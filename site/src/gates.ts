@@ -145,21 +145,6 @@ export const KNOWN_A11Y_FAILURES: ReadonlyArray<{
       "itself `Search`, so its accessible name does not contain its visible text. The markup is " +
       "the theme's own component, so fixing it means shadowing that component rather than editing " +
       "content or a token. Fires once on every audited page."
-  },
-  {
-    rule: "inline-svg-undecided",
-    criterion: "SC 1.1.1 Non-text Content",
-    signature:
-      /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="[^"]*" width="[^"]*" height="[^"]*" style="--bg:/,
-    owner: "site/src/lib/mermaid.ts",
-    why:
-      'Every build-time Mermaid figure is emitted as `<figure class="docs-mermaid" tabindex="0">` ' +
-      "around a bare `<svg>` with no role, no `<title>` and no `aria-label`, so assistive technology " +
-      "meets shapes and edges with no name. The signature is the renderer's exact opening tag " +
-      "(beautiful-mermaid's `--bg`/`--fg` theme variables are what make it unmistakable), so a second " +
-      "kind of undecided SVG still fails. The fix belongs to the plugin, not to any page: give the " +
-      'figure `role="img"` and a name derived from the fence\'s title or the nearest heading, and this ' +
-      "entry then fails as stale and is deleted. Measured on /internals/architecture/system-overview/."
   }
 ]
 

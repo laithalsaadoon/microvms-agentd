@@ -21,7 +21,12 @@
 
 import type { AstroIntegration } from "astro"
 import { renderMermaidSVG } from "beautiful-mermaid"
-import { defineMdastPlugin, type MdastPluginDefinition } from "satteri"
+import {
+  defineMdastPlugin,
+  type MdastPluginDefinition,
+  type MdastTarget,
+  type MdastVisitorContext
+} from "satteri"
 
 /** The fence language claimed. */
 export const MERMAID_LANG = "mermaid"
@@ -145,6 +150,78 @@ export const beautifulMermaid = (options: BeautifulMermaidOptions = {}): Mermaid
 }
 
 /**
+ * The accessible name of one rendered figure.
+ *
+ * The SVG `beautiful-mermaid` emits carries no `role`, no `<title>` and no `aria-label`, so on its own
+ * it is an undecided image: assistive technology meets shapes and edges with no name, and the site's
+ * accessibility tier (`tests/a11y.test.ts`, probe `inline-svg-undecided`) reports it. The name is put on
+ * the `<figure>` as `aria-label`, which names the SVG through its ancestor, the same way the theme's
+ * own icon buttons are decided.
+ *
+ * Where the name comes from, in order:
+ *
+ *  1. The fence's info string past the language (` ```mermaid The run lifecycle `), with a leading
+ *     `title=` and surrounding quotes removed. This corpus writes none today; it is the author's
+ *     override.
+ *  2. The text of the nearest heading before the fence, searched among the preceding siblings and then
+ *     up through the ancestors. Every fence in this corpus sits directly under a heading, so this is
+ *     the name that ships. `ctx.parent`, `ctx.indexOf` and `ctx.textContent` are the visitor context's
+ *     own accessors for the tree being edited; the child list they walk is Sätteri's lazily-decoded
+ *     sibling stubs, whose `type` is present without materializing the node.
+ *  3. The page's frontmatter `title`, which Astro's Markdown pipeline places at `ctx.data.astro`.
+ *     `docs:sync` moves a source document's H1 into that field, so a fence that opens a page (the two
+ *     diagram pages, `components.md` and `dependency-graph.md`) has no heading sibling and is named
+ *     for the page.
+ *  4. `Diagram N`, one-based within the document, which names position and nothing else.
+ *
+ * Exported so the unit tier can assert each source without a build.
+ */
+export const figureName = (
+  node: Readonly<MdastTarget> & { readonly meta?: string | null | undefined },
+  ctx: Pick<MdastVisitorContext, "parent" | "indexOf" | "textContent" | "data">,
+  index: number
+): string => {
+  const meta = (node.meta ?? "")
+    .trim()
+    .replace(/^title=/, "")
+    .replace(/^(["'])(.*)\1$/, "$2")
+    .trim()
+  if (meta !== "") return meta
+
+  let current: Readonly<MdastTarget> = node
+  for (;;) {
+    const parent = ctx.parent(current)
+    if (parent === undefined) break
+    const at = ctx.indexOf(current)
+    if (at !== undefined) {
+      for (let i = at - 1; i >= 0; i--) {
+        const sibling = parent.children[i]
+        if (sibling !== undefined && sibling.type === "heading") {
+          const text = ctx.textContent(sibling).trim()
+          if (text !== "") return text
+        }
+      }
+    }
+    current = parent
+  }
+
+  const astro = (ctx.data as { astro?: { frontmatter?: { title?: unknown } } }).astro
+  const title = astro?.frontmatter?.title
+  if (typeof title === "string" && title.trim() !== "") return title.trim()
+
+  return `Diagram ${index + 1}`
+}
+
+/** The five characters that must not reach an attribute value verbatim. */
+const escapeAttribute = (text: string): string =>
+  text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;")
+
+/**
  * The Sätteri mdast plugin. One instance per document, which is what makes `index` per-document.
  *
  * **The `fileURL` trap.** `ctx.fileURL` is `URL | undefined`: it holds the compile's `fileURL` option,
@@ -223,8 +300,13 @@ export const mermaidPlugin = (options: MermaidOptions = {}): MdastPluginDefiniti
        * viewport, and a scrollable region with no focusable descendant cannot be scrolled without a
        * pointer (SC 2.1.1). It is written here, at mdast, rather than applied by a hast visitor: a
        * late hast pass that returns a replacement for the subtree discards any earlier patch on it.
+       *
+       * `role="img"` and `aria-label`: the figure is one image to a reader, and the label decides the
+       * inline SVG (see `figureName`). Without them the accessibility tier reports the diagram as an
+       * undecided SVG on every page that carries one.
        */
-      const value = `<figure class="${className}" tabindex="0">${svg}</figure>`
+      const name = escapeAttribute(figureName(node, ctx, index - 1))
+      const value = `<figure class="${className}" role="img" aria-label="${name}" tabindex="0">${svg}</figure>`
 
       return ctx.sourceFormat === "mdx"
         ? {
