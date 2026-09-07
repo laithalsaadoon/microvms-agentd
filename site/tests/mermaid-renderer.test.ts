@@ -4,7 +4,7 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
-import { beautifulMermaid, MERMAID_LANG, mermaidPlugin } from "../src/lib/mermaid.js"
+import { beautifulMermaid, figureName, MERMAID_LANG, mermaidPlugin } from "../src/lib/mermaid.js"
 
 /**
  * The renderer gate: does `beautiful-mermaid` cover every diagram in this corpus, and does the plugin
@@ -94,8 +94,15 @@ describe("the mermaid renderer covers this corpus", () => {
 })
 
 describe("the plugin", () => {
-  /** The visitor's context, reduced to what the `code` visitor reads. */
-  const context = { fileURL: undefined, sourceFormat: "markdown" } as never
+  /** The visitor's context, reduced to what the `code` visitor reads: a fence with no ancestors. */
+  const context = {
+    fileURL: undefined,
+    sourceFormat: "markdown",
+    parent: () => undefined,
+    indexOf: () => undefined,
+    textContent: () => "",
+    data: {}
+  } as never
 
   it("claims only the mermaid fence and leaves every other language alone", () => {
     const plugin = mermaidPlugin({ renderer: () => "<svg></svg>" })
@@ -107,6 +114,11 @@ describe("the plugin", () => {
       context
     )
     expect(claimed).toMatchObject({ type: "html" })
+    // The figure is one decided image: a role and a name the a11y tier's `inline-svg-undecided`
+    // probe accepts through the ancestor. With no heading and no info string, the name is positional.
+    expect((claimed as { value: string }).value).toContain(
+      '<figure class="docs-mermaid" role="img" aria-label="Diagram 1" tabindex="0"><svg>'
+    )
 
     // A `rust` fence is the overwhelming majority of this corpus; claiming it would replace every code
     // block on the site with an SVG.
@@ -152,5 +164,78 @@ describe("the plugin", () => {
       context
     )
     expect(result).not.toBeInstanceOf(Promise)
+  })
+})
+
+describe("the figure's accessible name", () => {
+  /**
+   * A tree of one root whose children are given in order; `parent`/`indexOf`/`textContent` are the
+   * three visitor-context accessors `figureName` reads, reduced to a flat sibling list.
+   */
+  const treeOf = (children: ReadonlyArray<{ type: string; text?: string }>, title?: string) => {
+    const root = { type: "root", children }
+    return {
+      data: title === undefined ? {} : { astro: { frontmatter: { title } } },
+      parent: (node: unknown) => (node === root ? undefined : root),
+      indexOf: (node: unknown) => {
+        const at = children.indexOf(node as never)
+        return at === -1 ? undefined : at
+      },
+      textContent: (node: unknown) => (node as { text?: string }).text ?? ""
+    } as never
+  }
+
+  it("takes the nearest heading before the fence, which is how every fence in this corpus is named", () => {
+    const fence = { type: "code", lang: MERMAID_LANG, value: "graph TD" }
+    const ctx = treeOf([
+      { type: "heading", text: "Earlier section" },
+      { type: "heading", text: "Module map" },
+      { type: "paragraph", text: "prose between" },
+      fence as never
+    ])
+    expect(figureName(fence as never, ctx, 0)).toBe("Module map")
+  })
+
+  it("prefers the fence's own info string, with a `title=` prefix and quotes removed", () => {
+    const ctx = treeOf([{ type: "heading", text: "Module map" }])
+    expect(figureName({ type: "code", meta: "The run lifecycle" } as never, ctx, 0)).toBe(
+      "The run lifecycle"
+    )
+    expect(figureName({ type: "code", meta: 'title="The run lifecycle"' } as never, ctx, 0)).toBe(
+      "The run lifecycle"
+    )
+  })
+
+  it("names a fence with no heading before it for the page, whose H1 docs:sync moved into frontmatter", () => {
+    const fence = { type: "code", value: "graph TD" }
+    expect(figureName(fence as never, treeOf([fence as never], "Components"), 0)).toBe("Components")
+    // A heading on the page still wins over the page title: it is the nearer name.
+    expect(
+      figureName(
+        fence as never,
+        treeOf([{ type: "heading", text: "Module map" }, fence as never], "System overview"),
+        0
+      )
+    ).toBe("Module map")
+  })
+
+  it("falls back to a positional name when there is no heading and no page title", () => {
+    const fence = { type: "code", value: "graph TD" }
+    expect(figureName(fence as never, treeOf([fence as never]), 2)).toBe("Diagram 3")
+    expect(figureName(fence as never, treeOf([]), 0)).toBe("Diagram 1")
+  })
+
+  it("escapes the name it writes into the attribute", () => {
+    const plugin = mermaidPlugin({ renderer: () => "<svg></svg>" })
+    const code = plugin.code
+    if (typeof code !== "function") throw new Error("the plugin declares no `code` visitor")
+    const fence = {
+      type: "code",
+      lang: MERMAID_LANG,
+      value: "graph TD",
+      meta: 'A "quoted" <name> & more'
+    }
+    const out = code(fence as never, treeOf([fence as never]) as never) as { value: string }
+    expect(out.value).toContain('aria-label="A &quot;quoted&quot; &lt;name&gt; &amp; more"')
   })
 })
