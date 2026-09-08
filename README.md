@@ -231,6 +231,10 @@ and returns immediately (`--detach`), and reads an existing exec back
 running processes, and a suspended VM bills at a small fraction of a running
 one. If a run is interrupted, `microvm ls` lists what this CLI created and
 could not confirm it deleted, so nothing leaks silently.
+`microvm ls --watch` re-reads that ledger every two seconds until Ctrl-C
+(`--interval-sec` changes the cadence). The loop reads local files only and
+never polls a VM's `/v1/health`, the call that resets its idle timer, so
+watching keeps nothing alive and bills for nothing.
 
 ### Running a project through a VM
 
@@ -248,6 +252,16 @@ matching the `artifacts` globs in `microvm.toml` come back into the local
 directory, including when the command failed, because a failing run's report
 is the artifact CI most wants. An over-budget tree is refused locally, before
 any archive bytes are allocated or any AWS call is made.
+
+`microvm build --project <dir>` bakes the project's dependencies into the
+image so launches skip installing them. Exactly one ecosystem's manifest and
+lockfile pair enters the build context (`pyproject.toml` + `uv.lock`,
+`package.json` + `package-lock.json`, or `Cargo.toml` + `Cargo.lock`), nothing
+else in the directory enters the shared snapshot, and the derived Dockerfile
+installs from the lockfile (`uv sync --locked`, `npm ci`, `cargo fetch`). With
+`--reuse`, the pair joins the image's content hash: two projects with
+identical dependency files share an image, and a lockfile edit builds a fresh
+one.
 
 ### Running coding agents inside a MicroVM
 
@@ -352,6 +366,13 @@ the provisioned capacity), 4x the minimum is your hard ceiling, and both are
 fixed at provision time; there is no scaling event. For peaky workloads
 (builds, test runs, agent sessions), pick a low minimum and let peaks ride
 the always-present 4x headroom, which bills only by what is consumed.
+
+`microvm cost --max-cost <USD> --on-breach warn|abort` checks a run's report
+or a plan against a budget. The comparison uses the priced total, which is a
+lower bound whenever any line is unpriced, so a breach means the true cost is
+at least that far over. `--on-breach` is required beside `--max-cost` and has
+no default: `warn` reports the breach on stderr and exits 0, `abort` exits 12
+(`ERR_PRECONDITION`).
 
 ## Writing your own guest Dockerfile
 
