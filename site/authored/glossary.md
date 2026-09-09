@@ -135,8 +135,8 @@ sandbox worked and the command inside it exited non-zero. See [Exit codes](/refe
 The platform's lifecycle endpoints, served by the daemon under a prefix the platform fixes. `ready` and
 `validate` are build-time hooks: the build calls them in the snapshot VM to decide whether the snapshot
 it just produced is usable, before any instance exists. `run` fires at launch and delivers the
-`runHookPayload`. All three must answer on `AGENTD_PORT`, which must be 9000. See
-[Platform](/internals/platform/).
+`runHookPayload`. All three must answer on `AGENTD_PORT`, which must agree with the port in the
+create call (`--port`, default 9000). See [Platform](/internals/platform/).
 
 ### Identity repair
 
