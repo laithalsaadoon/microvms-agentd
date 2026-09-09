@@ -30,7 +30,7 @@ import { type StaticSite, serveStatic } from "./static-server.js"
  * measured in: the geometry belongs to the pre-emulation window, and the resize to the emulated
  * viewport was counted as a shift.
  *
- * So the composite score is asserted `optimistic` in `lighthouserc.json` (contention can only depress
+ * So the composite score is asserted `optimistic` in `src/gates.ts` (contention can only depress
  * a static page's score, never inflate it) and layout stability is asserted HERE instead, with the
  * viewport fixed before the first navigation so no emulation can race the paint. Same remedy the
  * `scrollable-region-focusable` flake got in `tests/a11y.test.ts`, and for the same reason: a

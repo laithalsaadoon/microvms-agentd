@@ -2,7 +2,6 @@
 import { createReadStream, existsSync, statSync } from "node:fs"
 import { createServer, type Server } from "node:http"
 import { join, resolve, sep } from "node:path"
-import { pathToFileURL } from "node:url"
 
 /**
  * The built site, served from disk at the base segment it was built with.
@@ -15,10 +14,9 @@ import { pathToFileURL } from "node:url"
  * exactly the bytes the Pages artifact contains, and the gate needs no dev server, no Astro config
  * load, and no network. Ported from memhtml-public's `apps/docs/tests/static-server.ts`.
  *
- * Two consumers. The vitest browser suites import `serveStatic`; `lighthouserc.json` runs this file
- * as a command (`startServerCommand`) so Lighthouse measures the same server, the same bytes and the
- * same content types as axe does, instead of lhci's own static server, which can only mount `dist/`
- * at the origin root and so cannot serve a site built under a base.
+ * Three consumers, all vitest browser suites: the accessibility audit, the layout probe and the
+ * Lighthouse budget import `serveStatic`, so all three measure the same server, the same bytes and
+ * the same content types.
  */
 
 /**
@@ -60,7 +58,7 @@ export type StaticSite = {
  * @param root absolute path to the built output
  * @param base the site's base: `/` at the origin root, or `/microvms-agentd/` under a path. A
  *   trailing slash is optional and a missing one is tolerated.
- * @param port `0` (the default) lets the kernel pick a free port; the lhci command passes a fixed one.
+ * @param port `0` (the default) lets the kernel pick a free port.
  */
 export const serveStatic = async (root: string, base: string, port = 0): Promise<StaticSite> => {
   const distRoot = resolve(root)
@@ -114,32 +112,4 @@ export const serveStatic = async (root: string, base: string, port = 0): Promise
     close: () =>
       new Promise<void>((done, fail) => server.close((err) => (err ? fail(err) : done())))
   }
-}
-
-/*
- * Command mode, for `lighthouserc.json`'s `startServerCommand`.
- *
- * `node --experimental-strip-types tests/static-server.ts` serves `dist/` under the base at a fixed
- * port and prints one line lhci waits for. The base and port come from the environment rather than
- * from `src/gates.ts`, because plain node resolves `../src/gates.js` to nothing: that specifier is a
- * TypeScript convention vitest understands and a runtime does not. The normalization is the one
- * `astro.config.ts` applies, so `DOCS_BASE` may be `/x`, `/x/`, `x`, or `/` here as it may there.
- *
- * The guard compares module URLs so importing this file from a test never starts a server.
- */
-if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const base =
-    `/${(process.env.DOCS_BASE ?? "/microvms-agentd/").replace(/^\/+|\/+$/g, "")}/`.replace(
-      /^\/{2,}/,
-      "/"
-    )
-  const port = Number(process.env.STATIC_PORT ?? "4173")
-  const dist = resolve(process.cwd(), process.env.DIST_DIR ?? "dist")
-  if (!existsSync(dist)) {
-    process.stderr.write(`static-server: no ${dist}; build the site first (mise run docs:build)\n`)
-    process.exit(2)
-  }
-  serveStatic(dist, base, port).then((site) => {
-    process.stdout.write(`serving ${dist} at ${site.origin}${base}\n`)
-  })
 }

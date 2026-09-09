@@ -3,9 +3,9 @@
  * What the built site is allowed to contain, and which pages the browser gates audit.
  *
  * Both lists are declared here and nowhere else. `tests/built-site.test.ts` reads them against
- * `dist/`, `tests/a11y.test.ts` and `tests/layout-stability.test.ts` drive a browser over them, and a
- * case in the first asserts that `lighthouserc.json` (JSON, so it cannot import this file) names the
- * same pages under the same base.
+ * `dist/`, and `tests/a11y.test.ts`, `tests/layout-stability.test.ts` and `tests/lighthouse.test.ts`
+ * drive a browser over them, so the three browser tiers cannot drift apart on which pages they
+ * audit.
  *
  * Ported from memhtml-public's `apps/docs/src/gates.ts`; the lists are this repository's own.
  */
@@ -149,15 +149,6 @@ export const KNOWN_A11Y_FAILURES: ReadonlyArray<{
 ]
 
 /** Where `astro build` writes, relative to the package root. */
-/**
- * `lighthouserc.json` launches Chrome with `--no-sandbox`. Measured 2026-09-05 on GitHub's
- * ubuntu-24.04 runner: Chrome's zygote aborted with "No usable sandbox!" because the image
- * restricts unprivileged user namespaces through AppArmor, and Lighthouse reported "Unable to
- * connect to Chrome" after fifteen seconds of waiting. Playwright's own launcher already passes the
- * equivalent flag, which is why the accessibility tier ran on the same runner without it. The flag
- * disables a defense for a browser that only ever loads this repository's own built pages from a
- * loopback server, and JSON carries no comments, so the reason lives here.
- */
 export const DIST_DIR = "dist"
 
 /**
@@ -166,8 +157,8 @@ export const DIST_DIR = "dist"
  * 0.1 is the Core Web Vitals "good" boundary rather than a number chosen to fit this site: every
  * audited page measures 0 today (`tests/layout-stability.test.ts`), so the headroom is not budget
  * anyone is spending. It lives here, beside the page list, because the probe that enforces it and the
- * case in `tests/built-site.test.ts` that keeps `lighthouserc.json` honest both need the same number,
- * and Lighthouse's own CLS reading is the one this repo does NOT gate on; see that probe's header for
+ * case in `tests/built-site.test.ts` that keeps `LIGHTHOUSE` honest both need the same number, and
+ * Lighthouse's own CLS reading is the one this repo does NOT gate on; see that probe's header for
  * the measurement that decided it.
  */
 export const LAYOUT_SHIFT_CEILING = 0.1
@@ -195,12 +186,11 @@ export const KNOWN_LAYOUT_SHIFTS: ReadonlyArray<{
  * The most bytes one audited page may transfer, in bytes, as Lighthouse's `total-byte-weight`
  * counts them (every resource the page load requested, compressed as served).
  *
- * `lighthouserc.json` carries the same number, because lhci reads only that file, and
- * `tests/built-site.test.ts` asserts the two agree so the budget is edited in one place with its
- * measurement beside it. JSON has no comments; this is where the comment lives.
+ * `tests/lighthouse.test.ts` reads it from here, so the budget is edited in one place with its
+ * measurement beside it.
  *
- * MEASURED 2026-09-05, `lhci collect` over `tests/static-server.ts`, desktop preset, three runs per
- * page, every run of a page identical to the byte:
+ * MEASURED 2026-09-05 over `tests/static-server.ts`, desktop preset, three runs per page, every run
+ * of a page identical to the byte:
  *
  *   /                                          283269
  *   /learn/tutorial/first-run/                 288810
@@ -214,3 +204,60 @@ export const KNOWN_LAYOUT_SHIFTS: ReadonlyArray<{
  * move both numbers together when the site legitimately grows.
  */
 export const TOTAL_BYTE_WEIGHT_BUDGET = 570000
+
+/**
+ * The Lighthouse gate, as `tests/lighthouse.test.ts` runs it over `AUDITED_PAGES`.
+ *
+ * Until 2026-09-09 this lived in `lighthouserc.json` and ran through `@lhci/cli`. lhci's last
+ * release (0.15.1, June 2025) pins lighthouse 12.6.1, whose puppeteer chain carries extract-zip
+ * 2.0.1, a package with two High advisories and no fixed release; the suite now calls lighthouse
+ * itself, so the floors moved here beside the page list and the byte budget they gate.
+ *
+ * The aggregation vocabulary is lhci's, kept so the numbers keep their meaning: `optimistic` takes
+ * the best of the runs (the highest score, the lowest byte count), `pessimistic` the worst, `median`
+ * the middle. Performance aggregates optimistically because a loaded runner can only depress a
+ * static page's score, never inflate it, and layout shift is gated by `tests/layout-stability.test.ts`
+ * rather than by Lighthouse's own reading (`tests/built-site.test.ts` records why). Accessibility,
+ * best practices and SEO are computed from the DOM rather than from timings, so they do not move
+ * under load, and `optimistic` there would let one lucky run hide a real regression.
+ *
+ * `chromeFlags`: `--no-sandbox` was measured necessary 2026-09-05 on GitHub's ubuntu-24.04 runner,
+ * where Chrome's zygote aborted with "No usable sandbox!" because the image restricts unprivileged
+ * user namespaces through AppArmor, and Lighthouse reported "Unable to connect to Chrome" after
+ * fifteen seconds. Playwright's own launcher passes the equivalent flag, which is why the a11y tier
+ * ran there without it. It disables a defense for a browser that only ever loads this repository's
+ * own built pages from a loopback server.
+ *
+ * `skipAudits`: `uses-http2`, because the static server speaks HTTP/1.1 and Pages decides the real
+ * protocol; `canonical`, because Starlight emits `rel="canonical"` against the production origin,
+ * which the audit reads as pointing off-site when the page is served from 127.0.0.1.
+ */
+export type Aggregation = "optimistic" | "median" | "pessimistic"
+
+export const LIGHTHOUSE = {
+  /** Runs per page. Three is the smallest count with a median that is a measured run. */
+  runs: 3,
+  chromeFlags: ["--headless=new", "--no-sandbox"],
+  skipAudits: ["canonical", "uses-http2"],
+  /** Category score floors on Lighthouse's 0..1 scale, each with how its runs are folded. */
+  categories: {
+    performance: { floor: 0.9, over: "optimistic" },
+    accessibility: { floor: 0.95, over: "median" },
+    "best-practices": { floor: 0.95, over: "median" },
+    seo: { floor: 1, over: "median" }
+  },
+  /**
+   * Binary audits that must pass. lhci asserted these as `"error"` with its default, a score of at
+   * least 0.9 over the best run; the suite keeps that reading rather than tightening it in the move.
+   */
+  passingAudits: ["unminified-css", "unminified-javascript"],
+  /** How `TOTAL_BYTE_WEIGHT_BUDGET` is folded: the heaviest run of a page has to fit. */
+  byteWeightOver: "pessimistic"
+} as const satisfies {
+  runs: number
+  chromeFlags: ReadonlyArray<string>
+  skipAudits: ReadonlyArray<string>
+  categories: Readonly<Record<string, { readonly floor: number; readonly over: Aggregation }>>
+  passingAudits: ReadonlyArray<string>
+  byteWeightOver: Aggregation
+}
