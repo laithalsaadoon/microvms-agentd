@@ -174,8 +174,8 @@ jobs:
       # The browser tiers. Chrome for Testing is fetched here rather than at install, because
       # Playwright ships no install script and the download is ~150 MB the node tier above never
       # needs. `--with-deps` pulls the shared libraries a headless Chromium wants on the runner.
-      # One binary serves axe (through Playwright) and Lighthouse (through CHROME_PATH), so both
-      # tiers measure the same engine.
+      # One binary serves axe (through Playwright) and Lighthouse (through chrome-launcher, handed
+      # Playwright's executable path), so both tiers measure the same engine.
       - name: fetch Chromium for the browser tiers
         working-directory: site
         run: pnpm exec playwright install --with-deps chromium
@@ -192,9 +192,11 @@ jobs:
           DOCS_BASE: ${{ vars.DOCS_BASE || steps.target.outputs.base }}
         run: pnpm run test:a11y
 
-      # Lighthouse category floors and the byte budget, three runs per page, desktop preset.
-      # Performance aggregates optimistically because a loaded runner can only depress a static
-      # page's score; layout shift is gated by the probe above, not by Lighthouse's own reading.
+      # Lighthouse category floors and the byte budget, three runs per page, desktop preset,
+      # lighthouse called as a library from `site/tests/lighthouse.test.ts` (`site/src/gates.ts`
+      # holds the floors). Performance aggregates optimistically because a loaded runner can only
+      # depress a static page's score; layout shift is gated by the probe above, not by
+      # Lighthouse's own reading.
       - name: performance budget
         working-directory: site
         env:
