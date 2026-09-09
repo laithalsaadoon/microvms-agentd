@@ -402,15 +402,15 @@ With `qemu-aarch64` binfmt registered this builds the real target architecture
 on an x86 host. Two errors in the example Dockerfile were caught this way in
 seconds.
 
-**`ENV AGENTD_PORT` must be 9000**, the client's `DEFAULT_AGENT_PORT`. The
-platform dials its build-time `ready` and `validate` hooks on the port from
-the create call, so a guest listening elsewhere answers neither, and the build
-fails with `CREATE_FAILED` after a completely clean build log. The daemon's
-own `agentd listening` line appears, with the wrong address, and no error line
-follows. The client refuses that disagreement locally now, including the case
-where the Dockerfile names no port while you have moved the client off the
-default with `--port`: an unset variable leaves the daemon on 9000 rather than
-on your port.
+**`ENV AGENTD_PORT` must agree with the client's port**: `--port`, default
+9000 (`DEFAULT_AGENT_PORT`). The platform dials its build-time `ready` and
+`validate` hooks on the port from the create call, so a guest listening
+elsewhere answers neither, and the build fails with `CREATE_FAILED` after a
+completely clean build log. The daemon's own `agentd listening` line appears,
+with the wrong address, and no error line follows. The client refuses that
+disagreement locally now, including the case where the Dockerfile names no
+port while you have moved the client off the default with `--port`: an unset
+variable leaves the daemon on 9000 rather than on your port.
 
 **Set a `WORKDIR` explicitly.** `al2023-minimal` leaves `WorkingDir` empty, so
 an omitted `--cwd` on every later `exec` resolves against `/`. Check that the
