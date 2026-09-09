@@ -4,17 +4,18 @@ import { join, relative } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { describe, expect, it } from "vitest"
-import lighthouserc from "../lighthouserc.json" with { type: "json" }
 import {
   AUDITED_PAGES,
   BASE,
   DENYLIST,
   DIST_DIR,
   LAYOUT_SHIFT_CEILING,
+  LIGHTHOUSE,
   TOTAL_BYTE_WEIGHT_BUDGET
 } from "../src/gates.js"
-import browserConfig from "../vitest.a11y.config.js"
+import a11yConfig from "../vitest.a11y.config.js"
 import unitConfig from "../vitest.config.js"
+import lighthouseConfig from "../vitest.lighthouse.config.js"
 
 /**
  * Gates over the BUILT site. Ported from memhtml-public's `apps/docs/tests/built-site.test.ts`.
@@ -224,61 +225,29 @@ describe("what axe cannot see", () => {
   })
 })
 
-describe("the two gate configurations name the same pages", () => {
+describe("the Lighthouse gate is the one the brief set", () => {
   /*
-   * `lighthouserc.json` is JSON and cannot import `src/gates.ts`, so the page set is written twice.
-   * This is the drift gate that makes the duplication safe: two files that must agree, and no
-   * mechanism forcing them to, is how the same shape of defect shipped elsewhere in this repository
-   * (the `docs.yml` node pin against `engines.node`, gated by `tests/toolchain.test.ts`).
-   *
-   * lhci is pointed at `tests/static-server.ts` rather than at its own `staticDistDir`, because that
-   * server can only mount `dist/` at the origin root while this site is built under a base. So the
-   * URLs carry an origin, and the comparison is on their paths.
+   * `LIGHTHOUSE` in `src/gates.ts` is what `tests/lighthouse.test.ts` runs. These cases pin the
+   * decisions in it that were measured rather than chosen, so a change to any of them is a diff
+   * against a stated reason and not an edit to a number nobody reads.
    */
-  it("audits the same URLs for accessibility and for the performance budget", () => {
-    const paths = lighthouserc.ci.collect.url.map((url) => new URL(url).pathname)
-    expect(paths).toEqual([...AUDITED_PAGES])
-  })
-
   it("keeps every audited URL under the base the site is built with", () => {
     for (const url of AUDITED_PAGES) expect(url.startsWith(BASE)).toBe(true)
   })
 
   it("serves Lighthouse from the same static server the accessibility tier uses", () => {
-    expect(lighthouserc.ci.collect.startServerCommand).toContain("tests/static-server.ts")
-    const origins = new Set(lighthouserc.ci.collect.url.map((url) => new URL(url).origin))
-    expect(origins.size).toBe(1)
-    const [origin] = origins
-    expect(lighthouserc.ci.collect.startServerCommand).toContain(
-      `STATIC_PORT=${new URL(origin ?? "").port}`
-    )
+    const suite = readFileSync(join(packageRoot, "tests/lighthouse.test.ts"), "utf8")
+    expect(suite).toContain('from "./static-server.js"')
+    expect(suite).toContain("serveStatic(dist, BASE)")
+    // And the same Chromium: Playwright's pinned build, not one Lighthouse downloads for itself.
+    expect(suite).toContain("chromium.executablePath()")
   })
-
-  /**
-   * An assertion's options object, or a failure naming the id that has none.
-   *
-   * lhci accepts two spellings, `"error"` alone or `["error", { … }]`, so reading `[1]` off the
-   * short form would be `undefined` and every expectation below would silently pass on it.
-   */
-  const optionsOf = (
-    id: string
-  ): { minScore?: number; maxNumericValue?: number; aggregationMethod?: string } => {
-    const declared: unknown = (lighthouserc.ci.assert.assertions as Record<string, unknown>)[id]
-    if (!Array.isArray(declared) || typeof declared[1] !== "object" || declared[1] === null) {
-      throw new Error(`lighthouserc.json declares ${id} with no options object`)
-    }
-    return declared[1] as {
-      minScore?: number
-      maxNumericValue?: number
-      aggregationMethod?: string
-    }
-  }
 
   /**
    * The performance category is asserted `optimistic`, and every other category `median`.
    *
    * The asymmetry is the whole point and it is a measured decision, so it is gated rather than left
-   * as a line in a JSON file nobody diffs. Lighthouse's CLS reading competes with its own viewport
+   * as a line in a config nobody diffs. Lighthouse's CLS reading competes with its own viewport
    * emulation on a loaded machine (`tests/layout-stability.test.ts` records the measurement).
    * Contention can only depress a static page's score, never inflate it, so the best of three runs is
    * the reading least polluted by the harness, and layout stability is gated deterministically by
@@ -289,73 +258,65 @@ describe("the two gate configurations name the same pages", () => {
    * `optimistic` there would let one lucky run hide a real regression.
    */
   it("aggregates the performance category optimistically and every other one at the median", () => {
-    expect(optionsOf("categories:performance").aggregationMethod).toBe("optimistic")
-    for (const category of [
-      "categories:accessibility",
-      "categories:best-practices",
-      "categories:seo"
-    ]) {
-      expect(optionsOf(category).aggregationMethod, category).toBe("median")
+    expect(LIGHTHOUSE.categories.performance.over).toBe("optimistic")
+    for (const category of ["accessibility", "best-practices", "seo"] as const) {
+      expect(LIGHTHOUSE.categories[category].over, category).toBe("median")
     }
   })
 
   it("holds the category floors the brief set: 0.9 performance, 0.95 a11y and best practices, 1 SEO", () => {
-    expect(optionsOf("categories:performance").minScore).toBe(0.9)
-    expect(optionsOf("categories:accessibility").minScore).toBe(0.95)
-    expect(optionsOf("categories:best-practices").minScore).toBe(0.95)
-    expect(optionsOf("categories:seo").minScore).toBe(1)
+    expect(LIGHTHOUSE.categories.performance.floor).toBe(0.9)
+    expect(LIGHTHOUSE.categories.accessibility.floor).toBe(0.95)
+    expect(LIGHTHOUSE.categories["best-practices"].floor).toBe(0.95)
+    expect(LIGHTHOUSE.categories.seo.floor).toBe(1)
   })
 
   /**
-   * The byte budget is written in two places for the same reason the page list is, and it is the
-   * number most likely to be edited in a hurry: a dependency ships a bigger client bundle, the gate
-   * goes red, and the fix is one digit in a JSON file. Keeping it beside its measurement in
-   * `src/gates.ts` means the edit lands next to the comment that says what the budget was measured
-   * against and why it has the headroom it has.
+   * The byte budget is the number most likely to be edited in a hurry: a dependency ships a bigger
+   * client bundle, the gate goes red, and the fix is one digit. It is folded pessimistically so the
+   * heaviest run of a page has to fit, and it lives beside its measurement in `src/gates.ts`.
    */
-  it("keeps the byte budget equal to the measured one recorded in src/gates.ts", () => {
+  it("holds the heaviest run of every page to the measured byte budget", () => {
     expect(TOTAL_BYTE_WEIGHT_BUDGET).toBeGreaterThan(0)
-    expect(optionsOf("total-byte-weight").maxNumericValue).toBe(TOTAL_BYTE_WEIGHT_BUDGET)
-    expect(optionsOf("total-byte-weight").aggregationMethod).toBe("pessimistic")
+    expect(LIGHTHOUSE.byteWeightOver).toBe("pessimistic")
   })
 
   it("does not gate on Lighthouse's own CLS reading, which the layout probe replaces", () => {
-    const assertions = lighthouserc.ci.assert.assertions as Record<string, unknown>
-    expect(assertions["cumulative-layout-shift"]).toBeUndefined()
-    // The number lives in one place; this is only here so a future CLS assertion in lhci is a
+    expect(Object.keys(LIGHTHOUSE.categories)).not.toContain("cumulative-layout-shift")
+    expect(LIGHTHOUSE.passingAudits).not.toContain("cumulative-layout-shift")
+    // The number lives in one place; this is only here so a future CLS floor in `LIGHTHOUSE` is a
     // deliberate decision made against the probe's ceiling rather than a default nobody chose.
     expect(LAYOUT_SHIFT_CEILING).toBe(0.1)
   })
 
-  it("runs the desktop preset three times and skips only the two audits a static host cannot pass", () => {
-    expect(lighthouserc.ci.collect.numberOfRuns).toBe(3)
-    expect(lighthouserc.ci.collect.settings.preset).toBe("desktop")
+  it("runs three times and skips only the two audits a static host cannot pass", () => {
+    expect(LIGHTHOUSE.runs).toBe(3)
     // `uses-http2`: the static server speaks HTTP/1.1 and Pages decides the real protocol.
     // `canonical`: Starlight emits `rel="canonical"` against the production origin, which the audit
     // reads as pointing off-site because the measured page is served from 127.0.0.1.
-    expect([...lighthouserc.ci.collect.settings.skipAudits].sort()).toEqual([
-      "canonical",
-      "uses-http2"
+    expect([...LIGHTHOUSE.skipAudits].sort()).toEqual(["canonical", "uses-http2"])
+    expect([...LIGHTHOUSE.passingAudits].sort()).toEqual([
+      "unminified-css",
+      "unminified-javascript"
     ])
-    expect(lighthouserc.ci.assert.assertions["unminified-css"]).toBe("error")
-    expect(lighthouserc.ci.assert.assertions["unminified-javascript"]).toBe("error")
   })
 
   /**
-   * Every suite that drives a browser is registered in BOTH vitest configs.
+   * Every suite that drives a browser is registered in BOTH kinds of vitest config.
    *
-   * A browser suite has to be named twice, excluded from the default tier and included in the
-   * browser tier, and nothing but this case forces the pair. Getting it wrong is silent in the
+   * A browser suite has to be named twice, excluded from the default tier and included in exactly
+   * one browser tier, and nothing but this case forces the pair. Getting it wrong is silent in the
    * worst direction: the suite still passes, having run twice, the second time in a tier with no
    * `fileParallelism: false`, so two Chromiums share a runner while one of them measures when a
-   * layout settles.
+   * layout settles. Exactly one browser tier, because the two run as separate sequential steps for
+   * the same reason, and a suite in both would run twice there too.
    *
    * An `import … from "playwright"` at the start of a line is the tell, which is exactly how the
    * mistake happens: someone writes the import and the discovery glob picks the file up for free. The
    * pattern is anchored so this file, which has to name the module to look for it, is not itself a
    * browser suite.
    */
-  it("registers every browser suite in both vitest configs", () => {
+  it("registers every browser suite in the default tier's exclusions and one browser tier", () => {
     const DRIVES_A_BROWSER = /^import [^\n]*from "playwright"/m
     const testsDir = join(packageRoot, "tests")
     const driversOfBrowsers = readdirSync(testsDir)
@@ -368,7 +329,10 @@ describe("the two gate configurations name the same pages", () => {
       expect(unitConfig.test?.exclude, `${suite} must be excluded from the default tier`).toContain(
         suite
       )
-      expect(browserConfig.test?.include, `${suite} must run in the browser tier`).toContain(suite)
+      const tiers = [a11yConfig, lighthouseConfig].filter((config) =>
+        config.test?.include?.includes(suite)
+      )
+      expect(tiers.length, `${suite} must run in exactly one browser tier`).toBe(1)
     }
   })
 })

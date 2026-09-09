@@ -1,6 +1,11 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.11/schema.json",
-  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true, "root": ".." },
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true,
+    "root": ".."
+  },
   "files": {
     "includes": [
       "src/**/*.ts",
@@ -11,7 +16,7 @@
       "vitest.config.ts",
       "vitest.a11y.config.ts",
       "cspell.json",
-      "lighthouserc.json",
+      "vitest.lighthouse.config.ts",
       "!dist",
       "!dist-typecheck-probe",
       "!.astro",
@@ -51,7 +56,7 @@
   },
   "overrides": [
     {
-      "includes": ["scripts/**", "tests/static-server.ts"],
+      "includes": ["scripts/**"],
       "linter": {
         "rules": {
           "suspicious": {

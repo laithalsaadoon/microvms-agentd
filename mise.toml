@@ -687,7 +687,8 @@ depends = ["docs:install"]
 # an explicit step. The download lands in a per-user cache (~/.cache/ms-playwright on Linux)
 # keyed by Playwright's build number, so this is a no-op once the version is present. `chromium`
 # is Chrome for Testing: one binary serves axe through Playwright and Lighthouse through
-# CHROME_PATH, so both tiers measure the same engine as each other and as CI.
+# chrome-launcher (`tests/lighthouse.test.ts` hands it Playwright's executable path), so both
+# tiers measure the same engine as each other and as CI.
 run = "pnpm exec playwright install chromium"
 
 [tasks."docs:lint"]
@@ -760,9 +761,10 @@ description = "Lighthouse category floors and the byte budget over the audited p
 dir = "site"
 depends = ["docs:build"]
 # Served by the same `tests/static-server.ts` the a11y tier uses, so both measure the same
-# bytes under the same base. `lighthouserc.json` carries the floors; the byte budget is
-# written there AND in `src/gates.ts` beside its measurement, and `tests/built-site.test.ts`
-# fails if the two disagree.
+# bytes under the same base. `tests/lighthouse.test.ts` calls lighthouse as a library (no
+# lhci: its last release pins a lighthouse whose puppeteer chain carries an unfixed
+# extract-zip); the floors, the aggregation and the byte budget live in `src/gates.ts`
+# beside their measurements, and `tests/built-site.test.ts` pins the measured decisions.
 run = "pnpm run test:budget"
 
 [tasks."docs:links"]

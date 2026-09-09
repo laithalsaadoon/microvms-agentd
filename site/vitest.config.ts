@@ -9,12 +9,13 @@ import { defineConfig } from "vitest/config"
  * a file they need is absent; wiring the build into the task runner is what keeps an ordered run
  * honest. See `mise run docs:check`.
  *
- * The two browser suites are excluded rather than left to be discovered. They drive Chromium, so
+ * The three browser suites are excluded rather than left to be discovered. They drive Chromium, so
  * folding them in here would make `mise run docs:check` require a 150 MB browser download to run a
  * string assertion, and it would run them a second time in a tier with no `fileParallelism: false`,
  * putting two browsers on one runner while one of them measures WHEN the layout settles. They have
- * their own task (`docs:a11y`) and their own config (`vitest.a11y.config.ts`), and
- * `tests/built-site.test.ts` asserts that every suite importing `playwright` is named in both files.
+ * their own tasks (`docs:a11y`, `docs:budget`) and their own configs (`vitest.a11y.config.ts`,
+ * `vitest.lighthouse.config.ts`), and `tests/built-site.test.ts` asserts that every suite importing
+ * `playwright` is excluded here and included in exactly one of those.
  */
 export default defineConfig({
   test: {
@@ -22,6 +23,7 @@ export default defineConfig({
     exclude: [
       "tests/a11y.test.ts",
       "tests/layout-stability.test.ts",
+      "tests/lighthouse.test.ts",
       "**/node_modules/**",
       "**/dist/**"
     ],
