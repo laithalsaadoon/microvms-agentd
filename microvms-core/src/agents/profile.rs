@@ -78,7 +78,17 @@ pub struct Profile {
 /// The shared system layer both agents need: Node 22 runs both CLIs, and the rest is
 /// what a coding agent expects of a working shell. Emitted once however many profiles
 /// share an image.
-pub const SYSTEM_PACKAGES: &str = "nodejs22 npm python3 git tar gzip which findutils procps-ng";
+///
+/// `nodejs22-npm`, spelled out, and not the bare `npm` the example Dockerfile installs.
+/// Measured 2026-09-10, us-east-1, on the first live build of this layer: with weak
+/// dependencies off (`--setopt=install_weak_deps=0`, the minimal-base convention) the bare
+/// `npm` resolves to Node 18's `npm-1:8.19.2`, its alternatives link fails against the
+/// `/usr/bin/node` that `nodejs22` installed ("exists and it is not a symlink"), and the
+/// next layer's `npm install -g` exits 127 with `npm: command not found`, three minutes
+/// and one wedged image name later. The example gets away with `npm` only because it
+/// leaves weak deps on, which pulls `nodejs22-npm` in beside it.
+pub const SYSTEM_PACKAGES: &str =
+    "nodejs22 nodejs22-npm python3 git tar gzip which findutils procps-ng";
 
 /// Claude Code. `--allowedTools` widened from the example's `Bash` alone to the set a
 /// coding task needs; each tool named is auto-approved in `-p` mode, and an unlisted one
@@ -131,10 +141,21 @@ pub fn env_pairs(agent: Agent, model: &str, token: &str) -> Vec<(&'static str, S
 /// The Responses wire API lives on the Mantle host, not on `bedrock-runtime`: that
 /// host's `/openai/v1` is chat-completions only, which Codex dropped. Same bearer token
 /// works on both hosts (measured 2026-09-02, us-east-1).
+///
+/// `model_reasoning_effort` is set because Codex has no metadata row for a Bedrock model
+/// id and its fallback sends none ("reasoning effort: none" in the banner). Measured
+/// 2026-09-10, us-east-1, Codex 0.154.0, `openai.gpt-5.6-sol`: one of five identical
+/// file-writing tasks came back as a plain refusal with zero tool calls and exit 0
+/// ("I can't create or run files in this environment"); the other four wrote the file.
+/// Mantle accepts `medium` for this model (verified in-VM the same day). The setting is
+/// the plausible mitigation, not a measured cure: the decline rate under it is unmeasured,
+/// and a caller who needs the effect verifies it the way the docs show, with an `exec`
+/// that reads the file back.
 pub fn codex_config(model: &str, region: &Region) -> String {
     format!(
         "model = \"{model}\"\n\
          model_provider = \"bedrock\"\n\
+         model_reasoning_effort = \"medium\"\n\
          [model_providers.bedrock]\n\
          name = \"Amazon Bedrock (Mantle)\"\n\
          base_url = \"https://bedrock-mantle.{}.api.aws/openai/v1\"\n\
@@ -192,6 +213,10 @@ mod tests {
         assert!(config.contains("https://bedrock-mantle.us-west-2.api.aws/openai/v1"));
         assert!(config.contains("wire_api = \"responses\""));
         assert!(config.starts_with("model = \"openai.gpt-5.6-sol\"\n"));
+        assert!(
+            config.contains("\nmodel_reasoning_effort = \"medium\"\n"),
+            "the fallback metadata sends no effort, and a no-effort run declined a task:\n{config}"
+        );
     }
 
     #[test]

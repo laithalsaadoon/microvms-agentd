@@ -108,10 +108,10 @@ Written in the EARS shapes the rest of `spec/` uses. `AGENT-n` is the id.
 | Field | ClaudeCode | Codex |
 | --- | --- | --- |
 | `id` | `claude-code` | `codex` |
-| `install_lines` | `dnf install nodejs22 npm python3 git tar gzip which findutils procps-ng`; `npm install -g @anthropic-ai/claude-code` | the same `dnf` line; `npm install -g @openai/codex` |
+| `install_lines` | `dnf install nodejs22 nodejs22-npm python3 git tar gzip which findutils procps-ng`; `npm install -g @anthropic-ai/claude-code` | the same `dnf` line; `npm install -g @openai/codex` |
 | `default_model` | `global.anthropic.claude-opus-5` | `openai.gpt-5.6-sol` |
 | `env` | `CLAUDE_CODE_USE_BEDROCK=1`, `ANTHROPIC_MODEL=<model>`, `AWS_BEARER_TOKEN_BEDROCK=<token>` | `OPENAI_API_KEY=<token>` |
-| `config_files` | none | `/workspace/.codex/config.toml`: provider `bedrock`, `base_url = https://bedrock-mantle.<region>.api.aws/openai/v1`, `env_key = OPENAI_API_KEY`, `wire_api = responses`, `model = <model>` |
+| `config_files` | none | `/workspace/.codex/config.toml`: provider `bedrock`, `model_reasoning_effort = medium` (Codex has no metadata for a Bedrock model id and otherwise sends none; a no-effort run declined a task once in five on 2026-09-10), `base_url = https://bedrock-mantle.<region>.api.aws/openai/v1`, `env_key = OPENAI_API_KEY`, `wire_api = responses`, `model = <model>` |
 | `headless_command(task)` | `claude -p <task> --allowedTools Bash,Read,Edit,Write,Grep,Glob` | `codex exec --skip-git-repo-check -s workspace-write <task>` |
 | `verified` | 2026-09-02, us-east-1, `@anthropic-ai/claude-code` latest on that date | 2026-09-02, us-east-1, `@openai/codex` latest on that date |
 

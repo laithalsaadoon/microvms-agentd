@@ -37,6 +37,13 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
   the installed environment file; without `--agent` it reads the guest marker
   `/workspace/.agent-vm.json` and refuses when two agents are installed.
   Envelope types `microvm.agent` and `microvm.agent.prompt`; no new exit row.
+  Two measured values from the first live runs are pinned by tests: the system
+  layer installs `nodejs22-npm` by name (with weak deps off, bare `npm` is Node
+  18's and the npm layer exits 127), and the Codex config sets
+  `model_reasoning_effort = "medium"` (Codex has no metadata for a Bedrock
+  model id and otherwise sends none; one no-effort run in five declined its
+  task with zero tool calls and exit 0). Because that decline exits 0, callers
+  verify effects with an `exec` that reads them back, as the docs show.
   Teardown stays `microvm terminate NAME`.
 - **The rule change.** Until now agent-specific detail (CLI installs, model
   ids, credential wiring) lived only in `examples/` and docs. `docs/AGENT-VMS.md`

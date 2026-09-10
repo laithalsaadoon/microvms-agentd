@@ -2934,32 +2934,49 @@ def drive_agent_vm(
 
         # AGENT-7 through Codex: a file the workspace keeps, read back by a plain exec
         # so the assertion does not depend on what the agent chose to print.
-        codex = cli.call(
-            "agent-prompt",
+        # The model can decline a task outright: measured once in five runs on
+        # 2026-09-10 (Codex 0.154.0, openai.gpt-5.6-sol), the reply was a refusal with
+        # zero tool calls and Codex exited 0, so the prompt check alone cannot see it.
+        # One re-prompt keeps a model's coin flip from failing the suite; a second
+        # decline fails it, and the detail names how many prompts it took.
+        codex_task = (
             "Create hello.py in the current directory that prints hello from a "
-            "microvm, run it, and show the output.",
-            "--agent",
-            "codex",
-            "--timeout",
-            "600",
-            *attach,
-            timeout=700.0,
+            "microvm, run it, and show the output."
         )
+        attempts = 0
+        while True:
+            attempts += 1
+            codex = cli.call(
+                "agent-prompt",
+                codex_task,
+                "--agent",
+                "codex",
+                "--timeout",
+                "600",
+                *attach,
+                timeout=700.0,
+            )
+            kept = cli.call("exec", "cat /workspace/hello.py", *attach)
+            declined = (
+                codex.data.get("exitCode") == 0 and kept.data.get("exitCode") != 0
+            )
+            if not declined or attempts == 2:
+                break
         results.check(
             AGENT_VM_CHECKS[8],
             codex.type == "microvm.agent.prompt"
             and codex.data.get("agent") == "codex"
             and codex.data.get("exitCode") == 0,
             f"type={codex.type} agent={codex.data.get('agent')!r} "
-            f"exit={codex.data.get('exitCode')!r} "
+            f"exit={codex.data.get('exitCode')!r} prompts={attempts} "
             f"stdout={(codex.data.get('stdout') or '').strip()[:120]!r} "
             f"stderr={(codex.data.get('stderr') or '').strip()[:200]!r}",
         )
-        kept = cli.call("exec", "cat /workspace/hello.py", *attach)
         results.check(
             AGENT_VM_CHECKS[9],
             kept.data.get("exitCode") == 0,
-            f"exit={kept.data.get('exitCode')!r} stdout={(kept.data.get('stdout') or '')[:120]!r}",
+            f"exit={kept.data.get('exitCode')!r} prompts={attempts} "
+            f"stdout={(kept.data.get('stdout') or '')[:120]!r}",
         )
 
         # AGENT-8: the same command against the registered name is a refresh, not a

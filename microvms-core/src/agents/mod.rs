@@ -728,6 +728,10 @@ mod tests {
             "the system layer is emitted once for two profiles:\n{text}"
         );
         assert!(
+            text.contains("RUN dnf install -y --setopt=install_weak_deps=0 nodejs22 nodejs22-npm "),
+            "with weak deps off, bare `npm` is Node 18's and the npm layer exits 127:\n{text}"
+        );
+        assert!(
             text.contains("RUN npm install -g @anthropic-ai/claude-code @openai/codex && npm"),
             "both CLIs in profile order, in one layer:\n{text}"
         );
