@@ -201,7 +201,10 @@ impl PySession {
     /// A sandbox that has been terminated has no session, and the error says which of the
     /// two states it is in rather than "no session" — the core sets that up by clearing
     /// the session in `terminate`.
-    fn with<T>(&self, body: impl FnOnce(&Session) -> Result<T, Error>) -> Result<T, Error> {
+    pub(crate) fn with<T>(
+        &self,
+        body: impl FnOnce(&Session) -> Result<T, Error>,
+    ) -> Result<T, Error> {
         match &self.held {
             Held::Owned(session) => body(session),
             Held::InSandbox(sandbox) => {
@@ -237,7 +240,7 @@ impl PySession {
     /// argument needs a higher-ranked bound plus a boxed future at every call site, and the
     /// boxing would be there only to satisfy the signature. Blocking inside the closure
     /// keeps the borrow entirely local and costs one visible call per method.
-    fn detached<T>(
+    pub(crate) fn detached<T>(
         &self,
         py: Python<'_>,
         body: impl FnOnce(&Session) -> Result<T, Error> + Send,

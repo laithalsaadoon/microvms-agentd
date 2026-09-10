@@ -71,12 +71,15 @@ agents consume the same token:
   `global.anthropic.claude-opus-5`).
 - **Codex CLI** has no Bedrock mode, but Bedrock exposes an
   OpenAI-compatible surface. Current Codex speaks only the Responses wire
-  API, which lives on the Mantle host
-  (`base_url = https://bedrock-mantle.<region>.api.aws/openai/v1`), not on
-  `bedrock-runtime` (that host's `/openai/v1` is chat-completions only,
-  which Codex dropped). A five-line `config.toml` defines the provider with
-  the bearer token as the API key (default model `openai.gpt-5.6-sol`,
-  which carries a 1M-token context window on Bedrock).
+  API, and `bedrock-runtime` serves it
+  (`base_url = https://bedrock-runtime.<region>.amazonaws.com/openai/v1`).
+  A short `config.toml` defines the provider with the bearer token as the
+  API key. Two lines are required on that host: the model is an
+  inference-profile id (default `global.openai.gpt-5.6-sol`; the bare id is
+  refused with "on-demand throughput isn't supported"), and
+  `web_search = "disabled"`, because Codex advertises its hosted web-search
+  tool by default and Bedrock fails the turn with "web search is not
+  supported for this request".
 
 The token never appears in the image, a command line, or a daemon log; it
 lives in `/workspace/.agent-env` inside one VM, and expires on its own.

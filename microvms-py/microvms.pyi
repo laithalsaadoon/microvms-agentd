@@ -14,6 +14,146 @@ from collections.abc import Sequence
 from typing import Any, Final, final
 
 @final
+class AgentSpec:
+    """
+    One agent to install: its name, and the two defaults a caller may override.
+    
+    `agent` is `"claude-code"` or `"codex"`; anything else is refused by the core with the
+    list. `model` defaults to the profile's row (an inference-profile id), `cli_version` to
+    the registry's latest at build time; a pin changes the image name.
+    """
+    def __eq__(self, other: object, /) -> bool: ...
+    def __new__(cls, /, agent: str, *, model: str |None = None, cli_version: str |None = None) -> AgentSpec: ...
+    def __repr__(self, /) -> str: ...
+    @property
+    def agent(self, /) -> str:
+        """
+        `"claude-code"` or `"codex"`.
+        """
+    @staticmethod
+    def claude_code(*, model: str |None = None, cli_version: str |None = None) -> AgentSpec:
+        """
+        Claude Code with the profile's defaults, or with overrides.
+        """
+    @property
+    def cli_version(self, /) -> str |None:
+        """
+        The pinned CLI version, or `None` for the registry's latest at build time.
+        """
+    @staticmethod
+    def codex(*, model: str |None = None, cli_version: str |None = None) -> AgentSpec:
+        """
+        Codex with the profile's defaults, or with overrides.
+        """
+    @property
+    def headless_command(self, /) -> str:
+        """
+        The exact command `prompt` runs, with `<TASK>` where the quoted task goes.
+        """
+    @property
+    def model(self, /) -> str:
+        """
+        The model this spec resolves to: the override, or the profile's default.
+        """
+
+@final
+class AgentVm:
+    """
+    One VM with coding agents in it: the sandbox plus the specs it is built for.
+    
+    The sequence is the CLI's `agent-up` and `agent-prompt`, one method per step:
+    `find_image` or `build_artifact` + your upload + `build_image`; `launch`;
+    `install_access`; `prompt` or `prompt_sync`; `terminate`. `sandbox` and `session` reach
+    the same VM for suspend, resume, `cp`-shaped transfers, and any other exec.
+    """
+    def __enter__(self, /) -> AgentVm: ...
+    def __exit__(self, /, exc_type: Any |None = None, exc_value: Any |None = None, traceback: Any |None = None) -> bool:
+        """
+        Tears down on the way out, whatever happened inside the block. Returns `False`, so
+        an exception raised inside the block propagates.
+        """
+    def __new__(cls, /, region: Region, agents: Sequence[AgentSpec] |None = None) -> AgentVm:
+        """
+        Resolves credentials for `region` and returns a VM with nothing built or launched.
+        
+        `agents` defaults to Claude Code alone. An empty list or a repeated agent is refused
+        by the core before any AWS call.
+        """
+    def __repr__(self, /) -> str: ...
+    @property
+    def agents(self, /) -> list[AgentSpec]:
+        """
+        The specs this VM carries, in profile order.
+        """
+    def build_artifact(self, /, *, binary: Sequence[int], build_role_arn: str, size: SizeClass |None = None) -> bytes:
+        """
+        The artifact bytes to upload to `s3://<bucket>/<image_name>.zip` before `build_image`.
+        """
+    def build_image(self, /, *, binary: Sequence[int], code_artifact_uri: str, build_role_arn: str, size: SizeClass |None = None) -> Image:
+        """
+        Builds the image and waits for it to become usable. `code_artifact_uri` is where
+        you uploaded `build_artifact`'s bytes. Several minutes, server-side.
+        """
+    def dockerfile(self, /) -> str:
+        """
+        The Dockerfile `build_image` will send: the client's agentd stanza plus the agent
+        layers. Read it to see what the image will contain; nothing in it is a secret.
+        """
+    def find_image(self, /, *, binary: Sequence[int], build_role_arn: str, size: SizeClass |None = None) -> str |None:
+        """
+        The ARN of an existing image named per `image_name`, or `None` when there is none.
+        """
+    def image_name(self, /, *, binary: Sequence[int], build_role_arn: str, size: SizeClass |None = None) -> str:
+        """
+        The image name for these specs and this daemon binary: `agent-vm-<agents>-<hash12>`.
+        
+        Content-addressed, so an unchanged binary and spec set name the image a previous
+        run built; `find_image` looks it up.
+        """
+    def install_access(self, /, *, token: BearerToken |None = None, ttl_seconds: float |None = None) -> BearerToken:
+        """
+        Mints a token (or takes yours) and installs Bedrock access for this VM's agents.
+        
+        Returns the token used, so `expires_at` says when to call this again. Re-runnable
+        on a running VM: that call is the credential refresh.
+        """
+    def launch(self, /, *, image_identifier: str, execution_role_arn: str |None = None, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None) -> Session:
+        """
+        Launches with egress and waits for the daemon to answer.
+        
+        Egress is not optional: neither agent reaches Bedrock without it. The idle knobs
+        default to the core's figures (ten-minute idle and suspended windows, a one-hour
+        ceiling); a multi-hour session raises `max_duration_sec` and polls `health` from
+        outside to stay awake.
+        """
+    def prompt(self, /, agent: str, task: str, *, timeout_sec: float |None = None, exec_id: str |None = None) -> ExecHandle:
+        """
+        Starts one task for `agent` and returns its handle. Does not wait.
+        """
+    def prompt_sync(self, /, agent: str, task: str, *, timeout: float = ..., exec_id: str |None = None) -> ExecResult:
+        """
+        Start, wait, ack: one task's whole result. `timeout` defaults to 900 seconds,
+        because agent tasks run minutes, and is also the daemon-side budget.
+        """
+    @property
+    def region(self, /) -> Region: ...
+    @property
+    def sandbox(self, /) -> Sandbox:
+        """
+        The sandbox this VM drives, for suspend, resume, and the lifecycle getters. The
+        same lock: a call here and a call there cannot interleave.
+        """
+    @property
+    def session(self, /) -> Session |None:
+        """
+        The session, once `launch` has run.
+        """
+    def terminate(self, /, *, delete_image: bool = False, delete_log_group: bool = False, delete_attempts: int |None = None, delete_backoff: float |None = None, wait_for_terminated: bool = False) -> TeardownReport:
+        """
+        Tears down, best-effort, never raising; see `Sandbox.terminate`.
+        """
+
+@final
 class Amount:
     """
     What a line item's cost can be: an estimate, or unpriced.
@@ -84,6 +224,30 @@ class BaseImage:
         """
     @property
     def working_dir(self, /) -> str: ...
+
+@final
+class BearerToken:
+    """
+    A Bedrock bearer token, the region it was minted for, and when it stops working.
+    
+    Opaque on purpose: `repr` shows the length, `expose()` is the one door to the text.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def expires_at(self, /) -> float:
+        """
+        The presign's expiry, seconds since the epoch. An upper bound: the service also
+        caps validity at the signing credentials' own expiry.
+        """
+    def expose(self, /) -> str:
+        """
+        The token text, for a caller writing it into an environment themselves.
+        """
+    @property
+    def region(self, /) -> Region:
+        """
+        The region the token was minted for.
+        """
 
 @final
 class BuildHookTimeout:
@@ -1354,6 +1518,11 @@ class Unpriced:
     @property
     def reason(self, /) -> str: ...
 
+def agent_constants() -> dict:
+    """
+    The layer's fixed values, for a caller that wants to reason about the guest.
+    """
+
 def build_unpriced_reason() -> str:
     """
     Why the image build has no price, as the reason that lands on the line item.
@@ -1390,6 +1559,42 @@ def estimate_run(size: SizeClass, *, running_seconds: float = 0.0, suspended_sec
     [`run_report`]: not the arithmetic, which is shared, but what the durations admit about
     themselves — and it is why this signature has no `Duration` parameter at all, so an
     accidentally-measured one is not something a caller can write.
+    """
+
+def install_agent_access(session: Session, agents: Sequence[AgentSpec], token: BearerToken) -> None:
+    """
+    Installs Bedrock access for `agents` into a running VM over `session`.
+    
+    Three uploads (the environment file, Codex's config when Codex is among the agents,
+    the marker) and one root `chown` of `/workspace` to uid 1000. Re-runnable: a fresh
+    token overwrites the same files, which is how a twelve-hour token is refreshed.
+    """
+
+def installed_agents(session: Session) -> list[AgentSpec]:
+    """
+    The agents a running VM was provisioned with, read from its guest marker.
+    
+    For a process holding only a session (`Session.direct` from the identifier triple):
+    this is how a credential refresh learns which agents and models to re-provision. A VM
+    with no marker is refused as a precondition, naming `agent-up`.
+    """
+
+def mint_bedrock_token(region: Region, *, ttl_seconds: float |None = None) -> BearerToken:
+    """
+    Mints a Bedrock bearer token from the default credential chain.
+    
+    A SigV4 presign of `POST https://bedrock.amazonaws.com/?Action=CallWithBearerToken`,
+    base64, prefixed `bedrock-api-key-` — the reference generator's recipe, in process.
+    `ttl_seconds` defaults to the ceiling, twelve hours; more is refused by the core.
+    """
+
+def prompt_agent(session: Session, agent: AgentSpec, task: str, *, timeout_sec: float |None = None, exec_id: str |None = None) -> ExecHandle:
+    """
+    Starts one task for `agent` over `session` and returns its handle. Does not wait.
+    
+    Runs the agent's headless command as uid 1000 in `/workspace`, sourcing the installed
+    environment file. `timeout_sec` is the daemon-side budget for the agent process;
+    `exec_id` is the idempotency key for a retry that must not spawn twice.
     """
 
 def run_report(size: SizeClass, *, running: Duration |None = None, suspended: Duration |None = None, image_build: Duration |None = None, image_gb: float |None = None, image_retained: Duration |None = None, suspend_resume_cycles: int = 0, snapshot_gb: float |None = None, launched: bool = True, label: str = "run", rates: RateTable |None = None) -> CostReport:

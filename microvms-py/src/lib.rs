@@ -49,8 +49,10 @@
 //!
 //! [`runtime`] is the bridge. [`errors`] is the exception hierarchy and the one conversion
 //! from a core `Error`. [`region`], [`hooks`], and [`cost`] are the value types.
-//! [`session`] and [`exec`] are the in-VM surface; [`sandbox`] is the lifecycle.
+//! [`session`] and [`exec`] are the in-VM surface; [`sandbox`] is the lifecycle; [`agents`]
+//! is the L3 layer over it, one VM with coding agents in it.
 
+mod agents;
 mod cost;
 mod errors;
 mod exec;
@@ -107,6 +109,11 @@ fn core_version() -> &'static str {
 /// The MicroVMs client, as Python sees it.
 #[pymodule]
 mod microvms {
+    #[pymodule_export]
+    use super::agents::{
+        PyAgentSpec, PyAgentVm, PyBearerToken, agent_constants, install_agent_access,
+        installed_agents, mint_bedrock_token, prompt_agent,
+    };
     #[pymodule_export]
     use super::core_version;
     #[pymodule_export]

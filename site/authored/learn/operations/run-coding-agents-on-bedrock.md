@@ -1,116 +1,177 @@
 ---
 title: Run coding agents on Bedrock inside a MicroVM
-description: Run Claude Code and Codex CLI headless inside a Lambda MicroVM against Bedrock, with credentials minted from your own AWS identity and no vendor API key anywhere.
+description: Bring up a VM with Claude Code or Codex CLI in it with one command, hand it a task with another, against Bedrock, with credentials minted from your own AWS identity and no vendor API key anywhere.
 editUrl: false
 sidebar:
   order: 3
 ---
 
 ```bash
-# from the repo root, with the first-run prerequisites in place and uv on PATH:
-examples/coding-agents-on-bedrock/run.sh
+microvm agent-up --vm-name dev --agent claude-code --agent codex
+microvm agent-prompt --name dev --agent claude-code \
+  "Write a one-line bash command that counts files in /usr/bin, run it, and report the number."
+microvm terminate dev
 ```
 
-The script builds an image carrying both agent CLIs on first use, launches a VM with outbound network, mints a short-lived Bedrock bearer token from your AWS credentials, copies it in over the authenticated channel, drives each agent through `microvm exec`, prints their output, and terminates the VM. At the end of this page both agents will have completed a task inside a VM, and you will know why each line of the script is there.
+`agent-up` builds an image carrying the agent CLIs, launches a VM with outbound network, mints a short-lived Bedrock bearer token from your AWS credentials, installs it as a file inside the VM, and registers the name `dev`. `agent-prompt` runs the agent headless as a non-root user over your task and prints what it did. At the end of this page you will have run both agents inside a VM, refreshed their credentials without relaunching, moved a project in and out, and know why the helper does each thing it does. [Agent VMs](/internals/agent-vms/) is the specification.
 
 ## 1. Prerequisites
 
-The `microvm` CLI on your `PATH`, the `MICROVM_BUCKET`, `MICROVM_BUILD_ROLE_ARN`, and `MICROVM_EXECUTION_ROLE_ARN` values from [your first run](/learn/tutorial/first-run/), AWS credentials that can call `lambda-microvms` and `bedrock:InvokeModel`, and `uv` on your `PATH` to mint the token. The account needs Bedrock access to the models the script defaults to; `CLAUDE_MODEL` and `CODEX_MODEL` override them.
+The `microvm` CLI on your `PATH`; the `MICROVM_BUCKET`, `MICROVM_BUILD_ROLE_ARN`, and `MICROVM_EXECUTION_ROLE_ARN` values from [your first run](/learn/tutorial/first-run/); and AWS credentials that can call `lambda-microvms` and `bedrock:InvokeModel`. The account needs Bedrock access to the models the profiles default to, `global.anthropic.claude-opus-5` for Claude Code and `global.openai.gpt-5.6-sol` for Codex; `--claude-model` and `--codex-model` override them. Nothing else is needed on your machine: the token is minted in-process, so there is no Python step.
 
-## 2. The image
-
-`Dockerfile` starts from the platform's `al2023-1` base pair, pinned by digest, carries the daemon exactly as the client's default Dockerfile does, then adds Node 22, python3, and the two CLIs:
-
-```dockerfile
-RUN dnf install -y nodejs22 npm python3 git tar gzip which findutils procps-ng \
-    && dnf clean all
-RUN npm install -g @anthropic-ai/claude-code @openai/codex \
-    && npm cache clean --force
-```
-
-The script builds it with `--reuse`, so the image name is keyed to a hash of the daemon binary and the Dockerfile. An unchanged Dockerfile reuses its image in seconds; a changed one builds fresh under a new name, which is what avoids serving a stale snapshot under a reused name:
+## 2. Bring the VM up
 
 ```bash
-BUILT=$(microvm build "$AGENTD" --json --reuse \
-  --name coding-agents \
-  --dockerfile "$HERE/Dockerfile" \
-  --region "$REGION")
+microvm agent-up --vm-name dev --agent claude-code --agent codex --json
 ```
 
-The image contains no secret of any kind.
+`--agent` is repeatable and defaults to `claude-code` alone. With `--json` the command prints one envelope of type `microvm.agent`; without it, a short text summary ending in the prompt and teardown lines to copy. Step by step, on a name this machine has not registered:
 
-## 3. Launch with egress and a low floor
+1. **The image.** The Dockerfile is the client's own agentd stanza plus three layers: `dnf install nodejs22 nodejs22-npm python3 git tar gzip which findutils procps-ng`, `npm install -g` of each agent's package, and a uid and gid 1000 appended to `/etc/passwd` and `/etc/group` directly, because `useradd` is not in the minimal base. `/workspace` is created and handed to that user and becomes the `WORKDIR`. The image is named `agent-vm-<agents>-<hash12>`, the hash over the daemon binary and the Dockerfile text, so an unchanged agent set reuses its image in seconds and a `--claude-version` or `--codex-version` pin builds a fresh one under a new name. The image contains no secret of any kind.
+2. **The launch.** A kept VM with egress, because neither agent reaches Bedrock without it; both would install fine and then fail on their first model call. `--memory` defaults to `1024` rather than `run`'s `2048`. The minimum you request is your bill floor, and four times it is the guest's always-present ceiling, with no scaling event. Agent sessions are peaky, long stretches of a small steady state punctuated by bursts of build and test work, so a 4 GiB ceiling at half the floor cost fits them, and the peaks bill only by what is consumed. A steadier or heavier workload passes `--memory 2048`.
+3. **The token.** A Bedrock bearer token is a SigV4 query presign of `POST https://bedrock.amazonaws.com/` with `Action=CallWithBearerToken`, base64-encoded and prefixed `bedrock-api-key-`. The CLI mints it from your default credential chain for `--token-ttl-hours` (default and ceiling 12). It is never printed, never an argument to anything, and never in the launch payload.
+4. **The files.** Three uploads over the authenticated channel, then one root exec. `/workspace/.agent-env` (mode `0600`) is the file every agent sources:
+
+   ```bash
+   export HOME="/workspace"
+   export PATH="/usr/local/bin:/usr/bin:/bin"
+   export AWS_REGION="us-east-1"
+   export CLAUDE_CODE_USE_BEDROCK="1"
+   export ANTHROPIC_MODEL="global.anthropic.claude-opus-5"
+   export AWS_BEARER_TOKEN_BEDROCK="<token>"
+   export OPENAI_API_KEY="<token>"
+   ```
+
+   Claude Code has a native Bedrock mode: `CLAUDE_CODE_USE_BEDROCK=1` plus the bearer token, with the model chosen by `ANTHROPIC_MODEL` as an inference-profile id. Codex has no Bedrock mode, and `bedrock-runtime` exposes an OpenAI-compatible surface that serves the Responses wire API Codex speaks, so when Codex is installed a second file, `/workspace/.codex/config.toml`, defines a provider with the bearer token as its API key. Two lines are required on that host: the model is an inference-profile id (the bare `openai.gpt-5.6-sol` is refused with "on-demand throughput isn't supported"), and hosted web search is disabled, because Codex advertises that tool by default and Bedrock fails the turn with "web search is not supported for this request":
+
+   ```toml
+   model = "global.openai.gpt-5.6-sol"
+   model_provider = "bedrock"
+   model_reasoning_effort = "medium"
+   web_search = "disabled"
+   [model_providers.bedrock]
+   name = "Amazon Bedrock"
+   base_url = "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1"
+   env_key = "OPENAI_API_KEY"
+   wire_api = "responses"
+   ```
+
+   The `PATH` line matters. The daemon spawns execs from an empty environment, and Claude Code's Bash tool snapshots the shell it starts from: without an exported `PATH` the agent's subshells find no `ls`, `wc`, or `python3` (every command exits 127) even though the daemon's own execs resolve them. Codex probes absolute paths when lookup fails, so it limps through; Claude Code does not.
+
+   The third file is the marker `/workspace/.agent-vm.json` (mode `0644`), naming the installed agents and their models, so a later `agent-prompt` can learn which agent to run from the VM itself. The daemon writes every upload as root, mode `0600`, which a demoted agent cannot read, so the command finishes with one root `chown -R 1000:1000 /workspace`.
+5. **The name.** `dev` is registered last, only over a VM every step succeeded on. A failure between the launch and the registration tears the VM down and names anything it could not remove in the failure envelope's `data.leaked`, because a running VM with no credentials and no name is one nobody can use.
+
+Envelope keys worth reading: `imageReused` says whether the image was built or found; `vmReused` is `false` on this path; `agents` lists each installed agent with its `model` and its `headlessCommand`, the exact template `agent-prompt` runs with `<TASK>` where the quoted task goes; `credentialExpiresAt` is the token's expiry in epoch seconds; `microvmId`, `endpoint`, and `agentToken` are the identifier triple every attached command can take instead of `--name`.
+
+## 3. Prompt an agent
 
 ```bash
-microvm run --json --keep --egress --image "$IMAGE_ARN" --config microvm.toml
+microvm agent-prompt --name dev --agent codex \
+  "Create hello.py that prints hello from a microvm, run it, and show the output."
+microvm exec "cat /workspace/hello.py" --name dev
 ```
 
-`--egress` gives the VM outbound network, and without it the guest cannot reach Bedrock; both agents would install fine and then fail on their first model call. `--keep` leaves the VM running and reports the endpoint, agent token, and MicroVM id the attached commands need.
+The command runs the agent's headless line, `claude -p <TASK> --allowedTools Bash,Read,Edit,Write,Grep,Glob` or `codex exec --skip-git-repo-check -s workspace-write <TASK>`, as uid 1000 and gid 1000, in `/workspace`, with `. /workspace/.agent-env &&` in front. It waits up to `--timeout` (default 900 seconds, because agent tasks run minutes, not seconds), then prints the agent's output and acks the exec. The envelope is `microvm.agent.prompt` with `exec`'s keys plus `agent` and `model`; a non-zero agent exit is `ERR_EXEC_FAILED`, as for `exec`. The `cat` afterwards is how you prove the agent did filesystem work inside the VM rather than reporting that it had. That proof is not decoration: in one of five identical runs on 2026-09-10, Codex answered "I can't create or run files in this environment", made no tool call, and exited 0, so the prompt envelope alone said `ok`. The config sets `model_reasoning_effort = "medium"` because Codex has no metadata for a Bedrock model id and otherwise sends no effort at all; whether that lowers the decline rate is unmeasured. Read the effect back, and re-prompt once if it is missing.
 
-`microvm.toml` pins `memory = 1024`. The minimum you request is your bill floor, and four times it is the guest's always-present ceiling, with no scaling event. Agent sessions are peaky, long stretches of a small steady state punctuated by bursts of build and test work, so a 4 GiB ceiling at half the floor cost of the 2048 default fits them, and the peaks bill only by what is consumed. A steadier or heavier workload should keep the default.
+Why uid 1000 and not root: Claude Code's `--dangerously-skip-permissions` refuses to run as root, and the agent then denies its own Bash, Grep, and WebFetch calls and returns a confident report built on zero tool calls. Measured on this task shape: as uid 0 the agent made no shell calls at all; as uid 1000 it made 147. The helper never offers a root option.
 
-## 4. Credentials, without a vendor key
+With two agents installed, `--agent` is required: the command reads the marker, finds two names, and refuses with `ERR_PRECONDITION` listing both. With one installed, omit it and the marker chooses. A typed `--agent` still reads the marker, so the prompt uses the model the VM was provisioned with.
 
-The script mints a Bedrock bearer token from the caller's own AWS credentials with the `aws-bedrock-token-generator` package (roughly a twelve-hour lifetime) and delivers it as a file:
+For a long task, detach and poll:
 
 ```bash
-microvm cp "$ENVFILE" vm:/workspace/.agent-env --mode 0600 "${ATTACH[@]}" --json >/dev/null
+ID=$(microvm agent-prompt --name dev --agent claude-code --detach --json "Refactor …" | jq -r .data.execId)
+microvm exec --poll "$ID" --name dev
+microvm ack "$ID" --name dev
 ```
 
-The file both agents source:
+`--detach` starts the agent and returns `phase: running` with the exec id. `exec --poll` reads the record without acking, so you can poll on an interval; `ack` releases it when you have what you need. To watch output as it arrives, take the `headlessCommand` from the `agent-up` envelope and run it through `microvm exec --stream --name dev --user 1000 --group 1000`, with your task in place of `<TASK>`.
+
+## 4. Refresh the credentials
+
+The token lives at most twelve hours. When it expires the VM is still running and still yours; re-run the same command against the same name:
 
 ```bash
-export HOME=/workspace
-export PATH=/usr/local/bin:/usr/bin:/bin
-export AWS_REGION=$REGION
-export AWS_BEARER_TOKEN_BEDROCK=$BEARER
-export CLAUDE_CODE_USE_BEDROCK=1
-export ANTHROPIC_MODEL=$CLAUDE_MODEL
-export OPENAI_API_KEY=$BEARER
+microvm agent-up --vm-name dev
 ```
 
-Claude Code has a native Bedrock mode: `CLAUDE_CODE_USE_BEDROCK=1` plus the bearer token, with the model chosen by `ANTHROPIC_MODEL` as an inference-profile id. Codex has no Bedrock mode, and Bedrock exposes an OpenAI-compatible surface, so a short `config.toml` defines a provider with the bearer token as its API key. Current Codex speaks only the Responses wire API, which lives on the Mantle host and not on `bedrock-runtime`:
+Because `dev` is registered, the command builds nothing and launches nothing. It attaches, reads the marker to keep the agents and models the VM already has, mints a fresh token, rewrites the same files, runs the same `chown`, and reports `vmReused: true` with a later `credentialExpiresAt`; the image keys are `null` because no image was touched. Typing `--agent` on a refresh is how you change the agents or models, and `--project` on a refresh uploads a tree the same way it does on a fresh launch.
 
-```toml
-model = "$CODEX_MODEL"
-model_provider = "bedrock"
-[model_providers.bedrock]
-name = "Amazon Bedrock (Mantle)"
-base_url = "https://bedrock-mantle.$REGION.api.aws/openai/v1"
-env_key = "OPENAI_API_KEY"
-wire_api = "responses"
-```
-
-The `PATH` line matters. The daemon spawns execs with a minimal environment, and Claude Code's Bash tool snapshots the shell it starts from: without an exported `PATH` the agent's subshells find no `ls`, `wc`, or `python3` (every command exits 127) even though the daemon's own execs resolve them. Codex probes absolute paths when lookup fails, so it limps through; Claude Code does not.
-
-The token never appears in the image, a command line, or a daemon log. It lives in one file inside one VM and expires on its own.
-
-## 5. Run as uid 1000, and why root silently breaks the agent
-
-The Dockerfile creates uid and gid 1000 by appending to `/etc/passwd` directly, because `useradd` is not in the minimal base, and hands `/workspace` to it. The daemon runs as root, so everything `cp` wrote is root-owned `0600`, which a demoted agent cannot read; one root exec fixes that before any agent runs:
+## 5. Bring a project in and results out
 
 ```bash
-microvm exec "chown -R 1000:1000 /workspace" "${ATTACH[@]}" --json >/dev/null
+microvm agent-up --vm-name dev --project ./my-app
+microvm agent-prompt --name dev "Run the test suite and fix the first failing test."
+microvm cp --tar vm:/workspace ./after.tar --name dev
 ```
 
-Then every agent exec passes `--user 1000 --group 1000`:
+`--project` packs the directory the way `run <DIR>` does, with `.git`, `target`, `node_modules`, and `.venv` skipped whole, under the same size budgets, and before any AWS call, so an unreadable tree costs nothing. The archive is uploaded into `/workspace` before the `chown`, so the agent owns every file it finds there. Codex's `--skip-git-repo-check` is on the headless line for exactly this reason: a synced tree arrives without `.git`. `cp --tar` brings the whole workspace back as one archive.
+
+## 6. The recipe by hand
+
+[examples/coding-agents-on-bedrock/run.sh](https://github.com/laithalsaadoon/microvms-agentd/tree/main/examples/coding-agents-on-bedrock) is the same recipe as a shell script, one `microvm` call per step: `build --reuse` with its own Dockerfile, `run --keep --egress` with `memory = 1024` in a `microvm.toml`, a token from the `aws-bedrock-token-generator` package through `uvx`, `cp --mode 0600` for the environment file, the root `chown` exec, and one `exec --user 1000 --group 1000` per agent. Read it when you want to see each decision on its own line or drive a step differently; the two commands above are that script moved into the library, with the same measured values.
+
+## 7. The same sequence from Python or Node
+
+The `microvms` wheel and the `@theagenticguy/microvms` package carry the layer as `AgentVm`. One method per step, the same names the CLI prints in its progress lines, and the artifact upload stays yours because S3 is not in the client's dependency set:
+
+```python
+import boto3, microvms
+
+agentd = open("agentd", "rb").read()
+vm = microvms.AgentVm(
+    microvms.Region.us_east_1(),
+    [microvms.AgentSpec.claude_code(), microvms.AgentSpec.codex()],
+)
+image = vm.find_image(binary=agentd, build_role_arn=BUILD_ROLE)
+if image is None:
+    name = vm.image_name(binary=agentd, build_role_arn=BUILD_ROLE)
+    boto3.client("s3").put_object(
+        Bucket=BUCKET,
+        Key=f"{name}.zip",
+        Body=vm.build_artifact(binary=agentd, build_role_arn=BUILD_ROLE),
+    )
+    image = vm.build_image(
+        binary=agentd,
+        build_role_arn=BUILD_ROLE,
+        code_artifact_uri=f"s3://{BUCKET}/{name}.zip",
+    ).identifier
+vm.launch(image_identifier=image, execution_role_arn=EXEC_ROLE)
+token = vm.install_access()  # minted in process; token.expires_at says when to repeat
+result = vm.prompt_sync(
+    "codex", "Create hello.py that prints hello from a microvm, run it."
+)
+print(result.stdout, vm.session.download_file("/workspace/hello.py"))
+vm.terminate()
+```
+
+```ts
+import { AgentVm, Region } from '@theagenticguy/microvms';
+
+const vm = await AgentVm.create(Region.usEast1(), [{ agent: 'claude-code' }, { agent: 'codex' }]);
+const opts = { binary: agentd, buildRoleArn: BUILD_ROLE };
+let image = await vm.findImage(opts);
+if (image === null) {
+  const name = await vm.imageName(opts);
+  await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: `${name}.zip`, Body: await vm.buildArtifact(opts) }));
+  image = (await vm.buildImage({ ...opts, codeArtifactUri: `s3://${BUCKET}/${name}.zip` })).identifier;
+}
+await vm.launch({ imageIdentifier: image, executionRoleArn: EXEC_ROLE });
+const token = await vm.installAccess();     // token.expiresAt
+const result = await vm.promptSync('codex', 'Create hello.py that prints hello from a microvm, run it.');
+await vm.terminate();
+```
+
+`vm.sandbox` and `vm.session` reach the same VM for suspend, resume, and file transfer, under the same lock, so a teardown and a session call cannot interleave. `terminate(delete_image=True)` deletes only an image this object built; an image `find_image` found belongs to whoever built it, and the report says `image_deleted: false` without a failure. Delete a reused image with `aws lambda-microvms delete-microvm-image` when you are done with it (measured 2026-09-10: the Node run reused the Python run's image and its teardown left it in place, as designed). A process that holds only the identifier triple refreshes credentials without an `AgentVm`: `installed_agents(session)` reads the marker, `mint_bedrock_token(region)` mints, `install_agent_access(session, agents, token)` rewrites the files, and `prompt_agent(session, spec, task)` runs a task. Every refusal is the core's, with the same messages the CLI prints. A `BearerToken` has no constructor and prints only its length; `expose()` is the one door to the text.
+
+## 8. Cost and cleanup
+
+An agent VM is kept by definition, so nothing tears it down for you except the launch's own idle policy: `--max-idle-sec` (default 600) suspends it after that much inbound idleness, `--suspended-sec` (default 600) terminates it after that long suspended, and `--max-duration-sec` (default 3600) is the hard ceiling. A multi-hour session needs an outside keepalive, because idleness is measured outside the VM: poll `microvm health --name dev` on an interval under `--max-idle-sec`, or pass `--auto-resume` so the next request wakes it. [Keep a VM running and work inside it](/learn/tutorial/long-lived-vm/) covers suspend and resume. When you are done:
 
 ```bash
-microvm exec ". /workspace/.agent-env && claude -p 'Write a one-line bash command that counts files in /usr/bin, then run it with your Bash tool and report the number.' --allowedTools Bash" \
-  --user 1000 --group 1000 "${ATTACH[@]}" --timeout 240
-
-microvm exec ". /workspace/.agent-env && codex exec --skip-git-repo-check -s workspace-write 'Create hello.py that prints hello from a microvm, run it, and show the output.'" \
-  --user 1000 --group 1000 "${ATTACH[@]}" --timeout 240
+microvm terminate dev
 ```
 
-Omit the uid and the failure is worse than an error. Claude Code's `--dangerously-skip-permissions` refuses to run as root, and under `acceptEdits` the agent then denies its own Bash, Grep, and WebFetch calls and returns a confident report built on zero tool calls. Measured on this task shape: as uid 0 the agent made no shell calls at all; as uid 1000 it made 147. A final exec cats the file Codex created, so the transcript carries proof the agents did filesystem work inside the VM.
+The image persists deliberately: its snapshot has a one-week minimum retention, so keeping and reusing it is cheaper than rebuilding, and the next `agent-up` with the same agents finds it by name. Delete old images with `aws lambda-microvms delete-microvm-image`.
 
-## 6. Longer sessions
-
-The same primitives compose. `exec --detach` starts a run and returns, `exec --poll <EXEC_ID>` reads it back, `cp --tar` moves a whole project in and out, and `suspend` and `resume` freeze a VM between turns with its filesystem and processes intact. A multi-hour run needs an outside keepalive, because idleness is measured outside the VM: poll `microvm health` on an interval under the launch's `--max-idle-sec`. [Keep a VM running and work inside it](/learn/tutorial/long-lived-vm/) covers each.
-
-## 7. Cost and cleanup
-
-The VM terminates on script exit through a trap, so failures tear down too. The image persists deliberately: its snapshot has a one-week minimum retention, so keeping and reusing it is cheaper than rebuilding. Delete old images with `aws lambda-microvms delete-microvm-image` when you are done.
-
-Two open-source harnesses run coding agents inside Lambda MicroVMs the same way, each carrying its own hand-rolled daemon. [Harness capabilities](/internals/harness-capabilities/) maps their contracts onto this platform and ranks what is still missing.
+Two open-source harnesses run coding agents inside Lambda MicroVMs the same way, each carrying its own hand-rolled daemon. [Harness capabilities](/internals/harness-capabilities/) maps their contracts onto this platform and ranks what is still missing; the agent VM layer is what such a harness class would call.

@@ -635,6 +635,379 @@
         "supportsJson": true
       },
       {
+        "alternateResponse": null,
+        "name": "agent-up",
+        "parameters": [
+          {
+            "choices": null,
+            "default": null,
+            "help": "The aarch64 agentd binary to bake in. Omitted provisions this CLI's own release asset",
+            "name": "binary",
+            "positional": true,
+            "required": false,
+            "type": "path"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "The local name to register for the VM, and the handle every later command uses",
+            "name": "vm-name",
+            "positional": false,
+            "required": true,
+            "type": "string"
+          },
+          {
+            "choices": [
+              "claude-code",
+              "codex"
+            ],
+            "default": null,
+            "help": "Which agent to install. Repeatable; defaults to `claude-code`",
+            "name": "agent",
+            "positional": false,
+            "required": false,
+            "type": "enum"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "The Bedrock inference-profile id Claude Code uses. Defaults to the profile's",
+            "name": "claude-model",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "The Bedrock model id Codex uses. Defaults to the profile's",
+            "name": "codex-model",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Pin the Claude Code npm package to this version. Changes the image's reuse hash",
+            "name": "claude-version",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Pin the Codex npm package to this version. Changes the image's reuse hash",
+            "name": "codex-version",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "A local directory to upload into /workspace after launch, packed the way `run <DIR>` packs",
+            "name": "project",
+            "positional": false,
+            "required": false,
+            "type": "path"
+          },
+          {
+            "choices": [
+              "512",
+              "1024",
+              "2048",
+              "4096",
+              "8192"
+            ],
+            "default": "1024",
+            "help": "Baseline MiB. Default 1024: a 4 GiB always-present ceiling at half the floor cost of 2048, which fits peaky agent sessions (see `docs/AGENT-VMS.md`)",
+            "name": "memory",
+            "positional": false,
+            "required": false,
+            "type": "enum"
+          },
+          {
+            "choices": null,
+            "default": "12",
+            "help": "How long the Bedrock bearer token lives, in hours. Default and ceiling 12",
+            "name": "token-ttl-hours",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": "600",
+            "help": "Suspend the VM after this much inbound-traffic idleness",
+            "name": "max-idle-sec",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": "600",
+            "help": "Terminate the VM after this long suspended. A resume past it cannot work",
+            "name": "suspended-sec",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Let the platform resume a suspended VM on an incoming request",
+            "name": "auto-resume",
+            "positional": false,
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "choices": null,
+            "default": "3600",
+            "help": "Hard ceiling on the VM's life. Refused above 28800 (eight hours) before any call",
+            "name": "max-duration-sec",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "The daemon's port inside the guest",
+            "name": "port",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Where the run ledger and name registry live. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
+            "name": "state-dir",
+            "positional": false,
+            "required": false,
+            "type": "path"
+          },
+          {
+            "choices": [
+              "us-east-1",
+              "us-east-2",
+              "us-west-2",
+              "eu-west-1",
+              "ap-northeast-1"
+            ],
+            "default": null,
+            "help": "AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1",
+            "name": "region",
+            "positional": false,
+            "required": false,
+            "type": "enum"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Use a region this client has not seen carry MicroVMs. Costs you the diagnostic",
+            "name": "unlisted-region",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "S3 bucket for the build artifact. Defaults to $MICROVM_BUCKET",
+            "name": "bucket",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Build role ARN. Defaults to $MICROVM_BUILD_ROLE_ARN",
+            "name": "build-role-arn",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Execution role ARN. Defaults to $MICROVM_EXECUTION_ROLE_ARN",
+            "name": "execution-role-arn",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "responseKeys": [
+          "vmName",
+          "microvmId",
+          "endpoint",
+          "agentToken",
+          "imageIdentifier",
+          "imageName",
+          "imageReused",
+          "vmReused",
+          "agents",
+          "credentialExpiresAt",
+          "workdir",
+          "project",
+          "agentd"
+        ],
+        "responseType": "microvm.agent",
+        "summary": "Bring up a VM with a coding agent in it: image, launch, model credentials, non-root user",
+        "supportsJson": true
+      },
+      {
+        "alternateResponse": null,
+        "name": "agent-prompt",
+        "parameters": [
+          {
+            "choices": null,
+            "default": null,
+            "help": "The task, as prose. Passed to the agent's headless command single-quoted for `sh`",
+            "name": "task",
+            "positional": true,
+            "required": true,
+            "type": "string"
+          },
+          {
+            "choices": [
+              "claude-code",
+              "codex"
+            ],
+            "default": null,
+            "help": "Which installed agent to prompt. Omitted reads the guest marker and takes the one it names",
+            "name": "agent",
+            "positional": false,
+            "required": false,
+            "type": "enum"
+          },
+          {
+            "choices": null,
+            "default": "900",
+            "help": "How long to wait for the agent, in seconds. Agent tasks run minutes, not seconds",
+            "name": "timeout",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Start the agent and return immediately, without waiting and without acking",
+            "name": "detach",
+            "positional": false,
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Use this exec id instead of a fresh one, making a retry idempotent",
+            "name": "exec-id",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "The VM's endpoint, as reported by `run`",
+            "name": "endpoint",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "The agent token delivered to the VM at launch",
+            "name": "agent-token",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "The MicroVM id, needed to mint the endpoint proxy token",
+            "name": "microvm-id",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "The name `run --keep --vm-name` registered, standing in for the whole triple",
+            "name": "name",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "The daemon's port inside the guest",
+            "name": "port",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Where the local state lives — the name registry, and exec's per-VM history. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
+            "name": "state-dir",
+            "positional": false,
+            "required": false,
+            "type": "path"
+          },
+          {
+            "choices": [
+              "us-east-1",
+              "us-east-2",
+              "us-west-2",
+              "eu-west-1",
+              "ap-northeast-1"
+            ],
+            "default": null,
+            "help": "AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1",
+            "name": "region",
+            "positional": false,
+            "required": false,
+            "type": "enum"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Use a region this client has not seen carry MicroVMs. Costs you the diagnostic",
+            "name": "unlisted-region",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "responseKeys": [
+          "execId",
+          "agent",
+          "model",
+          "phase",
+          "exitCode",
+          "stdout",
+          "stderr",
+          "truncated"
+        ],
+        "responseType": "microvm.agent.prompt",
+        "summary": "Hand a coding agent in a running agent VM one task, headless, as the non-root user",
+        "supportsJson": true
+      },
+      {
         "alternateResponse": {
           "responseKeys": [
             "execId",

@@ -60,8 +60,11 @@
 //!
 //! [`error`], [`region`], [`sizing`], [`hooks`], and [`constants`] are the foundation
 //! every other module builds on. [`cost`], [`control`], [`session`], and [`sandbox`]
-//! are the product surface.
+//! are the product surface. [`agents`] is the one layer above them: the coding-agent
+//! helpers `docs/AGENT-VMS.md` specifies, which compose the surface and which nothing
+//! below depends on.
 
+pub mod agents;
 pub mod constants;
 pub mod control;
 pub mod cost;

@@ -6,6 +6,72 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
 
 ## Unreleased
 
+### Added
+
+- **Agent VMs: the L3 helpers over the lifecycle (`docs/AGENT-VMS.md`).** A new
+  `microvms_core::agents` module gives a caller one VM with a coding agent
+  installed, Bedrock access wired, and a non-root user to run it as, then one
+  call that hands the agent a task. `Agent::{ClaudeCode, Codex}` is a closed
+  enum over a dated profile table (`agents::profile`): install lines, default
+  model id, environment lines, Codex's bedrock-runtime provider config, and the headless
+  command template, each overridable at the call site. `AgentVm` wraps a
+  `Sandbox` for the build, launch, provision, prompt, terminate shape; the free
+  functions `install_access`, `installed_agents`, and `prompt` take a `Session`
+  for a process that only holds an attached VM. `agents::bedrock::mint` ports
+  the `aws-bedrock-token-generator` recipe onto the `aws-sigv4` crate core
+  already carries, so the `uvx aws-bedrock-token-generator` step the example
+  script performed is now done in-process, the token is a `BearerToken` whose
+  `Debug` prints its length only, and it reaches the guest as a `0600` file
+  rather than an argv element. `Sandbox` gains one read-only accessor, `port`,
+  so the derived Dockerfile's `AGENTD_PORT` agrees with the launch; nothing in
+  L1 or L2 depends on `agents`.
+- **`microvm agent-up` and `microvm agent-prompt`.** `agent-up --vm-name NAME
+  [--agent claude-code|codex]...` builds the profile image under its
+  content-hash name (`agent-vm-<agents>-<hash12>`, reused when unchanged),
+  launches a kept, named VM with egress, mints a token, installs the
+  credentials, optionally uploads `--project`, and registers the name last.
+  Against a name that is already registered it attaches, mints a fresh token,
+  and re-installs instead of building or launching, reporting `vmReused: true`;
+  that is how a 12-hour token is refreshed on a long-lived VM. `agent-prompt
+  TASK` runs the agent's headless command as uid 1000 in `/workspace`, sourcing
+  the installed environment file; without `--agent` it reads the guest marker
+  `/workspace/.agent-vm.json` and refuses when two agents are installed.
+  Envelope types `microvm.agent` and `microvm.agent.prompt`; no new exit row.
+  Two measured values from the first live runs are pinned by tests: the system
+  layer installs `nodejs22-npm` by name (with weak deps off, bare `npm` is Node
+  18's and the npm layer exits 127), and the Codex config sets
+  `model_reasoning_effort = "medium"` (Codex has no metadata for a Bedrock
+  model id and otherwise sends none; one no-effort run in five declined its
+  task with zero tool calls and exit 0). Codex's provider is `bedrock-runtime`'s
+  `/openai/v1` (the Responses wire API is served there; the Mantle host the
+  example used to name is a separate surface), with the inference-profile id
+  `global.openai.gpt-5.6-sol` and `web_search = "disabled"`, both required on
+  that host. Because that decline exits 0, callers
+  verify effects with an `exec` that reads them back, as the docs show.
+  Teardown stays `microvm terminate NAME`.
+- **Bindings.** `microvms-py` and `microvms-js` carry the layer as `AgentVm`,
+  `AgentSpec`, and `BearerToken`, one method per `agent-up` step (`find_image`,
+  `image_name`, `build_artifact`, `build_image`, `launch`, `install_access`,
+  `prompt`, `prompt_sync`, `terminate`), plus `installed_agents`,
+  `install_agent_access`, `prompt_agent`, and `mint_bedrock_token` for a process
+  holding only a session. The binding shares the sandbox lock with every session
+  it hands out; every refusal is the core's; the token has no constructor and
+  one door, `expose()`. New core entry points back it: `image_request_for`,
+  `image_name_for`, `launch_request_for`, `spec_for`, `require_specs`, and
+  `FromStr for Agent`.
+- **The rule change.** Until now agent-specific detail (CLI installs, model
+  ids, credential wiring) lived only in `examples/` and docs. `docs/AGENT-VMS.md`
+  records why L3 crosses that line for two agents and how the churn is bounded:
+  one dated table, every default overridable, the generic layers untouched,
+  still not an orchestrator. The harness-provider-class non-goal in
+  `docs/HARNESS-CAPABILITIES.md` still holds; L3 is the layer such a class
+  would call.
+- **Live conformance.** The live half is `drive_agent_vm` in
+  `conformance/run_rs.py`: both profiles up, the marker naming both, one task
+  per agent, a refresh reporting `vmReused: true` with a later
+  `credentialExpiresAt`, and `terminate` releasing the name. It is the only
+  section that needs Bedrock model access in the conformance account.
+
 ## [0.6.0] — 2026-09-02
 
 ### Added

@@ -26,7 +26,7 @@ The operations pages are task-shaped. They assume the CLI is installed and the A
 | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | [Write a guest Dockerfile](/learn/operations/write-a-guest-dockerfile/)                      | How to start from the generated stanza, and which traps cost a server-side build cycle          |
 | [Embed agentd in your own image](/learn/operations/embed-agentd-in-your-image/)              | How to append the daemon to a task image your own harness drives                                |
-| [Run coding agents on Bedrock](/learn/operations/run-coding-agents-on-bedrock/)              | How Claude Code and Codex CLI run headless inside a VM with no vendor API key                    |
+| [Run coding agents on Bedrock](/learn/operations/run-coding-agents-on-bedrock/)              | How `agent-up` and `agent-prompt` run Claude Code and Codex CLI headless in a VM with no vendor API key |
 | [Remote dev with code-server](/learn/operations/remote-dev-with-code-server/)                | How to reach VS Code in a browser through `port-forward`, on a VM that suspends when you leave   |
 | [Prefetch S3 content at image build](/learn/operations/prefetch-s3-at-build/)                | How to bake an S3 prefix into the snapshot so a launched VM makes no S3 call                     |
 | [Read the cost report](/learn/operations/read-the-cost-report/)                              | What each line means, why a total may read "at least", and how to plan with `microvm cost`       |

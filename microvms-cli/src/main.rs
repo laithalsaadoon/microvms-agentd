@@ -389,6 +389,11 @@ fn infra_for(command: &Command) -> Infra {
             args.infra.build_role_arn.clone(),
             args.infra.execution_role_arn.clone(),
         ),
+        Command::AgentUp(args) => (
+            args.infra.bucket.clone(),
+            args.infra.build_role_arn.clone(),
+            args.infra.execution_role_arn.clone(),
+        ),
         Command::Doctor(args) => (
             args.infra.bucket.clone(),
             args.infra.build_role_arn.clone(),
@@ -420,6 +425,10 @@ async fn handle<O: std::io::Write, E: std::io::Write>(
         Command::Run(args) => commands::lifecycle::run(ctx, args, interrupt).await,
         Command::Quickstart(args) => commands::lifecycle::quickstart(ctx, args, interrupt).await,
         Command::Build(args) => commands::lifecycle::build(ctx, args).await,
+        // The L3 helpers. `agent-up` launches, so it races the interrupt as `run` does;
+        // `agent-prompt` is an attached exec with a template and takes none.
+        Command::AgentUp(args) => commands::agent::up(ctx, args, interrupt).await,
+        Command::AgentPrompt(args) => commands::agent::prompt(ctx, args).await,
         // The attached block: five commands, one door. See `commands/attached.rs`.
         Command::Exec(args) => commands::attached::exec(ctx, args).await,
         Command::Health(args) => commands::attached::health(ctx, args).await,

@@ -613,6 +613,14 @@ impl Sandbox {
         self.tunnel_identity.as_ref()
     }
 
+    /// The agent port the control plane was built with: the hooks port on every image
+    /// this sandbox builds, and the port the daemon listens on in every VM it launches.
+    /// Read-only; `agents::AgentVm` needs it to derive a Dockerfile whose `AGENTD_PORT`
+    /// agrees with the launch.
+    pub fn port(&self) -> u16 {
+        self.control.port()
+    }
+
     // ── build ────────────────────────────────────────────────────────────────
 
     /// Builds an image and waits for it to become usable.

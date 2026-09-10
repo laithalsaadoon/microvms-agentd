@@ -63,6 +63,20 @@ pub struct PyImage {
     log_stream: Option<String>,
 }
 
+impl PyImage {
+    pub(crate) fn wrap(image: &microvms_core::control::Image) -> Self {
+        Self {
+            identifier: image.identifier.clone(),
+            name: image.name.clone(),
+            version: image.version.clone(),
+            state: image.state.clone(),
+            size: image.size,
+            build_log_group: image.build_log_group(),
+            log_stream: image.log_stream.clone(),
+        }
+    }
+}
+
 #[pymethods]
 impl PyImage {
     /// The image ARN, which is what `imageIdentifier` takes.
@@ -287,6 +301,12 @@ pub struct PySandbox {
 }
 
 impl PySandbox {
+    /// A sandbox wrapper over an `Arc` another object already holds: how
+    /// [`crate::agents::PyAgentVm`] hands out the sandbox it drives.
+    pub(crate) fn from_arc(inner: Arc<Mutex<Sandbox>>) -> Self {
+        Self { inner }
+    }
+
     /// Runs `body` against the sandbox with the GIL released.
     ///
     /// One shape for every transition: release the GIL, take the lock, run, drop both
@@ -742,7 +762,7 @@ impl PySandbox {
         delete_backoff=None,
         wait_for_terminated=false,
     ))]
-    fn terminate(
+    pub(crate) fn terminate(
         &self,
         py: Python<'_>,
         delete_image: bool,

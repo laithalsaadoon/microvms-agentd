@@ -87,7 +87,7 @@ const STDIN_CHUNK_BYTES: usize = 256 * 1024;
 /// The returned id is the one the session addresses, whichever spelling named it — the history
 /// append needs it, and reading it off the resolution here is what keeps a `--name` exec's
 /// history under the same id as a triple exec's.
-async fn attach<O: std::io::Write, E: std::io::Write>(
+pub(crate) async fn attach<O: std::io::Write, E: std::io::Write>(
     ctx: &Ctx<'_, O, E>,
     region: &RegionFlags,
     flags: &AttachFlags,
@@ -513,6 +513,17 @@ fn event_to_json(event: &ExecEvent) -> Value {
 /// consumer reading empty `stdout` needs to be able to tell "produced nothing" from "already
 /// collected by someone".
 fn render_exec(exec_id: &str, result: &microvms_core::session::ExecResult) -> Rendered {
+    render_exec_as("exec", exec_id, result)
+}
+
+/// [`render_exec`] under another command's discriminant. `agent-prompt` renders the same
+/// exec shape (`commands/agent.rs`) and must carry its own `type`, so the one rendering is
+/// parameterised on the row rather than copied.
+pub(crate) fn render_exec_as(
+    command: &str,
+    exec_id: &str,
+    result: &microvms_core::session::ExecResult,
+) -> Rendered {
     let mut data = Map::new();
     data.insert("execId".into(), json!(exec_id));
     data.insert("phase".into(), json!(phase_name(result.phase)));
@@ -546,7 +557,7 @@ fn render_exec(exec_id: &str, result: &microvms_core::session::ExecResult) -> Re
         (true, None) => format!("exec {exec_id} died to a signal rather than exiting"),
     });
 
-    let (kind, _) = response_type("exec");
+    let (kind, _) = response_type(command);
     let rendered = Rendered::ok(kind, data, lines.join("\n"), dense);
     // Keyed on a *present* non-zero code, so a running exec's absent one is not a failure. A
     // signal death is: the exec finished and did not succeed, and `succeeded()` is false for it.

@@ -235,13 +235,13 @@ pub struct Session {
 /// borrows from it — which is the whole reason this is an enum rather than a closure-taking
 /// helper like the Python side's. A closure would work too, but it cannot be `async` without
 /// boxing every call site's future.
-enum Live<'a> {
+pub(crate) enum Live<'a> {
     Owned(&'a CoreSession),
     Guarded(MutexGuard<'a, CoreSandbox>),
 }
 
 impl Live<'_> {
-    fn session(&self) -> Result<&CoreSession, Error> {
+    pub(crate) fn session(&self) -> Result<&CoreSession, Error> {
         match self {
             Live::Owned(session) => Ok(session),
             Live::Guarded(guard) => guard.session().ok_or_else(|| {
@@ -271,7 +271,7 @@ impl Session {
     ///
     /// For a sandbox-held session that is the sandbox lock, held until the returned value
     /// drops — so it spans exactly one method call and no more.
-    async fn live(&self) -> Live<'_> {
+    pub(crate) async fn live(&self) -> Live<'_> {
         match &self.held {
             Held::Owned(session) => Live::Owned(session),
             Held::InSandbox(sandbox) => Live::Guarded(sandbox.lock().await),

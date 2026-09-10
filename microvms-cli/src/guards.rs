@@ -297,6 +297,49 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
             Door::OpenSandbox,
         ),
         (
+            // The fresh path: an unregistered name reaches the sandbox door. The state dir is
+            // a fresh temp path so no registry from another test makes this the refresh path.
+            "agent-up",
+            Command::AgentUp(crate::cli::AgentUpArgs {
+                binary: Some(binary.to_path_buf()),
+                vm_name: "guard-agent".into(),
+                agent: vec![crate::cli::AgentArg::ClaudeCode],
+                claude_model: None,
+                codex_model: None,
+                claude_version: None,
+                codex_version: None,
+                project: None,
+                memory: MemoryMib::Mib1024,
+                token_ttl_hours: 12,
+                max_idle_sec: 600,
+                suspended_sec: 600,
+                auto_resume: false,
+                max_duration_sec: 3600,
+                port: None,
+                state_dir: Some(std::env::temp_dir().join(format!(
+                    "microvm-guard-agent-up-{}-{:?}",
+                    std::process::id(),
+                    std::thread::current().id()
+                ))),
+                region: region_flags(),
+                infra: InfraFlags::default(),
+            }),
+            Door::OpenSandbox,
+        ),
+        (
+            "agent-prompt",
+            Command::AgentPrompt(crate::cli::AgentPromptArgs {
+                task: "count the files".into(),
+                agent: Some(crate::cli::AgentArg::ClaudeCode),
+                timeout: 30.0,
+                detach: false,
+                exec_id: None,
+                attach: attach_flags(),
+                region: region_flags(),
+            }),
+            Door::AttachSession,
+        ),
+        (
             "exec",
             Command::Exec(ExecArgs {
                 command: Some("true".into()),

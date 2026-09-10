@@ -6,7 +6,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Live conformance run driving the **Rust** client stack through the `microvm` CLI.
 
-This is the only live suite, and it now expresses **every named check** — 136 of them, with
+This is the only live suite, and it now expresses **every named check** — 151 of them, with
 none recorded SKIP. `conformance/run.py` was the oracle — 56 checks through the Python
 client — and it went away with that client once both suites ran green against real AWS on
 the same commit (Python 56/56, this one 38/38 with 34 recorded SKIP). Those 34 were the
@@ -132,6 +132,19 @@ tampered pin refused with nothing written. Live for the named-VMs reason and one
 the probe's whole claim is that a wrong token is refused *by the daemon* before a record
 exists, and only the real daemon's bearer check can refuse one.
 
+151 rather than 136: `drive_agent_vm` adds fifteen for `docs/AGENT-VMS.md`, the L3 layer
+over the primitives. An `agent-up` with both profiles on its own build — the fresh launch,
+the boolean reuse verdict, the `agent-vm-claude-code-codex-<12 hex>` name, the agent
+order, a future expiry — then the guest marker naming both agents and the env file at
+`1000:600`; `agent-prompt --agent claude-code` answering a Bash task with a number and
+`--agent codex` writing a file a plain `exec` reads back; the second `agent-up` under the
+same name refreshing credentials without a launch (AGENT-8); the `--agent`-less prompt
+refused with `ERR_PRECONDITION` because two agents are installed (AGENT-10); and the
+section's own three-part teardown — VM and image, the released name, the log group. The
+only section that needs Bedrock, on both default models, and it prints the model ids it
+used to stderr. An `agent-up` that fails before any VM exists records all fifteen as FAIL
+rather than SKIP: an account without the entitlement is a finding, not a gap.
+
 A hybrid driver, and both lanes are deliberate
 ----------------------------------------------
 
@@ -186,7 +199,9 @@ Money
 
 This run creates real MicroVMs and is billable, ~20 min — ~15 for the main flow plus
 about five for `drive_idle_keepalive`, which launches a second VM (from the image already
-built, so no second build) and deliberately waits out a 60-second idle window twice. It
+built, so no second build) and deliberately waits out a 60-second idle window twice —
+plus `drive_agent_vm`, which builds the two-agent image (two npm installs on the arm64
+builder), launches a VM with egress, and pays for two model calls on Bedrock. It
 belongs to `mise run live` and is never hooked. `--self-test` is the offline half: it drives the
 envelope-to-exception mapping and the NDJSON stream reader against a stub `microvm`
 script and touches no account.
@@ -2711,6 +2726,361 @@ def drive_project_build(
             )
 
 
+#: The fifteen names `drive_agent_vm` records, in the order it records them. A tuple
+#: rather than fifteen literals at the call sites because the section has a failure
+#: mode the others do not: `agent-up` itself can fail before any VM exists (no Bedrock
+#: access in the account, an expired credential chain), and the header's rule is that
+#: nothing here is ever recorded SKIP. So a failed `agent-up` records every one of these
+#: as FAIL with the same detail, and the denominator the summary prints stays the one the
+#: header claims.
+AGENT_VM_CHECKS = (
+    "agent-up launched a fresh VM rather than reusing one",
+    "the image reuse verdict is a boolean",
+    "the agent image is named by the profile set and the content hash",
+    "the envelope lists exactly claude-code then codex",
+    "the credential expiry is in the future",
+    "the guest marker names both agents",
+    "the env file belongs to uid 1000 at mode 600",
+    "claude-code completed a Bash task with exit 0",
+    "codex completed its task with exit 0",
+    "codex wrote a file the workspace kept",
+    "a second agent-up refreshes credentials without launching",
+    "a prompt with two agents installed and no --agent is refused",
+    "the agent VM and its image were deleted",
+    "terminate released the agent VM's name",
+    "the suite deleted the agent image's log group",
+)
+
+
+def drive_agent_vm(
+    cli: Cli, binary: Path, state_dir: Path, logs: Any, results: Results
+) -> None:
+    """`agent-up` and `agent-prompt` (`docs/AGENT-VMS.md`), live, both profiles.
+
+    Fifteen checks against a VM this section launches and terminates itself, from an
+    image this section builds (or reuses) itself: the agent image is derived from the
+    profile set and the daemon bytes, so no launch from the suite's image can carry a
+    coding agent. Live rather than only scripted for the reason the spec's Verification
+    section gives: the local guards see the Dockerfile as text and the token as a shape,
+    and only the real service says whether the arm64 build of two npm installs boots,
+    whether Bedrock accepts a presigned token that is one canonical byte off, and whether
+    a headless agent actually calls a tool when asked to.
+
+    **This is the only section that needs Bedrock**, on both default models in the
+    conformance account, and it prints the model ids it used to stderr so a red run
+    names the model rather than the suite. An `agent-up` that fails before any VM
+    exists records every check in `AGENT_VM_CHECKS` as FAIL, never SKIP: the header's
+    claim is that nothing here is recorded SKIP, and an absent Bedrock entitlement is a
+    finding about the account, not a gap in the client.
+
+    Two prompts, one per agent, each shaped so the assertion is about the agent having
+    *acted* rather than answered: Claude Code is asked for a number only a shell can
+    produce, and Codex is asked to write a file a later `exec` can `cat`. The second
+    `agent-up` under the same name is the AGENT-8 refresh path — no build, no launch,
+    a later expiry — and the `--agent`-less prompt is the AGENT-10 refusal, which is a
+    local read of the guest marker and costs no model call.
+
+    `--keep` is implicit (an agent VM is kept by definition) and the teardown is an
+    explicit `terminate <name> --delete-image` in this function's own `finally`, so
+    however the checks above end the VM, its image, and the service-created log group go.
+    The image is deleted rather than kept for the next run's `imageReused: true`,
+    because a snapshot nobody owns bills for a week (`scripts/verify-clean.py` knows the
+    `agent-vm-` prefix, so a leak of one is visible, and that is the backstop rather than
+    the plan); the reuse verdict is asserted as a boolean, which is the property that
+    holds either way.
+    """
+    print("\n== agent VMs (agent-up / agent-prompt, own build, needs Bedrock) ==")
+    vm_name = f"conformance-agent-{secrets.token_hex(4)}"
+    up_args = (
+        "agent-up",
+        str(binary),
+        "--vm-name",
+        vm_name,
+        "--agent",
+        "claude-code",
+        "--agent",
+        "codex",
+        "--memory",
+        str(BASELINE_MEMORY_MIB),
+        "--state-dir",
+        str(state_dir),
+        "--region",
+        cli.region,
+        "--max-idle-sec",
+        "600",
+        "--suspended-sec",
+        "600",
+        "--max-duration-sec",
+        "3600",
+    )
+    attach = ("--name", vm_name, "--state-dir", str(state_dir))
+
+    started = time.monotonic()
+    try:
+        up = cli.call(*up_args, timeout=50 * 60)
+    except Exception as exc:  # noqa: BLE001 - the reason is every check's finding
+        # Nothing launched, or the CLI already tore the unprovisioned VM down (agent.rs
+        # terminates on a failed mint or install and names any leak in `data.leaked`).
+        # Every check fails with the same detail so the denominator does not move.
+        leaked = exc.envelope.data if isinstance(exc, KindError) else {}
+        detail = f"agent-up failed: {exc!r}" + (
+            f" leaked={leaked.get('leaked')!r} microvm={leaked.get('microvmId')!r} "
+            f"image={leaked.get('imageIdentifier')!r}"
+            if leaked
+            else ""
+        )
+        print(
+            "  models: unknown (agent-up failed before reporting them)", file=sys.stderr
+        )
+        for name in AGENT_VM_CHECKS:
+            results.check(name, False, detail)
+        return
+    up_seconds = time.monotonic() - started
+
+    agents = up.data.get("agents") or []
+    models = {str(row.get("agent")): str(row.get("model")) for row in agents}
+    print(
+        "  models: " + ", ".join(f"{agent}={model}" for agent, model in models.items()),
+        file=sys.stderr,
+    )
+    image = str(up.data.get("imageIdentifier") or "")
+    image_name = str(up.data.get("imageName") or "")
+    microvm_id = str(up.data.get("microvmId") or "")
+    first_expiry = up.data.get("credentialExpiresAt")
+    try:
+        results.check(
+            AGENT_VM_CHECKS[0],
+            up.type == "microvm.agent" and up.data.get("vmReused") is False,
+            f"type={up.type} vmReused={up.data.get('vmReused')!r} in {up_seconds:.0f}s",
+        )
+        results.check(
+            AGENT_VM_CHECKS[1],
+            isinstance(up.data.get("imageReused"), bool),
+            f"imageReused={up.data.get('imageReused')!r}",
+        )
+        prefix = "agent-vm-claude-code-codex-"
+        suffix = image_name.removeprefix(prefix)
+        results.check(
+            AGENT_VM_CHECKS[2],
+            image_name.startswith(prefix)
+            and len(suffix) == 12
+            and all(c in "0123456789abcdef" for c in suffix),
+            f"{image_name!r}",
+        )
+        results.eq(
+            AGENT_VM_CHECKS[3],
+            [row.get("agent") for row in agents],
+            ["claude-code", "codex"],
+        )
+        now = int(time.time())
+        results.check(
+            AGENT_VM_CHECKS[4],
+            isinstance(first_expiry, int) and first_expiry > now,
+            f"credentialExpiresAt={first_expiry!r} now={now}",
+        )
+
+        # AGENT-6: the marker a later process reads to learn what is installed.
+        marker = cli.call("exec", "cat /workspace/.agent-vm.json", *attach)
+        marker_agents: list[str] = []
+        try:
+            marker_agents = [
+                str(row.get("agent"))
+                for row in json.loads(marker.data.get("stdout") or "{}").get(
+                    "agents", []
+                )
+            ]
+        except json.JSONDecodeError:
+            pass
+        results.check(
+            AGENT_VM_CHECKS[5],
+            marker.data.get("exitCode") == 0
+            and sorted(marker_agents) == ["claude-code", "codex"],
+            f"exit={marker.data.get('exitCode')} stdout={(marker.data.get('stdout') or '')[:200]!r}",
+        )
+        # AGENT-5: the credential file is the agent's and nobody else's. `%u` rather
+        # than `%U` because al2023-minimal need not resolve uid 1000 to a name.
+        env_stat = cli.call("exec", "stat -c %u:%a /workspace/.agent-env", *attach)
+        results.check(
+            AGENT_VM_CHECKS[6],
+            env_stat.data.get("exitCode") == 0
+            and (env_stat.data.get("stdout") or "").strip() == "1000:600",
+            f"exit={env_stat.data.get('exitCode')} stdout={env_stat.data.get('stdout')!r}",
+        )
+
+        # AGENT-7 through Claude Code: a number only a shell produces, so a reply with
+        # a digit in it is a reply that ran the tool.
+        claude = cli.call(
+            "agent-prompt",
+            "Run the shell command `ls /usr/bin | wc -l` with your Bash tool and "
+            "reply with only the number.",
+            "--agent",
+            "claude-code",
+            "--timeout",
+            "600",
+            *attach,
+            timeout=700.0,
+        )
+        claude_out = claude.data.get("stdout") or ""
+        results.check(
+            AGENT_VM_CHECKS[7],
+            claude.type == "microvm.agent.prompt"
+            and claude.data.get("agent") == "claude-code"
+            and claude.data.get("exitCode") == 0
+            and any(ch.isdigit() for ch in claude_out),
+            f"type={claude.type} agent={claude.data.get('agent')!r} "
+            f"exit={claude.data.get('exitCode')!r} stdout={claude_out.strip()[:120]!r} "
+            f"stderr={(claude.data.get('stderr') or '').strip()[:200]!r}",
+        )
+
+        # AGENT-7 through Codex: a file the workspace keeps, read back by a plain exec
+        # so the assertion does not depend on what the agent chose to print.
+        # The model can decline a task outright: measured once in five runs on
+        # 2026-09-10 (Codex 0.154.0, global.openai.gpt-5.6-sol), the reply was a refusal with
+        # zero tool calls and Codex exited 0, so the prompt check alone cannot see it.
+        # One re-prompt keeps a model's coin flip from failing the suite; a second
+        # decline fails it, and the detail names how many prompts it took.
+        codex_task = (
+            "Create hello.py in the current directory that prints hello from a "
+            "microvm, run it, and show the output."
+        )
+        attempts = 0
+        while True:
+            attempts += 1
+            codex = cli.call(
+                "agent-prompt",
+                codex_task,
+                "--agent",
+                "codex",
+                "--timeout",
+                "600",
+                *attach,
+                timeout=700.0,
+            )
+            kept = cli.call("exec", "cat /workspace/hello.py", *attach)
+            declined = (
+                codex.data.get("exitCode") == 0 and kept.data.get("exitCode") != 0
+            )
+            if not declined or attempts == 2:
+                break
+        results.check(
+            AGENT_VM_CHECKS[8],
+            codex.type == "microvm.agent.prompt"
+            and codex.data.get("agent") == "codex"
+            and codex.data.get("exitCode") == 0,
+            f"type={codex.type} agent={codex.data.get('agent')!r} "
+            f"exit={codex.data.get('exitCode')!r} prompts={attempts} "
+            f"stdout={(codex.data.get('stdout') or '').strip()[:120]!r} "
+            f"stderr={(codex.data.get('stderr') or '').strip()[:200]!r}",
+        )
+        results.check(
+            AGENT_VM_CHECKS[9],
+            kept.data.get("exitCode") == 0,
+            f"exit={kept.data.get('exitCode')!r} prompts={attempts} "
+            f"stdout={(kept.data.get('stdout') or '')[:120]!r}",
+        )
+
+        # AGENT-8: the same command against the registered name is a refresh, not a
+        # launch — no image in the envelope, the same VM, a token that expires no earlier.
+        again = cli.call(*up_args, timeout=5 * 60)
+        second_expiry = again.data.get("credentialExpiresAt")
+        results.check(
+            AGENT_VM_CHECKS[10],
+            again.type == "microvm.agent"
+            and again.data.get("vmReused") is True
+            and again.data.get("imageIdentifier") is None
+            and again.data.get("microvmId") == microvm_id
+            and isinstance(second_expiry, int)
+            and isinstance(first_expiry, int)
+            and second_expiry >= first_expiry,
+            f"vmReused={again.data.get('vmReused')!r} "
+            f"image={again.data.get('imageIdentifier')!r} "
+            f"microvm={again.data.get('microvmId')!r} "
+            f"expiry {first_expiry!r} -> {second_expiry!r}",
+        )
+
+        # AGENT-10: two agents and no `--agent` is two answers to "which one", refused
+        # from the marker before any model call. A local decision, so `data.kind` is
+        # absent and the code is the right granularity.
+        try:
+            cli.call("agent-prompt", "anything", *attach, timeout=120.0)
+            results.check(AGENT_VM_CHECKS[11], False, "no refusal")
+        except KindError as exc:
+            results.check(
+                AGENT_VM_CHECKS[11],
+                exc.code == "ERR_PRECONDITION" and exc.kind is None,
+                f"code={exc.code} kind={exc.kind!r} exit={exc.exit_code}: {exc}",
+            )
+    finally:
+        # This section's own VM, image, and log group, this section's own teardown.
+        # Terminate by the **name**, with the image the first `agent-up` reported, so
+        # the resolution path and the deletion are both asserted.
+        try:
+            torn = cli.call(
+                "terminate",
+                vm_name,
+                "--image-identifier",
+                image,
+                "--image-name",
+                image_name,
+                "--delete-image",
+                "--wait",
+                "--state-dir",
+                str(state_dir),
+                "--region",
+                cli.region,
+                timeout=15 * 60,
+            )
+        except Exception as exc:  # noqa: BLE001 - a teardown failure is a finding
+            results.check(AGENT_VM_CHECKS[12], False, f"{microvm_id}: {exc!r}")
+            results.check(
+                AGENT_VM_CHECKS[13],
+                False,
+                "terminate failed, so the name was never released",
+            )
+            results.check(
+                AGENT_VM_CHECKS[14], False, "terminate failed, so no group was named"
+            )
+        else:
+            results.check(
+                AGENT_VM_CHECKS[12],
+                torn.type == "microvm.teardown"
+                and torn.data.get("microvmId") == microvm_id
+                and not torn.data.get("leaked"),
+                f"microvm={torn.data.get('microvmId')!r} leaked={torn.data.get('leaked')!r}",
+            )
+            # Released means the registry no longer resolves it: `health --name` fails
+            # locally, with zero wire calls, and the record file is gone.
+            try:
+                cli.call("health", *attach, timeout=60.0)
+                results.check(
+                    AGENT_VM_CHECKS[13], False, "health --name still resolved"
+                )
+            except KindError as exc:
+                results.check(
+                    AGENT_VM_CHECKS[13],
+                    exc.code == "ERR_PRECONDITION"
+                    and exc.kind is None
+                    and not (state_dir / "names" / f"{vm_name}.json").exists(),
+                    f"code={exc.code} kind={exc.kind!r} "
+                    f"record exists={(state_dir / 'names' / f'{vm_name}.json').exists()}",
+                )
+            # The service-created group, deleted by the party that caused it to exist
+            # (`drive_teardown`'s argument). Already absent is the desired end state.
+            groups = [str(group) for group in torn.data.get("undeletedLogGroups") or []]
+            failures: list[str] = []
+            for group in groups:
+                try:
+                    logs.delete_log_group(logGroupName=group)
+                except Exception as exc:  # noqa: BLE001 - the reason is the finding
+                    if type(exc).__name__ != "ResourceNotFoundException":
+                        failures.append(f"{group}: {type(exc).__name__}: {exc}")
+            results.check(
+                AGENT_VM_CHECKS[14],
+                bool(groups) and not failures,
+                f"groups={groups!r} failures={failures!r}",
+            )
+
+
 def drive_idle_keepalive(
     cli: Cli, launched: Envelope, aws: Any, results: Results
 ) -> None:
@@ -3795,6 +4165,14 @@ def main() -> int:
             # Beside the other own-build section so the two ~3-minute builds sit together.
             drive_project_build(
                 cli, binary, Path(tmp) / "project", aws.client("logs"), results
+            )
+            # Agent VMs on their own build and their own VM (`docs/AGENT-VMS.md`): the
+            # image is derived from the profile set and the daemon bytes, so no launch
+            # from the suite's image can carry a coding agent. The only section that
+            # needs Bedrock; it prints the model ids it used to stderr. Beside the
+            # other own-build sections for the same reason `drive_project_build` is.
+            drive_agent_vm(
+                cli, binary, Path(tmp) / "agent-state", aws.client("logs"), results
             )
             # Auto-resume on its own VM (launched `--auto-resume` from the suite's image):
             # the policy is set only at launch, so the suite's VM cannot carry it. NEW in

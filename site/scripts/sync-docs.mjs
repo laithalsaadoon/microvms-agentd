@@ -152,11 +152,12 @@ const AUTHORITATIVE = new Map([
   ["EMBEDDING.md", { label: "Embedding", order: 5 }],
   ["STRATEGY.md", { label: "Strategy", order: 6 }],
   ["HARNESS-CAPABILITIES.md", { label: "Harness capabilities", order: 7 }],
-  ["CLI-COVERAGE-PLAN.md", { label: "CLI coverage plan", order: 8 }]
+  ["AGENT-VMS.md", { label: "Agent VMs", order: 8 }],
+  ["CLI-COVERAGE-PLAN.md", { label: "CLI coverage plan", order: 9 }]
 ])
 
 /** Anything else at the tree root: published, ranked after the named documents, before the categories. */
-const ROOT_ORDER = 9
+const ROOT_ORDER = 10
 
 /**
  * Pages in the tree that the site deliberately does not publish, each with the reason.

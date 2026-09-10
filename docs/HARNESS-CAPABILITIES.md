@@ -203,7 +203,11 @@ can never live here.
   Omnigent launcher, and the eve backend all import their harness's
   packages, so they live in those ecosystems (or standalone adapter repos),
   never here. This repo's deliverable is the daemon, the clients, and the
-  published behavior they can rely on.
+  published behavior they can rely on. `docs/AGENT-VMS.md` now carries two
+  agent profiles (Claude Code, Codex) as the L3 layer such a class would
+  call: one function that builds, launches, and provisions the VM, one that
+  hands the agent a task. The non-goal still holds for the class itself,
+  because it imports the harness's packages and this repo does not.
 - **GPUs, Windows, dynamic network policy.** Not offered by the platform;
   harnesses that need them reject the environment up front, which is the
   correct degradation.

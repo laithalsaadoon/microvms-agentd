@@ -23,6 +23,24 @@ construct: a raw token cannot be passed where a session is expected, a capabilit
 cannot be widened after the fact, and a dollar amount is never a bare float. Nine planted
 bypasses each have a test that goes red if the door reopens.
 
+## Coding agents in a VM
+
+`AgentVm` is the L3 layer over the sandbox: an image with Claude Code and/or Codex CLI in
+it, a launch with egress, a Bedrock bearer token minted in process and installed as a file
+the agent sources, and one method that hands the agent a task as uid 1000 in `/workspace`.
+
+```python
+vm = microvms.AgentVm(microvms.Region.us_east_1(), [microvms.AgentSpec.codex()])
+vm.launch(image_identifier=image_arn, execution_role_arn=role)
+vm.install_access()
+print(vm.prompt_sync("codex", "Create hello.py that prints hello, run it.").stdout)
+vm.terminate()
+```
+
+`find_image`, `image_name`, `build_artifact`, and `build_image` cover the image, with the
+S3 upload left to you. `installed_agents`, `install_agent_access`, and `prompt_agent` do the
+same over a bare `Session` for a process that holds only the identifier triple.
+
 ## Reading
 
 - [Documentation](https://laithalsaadoon.github.io/microvms-agentd/)
