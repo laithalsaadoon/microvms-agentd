@@ -111,6 +111,7 @@ Written in the EARS shapes the rest of `spec/` uses. `AGENT-n` is the id.
 | `install_lines` | `dnf install nodejs22 nodejs22-npm python3 git tar gzip which findutils procps-ng`; `npm install -g @anthropic-ai/claude-code` | the same `dnf` line; `npm install -g @openai/codex` |
 | `default_model` | `global.anthropic.claude-opus-5` | `global.openai.gpt-5.6-sol` |
 | `env` | `CLAUDE_CODE_USE_BEDROCK=1`, `ANTHROPIC_MODEL=<model>`, `AWS_BEARER_TOKEN_BEDROCK=<token>` | `OPENAI_API_KEY=<token>` |
+| `env_extra` | `CLAUDE_CODE_USE_BEDROCK=1`, `ANTHROPIC_MODEL=<model>`, `AWS_BEARER_TOKEN_BEDROCK=<token>` | `AWS_BEARER_TOKEN_BEDROCK=<token>` (what Codex reads on this host), `OPENAI_API_KEY=<token>` (the `env_key` the config declares) |
 | `config_files` | none | `/workspace/.codex/config.toml`: provider `bedrock`, `model_reasoning_effort = medium` (Codex has no metadata for a Bedrock model id and otherwise sends none; a no-effort run declined a task once in five on 2026-09-10), `base_url = https://bedrock-runtime.<region>.amazonaws.com/openai/v1`, `web_search = disabled` (Codex advertises hosted web search by default and bedrock-runtime fails the turn), `env_key = OPENAI_API_KEY`, `wire_api = responses`, `model = <model>` |
 | `headless_command(task)` | `claude -p <task> --allowedTools Bash,Read,Edit,Write,Grep,Glob` | `codex exec --skip-git-repo-check -s workspace-write <task>` |
 | `verified` | 2026-09-10, us-east-1, `@anthropic-ai/claude-code` latest on that date | 2026-09-10, us-east-1, `@openai/codex` 0.154.0, bedrock-runtime host |
@@ -249,7 +250,8 @@ refused with zero doors), and the manifest count.
 
 The live half, per `CLAUDE.md`'s rule, is `drive_agent_vm` in `conformance/run_rs.py`:
 `agent-up` with both profiles builds or reuses the image and launches; the marker names
-both; `agent-prompt --agent claude-code` completes a Bash task with exit 0 and a
+both; the credential file exports the variable each installed agent reads (names only, so
+no value reaches a log); `agent-prompt --agent claude-code` completes a Bash task with exit 0 and a
 tool-call in its transcript; `agent-prompt --agent codex` creates a file that a following
 `exec` can `cat`; a second `agent-up` against the same name reports `vmReused: true`
 and a later `credentialExpiresAt`; `terminate NAME` releases the name. That section

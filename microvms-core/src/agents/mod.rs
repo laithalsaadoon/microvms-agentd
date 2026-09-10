@@ -19,7 +19,8 @@
 //!    cannot read. One root `chown` follows the uploads.
 //! 4. **Codex reaches Bedrock through `bedrock-runtime`'s `/openai/v1`** on the Responses
 //!    wire API, with an inference-profile model id and hosted web search disabled. Its
-//!    config file names that host for the launch region.
+//!    config file names that host for the launch region, and its credential comes from
+//!    `AWS_BEARER_TOKEN_BEDROCK` rather than the provider's `env_key`.
 //!
 //! # What it is not
 //!
@@ -826,6 +827,16 @@ mod tests {
     /// **Claude alone gets two files; Codex adds its config.** The environment file sets
     /// PATH and HOME, carries the token under each agent's variable, and every value is
     /// double-quoted. The marker names the agents and their resolved models.
+    #[test]
+    fn a_codex_only_vm_still_gets_the_variable_codex_reads() {
+        let files = provisioning_files(&[AgentSpec::new(Agent::Codex)], &access()).expect("files");
+        let env = String::from_utf8(files[0].contents.clone()).expect("utf-8");
+        assert!(
+            env.contains("export AWS_BEARER_TOKEN_BEDROCK="),
+            "no Claude Code profile is present to export it, and Codex 401s without it:\n{env}"
+        );
+    }
+
     #[test]
     fn the_file_set_follows_the_profiles_and_the_env_file_is_quoted() {
         let access = access();

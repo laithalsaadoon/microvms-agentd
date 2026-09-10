@@ -42,6 +42,8 @@ microvm agent-up --vm-name dev --agent claude-code --agent codex --json
    export OPENAI_API_KEY="<token>"
    ```
 
+   Codex reads `AWS_BEARER_TOKEN_BEDROCK` on a `bedrock-runtime` host and ignores the `env_key` its own config declares, so both variables carry the token. Measured 2026-09-10 in a VM carrying Codex alone: with only `OPENAI_API_KEY` set, ten of ten identical tasks failed with `401 Unauthorized: Credential should be scoped to correct service: 'bedrock'`, while a plain `python3` POST to the same endpoint with the same variable returned 200. A VM that also carries Claude Code got the variable from that profile, which is why the two-agent path never showed it.
+
    Claude Code has a native Bedrock mode: `CLAUDE_CODE_USE_BEDROCK=1` plus the bearer token, with the model chosen by `ANTHROPIC_MODEL` as an inference-profile id. Codex has no Bedrock mode, and `bedrock-runtime` exposes an OpenAI-compatible surface that serves the Responses wire API Codex speaks, so when Codex is installed a second file, `/workspace/.codex/config.toml`, defines a provider with the bearer token as its API key. Two lines are required on that host: the model is an inference-profile id (the bare `openai.gpt-5.6-sol` is refused with "on-demand throughput isn't supported"), and hosted web search is disabled, because Codex advertises that tool by default and Bedrock fails the turn with "web search is not supported for this request":
 
    ```toml

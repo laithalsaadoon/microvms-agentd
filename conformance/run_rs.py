@@ -6,7 +6,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Live conformance run driving the **Rust** client stack through the `microvm` CLI.
 
-This is the only live suite, and it now expresses **every named check** — 151 of them, with
+This is the only live suite, and it now expresses **every named check** — 152 of them, with
 none recorded SKIP. `conformance/run.py` was the oracle — 56 checks through the Python
 client — and it went away with that client once both suites ran green against real AWS on
 the same commit (Python 56/56, this one 38/38 with 34 recorded SKIP). Those 34 were the
@@ -132,11 +132,11 @@ tampered pin refused with nothing written. Live for the named-VMs reason and one
 the probe's whole claim is that a wrong token is refused *by the daemon* before a record
 exists, and only the real daemon's bearer check can refuse one.
 
-151 rather than 136: `drive_agent_vm` adds fifteen for `docs/AGENT-VMS.md`, the L3 layer
+152 rather than 136: `drive_agent_vm` adds sixteen for `docs/AGENT-VMS.md`, the L3 layer
 over the primitives. An `agent-up` with both profiles on its own build — the fresh launch,
 the boolean reuse verdict, the `agent-vm-claude-code-codex-<12 hex>` name, the agent
-order, a future expiry — then the guest marker naming both agents and the env file at
-`1000:600`; `agent-prompt --agent claude-code` answering a Bash task with a number and
+order, a future expiry — then the guest marker naming both agents, the env file at `1000:600` and exporting the
+variable each installed agent reads (names only, never a value); `agent-prompt --agent claude-code` answering a Bash task with a number and
 `--agent codex` writing a file a plain `exec` reads back; the second `agent-up` under the
 same name refreshing credentials without a launch (AGENT-8); the `--agent`-less prompt
 refused with `ERR_PRECONDITION` because two agents are installed (AGENT-10); and the
@@ -2741,6 +2741,7 @@ AGENT_VM_CHECKS = (
     "the credential expiry is in the future",
     "the guest marker names both agents",
     "the env file belongs to uid 1000 at mode 600",
+    "the env file exports the variable each installed agent reads",
     "claude-code completed a Bash task with exit 0",
     "codex completed its task with exit 0",
     "codex wrote a file the workspace kept",
@@ -2907,6 +2908,31 @@ def drive_agent_vm(
             f"exit={env_stat.data.get('exitCode')} stdout={env_stat.data.get('stdout')!r}",
         )
 
+        # The variable names in the credential file, and only the names: `sed` strips
+        # every value, so the token cannot reach this log. Codex reads
+        # AWS_BEARER_TOKEN_BEDROCK on a bedrock-runtime host and ignores the `env_key` its
+        # own config declares (measured 2026-09-10: without it, ten of ten tasks 401'd),
+        # and a two-agent VM would get that variable from the Claude Code profile either
+        # way — so this asserts the union the installed set requires, and the Codex-only
+        # case is covered offline by `a_codex_only_vm_still_gets_the_variable_codex_reads`.
+        env_names = cli.call("exec", "sed 's/=.*//' /workspace/.agent-env", *attach)
+        names = set((env_names.data.get("stdout") or "").split())
+        wanted = {
+            "export",
+            "HOME",
+            "PATH",
+            "AWS_REGION",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "ANTHROPIC_MODEL",
+            "AWS_BEARER_TOKEN_BEDROCK",
+            "OPENAI_API_KEY",
+        }
+        results.check(
+            AGENT_VM_CHECKS[7],
+            env_names.data.get("exitCode") == 0 and wanted <= names,
+            f"exit={env_names.data.get('exitCode')} missing={sorted(wanted - names)}",
+        )
+
         # AGENT-7 through Claude Code: a number only a shell produces, so a reply with
         # a digit in it is a reply that ran the tool.
         claude = cli.call(
@@ -2922,7 +2948,7 @@ def drive_agent_vm(
         )
         claude_out = claude.data.get("stdout") or ""
         results.check(
-            AGENT_VM_CHECKS[7],
+            AGENT_VM_CHECKS[8],
             claude.type == "microvm.agent.prompt"
             and claude.data.get("agent") == "claude-code"
             and claude.data.get("exitCode") == 0
@@ -2963,7 +2989,7 @@ def drive_agent_vm(
             if not declined or attempts == 2:
                 break
         results.check(
-            AGENT_VM_CHECKS[8],
+            AGENT_VM_CHECKS[9],
             codex.type == "microvm.agent.prompt"
             and codex.data.get("agent") == "codex"
             and codex.data.get("exitCode") == 0,
@@ -2973,7 +2999,7 @@ def drive_agent_vm(
             f"stderr={(codex.data.get('stderr') or '').strip()[:200]!r}",
         )
         results.check(
-            AGENT_VM_CHECKS[9],
+            AGENT_VM_CHECKS[10],
             kept.data.get("exitCode") == 0,
             f"exit={kept.data.get('exitCode')!r} prompts={attempts} "
             f"stdout={(kept.data.get('stdout') or '')[:120]!r}",
@@ -2984,7 +3010,7 @@ def drive_agent_vm(
         again = cli.call(*up_args, timeout=5 * 60)
         second_expiry = again.data.get("credentialExpiresAt")
         results.check(
-            AGENT_VM_CHECKS[10],
+            AGENT_VM_CHECKS[11],
             again.type == "microvm.agent"
             and again.data.get("vmReused") is True
             and again.data.get("imageIdentifier") is None
@@ -3003,10 +3029,10 @@ def drive_agent_vm(
         # absent and the code is the right granularity.
         try:
             cli.call("agent-prompt", "anything", *attach, timeout=120.0)
-            results.check(AGENT_VM_CHECKS[11], False, "no refusal")
+            results.check(AGENT_VM_CHECKS[12], False, "no refusal")
         except KindError as exc:
             results.check(
-                AGENT_VM_CHECKS[11],
+                AGENT_VM_CHECKS[12],
                 exc.code == "ERR_PRECONDITION" and exc.kind is None,
                 f"code={exc.code} kind={exc.kind!r} exit={exc.exit_code}: {exc}",
             )
@@ -3031,18 +3057,18 @@ def drive_agent_vm(
                 timeout=15 * 60,
             )
         except Exception as exc:  # noqa: BLE001 - a teardown failure is a finding
-            results.check(AGENT_VM_CHECKS[12], False, f"{microvm_id}: {exc!r}")
+            results.check(AGENT_VM_CHECKS[13], False, f"{microvm_id}: {exc!r}")
             results.check(
-                AGENT_VM_CHECKS[13],
+                AGENT_VM_CHECKS[14],
                 False,
                 "terminate failed, so the name was never released",
             )
             results.check(
-                AGENT_VM_CHECKS[14], False, "terminate failed, so no group was named"
+                AGENT_VM_CHECKS[15], False, "terminate failed, so no group was named"
             )
         else:
             results.check(
-                AGENT_VM_CHECKS[12],
+                AGENT_VM_CHECKS[13],
                 torn.type == "microvm.teardown"
                 and torn.data.get("microvmId") == microvm_id
                 and not torn.data.get("leaked"),
@@ -3053,11 +3079,11 @@ def drive_agent_vm(
             try:
                 cli.call("health", *attach, timeout=60.0)
                 results.check(
-                    AGENT_VM_CHECKS[13], False, "health --name still resolved"
+                    AGENT_VM_CHECKS[14], False, "health --name still resolved"
                 )
             except KindError as exc:
                 results.check(
-                    AGENT_VM_CHECKS[13],
+                    AGENT_VM_CHECKS[14],
                     exc.code == "ERR_PRECONDITION"
                     and exc.kind is None
                     and not (state_dir / "names" / f"{vm_name}.json").exists(),
@@ -3075,7 +3101,7 @@ def drive_agent_vm(
                     if type(exc).__name__ != "ResourceNotFoundException":
                         failures.append(f"{group}: {type(exc).__name__}: {exc}")
             results.check(
-                AGENT_VM_CHECKS[14],
+                AGENT_VM_CHECKS[15],
                 bool(groups) and not failures,
                 f"groups={groups!r} failures={failures!r}",
             )

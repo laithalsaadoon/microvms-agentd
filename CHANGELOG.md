@@ -49,6 +49,19 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
   that host. Because that decline exits 0, callers
   verify effects with an `exec` that reads them back, as the docs show.
   Teardown stays `microvm terminate NAME`.
+- **Codex reads `AWS_BEARER_TOKEN_BEDROCK`, not the provider's `env_key`.** On a
+  `bedrock-runtime` host Codex 0.154.0 authenticates from that variable and ignores
+  the `env_key` its own `config.toml` declares, so the environment file exports the
+  token under both names. Measured 2026-09-10, us-east-1, in a VM carrying Codex
+  alone: with only `OPENAI_API_KEY` set, ten of ten identical tasks failed
+  `401 Unauthorized: Credential should be scoped to correct service: 'bedrock'`
+  after five reconnects, while a `python3` POST to the same endpoint with the same
+  variable returned 200; adding the bearer variable made the task succeed, and
+  setting it with `OPENAI_API_KEY` unset also succeeded. Twelve of twelve tasks
+  wrote their file after the fix. A VM that also carries Claude Code got the
+  variable from that profile, which is why every earlier two-agent run passed and
+  hid it. Two tests pin it, and the live suite now reads the credential file's
+  variable *names* (152 checks, up from 151).
 - **Bindings.** `microvms-py` and `microvms-js` carry the layer as `AgentVm`,
   `AgentSpec`, and `BearerToken`, one method per `agent-up` step (`find_image`,
   `image_name`, `build_artifact`, `build_image`, `launch`, `install_access`,
