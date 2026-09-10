@@ -531,7 +531,7 @@ describe("the generator's ownership rules", () => {
 
 describe("every generated page reaches the build", () => {
   const CONFIG = {
-    origin: (process.env.DOCS_SITE ?? "https://theagenticguy.github.io").replace(/\/+$/, ""),
+    origin: (process.env.DOCS_SITE ?? "https://laithalsaadoon.github.io").replace(/\/+$/, ""),
     base: process.env.DOCS_BASE ?? "/microvms-agentd/"
   }
   const segment = CONFIG.base.endsWith("/") ? CONFIG.base : `${CONFIG.base}/`

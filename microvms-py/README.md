@@ -25,9 +25,9 @@ bypasses each have a test that goes red if the door reopens.
 
 ## Reading
 
-- [Documentation](https://theagenticguy.github.io/microvms-agentd/)
-- [`docs/EMBEDDING.md`](https://github.com/theagenticguy/microvms-agentd/blob/main/docs/EMBEDDING.md)
-- [`docs/TRUST.md`](https://github.com/theagenticguy/microvms-agentd/blob/main/docs/TRUST.md)
+- [Documentation](https://laithalsaadoon.github.io/microvms-agentd/)
+- [`docs/EMBEDDING.md`](https://github.com/laithalsaadoon/microvms-agentd/blob/main/docs/EMBEDDING.md)
+- [`docs/TRUST.md`](https://github.com/laithalsaadoon/microvms-agentd/blob/main/docs/TRUST.md)
 
 ## License
 

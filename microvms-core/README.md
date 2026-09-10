@@ -26,9 +26,9 @@ Nothing depends on the CLI. That direction is asserted mechanically by
 
 ## Reading
 
-- [`docs/TRUST.md`](https://github.com/theagenticguy/microvms-agentd/blob/main/docs/TRUST.md) — the threat model and the trust boundary
-- [`docs/PLATFORM.md`](https://github.com/theagenticguy/microvms-agentd/blob/main/docs/PLATFORM.md) — measured platform behavior
-- [`docs/EMBEDDING.md`](https://github.com/theagenticguy/microvms-agentd/blob/main/docs/EMBEDDING.md) — using this crate from a host application
+- [`docs/TRUST.md`](https://github.com/laithalsaadoon/microvms-agentd/blob/main/docs/TRUST.md) — the threat model and the trust boundary
+- [`docs/PLATFORM.md`](https://github.com/laithalsaadoon/microvms-agentd/blob/main/docs/PLATFORM.md) — measured platform behavior
+- [`docs/EMBEDDING.md`](https://github.com/laithalsaadoon/microvms-agentd/blob/main/docs/EMBEDDING.md) — using this crate from a host application
 
 ## License
 

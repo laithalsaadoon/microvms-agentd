@@ -11,21 +11,21 @@
 # Every internal href in the output is site-absolute and host-less (`/microvms-agentd/…`), and lychee
 # cannot turn that into a URL without an origin: it warns on each one and checks none of them. So the
 # production origin is supplied purely so the links resolve, and then excluded below.
-base_url = "https://theagenticguy.github.io"
+base_url = "https://laithalsaadoon.github.io"
 exclude_path = ["site/dist/pagefind"]
 include_verbatim = false
 exclude_all_private = true
 
 exclude = [
-  "^https://theagenticguy\\.github\\.io/",
+  "^https://laithalsaadoon\\.github\\.io/",
   # The site has no edit links today (every page is generated and carries `editUrl: false`), and the
   # exclusion stays so the day one is added does not turn into a hundred requests at one GitHub path.
-  "^https://github\\.com/theagenticguy/microvms-agentd/edit/",
+  "^https://github\\.com/laithalsaadoon/microvms-agentd/edit/",
   # Every generated page carries commit-pinned `path:line` citation permalinks into this repository,
   # hundreds of them per build. Each one was resolved with `git ls-tree` at the pinned commit when the
   # page was synced, so the build already refuses a citation that names nothing, and asking GitHub the
   # same question over HTTP for every line is what its rate limiter exists to stop.
-  "^https://github\\.com/theagenticguy/microvms-agentd/blob/",
+  "^https://github\\.com/laithalsaadoon/microvms-agentd/blob/",
 ]
 
 # One retry, then believe it. A checker that retries five times over a growing corpus turns a scheduled

@@ -20,7 +20,7 @@
  * `tests/branding.test.ts` is what keeps the committed icons equal to the generator.
  *
  * Every URL is built with `new URL()`, never by concatenating strings. `Astro.site` EXCLUDES the base —
- * for this site it is `https://theagenticguy.github.io` — so resolving a path against it directly drops
+ * for this site it is `https://laithalsaadoon.github.io` — so resolving a path against it directly drops
  * the `/microvms-agentd` segment and yields a 404 that only appears in production.
  * `import.meta.env.BASE_URL` is the accessor that includes it.
  */
@@ -44,7 +44,7 @@ const SITE: SiteDescription = {
     "A verified client stack and in-VM daemon for AWS Lambda MicroVMs, in Rust: the wire protocol, " +
     "the trust boundary, and measured platform behavior.",
   inLanguage: "en",
-  publisher: { name: "theagenticguy", url: "https://github.com/theagenticguy/microvms-agentd" }
+  publisher: { name: "laithalsaadoon", url: "https://github.com/laithalsaadoon/microvms-agentd" }
 }
 
 const { site } = Astro

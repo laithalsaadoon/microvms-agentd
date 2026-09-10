@@ -62,7 +62,7 @@ const SOURCE = "../docs"
 const TARGET = "src/content/docs"
 const AUTHORED = "authored"
 const REPO_ROOT = ".."
-const REPO_URL = "https://github.com/theagenticguy/microvms-agentd"
+const REPO_URL = "https://github.com/laithalsaadoon/microvms-agentd"
 
 /**
  * The GitHub edit URL for an authored source file, for the pencil link on an authored page.

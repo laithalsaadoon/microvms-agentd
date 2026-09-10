@@ -56,7 +56,7 @@ const CONFIG = {
    * ordering probe compare against this repository's origin whatever origin the build used, which
    * silently passes the wrong assertion on a fork and on a custom domain.
    */
-  origin: (process.env.DOCS_SITE ?? "https://theagenticguy.github.io").replace(/\/+$/, ""),
+  origin: (process.env.DOCS_SITE ?? "https://laithalsaadoon.github.io").replace(/\/+$/, ""),
 
   /** The base the build ran with, from the same variable, for the same reason. */
   base: process.env.DOCS_BASE ?? "/microvms-agentd/",

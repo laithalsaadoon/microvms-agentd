@@ -40,8 +40,8 @@ The full route table and request shapes are in [Protocol](/internals/protocol/),
 The CLI provisions its own version's release asset. For a build you manage, fetch and verify it the same way:
 
 ```bash
-gh release download --repo theagenticguy/microvms-agentd --pattern agentd
-gh attestation verify agentd --repo theagenticguy/microvms-agentd
+gh release download --repo laithalsaadoon/microvms-agentd --pattern agentd
+gh attestation verify agentd --repo laithalsaadoon/microvms-agentd
 chmod +x agentd
 ```
 

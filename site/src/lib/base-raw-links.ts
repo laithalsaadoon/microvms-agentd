@@ -8,7 +8,7 @@ import type { AstroIntegration } from "astro"
  *
  * The defect this closes: this site is published under `/microvms-agentd/`, and a root-relative link
  * authored as `/agents/` comes out of the twin builder unchanged, so an agent following it fetches
- * `https://theagenticguy.github.io/agents/` and gets a 404 — while the same link in the HTML is
+ * `https://laithalsaadoon.github.io/agents/` and gets a 404 — while the same link in the HTML is
  * correct. The two surfaces are built from different things. `starlight-base-path` rewrites the
  * rendered tree, while `starlight-md-txt` builds each raw route from the page's Markdown source, so a
  * link is correct on whichever surface its producer touched and wrong on the other, and nothing fails.

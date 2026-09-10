@@ -62,7 +62,9 @@ pipefail
 setopt
 openat
 subshells
-# The GitHub owner, quoted in clone URLs and image names.
+# The GitHub owner since the 2026-09-09 account rename, quoted in clone URLs and `gh --repo` lines.
+laithalsaadoon
+# The npm scope, which the account rename did not touch: `@theagenticguy/microvms`.
 theagenticguy
 # `terraform.tfstate`, named where the live-suite page says what `terraform destroy` leaves behind.
 tfstate
