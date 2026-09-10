@@ -4,7 +4,7 @@
 
 Report privately through **GitHub Security Advisories** on this repository
 ("Security" → "Report a vulnerability", or directly at
-<https://github.com/theagenticguy/microvms-agentd/security/advisories/new>).
+<https://github.com/laithalsaadoon/microvms-agentd/security/advisories/new>).
 There is no security email address for this project. The advisory form is the
 only private reporting channel.
 
@@ -17,7 +17,7 @@ anything in "Not vulnerabilities" below.
 
 ## Threat model
 
-[`docs/TRUST.md`](https://github.com/theagenticguy/microvms-agentd/blob/main/docs/TRUST.md)
+[`docs/TRUST.md`](https://github.com/laithalsaadoon/microvms-agentd/blob/main/docs/TRUST.md)
 is the threat model. It describes what the daemon guarantees
 when the workload is assumed hostile, and what it does not guarantee. Read it
 before filing. `docs/PROTOCOL.md` states the enforced rules, and `model/` checks

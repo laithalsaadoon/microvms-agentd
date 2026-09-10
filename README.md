@@ -1,10 +1,10 @@
 # microvms-agentd
 
-[![ci](https://github.com/theagenticguy/microvms-agentd/actions/workflows/ci.yml/badge.svg)](https://github.com/theagenticguy/microvms-agentd/actions/workflows/ci.yml)
-[![live conformance](https://github.com/theagenticguy/microvms-agentd/actions/workflows/live-conformance.yml/badge.svg)](https://github.com/theagenticguy/microvms-agentd/actions/workflows/live-conformance.yml)
-[![release](https://github.com/theagenticguy/microvms-agentd/actions/workflows/release.yml/badge.svg)](https://github.com/theagenticguy/microvms-agentd/actions/workflows/release.yml)
-[![docs](https://github.com/theagenticguy/microvms-agentd/actions/workflows/docs.yml/badge.svg)](https://theagenticguy.github.io/microvms-agentd/)
-[![OpenSSF Scorecard](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.scorecard.dev%2Fprojects%2Fgithub.com%2Ftheagenticguy%2Fmicrovms-agentd&query=%24.score&label=openssf%20scorecard)](https://scorecard.dev/viewer/?uri=github.com/theagenticguy/microvms-agentd)
+[![ci](https://github.com/laithalsaadoon/microvms-agentd/actions/workflows/ci.yml/badge.svg)](https://github.com/laithalsaadoon/microvms-agentd/actions/workflows/ci.yml)
+[![live conformance](https://github.com/laithalsaadoon/microvms-agentd/actions/workflows/live-conformance.yml/badge.svg)](https://github.com/laithalsaadoon/microvms-agentd/actions/workflows/live-conformance.yml)
+[![release](https://github.com/laithalsaadoon/microvms-agentd/actions/workflows/release.yml/badge.svg)](https://github.com/laithalsaadoon/microvms-agentd/actions/workflows/release.yml)
+[![docs](https://github.com/laithalsaadoon/microvms-agentd/actions/workflows/docs.yml/badge.svg)](https://laithalsaadoon.github.io/microvms-agentd/)
+[![OpenSSF Scorecard](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.scorecard.dev%2Fprojects%2Fgithub.com%2Flaithalsaadoon%2Fmicrovms-agentd&query=%24.score&label=openssf%20scorecard)](https://scorecard.dev/viewer/?uri=github.com/laithalsaadoon/microvms-agentd)
 
 [![crates.io](https://img.shields.io/crates/v/microvms-cli.svg?label=crates.io)](https://crates.io/crates/microvms-cli)
 [![docs.rs](https://img.shields.io/docsrs/microvms-core?label=docs.rs)](https://docs.rs/microvms-core)
@@ -70,8 +70,8 @@ image with no interpreter and no dynamic loader. Verify it the same way the
 CLI does before passing it as the positional or `$MICROVM_AGENTD`:
 
 ```bash
-gh release download --repo theagenticguy/microvms-agentd --pattern agentd
-gh attestation verify agentd --repo theagenticguy/microvms-agentd
+gh release download --repo laithalsaadoon/microvms-agentd --pattern agentd
+gh attestation verify agentd --repo laithalsaadoon/microvms-agentd
 chmod +x agentd
 ```
 
@@ -481,7 +481,7 @@ measured allowlist, yanked crates, untrusted registries), and actionlint over
 the workflows. CI publishes CycloneDX and SPDX SBOMs per commit, three
 scanners audit them (grype, trivy, osv-scanner), every accepted finding lives
 in an ignore file with its reason, and Dependabot watches cargo, Actions, and
-npm weekly. [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/theagenticguy/microvms-agentd)
+npm weekly. [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/laithalsaadoon/microvms-agentd)
 audits the repository's own maintenance posture weekly from
 [scorecard.yml](.github/workflows/scorecard.yml), and its findings land as
 code-scanning alerts. Releases are tag-triggered through
@@ -495,7 +495,7 @@ starting with the
 [debugging guide](docs/insights/debugging-guide.md).
 
 The same documentation is published at
-**<https://theagenticguy.github.io/microvms-agentd/>**, built by `site/` and
+**<https://laithalsaadoon.github.io/microvms-agentd/>**, built by `site/` and
 deployed by `.github/workflows/docs.yml`, in three tiers: Learn (tutorials and
 task-shaped how-tos, authored under `site/authored/learn/`), Reference
 (generated from `microvm manifest`, one page per command plus the exit codes,
@@ -506,7 +506,7 @@ with `.md` appended, the whole corpus comes as `llms.txt`, `llms-full.txt` and
 `llms-small.txt`, every `path:line` citation is a commit-pinned link into this
 repository, and the Mermaid diagrams are rendered to SVG at build time so they
 are present in a fetch that runs no JavaScript.
-[For agents](https://theagenticguy.github.io/microvms-agentd/agents/) is the
+[For agents](https://laithalsaadoon.github.io/microvms-agentd/agents/) is the
 page that names which surface answers which question. `mise run docs:check`
 builds and gates it locally, and the gates over the built output cover
 accessibility, layout stability, a Lighthouse budget, link and census checks,

@@ -8,8 +8,8 @@ import type { AstroIntegration } from "astro"
  *
  * RFC 9309 §2.3 puts robots.txt at `/robots.txt` in the top-level path, with the URI
  * `scheme:[//authority]/robots.txt`. Authority is host plus port, so **robots.txt is per-origin and a
- * path-prefixed site cannot own one.** A site served from `https://theagenticguy.github.io/microvms-agentd/`
- * is governed by `https://theagenticguy.github.io/robots.txt`, which belongs to the account and not to
+ * path-prefixed site cannot own one.** A site served from `https://laithalsaadoon.github.io/microvms-agentd/`
+ * is governed by `https://laithalsaadoon.github.io/robots.txt`, which belongs to the account and not to
  * this repository; a file emitted at `/microvms-agentd/robots.txt` has no protocol meaning and is dead
  * weight that reads as a policy.
  *

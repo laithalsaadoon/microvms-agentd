@@ -83,6 +83,6 @@ Every `AGENTD_*` variable is read at startup, and an unset or unparseable value 
 
 ## 8. Working examples
 
-Three Dockerfiles in the repository respect all of the above: [coding-agents-on-bedrock](https://github.com/theagenticguy/microvms-agentd/tree/main/examples/coding-agents-on-bedrock) adds Node, Python, and two agent CLIs; [code-server-remote-dev](https://github.com/theagenticguy/microvms-agentd/tree/main/examples/code-server-remote-dev) installs an IDE from a release RPM; [s3-prefetch-at-build](https://github.com/theagenticguy/microvms-agentd/tree/main/examples/s3-prefetch-at-build) replaces `CMD` with a wrapper that fetches before it hands off to the daemon.
+Three Dockerfiles in the repository respect all of the above: [coding-agents-on-bedrock](https://github.com/laithalsaadoon/microvms-agentd/tree/main/examples/coding-agents-on-bedrock) adds Node, Python, and two agent CLIs; [code-server-remote-dev](https://github.com/laithalsaadoon/microvms-agentd/tree/main/examples/code-server-remote-dev) installs an IDE from a release RPM; [s3-prefetch-at-build](https://github.com/laithalsaadoon/microvms-agentd/tree/main/examples/s3-prefetch-at-build) replaces `CMD` with a wrapper that fetches before it hands off to the daemon.
 
 When a build fails anyway, [Debug a failed build](/learn/operations/debug-a-failed-build/) says where the reason lives. The measurements behind every rule above are in [Platform](/internals/platform/).

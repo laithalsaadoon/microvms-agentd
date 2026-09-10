@@ -45,8 +45,8 @@ Lambda MicroVMs are ARM64-only, so `agentd` is a static `aarch64-unknown-linux-m
 If you want to manage the binary yourself, for a custom build or an airgapped machine, fetch and verify it the same way the CLI does, then pass it as the positional argument or as `$MICROVM_AGENTD`:
 
 ```bash
-gh release download --repo theagenticguy/microvms-agentd --pattern agentd
-gh attestation verify agentd --repo theagenticguy/microvms-agentd
+gh release download --repo laithalsaadoon/microvms-agentd --pattern agentd
+gh attestation verify agentd --repo laithalsaadoon/microvms-agentd
 chmod +x agentd
 ```
 
@@ -69,7 +69,7 @@ The Python package ships abi3 wheels for Linux, macOS, and Windows, so one wheel
 Contributors, and anyone who wants the binaries from a specific commit, build them instead. `mise` is the command surface for the repository and installs the toolchain from `mise.toml`:
 
 ```bash
-git clone https://github.com/theagenticguy/microvms-agentd.git
+git clone https://github.com/laithalsaadoon/microvms-agentd.git
 cd microvms-agentd
 mise install               # the toolchain
 mise run install           # the git hooks

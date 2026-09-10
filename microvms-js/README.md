@@ -26,9 +26,9 @@ never a bare float. Each planted bypass has a test that goes red if the door reo
 
 ## Reading
 
-- [Documentation](https://theagenticguy.github.io/microvms-agentd/)
-- [`docs/EMBEDDING.md`](https://github.com/theagenticguy/microvms-agentd/blob/main/docs/EMBEDDING.md)
-- [`docs/TRUST.md`](https://github.com/theagenticguy/microvms-agentd/blob/main/docs/TRUST.md)
+- [Documentation](https://laithalsaadoon.github.io/microvms-agentd/)
+- [`docs/EMBEDDING.md`](https://github.com/laithalsaadoon/microvms-agentd/blob/main/docs/EMBEDDING.md)
+- [`docs/TRUST.md`](https://github.com/laithalsaadoon/microvms-agentd/blob/main/docs/TRUST.md)
 
 ## License
 

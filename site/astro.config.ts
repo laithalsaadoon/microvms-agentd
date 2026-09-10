@@ -34,7 +34,7 @@ import { rootTwin } from "./src/lib/root-twin.js"
  * `import.meta.env.BASE_URL`. Nothing derives one from the other, because confusing the two produces a
  * protocol-relative URL that parses, resolves to nothing, and looks correct in source.
  */
-const SITE = new URL(process.env.DOCS_SITE ?? "https://theagenticguy.github.io")
+const SITE = new URL(process.env.DOCS_SITE ?? "https://laithalsaadoon.github.io")
 
 /**
  * Exactly one leading and one trailing slash, whatever the caller wrote.
@@ -54,7 +54,7 @@ const SITE_DESCRIPTION =
   "A verified client stack and in-VM daemon for AWS Lambda MicroVMs, in Rust: the wire protocol, " +
   "the trust boundary, and measured platform behavior."
 
-const REPO_URL = "https://github.com/theagenticguy/microvms-agentd"
+const REPO_URL = "https://github.com/laithalsaadoon/microvms-agentd"
 
 const here = fileURLToPath(new URL(".", import.meta.url))
 const REPO_ROOT = resolve(here, "..")

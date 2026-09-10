@@ -27,7 +27,7 @@ appears.
 ## Reading
 
 Command reference and behavior:
-[`docs/reference/cli.md`](https://github.com/theagenticguy/microvms-agentd/blob/main/docs/reference/cli.md).
+[`docs/reference/cli.md`](https://github.com/laithalsaadoon/microvms-agentd/blob/main/docs/reference/cli.md).
 
 ## License
 
