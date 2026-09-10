@@ -117,6 +117,26 @@ pub enum Command {
     /// early saves nothing.
     Build(BuildArgs),
 
+    /// Bring up a VM with a coding agent in it: image, launch, model credentials, non-root user.
+    ///
+    /// The L3 helper (`docs/AGENT-VMS.md`): one command that composes `build --reuse`,
+    /// `run --keep --egress --vm-name`, a Bedrock bearer token minted from your own AWS
+    /// credentials, and the file uploads and `chown` the coding-agents example performed by
+    /// hand. Against a name that is already registered it refreshes the credentials instead
+    /// of building or launching, which is how a 12-hour token is renewed on a long-lived VM.
+    /// Tear the VM down with `microvm terminate <NAME>`.
+    #[command(name = "agent-up")]
+    AgentUp(AgentUpArgs),
+
+    /// Hand a coding agent in a running agent VM one task, headless, as the non-root user.
+    ///
+    /// Runs the agent's headless command (`claude -p …` or `codex exec …`) as uid 1000 in
+    /// `/workspace`, sourcing the credentials `agent-up` installed. Without `--agent`, reads
+    /// the marker `agent-up` wrote in the guest and prompts the one agent it names. `--detach`
+    /// starts and returns the exec id for `microvm exec --poll`; the default waits and acks.
+    #[command(name = "agent-prompt")]
+    AgentPrompt(AgentPromptArgs),
+
     /// Run one command in a MicroVM that is already running.
     ///
     /// The loop shape: launch once with `run --keep`, then exec against it. Needs the three
@@ -451,7 +471,7 @@ impl RegionFlags {
 /// chances to document one as another. Flattened, every attached command's triple is declared
 /// once — and `tests/manifest.rs` sees the same parameter names on all six, which is what makes
 /// "the attached commands take the triple `exec` takes" a checkable claim.
-#[derive(Args, Debug, Default)]
+#[derive(Args, Debug, Default, Clone)]
 pub struct AttachFlags {
     /// The VM's endpoint, as reported by `run`.
     #[arg(long, required_unless_present = "name")]
@@ -1723,6 +1743,141 @@ pub struct DockerfileArgs {
     pub workdir: Option<String>,
 }
 
+/// The two coding agents `agent-up` can install. Mirrors `microvms_core::agents::Agent`,
+/// which is the closed set; the mapping is exhaustive so a third agent added to core is a
+/// compile error here rather than a flag value the CLI silently cannot spell.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum AgentArg {
+    #[value(name = "claude-code")]
+    ClaudeCode,
+    #[value(name = "codex")]
+    Codex,
+}
+
+impl AgentArg {
+    /// The core profile this flag value selects.
+    pub fn agent(self) -> microvms_core::agents::Agent {
+        match self {
+            AgentArg::ClaudeCode => microvms_core::agents::Agent::ClaudeCode,
+            AgentArg::Codex => microvms_core::agents::Agent::Codex,
+        }
+    }
+}
+
+#[derive(Args, Clone, Debug)]
+pub struct AgentUpArgs {
+    /// The aarch64 agentd binary to bake in. Omitted provisions this CLI's own release asset.
+    #[arg(value_name = "BINARY")]
+    pub binary: Option<PathBuf>,
+
+    /// The local name to register for the VM, and the handle every later command uses.
+    ///
+    /// Required, because an agent VM is kept by definition: the whole point is to prompt it
+    /// later. Same grammar as `run --vm-name`. A name already registered to a live VM is
+    /// not a collision here: it selects the refresh path, which re-installs credentials.
+    #[arg(long, value_name = "NAME")]
+    pub vm_name: String,
+
+    /// Which agent to install. Repeatable; defaults to `claude-code`.
+    #[arg(long, value_enum, value_name = "AGENT")]
+    pub agent: Vec<AgentArg>,
+
+    /// The Bedrock inference-profile id Claude Code uses. Defaults to the profile's.
+    #[arg(long, value_name = "MODEL_ID")]
+    pub claude_model: Option<String>,
+
+    /// The Bedrock model id Codex uses. Defaults to the profile's.
+    #[arg(long, value_name = "MODEL_ID")]
+    pub codex_model: Option<String>,
+
+    /// Pin the Claude Code npm package to this version. Changes the image's reuse hash.
+    #[arg(long, value_name = "VERSION")]
+    pub claude_version: Option<String>,
+
+    /// Pin the Codex npm package to this version. Changes the image's reuse hash.
+    #[arg(long, value_name = "VERSION")]
+    pub codex_version: Option<String>,
+
+    /// A local directory to upload into /workspace after launch, packed the way `run <DIR>` packs.
+    ///
+    /// Same skip list (`.git`, `target`, `node_modules`, `.venv`), same budgets, packed
+    /// before any AWS call so an unreadable tree costs nothing. Bring results back with
+    /// `microvm cp --tar vm:/workspace <LOCAL> --name <NAME>`.
+    #[arg(long, value_name = "DIR")]
+    pub project: Option<PathBuf>,
+
+    /// Baseline MiB. Default 1024: a 4 GiB always-present ceiling at half the floor cost of
+    /// 2048, which fits peaky agent sessions (see `docs/AGENT-VMS.md`).
+    #[arg(long, value_enum, default_value = "1024")]
+    pub memory: MemoryMib,
+
+    /// How long the Bedrock bearer token lives, in hours. Default and ceiling 12.
+    #[arg(long, default_value_t = 12, value_name = "HOURS")]
+    pub token_ttl_hours: u32,
+
+    /// Suspend the VM after this much inbound-traffic idleness.
+    #[arg(long, default_value_t = 600)]
+    pub max_idle_sec: u32,
+
+    /// Terminate the VM after this long suspended. A resume past it cannot work.
+    #[arg(long, default_value_t = 600)]
+    pub suspended_sec: u32,
+
+    /// Let the platform resume a suspended VM on an incoming request.
+    #[arg(long)]
+    pub auto_resume: bool,
+
+    /// Hard ceiling on the VM's life. Refused above 28800 (eight hours) before any call.
+    #[arg(long, default_value_t = 3600)]
+    pub max_duration_sec: u32,
+
+    /// The daemon's port inside the guest.
+    #[arg(long)]
+    pub port: Option<u16>,
+
+    /// Where the run ledger and name registry live. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs.
+    #[arg(long)]
+    pub state_dir: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+
+    #[command(flatten)]
+    pub infra: InfraFlags,
+}
+
+#[derive(Args, Clone, Debug)]
+pub struct AgentPromptArgs {
+    /// The task, as prose. Passed to the agent's headless command single-quoted for `sh`.
+    #[arg(value_name = "TASK")]
+    pub task: String,
+
+    /// Which installed agent to prompt. Omitted reads the guest marker and takes the one it names.
+    #[arg(long, value_enum, value_name = "AGENT")]
+    pub agent: Option<AgentArg>,
+
+    /// How long to wait for the agent, in seconds. Agent tasks run minutes, not seconds.
+    #[arg(long, default_value_t = 900.0)]
+    pub timeout: f64,
+
+    /// Start the agent and return immediately, without waiting and without acking.
+    ///
+    /// Prints the exec id; `microvm exec --poll <ID> --name <NAME>` reads it back and
+    /// `microvm ack` releases it, exactly as for `exec --detach`.
+    #[arg(long)]
+    pub detach: bool,
+
+    /// Use this exec id instead of a fresh one, making a retry idempotent.
+    #[arg(long, value_name = "ID")]
+    pub exec_id: Option<String>,
+
+    #[command(flatten)]
+    pub attach: AttachFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
 /// One `--env KEY=VALUE` pair, split at the first `=`.
 ///
 /// A parser rather than a raw `Vec<String>` the handler splits later, for the CLI-5 reason:
@@ -1961,6 +2116,8 @@ mod tests {
                 "run",
                 "quickstart",
                 "build",
+                "agent-up",
+                "agent-prompt",
                 "exec",
                 "health",
                 "ack",

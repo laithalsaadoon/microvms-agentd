@@ -22,6 +22,7 @@
 //!
 //! (cli.py line numbers resolve at `git show 'c4d396e^:clients/python/src/microvms_agentd/cli.py'` — the retired oracle.)
 
+pub mod agent;
 pub mod attached;
 pub mod cost;
 pub mod doctor;
@@ -105,7 +106,7 @@ pub struct Ctx<'a, O: Write, E: Write> {
 /// command added without an entry fails rather than shipping undescribed. That check is the
 /// only thing that keeps this table from being the hand-maintained artifact the manifest is
 /// forbidden to be.
-pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 24] = [
+pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 26] = [
     (
         "run",
         "microvm.run",
@@ -188,6 +189,48 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 24] = [
             // The same self-provisioning report `run` carries; null when the caller
             // supplied the binary.
             "agentd",
+        ],
+    ),
+    // The L3 helpers (`docs/AGENT-VMS.md`). `agent-up` carries the same identifier triple
+    // `run --keep` does, plus what was installed: `agents` is `[{agent, model, cliVersion,
+    // headlessCommand}]`, `imageReused`/`vmReused` say which of the two paths ran (a
+    // refresh has no image to report, so both image keys are null there), and
+    // `credentialExpiresAt` is epoch seconds — the ledger's clock — for the token just
+    // installed. `project` is `{workdir, uploadedBytes, uploadedMembers}` or null.
+    (
+        "agent-up",
+        "microvm.agent",
+        &[
+            "vmName",
+            "microvmId",
+            "endpoint",
+            "agentToken",
+            "imageIdentifier",
+            "imageName",
+            "imageReused",
+            "vmReused",
+            "agents",
+            "credentialExpiresAt",
+            "workdir",
+            "project",
+            "agentd",
+        ],
+    ),
+    // `exec`'s keys plus which agent and model ran, under its own discriminant because a
+    // consumer that learned `microvm.exec` is reading a command it chose; this one ran a
+    // template it did not.
+    (
+        "agent-prompt",
+        "microvm.agent.prompt",
+        &[
+            "execId",
+            "agent",
+            "model",
+            "phase",
+            "exitCode",
+            "stdout",
+            "stderr",
+            "truncated",
         ],
     ),
     (

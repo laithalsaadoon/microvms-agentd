@@ -46,10 +46,19 @@ REGION = os.environ.get("AWS_REGION", "us-east-1")
 # after exactly that happened: a CLI run leaked a log group and this script said
 # the account was clean, because it only knew the two names the conformance
 # scripts used.
-NAME_PREFIXES = ("agentd-conformance", "agentd-probe", "microvm-cli", "microvm-")
+# `agent-vm-` is the stem `microvm agent-up` names its images by (docs/AGENT-VMS.md,
+# AGENT-3); the live suite's `drive_agent_vm` builds one, so a leak of it must be visible.
+NAME_PREFIXES = (
+    "agentd-conformance",
+    "agentd-probe",
+    "microvm-cli",
+    "microvm-",
+    "agent-vm-",
+)
 LOG_GROUP_PREFIXES = (
     "/aws/lambda-microvms/agentd-",
     "/aws/lambda-microvms/microvm-",
+    "/aws/lambda-microvms/agent-vm-",
 )
 
 

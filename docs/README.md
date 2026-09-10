@@ -32,6 +32,10 @@ tutorials and a Reference tier generated from `microvm manifest`.
 - [HARNESS-CAPABILITIES.md](HARNESS-CAPABILITIES.md) — what agent harnesses
   (Harbor, Omnigent, the Vercel Sandbox / eve shape) require of a sandbox
   platform, mapped onto this one, with the gaps ranked.
+- [AGENT-VMS.md](AGENT-VMS.md): the L3 layer, `agent-up` and `agent-prompt`,
+  the `agents` core module behind them, the dated profile table for Claude Code
+  and Codex, the Bedrock bearer-token recipe, and the record of the scope rule
+  this layer changed.
 - [CLI-COVERAGE-PLAN.md](CLI-COVERAGE-PLAN.md) — the plan that took live
   conformance from 38 checks to all of them. The plan is implemented; the file
   is kept for its reasoning.

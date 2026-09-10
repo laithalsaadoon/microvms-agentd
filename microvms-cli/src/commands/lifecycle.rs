@@ -401,7 +401,7 @@ fn config_error(error: crate::config::ConfigError) -> crate::exit::CliError {
 }
 
 /// A [`crate::sync::SyncError`] as the `ERR_SYNC` row.
-fn sync_error(error: crate::sync::SyncError) -> crate::exit::CliError {
+pub(crate) fn sync_error(error: crate::sync::SyncError) -> crate::exit::CliError {
     crate::exit::CliError::new(Exit::Sync, error.to_string())
         .suggest("the failure is on this machine's filesystem; the platform was not involved")
 }

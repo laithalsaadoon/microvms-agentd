@@ -1,6 +1,6 @@
 # microvms-agentd · CLI
 
-The `microvm` binary has twenty-four subcommands, declared as one `clap` `Subcommand` enum in `microvms-cli/src/cli.rs` and built from `microvms-cli/Cargo.toml:20-22`.
+The `microvm` binary has twenty-six subcommands, declared as one `clap` `Subcommand` enum in `microvms-cli/src/cli.rs` and built from `microvms-cli/Cargo.toml:20-22`.
 
 ## Global flags
 
@@ -116,6 +116,62 @@ Flags:
 - Plus `RegionFlags` and `InfraFlags`. `microvms-cli/src/cli.rs:469-473`.
 
 The success envelope always carries `reused` (`false` for a plain build) and `logStream` (`null` when no `--log-stream` was configured; a reused image also reports `null`, because no build ran and no stream was resolved), so a consumer never guards for either key. `microvms-cli/src/commands/mod.rs`.
+
+## agent-up
+
+```
+microvm agent-up [OPTIONS] --vm-name <NAME> [BINARY]
+```
+
+Brings up a VM with a coding agent in it: image, launch, model credentials, non-root user. The L3 helper (`docs/AGENT-VMS.md`) composes `build --reuse`, `run --keep --egress --vm-name`, a Bedrock bearer token minted from the caller's own AWS credentials, and the file uploads and `chown` the coding-agents example performed by hand. Two paths, decided by one local registry read: a name this state directory has not registered means build (or reuse), launch, provision, register; a name it has registered means attach, mint a fresh token, re-install the same files, and report `vmReused: true`, with no build and no launch. That refresh path is how a 12-hour token is renewed on a long-lived VM. Teardown is `microvm terminate <NAME>`.
+
+`microvms-cli/src/commands/agent.rs`
+
+Flags:
+
+- `[BINARY]`: the aarch64 agentd binary to bake in. Omitted provisions this CLI's own release asset, the same chain `run` and `build` use; the envelope's `agentd` key reports the path and source. `microvms-cli/src/cli.rs`, `AgentUpArgs::binary`.
+- `--vm-name <NAME>`: the local name to register for the VM, and the handle every later command uses. Required, because an agent VM is kept by definition. Same grammar as `run --vm-name`. A name already registered to a live VM is not a collision here: it selects the refresh path. A name registered to a torn record (empty MicroVM id, a process died mid-register) is refused with `ERR_NAME_TAKEN` and the record's path. `microvms-cli/src/cli.rs`, `AgentUpArgs::vm_name`.
+- `--agent <AGENT>`: which agent to install. Closed set: `claude-code`, `codex`. Repeatable; omitted means `claude-code`; a repeated value collapses to one row. On the refresh path, omitted keeps the agents and models the guest marker names, and a typed `--agent` is the caller changing them. `microvms-cli/src/cli.rs`, `AgentArg`.
+- `--claude-model <MODEL_ID>`: the Bedrock inference-profile id Claude Code uses; default `global.anthropic.claude-opus-5`, from the profile table. `microvms-core/src/agents/profile.rs`, `CLAUDE_CODE`.
+- `--codex-model <MODEL_ID>`: the Bedrock model id Codex uses; default `openai.gpt-5.6-sol`, from the profile table. `microvms-core/src/agents/profile.rs`, `CODEX`.
+- `--claude-version <VERSION>` / `--codex-version <VERSION>`: pin the agent's npm package to this version (`@anthropic-ai/claude-code@<V>`, `@openai/codex@<V>`). Unpinned, the image carries the registry's latest at build time. A pin changes the Dockerfile text and therefore the image's reuse hash. `microvms-cli/src/cli.rs`, `AgentUpArgs::claude_version`.
+- `--project <DIR>`: a local directory to upload into `/workspace` after launch, packed the way `run <DIR>` packs: same skip list (`.git`, `target`, `node_modules`, `.venv`), same budgets, packed before any AWS call so an unreadable tree costs nothing. The upload lands before the install's `chown`, so the agent owns the tree. Bring results back with `microvm cp --tar vm:/workspace <LOCAL> --name <NAME>`. Also honored on the refresh path. `microvms-cli/src/cli.rs`, `AgentUpArgs::project`.
+- `--memory <MEMORY>`: baseline MiB; default `1024`, not `run`'s `2048`: a 4 GiB always-present ceiling at half the floor cost, which fits peaky agent sessions. Closed set as for `run`. `microvms-cli/src/cli.rs`, `AgentUpArgs::memory`; `microvms-core/src/agents/mod.rs`, `DEFAULT_SIZE`.
+- `--token-ttl-hours <HOURS>`: how long the Bedrock bearer token lives; default and ceiling `12`. Core refuses a lifetime outside `(0, 12 h]` with `ERR_INVALID_ARG`; the service additionally caps validity at the signing credentials' own expiry. `microvms-core/src/agents/bedrock.rs`, `MAX_LIFETIME`.
+- `--max-idle-sec <MAX_IDLE_SEC>`: suspend the VM after this much inbound-traffic idleness; default `600`.
+- `--suspended-sec <SUSPENDED_SEC>`: terminate the VM after this long suspended; default `600`.
+- `--auto-resume`: let the platform resume a suspended VM on an incoming request; omitted by default.
+- `--max-duration-sec <MAX_DURATION_SEC>`: hard ceiling on the VM's life; refused above 28800 before any call. Default `3600`.
+- `--port <PORT>`: the daemon's port inside the guest.
+- `--state-dir <STATE_DIR>`: where the run ledger and name registry live; defaults to `$MICROVM_STATE_DIR` or `~/.microvm/runs`.
+- Plus `RegionFlags` and `InfraFlags`. The fresh path requires the bucket, the build role, and the execution role (`ERR_PRECONDITION` naming the missing one); the refresh path makes no control-plane call before the attach, and takes the region from the flag when typed, else from the name record.
+
+Egress is always requested, because neither agent reaches Bedrock without it. The image is named `agent-vm-<agents>-<hash12>`, the hash over the same inputs `build --reuse` covers, so an unchanged daemon and agent set reuse their image and a version pin builds a fresh one. Provisioning writes `/workspace/.agent-env` (mode `0600`; `HOME`, `PATH`, `AWS_REGION`, and each agent's credential and model lines), `/workspace/.codex/config.toml` when Codex is present, and the marker `/workspace/.agent-vm.json` (mode `0644`) naming the installed agents and models, then runs one root `chown -R 1000:1000 /workspace`. The token travels only as a file over the authenticated channel; it is never an argv element and never in the launch payload. `microvms-core/src/agents/mod.rs`, `provisioning_files` and `install_access`.
+
+A failure after the launch and before the registration (token mint, project upload, credential install, or an interrupt) tears the VM down, because a VM with no name and no credentials is one nobody can use; the failure envelope carries `microvmId`, `imageIdentifier`, `leaked`, and `terminateAccepted`. The image stays, as the durable artifact. The name is registered last, over a VM every step succeeded on; a registry write failure is `ERR_PRECONDITION` with the identifier triple in `data`. No new exit row: every failure maps onto the existing table.
+
+The success envelope's type is `microvm.agent`; its keys are `vmName`, `microvmId`, `endpoint`, `agentToken`, `imageIdentifier`, `imageName`, `imageReused`, `vmReused`, `agents` (`[{agent, model, cliVersion, headlessCommand}]`), `credentialExpiresAt` (epoch seconds), `workdir`, `project` (`{workdir, uploadedBytes, uploadedMembers}` or `null`), and `agentd`. On the refresh path the two image keys and `imageReused` are `null`, because no image was built or looked up. `agents[].headlessCommand` is the exact template `agent-prompt` runs with `<TASK>` where the quoted task goes, so a caller who wants `exec --stream --user 1000 --group 1000` over it can spell the command without knowing the profile. `microvms-cli/src/commands/mod.rs`, the `agent-up` row.
+
+## agent-prompt
+
+```
+microvm agent-prompt [OPTIONS] <TASK>
+```
+
+Hands a coding agent in a running agent VM one task, headless, as the non-root user. Runs the agent's headless command (`claude -p <TASK> --allowedTools Bash,Read,Edit,Write,Grep,Glob` or `codex exec --skip-git-repo-check -s workspace-write <TASK>`) as uid 1000, gid 1000, in `/workspace`, with `. /workspace/.agent-env &&` in front so the credentials `agent-up` installed are the environment; the request's own `env` map is empty, so the token never rides in a request body. By default it waits and acks, exactly as `exec` does; `--detach` starts and returns the exec id.
+
+`microvms-cli/src/commands/agent.rs`
+
+Flags:
+
+- `<TASK>`: the task, as prose. Passed to the headless command single-quoted for `sh`. Required. An empty or whitespace-only task is refused locally with `ERR_INVALID_ARG` before the attach, so it costs zero calls. `microvms-cli/src/cli.rs`, `AgentPromptArgs::task`.
+- `--agent <AGENT>`: which installed agent to prompt; closed set `claude-code`, `codex`. Omitted reads the guest marker `/workspace/.agent-vm.json` and takes the one agent it names; a marker naming two agents is refused with `ERR_PRECONDITION` listing both and suggesting `--agent`. A typed `--agent` still reads the marker when it can, so the prompt uses the model the VM was provisioned with; a VM with no marker and a typed agent runs the profile's defaults; a VM with no marker and no flag is `ERR_PRECONDITION` naming `agent-up`. `microvms-cli/src/commands/agent.rs`, `choose_spec`; `microvms-core/src/agents/mod.rs`, `installed_agents`.
+- `--timeout <TIMEOUT>`: how long this process waits for the agent, in seconds; default `900`, because agent tasks run minutes, not seconds. A client-side deadline: the exec on the daemon's side is started with no wall-clock budget of its own. `microvms-cli/src/cli.rs`, `AgentPromptArgs::timeout`.
+- `--detach`: start the agent and return immediately, without waiting and without acking; the envelope reports `phase: running` and a `null` exit code. `microvm exec --poll <ID> --name <NAME>` reads it back and `microvm ack` releases it, as for `exec --detach`. `microvms-cli/src/cli.rs`, `AgentPromptArgs::detach`.
+- `--exec-id <ID>`: use this exec id instead of a fresh one, making a retry idempotent. `microvms-cli/src/cli.rs`, `AgentPromptArgs::exec_id`.
+- Plus `AttachFlags` and `RegionFlags`; `--name <NAME>` is the usual spelling, the name `agent-up --vm-name` registered.
+
+The success envelope's type is `microvm.agent.prompt`, under its own discriminant because a consumer that learned `microvm.exec` is reading a command it chose and this one ran a template it did not. Its keys are `exec`'s plus which agent ran: `execId`, `agent`, `model`, `phase`, `exitCode`, `stdout`, `stderr`, `truncated`. A non-zero agent exit earns `ERR_EXEC_FAILED` on a success envelope, as `exec` does. `microvms-cli/src/commands/mod.rs`, the `agent-prompt` row; `microvms-cli/src/commands/attached.rs`, `render_exec_as`.
 
 ## exec
 
@@ -545,6 +601,8 @@ Each command declares its `type` discriminant and the `data` keys its success en
 | --- | --- |
 | `run` | `microvm.run` |
 | `build` | `microvm.image` |
+| `agent-up` | `microvm.agent` |
+| `agent-prompt` | `microvm.agent.prompt` |
 | `exec` | `microvm.exec` |
 | `health` | `microvm.health` |
 | `ack` | `microvm.exec` |

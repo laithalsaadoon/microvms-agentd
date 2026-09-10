@@ -265,22 +265,29 @@ one.
 
 ### Running coding agents inside a MicroVM
 
-[examples/coding-agents-on-bedrock](examples/coding-agents-on-bedrock/) runs
-Claude Code and Codex CLI headless inside a MicroVM, against Bedrock, with no
-vendor API key anywhere. One script builds an image carrying both CLIs,
-launches a VM with `--egress`, mints a short-lived Bedrock bearer token from
-your AWS credentials, copies it in over the authenticated channel, and drives
-each agent through `microvm exec`:
+Two commands bring up a VM with Claude Code or Codex CLI in it, headless,
+against Bedrock, with no vendor API key anywhere, and hand it a task:
 
 ```bash
-examples/coding-agents-on-bedrock/run.sh
+microvm agent-up --vm-name dev --agent claude-code --agent codex
+microvm agent-prompt --name dev "Create hello.py that prints hello from a microvm, run it, and show the output."
+microvm terminate dev
 ```
 
-Claude Code uses its native Bedrock mode (`CLAUDE_CODE_USE_BEDROCK=1`);
-Codex talks to Bedrock's OpenAI-compatible Responses endpoint through a
-five-line provider config. The example's [README](examples/coding-agents-on-bedrock/README.md)
-explains each decision, including the two platform constraints the Dockerfile
-has to respect.
+`agent-up` builds an image carrying the agent CLIs (reused when nothing
+changed), launches a kept VM with `--egress`, mints a short-lived Bedrock
+bearer token from your own AWS credentials, installs it as a file the agents
+source, and hands `/workspace` to uid 1000. `agent-prompt` runs the agent's
+headless command as that user and returns its output; `--agent` picks one
+when two are installed. Re-running `agent-up` against the same name refreshes
+the token instead of launching. Claude Code uses its native Bedrock mode
+(`CLAUDE_CODE_USE_BEDROCK=1`); Codex talks to Bedrock's OpenAI-compatible
+Responses endpoint through a short provider config the command writes.
+[docs/AGENT-VMS.md](docs/AGENT-VMS.md) is the specification and the record of
+the scope decision it changed.
+[examples/coding-agents-on-bedrock](examples/coding-agents-on-bedrock/) is the
+same recipe done by hand as a shell script, one `microvm` call per step, for a
+reader who wants to see each decision.
 
 Two open-source harnesses run coding agents inside Lambda MicroVMs the same
 way, each carrying its own hand-rolled daemon:
@@ -442,10 +449,10 @@ protocol/        daemon↔client wire types; drift is a compile error
 agentd/          the in-VM daemon: exec, file transfer, one-shot bootstrap
 model/           stateright models of the daemon and client lifecycle
 microvms-core/   the client library: control plane, session, cost, sandbox
-microvms-cli/    the microvm binary: 24 commands, JSON envelopes, a manifest
+microvms-cli/    the microvm binary: 26 commands, JSON envelopes, a manifest
 microvms-py/     Python binding (PyO3)
 microvms-js/     Node binding (napi-rs)
-conformance/     the live suite: 136 checks against real AWS, via the CLI
+conformance/     the live suite: 151 checks against real AWS, via the CLI
 spec/            57 formal requirements in symspec, checked with Z3
 ```
 

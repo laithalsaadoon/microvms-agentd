@@ -74,6 +74,7 @@ hardlinks
 # Protocol vocabulary: the `ack` command's verb forms, the idle keepalive, a VM that can suspend.
 acked
 acking
+acks
 keepalive
 KEEPALIVE
 suspendable
@@ -98,3 +99,5 @@ Omnigent
 chipset
 # `terraform -chdir=…`, the flag the live-suite page quotes.
 chdir
+# SigV4 query presigning, the mechanism behind the Bedrock bearer token the agent-VM page describes.
+presign

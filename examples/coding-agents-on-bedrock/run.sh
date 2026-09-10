@@ -2,6 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Claude Code and Codex CLI, inside a Lambda MicroVM, against Bedrock.
 #
+# This is the by-hand recipe. The same steps are one command each since the L3 helpers
+# landed (docs/AGENT-VMS.md): `microvm agent-up --vm-name dev --agent claude-code
+# --agent codex`, then `microvm agent-prompt --name dev "<task>"`, then `microvm
+# terminate dev`. Keep reading this script when you want every step visible, or when
+# you are adapting the recipe to a third agent the profile table does not carry.
+#
 # What this does, end to end:
 #   1. builds a MicroVM image carrying agentd + both CLIs (first run only),
 #   2. launches a VM from it with outbound network (--egress),
