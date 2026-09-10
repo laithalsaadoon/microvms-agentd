@@ -119,18 +119,28 @@ The `microvms` wheel and the `@theagenticguy/microvms` package carry the layer a
 import boto3, microvms
 
 agentd = open("agentd", "rb").read()
-vm = microvms.AgentVm(microvms.Region.us_east_1(),
-                      [microvms.AgentSpec.claude_code(), microvms.AgentSpec.codex()])
+vm = microvms.AgentVm(
+    microvms.Region.us_east_1(),
+    [microvms.AgentSpec.claude_code(), microvms.AgentSpec.codex()],
+)
 image = vm.find_image(binary=agentd, build_role_arn=BUILD_ROLE)
 if image is None:
     name = vm.image_name(binary=agentd, build_role_arn=BUILD_ROLE)
-    boto3.client("s3").put_object(Bucket=BUCKET, Key=f"{name}.zip",
-        Body=vm.build_artifact(binary=agentd, build_role_arn=BUILD_ROLE))
-    image = vm.build_image(binary=agentd, build_role_arn=BUILD_ROLE,
-        code_artifact_uri=f"s3://{BUCKET}/{name}.zip").identifier
+    boto3.client("s3").put_object(
+        Bucket=BUCKET,
+        Key=f"{name}.zip",
+        Body=vm.build_artifact(binary=agentd, build_role_arn=BUILD_ROLE),
+    )
+    image = vm.build_image(
+        binary=agentd,
+        build_role_arn=BUILD_ROLE,
+        code_artifact_uri=f"s3://{BUCKET}/{name}.zip",
+    ).identifier
 vm.launch(image_identifier=image, execution_role_arn=EXEC_ROLE)
-token = vm.install_access()                 # minted in process; token.expires_at says when to repeat
-result = vm.prompt_sync("codex", "Create hello.py that prints hello from a microvm, run it.")
+token = vm.install_access()  # minted in process; token.expires_at says when to repeat
+result = vm.prompt_sync(
+    "codex", "Create hello.py that prints hello from a microvm, run it."
+)
 print(result.stdout, vm.session.download_file("/workspace/hello.py"))
 vm.terminate()
 ```

@@ -266,17 +266,25 @@ sequence is the CLI's, one method per step, and the upload stays the caller's be
 S3 is not in the core's dependency set:
 
 ```python
-vm = microvms.AgentVm(microvms.Region.us_east_1(),
-                      [microvms.AgentSpec.claude_code(), microvms.AgentSpec.codex()])
+vm = microvms.AgentVm(
+    microvms.Region.us_east_1(),
+    [microvms.AgentSpec.claude_code(), microvms.AgentSpec.codex()],
+)
 image = vm.find_image(binary=agentd, build_role_arn=build_role)
 if image is None:
     name = vm.image_name(binary=agentd, build_role_arn=build_role)
-    s3.put_object(Bucket=bucket, Key=f"{name}.zip",
-                  Body=vm.build_artifact(binary=agentd, build_role_arn=build_role))
-    image = vm.build_image(binary=agentd, code_artifact_uri=f"s3://{bucket}/{name}.zip",
-                           build_role_arn=build_role).identifier
+    s3.put_object(
+        Bucket=bucket,
+        Key=f"{name}.zip",
+        Body=vm.build_artifact(binary=agentd, build_role_arn=build_role),
+    )
+    image = vm.build_image(
+        binary=agentd,
+        code_artifact_uri=f"s3://{bucket}/{name}.zip",
+        build_role_arn=build_role,
+    ).identifier
 vm.launch(image_identifier=image, execution_role_arn=exec_role)
-token = vm.install_access()                      # minted in process; token.expires_at
+token = vm.install_access()  # minted in process; token.expires_at
 result = vm.prompt_sync("codex", "Create hello.py that prints hello, run it.")
 vm.terminate(delete_image=False)
 ```
