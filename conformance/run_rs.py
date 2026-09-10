@@ -2935,7 +2935,7 @@ def drive_agent_vm(
         # AGENT-7 through Codex: a file the workspace keeps, read back by a plain exec
         # so the assertion does not depend on what the agent chose to print.
         # The model can decline a task outright: measured once in five runs on
-        # 2026-09-10 (Codex 0.154.0, openai.gpt-5.6-sol), the reply was a refusal with
+        # 2026-09-10 (Codex 0.154.0, global.openai.gpt-5.6-sol), the reply was a refusal with
         # zero tool calls and Codex exited 0, so the prompt check alone cannot see it.
         # One re-prompt keeps a model's coin flip from failing the suite; a second
         # decline fails it, and the detail names how many prompts it took.

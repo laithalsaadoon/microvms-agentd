@@ -17,8 +17,9 @@
 //!    find no `PATH` and every command exits 127. The environment file sets it.
 //! 3. **The daemon writes uploaded files as root, mode 0600**, which a demoted agent
 //!    cannot read. One root `chown` follows the uploads.
-//! 4. **Codex reaches Bedrock only through the Mantle host** on the Responses wire API.
-//!    Its config file names that host for the launch region.
+//! 4. **Codex reaches Bedrock through `bedrock-runtime`'s `/openai/v1`** on the Responses
+//!    wire API, with an inference-profile model id and hosted web search disabled. Its
+//!    config file names that host for the launch region.
 //!
 //! # What it is not
 //!
@@ -831,11 +832,11 @@ mod tests {
 
         let config = String::from_utf8(files[1].contents.clone()).expect("utf-8");
         assert!(
-            config.contains("bedrock-mantle.us-east-1.api.aws"),
+            config.contains("bedrock-runtime.us-east-1.amazonaws.com/openai/v1"),
             "{config}"
         );
         assert!(
-            config.contains("model = \"openai.gpt-5.6-sol\""),
+            config.contains("model = \"global.openai.gpt-5.6-sol\""),
             "{config}"
         );
 
@@ -843,7 +844,7 @@ mod tests {
         assert_eq!(files[2].mode, "0644");
         assert_eq!(marker["agents"][0]["agent"], "claude-code");
         assert_eq!(marker["agents"][1]["agent"], "codex");
-        assert_eq!(marker["agents"][1]["model"], "openai.gpt-5.6-sol");
+        assert_eq!(marker["agents"][1]["model"], "global.openai.gpt-5.6-sol");
         assert!(
             !files[2]
                 .contents
@@ -954,7 +955,7 @@ mod tests {
         assert_eq!(read[0].model(), "global.anthropic.claude-sonnet-5");
         assert_eq!(read[1].agent, Agent::Codex);
         assert_eq!(read[1].cli_version.as_deref(), Some("0.50.0"));
-        assert_eq!(read[1].model(), "openai.gpt-5.6-sol");
+        assert_eq!(read[1].model(), "global.openai.gpt-5.6-sol");
     }
 
     /// A VM with no marker is a precondition failure naming the command that writes one,

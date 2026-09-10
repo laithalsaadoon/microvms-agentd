@@ -13,7 +13,7 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
   installed, Bedrock access wired, and a non-root user to run it as, then one
   call that hands the agent a task. `Agent::{ClaudeCode, Codex}` is a closed
   enum over a dated profile table (`agents::profile`): install lines, default
-  model id, environment lines, Codex's Mantle provider config, and the headless
+  model id, environment lines, Codex's bedrock-runtime provider config, and the headless
   command template, each overridable at the call site. `AgentVm` wraps a
   `Sandbox` for the build, launch, provision, prompt, terminate shape; the free
   functions `install_access`, `installed_agents`, and `prompt` take a `Session`
@@ -42,7 +42,11 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
   18's and the npm layer exits 127), and the Codex config sets
   `model_reasoning_effort = "medium"` (Codex has no metadata for a Bedrock
   model id and otherwise sends none; one no-effort run in five declined its
-  task with zero tool calls and exit 0). Because that decline exits 0, callers
+  task with zero tool calls and exit 0). Codex's provider is `bedrock-runtime`'s
+  `/openai/v1` (the Responses wire API is served there; the Mantle host the
+  example used to name is a separate surface), with the inference-profile id
+  `global.openai.gpt-5.6-sol` and `web_search = "disabled"`, both required on
+  that host. Because that decline exits 0, callers
   verify effects with an `exec` that reads them back, as the docs show.
   Teardown stays `microvm terminate NAME`.
 - **The rule change.** Until now agent-specific detail (CLI installs, model

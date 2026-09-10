@@ -31,7 +31,7 @@ AGENTD="${AGENTD:-target/aarch64-unknown-linux-musl/release/agentd}"
 # window on Bedrock (context length is a model property, not a model-id
 # variant — there is no separate "-1m" id).
 CLAUDE_MODEL="${CLAUDE_MODEL:-global.anthropic.claude-opus-5}"
-CODEX_MODEL="${CODEX_MODEL:-openai.gpt-5.6-sol}"
+CODEX_MODEL="${CODEX_MODEL:-global.openai.gpt-5.6-sol}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 jqr() { python3 -c "import json,sys; print(json.load(sys.stdin)['data']$1)"; }
@@ -99,17 +99,19 @@ microvm cp "$ENVFILE" vm:/workspace/.agent-env --mode 0600 "${ATTACH[@]}" --json
 rm -f "$ENVFILE"
 
 # Codex reads its provider from config.toml. Current Codex speaks only the
-# Responses wire API, and on Bedrock that lives on the Mantle host
-# (bedrock-mantle.<region>.api.aws), not on bedrock-runtime; the
-# bedrock-runtime /openai/v1 surface is chat-completions only, which Codex
-# dropped. Same bearer token works on both hosts.
+# Responses wire API; bedrock-runtime's /openai/v1 serves it. The model must
+# be an inference-profile id (the bare openai.gpt-5.6-sol is refused), and
+# hosted web search must be off or Bedrock fails every turn with "web search
+# is not supported for this request".
 CODEXCFG=$(mktemp)
 cat > "$CODEXCFG" <<CFG
 model = "$CODEX_MODEL"
 model_provider = "bedrock"
+model_reasoning_effort = "medium"
+web_search = "disabled"
 [model_providers.bedrock]
-name = "Amazon Bedrock (Mantle)"
-base_url = "https://bedrock-mantle.$REGION.api.aws/openai/v1"
+name = "Amazon Bedrock"
+base_url = "https://bedrock-runtime.$REGION.amazonaws.com/openai/v1"
 env_key = "OPENAI_API_KEY"
 wire_api = "responses"
 CFG

@@ -822,7 +822,7 @@ mod tests {
         assert_eq!(both.len(), 2);
         assert_eq!(both[0].agent, Agent::Codex);
         assert_eq!(both[0].cli_version.as_deref(), Some("0.50.0"));
-        assert_eq!(both[0].model(), "openai.gpt-5.6-sol");
+        assert_eq!(both[0].model(), "global.openai.gpt-5.6-sol");
         assert_eq!(both[1].agent, Agent::ClaudeCode);
         assert_eq!(both[1].cli_version, None);
     }

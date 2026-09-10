@@ -97,7 +97,7 @@ pub const SYSTEM_PACKAGES: &str =
 pub const CLAUDE_CODE: Profile = Profile {
     npm_package: "@anthropic-ai/claude-code",
     default_model: "global.anthropic.claude-opus-5",
-    verified: "2026-09-02, us-east-1, @anthropic-ai/claude-code latest on that date",
+    verified: "2026-09-10, us-east-1, @anthropic-ai/claude-code latest on that date",
 };
 
 /// Codex. `-s workspace-write` because the agent runs as uid 1000 in `/workspace` and
@@ -105,8 +105,8 @@ pub const CLAUDE_CODE: Profile = Profile {
 /// tree arrives without `.git` (`microvms-cli/src/sync.rs`, `SKIPPED_DIRS`).
 pub const CODEX: Profile = Profile {
     npm_package: "@openai/codex",
-    default_model: "openai.gpt-5.6-sol",
-    verified: "2026-09-02, us-east-1, @openai/codex latest on that date",
+    default_model: "global.openai.gpt-5.6-sol",
+    verified: "2026-09-10, us-east-1, @openai/codex 0.154.0, bedrock-runtime host",
 };
 
 /// The environment file both agents source, and where the credentials live.
@@ -138,16 +138,27 @@ pub fn env_pairs(agent: Agent, model: &str, token: &str) -> Vec<(&'static str, S
 
 /// Codex's `config.toml`.
 ///
-/// The Responses wire API lives on the Mantle host, not on `bedrock-runtime`: that
-/// host's `/openai/v1` is chat-completions only, which Codex dropped. Same bearer token
-/// works on both hosts (measured 2026-09-02, us-east-1).
+/// The provider is `bedrock-runtime`'s OpenAI-compatible surface,
+/// `https://bedrock-runtime.<region>.amazonaws.com/openai/v1`, which serves the Responses
+/// wire API Codex speaks (the InvokeModel path in CloudTrail). An earlier version of this
+/// file claimed that surface was chat-completions only and pointed Codex at the Mantle
+/// host (`bedrock-mantle.<region>.api.aws`); that claim was wrong by 2026-09-03 and the
+/// Mantle host is a separate service surface, so the config names `bedrock-runtime`.
+/// Verified 2026-09-10, us-east-1, Codex 0.154.0, on the host and inside the VM.
+///
+/// Two lines are required on this host and were not on Mantle. The model must be an
+/// inference-profile id (`global.openai.gpt-5.6-sol`; the bare `openai.gpt-5.6-sol` is
+/// refused with "on-demand throughput isn't supported"). `web_search = "disabled"`
+/// because Codex advertises its hosted web-search tool by default and Bedrock fails the
+/// turn with "web search is not supported for this request", so without it every task
+/// dies on turn one.
 ///
 /// `model_reasoning_effort` is set because Codex has no metadata row for a Bedrock model
 /// id and its fallback sends none ("reasoning effort: none" in the banner). Measured
-/// 2026-09-10, us-east-1, Codex 0.154.0, `openai.gpt-5.6-sol`: one of five identical
+/// 2026-09-10, us-east-1, Codex 0.154.0, `global.openai.gpt-5.6-sol`: one of five identical
 /// file-writing tasks came back as a plain refusal with zero tool calls and exit 0
 /// ("I can't create or run files in this environment"); the other four wrote the file.
-/// Mantle accepts `medium` for this model (verified in-VM the same day). The setting is
+/// The host accepts `medium` for this model (verified the same day). The setting is
 /// the plausible mitigation, not a measured cure: the decline rate under it is unmeasured,
 /// and a caller who needs the effect verifies it the way the docs show, with an `exec`
 /// that reads the file back.
@@ -156,9 +167,10 @@ pub fn codex_config(model: &str, region: &Region) -> String {
         "model = \"{model}\"\n\
          model_provider = \"bedrock\"\n\
          model_reasoning_effort = \"medium\"\n\
+         web_search = \"disabled\"\n\
          [model_providers.bedrock]\n\
-         name = \"Amazon Bedrock (Mantle)\"\n\
-         base_url = \"https://bedrock-mantle.{}.api.aws/openai/v1\"\n\
+         name = \"Amazon Bedrock\"\n\
+         base_url = \"https://bedrock-runtime.{}.amazonaws.com/openai/v1\"\n\
          env_key = \"OPENAI_API_KEY\"\n\
          wire_api = \"responses\"\n",
         region.as_str()
@@ -208,11 +220,19 @@ mod tests {
     }
 
     #[test]
-    fn the_codex_config_names_the_mantle_host_for_the_region() {
-        let config = codex_config("openai.gpt-5.6-sol", &Region::UsWest2);
-        assert!(config.contains("https://bedrock-mantle.us-west-2.api.aws/openai/v1"));
+    fn the_codex_config_names_the_bedrock_runtime_host_for_the_region() {
+        let config = codex_config("global.openai.gpt-5.6-sol", &Region::UsWest2);
+        assert!(config.contains("https://bedrock-runtime.us-west-2.amazonaws.com/openai/v1"));
+        assert!(
+            !config.contains("mantle"),
+            "the Mantle host is a separate surface:\n{config}"
+        );
         assert!(config.contains("wire_api = \"responses\""));
-        assert!(config.starts_with("model = \"openai.gpt-5.6-sol\"\n"));
+        assert!(config.starts_with("model = \"global.openai.gpt-5.6-sol\"\n"));
+        assert!(
+            config.contains("\nweb_search = \"disabled\"\n"),
+            "bedrock-runtime fails the turn when Codex advertises hosted web search:\n{config}"
+        );
         assert!(
             config.contains("\nmodel_reasoning_effort = \"medium\"\n"),
             "the fallback metadata sends no effort, and a no-effort run declined a task:\n{config}"

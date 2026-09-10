@@ -17,7 +17,7 @@ microvm terminate dev
 
 ## 1. Prerequisites
 
-The `microvm` CLI on your `PATH`; the `MICROVM_BUCKET`, `MICROVM_BUILD_ROLE_ARN`, and `MICROVM_EXECUTION_ROLE_ARN` values from [your first run](/learn/tutorial/first-run/); and AWS credentials that can call `lambda-microvms` and `bedrock:InvokeModel`. The account needs Bedrock access to the models the profiles default to, `global.anthropic.claude-opus-5` for Claude Code and `openai.gpt-5.6-sol` for Codex; `--claude-model` and `--codex-model` override them. Nothing else is needed on your machine: the token is minted in-process, so there is no Python step.
+The `microvm` CLI on your `PATH`; the `MICROVM_BUCKET`, `MICROVM_BUILD_ROLE_ARN`, and `MICROVM_EXECUTION_ROLE_ARN` values from [your first run](/learn/tutorial/first-run/); and AWS credentials that can call `lambda-microvms` and `bedrock:InvokeModel`. The account needs Bedrock access to the models the profiles default to, `global.anthropic.claude-opus-5` for Claude Code and `global.openai.gpt-5.6-sol` for Codex; `--claude-model` and `--codex-model` override them. Nothing else is needed on your machine: the token is minted in-process, so there is no Python step.
 
 ## 2. Bring the VM up
 
@@ -42,15 +42,16 @@ microvm agent-up --vm-name dev --agent claude-code --agent codex --json
    export OPENAI_API_KEY="<token>"
    ```
 
-   Claude Code has a native Bedrock mode: `CLAUDE_CODE_USE_BEDROCK=1` plus the bearer token, with the model chosen by `ANTHROPIC_MODEL` as an inference-profile id. Codex has no Bedrock mode, and Bedrock exposes an OpenAI-compatible surface, so when Codex is installed a second file, `/workspace/.codex/config.toml`, defines a provider with the bearer token as its API key. Current Codex speaks only the Responses wire API, which lives on the Mantle host and not on `bedrock-runtime`:
+   Claude Code has a native Bedrock mode: `CLAUDE_CODE_USE_BEDROCK=1` plus the bearer token, with the model chosen by `ANTHROPIC_MODEL` as an inference-profile id. Codex has no Bedrock mode, and `bedrock-runtime` exposes an OpenAI-compatible surface that serves the Responses wire API Codex speaks, so when Codex is installed a second file, `/workspace/.codex/config.toml`, defines a provider with the bearer token as its API key. Two lines are required on that host: the model is an inference-profile id (the bare `openai.gpt-5.6-sol` is refused with "on-demand throughput isn't supported"), and hosted web search is disabled, because Codex advertises that tool by default and Bedrock fails the turn with "web search is not supported for this request":
 
    ```toml
-   model = "openai.gpt-5.6-sol"
+   model = "global.openai.gpt-5.6-sol"
    model_provider = "bedrock"
    model_reasoning_effort = "medium"
+   web_search = "disabled"
    [model_providers.bedrock]
-   name = "Amazon Bedrock (Mantle)"
-   base_url = "https://bedrock-mantle.us-east-1.api.aws/openai/v1"
+   name = "Amazon Bedrock"
+   base_url = "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1"
    env_key = "OPENAI_API_KEY"
    wire_api = "responses"
    ```
