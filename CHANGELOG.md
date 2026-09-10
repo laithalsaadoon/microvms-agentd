@@ -49,6 +49,16 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
   that host. Because that decline exits 0, callers
   verify effects with an `exec` that reads them back, as the docs show.
   Teardown stays `microvm terminate NAME`.
+- **Bindings.** `microvms-py` and `microvms-js` carry the layer as `AgentVm`,
+  `AgentSpec`, and `BearerToken`, one method per `agent-up` step (`find_image`,
+  `image_name`, `build_artifact`, `build_image`, `launch`, `install_access`,
+  `prompt`, `prompt_sync`, `terminate`), plus `installed_agents`,
+  `install_agent_access`, `prompt_agent`, and `mint_bedrock_token` for a process
+  holding only a session. The binding shares the sandbox lock with every session
+  it hands out; every refusal is the core's; the token has no constructor and
+  one door, `expose()`. New core entry points back it: `image_request_for`,
+  `image_name_for`, `launch_request_for`, `spec_for`, `require_specs`, and
+  `FromStr for Agent`.
 - **The rule change.** Until now agent-specific detail (CLI installs, model
   ids, credential wiring) lived only in `examples/` and docs. `docs/AGENT-VMS.md`
   records why L3 crosses that line for two agents and how the churn is bounded:

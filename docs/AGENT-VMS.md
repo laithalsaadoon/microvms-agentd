@@ -256,11 +256,49 @@ and a later `credentialExpiresAt`; `terminate NAME` releases the name. That sect
 needs Bedrock access to both default models in the conformance account and is the only
 part of the suite that does; it reports the model ids it used.
 
+## The bindings
+
+`microvms-py` and `microvms-js` carry the layer as `AgentVm`, `AgentSpec`, and
+`BearerToken`, plus four module functions for a caller who holds only a session:
+`installed_agents`, `install_agent_access`, `prompt_agent`, and `mint_bedrock_token`
+(`installedAgents`, `installAgentAccess`, `promptAgent`, `mintBedrockToken`). The
+sequence is the CLI's, one method per step, and the upload stays the caller's because
+S3 is not in the core's dependency set:
+
+```python
+vm = microvms.AgentVm(microvms.Region.us_east_1(),
+                      [microvms.AgentSpec.claude_code(), microvms.AgentSpec.codex()])
+image = vm.find_image(binary=agentd, build_role_arn=build_role)
+if image is None:
+    name = vm.image_name(binary=agentd, build_role_arn=build_role)
+    s3.put_object(Bucket=bucket, Key=f"{name}.zip",
+                  Body=vm.build_artifact(binary=agentd, build_role_arn=build_role))
+    image = vm.build_image(binary=agentd, code_artifact_uri=f"s3://{bucket}/{name}.zip",
+                           build_role_arn=build_role).identifier
+vm.launch(image_identifier=image, execution_role_arn=exec_role)
+token = vm.install_access()                      # minted in process; token.expires_at
+result = vm.prompt_sync("codex", "Create hello.py that prints hello, run it.")
+vm.terminate(delete_image=False)
+```
+
+The binding holds the same lock the sandbox and every session it hands out hold, so a
+`terminate` and a session call cannot interleave; `vm.sandbox` and `vm.session` reach
+the same VM for suspend, resume, and file transfer. `terminate(delete_image=True)` deletes
+only an image the object itself built, the sandbox's existing rule; a reused image is
+reported `image_deleted: false` with no failure, and the caller deletes it. The core's `AgentVm` owns its
+sandbox, which one binding class cannot share, so the bindings drive the layer through
+the core's free functions (`image_request_for`, `launch_request_for`, `install_access`,
+`prompt`, `spec_for`) with the specs kept beside the lock. No refusal lives in a
+binding: an unknown agent name, an empty or repeated spec set, a prompt for an agent
+the VM does not carry, a blank task, and a token lifetime past the ceiling are all the
+core's messages. A `BearerToken` has no constructor and shows only its length; `expose()`
+is the one door to the text, for a caller writing it into an environment themselves.
+
+The Python stub is regenerated from the compiled module (`mise run stubs`) and the Node
+`index.d.ts` from the napi surface, so both type surfaces follow the Rust.
+
 ## Phase 2, deliberately out of this change
 
-- Python and Node bindings for `AgentVm`. The core type is shaped for it (one object,
-  runtime-checked lifecycle), and the stub generators will carry it; landing it here
-  would double the change and the review.
 - `--stream` on `agent-prompt`. The `exec --stream` path exists and the envelope
   publishes the command to stream.
 - `microvm.toml` keys for the agent flags. `merge_config` is `run`-shaped and the

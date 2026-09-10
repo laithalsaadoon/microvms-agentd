@@ -71,13 +71,14 @@
 //! [`errors`] is the one conversion out. [`region`], [`hooks`], and [`cost`] are the value
 //! types. [`session`] and [`exec`] are the in-VM surface; [`process`] is the same exec seen as
 //! two byte streams, for a consumer shaped like the AI SDK's `SandboxProcess`; [`sandbox`] is
-//! the lifecycle.
+//! the lifecycle; [`agents`] is the L3 layer over it, one VM with coding agents in it.
 
 // `pub` rather than private: the `#[napi]` macro registers each item at module-init time
 // through a link-section constructor rather than through a Rust path, so with private modules
 // every exported function is `dead_code` as far as rustc can see. Making the modules public is
 // what lets `-D warnings` stay on without a blanket allow — and it exports nothing extra,
 // because this crate is a `cdylib` with no Rust consumers.
+pub mod agents;
 pub mod cost;
 pub mod errors;
 pub mod exec;

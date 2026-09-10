@@ -54,6 +54,24 @@ impl Agent {
     }
 }
 
+impl std::str::FromStr for Agent {
+    type Err = crate::Error;
+
+    /// The refusal the bindings surface for an unknown name, so the message is the core's.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        Agent::parse(text).ok_or_else(|| {
+            crate::Error::invalid_arg(format!(
+                "unknown agent {text:?}. An agent VM installs one or both of: {}.",
+                Agent::ALL
+                    .iter()
+                    .map(|agent| agent.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+        })
+    }
+}
+
 impl std::fmt::Display for Agent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())

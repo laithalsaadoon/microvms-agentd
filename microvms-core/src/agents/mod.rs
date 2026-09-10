@@ -124,7 +124,10 @@ impl AgentSpec {
 ///
 /// Both are caller mistakes with no sensible reading: an image with no agent is
 /// `microvm build`, and two rows for one agent would have two models for one CLI.
-fn require_specs(specs: &[AgentSpec]) -> Result<(), Error> {
+///
+/// Public because the bindings hold a spec list beside a shared sandbox rather than an
+/// [`AgentVm`], and the refusal has to be this one rather than a copy of it.
+pub fn require_specs(specs: &[AgentSpec]) -> Result<(), Error> {
     if specs.is_empty() {
         return Err(Error::invalid_arg(
             "no agent named. An agent VM installs at least one of: claude-code, codex.",
@@ -150,6 +153,65 @@ fn ordered(specs: &[AgentSpec]) -> Vec<&AgentSpec> {
     let mut sorted: Vec<&AgentSpec> = specs.iter().collect();
     sorted.sort_by_key(|spec| spec.agent);
     sorted
+}
+
+/// The spec in `specs` for `agent`, or the refusal [`AgentVm::prompt`] gives.
+pub fn spec_for(specs: &[AgentSpec], agent: Agent) -> Result<&AgentSpec, Error> {
+    specs
+        .iter()
+        .find(|spec| spec.agent == agent)
+        .ok_or_else(|| {
+            Error::invalid_arg(format!(
+                "this VM carries {}, not {agent}.",
+                image_stem(specs).trim_start_matches("agent-vm-")
+            ))
+        })
+}
+
+/// [`AgentVm::image_name`] for a caller holding the sandbox and the specs separately:
+/// the bindings, whose sandbox sits behind a lock shared with every session they hand out.
+pub fn image_name_for(
+    sandbox: &Sandbox,
+    specs: &[AgentSpec],
+    request: &CreateImageRequest,
+) -> String {
+    let hash = sandbox.artifact_content_hash_for(request);
+    format!("{}-{}", image_stem(specs), &hash[..12])
+}
+
+/// [`AgentVm::image_request`] for a caller holding the sandbox and the specs separately.
+pub fn image_request_for(
+    sandbox: &Sandbox,
+    specs: &[AgentSpec],
+    binary: Vec<u8>,
+    build_role_arn: impl Into<String>,
+    size: SizeClass,
+) -> Result<CreateImageRequest, Error> {
+    require_specs(specs)?;
+    let base = BaseImage::al2023();
+    let dockerfile = dockerfile(specs, &base, sandbox.port())?;
+    let mut request =
+        CreateImageRequest::new(image_stem(specs), binary, String::new(), build_role_arn);
+    request.base_image = base;
+    request.dockerfile = Some(dockerfile);
+    request.size = size;
+    let name = image_name_for(sandbox, specs, &request);
+    request.name = name.clone();
+    request.token_scope = Some(name);
+    Ok(request)
+}
+
+/// [`AgentVm::launch_request`] for a caller holding the specs separately.
+pub fn launch_request_for(
+    specs: &[AgentSpec],
+    image_identifier: impl Into<String>,
+    execution_role_arn: Option<String>,
+) -> RunRequest {
+    let identifier = image_identifier.into();
+    let mut request = RunRequest::new().with_image(&identifier).with_egress();
+    request.execution_role_arn = execution_role_arn;
+    request.token_scope = Some(image_stem(specs));
+    request
 }
 
 /// The stem of the image name: `agent-vm-<agents>` in profile order (AGENT-3). The
@@ -573,8 +635,7 @@ impl AgentVm {
     /// hex characters of the artifact content hash, so an unchanged binary and an
     /// unchanged spec set name the image `build --reuse` would find (AGENT-3).
     pub fn image_name(&self, request: &CreateImageRequest) -> String {
-        let hash = self.sandbox.artifact_content_hash_for(request);
-        format!("{}-{}", image_stem(&self.specs), &hash[..12])
+        image_name_for(&self.sandbox, &self.specs, request)
     }
 
     /// The create request for this VM's image, named per [`AgentVm::image_name`].
@@ -589,21 +650,7 @@ impl AgentVm {
         build_role_arn: impl Into<String>,
         size: SizeClass,
     ) -> Result<CreateImageRequest, Error> {
-        let base = BaseImage::al2023();
-        let dockerfile = dockerfile(&self.specs, &base, self.sandbox.port())?;
-        let mut request = CreateImageRequest::new(
-            image_stem(&self.specs),
-            binary,
-            String::new(),
-            build_role_arn,
-        );
-        request.base_image = base;
-        request.dockerfile = Some(dockerfile);
-        request.size = size;
-        let name = self.image_name(&request);
-        request.name = name.clone();
-        request.token_scope = Some(name);
-        Ok(request)
+        image_request_for(&self.sandbox, &self.specs, binary, build_role_arn, size)
     }
 
     /// Builds the image. The caller has uploaded the artifact to the request's URI.
@@ -618,11 +665,7 @@ impl AgentVm {
         image_identifier: impl Into<String>,
         execution_role_arn: Option<String>,
     ) -> RunRequest {
-        let identifier = image_identifier.into();
-        let mut request = RunRequest::new().with_image(&identifier).with_egress();
-        request.execution_role_arn = execution_role_arn;
-        request.token_scope = Some(image_stem(&self.specs));
-        request
+        launch_request_for(&self.specs, image_identifier, execution_role_arn)
     }
 
     /// Launches and waits for the daemon to answer.
@@ -655,16 +698,7 @@ impl AgentVm {
         task: &str,
         options: &PromptOptions,
     ) -> Result<ExecHandle, Error> {
-        let spec = self
-            .specs
-            .iter()
-            .find(|spec| spec.agent == agent)
-            .ok_or_else(|| {
-                Error::invalid_arg(format!(
-                    "this VM carries {}, not {agent}.",
-                    image_stem(&self.specs).trim_start_matches("agent-vm-")
-                ))
-            })?;
+        let spec = spec_for(&self.specs, agent)?;
         prompt(self.require_session()?, spec, task, options).await
     }
 

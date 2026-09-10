@@ -111,7 +111,50 @@ microvm cp --tar vm:/workspace ./after.tar --name dev
 
 [examples/coding-agents-on-bedrock/run.sh](https://github.com/laithalsaadoon/microvms-agentd/tree/main/examples/coding-agents-on-bedrock) is the same recipe as a shell script, one `microvm` call per step: `build --reuse` with its own Dockerfile, `run --keep --egress` with `memory = 1024` in a `microvm.toml`, a token from the `aws-bedrock-token-generator` package through `uvx`, `cp --mode 0600` for the environment file, the root `chown` exec, and one `exec --user 1000 --group 1000` per agent. Read it when you want to see each decision on its own line or drive a step differently; the two commands above are that script moved into the library, with the same measured values.
 
-## 7. Cost and cleanup
+## 7. The same sequence from Python or Node
+
+The `microvms` wheel and the `@theagenticguy/microvms` package carry the layer as `AgentVm`. One method per step, the same names the CLI prints in its progress lines, and the artifact upload stays yours because S3 is not in the client's dependency set:
+
+```python
+import boto3, microvms
+
+agentd = open("agentd", "rb").read()
+vm = microvms.AgentVm(microvms.Region.us_east_1(),
+                      [microvms.AgentSpec.claude_code(), microvms.AgentSpec.codex()])
+image = vm.find_image(binary=agentd, build_role_arn=BUILD_ROLE)
+if image is None:
+    name = vm.image_name(binary=agentd, build_role_arn=BUILD_ROLE)
+    boto3.client("s3").put_object(Bucket=BUCKET, Key=f"{name}.zip",
+        Body=vm.build_artifact(binary=agentd, build_role_arn=BUILD_ROLE))
+    image = vm.build_image(binary=agentd, build_role_arn=BUILD_ROLE,
+        code_artifact_uri=f"s3://{BUCKET}/{name}.zip").identifier
+vm.launch(image_identifier=image, execution_role_arn=EXEC_ROLE)
+token = vm.install_access()                 # minted in process; token.expires_at says when to repeat
+result = vm.prompt_sync("codex", "Create hello.py that prints hello from a microvm, run it.")
+print(result.stdout, vm.session.download_file("/workspace/hello.py"))
+vm.terminate()
+```
+
+```ts
+import { AgentVm, Region } from '@theagenticguy/microvms';
+
+const vm = await AgentVm.create(Region.usEast1(), [{ agent: 'claude-code' }, { agent: 'codex' }]);
+const opts = { binary: agentd, buildRoleArn: BUILD_ROLE };
+let image = await vm.findImage(opts);
+if (image === null) {
+  const name = await vm.imageName(opts);
+  await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: `${name}.zip`, Body: await vm.buildArtifact(opts) }));
+  image = (await vm.buildImage({ ...opts, codeArtifactUri: `s3://${BUCKET}/${name}.zip` })).identifier;
+}
+await vm.launch({ imageIdentifier: image, executionRoleArn: EXEC_ROLE });
+const token = await vm.installAccess();     // token.expiresAt
+const result = await vm.promptSync('codex', 'Create hello.py that prints hello from a microvm, run it.');
+await vm.terminate();
+```
+
+`vm.sandbox` and `vm.session` reach the same VM for suspend, resume, and file transfer, under the same lock, so a teardown and a session call cannot interleave. `terminate(delete_image=True)` deletes only an image this object built; an image `find_image` found belongs to whoever built it, and the report says `image_deleted: false` without a failure. Delete a reused image with `aws lambda-microvms delete-microvm-image` when you are done with it (measured 2026-09-10: the Node run reused the Python run's image and its teardown left it in place, as designed). A process that holds only the identifier triple refreshes credentials without an `AgentVm`: `installed_agents(session)` reads the marker, `mint_bedrock_token(region)` mints, `install_agent_access(session, agents, token)` rewrites the files, and `prompt_agent(session, spec, task)` runs a task. Every refusal is the core's, with the same messages the CLI prints. A `BearerToken` has no constructor and prints only its length; `expose()` is the one door to the text.
+
+## 8. Cost and cleanup
 
 An agent VM is kept by definition, so nothing tears it down for you except the launch's own idle policy: `--max-idle-sec` (default 600) suspends it after that much inbound idleness, `--suspended-sec` (default 600) terminates it after that long suspended, and `--max-duration-sec` (default 3600) is the hard ceiling. A multi-hour session needs an outside keepalive, because idleness is measured outside the VM: poll `microvm health --name dev` on an interval under `--max-idle-sec`, or pass `--auto-resume` so the next request wakes it. [Keep a VM running and work inside it](/learn/tutorial/long-lived-vm/) covers suspend and resume. When you are done:
 

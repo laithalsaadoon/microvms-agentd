@@ -88,7 +88,7 @@ pub struct Image {
 }
 
 impl Image {
-    fn wrap(image: &microvms_core::control::Image) -> Self {
+    pub(crate) fn wrap(image: &microvms_core::control::Image) -> Self {
         Self {
             identifier: image.identifier.clone(),
             name: image.name.clone(),
@@ -130,7 +130,7 @@ pub struct TeardownReport {
 }
 
 impl TeardownReport {
-    fn wrap(report: CoreTeardownReport) -> Self {
+    pub(crate) fn wrap(report: CoreTeardownReport) -> Self {
         Self {
             leaked: report.leaked(),
             lifecycle: report
@@ -360,6 +360,27 @@ pub struct TeardownOptions {
     pub wait_for_terminated: Option<bool>,
 }
 
+impl TeardownOptions {
+    /// The core options, every unset knob falling back to the core's own figure.
+    pub(crate) fn into_opts(self) -> Result<TeardownOpts, AsyncError> {
+        let defaults = TeardownOpts::default();
+        let mut opts = TeardownOpts {
+            delete_image: self.delete_image.unwrap_or(false),
+            delete_log_group: self.delete_log_group.unwrap_or(false),
+            delete_attempts: self.delete_attempts.unwrap_or(defaults.delete_attempts),
+            delete_backoff: match self.delete_backoff {
+                Some(backoff) => seconds_async(backoff)?,
+                None => defaults.delete_backoff,
+            },
+            wait_for_terminated: defaults.wait_for_terminated,
+        };
+        if self.wait_for_terminated.unwrap_or(false) {
+            opts = opts.waiting_for_terminated();
+        }
+        Ok(opts)
+    }
+}
+
 /// One MicroVM's whole life.
 ///
 /// The five transitions are `buildImage`, `run`, `suspend`, `resume`, and `terminate`, and
@@ -367,6 +388,14 @@ pub struct TeardownOptions {
 #[napi]
 pub struct Sandbox {
     inner: Arc<Mutex<CoreSandbox>>,
+}
+
+impl Sandbox {
+    /// A sandbox over an `Arc` another object already holds: how [`crate::agents::AgentVm`]
+    /// hands out the sandbox it drives.
+    pub(crate) fn from_arc(inner: Arc<Mutex<CoreSandbox>>) -> Self {
+        Self { inner }
+    }
 }
 
 #[napi]
@@ -627,21 +656,7 @@ impl Sandbox {
         // here: twenty attempts fifteen seconds apart is the difference between a clean
         // account and a billed leak, and restating them would put a second copy of that
         // measurement in a binding.
-        let defaults = TeardownOpts::default();
-        let options = options.unwrap_or_default();
-        let mut opts = TeardownOpts {
-            delete_image: options.delete_image.unwrap_or(false),
-            delete_log_group: options.delete_log_group.unwrap_or(false),
-            delete_attempts: options.delete_attempts.unwrap_or(defaults.delete_attempts),
-            delete_backoff: match options.delete_backoff {
-                Some(backoff) => seconds_async(backoff)?,
-                None => defaults.delete_backoff,
-            },
-            wait_for_terminated: defaults.wait_for_terminated,
-        };
-        if options.wait_for_terminated.unwrap_or(false) {
-            opts = opts.waiting_for_terminated();
-        }
+        let opts = options.unwrap_or_default().into_opts()?;
         let mut guard = self.inner.lock().await;
         // The core answers a report rather than a `Result`, so the `Ok` here is this wrapper's
         // and never the core's — a teardown cannot reject, which is the whole point.
