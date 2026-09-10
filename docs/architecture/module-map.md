@@ -66,13 +66,19 @@ file in the repository and carries the rule that makes the rest of it legible �
 zero, so `Amount::Unpriced` is a distinct variant a consumer has to match on rather than a $0.00
 line (`microvms-core/src/cost.rs:22-27`) — and the crate re-exports `protocol` so consumers name
 wire types through here instead of depending on the contract crate
-(`microvms-core/src/lib.rs:75-77`).
+(`microvms-core/src/lib.rs:75-77`). One module sits deliberately above the generic lifecycle:
+`agents` is the L3 layer, a dated two-row profile table (Claude Code, Codex), an `AgentVm` that
+derives an image, launches with egress, and provisions Bedrock access, and `agents::bedrock`, which
+mints the bearer token in process (`microvms-core/src/agents/mod.rs`, `docs/AGENT-VMS.md`). Its
+free functions (`image_request_for`, `launch_request_for`, `install_access`, `prompt`) are what
+the bindings drive, because their sandbox sits behind a lock one `AgentVm` cannot own.
 
 - `microvms-core/src/cost.rs` (4127 LOC)
 - `microvms-core/src/control/image.rs` (3462 LOC)
 - `microvms-core/src/session/exec.rs` (1711 LOC)
 - `microvms-core/src/control/microvm.rs` (2009 LOC)
 - `microvms-core/src/sandbox.rs` (2371 LOC)
+- `microvms-core/src/agents/mod.rs` (1158 LOC)
 - `microvms-core/src/control/ops.rs` (2272 LOC)
 - `microvms-core/src/control/mod.rs` (1525 LOC)
 - `microvms-core/src/session/mod.rs` (1200 LOC)
@@ -116,14 +122,18 @@ any method, and the two hook timeouts as separate `#[pyclass]`es so transposing 
 the async core, blocking on one shared multi-thread tokio runtime with the GIL released first
 (`microvms-py/src/lib.rs:42-46`), and module membership is declared inside the `#[pymodule] mod`
 so the committed `microvms.pyi` is a function of this file and `mise run stubs:check` fails when
-the two disagree (`microvms-py/src/lib.rs:98-101`).
+the two disagree (`microvms-py/src/lib.rs:98-101`). `agents.rs` is the L3 layer as Python sees
+it: `AgentVm`, `AgentSpec`, and `BearerToken` over the same `Arc<Mutex<Sandbox>>` every session
+shares, driving the core's free functions with the specs kept beside the lock
+(`microvms-py/src/agents.rs`).
 
 - `microvms-py/src/cost.rs` (1123 LOC)
-- `microvms-py/src/sandbox.rs` (780 LOC)
+- `microvms-py/src/sandbox.rs` (840 LOC)
+- `microvms-py/src/agents.rs` (674 LOC)
 - `microvms-py/src/exec.rs` (631 LOC)
 - `microvms-py/src/session.rs` (605 LOC)
 - `microvms-py/src/errors.rs` (226 LOC)
-- `microvms-py/src/lib.rs` (138 LOC)
+- `microvms-py/src/lib.rs` (145 LOC)
 - `microvms-py/src/hooks.rs` (117 LOC)
 - `microvms-py/src/runtime.rs` (92 LOC)
 
@@ -143,15 +153,19 @@ with no `block_on` bridge, at the cost of the one divergence from the Python twi
 rejection path is typed over its own closed `Status` enum, so a caller branches on
 `err.cause.message` rather than `err.code` (`microvms-js/src/lib.rs:58-67`) — and the generated
 `index.js`, `index.d.ts`, and `.node` addon are untracked, so they are absent from the list below
-(`.gitignore:27-29`).
+(`.gitignore:27-29`). `agents.rs` is the L3 layer as JS sees it, the twin of the Python file
+over tokio's mutex; `BearerToken` is a `#[napi]` class rather than an object because it carries a
+secret, so `JSON.stringify` gives `{}` and a look-alike object is rejected by napi's conversion
+(`microvms-js/src/agents.rs`).
 
 - `microvms-js/src/cost.rs` (1038 LOC)
 - `microvms-js/src/session.rs` (609 LOC)
 - `microvms-js/src/exec.rs` (456 LOC)
-- `microvms-js/src/sandbox.rs` (623 LOC)
+- `microvms-js/src/sandbox.rs` (665 LOC)
+- `microvms-js/src/agents.rs` (606 LOC)
 - `microvms-js/src/process.rs` (541 LOC)
 - `microvms-js/src/region.rs` (139 LOC)
-- `microvms-js/src/lib.rs` (100 LOC)
+- `microvms-js/src/lib.rs` (101 LOC)
 - `microvms-js/src/errors.rs` (158 LOC)
 
 ## model

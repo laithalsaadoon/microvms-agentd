@@ -54,6 +54,8 @@ Branch on `code`, never on `error`. `data` carries partial results on the failur
 
 `microvm manifest` emits the whole command surface, its exit codes, and its envelope schema, generated from the CLI's own argument tree rather than written down. It is always JSON, and it needs no credentials, no region, and no network, so it doubles as a liveness check. Each command's entry carries its parameters with `type`, `default`, `choices`, `required`, and `positional`, its `responseType` and `responseKeys`, and for `exec` an `alternateResponse` naming when it applies. The `conventions` list is the contract in prose. `microvm manifest --dense` prints one line per command with its parameters.
 
+The agent layer's two commands follow the same rules: `agent-up --json` is one `microvm.agent` envelope whose `agents` list carries each installed agent's model and the exact `headlessCommand` `agent-prompt` will run, and `agent-prompt --json` is a `microvm.agent.prompt` envelope, `exec`'s keys plus `agent` and `model`. An agent that declines a task and exits 0 is an `ok` envelope, so read the effect back with `exec` rather than trusting the prompt's exit alone.
+
 `microvm constants --emit-json` emits every service constraint this client believes, unwrapped by an envelope, for the drift gate that compares them against the pinned service model.
 
 ## 4. The one exception: `exec --stream`

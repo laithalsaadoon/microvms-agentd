@@ -190,6 +190,19 @@ so the rows are the generic needs.
 | A liveness probe cheaper than an exec | session servers | unauthenticated `GET /v1/health` |
 | Live output streaming with resume | neither had it | SSE with byte-cursor resume and explicit gap events (`agentd/src/exec.rs:436-524`) |
 
+## Coding agents over the daemon
+
+The one opinionated layer this repo ships over the recipe above is `docs/AGENT-VMS.md`:
+`microvm agent-up` derives a Dockerfile from your agentd stanza plus three layers
+(Node 22 with `nodejs22-npm`, `npm install -g` of Claude Code and/or Codex, a uid
+1000), launches with egress, mints a Bedrock bearer token from the caller's own
+credentials, and installs it as `/workspace/.agent-env` for the agent to source;
+`microvm agent-prompt` runs the agent headless as that user. A harness that already
+embeds agentd gets the same steps from the bindings' `AgentVm`, or piecewise from
+`install_agent_access` and `prompt_agent` over any `Session`, so the credential file,
+the demotion, the `PATH` line, and the read-back-the-effect discipline are the
+library's rather than each harness's to rediscover.
+
 ## Configuration knobs
 
 Every `AGENTD_*` variable is read at startup by `Config::from_env`

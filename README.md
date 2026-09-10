@@ -289,6 +289,24 @@ the scope decision it changed.
 same recipe done by hand as a shell script, one `microvm` call per step, for a
 reader who wants to see each decision.
 
+The same layer is in both SDKs as `AgentVm`, one method per step, with the
+artifact upload left to you because S3 is not in the client's dependency set:
+
+```python
+vm = microvms.AgentVm(microvms.Region.us_east_1(), [microvms.AgentSpec.codex()])
+vm.launch(image_identifier=image_arn, execution_role_arn=exec_role)
+token = vm.install_access()  # minted in process; token.expires_at
+print(vm.prompt_sync("codex", "Create hello.py that prints hello, run it.").stdout)
+vm.terminate()
+```
+
+`find_image`, `image_name`, `build_artifact`, and `build_image` cover the image;
+`installed_agents`, `install_agent_access`, and `prompt_agent` do the same over
+a bare `Session` for a process holding only the identifier triple. Node is the
+same shape, async (`AgentVm.create`, `findImage`, `installAccess`,
+`promptSync`). Every refusal is the core's, and the token has no constructor
+and one door, `expose()`.
+
 Two open-source harnesses run coding agents inside Lambda MicroVMs the same
 way, each carrying its own hand-rolled daemon:
 **Harbor** ([harbor-framework/harbor#2469](https://github.com/harbor-framework/harbor/pull/2469))
@@ -339,6 +357,10 @@ same guardrails:
   than `Any`.
 - **Node**: [`@theagenticguy/microvms`](https://www.npmjs.com/package/@theagenticguy/microvms),
   built with napi-rs. Typed: `index.d.ts` ships beside the addon.
+
+The agent layer rides along: `AgentVm`, `AgentSpec`, and `BearerToken` in both
+bindings, with the CLI's `agent-up` and `agent-prompt` steps as methods
+([docs/AGENT-VMS.md](docs/AGENT-VMS.md), "The bindings").
 
 Both binding stubs are generated from the Rust source, never hand-written, so
 the trap closures are visible to a type checker and not only at runtime: a
