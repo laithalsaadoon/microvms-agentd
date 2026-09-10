@@ -67,6 +67,14 @@ prints the whole command surface, generated from the CLI's own argument tree, an
 Node package `@theagenticguy/microvms` are thin bindings over it, and both stubs are generated from
 the Rust source so the type system carries the trap closures rather than a comment.
 
+**The agent layer** sits over the lifecycle as the one opinionated piece: `microvm agent-up` builds an
+image with Claude Code and/or Codex CLI in it, launches with egress, mints a Bedrock bearer token from
+your own AWS credentials, and installs it as a file the agents source; `microvm agent-prompt` hands an
+agent a task as a non-root user in `/workspace`. The same two steps are `AgentVm` in the Python and
+Node packages. Agent-specific detail lives in one dated profile table, and
+[Agent VMs](/internals/agent-vms/) records why the layer crosses the line the rest of the platform
+keeps.
+
 **The conformance suite** runs the whole surface against real VMs. It is separate from the offline
 gate because it creates MicroVMs and costs money; `mise run check` is the free definition of done and
 `mise run live` is the paid proof. Beneath both sit Z3 proofs over the formal requirements, stateright

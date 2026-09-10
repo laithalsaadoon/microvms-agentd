@@ -26,6 +26,15 @@ the one-shot bootstrap, and every `/v1/` route except `/v1/health` and `/v1/sche
 child's environment. It is not the proxy token, which the platform's endpoint wants on the same
 request. See [Trust](/internals/trust/).
 
+### Agent VM
+
+A MicroVM launched by `microvm agent-up` (or `AgentVm` in the Python and Node packages): an image
+carrying Claude Code and/or Codex CLI, egress on, a Bedrock bearer token installed as
+`/workspace/.agent-env` for the agent to source, and a marker `/workspace/.agent-vm.json` naming the
+agents and models it was provisioned with. `agent-prompt` runs an agent's headless command in it as
+uid 1000. It is the one opinionated layer over the generic lifecycle, and its agent-specific detail
+lives in one dated profile table. See [Agent VMs](/internals/agent-vms/).
+
 ### Artifacts globs
 
 The `artifacts` patterns in `microvm.toml`. After a sync-mode run, members of the guest's `/workspace`
@@ -38,6 +47,15 @@ The two memory figures behind `minimumMemoryInMiB`. The request selects a size c
 is billed while running and whose peak, four times the baseline, is provisioned from the start; the
 guest's `/proc/meminfo` reports the peak. Nothing changes size during a run. See
 [Platform](/internals/platform/).
+
+### Bearer token (Bedrock)
+
+A short-lived credential for Bedrock minted from the caller's own AWS credentials: a SigV4 presign of
+`POST https://bedrock.amazonaws.com/?Action=CallWithBearerToken`, base64, prefixed `bedrock-api-key-`,
+valid for at most twelve hours. `agent-up` and `AgentVm.install_access` mint it in process and write it
+into the guest's environment file; it is never printed, never an argument, and never in the launch
+payload. In the bindings it is a `BearerToken` with no constructor and one door, `expose()`. It is not
+the agent token and not the proxy token. See [Agent VMs](/internals/agent-vms/).
 
 ### Bootstrap, one-shot
 
@@ -185,6 +203,13 @@ The launch-time grant that gives a VM a network path, spelled as an ARN of the f
 `arn:aws:lambda:<region>:aws:network-connector:aws-network-connector:<NAME>`, never as the bare name.
 `ALL_INGRESS` and `INTERNET_EGRESS` are the two the client uses; `SHELL_INGRESS` is what `microvm
 shell` requires. See [Platform](/internals/platform/).
+
+### Profile table
+
+The one place agent-specific detail lives: for each agent the npm package, the default model (an
+inference-profile id), and the date and region it was last verified. Every default is overridable
+(`--claude-model`, `--codex-version`, `AgentSpec(model=..., cli_version=...)`), and the table is what
+bounds the churn the agent layer takes on. See [Agent VMs](/internals/agent-vms/).
 
 ### Proxy token
 

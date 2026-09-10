@@ -4,7 +4,7 @@ Four crates carry a public surface. `microvms-core` is the client library: the c
 
 `microvms-cli` is not part of this surface. It declares exactly one `[[bin]]` and no `src/lib.rs`, so it exports nothing a binding could depend on, and `tests/dependency_direction.rs` fails if a lib target ever appears (`microvms-cli/Cargo.toml:10-20`). Its commands are documented in `reference/cli.md`.
 
-Thirty symbols are listed, ranked by inbound reference count within each surface. Seven public names fall below the cut and are not documented here: `CreateImageRequest` (`microvms-core/src/control/mod.rs:275`), `RunMicrovmRequest` (`microvms-core/src/control/mod.rs:389`), `run_report` (`microvms-core/src/cost.rs:1778`), `estimate_run` (`microvms-core/src/cost.rs:1900`), `RunRequest` (`microvms-core/src/sandbox.rs:146`), `Lifecycle` (`microvms-core/src/sandbox.rs:97`), and `TeardownReport` (`microvms-core/src/sandbox.rs:335`).
+Thirty-one symbols are listed, ranked by inbound reference count within each surface. Seven public names fall below the cut and are not documented here: `CreateImageRequest` (`microvms-core/src/control/mod.rs:275`), `RunMicrovmRequest` (`microvms-core/src/control/mod.rs:389`), `run_report` (`microvms-core/src/cost.rs:1778`), `estimate_run` (`microvms-core/src/cost.rs:1900`), `RunRequest` (`microvms-core/src/sandbox.rs:146`), `Lifecycle` (`microvms-core/src/sandbox.rs:97`), and `TeardownReport` (`microvms-core/src/sandbox.rs:335`).
 
 ## microvms-core
 
@@ -88,6 +88,16 @@ pub struct Sandbox {
 One MicroVM's whole life: the state machine, the suspended window, and explicit teardown.
 
 `microvms-core/src/sandbox.rs:422`
+
+### AgentVm
+
+```rs
+pub struct AgentVm {
+```
+
+One VM with coding agents in it: the `Sandbox` plus the `AgentSpec`s it was built for, with `image_request`, `build`, `launch_request`, `launch`, `install_access`, `prompt`, and `terminate` as the L3 steps over the lifecycle. The free functions beside it (`image_request_for`, `launch_request_for`, `install_access`, `prompt`, `installed_agents`, `spec_for`) are the same steps for a caller holding the sandbox and the specs separately, which is how the bindings drive it; `agents::bedrock::mint` is the in-process Bedrock bearer token.
+
+`microvms-core/src/agents/mod.rs`
 
 ### WireKind
 
@@ -268,7 +278,7 @@ The `GET /v1/exec/{id}` body, which flattens the outcome into the response and o
 
 ## microvms-py
 
-The Python module is declared rather than assembled: a `#[pymodule] mod microvms` lists its members in `#[pymodule_export]` use statements, 26 classes and 7 functions, so the macro can see the whole membership and `maturin generate-stubs` emits the real surface instead of a `__getattr__` escape hatch (`microvms-py/src/lib.rs:110-129`). The exception hierarchy stays imperative in `#[pymodule_init]`, because `create_exception!` builds its types at runtime and leaves no introspection record for `#[pymodule_export]` to carry (`microvms-py/src/lib.rs:103-137`). Every method is sync, blocking on one shared multi-thread tokio runtime with `py.detach` first (`microvms-py/src/lib.rs:42-46`). The generated stub and its PEP 561 marker are committed as `microvms-py/microvms.pyi` and `microvms-py/py.typed`, and `mise run stubs:check` fails when the committed stub no longer matches the pyo3 surface (`mise.toml:179-181`).
+The Python module is declared rather than assembled: a `#[pymodule] mod microvms` lists its members in `#[pymodule_export]` use statements, 29 classes and 12 functions (the agent layer's `AgentSpec`, `AgentVm`, and `BearerToken`, with `mint_bedrock_token`, `installed_agents`, `install_agent_access`, `prompt_agent`, and `agent_constants`, arrived with `docs/AGENT-VMS.md`), so the macro can see the whole membership and `maturin generate-stubs` emits the real surface instead of a `__getattr__` escape hatch (`microvms-py/src/lib.rs:110-129`). The exception hierarchy stays imperative in `#[pymodule_init]`, because `create_exception!` builds its types at runtime and leaves no introspection record for `#[pymodule_export]` to carry (`microvms-py/src/lib.rs:103-137`). Every method is sync, blocking on one shared multi-thread tokio runtime with `py.detach` first (`microvms-py/src/lib.rs:42-46`). The generated stub and its PEP 561 marker are committed as `microvms-py/microvms.pyi` and `microvms-py/py.typed`, and `mise run stubs:check` fails when the committed stub no longer matches the pyo3 surface (`mise.toml:179-181`).
 
 ### microvms-py Region
 

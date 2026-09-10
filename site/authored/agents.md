@@ -126,6 +126,14 @@ manifest declares, and it is what makes output parseable without a schema of you
 `exec` returns NDJSON as output arrives rather than one document at the end — the one documented
 exception to the envelope, declared in the manifest under its own response type.
 
+To run a coding agent *inside* a VM rather than drive the VM from one, take the agent layer:
+`microvm agent-up --vm-name dev --agent claude-code --agent codex` builds the image, launches with
+egress, and installs a Bedrock bearer token minted from the caller's own credentials;
+`microvm agent-prompt --name dev --agent codex "<task>"` runs the agent headless as uid 1000 and
+returns its output in the `microvm.agent.prompt` envelope. From Python or Node the same two steps
+are `AgentVm`. [Run coding agents on Bedrock](/learn/operations/run-coding-agents-on-bedrock/) is
+the walkthrough; [Agent VMs](/internals/agent-vms/) is the specification.
+
 ## 5. Working in this repository
 
 - **Scraping these pages.** Every one of them is served as Markdown and section 7 has the URLs. Scraping

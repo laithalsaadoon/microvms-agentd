@@ -122,7 +122,39 @@ function report() {
 
 One thing to know before reading an error: napi types the async path over its own closed status enum, so a custom code survives a synchronous throw and is collapsed to `GenericFailure` on a Promise rejection. Read `err.cause.message` for the `ERR_*` code and `err.cause.cause.message` for the fine-grained wire kind.
 
-## 6. Rust
+## 6. Coding agents from code
+
+The agent layer is `AgentVm` in both packages: the same steps `microvm agent-up` and `agent-prompt` take, one method each. The Python shape, with the S3 upload left to you:
+
+```python
+vm = microvms.AgentVm(
+    microvms.Region.us_east_1(),
+    [microvms.AgentSpec.claude_code(), microvms.AgentSpec.codex()],
+)
+image = vm.find_image(binary=agentd, build_role_arn=BUILD_ROLE)  # content-named reuse
+if image is None:
+    name = vm.image_name(binary=agentd, build_role_arn=BUILD_ROLE)
+    s3.put_object(
+        Bucket=BUCKET,
+        Key=f"{name}.zip",
+        Body=vm.build_artifact(binary=agentd, build_role_arn=BUILD_ROLE),
+    )
+    image = vm.build_image(
+        binary=agentd,
+        build_role_arn=BUILD_ROLE,
+        code_artifact_uri=f"s3://{BUCKET}/{name}.zip",
+    ).identifier
+vm.launch(image_identifier=image, execution_role_arn=EXEC_ROLE)
+token = vm.install_access()  # minted in process; token.expires_at
+result = vm.prompt_sync(
+    "codex", "Create hello.py that prints hello from a microvm, run it."
+)
+vm.terminate()
+```
+
+Node is the same, async: `AgentVm.create(region, [{ agent: 'codex' }])`, `findImage`, `buildArtifact`, `buildImage`, `launch`, `installAccess`, `prompt` or `promptSync`, `terminate`. A process holding only a session refreshes credentials with `installed_agents`, `mint_bedrock_token`, and `install_agent_access`, and runs a task with `prompt_agent`. `vm.sandbox` and `vm.session` reach the same VM under the same lock. Every refusal is the core's: an unknown agent name, an empty or repeated spec set, a blank task, a token lifetime past twelve hours. `BearerToken` has no constructor and prints only its length; `expose()` is the one door to the text. [Run coding agents on Bedrock](/learn/operations/run-coding-agents-on-bedrock/) explains each step's reason, and [Agent VMs](/internals/agent-vms/) is the specification.
+
+## 7. Rust
 
 `microvms-core` is the crate the CLI is a thin layer over, with the control plane (image builds, launch, suspend, resume, teardown), the session plane (exec, streaming, file transfer, port forwarding), the cost engine, and the closed enums for regions and size classes. The API reference is on [docs.rs](https://docs.rs/microvms-core), and [Public API](/reference/public-api/) lists the types by name.
 
