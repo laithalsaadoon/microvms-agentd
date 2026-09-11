@@ -1,0 +1,24 @@
+# CodeQL advanced-setup configuration, read by `.github/workflows/codeql.yml` (`config-file:`).
+#
+# One filter. `rust/access-invalid-pointer` fires on every `#[napi] pub struct` in
+# microvms-js: napi-derive expands the attribute into raw-pointer N-API glue, and CodeQL's
+# Rust extractor keeps only the original source location for findings inside a macro
+# expansion, so the alert anchors to the struct line and re-opens under a new number every
+# time the struct moves (github/codeql#20659, maintainer: no plans to change). Every alert
+# this repository has raised under the rule (#87-#104, #113-#115, 2026-08-30 to 2026-09-10)
+# was this class and was dismissed as a false positive.
+#
+# What the filter gives up: a genuine dereference of a dangling pointer in hand-written
+# `unsafe`. The workspace has none: `unsafe_code = "forbid"` in every crate's `[lints.rust]`
+# except microvms-js makes one a compile error, and microvms-js's single `unsafe` block
+# (src/process.rs, `from_napi_value`) sits on the same N-API contract as the macro output.
+# Inline `// codeql[...]` suppression does not exist for Rust yet (github/codeql#21637,
+# PR #21638 open), and a query filter cannot be scoped to a path, so this is the narrowest
+# expressible exclusion. Every other query in the default suite stays on.
+#
+# The filter does not close alerts that are already open; those are dismissed by hand once.
+name: microvms-agentd CodeQL config
+disable-default-queries: false
+query-filters:
+  - exclude:
+      id: rust/access-invalid-pointer

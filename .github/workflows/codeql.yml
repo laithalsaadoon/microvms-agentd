@@ -44,6 +44,9 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
+          # One query filter, explained in the file: napi-derive's macro output trips
+          # `rust/access-invalid-pointer` on every `#[napi] pub struct`.
+          config-file: ./.github/codeql/codeql-config.yml
       - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
         with:
           category: '/language:${{ matrix.language }}'
