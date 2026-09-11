@@ -39,10 +39,10 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://theagenticguy.github.io/microvms-agentd/"
-Documentation = "https://theagenticguy.github.io/microvms-agentd/"
-Repository = "https://github.com/theagenticguy/microvms-agentd"
-Issues = "https://github.com/theagenticguy/microvms-agentd/issues"
+Homepage = "https://laithalsaadoon.github.io/microvms-agentd/"
+Documentation = "https://laithalsaadoon.github.io/microvms-agentd/"
+Repository = "https://github.com/laithalsaadoon/microvms-agentd"
+Issues = "https://github.com/laithalsaadoon/microvms-agentd/issues"
 
 [tool.maturin]
 # Defaults to the Cargo.toml next to this file; stated because `maturin build -m`

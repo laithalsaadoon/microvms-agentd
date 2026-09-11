@@ -1,7 +1,7 @@
 {
   "@context": "https://openvex.dev/ns/v0.2.0",
-  "@id": "https://github.com/theagenticguy/microvms-agentd/blob/main/.vex/microvms-agentd.openvex.json",
-  "author": "theagenticguy/microvms-agentd maintainers",
+  "@id": "https://github.com/laithalsaadoon/microvms-agentd/blob/main/.vex/microvms-agentd.openvex.json",
+  "author": "laithalsaadoon/microvms-agentd maintainers",
   "timestamp": "2026-09-09T13:00:00Z",
   "version": 3,
   "statements": [

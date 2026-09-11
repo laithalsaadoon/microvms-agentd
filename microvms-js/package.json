@@ -4,14 +4,14 @@
   "description": "Node bindings over microvms-core: the MicroVMs client with every trap closure",
   "license": "Apache-2.0",
   "author": "Laith Al-Saadoon",
-  "homepage": "https://theagenticguy.github.io/microvms-agentd/",
+  "homepage": "https://laithalsaadoon.github.io/microvms-agentd/",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/theagenticguy/microvms-agentd.git",
+    "url": "git+https://github.com/laithalsaadoon/microvms-agentd.git",
     "directory": "microvms-js"
   },
   "bugs": {
-    "url": "https://github.com/theagenticguy/microvms-agentd/issues"
+    "url": "https://github.com/laithalsaadoon/microvms-agentd/issues"
   },
   "keywords": [
     "microvms",

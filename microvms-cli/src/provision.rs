@@ -56,7 +56,7 @@ use std::path::{Path, PathBuf};
 use crate::exit::{CliError, Exit};
 
 /// The repository whose releases carry the daemon asset.
-pub const RELEASE_REPO: &str = "theagenticguy/microvms-agentd";
+pub const RELEASE_REPO: &str = "laithalsaadoon/microvms-agentd";
 
 /// The release asset's name — a literal, because the README's `--pattern agentd` and the
 /// checksum lookup below both match it exactly.
@@ -677,13 +677,13 @@ mod tests {
         let gh = gh_download_args("v0.5.0", dest).join(" ");
         assert_eq!(
             gh,
-            "gh release download v0.5.0 --repo theagenticguy/microvms-agentd \
+            "gh release download v0.5.0 --repo laithalsaadoon/microvms-agentd \
              --pattern agentd --output /tmp/agentd --clobber"
         );
         let verify = gh_verify_args(dest).join(" ");
         assert_eq!(
             verify,
-            "gh attestation verify /tmp/agentd --repo theagenticguy/microvms-agentd"
+            "gh attestation verify /tmp/agentd --repo laithalsaadoon/microvms-agentd"
         );
         let curl = curl_args(&asset_url("v0.5.0", ASSET), dest).join(" ");
         assert!(
@@ -692,7 +692,7 @@ mod tests {
         );
         assert!(
             curl.ends_with(
-                "https://github.com/theagenticguy/microvms-agentd/releases/download/v0.5.0/agentd"
+                "https://github.com/laithalsaadoon/microvms-agentd/releases/download/v0.5.0/agentd"
             ),
             "{curl}"
         );
