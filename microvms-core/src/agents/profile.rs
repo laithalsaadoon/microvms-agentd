@@ -148,9 +148,27 @@ pub fn env_pairs(agent: Agent, model: &str, token: &str) -> Vec<(&'static str, S
             ("ANTHROPIC_MODEL", model.to_string()),
             ("AWS_BEARER_TOKEN_BEDROCK", token.to_string()),
         ],
-        // Codex has no Bedrock mode; the bearer token is the API key of the provider
-        // `codex_config` declares.
-        Agent::Codex => vec![("OPENAI_API_KEY", token.to_string())],
+        // Codex reads `AWS_BEARER_TOKEN_BEDROCK` on a `bedrock-runtime` host and ignores
+        // the provider's `env_key` there. Measured 2026-09-10, us-east-1, Codex 0.154.0,
+        // in a VM carrying Codex alone: with `OPENAI_API_KEY` set and the bearer variable
+        // unset, ten of ten identical tasks failed with
+        // `401 Unauthorized: Credential should be scoped to correct service: 'bedrock'`
+        // after five reconnect attempts, while a `python3` POST to the same endpoint with
+        // the same variable returned 200 — so the token was good and the transport was
+        // fine, and only Codex's own request was unauthorized. Setting the bearer variable
+        // (with everything else unchanged) made the same task succeed, and setting it with
+        // `OPENAI_API_KEY` *unset* also succeeded, which is what proves `env_key` is not
+        // the variable Codex reads here.
+        //
+        // Both are exported: `AWS_BEARER_TOKEN_BEDROCK` is what Codex actually uses, and
+        // `OPENAI_API_KEY` stays because it is the `env_key` the config declares and a
+        // Codex release that honors it would find it. A VM that also carries Claude Code
+        // exported the bearer variable anyway, from that profile — which is why every
+        // earlier two-agent run passed and hid this.
+        Agent::Codex => vec![
+            ("AWS_BEARER_TOKEN_BEDROCK", token.to_string()),
+            ("OPENAI_API_KEY", token.to_string()),
+        ],
     }
 }
 
@@ -263,6 +281,11 @@ mod tests {
         assert!(claude.contains(&("AWS_BEARER_TOKEN_BEDROCK", "tok".to_string())));
         assert!(claude.contains(&("CLAUDE_CODE_USE_BEDROCK", "1".to_string())));
         let codex = env_pairs(Agent::Codex, "m", "tok");
-        assert_eq!(codex, vec![("OPENAI_API_KEY", "tok".to_string())]);
+        assert!(
+            codex.contains(&("AWS_BEARER_TOKEN_BEDROCK", "tok".to_string())),
+            "Codex reads the bearer variable on bedrock-runtime and ignores env_key; \
+             without it a Codex-only VM 401s on every task: {codex:?}"
+        );
+        assert!(codex.contains(&("OPENAI_API_KEY", "tok".to_string())));
     }
 }
