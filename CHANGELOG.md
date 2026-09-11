@@ -6,20 +6,6 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
 
 ## Unreleased
 
-### Fixed
-
-- **Every repository and docs-site URL the registries read now names `laithalsaadoon`.**
-  The GitHub account was renamed on 2026-09-09; `github.com` redirects reads but npm
-  compares `package.json`'s `repository.url` against the provenance certificate's source
-  repository byte for byte, so the 0.7.0 npm publish would have failed on it even with a
-  corrected trusted-publisher configuration. Changed: `Cargo.toml` `repository`,
-  `microvms-js/package.json` (`homepage`, `repository.url`, `bugs.url`),
-  `microvms-py/pyproject.toml` `[project.urls]`, `microvms-cli/src/provision.rs`
-  `RELEASE_REPO` (the daemon download and `gh attestation verify --repo` hint),
-  `.vex/microvms-agentd.openvex.json` `@id` and `author`, `protocol/README.md`, and the
-  `links.yml` `DOCS_SITE` fallback. The npm scope `@theagenticguy` is a registry name, not
-  an account, and is unchanged.
-
 ## [0.7.0] — 2026-09-11
 
 ### Added
@@ -100,6 +86,20 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
   per agent, a refresh reporting `vmReused: true` with a later
   `credentialExpiresAt`, and `terminate` releasing the name. It is the only
   section that needs Bedrock model access in the conformance account.
+
+### Fixed
+
+- **Every repository and docs-site URL the registries read now names `laithalsaadoon`.**
+  The GitHub account was renamed on 2026-09-09; `github.com` redirects reads but npm
+  compares `package.json`'s `repository.url` against the provenance certificate's source
+  repository byte for byte, so the 0.7.0 npm publish would have failed on it even with a
+  corrected trusted-publisher configuration. Changed: `Cargo.toml` `repository`,
+  `microvms-js/package.json` (`homepage`, `repository.url`, `bugs.url`),
+  `microvms-py/pyproject.toml` `[project.urls]`, `microvms-cli/src/provision.rs`
+  `RELEASE_REPO` (the daemon download and `gh attestation verify --repo` hint),
+  `.vex/microvms-agentd.openvex.json` `@id` and `author`, `protocol/README.md`, and the
+  `links.yml` `DOCS_SITE` fallback. The npm scope `@theagenticguy` is a registry name, not
+  an account, and is unchanged.
 
 ## [0.6.0] — 2026-09-02
 
