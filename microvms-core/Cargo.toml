@@ -177,3 +177,7 @@ hyper-util = { version = "0.1", features = [
     "server",
     "tokio",
 ] }
+
+[lints.rust]
+# No hand-written `unsafe` in this crate; a future one is a build error, not a scan finding.
+unsafe_code = "forbid"

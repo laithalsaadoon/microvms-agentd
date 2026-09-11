@@ -62,3 +62,7 @@ tokio = { version = "1.53", features = ["rt-multi-thread", "sync", "time"] }
 # gate that names the command to run) instead of breaking the wheel every caller
 # installs.
 stubs = ["pyo3/experimental-inspect"]
+
+[lints.rust]
+# No hand-written `unsafe` in this crate; a future one is a build error, not a scan finding.
+unsafe_code = "forbid"

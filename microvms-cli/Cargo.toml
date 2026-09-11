@@ -151,3 +151,7 @@ cargo_metadata = "0.23.1"
 # benefit, which is the same trade `envelope.rs` refuses with `into_streams` being
 # `cfg(test)`.
 tokio = { version = "1.53", features = ["test-util"] }
+
+[lints.rust]
+# No hand-written `unsafe` in this crate; a future one is a build error, not a scan finding.
+unsafe_code = "forbid"

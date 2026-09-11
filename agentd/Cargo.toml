@@ -135,3 +135,7 @@ tempfile = "3"
 # framing implementation whose bugs read as relay bugs. Dev-only: nothing that ships into a
 # guest image needs a WebSocket client.
 tokio-tungstenite = "0.30"
+
+[lints.rust]
+# No hand-written `unsafe` in this crate; a future one is a build error, not a scan finding.
+unsafe_code = "forbid"

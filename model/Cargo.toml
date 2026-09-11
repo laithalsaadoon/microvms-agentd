@@ -11,3 +11,7 @@ publish = false
 
 [dependencies]
 stateright = "0.31"
+
+[lints.rust]
+# No hand-written `unsafe` in this crate; a future one is a build error, not a scan finding.
+unsafe_code = "forbid"
