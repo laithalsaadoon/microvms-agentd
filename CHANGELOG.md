@@ -6,6 +6,8 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
 
 ## Unreleased
 
+## [0.7.0] — 2026-09-11
+
 ### Added
 
 - **Agent VMs: the L3 helpers over the lifecycle (`docs/AGENT-VMS.md`).** A new

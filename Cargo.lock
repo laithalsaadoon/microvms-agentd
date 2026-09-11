@@ -2406,7 +2406,7 @@ dependencies = [
 
 [[package]]
 name = "microvms-cli"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "cargo_metadata",
  "clap",
@@ -2427,7 +2427,7 @@ dependencies = [
 
 [[package]]
 name = "microvms-core"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "aws-config",
  "aws-credential-types",
@@ -2474,7 +2474,7 @@ dependencies = [
 
 [[package]]
 name = "microvms-protocol"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "schemars",
  "serde",

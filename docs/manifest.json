@@ -3079,7 +3079,7 @@
         "meaning": "run <DIR> could not pack the directory or write an artifact back; the failure is on this machine's filesystem, not the platform's"
       }
     ],
-    "version": "0.6.0"
+    "version": "0.7.0"
   },
   "status": "ok",
   "type": "microvm.manifest"
