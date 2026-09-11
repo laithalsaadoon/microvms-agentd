@@ -85,7 +85,7 @@ the bindings drive, because their sandbox sits behind a lock one `AgentVm` canno
 
 ## microvms-cli
 
-`microvms-cli` builds the `microvm` binary: twenty-four subcommands in lifecycle order over
+`microvms-cli` builds the `microvm` binary: twenty-six subcommands in lifecycle order over
 `microvms-core`, and nothing the library does not do (`microvms-cli/src/cli.rs:83`,
 `microvms-cli/src/main.rs:2`). Thinness is checked three ways rather than intended — the direct
 dependency set contains none of twelve denylisted transport and signing crates, no source file here names a transport or a
