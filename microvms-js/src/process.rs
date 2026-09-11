@@ -417,7 +417,10 @@ impl ExecProcess {
         // SAFETY: `raw` is the `ReadableStream` object this function itself constructed (or
         // re-fetched from the reference to it), so the type is right by construction. napi's
         // own `FromNapiValue` for `ReadableStream` is an unchecked rewrap for exactly this.
-        unsafe { ReadableStream::<Uint8Array>::from_napi_value(env.raw(), raw) }
+        // The crate denies `unsafe_code` (Cargo.toml `[lints.rust]`); this is its one exception.
+        #[allow(unsafe_code)]
+        let stream = unsafe { ReadableStream::<Uint8Array>::from_napi_value(env.raw(), raw) };
+        stream
     }
 }
 

@@ -9,9 +9,12 @@
 # was this class and was dismissed as a false positive.
 #
 # What the filter gives up: a genuine dereference of a dangling pointer in hand-written
-# `unsafe`. The workspace has none: `unsafe_code = "forbid"` in every crate's `[lints.rust]`
-# except microvms-js makes one a compile error, and microvms-js's single `unsafe` block
-# (src/process.rs, `from_napi_value`) sits on the same N-API contract as the macro output.
+# `unsafe`. The compiler covers that instead: `unsafe_code = "forbid"` in every other crate's
+# `[lints.rust]`, and `unsafe_code = "deny"` in microvms-js (napi-derive's expansion carries
+# its own `allow`, which deny honours and forbid rejects). A hand-written `unsafe` block there
+# fails the build unless it sits under a scoped `#[allow(unsafe_code)]` with a SAFETY note;
+# `grep -rn 'allow(unsafe_code)' microvms-js/src` lists every exception (one today,
+# src/process.rs, napi's own `from_napi_value`).
 # Inline `// codeql[...]` suppression does not exist for Rust yet (github/codeql#21637,
 # PR #21638 open), and a query filter cannot be scoped to a path, so this is the narrowest
 # expressible exclusion. Every other query in the default suite stays on.

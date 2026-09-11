@@ -67,3 +67,8 @@ tokio = { version = "1.53", features = ["time", "sync"] }
 # is the one build-time requirement napi-rs still has — it uses no node-gyp and
 # no Node headers, and resolves Node-API symbols at runtime through libloading.
 napi-build = "2"
+
+[lints.rust]
+# napi-derive's expansion carries its own allow(unsafe_code), which deny (unlike forbid) honours;
+# hand-written unsafe in this crate is a build error unless a scoped allow with a SAFETY note sits on it.
+unsafe_code = "deny"
