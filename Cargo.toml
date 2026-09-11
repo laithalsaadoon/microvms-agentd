@@ -26,7 +26,7 @@ exclude = ["agentd/fuzz"]
 [workspace.package]
 edition = "2024"
 license = "Apache-2.0"
-repository = "https://github.com/theagenticguy/microvms-agentd"
+repository = "https://github.com/laithalsaadoon/microvms-agentd"
 # Default-deny, and an allowlist rather than a denylist for the same reason
 # `microvms-cli/tests/thinness.rs` gives: a denylist is defeated by the crate
 # nobody thought to write down. A member added later is unpublishable until

@@ -58,7 +58,7 @@ jobs:
       - name: build the site
         working-directory: site
         env:
-          DOCS_SITE: ${{ vars.DOCS_SITE || 'https://theagenticguy.github.io' }}
+          DOCS_SITE: ${{ vars.DOCS_SITE || 'https://laithalsaadoon.github.io' }}
           DOCS_BASE: ${{ vars.DOCS_BASE || '/microvms-agentd/' }}
         run: |
           pnpm run sync
