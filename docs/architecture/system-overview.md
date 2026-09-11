@@ -43,8 +43,8 @@ field private so the Z3 proofs are proofs about the code
 (`microvms-core/src/sandbox.rs:11-17`); `cost` treats unpriced as a distinct variant rather
 than zero (`microvms-core/src/cost.rs:22-27`).
 
-`microvms-cli` ships `microvm` with twenty-four subcommands
-(`microvms-cli/src/cli.rs:95-307`, 2,681 LOC), each invocation writing exactly one JSON
+`microvms-cli` ships `microvm` with twenty-six subcommands
+(`microvms-cli/src/cli.rs:95-327`, 2,838 LOC), each invocation writing exactly one JSON
 envelope to stdout and progress to stderr (`microvms-cli/src/envelope.rs:4-11`). It has no
 lib target (`microvms-cli/Cargo.toml:21-23`) and no second path to AWS: a twelve-crate denylist
 of HTTP clients, signers, and credential chains is asserted against `cargo metadata`
