@@ -397,9 +397,14 @@ pub fn classify(error: &Error) -> CliError {
             &["minting happens inside the request path, so the identical command may succeed"]
         }
         (Exit::Retryable, _) => &["a transient condition: run the identical command again"],
-        (Exit::Timeout, _) => {
-            &["polling is read-only, so the exec and its output are untouched and re-pollable"]
-        }
+        // The fact and the remedy, both. Measured 2026-09-11 (issue #156): a reader took the
+        // fact alone as a stop, and the command kept running in the guest.
+        (Exit::Timeout, _) => &[
+            "polling is read-only, so the exec and its output are untouched and re-pollable",
+            "a timeout is not a stop: the command is still running in the guest — `microvm kill \
+             <exec-id>` signals its whole process group, or pass `exec --kill-on-timeout` to \
+             have the timeout do that",
+        ],
         (Exit::InvalidArg, _) => &["`microvm manifest` lists every command and its option domains"],
         (Exit::Precondition, _) => &["`microvm doctor` checks every prerequisite at once"],
         (Exit::BuildWedged, _) => &[

@@ -433,6 +433,8 @@ async fn handle<O: std::io::Write, E: std::io::Write>(
         Command::Exec(args) => commands::attached::exec(ctx, args).await,
         Command::Health(args) => commands::attached::health(ctx, args).await,
         Command::Ack(args) => commands::attached::ack(ctx, args).await,
+        Command::Kill(args) => commands::attached::kill(ctx, args).await,
+        Command::Ps(args) => commands::attached::ps(ctx, args).await,
         Command::Stdin(args) => commands::attached::stdin(ctx, args).await,
         Command::Cp(args) => commands::attached::cp(ctx, args).await,
         // The third command that takes the interrupt, and like the other two it is the

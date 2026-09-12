@@ -382,7 +382,7 @@ A long-running exec in the AI SDK's `SandboxProcess` shape, built by `Session.sp
 
 ## HTTP
 
-The daemon serves 18 routes. All of them come from one list, `surface_docs`, which `app` walks to build the router and `GET /v1/schema` walks to publish the document (`agentd/src/routes.rs:371-626`). A route cannot be served unless it appears in that list, and a listed route with no handler panics at startup rather than serving an undocumented surface (`agentd/src/routes.rs:110-140`). Each row also declares its auth, which is what splits the router in two: `Auth::Bearer` rows go behind the token guard, `Auth::Open` and `Auth::PlatformHook` rows do not (`agentd/src/routes.rs:51-59`).
+The daemon serves 20 routes. All of them come from one list, `surface_docs`, which `app` walks to build the router and `GET /v1/schema` walks to publish the document (`agentd/src/routes.rs:371-626`). A route cannot be served unless it appears in that list, and a listed route with no handler panics at startup rather than serving an undocumented surface (`agentd/src/routes.rs:110-140`). Each row also declares its auth, which is what splits the router in two: `Auth::Bearer` rows go behind the token guard, `Auth::Open` and `Auth::PlatformHook` rows do not (`agentd/src/routes.rs:51-59`).
 
 The six lifecycle hooks sit under a prefix fixed by the service, `/aws/lambda-microvms/runtime/v1` (`protocol/src/hook.rs:15`). They are unauthenticated because the platform has no token to present, and a consumer must never call them.
 
@@ -451,6 +451,18 @@ Sends SIGTERM then SIGKILL to the whole process group rather than the direct chi
 Writes to a child's stdin or signals EOF, a separate request from the output stream so a dropped attach does not cost the ability to feed the process.
 
 `agentd/src/routes.rs:504-518`
+
+### GET /v1/procs
+
+Process accounting: every registered exec with its process group's live pids, read from `/proc` inside the guest so the image needs no `ps`. `child_exited: true` beside a non-empty `pids` is a command that finished while something it backgrounded did not; `reap` echoes the start request's `reap_group_on_exit`.
+
+`agentd/src/routes.rs`
+
+### GET /v1/tcp
+
+A WebSocket relayed to `127.0.0.1:<port>` in the guest, loopback-only, one connection per socket, with the outcome carried in close codes because the route leaves HTTP behind after its 101.
+
+`agentd/src/routes.rs`
 
 ### GET `/v1/exec/{id}/stream`
 

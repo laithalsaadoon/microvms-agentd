@@ -79,6 +79,63 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
   the conformance execution role back from IAM and fails on any action outside `logs:`,
   an `Allow` statement's `NotAction` included (six new checks; 165 in all).
 
+### Added
+
+- **A stop button and process accounting for execs (issues #156, #157).** The daemon
+  gains `GET /v1/procs`, a bearer route answering `{procs: [{exec_id, pgid, started_at,
+  child_exited, reap, pids}]}` — every registered exec with the live pids of its process
+  group, read from `/proc/<pid>/stat` inside the guest so the al2023 base image needs no
+  `ps`. `child_exited` reads the same write-once marker `busy` does, so an acked exec still
+  reads exited, and zombies are not listed. The row the route exists for is `child_exited:
+  true` beside a non-empty `pids`: the survivor of a command that finished (measured
+  2026-09-11: a ticker still counting six seconds after its exec reported exit 0). 20 routes
+  now, from 19; `docs/PROTOCOL.md`'s table also gains the `/v1/tcp` and `/v1/schema` rows
+  it lacked.
+- **`reap_group_on_exit` on `POST /v1/exec/start`.** Opt-in, `#[serde(default)]` false.
+  When set, the daemon runs the kill route's SIGTERM-then-SIGKILL escalation against the
+  exec's process group as soon as the child's exit is observed and before the output linger
+  begins, so nothing the command backgrounded outlives it and `writers_may_be_alive` reads
+  false because the linger saw EOF. A timed-out exec is not escalated twice. The default
+  keeps today's grandchild-output guarantee. The escalation's grace wait now ends as soon as
+  nothing *live* is left in the group instead of always running its full length, and
+  "live" is read from `/proc`, not from `killpg(pgid, 0)`: the daemon is PID 1 in the guest
+  (measured 2026-09-12, `/proc/1/comm` is `agentd`) and reaps only its own children, so a
+  signalled grandchild stays a zombie that still answers the existence probe. Measured on the
+  first live VM before that fix, every `--reap` cost the whole 10 s grace; on the second, the
+  reaped group read empty within one second. The timeout path benefits the same way.
+- **`microvm kill <EXEC_ID>`** — `POST /v1/exec/{id}/kill` over the attached door, envelope
+  `microvm.kill` `{microvmId, execId, killed}`. `killed: false` with exit 0 is a group that had
+  already exited. The VM is addressed like every attached command, by `--name` or the
+  identifier triple; the exec by its id.
+- **`microvm ps`** — `GET /v1/procs`, envelope `microvm.procs` `{microvmId, procs}` with
+  camelCase keys and `pgid` null rather than absent; `--dense` is one TSV row per group, exec
+  id first so `cut -f1` feeds `kill`. 28 commands now, from 26; `RESPONSE_TYPES` is
+  `[_; 28]`.
+- **`exec --reap`** sets `reap_group_on_exit` on the start body; the behavioral guard asserts
+  the key in both directions on the recorded request.
+- **`exec --kill-on-timeout`** follows an `ERR_TIMEOUT` with one best-effort kill and puts the
+  daemon's verdict in the failure envelope's `data.killed`; the exit code stays `ERR_TIMEOUT`
+  because the deadline is still what ended the wait.
+- **Bindings.** `Session.procs()` returns typed objects on both sides (`ProcGroup`, a frozen
+  class in Python and a plain object in Node); `run`/`run_sync` take
+  `reap_group_on_exit` (Python keyword, `reapGroupOnExit` in `ExecOptions`); both retryable
+  tables list `procs`.
+- **Conformance.** `drive_kill_and_procs` adds sixteen live checks: a live group listed with
+  `childExited: false` and two or more pids, killed to a non-zero exit and an empty group;
+  the #157 survivor listed with `childExited: true` and a live pid, its tick file growing
+  across two reads four seconds apart and frozen after a kill; the same shape under `--reap`
+  leaving no pid within `kill_grace` + 2 s; `exec --timeout 2` raising `ERR_TIMEOUT` whose
+  suggestions name `microvm kill`, and `--kill-on-timeout` reporting `data.killed: true`
+  with the group empty afterwards. 181 checks, from 152.
+
+### Changed
+
+- **`ERR_TIMEOUT`'s suggestion names the remedy.** It kept saying the exec and its output are
+  untouched and re-pollable — true, and read as a stop by a caller who then found the command
+  still running (issue #156). A second line now says a timeout is not a stop, that the command
+  is still running in the guest, and that `microvm kill <exec-id>` or `exec --kill-on-timeout`
+  is what stops it.
+
 ## [0.7.0] — 2026-09-11
 
 ### Added

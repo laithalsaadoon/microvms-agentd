@@ -28,7 +28,7 @@ compile against it, so a renamed field fails a build instead of a consumer's run
 before a body byte is read, `exec` and `fs` own idempotent exec and streaming tar. Its
 router is assembled by walking the same endpoint list `/v1/schema` publishes, so a
 documented route with no handler panics at startup (`agentd/src/routes.rs:29-35`, 807 LOC);
-there are eighteen, split into a Bearer-guarded `control` router and an `open` one
+there are twenty, split into a Bearer-guarded `control` router and an `open` one
 (`agentd/src/routes.rs:51-59`, `agentd/src/routes.rs:110-140`). It runs as the container
 `CMD` on a current-thread runtime sized for a 512 MiB guest (`agentd/src/main.rs:4-6`,
 `agentd/src/main.rs:24-27`).
@@ -43,7 +43,7 @@ field private so the Z3 proofs are proofs about the code
 (`microvms-core/src/sandbox.rs:11-17`); `cost` treats unpriced as a distinct variant rather
 than zero (`microvms-core/src/cost.rs:22-27`).
 
-`microvms-cli` ships `microvm` with twenty-six subcommands
+`microvms-cli` ships `microvm` with twenty-eight subcommands
 (`microvms-cli/src/cli.rs:95-327`, 2,838 LOC), each invocation writing exactly one JSON
 envelope to stdout and progress to stderr (`microvms-cli/src/envelope.rs:4-11`). It has no
 lib target (`microvms-cli/Cargo.toml:21-23`) and no second path to AWS: a twelve-crate denylist
@@ -52,7 +52,7 @@ of HTTP clients, signers, and credential chains is asserted against `cargo metad
 wrap the same core and never the CLI (`microvms-py/Cargo.toml:22-26`,
 `microvms-js/Cargo.toml:20-21`). Verification sits outside the product graph: `model` has
 one dependency and no workspace edge, modelling the protocol rather than importing it
-(`model/Cargo.toml:9-10`), and `conformance/run_rs.py` drives the built CLI through 165 named
+(`model/Cargo.toml:9-10`), and `conformance/run_rs.py` drives the built CLI through 181 named
 checks against real AWS (`conformance/run_rs.py:9`, 4,245 LOC). Start at
 `agentd/src/lib.rs:9-29` for the trust boundary, then `microvms-core/src/lib.rs:21-40` for
 the trap ladder.

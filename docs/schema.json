@@ -332,6 +332,71 @@
       ],
       "type": "object"
     },
+    "ProcGroup": {
+      "description": "One entry of `GET /v1/procs`: an exec's process group as the daemon sees it.\n\nThe exec registry knows the group (`pgid`) and whether the direct child has\nexited; `/proc` knows which pids are still in that group. Both halves are here\nbecause the interesting case is their disagreement — `child_exited: true` with a\nnon-empty `pids` is a command that finished while something it started did not,\nwhich is exactly what a caller asking \"did this step leave anything behind\"\nneeds to see and could not before.",
+      "properties": {
+        "child_exited": {
+          "description": "Whether the exec's own child has exited. Read from the terminal marker an\nack cannot take, so an acked exec still reads as exited here.",
+          "type": "boolean"
+        },
+        "exec_id": {
+          "type": "string"
+        },
+        "pgid": {
+          "description": "The process group id captured at spawn. `None` when the child was reaped\nbefore it could be read, in which case `pids` is empty because there is no\ngroup to scan for.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "pids": {
+          "description": "Live pids whose process group is `pgid`, read from `/proc`. Zombies are not\nlive and are not listed. Empty once the group is gone, and empty for an\nentry whose `pgid` is `None`.",
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "reap": {
+          "description": "Whether the exec was started with `reap_group_on_exit`.",
+          "type": "boolean"
+        },
+        "started_at": {
+          "description": "Seconds since the epoch on the daemon's clock when the child was spawned.\nThe same convention as a hook observation's `fired_at`.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "exec_id",
+        "pgid",
+        "started_at",
+        "child_exited",
+        "reap",
+        "pids"
+      ],
+      "type": "object"
+    },
+    "ProcsResponse": {
+      "description": "`GET /v1/procs` response.",
+      "properties": {
+        "procs": {
+          "description": "Every registered exec, in registry order, whether or not anything in its\ngroup is still alive. An exec that exited cleanly with nothing left behind\nis listed with `child_exited: true` and `pids: []`.",
+          "items": {
+            "$ref": "#/$defs/ProcGroup"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "procs"
+      ],
+      "type": "object"
+    },
     "RunHookEnvelope": {
       "description": "The envelope the platform posts to the run hook.\n\nThe `runHookPayload` string given to `RunMicrovm` is not delivered as the\nrequest body: the platform wraps it, so the body is\n`{\"runHookPayload\": \"<the caller's string>\"}` and the caller's own JSON is one\n`serde_json` parse deeper. Measured 2026-08-05 — a daemon that reads\n`agent_token` from the top level answers 400, and the platform then terminates\nthe VM with \"Run lifecycle hook returned HTTP status 400\" before any traffic is\nforwarded, so the mistake is invisible from the outside.",
       "properties": {
@@ -381,6 +446,11 @@
             "integer",
             "null"
           ]
+        },
+        "reap_group_on_exit": {
+          "default": false,
+          "description": "Whether to signal the exec's whole process group once its own child exits.\n\nOff by default, and the default is the contract this daemon has always had:\na backgrounded grandchild that inherited the output pipe keeps running and\nkeeps writing, and the linger deadline is what bounds how long the daemon\nwaits on it. That is the \"backgrounded server keeps logging\" guarantee, and\ncallers rely on it. Set to `true`, the daemon runs the same SIGTERM-then-\nSIGKILL escalation `POST /v1/exec/{id}/kill` uses against the group as soon\nas the child's exit is observed, so nothing the command left behind outlives\nit and the linger sees EOF rather than `writers_may_be_alive`. A timed-out\nexec is already escalated and is not escalated twice.",
+          "type": "boolean"
         },
         "shell": {
           "default": false,
@@ -959,6 +1029,36 @@
         }
       ],
       "summary": "SIGTERM then SIGKILL to the whole process group, not just the direct child — a shell that backgrounded a server leaves the interesting process outside the child pid"
+    },
+    {
+      "auth": "bearer",
+      "method": "GET",
+      "path": "/v1/procs",
+      "request": null,
+      "response": {
+        "media_type": "application/json",
+        "schema": {
+          "$ref": "#/$defs/ProcsResponse"
+        }
+      },
+      "statuses": [
+        {
+          "code": 200,
+          "error": "",
+          "meaning": "every registered exec with its group's live pids, in registry order. An empty list is a daemon that has run nothing since it started, not an error."
+        },
+        {
+          "code": 401,
+          "error": "",
+          "meaning": "the presented bearer token does not match the installed one"
+        },
+        {
+          "code": 503,
+          "error": "",
+          "meaning": "no token is installed yet, so the control API is closed. Never 404: a client mapping 404 onto \"not found\" would report a phantom absent artifact."
+        }
+      ],
+      "summary": "process accounting: every registered exec with its process group's live pids, read from /proc so the guest needs no `ps`. `child_exited` beside a non-empty `pids` is a command that finished while something it backgrounded did not — the shape /v1/health's `busy` cannot show, and the exec_id beside it is the one to pass to /v1/exec/{id}/kill. `reap` echoes the start request's `reap_group_on_exit`. Entries whose pgid was never captured list no pids. Read-only."
     },
     {
       "auth": "bearer",

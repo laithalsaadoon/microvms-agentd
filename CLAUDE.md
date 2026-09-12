@@ -145,9 +145,9 @@ requirements sharing vocabulary with no peer need a glossary link, not a looser 
 - `agentd/` — the in-VM daemon (exec, file transfer, one-shot bootstrap)
 - `model/` — stateright models of daemon and client lifecycle
 - `microvms-core/` — the client library; the type system carries every trap closure
-- `microvms-cli/` — the `microvm` binary: 26 commands, JSON envelopes, `manifest`.
+- `microvms-cli/` — the `microvm` binary: 28 commands, JSON envelopes, `manifest`.
   No lib target; allowlisted deps (6), asserted by `tests/thinness.rs`. The count is
-  compile-enforced by `RESPONSE_TYPES: [_; 26]` in `src/commands/mod.rs`.
+  compile-enforced by `RESPONSE_TYPES: [_; 28]` in `src/commands/mod.rs`.
 - `microvms-py/`, `microvms-js/` — thin PyO3 / napi-rs bindings over core. Only the
   Python side has a drift gate: `microvms.pyi` is checked by `stubs:check`, while
   `microvms-js/index.d.ts` is gitignored and nothing compares it to the crate.
@@ -288,7 +288,7 @@ always on a subshell's `PATH`.
 Two edges where the index misleads, both worth knowing before you trust a count:
 
 - `-k route` only sees `.route()` calls with a literal path argument. The daemon builds its
-  routes from a schema, so a route query returns test fixtures, never the real 18-endpoint
+  routes from a schema, so a route query returns test fixtures, never the real 20-endpoint
   surface. Use `docs/schema.json` for that census.
 - Symbol lookup is name-resolved, not crate-qualified. `Sandbox`, `Session`, and
   `Duration` each exist in several crates, so callers and coverage cross-attribute between

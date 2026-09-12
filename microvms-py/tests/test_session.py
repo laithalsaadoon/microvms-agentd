@@ -25,6 +25,9 @@ a fake daemon whose agreement with the real one nobody would be testing.
 
 from __future__ import annotations
 
+import inspect
+import types
+
 import pytest
 
 import microvms
@@ -176,6 +179,7 @@ def test_every_exec_option_is_keyword_only_so_none_can_be_transposed() -> None:
             timeout_sec=30.0,
             stdin=True,
             exec_id="x-0000000000000009",
+            reap_group_on_exit=True,
         )
 
 
@@ -239,6 +243,7 @@ def test_a_refused_connection_is_retryable_on_every_method_that_makes_a_request(
         ("run", lambda: session.run(["true"])),
         ("run_sync", lambda: session.run_sync(["true"])),
         ("kill", lambda: session.kill("x-0000000000000001")),
+        ("procs", session.procs),
         ("file_exists", lambda: session.file_exists("/tmp/x")),
         ("download_file", lambda: session.download_file("/tmp/x")),
         ("download_tar", lambda: session.download_tar("/tmp")),
@@ -251,6 +256,24 @@ def test_a_refused_connection_is_retryable_on_every_method_that_makes_a_request(
         assert error.retryable is True, f"{name} reported a refused connection as fatal"
         assert error.code == "ERR_RETRYABLE", name
         assert error.wire_kind == "Transport", name
+
+
+def test_procs_is_a_typed_class_with_no_constructor_like_health() -> None:
+    """`ProcGroup` is what `procs()` returns, and only `procs()` makes one.
+
+    The same shape as `Health`: a frozen class a caller reads fields off, never builds. A
+    dict here would be the daemon's snake_case keys with no checker able to say which are
+    present — and `child_exited` beside a non-empty `pids` is the whole reason the route
+    exists, so those two names in particular have to be checkable.
+    """
+    assert hasattr(microvms, "ProcGroup")
+    with pytest.raises(TypeError):
+        microvms.ProcGroup()  # type: ignore[call-arg]
+    for name in ("exec_id", "pgid", "started_at", "child_exited", "reap", "pids"):
+        # PyO3 getters are C-level descriptors rather than `property` objects; what matters
+        # is that each name is a read-only attribute on the class, not an instance dict key.
+        descriptor = inspect.getattr_static(microvms.ProcGroup, name)
+        assert isinstance(descriptor, types.GetSetDescriptorType), (name, descriptor)
 
 
 def test_a_transport_failure_names_the_method_and_path_it_was_attempting() -> None:

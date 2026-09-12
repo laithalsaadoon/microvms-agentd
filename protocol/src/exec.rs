@@ -136,6 +136,19 @@ pub struct StartRequest {
     /// gets today's behavior by not setting this.
     #[serde(default)]
     pub stdin: bool,
+    /// Whether to signal the exec's whole process group once its own child exits.
+    ///
+    /// Off by default, and the default is the contract this daemon has always had:
+    /// a backgrounded grandchild that inherited the output pipe keeps running and
+    /// keeps writing, and the linger deadline is what bounds how long the daemon
+    /// waits on it. That is the "backgrounded server keeps logging" guarantee, and
+    /// callers rely on it. Set to `true`, the daemon runs the same SIGTERM-then-
+    /// SIGKILL escalation `POST /v1/exec/{id}/kill` uses against the group as soon
+    /// as the child's exit is observed, so nothing the command left behind outlives
+    /// it and the linger sees EOF rather than `writers_may_be_alive`. A timed-out
+    /// exec is already escalated and is not escalated twice.
+    #[serde(default)]
+    pub reap_group_on_exit: bool,
 }
 
 /// `POST /v1/exec/{id}/stdin` body.
@@ -224,6 +237,44 @@ pub struct KillResponse {
     /// Whether a signal was actually delivered. `false` with a 200 means the
     /// process group had already exited, which is the outcome a kill wanted.
     pub killed: bool,
+}
+
+/// One entry of `GET /v1/procs`: an exec's process group as the daemon sees it.
+///
+/// The exec registry knows the group (`pgid`) and whether the direct child has
+/// exited; `/proc` knows which pids are still in that group. Both halves are here
+/// because the interesting case is their disagreement — `child_exited: true` with a
+/// non-empty `pids` is a command that finished while something it started did not,
+/// which is exactly what a caller asking "did this step leave anything behind"
+/// needs to see and could not before.
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct ProcGroup {
+    pub exec_id: String,
+    /// The process group id captured at spawn. `None` when the child was reaped
+    /// before it could be read, in which case `pids` is empty because there is no
+    /// group to scan for.
+    pub pgid: Option<u32>,
+    /// Seconds since the epoch on the daemon's clock when the child was spawned.
+    /// The same convention as a hook observation's `fired_at`.
+    pub started_at: u64,
+    /// Whether the exec's own child has exited. Read from the terminal marker an
+    /// ack cannot take, so an acked exec still reads as exited here.
+    pub child_exited: bool,
+    /// Whether the exec was started with `reap_group_on_exit`.
+    pub reap: bool,
+    /// Live pids whose process group is `pgid`, read from `/proc`. Zombies are not
+    /// live and are not listed. Empty once the group is gone, and empty for an
+    /// entry whose `pgid` is `None`.
+    pub pids: Vec<u32>,
+}
+
+/// `GET /v1/procs` response.
+#[derive(Debug, Default, Deserialize, JsonSchema, Serialize)]
+pub struct ProcsResponse {
+    /// Every registered exec, in registry order, whether or not anything in its
+    /// group is still alive. An exec that exited cleanly with nothing left behind
+    /// is listed with `child_exited: true` and `pids: []`.
+    pub procs: Vec<ProcGroup>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
@@ -364,6 +415,36 @@ mod tests {
         assert!(request.env.is_empty());
         assert!(request.timeout_sec.is_none());
         assert!(!request.stdin);
+        assert!(
+            !request.reap_group_on_exit,
+            "reaping is opt-in: an old client that never heard of the flag keeps today's \
+             grandchild-output guarantee"
+        );
+    }
+
+    /// The procs body round-trips with every field present, `pgid: null` included, so a
+    /// client can tell "no group was ever captured" from "the group is empty".
+    #[test]
+    fn a_procs_response_round_trips_with_a_missing_pgid() {
+        let written = serde_json::to_string(&ProcsResponse {
+            procs: vec![ProcGroup {
+                exec_id: "e1".into(),
+                pgid: None,
+                started_at: 1_756_500_000,
+                child_exited: true,
+                reap: false,
+                pids: Vec::new(),
+            }],
+        })
+        .expect("serializes");
+        assert_eq!(
+            written,
+            r#"{"procs":[{"exec_id":"e1","pgid":null,"started_at":1756500000,"child_exited":true,"reap":false,"pids":[]}]}"#
+        );
+        let read: ProcsResponse = serde_json::from_str(&written).expect("deserializes");
+        assert_eq!(read.procs.len(), 1);
+        assert_eq!(read.procs[0].pgid, None);
+        assert!(read.procs[0].child_exited);
     }
 
     /// The flatten-plus-skip on `PollResponse.result` is the one shape whose two

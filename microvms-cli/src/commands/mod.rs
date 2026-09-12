@@ -106,7 +106,7 @@ pub struct Ctx<'a, O: Write, E: Write> {
 /// command added without an entry fails rather than shipping undescribed. That check is the
 /// only thing that keeps this table from being the hand-maintained artifact the manifest is
 /// forbidden to be.
-pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 26] = [
+pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 28] = [
     (
         "run",
         "microvm.run",
@@ -276,6 +276,12 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 26] = [
             "truncated",
         ],
     ),
+    // `kill` carries the daemon's own verdict: `killed: false` with exit 0 is a group that
+    // had already exited, which is what a kill wanted. `ps` is `procs`: one object per exec's
+    // process group, `{execId, pgid, startedAt, childExited, reap, pids}`, with `pgid` null
+    // (never absent) when the daemon captured none.
+    ("kill", "microvm.kill", &["microvmId", "execId", "killed"]),
+    ("ps", "microvm.procs", &["microvmId", "procs"]),
     ("stdin", "microvm.stdin", &["execId", "written", "eof"]),
     (
         "cp",

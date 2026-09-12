@@ -41,7 +41,8 @@ use microvms_core::{Error, ErrorKind};
 use serde_json::{Map, Value, json};
 
 use crate::cli::{
-    AckArgs, AttachArgs, AttachFlags, CpArgs, ExecArgs, HealthArgs, RegionFlags, StdinArgs,
+    AckArgs, AttachArgs, AttachFlags, CpArgs, ExecArgs, HealthArgs, KillArgs, PsArgs, RegionFlags,
+    StdinArgs,
 };
 use crate::commands::{Ctx, Rendered, STREAM_RESPONSE, response_type};
 use crate::exit::{CliError, Exit};
@@ -219,6 +220,7 @@ pub async fn exec<O: std::io::Write, E: std::io::Write>(
             env: args.env.iter().cloned().collect(),
             user: args.user,
             group: args.group,
+            reap: args.reap,
         });
     let exec_id = request.exec_id.clone();
     ctx.out.progress(&format!("exec {exec_id}: {command}"));
@@ -279,7 +281,32 @@ pub async fn exec<O: std::io::Write, E: std::io::Write>(
         });
         return Ok(render_exec(&exec_id, &started));
     }
-    let result = handle.wait_and_ack(timeout).await?;
+    let result = match handle.wait_and_ack(timeout).await {
+        Ok(result) => result,
+        // The deadline ended the wait and the caller asked for that to be a stop. One kill,
+        // best-effort: its own failure is folded into the report rather than replacing the
+        // timeout, because the exit code has to keep saying what ended the wait. `killed`
+        // carries the daemon's verdict — false is "the group was already gone", which is also
+        // what a kill wanted — and a kill that could not be sent at all reports `false` with
+        // the reason in the message, so a reader never infers a stop from a silence.
+        Err(err) if err.kind() == ErrorKind::Timeout && args.kill_on_timeout => {
+            ctx.out
+                .progress(&format!("timed out; killing {exec_id}'s process group"));
+            let (killed, detail) = match handle.kill().await {
+                Ok(killed) => (killed, None),
+                Err(kill_err) => (false, Some(kill_err.to_string())),
+            };
+            let mut failure = CliError::from(err).with_data("killed", json!(killed));
+            if let Some(detail) = detail {
+                failure.message = format!(
+                    "{}; the kill that --kill-on-timeout sent failed too: {detail}",
+                    failure.message
+                );
+            }
+            return Err(failure);
+        }
+        Err(err) => return Err(err.into()),
+    };
     history.append(Event::Exec {
         exec_id: exec_id.clone(),
         exit_code: result.exit_code(),
@@ -801,6 +828,152 @@ pub async fn ack<O: std::io::Write, E: std::io::Write>(
     Ok(rendered)
 }
 
+// ── kill ────────────────────────────────────────────────────────────────────
+
+/// Signals an exec's whole process group: SIGTERM, then SIGKILL after the daemon's grace.
+///
+/// # Why this is its own command and not `exec --timeout`'s job
+///
+/// `exec --timeout` is a client-side deadline over a read-only poll, and issue #156 measured
+/// what that means in practice: the command kept running in the guest after `ERR_TIMEOUT`, and
+/// a reader took the timeout for a stop. Reaching the kill route by hand is not a workaround —
+/// the platform proxy wants a freshly minted `X-aws-proxy-auth` on every request, which is what
+/// core's session does and `curl` cannot. So the stop button has to be a command, over the same
+/// door as every other attached command.
+///
+/// # The verdict is the daemon's, and `false` is a success
+///
+/// `POST /v1/exec/{id}/kill` answers 200 with `killed: false` when the group had already
+/// exited (`agentd/src/exec.rs`, `kill`): no signal was delivered because there was nothing to
+/// deliver it to, which is the outcome a kill was asking for. The envelope carries that boolean
+/// unflattened and the exit code stays 0, so a script shaped `microvm kill x-1 && collect` runs
+/// its second half whether the stop was needed or not. An unknown exec id is the daemon's 404,
+/// arriving as `ERR_PROTOCOL` / `NotFound` like every other exec route.
+pub async fn kill<O: std::io::Write, E: std::io::Write>(
+    ctx: &mut Ctx<'_, O, E>,
+    args: &KillArgs,
+) -> Result<Rendered, CliError> {
+    let (session, microvm_id) = attach(ctx, &args.region, &args.attach).await?;
+    ctx.out.progress(&format!(
+        "killing {}'s process group on {microvm_id}",
+        args.exec_id
+    ));
+    let killed = session.exec(&args.exec_id).kill().await?;
+
+    let mut data = Map::new();
+    data.insert("microvmId".into(), json!(microvm_id));
+    data.insert("execId".into(), json!(args.exec_id));
+    data.insert("killed".into(), json!(killed));
+    let text = if killed {
+        format!(
+            "exec {}: process group signalled (SIGTERM now, SIGKILL after the daemon's grace)",
+            args.exec_id
+        )
+    } else {
+        format!(
+            "exec {}: nothing to signal — the process group had already exited",
+            args.exec_id
+        )
+    };
+    let dense = format!("{}\t{killed}", args.exec_id);
+    let (kind, _) = response_type("kill");
+    Ok(Rendered::ok(kind, data, text, dense))
+}
+
+// ── ps ──────────────────────────────────────────────────────────────────────
+
+/// Lists every exec's process group and its live pids, from the daemon's own `/proc` read.
+///
+/// # What this shows that `health` cannot
+///
+/// `health`'s `busy` is about each exec's *own child*: an exec whose shell exited is not busy,
+/// however many processes that shell backgrounded (issue #157 measured a ticker still counting
+/// six seconds after its exec reported exit 0). `GET /v1/procs` reads `/proc` inside the guest
+/// for every pid whose process group is one the daemon spawned, so the row `childExited: true`
+/// with a non-empty `pids` is exactly that survivor — and its `execId` is what `kill` takes.
+/// Reading `/proc` daemon-side is also what makes this work on the al2023 base, which ships no
+/// `ps`; a caller who wants `ps` *inside* the VM installs `procps-ng` in the image, and this
+/// command needs nothing.
+///
+/// # The keys are camelCase and always present
+///
+/// `pgid` is `null` when the daemon captured none (a child reaped before `Child::id()`
+/// answered), never absent, because an absent key reads as "this client predates the field".
+/// The dense rendering is one TSV row per group — exec id, pgid, childExited, pid count,
+/// startedAt — exec id first so `cut -f1` feeds `kill`.
+pub async fn ps<O: std::io::Write, E: std::io::Write>(
+    ctx: &mut Ctx<'_, O, E>,
+    args: &PsArgs,
+) -> Result<Rendered, CliError> {
+    let (session, microvm_id) = attach(ctx, &args.region, &args.attach).await?;
+    ctx.out.progress(&format!("process groups on {microvm_id}"));
+    let listed = session.procs().await?;
+
+    let procs: Vec<Value> = listed
+        .procs
+        .iter()
+        .map(|group| {
+            json!({
+                "execId": group.exec_id,
+                "pgid": group.pgid,
+                "startedAt": group.started_at,
+                "childExited": group.child_exited,
+                "reap": group.reap,
+                "pids": group.pids,
+            })
+        })
+        .collect();
+
+    let mut data = Map::new();
+    data.insert("microvmId".into(), json!(microvm_id));
+    data.insert("procs".into(), Value::Array(procs));
+
+    let mut lines = vec![format!(
+        "{} process group(s) on {microvm_id}",
+        listed.procs.len()
+    )];
+    for group in &listed.procs {
+        lines.push(format!(
+            "{}\tpgid={}\tchild {}\t{} live pid(s){}\tstarted {}",
+            group.exec_id,
+            group
+                .pgid
+                .map(|pgid| pgid.to_string())
+                .unwrap_or_else(|| "none".into()),
+            if group.child_exited {
+                "exited"
+            } else {
+                "running"
+            },
+            group.pids.len(),
+            // The survivor shape, called out: it is the row this command exists for.
+            if group.child_exited && !group.pids.is_empty() {
+                " — left behind by an exec that finished"
+            } else {
+                ""
+            },
+            group.started_at,
+        ));
+    }
+    let dense = listed
+        .procs
+        .iter()
+        .map(|group| {
+            format!(
+                "{}\t{}\t{}\t{}\t{}",
+                group.exec_id,
+                group.pgid.map(|pgid| pgid.to_string()).unwrap_or_default(),
+                group.child_exited,
+                group.pids.len(),
+                group.started_at,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let (kind, _) = response_type("ps");
+    Ok(Rendered::ok(kind, data, lines.join("\n"), dense))
+}
+
 // ── stdin ───────────────────────────────────────────────────────────────────
 
 /// Writes to a running exec's stdin, and optionally closes it.
@@ -1285,6 +1458,7 @@ async fn sync_pass<O: std::io::Write, E: std::io::Write>(
                     group: None,
                     timeout_sec: Some(delete_timeout),
                     stdin: false,
+                    reap_group_on_exit: false,
                 },
                 Duration::from_secs_f64(delete_timeout.max(1.0) + 30.0),
             )

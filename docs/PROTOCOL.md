@@ -24,11 +24,14 @@ never gets bootstrapped.
 | `POST /v1/exec/{id}/stdin` | bearer | write to a child's stdin, or signal EOF |
 | `POST /v1/exec/{id}/ack` | bearer | release output, enter TTL collection |
 | `POST /v1/exec/{id}/kill` | bearer | signal escalation to the process group |
+| `GET /v1/procs` | bearer | process accounting: every exec's group and its live pids, read from `/proc` |
+| `GET /v1/tcp?port=&identity=` | bearer | WebSocket relay to `127.0.0.1:<port>` in the guest; close codes carry the outcome |
 | `PUT /v1/fs/tar` | bearer | streaming tar upload and confined extraction |
 | `GET /v1/fs/tar?path=` | bearer | streaming tar download |
 | `PUT /v1/fs/file` | bearer | write one file |
 | `GET /v1/fs/file?path=&start_line=&end_line=` | bearer | read one file, or a 1-based inclusive line range of it |
 | `GET /v1/health` | none | liveness, version, bootstrap state, exec-activity, hook observations |
+| `GET /v1/schema` | none | this contract as a JSON Schema document: every route, shape, status, and limit |
 
 **Every hook invocation is recorded and reported on `/v1/health`.** The daemon
 records each invocation in memory — the hook's name and the daemon's clock, in
@@ -131,6 +134,35 @@ for a 327-byte archive, so the size guard almost never fired.
 
 **Output is bounded, and truncation is marked explicitly.** A post-exit linger
 deadline bounds how long the daemon waits on grandchildren still holding the pipe.
+
+**A grandchild outlives its exec unless the caller asks otherwise, and
+`/v1/procs` is how anyone finds it.** Each exec runs in its own process group,
+and until now only `/v1/exec/{id}/kill` ever signalled that group: a command that
+backgrounded something and exited left it running with nothing able to enumerate
+it (issue #157, measured 2026-09-11 — a ticker still counting six seconds after
+its exec reported exit 0). `GET /v1/procs` answers `{procs: [{exec_id, pgid,
+started_at, child_exited, reap, pids}]}`, one entry per registered exec in any
+phase. `pids` are the live pids whose process group is `pgid`, read from
+`/proc/<pid>/stat` inside the guest, so the route needs no `ps` in the image;
+zombies are not live and are not listed, and an entry whose `pgid` was never
+captured lists none. `child_exited` is read from the same write-once marker
+`busy` uses, never from the polled result, so an acked exec still reads exited.
+`started_at` is epoch seconds on the daemon's clock, like a hook's `fired_at`.
+The row worth reading is `child_exited: true` with a non-empty `pids`: that is
+the survivor, and its `exec_id` is what the kill route takes.
+
+`reap_group_on_exit: true` on `/v1/exec/start` is the opt-in that closes the gap
+at the source. When set, the daemon runs the kill route's SIGTERM-then-SIGKILL
+escalation against the group as soon as the child's exit is observed and before
+the linger begins, so the survivors die, the pipe closes, and
+`writers_may_be_alive` reads false because the linger saw EOF rather than its
+deadline. A timed-out exec is already escalated and is not escalated twice. The
+escalation's grace ends as soon as `/proc` shows no live member of the group —
+not when `killpg(pgid, 0)` fails, because the daemon is PID 1 in the guest and a
+signalled grandchild stays a zombie that still answers that probe. The
+flag defaults to false and the default is the contract above: a backgrounded
+grandchild that keeps writing is a feature for the caller who did not set it.
+`reap` on a procs entry echoes what the start request asked.
 
 ## The launch environment
 

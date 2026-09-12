@@ -430,6 +430,19 @@ impl Session {
         self.exec(exec_id).kill().await
     }
 
+    /// Process accounting: every registered exec with its group's live pids.
+    ///
+    /// The daemon reads `/proc` itself, so this works against a guest with no `ps`.
+    /// `child_exited: true` beside a non-empty `pids` is a command that finished while
+    /// something it backgrounded did not; the `exec_id` beside it is what [`Self::kill`]
+    /// takes. Bearer-guarded, unlike [`Self::health`]: the answer names every pid in the
+    /// guest, and a caller without the token has no business with it.
+    pub async fn procs(&self) -> Result<protocol::exec::ProcsResponse, Error> {
+        self.transport
+            .send_json(HttpRequest::new("GET", "/v1/procs"))
+            .await
+    }
+
     // -- file transfer -----------------------------------------------------
 
     /// Writes one file, creating parents. `mode` is octal as a string.
@@ -740,6 +753,7 @@ mod tests {
             group: None,
             timeout_sec: None,
             stdin: false,
+            reap_group_on_exit: false,
         }
     }
 
@@ -1191,6 +1205,73 @@ mod tests {
             second[1].ends_with(&CountingMinter::value(1)),
             "the handshake would carry a token past its refresh window: {}",
             second[1]
+        );
+    }
+
+    /// **`procs` is a bearer GET of `/v1/procs`, and its body is the typed account.**
+    ///
+    /// Mirrors `health` in shape and differs in the one thing that matters: the token goes
+    /// out. The route is bearer-guarded because it names every pid in the guest, and a
+    /// client that sent it unauthenticated would read the daemon's 503-before-bootstrap as
+    /// a broken VM.
+    ///
+    /// **Guard proof.** Wrap the request in `unauthenticated(..)` the way `health` does and
+    /// the authorization assertion is red; point it at `/v1/health` and the path one is.
+    #[tokio::test]
+    async fn procs_is_a_bearer_get_of_the_procs_route_with_a_typed_body() {
+        let recorder = Recorder::with([Reply::ok(serde_json::json!({
+            "procs": [{
+                "exec_id": "e1",
+                "pgid": 4242,
+                "started_at": 1_756_500_000u64,
+                "child_exited": true,
+                "reap": false,
+                "pids": [4243],
+            }]
+        }))]);
+        let (session, _, _) = session_with(Arc::clone(&recorder));
+
+        let listed = session.procs().await.expect("procs");
+        let request = recorder.last();
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.path, "/v1/procs");
+        assert_eq!(
+            header(&request, "authorization").as_deref(),
+            Some("Bearer agent-token-abcdef"),
+            "the procs route is bearer-guarded; without the token it is a 503 or a 401"
+        );
+        assert_eq!(listed.procs.len(), 1);
+        assert_eq!(listed.procs[0].exec_id, "e1");
+        assert_eq!(listed.procs[0].pgid, Some(4242));
+        assert!(listed.procs[0].child_exited);
+        assert_eq!(listed.procs[0].pids, [4243]);
+    }
+
+    /// **The reap flag rides the start body under its wire name.**
+    ///
+    /// The field is `#[serde(default)]` on the daemon side, so a client that dropped it
+    /// would still be accepted — and the exec would silently keep today's leave-it-running
+    /// behaviour. Asserted on the recorded body, not on the request struct.
+    ///
+    /// **Guard proof.** Add `#[serde(skip)]` to the field and this is red on the missing key.
+    #[tokio::test]
+    async fn a_start_request_carries_the_reap_flag_on_the_wire() {
+        let recorder = Recorder::with([Reply::ok(
+            serde_json::json!({"exec_id":"e1","phase":"running"}),
+        )]);
+        let (session, _, _) = session_with(Arc::clone(&recorder));
+
+        let mut request = start_request("e1");
+        request.reap_group_on_exit = true;
+        session.run(request).await.expect("start");
+
+        let body: serde_json::Value =
+            serde_json::from_slice(&recorder.last().body).expect("a JSON start body");
+        assert_eq!(
+            body["reap_group_on_exit"],
+            serde_json::Value::Bool(true),
+            "the daemon defaults a missing flag to false, so a dropped key is a silent \
+             behaviour change: {body}"
         );
     }
 

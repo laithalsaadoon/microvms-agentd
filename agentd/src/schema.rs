@@ -527,6 +527,17 @@ pub const EXEC_KILL: &[Status] = &[
     UNKNOWN_EXEC,
 ];
 
+pub const PROCS: &[Status] = &[
+    Status::new(
+        StatusCode::OK,
+        "",
+        "every registered exec with its group's live pids, in registry order. An \
+         empty list is a daemon that has run nothing since it started, not an error.",
+    ),
+    UNAUTHORIZED,
+    NOT_BOOTSTRAPPED,
+];
+
 pub const FS_READ_FILE: &[Status] = &[
     Status::new(
         StatusCode::OK,

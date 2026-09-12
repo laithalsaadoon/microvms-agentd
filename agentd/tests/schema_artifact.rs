@@ -372,6 +372,7 @@ fn the_non_obvious_status_codes_are_in_the_machine_readable_artifact() {
         ("POST", "/v1/exec/{id}/stdin"),
         ("POST", "/v1/exec/{id}/ack"),
         ("POST", "/v1/exec/{id}/kill"),
+        ("GET", "/v1/procs"),
         ("GET", "/v1/fs/file"),
         ("PUT", "/v1/fs/file"),
         ("GET", "/v1/fs/tar"),

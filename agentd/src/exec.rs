@@ -86,7 +86,8 @@ use protocol::exec::{
 /// in the `agentd-model` crate, and for anything downstream that imported it.
 pub use protocol::exec::{
     ErrorBody, ExitEvent, GapEvent, KillResponse, Outcome, OutputEvent, Phase, PollResponse,
-    StartRequest, StartResponse, StdinRequest, StdinResponse, StreamKind, StreamQuery,
+    ProcGroup, ProcsResponse, StartRequest, StartResponse, StdinRequest, StdinResponse, StreamKind,
+    StreamQuery,
 };
 
 /// The exit status of a finished exec, kept separately from [`Outcome`].
@@ -214,6 +215,14 @@ pub struct ExecEntry {
     /// When the entry was acked. TTL collection reads this; an unacked entry has
     /// no deadline and is never collected.
     acked_at: Option<Instant>,
+    /// Seconds since the epoch when the child was spawned, on the daemon's clock —
+    /// the same convention as a hook observation's `fired_at`. Wall-clock rather
+    /// than `Instant` because it is reported to a caller outside the VM, who cannot
+    /// read a monotonic instant from another machine.
+    started_at: u64,
+    /// Whether the start request asked for the group to be reaped when the child
+    /// exits. Kept on the entry so `/v1/procs` can report it back.
+    reap: bool,
 }
 
 /// The part of an entry the waiter task and the handlers both touch.
@@ -376,7 +385,13 @@ pub async fn start(
             .into_response();
     }
 
-    match spawn(&state, &req.exec_id, command, timeout) {
+    match spawn(
+        &state,
+        &req.exec_id,
+        command,
+        timeout,
+        req.reap_group_on_exit,
+    ) {
         Ok(()) => (
             StatusCode::OK,
             Json(StartResponse {
@@ -1011,6 +1026,133 @@ pub async fn activity(state: &AppState) -> (bool, usize) {
     (busy, count)
 }
 
+/// `GET /v1/procs`.
+///
+/// Every registered exec with its process group's live pids, read from `/proc` so
+/// the guest needs no `ps` — the al2023 base has none (issue #157). What this
+/// answers that `/v1/health` cannot is *which* exec left *what* behind:
+/// `child_exited: true` beside a non-empty `pids` is a command that finished while
+/// something it backgrounded did not, and the id beside it is the one to pass to
+/// `/v1/exec/{id}/kill`.
+///
+/// `child_exited` reads the terminal marker, never `result`, for the reason
+/// [`activity`] gives: an ack takes the result, and an acked exec would otherwise
+/// read as still running forever. `try_lock` for the same reason as there — a slot
+/// whose lock is held is one the waiter is writing to, which is not exited yet.
+///
+/// The `/proc` walk is one `read_dir` plus one small read per live pid, on the
+/// blocking pool: it is synchronous filesystem I/O, and on a busy guest it is a few
+/// hundred files, which is more than a request handler should block a
+/// current-thread runtime on.
+pub async fn procs(State(state): State<AppState>) -> Response {
+    let entries: Vec<(String, Option<u32>, u64, bool, bool)> = state.with_execs(|execs| {
+        execs
+            .iter()
+            .map(|(id, entry)| {
+                let child_exited = match entry.shared.terminal.try_lock() {
+                    Ok(terminal) => terminal.is_some(),
+                    Err(_) => false,
+                };
+                (
+                    id.clone(),
+                    entry.pgid,
+                    entry.started_at,
+                    child_exited,
+                    entry.reap,
+                )
+            })
+            .collect()
+    });
+
+    let wanted: Vec<u32> = entries.iter().filter_map(|entry| entry.1).collect();
+    let by_group = match tokio::task::spawn_blocking(move || pids_in_groups(&wanted)).await {
+        Ok(by_group) => by_group,
+        // A panic on the blocking task is a daemon defect; the account is still
+        // worth answering with what the registry knows, and the log says the pid
+        // half is missing.
+        Err(err) => {
+            tracing::error!(%err, "the /proc scan for /v1/procs panicked");
+            std::collections::HashMap::new()
+        }
+    };
+
+    let procs = entries
+        .into_iter()
+        .map(
+            |(exec_id, pgid, started_at, child_exited, reap)| ProcGroup {
+                exec_id,
+                pgid,
+                started_at,
+                child_exited,
+                reap,
+                pids: pgid
+                    .and_then(|pgid| by_group.get(&pgid).cloned())
+                    .unwrap_or_default(),
+            },
+        )
+        .collect();
+
+    (StatusCode::OK, Json(ProcsResponse { procs })).into_response()
+}
+
+/// Every live pid on the box whose process group is one of `groups`, keyed by group.
+///
+/// One walk of `/proc` for all groups rather than one per group: the walk is the
+/// cost, and a daemon holding forty exec records would otherwise read every stat
+/// file forty times.
+fn pids_in_groups(groups: &[u32]) -> std::collections::HashMap<u32, Vec<u32>> {
+    let mut by_group: std::collections::HashMap<u32, Vec<u32>> =
+        groups.iter().map(|group| (*group, Vec::new())).collect();
+    if by_group.is_empty() {
+        return by_group;
+    }
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return by_group;
+    };
+    for entry in entries.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        // A process can exit between `read_dir` and this read; a missing stat is a
+        // pid that is no longer live, which is the right answer for it.
+        let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
+            continue;
+        };
+        if let Some(pgrp) = live_pgrp(&stat)
+            && let Some(pids) = by_group.get_mut(&pgrp)
+        {
+            pids.push(pid);
+        }
+    }
+    for pids in by_group.values_mut() {
+        pids.sort_unstable();
+    }
+    by_group
+}
+
+/// The process group in one `/proc/<pid>/stat` line, or `None` for a zombie.
+///
+/// The `comm` field is in parentheses and may itself contain spaces and
+/// parentheses — `(sh)` is tame, `(my (odd) name)` is legal — so the fields after
+/// it are located from the *last* `)` rather than by splitting the whole line. After
+/// it: state, ppid, pgrp, so pgrp is index 2. A `Z` state is a process that has
+/// exited and not yet been reaped; it holds no pipe and runs nothing, so listing it
+/// as live would make a killed group look like a survivor.
+fn live_pgrp(stat: &str) -> Option<u32> {
+    let after_comm = &stat[stat.rfind(')')? + 1..];
+    let mut fields = after_comm.split_whitespace();
+    let state = fields.next()?;
+    if state == "Z" || state == "X" {
+        return None;
+    }
+    let _ppid = fields.next()?;
+    fields.next()?.parse().ok()
+}
+
 /// Rejects a timeout that cannot describe a real budget.
 ///
 /// `f64` from JSON admits NaN and infinity through some encoders, and both turn
@@ -1109,6 +1251,7 @@ fn spawn(
     id: &str,
     mut command: Command,
     timeout: Option<Duration>,
+    reap: bool,
 ) -> std::io::Result<()> {
     let mut child = command.spawn()?;
 
@@ -1145,6 +1288,8 @@ fn spawn(
                 pgid,
                 shared: Arc::clone(&shared),
                 acked_at: None,
+                started_at: crate::state::epoch_secs(),
+                reap,
             },
         );
     });
@@ -1160,6 +1305,7 @@ fn spawn(
             cfg.output_linger,
             cfg.kill_grace,
             timeout,
+            reap,
             &shared,
         )
         .await;
@@ -1221,6 +1367,7 @@ async fn super_wait(
     linger: Duration,
     grace: Duration,
     timeout: Option<Duration>,
+    reap: bool,
     shared: &Shared,
 ) -> Outcome {
     let mut out_reader = Capped::new(stdout, cap, StreamKind::Stdout);
@@ -1248,6 +1395,22 @@ async fn super_wait(
                 status = Some(child.wait().await);
             }
         }
+    }
+
+    // The opt-in reap, between the two phases: the child is gone, and the caller
+    // asked that nothing it left behind outlive it. The same escalation the kill
+    // route and the timeout use, against the same group, so the grandchildren
+    // holding the write end are signalled and the linger below sees EOF instead of
+    // its deadline. Not after a timeout, whose branch above already escalated —
+    // signalling a group twice is harmless but would double the grace wait. Off by
+    // default, because the default is the grandchild-output guarantee: a
+    // backgrounded server that keeps logging is a feature for the caller who did
+    // not set this and a leak for the one who did.
+    if reap
+        && !timed_out
+        && let Some(pgid) = pgid
+    {
+        escalate_blind(pgid, grace).await;
     }
 
     // Phase two: the child is gone but grandchildren may still hold the write
@@ -1430,14 +1593,56 @@ async fn escalate(pgid: u32, grace: Duration, done: Arc<Shared>) -> bool {
     true
 }
 
-/// The timeout path's escalation, which has no `Shared` to watch because the
-/// waiter task *is* the caller.
+/// The timeout and reap paths' escalation, which has no `Shared` to watch because
+/// the waiter task *is* the caller.
+///
+/// The grace wait ends as soon as nothing live is left in the group rather than
+/// always running its full length. Waiting the whole grace regardless was tolerable
+/// for a timeout, which is rare; for a reap it would add the full `kill_grace` (10 s
+/// by default) to every reaped exec whose survivors died on the first signal, which
+/// is all of them that behave. Measured 2026-09-12 on a live VM before this check
+/// read `/proc`: every `--reap` cost the whole ten seconds, for the reason
+/// [`group_has_live_members`] gives.
 async fn escalate_blind(pgid: u32, grace: Duration) {
     if !signal_group(pgid, nix::sys::signal::Signal::SIGTERM) {
         return;
     }
-    tokio::time::sleep(grace).await;
+    let deadline = Instant::now() + grace;
+    while Instant::now() < deadline {
+        let alive = tokio::task::spawn_blocking(move || group_has_live_members(pgid))
+            .await
+            // A panic on the blocking task is a daemon defect; the safe direction for
+            // an escalation is to keep going, so it reads as "still alive".
+            .unwrap_or(true);
+        if !alive {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50).min(grace)).await;
+    }
     signal_group(pgid, nix::sys::signal::Signal::SIGKILL);
+}
+
+/// Whether anything in the group is still running — not merely still *existing*.
+///
+/// `killpg(pgid, 0)` is the documented probe for a group's existence, and it is the
+/// wrong question here. The daemon is PID 1 in the guest (measured 2026-09-12:
+/// `/proc/1/comm` is `agentd`) and reaps only the children it spawned, so a killed
+/// grandchild is reparented to it and stays a zombie for the life of the VM. A
+/// zombie still answers the signal-0 probe, so a check built on it never saw the
+/// group empty and every escalation ran its full grace. `ESRCH` is kept as the fast
+/// path — a group that is gone is gone — and anything else is settled by the same
+/// `/proc` read `/v1/procs` reports from, which does not count a `Z`.
+fn group_has_live_members(pgid: u32) -> bool {
+    let pid = nix::unistd::Pid::from_raw(pgid as i32);
+    if matches!(
+        nix::sys::signal::killpg(pid, None),
+        Err(nix::errno::Errno::ESRCH)
+    ) {
+        return false;
+    }
+    pids_in_groups(&[pgid])
+        .get(&pgid)
+        .is_some_and(|pids| !pids.is_empty())
 }
 
 /// Signals a whole process group.
@@ -1497,6 +1702,7 @@ mod tests {
             group: None,
             timeout_sec: None,
             stdin: false,
+            reap_group_on_exit: false,
         }
     }
 
@@ -1511,7 +1717,7 @@ mod tests {
         let id = req.exec_id.clone();
         let timeout = validate_timeout(req.timeout_sec).expect("valid timeout");
         let command = build_command(&req, &state.launch_env()).expect("buildable command");
-        spawn(state, &id, command, timeout).expect("spawn");
+        spawn(state, &id, command, timeout, req.reap_group_on_exit).expect("spawn");
         await_result(state, &id).await
     }
 
@@ -1690,7 +1896,7 @@ mod tests {
         let id = request.exec_id.clone();
         let timeout = validate_timeout(request.timeout_sec).expect("valid timeout");
         let command = build_command(&request, &state.launch_env()).expect("buildable command");
-        spawn(state, &id, command, timeout).expect("spawn");
+        spawn(state, &id, command, timeout, request.reap_group_on_exit).expect("spawn");
     }
 
     fn stdin_body(data: Option<&str>, signal: Option<&str>) -> StdinRequest {
@@ -2090,7 +2296,7 @@ mod tests {
         let request = req("live", &["/bin/sh", "-c", "sleep 30"]);
         let timeout = validate_timeout(request.timeout_sec).expect("valid");
         let command = build_command(&request, &state.launch_env()).expect("buildable");
-        spawn(&state, "live", command, timeout).expect("spawn");
+        spawn(&state, "live", command, timeout, false).expect("spawn");
 
         let response = ack(State(state.clone()), Path("live".to_string())).await;
         assert_eq!(response.status(), StatusCode::CONFLICT);
@@ -2113,7 +2319,7 @@ mod tests {
         });
         let request = req("group", &["/bin/sh", "-c", "sleep 30 & echo started; wait"]);
         let command = build_command(&request, &state.launch_env()).expect("buildable");
-        spawn(&state, "group", command, None).expect("spawn");
+        spawn(&state, "group", command, None, false).expect("spawn");
 
         let pgid = state
             .with_execs(|execs| execs.get("group").and_then(|e| e.pgid))
@@ -2173,6 +2379,293 @@ mod tests {
             "before",
             "output before the kill is kept"
         );
+    }
+
+    /// `GET /v1/procs`, decoded.
+    async fn procs_of(state: &AppState) -> Vec<ProcGroup> {
+        let response = procs(State(state.clone())).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: ProcsResponse = serde_json::from_value(body_json(response).await)
+            .expect("a procs body deserializes through the protocol type");
+        body.procs
+    }
+
+    /// The one entry for `id`, or a panic naming what was listed instead.
+    async fn group_of(state: &AppState, id: &str) -> ProcGroup {
+        let listed = procs_of(state).await;
+        listed
+            .iter()
+            .find(|group| group.exec_id == id)
+            .cloned()
+            .unwrap_or_else(|| panic!("{id} is not listed: {listed:?}"))
+    }
+
+    /// Polls `/v1/procs` until `id`'s group has no live pid, bounded so a regression
+    /// fails rather than hangs. Signals take a moment to land and a dying process is
+    /// a zombie for another, so one read right after a kill is a race, not a check.
+    async fn await_group_empty(state: &AppState, id: &str) -> ProcGroup {
+        let mut last = None;
+        for _ in 0..600 {
+            let group = group_of(state, id).await;
+            if group.pids.is_empty() {
+                return group;
+            }
+            last = Some(group);
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("{id}'s group never emptied: {last:?}");
+    }
+
+    /// The process group of `pid` read straight from `/proc`, independently of the
+    /// handler's own parser, so an assertion that every listed pid is in the group
+    /// does not trust the code under test to say so.
+    fn pgrp_from_proc(pid: u32) -> Option<u32> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        let after_comm = &stat[stat.rfind(')')? + 1..];
+        after_comm.split_whitespace().nth(2)?.parse().ok()
+    }
+
+    /// A fresh daemon has nothing to account for, and says so with an empty list
+    /// rather than an absent field.
+    #[tokio::test]
+    async fn a_fresh_daemon_lists_no_process_groups() {
+        let state = state();
+        assert_eq!(procs_of(&state).await, Vec::<ProcGroup>::new());
+    }
+
+    /// A running exec is listed with its group's live pids — the shell and the sleep
+    /// it backgrounded, at least — and `child_exited: false`. After a kill the same
+    /// entry reads `child_exited: true` with no pid left, because the kill reached
+    /// the whole group and not only the shell.
+    ///
+    /// Every listed pid is cross-checked against `/proc` here, so the assertion is
+    /// "these are the group's pids" and not merely "some pids were listed".
+    #[tokio::test]
+    async fn procs_lists_a_live_group_and_shows_it_empty_after_a_kill() {
+        let state = state_with(|cfg| {
+            cfg.kill_grace = Duration::from_millis(50);
+            cfg.output_linger = Duration::from_millis(200);
+        });
+        launch(
+            &state,
+            req(
+                "live-group",
+                &["/bin/sh", "-c", "sleep 30 & echo started; wait"],
+            ),
+        );
+        let pgid = state
+            .with_execs(|execs| execs["live-group"].pgid)
+            .expect("the pgid is captured at spawn");
+
+        // The backgrounded sleep needs a moment to be forked; poll for the second
+        // pid rather than asserting on the first read.
+        let mut group = group_of(&state, "live-group").await;
+        for _ in 0..600 {
+            if group.pids.len() >= 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            group = group_of(&state, "live-group").await;
+        }
+        assert_eq!(group.pgid, Some(pgid));
+        assert!(
+            !group.child_exited,
+            "the shell is still in `wait`: {group:?}"
+        );
+        assert!(!group.reap);
+        assert!(
+            group.started_at > 1_600_000_000,
+            "started_at is epoch seconds on the daemon's clock: {group:?}"
+        );
+        assert!(
+            group.pids.len() >= 2,
+            "the shell and its backgrounded sleep are both in the group: {group:?}"
+        );
+        for pid in &group.pids {
+            assert_eq!(
+                pgrp_from_proc(*pid),
+                Some(pgid),
+                "pid {pid} was listed under a group it is not in: {group:?}"
+            );
+        }
+
+        kill(State(state.clone()), Path("live-group".to_string())).await;
+        await_result(&state, "live-group").await;
+        let after = await_group_empty(&state, "live-group").await;
+        assert!(after.child_exited, "{after:?}");
+        assert_eq!(
+            after.pgid,
+            Some(pgid),
+            "the entry keeps its pgid: {after:?}"
+        );
+    }
+
+    /// Issue #157's shape, and the control case for the reap flag: a command that
+    /// backgrounds something and exits leaves that something running in the group
+    /// with nobody able to find it. Now `/v1/procs` finds it — `child_exited: true`
+    /// beside exactly one live pid, the sleep — and the outcome reports
+    /// `writers_may_be_alive` because the survivor still holds the pipe.
+    ///
+    /// **Guard proof.** Delete the pgrp comparison in `pids_in_groups` so every live
+    /// pid on the box is listed, and the `len() == 1` assertion goes red with hundreds
+    /// of pids; the per-pid `/proc` cross-check goes red on the first one that is not
+    /// in the group.
+    #[tokio::test]
+    async fn a_backgrounded_survivor_is_listed_after_its_exec_exited() {
+        let state = state_with(|cfg| {
+            cfg.kill_grace = Duration::from_millis(50);
+            cfg.output_linger = Duration::from_millis(200);
+        });
+        let outcome = run(&state, req("survivor", &["/bin/sh", "-c", "sleep 30 &"])).await;
+        assert_eq!(outcome.exit_code, Some(0));
+        assert!(
+            outcome.writers_may_be_alive,
+            "the backgrounded sleep still holds the pipe after the linger: {outcome:?}"
+        );
+
+        let group = group_of(&state, "survivor").await;
+        let pgid = group.pgid.expect("captured at spawn");
+        assert!(group.child_exited, "{group:?}");
+        assert!(!group.reap);
+        assert_eq!(
+            group.pids.len(),
+            1,
+            "exactly the sleep survives its shell: {group:?}"
+        );
+        assert_ne!(
+            group.pids[0], pgid,
+            "the survivor is a grandchild, not the group leader (the shell, which exited)"
+        );
+        assert_eq!(pgrp_from_proc(group.pids[0]), Some(pgid), "{group:?}");
+
+        // A kill after the child exited still reaches the survivor: the pgid was
+        // captured at spawn and the group is what gets signalled.
+        let response = kill(State(state.clone()), Path("survivor".to_string())).await;
+        assert_eq!(
+            body_json(response).await["killed"],
+            serde_json::Value::Bool(true)
+        );
+        await_group_empty(&state, "survivor").await;
+    }
+
+    /// The same shape with `reap_group_on_exit`: the group is escalated as soon as
+    /// the shell exits, so the sleep dies, the pipe closes, and the linger sees EOF —
+    /// `writers_may_be_alive` is false and nothing is left in the group.
+    ///
+    /// **Guard proof.** Drop the `if reap` escalation between the two phases of
+    /// `super_wait` and this goes red on `writers_may_be_alive` (true, the linger
+    /// expired) and on the surviving pid.
+    #[tokio::test]
+    async fn reap_group_on_exit_leaves_no_survivor_and_no_live_writer() {
+        let state = state_with(|cfg| {
+            cfg.kill_grace = Duration::from_millis(50);
+            cfg.output_linger = Duration::from_millis(200);
+        });
+        let mut request = req("reaped", &["/bin/sh", "-c", "sleep 30 & echo started"]);
+        request.reap_group_on_exit = true;
+        let outcome = run(&state, request).await;
+        assert_eq!(outcome.exit_code, Some(0), "{outcome:?}");
+        assert_eq!(
+            outcome.stdout.trim(),
+            "started",
+            "output before the reap is kept"
+        );
+        assert!(
+            !outcome.writers_may_be_alive,
+            "the reap closed the pipe, so the linger saw EOF rather than a deadline: {outcome:?}"
+        );
+
+        let group = await_group_empty(&state, "reaped").await;
+        assert!(group.child_exited, "{group:?}");
+        assert!(group.reap, "the flag is reported back: {group:?}");
+    }
+
+    /// A group whose only remaining member is a zombie is *not* alive, and the
+    /// escalation must not wait the grace out on it.
+    ///
+    /// The guest's daemon is PID 1 and reaps only its own children, so a signalled
+    /// grandchild stays a zombie forever — and a zombie still answers `killpg(pgid,
+    /// 0)`. Reproduced here without PID 1: a child this test spawns and never waits
+    /// on becomes a zombie of the test process, in its own group, and the escalation
+    /// against that group has to return in well under the five-second grace.
+    ///
+    /// **Guard proof.** Replace `group_has_live_members` with the bare `killpg`
+    /// existence probe and this is red on the elapsed time (~5 s against < 2 s),
+    /// while the survivor-and-reap tests stay green because init reaps orphans on a
+    /// development box.
+    #[tokio::test]
+    async fn an_escalation_does_not_wait_the_grace_out_on_a_zombie() {
+        use std::os::unix::process::CommandExt as _;
+        let mut child = std::process::Command::new("/bin/true")
+            .process_group(0)
+            .spawn()
+            .expect("spawns");
+        let pgid = child.id();
+        // Poll until the child has exited and become a zombie (state `Z`), rather
+        // than sleeping a fixed interval.
+        let mut zombie = false;
+        for _ in 0..600 {
+            let stat = std::fs::read_to_string(format!("/proc/{pgid}/stat")).unwrap_or_default();
+            if stat
+                .rfind(')')
+                .is_some_and(|at| stat[at + 1..].trim_start().starts_with('Z'))
+            {
+                zombie = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert!(zombie, "the unwaited child never became a zombie");
+        assert!(
+            nix::sys::signal::killpg(nix::unistd::Pid::from_raw(pgid as i32), None).is_ok(),
+            "a zombie still answers the existence probe, which is the whole trap"
+        );
+        assert!(
+            !group_has_live_members(pgid),
+            "a zombie is not a live member"
+        );
+
+        let started = Instant::now();
+        escalate_blind(pgid, Duration::from_secs(5)).await;
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "the escalation waited the grace out on a zombie: {:?}",
+            started.elapsed()
+        );
+        child.wait().expect("reaped");
+    }
+
+    /// An acked exec still reads `child_exited: true`. The ack takes `result`, so a
+    /// handler reading that slot would report every acked exec as running — the same
+    /// mistake `activity` documents, arriving here as a stop button that never shows
+    /// green.
+    ///
+    /// **Guard proof.** Read `result` instead of `terminal` in `procs` and this goes
+    /// red on the acked read while every other procs test stays green.
+    #[tokio::test]
+    async fn an_acked_exec_still_reads_as_exited_on_procs() {
+        let state = state();
+        run(&state, req("acked-procs", &["/bin/true"])).await;
+        assert!(group_of(&state, "acked-procs").await.child_exited);
+        ack(State(state.clone()), Path("acked-procs".to_string())).await;
+        let group = group_of(&state, "acked-procs").await;
+        assert!(
+            group.child_exited,
+            "an ack released the output; it did not restart the child: {group:?}"
+        );
+    }
+
+    /// An entry with no pgid — the child was reaped before `Child::id()` answered — is
+    /// still listed, with an empty pid list, rather than dropped from the account.
+    #[tokio::test]
+    async fn an_entry_without_a_pgid_is_listed_with_no_pids() {
+        let state = state();
+        run(&state, req("no-pgid", &["/bin/true"])).await;
+        state.with_execs(|execs| execs.get_mut("no-pgid").expect("registered").pgid = None);
+        let group = group_of(&state, "no-pgid").await;
+        assert_eq!(group.pgid, None);
+        assert!(group.pids.is_empty(), "{group:?}");
+        assert!(group.child_exited);
     }
 
     /// Only acked entries are collected. An unacked entry has no deadline

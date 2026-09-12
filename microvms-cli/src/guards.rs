@@ -354,6 +354,8 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 stream: false,
                 from_offset: None,
                 stdin: false,
+                reap: false,
+                kill_on_timeout: false,
                 attach: AttachFlags {
                     state_dir: Some(std::env::temp_dir().join("microvm-guard-history")),
                     ..attach_flags()
@@ -404,6 +406,23 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
             "ack",
             Command::Ack(AckArgs {
                 exec_id: "x-1".into(),
+                attach: attach_flags(),
+                region: region_flags(),
+            }),
+            Door::AttachSession,
+        ),
+        (
+            "kill",
+            Command::Kill(crate::cli::KillArgs {
+                exec_id: "x-1".into(),
+                attach: attach_flags(),
+                region: region_flags(),
+            }),
+            Door::AttachSession,
+        ),
+        (
+            "ps",
+            Command::Ps(crate::cli::PsArgs {
                 attach: attach_flags(),
                 region: region_flags(),
             }),
@@ -2904,6 +2923,8 @@ fn exec_command(shape: impl FnOnce(&mut ExecArgs)) -> Command {
         stream: false,
         from_offset: None,
         stdin: false,
+        reap: false,
+        kill_on_timeout: false,
         attach: AttachFlags {
             state_dir: Some(std::env::temp_dir().join(format!(
                 "microvm-guard-exec-history-{}-{:?}",
@@ -3643,6 +3664,237 @@ async fn a_second_ack_conflicts_and_says_which_conflict_it_is() {
         failure.message.contains("still_running"),
         "{}",
         failure.message
+    );
+}
+
+/// **`microvm kill` POSTs the kill route and reports the daemon's own `killed` verdict.**
+///
+/// Issue #156: until this landed the only stop button on the CLI was `terminate`, and the
+/// route's `killed: false` with a 200 — "the group had already exited" — is a fact the envelope
+/// has to carry rather than flatten into success. Both verdicts are asserted, and both exit 0:
+/// a kill whose target was already gone got what it asked for.
+///
+/// **Guard proof.** Route the handler through `session.exec(id).poll()` instead of `kill()` and
+/// the path assertion is red; hard-code `killed: true` and the second half is.
+#[tokio::test]
+async fn kill_posts_the_kill_route_and_reports_the_daemons_verdict() {
+    let script = DaemonScript::new();
+    script.reply(200, r#"{"exec_id": "x-1", "killed": true}"#);
+    let command = Command::Kill(crate::cli::KillArgs {
+        exec_id: "x-1".into(),
+        attach: attach_flags(),
+        region: region_flags(),
+    });
+    let (result, _, _) = against_daemon(&script, &command).await;
+    let rendered = result.expect("a kill that signalled");
+    assert_eq!(script.paths(), ["POST /v1/exec/x-1/kill"]);
+    assert_eq!(rendered.kind, "microvm.kill");
+    assert_eq!(rendered.data["microvmId"], "mvm-1");
+    assert_eq!(rendered.data["execId"], "x-1");
+    assert_eq!(rendered.data["killed"], true);
+    assert_eq!(rendered.already_reported, None);
+
+    // The group was already gone: still a success, and the envelope says nothing was signalled.
+    let gone = DaemonScript::new();
+    gone.reply(200, r#"{"exec_id": "x-1", "killed": false}"#);
+    let (result, _, _) = against_daemon(&gone, &command).await;
+    let rendered = result.expect("killing an exited group is the outcome a kill wanted");
+    assert_eq!(
+        rendered.data["killed"], false,
+        "the daemon's false must not be flattened into a success that reads as a signal"
+    );
+    assert_eq!(rendered.already_reported, None);
+
+    // And an unknown id is the daemon's 404, arriving as ERR_PROTOCOL / NotFound like every
+    // other exec route.
+    let missing = DaemonScript::new();
+    missing.reply(404, r#"{"error": "unknown_exec", "detail": "x-1"}"#);
+    let (result, _, _) = against_daemon(&missing, &command).await;
+    let failure = result.expect_err("an unknown exec is refused");
+    assert_eq!(failure.exit, Exit::Protocol);
+    assert_eq!(failure.wire_kind, Some(microvms_core::WireKind::NotFound));
+}
+
+/// **`microvm ps` GETs `/v1/procs` and renders one row per process group, camelCase.**
+///
+/// Issue #157's enumeration half. The row that matters is the second one: `childExited: true`
+/// with a live pid is a command that finished while something it backgrounded did not, which
+/// no other command can show. The dense rendering is one TSV line per group so a shell can
+/// `cut` the exec id out and hand it to `kill`.
+///
+/// **Guard proof.** Read `/v1/health` instead and the path assertion is red; drop the
+/// `childExited` key and the envelope assertion is.
+#[tokio::test]
+async fn ps_gets_the_procs_route_and_renders_one_row_per_group() {
+    let script = DaemonScript::new();
+    script.reply(
+        200,
+        r#"{"procs": [
+            {"exec_id": "x-1", "pgid": 100, "started_at": 1756500000, "child_exited": false,
+             "reap": false, "pids": [100, 101]},
+            {"exec_id": "x-2", "pgid": 200, "started_at": 1756500010, "child_exited": true,
+             "reap": false, "pids": [201]},
+            {"exec_id": "x-3", "pgid": null, "started_at": 1756500020, "child_exited": true,
+             "reap": true, "pids": []}
+        ]}"#,
+    );
+    let command = Command::Ps(crate::cli::PsArgs {
+        attach: attach_flags(),
+        region: region_flags(),
+    });
+    let (result, _, _) = against_daemon(&script, &command).await;
+    let rendered = result.expect("ps lists");
+    assert_eq!(script.paths(), ["GET /v1/procs"]);
+    assert_eq!(rendered.kind, "microvm.procs");
+    assert_eq!(rendered.data["microvmId"], "mvm-1");
+    let procs = rendered.data["procs"].as_array().expect("an array");
+    assert_eq!(procs.len(), 3);
+    assert_eq!(procs[0]["execId"], "x-1");
+    assert_eq!(procs[0]["pgid"], 100);
+    assert_eq!(procs[0]["startedAt"], 1_756_500_000u64);
+    assert_eq!(procs[0]["childExited"], false);
+    assert_eq!(procs[0]["pids"], serde_json::json!([100, 101]));
+    assert_eq!(
+        (
+            procs[1]["childExited"].as_bool(),
+            procs[1]["pids"].as_array().map(Vec::len)
+        ),
+        (Some(true), Some(1)),
+        "the survivor shape — exited child, live pid — is the reason the command exists"
+    );
+    // `Value::index` on a missing key also yields `Null`, so the key's presence has to be
+    // asserted through the map, or a renderer that drops the key would pass here.
+    assert_eq!(
+        procs[2].as_object().and_then(|group| group.get("pgid")),
+        Some(&serde_json::Value::Null),
+        "a missing pgid is null, never absent"
+    );
+    assert_eq!(procs[2]["reap"], true);
+    // Dense: one TSV row per group, exec id first so `cut -f1` feeds `kill`.
+    let dense: Vec<&str> = rendered.dense_text.lines().collect();
+    assert_eq!(dense.len(), 3, "{:?}", rendered.dense_text);
+    assert_eq!(
+        dense[1].split('\t').collect::<Vec<_>>(),
+        ["x-2", "200", "true", "1", "1756500010"]
+    );
+    // An empty account is an empty list and a success.
+    let idle = DaemonScript::new();
+    idle.reply(200, r#"{"procs": []}"#);
+    let (result, _, _) = against_daemon(&idle, &command).await;
+    let rendered = result.expect("an idle daemon lists nothing");
+    assert_eq!(rendered.data["procs"], serde_json::json!([]));
+}
+
+/// **`exec --reap` puts `reap_group_on_exit: true` on the start body, and its absence puts
+/// `false`.**
+///
+/// The daemon defaults a missing key to false, so a CLI that dropped the flag would still get a
+/// 200 and an exec that quietly kept today's leave-it-running behaviour. Asserted on the recorded
+/// body in both directions: the control case is what proves the default is really off.
+///
+/// **Guard proof.** Stop forwarding `spec.reap` in `start_request` and the first assertion is red.
+#[tokio::test]
+async fn exec_reap_puts_the_flag_on_the_start_body_and_its_absence_puts_false() {
+    for reap in [true, false] {
+        let script = DaemonScript::new();
+        script
+            .reply(200, STARTED_BODY)
+            .reply(200, &poll_body("exited", "0", "", false))
+            .reply(200, &poll_body("acked", "0", "", false));
+        let command = exec_command(|args| args.reap = reap);
+        let (result, _, _) = against_daemon(&script, &command).await;
+        result.expect("the exec completes");
+        let start = script
+            .requests()
+            .into_iter()
+            .find(|request| request.path == "/v1/exec/start")
+            .expect("a start went out");
+        let body: serde_json::Value = serde_json::from_slice(&start.body).expect("JSON");
+        assert_eq!(
+            body["reap_group_on_exit"],
+            serde_json::Value::Bool(reap),
+            "--reap={reap} must reach the wire as the daemon's own key: {body}"
+        );
+    }
+}
+
+/// **`exec --kill-on-timeout` kills the exec after `ERR_TIMEOUT` and says whether it did; a
+/// plain timeout kills nothing and names `microvm kill` as the remedy.**
+///
+/// Issue #156's measurement: `exec --timeout` abandoned an exec and a reader took it for a stop.
+/// The plain timeout keeps its fact — the exec is untouched — and now names the command that
+/// stops it. The flag turns the timeout into a stop, and the failure envelope carries the kill's
+/// own verdict in `data.killed` rather than implying it from the exit code, which stays
+/// `ERR_TIMEOUT` because the deadline is still what ended the wait.
+///
+/// The wait is a zero deadline against a daemon that answers `running`: one poll, then the
+/// timeout, then — with the flag — exactly one kill.
+///
+/// **Guard proof.** Drop the `kill_on_timeout` arm and the kill-path assertion is red with the
+/// script's kill reply unconsumed; drop `microvm kill` from the suggestion and the text one is.
+#[tokio::test]
+async fn exec_kill_on_timeout_kills_after_the_deadline_and_a_plain_timeout_names_the_remedy() {
+    let script = DaemonScript::new();
+    script
+        .reply(200, STARTED_BODY)
+        .reply(200, STARTED_BODY)
+        .reply(200, r#"{"exec_id": "x-1", "killed": true}"#);
+    let command = exec_command(|args| {
+        args.timeout = 0.0;
+        args.kill_on_timeout = true;
+        args.exec_id = Some("x-1".into());
+    });
+    let (result, _, _) = against_daemon(&script, &command).await;
+    let failure = result.expect_err("the deadline still ends the wait");
+    assert_eq!(failure.exit, Exit::Timeout);
+    assert_eq!(
+        failure.data.get("killed"),
+        Some(&serde_json::Value::Bool(true)),
+        "the kill's verdict rides the failure envelope: {:?}",
+        failure.data
+    );
+    assert_eq!(
+        script.paths().last().map(String::as_str),
+        Some("POST /v1/exec/x-1/kill"),
+        "the timeout must be followed by exactly one kill: {:?}",
+        script.paths()
+    );
+
+    // Without the flag: no kill goes out, `killed` is absent, and the suggestion names the stop.
+    let plain = DaemonScript::new();
+    plain.reply(200, STARTED_BODY).reply(200, STARTED_BODY);
+    let command = exec_command(|args| {
+        args.timeout = 0.0;
+        args.exec_id = Some("x-1".into());
+    });
+    let (result, _, _) = against_daemon(&plain, &command).await;
+    let failure = result.expect_err("a plain timeout");
+    assert_eq!(failure.exit, Exit::Timeout);
+    assert!(
+        !plain.paths().iter().any(|path| path.contains("/kill")),
+        "a plain timeout must not stop the exec: {:?}",
+        plain.paths()
+    );
+    assert!(
+        failure.data.get("killed").is_none(),
+        "no kill was attempted, so no verdict is claimed: {:?}",
+        failure.data
+    );
+    assert!(
+        failure
+            .suggestions
+            .iter()
+            .any(|line| line.contains("microvm kill")),
+        "a timeout that does not name `microvm kill` reads as a stop: {:?}",
+        failure.suggestions
+    );
+    assert!(
+        failure
+            .suggestions
+            .iter()
+            .any(|line| line.contains("untouched")),
+        "the fact that the exec is untouched stays: {:?}",
+        failure.suggestions
     );
 }
 

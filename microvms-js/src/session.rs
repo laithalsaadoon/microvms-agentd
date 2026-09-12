@@ -97,6 +97,42 @@ impl Health {
     }
 }
 
+/// One exec's process group, as `GET /v1/procs` reports it.
+///
+/// `childExited` beside a non-empty `pids` is the shape worth reading: a command that finished
+/// while something it backgrounded did not, which `Health.busy` cannot show. The `execId`
+/// beside it is what `Session.kill` takes.
+#[napi(object)]
+pub struct ProcGroup {
+    /// The exec this group belongs to — what `kill` takes.
+    pub exec_id: String,
+    /// The process group id captured at spawn, or `null` when the child was reaped before it
+    /// could be read (then `pids` is empty: there is no group to scan for).
+    pub pgid: Option<u32>,
+    /// Seconds since the epoch on the daemon's clock when the child was spawned.
+    pub started_at: i64,
+    /// Whether the exec's own child has exited. An acked exec still reads `true`.
+    pub child_exited: bool,
+    /// Whether the exec was started with `reapGroupOnExit`.
+    pub reap: bool,
+    /// Live pids whose process group is `pgid`, read from `/proc` inside the guest. Zombies
+    /// are not listed. Empty once the group is gone.
+    pub pids: Vec<u32>,
+}
+
+impl ProcGroup {
+    fn wrap(group: protocol::exec::ProcGroup) -> Self {
+        Self {
+            exec_id: group.exec_id,
+            pgid: group.pgid,
+            started_at: group.started_at as i64,
+            child_exited: group.child_exited,
+            reap: group.reap,
+            pids: group.pids,
+        }
+    }
+}
+
 /// How an exec should be started. Every field optional; the defaults are the daemon's.
 #[napi(object)]
 pub struct ExecOptions {
@@ -116,6 +152,10 @@ pub struct ExecOptions {
     pub exec_id: Option<String>,
     /// The client-side deadline for `runSync` only.
     pub timeout: Option<f64>,
+    /// Signal the whole process group once the command's own child exits, so nothing it
+    /// backgrounded outlives it. Off by default, which keeps the backgrounded-grandchild-output
+    /// guarantee for callers who rely on it.
+    pub reap_group_on_exit: Option<bool>,
 }
 
 impl ExecOptions {
@@ -130,6 +170,7 @@ impl ExecOptions {
             stdin: None,
             exec_id: None,
             timeout: None,
+            reap_group_on_exit: None,
         }
     }
 
@@ -153,6 +194,7 @@ impl ExecOptions {
             group: self.group,
             timeout_sec: self.timeout_sec,
             stdin: self.stdin.unwrap_or(false),
+            reap_group_on_exit: self.reap_group_on_exit.unwrap_or(false),
         }
     }
 }
@@ -422,6 +464,25 @@ impl Session {
         let live = self.live().await;
         let session = live.session().map_err(js_async)?;
         session.kill(&exec_id).await.map_err(js_async)
+    }
+
+    /// Process accounting: every registered exec with its group's live pids.
+    ///
+    /// The daemon reads `/proc` itself, so this needs no `ps` in the guest. A `ProcGroup` with
+    /// `childExited` and a non-empty `pids` is a command that finished while something it
+    /// backgrounded did not; pass its `execId` to `kill`.
+    #[napi]
+    pub async fn procs(&self) -> Result<Vec<ProcGroup>, AsyncError> {
+        let live = self.live().await;
+        let session = live.session().map_err(js_async)?;
+        Ok(session
+            .procs()
+            .await
+            .map_err(js_async)?
+            .procs
+            .into_iter()
+            .map(ProcGroup::wrap)
+            .collect())
     }
 
     /// Writes one file, creating parents. `mode` is an **octal string** (`"0755"`), which is
