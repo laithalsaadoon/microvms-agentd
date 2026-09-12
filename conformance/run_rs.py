@@ -6,7 +6,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Live conformance run driving the **Rust** client stack through the `microvm` CLI.
 
-This is the only live suite, and it now expresses **every named check** — 158 of them, with
+This is the only live suite, and it now expresses **every named check** — 159 of them, with
 none recorded SKIP. `conformance/run.py` was the oracle — 56 checks through the Python
 client — and it went away with that client once both suites ran green against real AWS on
 the same commit (Python 56/56, this one 38/38 with 34 recorded SKIP). Those 34 were the
@@ -145,7 +145,7 @@ only section that needs Bedrock, on both default models, and it prints the model
 used to stderr. An `agent-up` that fails before any VM exists records all fifteen as FAIL
 rather than SKIP: an account without the entitlement is a finding, not a gap.
 
-158 rather than 152: six for issues #158, #160 and #161, the hygiene trio measured by the
+159 rather than 152: seven for issues #158, #160 and #161, the hygiene trio measured by the
 2026-09-11 seam probe. `drive_lifecycle` asserts the kept launch carries its agent token and
 `drive_config_and_sync` asserts a launch without `--keep` nulls it — the token has no consumer
 once the VM is gone and stdout outlives the process (#161). `drive_teardown` now terminates
@@ -155,8 +155,11 @@ record's image name (#160). Then, before the suite deletes that group, it runs
 `scripts/verify-clean.py` and asserts two lines of its report: the suite's group is a LEAK,
 and the configured `--log-group` (which no prefix and no ledger record names) is
 UNCLASSIFIED rather than absent (#158) — the sweep now covers the whole
-`/aws/lambda-microvms/` namespace, and a group it cannot attribute counts against a clean
-verdict instead of vanishing from it.
+`/aws/lambda-microvms/` namespace, and a group it cannot attribute is listed and counted
+instead of vanishing. A seventh writes a one-record state directory whose `leaked` names
+that configured group and runs the script against it with `--state-dir`, which turns the
+UNCLASSIFIED line into an attributed LEAK: the ledger rule proved on the real account, on a
+name no prefix matches.
 
 A hybrid driver, and both lanes are deliberate
 ----------------------------------------------
@@ -3509,6 +3512,40 @@ def drive_teardown(
         swept.returncode == 1 and f"LEAK log group {expected_group}" in swept.stdout,
         f"exit={swept.returncode} named={f'LEAK log group {expected_group}' in swept.stdout}",
     )
+    # The ledger path itself, live: a state directory holding one record whose `leaked`
+    # names the configured group — the shape a teardown that could only name its group
+    # leaves — turns that same UNCLASSIFIED group into an attributed LEAK. The suite's own
+    # group cannot show this (its `microvm-cli-` prefix is matched first), which is why the
+    # configured group, matching no prefix, is the one that proves the ledger rule against
+    # the real account rather than only in `--self-test`.
+    ledger_only: list[str] = []
+    with tempfile.TemporaryDirectory(prefix="verify-clean-ledger-") as tmp:
+        (Path(tmp) / "1700000000-1.json").write_text(
+            json.dumps(
+                {
+                    "runId": "1700000000-1",
+                    "region": cli.region,
+                    "leaked": list(extra_log_groups),
+                }
+            )
+        )
+        attributed = subprocess.run(
+            [str(verify_clean), "--state-dir", tmp],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "AWS_REGION": cli.region},
+            timeout=300,
+            check=False,
+        )
+        ledger_only = [
+            f"LEAK log group {group} (named in {tmp})" for group in extra_log_groups
+        ]
+        results.check(
+            "verify-clean attributes a non-prefixed group through a ledger record that names it (issue #158)",
+            bool(extra_log_groups)
+            and all(line in attributed.stdout for line in ledger_only),
+            f"exit={attributed.returncode} wanted={ledger_only!r}",
+        )
     results.check(
         "verify-clean reports a group it cannot attribute as unclassified, not as clean (issue #158)",
         all(

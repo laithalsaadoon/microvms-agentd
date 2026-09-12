@@ -133,6 +133,11 @@ def ledger_oracle(state_dir: Path) -> Oracle:
             continue
         if not isinstance(record, dict):
             continue
+        # A record from another region names that region's resources; a bare image name
+        # matched across regions would attribute (and under --delete, delete) a same-named
+        # image here. Records with no region predate the field and are read.
+        if record.get("region") not in (None, REGION):
+            continue
         oracle.records[path] = record
         if isinstance(record.get("imageName"), str):
             oracle.image_names.add(record["imageName"])
@@ -194,6 +199,18 @@ def classify_log_group(group_name: str, ledger: set[str] | Oracle) -> str:
     return UNKNOWN
 
 
+def all_items(client: Any, operation: str) -> list[dict[str, Any]]:
+    """Every `items` entry of a paginated list operation, across pages.
+
+    The bare call returns one page, and a 51st MicroVM or image would read as absent — the
+    same false-assurance shape the log-group sweep pages for.
+    """
+    items: list[dict[str, Any]] = []
+    for page in client.get_paginator(operation).paginate():
+        items.extend(page.get("items", []))
+    return items
+
+
 def service_log_groups(logs: Any) -> list[dict[str, Any]]:
     """Every group under the namespace, across pages.
 
@@ -252,14 +269,14 @@ def main() -> int:
     # MicroVMs. TERMINATED is not a leak: billing stops at terminate and the
     # record is history the service keeps. Anything else is still costing money.
     live_states = {"PENDING", "RUNNING", "SUSPENDING", "SUSPENDED", "TERMINATING"}
-    for vm in mv.list_microvms().get("items", []):
+    for vm in all_items(mv, "list_microvms"):
         if vm.get("state") in live_states:
             leaks.append(f"microvm {vm.get('microvmId')} in {vm.get('state')}")
 
     # Images. DELETING is in progress rather than leaked, so it is reported
     # separately: re-running this a minute later is the right response.
     pending: list[str] = []
-    for image in mv.list_microvm_images().get("items", []):
+    for image in all_items(mv, "list_microvm_images"):
         name = image.get("name")
         # The ledger is the second oracle for images for the same reason it is for log
         # groups: a custom `--name` is invisible to the prefix list.
@@ -328,7 +345,7 @@ def main() -> int:
     for group in log_groups:
         if _try(logs.delete_log_group, logGroupName=group["logGroupName"]):
             removed.add(group["logGroupName"])
-    for image in mv.list_microvm_images().get("items", []):
+    for image in all_items(mv, "list_microvm_images"):
         name = image.get("name")
         arn = image.get("imageArn")
         if (ours(name) or oracle.knows_image(name, arn)) and image.get(
@@ -339,7 +356,7 @@ def main() -> int:
                 imageIdentifier=image.get("imageIdentifier") or arn,
             ):
                 removed.add(str(arn))
-    for vm in mv.list_microvms().get("items", []):
+    for vm in all_items(mv, "list_microvms"):
         if vm.get("state") in live_states:
             _try(mv.terminate_microvm, microvmIdentifier=vm["microvmId"])
     # What was just removed leaves the ledger too, so `microvm ls` stops reporting it.
@@ -445,10 +462,25 @@ def self_test() -> int:
                 }
             )
         )
+        (state / "1757600004-104.json").write_text(
+            json.dumps(
+                {
+                    "runId": "1757600004-104",
+                    "region": "eu-west-1",
+                    "imageName": "elsewhere",
+                    "leaked": ["/aws/lambda-microvms/elsewhere"],
+                }
+            )
+        )
         names = ledger_image_names(state)
         expect(
-            "the ledger yields exactly the imageName values of readable run records",
+            "the ledger yields exactly the imageName values of readable run records in this region",
             names == {"seam-probe-1757600000", "torn-down"},
+        )
+        expect(
+            "a record from another region is not this region's oracle",
+            "elsewhere" not in names
+            and "/aws/lambda-microvms/elsewhere" not in ledger_oracle(state).log_groups,
         )
         expect(
             "a missing state dir yields no names rather than raising",

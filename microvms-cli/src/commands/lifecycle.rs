@@ -2016,16 +2016,24 @@ pub async fn terminate<O: std::io::Write, E: std::io::Write>(
     // The kept run's own record, when this state directory launched the VM. It names the
     // image and the image's name, which is what lets `--delete-image` stand alone (issue
     // #160), and it is what gets retired below once nothing it recorded is outstanding.
-    let mut record = crate::ledger::Ledger::open_for_vm(&ledger_root, &microvm_id);
+    let mut records = crate::ledger::Ledger::open_all_for_vm(&ledger_root, &microvm_id);
+    let record = records.first();
     let image_identifier: Option<String> = args.image_identifier.clone().or_else(|| {
         record
             .as_ref()
             .and_then(|r| r.record.image_identifier.clone())
     });
-    let image_name: Option<String> = args
-        .image_name
-        .clone()
-        .or_else(|| record.as_ref().and_then(|r| r.record.image_name.clone()));
+    // The record's name is only the right name for the record's image. An explicit
+    // `--image-identifier` naming some other image gets no name from the record — the
+    // group it would name belongs to an image this command is not deleting.
+    let identifier_is_the_records = record
+        .as_ref()
+        .is_some_and(|r| r.record.image_identifier == image_identifier);
+    let image_name: Option<String> = args.image_name.clone().or_else(|| {
+        identifier_is_the_records
+            .then(|| record.and_then(|r| r.record.image_name.clone()))
+            .flatten()
+    });
     // Refused before any call: a terminate that cannot name what it would delete must not
     // terminate first and ask second. Same row the clap `requires` used to produce.
     if args.delete_image && image_identifier.is_none() {
@@ -2141,17 +2149,34 @@ pub async fn terminate<O: std::io::Write, E: std::io::Write>(
     // and a build log group this CLI could only name stays too — the same convention the
     // `run` path follows, where core's teardown report lists the group under `undeleted`.
     // `scripts/verify-clean.py` reads those names back as its oracle for custom-named images.
-    if let Some(record) = record.as_mut() {
+    let records_snapshot: Vec<Option<String>> = records
+        .iter()
+        .map(|r| r.record.image_identifier.clone())
+        .collect();
+    for (index, record) in records.iter_mut().enumerate() {
         let mut still: Vec<String> = Vec::new();
         if leaked.contains(&microvm_id) {
             still.push(microvm_id.clone());
         }
-        if let Some(image) = &record.record.image_identifier
-            && (!args.delete_image || leaked.contains(image))
-        {
-            still.push(image.clone());
+        // The record's image leaves the list only when THIS command deleted THAT image: an
+        // explicit `--image-identifier` naming another image leaves the record's image
+        // billing, and a record must keep saying so.
+        if let Some(image) = &record.record.image_identifier {
+            let deleted_here = args.delete_image
+                && image_identifier.as_deref() == Some(image.as_str())
+                && !leaked.contains(image);
+            if !deleted_here {
+                still.push(image.clone());
+            }
         }
-        still.extend(log_groups.iter().cloned());
+        // The named build log group rides on the record whose image it belongs to, or on the
+        // newest record when none names that image (a kept launch from an existing image
+        // whose caller passed the identifier and name explicitly).
+        let owns_group = record.record.image_identifier == image_identifier
+            || (index == 0 && !records_name_image(&records_snapshot, &image_identifier));
+        if owns_group {
+            still.extend(log_groups.iter().cloned());
+        }
         record.mark_deleted(&still);
         record.clear();
     }
@@ -2241,6 +2266,11 @@ fn name_record_for_kept(
         identity_host_seed: outcome.identity_host_seed.clone(),
         identity_vm_public_key: outcome.identity_vm_public_key.clone(),
     })
+}
+
+/// Whether any record's image is `identifier`.
+fn records_name_image(images: &[Option<String>], identifier: &Option<String>) -> bool {
+    identifier.is_some() && images.iter().any(|image| image == identifier)
 }
 
 /// An image's name from its ARN: the last colon segment.

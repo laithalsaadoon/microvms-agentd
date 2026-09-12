@@ -474,7 +474,7 @@ microvms-core/   the client library: control plane, session, cost, sandbox
 microvms-cli/    the microvm binary: 26 commands, JSON envelopes, a manifest
 microvms-py/     Python binding (PyO3)
 microvms-js/     Node binding (napi-rs)
-conformance/     the live suite: 158 checks against real AWS, via the CLI
+conformance/     the live suite: 159 checks against real AWS, via the CLI
 spec/            57 formal requirements in symspec, checked with Z3
 ```
 

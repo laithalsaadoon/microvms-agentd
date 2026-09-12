@@ -52,7 +52,7 @@ of HTTP clients, signers, and credential chains is asserted against `cargo metad
 wrap the same core and never the CLI (`microvms-py/Cargo.toml:22-26`,
 `microvms-js/Cargo.toml:20-21`). Verification sits outside the product graph: `model` has
 one dependency and no workspace edge, modelling the protocol rather than importing it
-(`model/Cargo.toml:9-10`), and `conformance/run_rs.py` drives the built CLI through 152 named
+(`model/Cargo.toml:9-10`), and `conformance/run_rs.py` drives the built CLI through 159 named
 checks against real AWS (`conformance/run_rs.py:9`, 4,245 LOC). Start at
 `agentd/src/lib.rs:9-29` for the trust boundary, then `microvms-core/src/lib.rs:21-40` for
 the trap ladder.

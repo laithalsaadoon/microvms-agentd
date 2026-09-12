@@ -49,7 +49,7 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
   proves the classification and verdict rules offline and `--state-dir` points at
   another ledger. The live suite runs the script before deleting its own group
   and asserts the group is a LEAK and the configured `--log-group` is
-  UNCLASSIFIED (158 checks, up from 152). Measured 2026-09-12, us-east-1: an
+  UNCLASSIFIED (159 checks, up from 152). Measured 2026-09-12, us-east-1: an
   image built as `seam-probe-<epoch>` and torn down with `terminate
   --delete-image` left `/aws/lambda-microvms/seam-probe-<epoch>`, which the
   script named as a leak through the run record.

@@ -4829,6 +4829,128 @@ async fn a_terminate_with_delete_image_derives_the_image_from_the_kept_runs_ledg
     );
 }
 
+/// **Issue #160, the override half: an explicit `--image-identifier` naming a different image
+/// than the record's deletes that image, names no group for it, and leaves the record's own
+/// image outstanding.**
+///
+/// The review of the first cut found the hole: the record's name was used for whatever
+/// identifier was passed, so a deletion of `other-img` named `record-img`'s group and dropped
+/// `record-img` — a billing image — from the record. Both halves are pinned here.
+#[tokio::test]
+async fn an_explicit_identifier_that_differs_from_the_record_leaves_the_records_image_outstanding()
+{
+    let dir = TempDir::new("terminate-override");
+    let record_img = "arn:aws:lambda:us-east-1:123456789012:microvm-image:record-img";
+    let other_img = "arn:aws:lambda:us-east-1:123456789012:microvm-image:other-img";
+    let mut ledger = crate::ledger::Ledger::new("us-east-1", &dir.0);
+    ledger.record_image(record_img, "record-img");
+    ledger.record_microvm("mvm-1");
+    ledger.mark_outstanding();
+
+    let transport = Arc::new(ScriptedTransport::new());
+    transport
+        .answer("TerminateMicrovm", 200, "{}")
+        .answer(
+            "ListMicrovmImageVersions",
+            200,
+            r#"{"items": [{
+                 "baseImageArn": "arn:aws:lambda:us-east-1:aws:microvm-image:al2023-1",
+                 "buildRoleArn": "arn:aws:iam::123456789012:role/build",
+                 "codeArtifact": {"uri": "s3://bucket/img.zip"},
+                 "imageArn": "arn:aws:lambda:us-east-1:123456789012:microvm-image:other-img",
+                 "imageVersion": "1", "state": "SUCCESSFUL", "status": "ACTIVE",
+                 "createdAt": 1754524800}]}"#,
+        )
+        .answer(
+            "DeleteMicrovmImage",
+            200,
+            r#"{"imageIdentifier": "arn:aws:lambda:us-east-1:123456789012:microvm-image:other-img",
+             "state": "DELETING"}"#,
+        );
+    let seam = ScriptedSeam {
+        transport: Arc::clone(&transport),
+        clock: Arc::new(YieldingClock::default()),
+    };
+    let command = Command::Terminate(TerminateArgs {
+        microvm_id: "mvm-1".into(),
+        image_identifier: Some(other_img.into()),
+        image_name: None,
+        delete_image: true,
+        wait: false,
+        state_dir: Some(dir.0.clone()),
+        region: region_flags(),
+    });
+    let (result, stderr) = dispatch_with(&seam, &command, full_infra()).await;
+    let rendered = result.expect("the explicit identifier is deleted");
+    let envelope = crate::envelope::ok(rendered.kind, rendered.data.clone());
+    assert_eq!(envelope["data"]["imageIdentifier"], other_img);
+    assert_eq!(
+        envelope["data"]["undeletedLogGroups"],
+        serde_json::json!([]),
+        "the record's name belongs to the record's image, not to other-img: {envelope}"
+    );
+    assert!(
+        stderr.contains("could not even be named"),
+        "the unnamed group is warned about: {stderr}"
+    );
+    let after = crate::ledger::read_all(&dir.0);
+    assert_eq!(after.len(), 1, "{after:?}");
+    assert_eq!(
+        after[0]["leaked"],
+        serde_json::json!([record_img]),
+        "record-img still bills and the record still says so: {after:?}"
+    );
+}
+
+/// **Two records naming one VM both stop naming it after the terminate.**
+///
+/// A retried launch leaves two records for one VM; narrowing only the newest leaves the
+/// older one reporting a VM that is gone — the stale `ls` shape of issue #159.
+#[tokio::test]
+async fn every_record_naming_the_vm_is_narrowed_not_only_the_newest() {
+    let dir = TempDir::new("terminate-two-records");
+    let mut first = crate::ledger::Ledger::new("us-east-1", &dir.0);
+    first.record_microvm("mvm-1");
+    first.mark_outstanding();
+    std::fs::write(
+        dir.0.join("9999999999-1.json"),
+        serde_json::to_string(&crate::ledger::Record {
+            run_id: "9999999999-1".into(),
+            region: "us-east-1".into(),
+            image_identifier: None,
+            image_name: None,
+            microvm_id: Some("mvm-1".into()),
+            leaked: vec!["mvm-1".into()],
+        })
+        .expect("serializes"),
+    )
+    .expect("writes");
+    assert_eq!(crate::ledger::read_all(&dir.0).len(), 2);
+
+    let transport = Arc::new(ScriptedTransport::new());
+    transport.answer("TerminateMicrovm", 200, "{}");
+    let seam = ScriptedSeam {
+        transport: Arc::clone(&transport),
+        clock: Arc::new(YieldingClock::default()),
+    };
+    let command = Command::Terminate(TerminateArgs {
+        microvm_id: "mvm-1".into(),
+        image_identifier: None,
+        image_name: None,
+        delete_image: false,
+        wait: false,
+        state_dir: Some(dir.0.clone()),
+        region: region_flags(),
+    });
+    let (result, _) = dispatch_with(&seam, &command, full_infra()).await;
+    result.expect("the terminate succeeds");
+    assert!(
+        crate::ledger::read_all(&dir.0).is_empty(),
+        "both records named only the VM, and the VM is gone: {:?}",
+        crate::ledger::read_all(&dir.0)
+    );
+}
+
 /// **Issue #160, the refusal half: with no record naming an image, `--delete-image` alone is
 /// still `ERR_INVALID_ARG`, before any AWS call.**
 ///
