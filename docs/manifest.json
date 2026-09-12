@@ -2764,14 +2764,59 @@
             "positional": false,
             "required": false,
             "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Ask the account too: list live MicroVMs and images and mark each ledger entry live, gone, or unjudged",
+            "name": "remote",
+            "positional": false,
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Remove the ledger files of `gone` entries. Requires `--remote`",
+            "name": "prune",
+            "positional": false,
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "choices": [
+              "us-east-1",
+              "us-east-2",
+              "us-west-2",
+              "eu-west-1",
+              "ap-northeast-1"
+            ],
+            "default": null,
+            "help": "AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1",
+            "name": "region",
+            "positional": false,
+            "required": false,
+            "type": "enum"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Use a region this client has not seen carry MicroVMs. Costs you the diagnostic",
+            "name": "unlisted-region",
+            "positional": false,
+            "required": false,
+            "type": "string"
           }
         ],
         "responseKeys": [
           "runs",
-          "watch"
+          "watch",
+          "source",
+          "remote",
+          "pruned"
         ],
         "responseType": "microvm.runs",
-        "summary": "List what this CLI created and could not confirm it deleted",
+        "summary": "List what this CLI created and could not confirm it deleted; `--remote` asks the account too",
         "supportsJson": true
       },
       {
@@ -3287,6 +3332,35 @@
         "exit": 16,
         "finding": "",
         "meaning": "run <DIR> could not pack the directory or write an artifact back; the failure is on this machine's filesystem, not the platform's"
+      }
+    ],
+    "globalFlags": [
+      {
+        "choices": null,
+        "default": null,
+        "help": "Emit the typed JSON envelope on stdout instead of human output",
+        "name": "json",
+        "positional": false,
+        "required": false,
+        "type": "boolean"
+      },
+      {
+        "choices": null,
+        "default": null,
+        "help": "Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json",
+        "name": "dense",
+        "positional": false,
+        "required": false,
+        "type": "boolean"
+      },
+      {
+        "choices": null,
+        "default": null,
+        "help": "Suppress progress on stderr. Warnings still print",
+        "name": "quiet",
+        "positional": false,
+        "required": false,
+        "type": "boolean"
       }
     ],
     "version": "0.7.0"

@@ -289,19 +289,29 @@ describe("the pages themselves", () => {
     }
   })
 
-  it("states the global flag once, on the overview, when every command supports JSON", () => {
+  it("states every global flag once, on the overview, and on no command page", () => {
     /*
-     * The three flags the CLI reads off raw argv never appear in any command's parameter list, so
-     * there is nothing to factor out of the tables. What the manifest DOES state is `supportsJson`,
-     * and this is the derived sentence about it.
+     * The manifest publishes the command-wide flags under `globalFlags` (#131). Each reaches the
+     * overview's table exactly once, none appears in any command's parameter list, and the
+     * `supportsJson` sentence the tier stated before the array existed is still derived beside it.
      */
+    const globals = manifest.data.globalFlags.map((flag) => flag.name)
+    expect(globals.length).toBeGreaterThan(0)
     for (const command of manifest.data.commands) {
       for (const parameter of command.parameters) {
-        expect(["json", "dense", "quiet"]).not.toContain(parameter.name)
+        expect(globals).not.toContain(parameter.name)
       }
     }
     const overview = page(TIER).body
     expect(overview).toContain("## 3. Global flags")
+    expect(overview).toContain(`${manifest.data.globalFlags.length} command-wide flags`)
+    for (const name of globals) {
+      expect(rowsLeadingWith(overview, `--${name}`), name).toBe(1)
+    }
+    for (const command of manifest.data.commands) {
+      const body = page(`${TIER}/commands/${commandSlug(command.name)}`).body
+      for (const name of globals) expect(rowsLeadingWith(body, `--${name}`), command.name).toBe(0)
+    }
     if (everyCommandSupportsJson(manifest)) {
       expect(overview).toContain(`all ${manifest.data.commands.length} set it`)
       for (const command of manifest.data.commands) {
@@ -365,6 +375,29 @@ describe("the mutation lock", () => {
     expect(rowsLeadingWith(types, "microvm.zz-synthetic")).toBe(1)
   })
 
+  it("adds exactly one overview row when a global flag is appended to a copy of the manifest", () => {
+    const copy = structuredClone(manifest)
+    copy.data.globalFlags = [
+      ...copy.data.globalFlags,
+      {
+        choices: null,
+        default: null,
+        help: "A global flag that exists only in this test",
+        name: "zz-synthetic-global",
+        positional: false,
+        required: false,
+        type: "boolean"
+      }
+    ]
+    const before = page(TIER).body
+    const after =
+      referencePages(validateManifest(copy, "a copy"), schema).find((one) => one.id === TIER)
+        ?.body ?? ""
+    expect(rowsLeadingWith(after, "--zz-synthetic-global")).toBe(1)
+    expect(tableRows(after)).toHaveLength(tableRows(before).length + 1)
+    expect(after).toContain(`${copy.data.globalFlags.length} command-wide flags`)
+  })
+
   it("adds a row when an exit code is appended, and a subsection when a schema type is", () => {
     const withExit = structuredClone(manifest)
     withExit.data.exitCodes = [
@@ -410,6 +443,25 @@ describe("the mutation lock", () => {
     delete first.parameters
     expect(() => validateManifest(renamed, "poisoned")).toThrow(
       /`data\.commands\[0\]\.parameters` should be an array/
+    )
+
+    const noGlobals = structuredClone(manifest) as unknown as {
+      data: Record<string, unknown>
+    }
+    noGlobals.data.globals = noGlobals.data.globalFlags
+    delete noGlobals.data.globalFlags
+    expect(() => validateManifest(noGlobals, "poisoned")).toThrow(
+      /`data\.globalFlags` should be a non-empty array/
+    )
+
+    // A global flag whose name a command also lists is the shape `Command::build()` would
+    // produce, and the tier refuses it rather than printing the flag twice.
+    const collided = structuredClone(manifest)
+    const owned = collided.data.commands[0]?.parameters[0]
+    if (owned === undefined) throw new Error("the first command has no parameters")
+    collided.data.globalFlags = [...collided.data.globalFlags, { ...owned, positional: false }]
+    expect(() => validateManifest(collided, "poisoned")).toThrow(
+      /`data\.globalFlags\[\d+\]\.name` should be a flag no command lists as its own/
     )
 
     const wrongType = structuredClone(manifest)

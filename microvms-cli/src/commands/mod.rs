@@ -396,7 +396,18 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 28] = [
     // `watch` is `--watch`'s summary — {refreshes, intervalSeconds, interrupted,
     // calls} with `calls` stating flatly that a refresh is one ledger read and zero
     // platform calls (#78) — and null for a plain single-read `ls`.
-    ("ls", "microvm.runs", &["runs", "watch"]),
+    //
+    // #159's three, always present: `source` is the string "local-ledger" on every
+    // envelope, because the list is what this CLI could not confirm it deleted rather
+    // than what exists; `remote` is null until `--remote` asked the account, then
+    // {region, microvms, images, entries: [{runId, microvmId, imageIdentifier,
+    // microvmState, imageState, status: live|gone|unjudged}], unknownToLedger:
+    // {microvms, images}}; `pruned` is the run ids `--prune` removed, `[]` otherwise.
+    (
+        "ls",
+        "microvm.runs",
+        &["runs", "watch", "source", "remote", "pruned"],
+    ),
     ("history", "microvm.history", &["microvmId", "events"]),
     (
         "logs",

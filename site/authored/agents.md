@@ -121,8 +121,10 @@ creates exactly those three and nothing else; [Install](/learn/tutorial/install/
 task image instead. Building from source stays one task, `mise install && mise run build`, for a custom
 daemon or an airgapped machine.
 
-Two habits change the shape of what you get back. `--json` wraps every response in the envelope the
-manifest declares, and it is what makes output parseable without a schema of your own. `--stream` on
+Two habits change the shape of what you get back. `--json`, one of the three
+[global flags](/reference/#3-global-flags) the manifest publishes under `globalFlags`, wraps every
+response in the envelope the manifest declares, and it is what makes output parseable without a schema
+of your own. `--stream` on
 `exec` returns NDJSON as output arrives rather than one document at the end — the one documented
 exception to the envelope, declared in the manifest under its own response type.
 

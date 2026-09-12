@@ -21,13 +21,147 @@ use crate::exit::CliError;
 use crate::seam::state_dir;
 use crate::{history, ledger};
 
-/// Lists what this CLI created and could not confirm it deleted.
-pub fn ls<O: std::io::Write, E: std::io::Write>(
+/// What every `microvm.runs` envelope's `source` says, and the first line of its text.
+///
+/// Issue #159's measurement is the reason this is on the output rather than only in the
+/// docs: `ls` printed 30-plus entries with populated `leaked` lists in an account both
+/// `scripts/verify-clean.py` and the live APIs showed empty, because the ledger answers
+/// "what could this CLI not confirm it deleted" and the reader had wired it to "what is
+/// still running". The two questions have different answers, and the output now names
+/// which one it answered.
+const SOURCE: &str = "local-ledger";
+
+/// The header line: the ledger's own definition, with the directory it was read from.
+fn ledger_header(root: &std::path::Path) -> String {
+    format!(
+        "local ledger of {}: what this CLI could not confirm it deleted, not what exists in \
+         the account",
+        root.display()
+    )
+}
+
+/// Lists what this CLI created and could not confirm it deleted — and, with `--remote`, what
+/// the account still has.
+///
+/// The plain form is one directory read and touches no seam door; `tests` in `guards.rs`
+/// hold `ls` in `LOCAL_ONLY` on that basis. `--remote` is the one flag that changes it, and
+/// it goes through [`crate::seam::CoreSeam::control_plane`] — the single AWS service this
+/// binary talks to — for two listings, `ListMicrovms` and `ListMicrovmImages`, read to their
+/// last page. Nothing is written unless `--prune` asks, and then only the files of entries
+/// the listings judged `gone`.
+pub async fn ls<O: std::io::Write, E: std::io::Write>(
     ctx: &mut Ctx<'_, O, E>,
     args: &LsArgs,
 ) -> Result<Rendered, CliError> {
     let root = state_dir(args.state_dir.clone(), ctx.env);
-    let runs = ledger::read_all(&root);
+    let mut runs = ledger::read_all(&root);
+    let mut text = vec![ledger_header(&root)];
+    let mut dense = Vec::new();
+    let mut remote = Value::Null;
+    let mut pruned: Vec<String> = Vec::new();
+
+    if args.remote {
+        let region = args.region.resolve(ctx.env)?;
+        let plane = ctx.seam.control_plane(region.clone()).await?;
+        let microvms = plane.list_microvms().await?;
+        let images = plane.list_images().await?;
+        let verdicts = reconcile(region.as_str(), &runs, &microvms, &images);
+
+        if args.prune {
+            for entry in &verdicts.entries {
+                if entry["status"] != "gone" {
+                    continue;
+                }
+                let run_id = entry["runId"].as_str().unwrap_or_default();
+                match ledger::remove(&root, run_id) {
+                    Ok(()) => pruned.push(run_id.to_string()),
+                    // Never `--quiet`-suppressed and never fatal: the listing's verdicts are
+                    // still the right answer, and a file that would not delete is one more
+                    // thing to tell the operator about rather than a reason to hide the rest.
+                    Err(error) => ctx
+                        .out
+                        .warn(&format!("could not remove ledger record {run_id}: {error}")),
+                }
+            }
+            // Re-read rather than filter, so `runs` is what the directory holds after the
+            // prune — the envelope agrees with the disk rather than with an intention.
+            runs = ledger::read_all(&root);
+        }
+
+        text.push(runs_text(&runs));
+        dense.push(runs_dense(&runs));
+        text.push(format!(
+            "remote ({}): {} microvm(s), {} image(s) listed",
+            region.as_str(),
+            microvms.len(),
+            images.len()
+        ));
+        for entry in &verdicts.entries {
+            text.push(format!(
+                "  {}  {:<8} microvm={} image={}",
+                entry["runId"].as_str().unwrap_or_default(),
+                entry["status"].as_str().unwrap_or_default(),
+                entry["microvmState"].as_str().unwrap_or("-"),
+                entry["imageState"].as_str().unwrap_or("-"),
+            ));
+            dense.push(format!(
+                "reconcile\t{}\t{}\t{}\t{}",
+                entry["runId"].as_str().unwrap_or_default(),
+                entry["status"].as_str().unwrap_or_default(),
+                entry["microvmState"].as_str().unwrap_or_default(),
+                entry["imageState"].as_str().unwrap_or_default(),
+            ));
+        }
+        if verdicts.unknown_microvms.is_empty() && verdicts.unknown_images.is_empty() {
+            text.push(
+                "unknown to this ledger: nothing alive in the account that no entry names".into(),
+            );
+        } else {
+            text.push(format!(
+                "unknown to this ledger: microvms=[{}] images=[{}]",
+                verdicts.unknown_microvms.join(", "),
+                verdicts.unknown_images.join(", "),
+            ));
+        }
+        for id in &verdicts.unknown_microvms {
+            dense.push(format!("unknown\tmicrovm\t{id}"));
+        }
+        for arn in &verdicts.unknown_images {
+            dense.push(format!("unknown\timage\t{arn}"));
+        }
+        if args.prune {
+            text.push(format!(
+                "pruned {} gone record(s){}{}",
+                pruned.len(),
+                if pruned.is_empty() { "" } else { ": " },
+                pruned.join(", ")
+            ));
+            for run_id in &pruned {
+                dense.push(format!("pruned\t{run_id}"));
+            }
+        }
+        remote = json!({
+            "region": region.as_str(),
+            "microvms": microvms.iter().map(|vm| json!({
+                "microvmId": vm.microvm_id,
+                "state": vm.state,
+                "imageArn": vm.image_arn,
+            })).collect::<Vec<_>>(),
+            "images": images.iter().map(|image| json!({
+                "imageArn": image.image_arn,
+                "name": image.name,
+                "state": image.state,
+            })).collect::<Vec<_>>(),
+            "entries": verdicts.entries,
+            "unknownToLedger": {
+                "microvms": verdicts.unknown_microvms,
+                "images": verdicts.unknown_images,
+            },
+        });
+    } else {
+        text.push(runs_text(&runs));
+        dense.push(runs_dense(&runs));
+    }
 
     let mut data = Map::new();
     data.insert("runs".into(), json!(runs));
@@ -35,10 +169,205 @@ pub fn ls<O: std::io::Write, E: std::io::Write>(
     // key an agent branches on exists on every `microvm.runs` envelope, and null is
     // how a plain `ls` says "this was one read, not a watch".
     data.insert("watch".into(), Value::Null);
+    data.insert("source".into(), json!(SOURCE));
+    data.insert("remote".into(), remote);
+    data.insert("pruned".into(), json!(pruned));
     let (kind, _) = response_type("ls");
-    let dense = runs_dense(&runs);
-    let text = runs_text(&runs);
-    Ok(Rendered::ok(kind, data, text, dense))
+    Ok(Rendered::ok(
+        kind,
+        data,
+        text.join("\n"),
+        dense
+            .into_iter()
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    ))
+}
+
+/// Each ledger entry against the two listings, and what the listings hold that no entry names.
+struct Verdicts {
+    /// `[{runId, microvmId, imageIdentifier, microvmState, imageState, status}]`, ledger order.
+    entries: Vec<Value>,
+    /// Ids of VMs listed alive that no entry names.
+    unknown_microvms: Vec<String>,
+    /// ARNs of images listed alive that no entry names.
+    unknown_images: Vec<String>,
+}
+
+/// Whether a listed MicroVM is still something to account for.
+///
+/// `scripts/verify-clean.py`'s predicate, so `ls --remote` and the leak check cannot disagree
+/// about a VM: every state but `TERMINATED` — `TERMINATING` included, because billing stops
+/// at terminate and a VM still on its way out is still the operator's until it is gone.
+fn microvm_is_live(state: &str) -> bool {
+    state != "TERMINATED"
+}
+
+/// Whether a listed image is still something to account for: not on its way out or gone.
+fn image_is_live(state: &str) -> bool {
+    !matches!(state, "DELETING" | "DELETED")
+}
+
+/// What the two listings say about one identifier a record carries.
+#[derive(Clone, Copy, PartialEq)]
+enum Judgement {
+    Live,
+    Gone,
+    Unjudged,
+}
+
+/// Whether the two listings this command reads could show `identifier` at all, read from its
+/// spelling once neither listing carried it: the service spells a MicroVM id `microvm-…` and
+/// an image ARN `…:microvm-image:<name>`. Anything else — a `/aws/lambda-microvms/…` log
+/// group above all — is something neither listing speaks for, so its absence from them says
+/// nothing about whether it still exists.
+///
+/// Spelling is consulted only for an identifier absent from both listings; a listed image
+/// whose *name* happens to start with `microvm-` is found by the listing first and never
+/// reaches this test.
+fn listings_could_show(identifier: &str) -> bool {
+    identifier.starts_with("microvm-") || identifier.contains(":microvm-image:")
+}
+
+/// Marks every ledger entry `live`, `gone`, or `unjudged` against the listings for `region`.
+///
+/// The record's `leaked` list is what gets judged, identifier by identifier, because that
+/// list is the ledger's own statement of what is outstanding: `tear_down` narrows it to what
+/// a delete did not report gone, so a record kept only for a service-created log group
+/// carries the group there and nothing else. Judging the named `microvmId`/`imageIdentifier`
+/// instead — as this function did before the #164 review — read such a record as `gone`
+/// (its VM was TERMINATED) and `--prune` deleted the one pointer to a group that still
+/// existed and still billed; 3 of 72 real records had that shape on 2026-09-12. Only a
+/// record whose `leaked` list is empty, the shape a run that created nothing leaves, is
+/// judged by its named fields.
+///
+/// Per identifier: found in either listing, the listed state decides (`live` or `gone`);
+/// absent but spelled as a MicroVM id or an image ARN, the listing's silence is the answer
+/// (`gone`); absent in any other spelling, [`listings_could_show`] says neither listing can
+/// speak for it and it is `unjudged`. The entry is `live` if any identifier is, else
+/// `unjudged` if any is, else `gone` — and `unjudged` outright when the record was written
+/// for another region or cannot be read at all (the file a process killed mid-write leaves,
+/// which is exactly the record a prune must not touch on a guess). Only `gone` is ever
+/// pruned.
+///
+/// An image is matched by ARN, then by name: `run` records the resolved ARN, and an image
+/// ARN is `…:microvm-image:<name>`, so the two agree whenever both are present.
+fn reconcile(
+    region: &str,
+    runs: &[Value],
+    microvms: &[microvms_core::control::ops::MicrovmItemWire],
+    images: &[microvms_core::control::ops::MicrovmImageSummaryWire],
+) -> Verdicts {
+    let mut named_microvms = std::collections::BTreeSet::new();
+    let mut named_images = std::collections::BTreeSet::new();
+    let entries = runs
+        .iter()
+        .map(|run| {
+            let run_id = run["runId"].as_str().unwrap_or_default();
+            let microvm_id = run["microvmId"].as_str();
+            let image_identifier = run["imageIdentifier"].as_str();
+            let image_name = run["imageName"].as_str();
+            let mut vm = microvm_id.and_then(|id| microvms.iter().find(|vm| vm.microvm_id == id));
+            let mut image = images.iter().find(|image| {
+                image_identifier.is_some_and(|arn| image.image_arn == arn)
+                    || image_name.is_some_and(|name| image.name == name)
+            });
+            if let Some(id) = microvm_id {
+                named_microvms.insert(id.to_string());
+            }
+            if let Some(image) = image {
+                named_images.insert(image.image_arn.clone());
+            }
+
+            // `None` stands for an element that is not a string: a shape this CLI never
+            // wrote, judged the way anything unreadable is.
+            let leaked: Vec<Option<&str>> = run["leaked"]
+                .as_array()
+                .map(|items| items.iter().map(Value::as_str).collect())
+                .unwrap_or_default();
+            let outstanding: Vec<Option<&str>> = if leaked.is_empty() {
+                microvm_id
+                    .into_iter()
+                    .chain(image_identifier)
+                    .map(Some)
+                    .collect()
+            } else {
+                leaked
+            };
+            let judgements: Vec<Judgement> = outstanding
+                .into_iter()
+                .map(|identifier| {
+                    let Some(identifier) = identifier else {
+                        return Judgement::Unjudged;
+                    };
+                    if let Some(listed) = microvms.iter().find(|vm| vm.microvm_id == identifier) {
+                        vm.get_or_insert(listed);
+                        named_microvms.insert(listed.microvm_id.clone());
+                        return if microvm_is_live(&listed.state) {
+                            Judgement::Live
+                        } else {
+                            Judgement::Gone
+                        };
+                    }
+                    if let Some(listed) = images
+                        .iter()
+                        .find(|image| image.image_arn == identifier || image.name == identifier)
+                    {
+                        image.get_or_insert(listed);
+                        named_images.insert(listed.image_arn.clone());
+                        return if image_is_live(&listed.state) {
+                            Judgement::Live
+                        } else {
+                            Judgement::Gone
+                        };
+                    }
+                    if listings_could_show(identifier) {
+                        Judgement::Gone
+                    } else {
+                        Judgement::Unjudged
+                    }
+                })
+                .collect();
+
+            let unreadable = run.get("unreadable").is_some();
+            let other_region = run["region"]
+                .as_str()
+                .is_some_and(|recorded| recorded != region);
+            let status = if unreadable || other_region {
+                "unjudged"
+            } else if judgements.contains(&Judgement::Live) {
+                "live"
+            } else if judgements.contains(&Judgement::Unjudged) {
+                "unjudged"
+            } else {
+                "gone"
+            };
+            json!({
+                "runId": run_id,
+                "microvmId": microvm_id,
+                "imageIdentifier": image_identifier,
+                "microvmState": vm.map(|vm| vm.state.as_str()),
+                "imageState": image.map(|image| image.state.as_str()),
+                "status": status,
+            })
+        })
+        .collect();
+    let unknown_microvms = microvms
+        .iter()
+        .filter(|vm| microvm_is_live(&vm.state) && !named_microvms.contains(&vm.microvm_id))
+        .map(|vm| vm.microvm_id.clone())
+        .collect();
+    let unknown_images = images
+        .iter()
+        .filter(|image| image_is_live(&image.state) && !named_images.contains(&image.image_arn))
+        .map(|image| image.image_arn.clone())
+        .collect();
+    Verdicts {
+        entries,
+        unknown_microvms,
+        unknown_images,
+    }
 }
 
 /// The tab-separated rendering of the ledger's runs, one row each.
@@ -166,6 +495,12 @@ pub async fn watch<O: std::io::Write, E: std::io::Write>(
 
     let mut data = Map::new();
     data.insert("runs".into(), json!(runs));
+    // The #159 keys, present on the watch envelope for the same reason `watch` is present
+    // on the plain one: a consumer branches on a key that is always there. A watch is
+    // ledger-only by contract, so `remote` is null and nothing was pruned.
+    data.insert("source".into(), json!(SOURCE));
+    data.insert("remote".into(), Value::Null);
+    data.insert("pruned".into(), json!([]));
     data.insert(
         "watch".into(),
         json!({
@@ -184,7 +519,8 @@ pub async fn watch<O: std::io::Write, E: std::io::Write>(
     );
     let (kind, _) = response_type("ls");
     let text = format!(
-        "{}\nwatched {refreshes} refresh(es) at {}s intervals{}\n{WATCH_LEDGER_ONLY}",
+        "{}\n{}\nwatched {refreshes} refresh(es) at {}s intervals{}\n{WATCH_LEDGER_ONLY}",
+        ledger_header(&root),
         runs_text(&runs),
         args.interval_sec,
         if interrupted { ", ended by ctrl-c" } else { "" },
@@ -577,8 +913,8 @@ mod tests {
     }
 
     /// `ls` with nothing outstanding says so rather than printing an empty line.
-    #[test]
-    fn ls_with_an_empty_state_directory_says_nothing_outstanding() {
+    #[tokio::test]
+    async fn ls_with_an_empty_state_directory_says_nothing_outstanding() {
         let mut out = Output::new(Format::Plain, false, Vec::new(), Vec::new());
         let env = |_: &str| Some("/nonexistent-microvm-state".to_string());
         let seam = crate::seam::PanickingSeam;
@@ -590,14 +926,31 @@ mod tests {
                 watch: false,
                 interval_sec: 2.0,
                 max_refreshes: None,
+                remote: false,
+                prune: false,
+                region: crate::cli::RegionFlags::default(),
             },
         )
+        .await
         .expect("ls never fails");
-        assert_eq!(rendered.text, "nothing outstanding");
+        // The header says what the list IS (#159): a local ledger, not the account. The
+        // measured confusion behind it: 68 entries with populated `leaked` lists in an
+        // account both `verify-clean` and the live APIs showed empty.
+        assert_eq!(
+            rendered.text,
+            "local ledger of /nonexistent-microvm-state: what this CLI could not confirm it \
+             deleted, not what exists in the account\nnothing outstanding"
+        );
         assert_eq!(rendered.data["runs"], json!([]));
         // Null, not absent: the key an agent branches on exists on every
         // `microvm.runs` envelope, and null says "one read, not a watch".
         assert_eq!(rendered.data["watch"], Value::Null);
+        // The same rule for the three #159 keys: `source` names the ledger on every
+        // envelope, `remote` is null until `--remote` asked, `pruned` is empty until
+        // `--prune` removed something.
+        assert_eq!(rendered.data["source"], "local-ledger");
+        assert_eq!(rendered.data["remote"], Value::Null);
+        assert_eq!(rendered.data["pruned"], json!([]));
     }
 
     /// The `LsArgs` for a watch over `dir`, bounded to `max_refreshes` snapshots.
@@ -607,6 +960,9 @@ mod tests {
             watch: true,
             interval_sec: 0.1,
             max_refreshes,
+            remote: false,
+            prune: false,
+            region: crate::cli::RegionFlags::default(),
         }
     }
 

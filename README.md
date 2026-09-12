@@ -230,7 +230,17 @@ and returns immediately (`--detach`), and reads an existing exec back
 (`--poll <id>`). Suspend and resume preserve memory, the filesystem, and
 running processes, and a suspended VM bills at a small fraction of a running
 one. If a run is interrupted, `microvm ls` lists what this CLI created and
-could not confirm it deleted, so nothing leaks silently.
+could not confirm it deleted, so nothing leaks silently. That is a local
+ledger, not the account: the output says so (`data.source` is
+`"local-ledger"`, and the header names the state directory), because an
+entry can outlive the resource it names. `microvm ls --remote` asks the
+account too, through the same control plane, and judges each identifier in
+an entry's `leaked` list against the real `ListMicrovms` and
+`ListMicrovmImages`: `live` if one is still listed alive, `gone` if every
+one is a MicroVM id or image ARN the listings no longer carry, `unjudged`
+if one is something those listings cannot see (a service-created log
+group). Whatever is alive that no entry names is reported as unknown to
+the ledger, and `--prune` removes the files of `gone` entries only.
 `microvm ls --watch` re-reads that ledger every two seconds until Ctrl-C
 (`--interval-sec` changes the cadence). The loop reads local files only and
 never polls a VM's `/v1/health`, the call that resets its idle timer, so
@@ -494,7 +504,7 @@ microvms-core/   the client library: control plane, session, cost, sandbox
 microvms-cli/    the microvm binary: 28 commands, JSON envelopes, a manifest
 microvms-py/     Python binding (PyO3)
 microvms-js/     Node binding (napi-rs)
-conformance/     the live suite: 181 checks against real AWS, via the CLI
+conformance/     the live suite: 185 checks against real AWS, via the CLI
 spec/            57 formal requirements in symspec, checked with Z3
 ```
 

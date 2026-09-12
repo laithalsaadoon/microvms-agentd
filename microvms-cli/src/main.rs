@@ -240,8 +240,11 @@ fn tui_grid(rendered: &commands::Rendered) -> Option<tui::Grid> {
     match rendered.kind {
         "microvm.runs" => {
             let runs = rendered.data.get("runs")?.as_array()?;
+            // The title is the text rendering's first line: the ledger's own definition
+            // (#159), so the interactive surface says what the list is as plainly as the
+            // pipe does.
             let mut grid = tui::Grid::new(
-                "outstanding runs",
+                rendered.text.lines().next().unwrap_or("outstanding runs"),
                 vec![
                     "run".into(),
                     "microvm".into(),
@@ -462,7 +465,7 @@ async fn handle<O: std::io::Write, E: std::io::Write>(
         // runs until the caller stops it, and `--watch` is the only `ls` that polls
         // anything — the local ledger, never the platform (see `local::watch`).
         Command::Ls(args) if args.watch => commands::local::watch(ctx, args, interrupt).await,
-        Command::Ls(args) => commands::local::ls(ctx, args),
+        Command::Ls(args) => commands::local::ls(ctx, args).await,
         Command::History(args) => commands::local::history(ctx, args),
         Command::Logs(args) => commands::local::logs(ctx, args),
         Command::Cost(args) => commands::cost::cost(ctx, args),

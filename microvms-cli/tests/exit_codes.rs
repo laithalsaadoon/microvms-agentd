@@ -527,13 +527,28 @@ fn a_piped_invocation_produces_plain_deterministic_text() {
     }
 }
 
-/// `ls` with nothing outstanding says so, in words, on the plain path.
+/// `ls` with nothing outstanding says so, in words, on the plain path — under the header that
+/// says what the list is (#159).
 #[test]
 fn a_piped_ls_with_an_empty_ledger_says_nothing_outstanding() {
     let ledgers = TempDir::new("empty-ls");
     let outcome = run(&["ls", "--state-dir", ledgers.path()], &[]);
     assert_eq!(outcome.exit_code(), 0);
-    assert_eq!(outcome.stdout.trim(), "nothing outstanding");
+    let lines: Vec<&str> = outcome.stdout.trim().lines().collect();
+    assert_eq!(
+        lines,
+        [
+            format!(
+                "local ledger of {}: what this CLI could not confirm it deleted, not what exists \
+                 in the account",
+                ledgers.path()
+            )
+            .as_str(),
+            "nothing outstanding",
+        ],
+        "{}",
+        outcome.stdout
+    );
 }
 
 /// The dense cost path is TSV a shell can cut, and never a dollar figure where a line is unpriced.
