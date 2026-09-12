@@ -443,6 +443,7 @@ pub async fn install_access(
         group: None,
         timeout_sec: Some(CHOWN_TIMEOUT.as_secs_f64()),
         stdin: false,
+        reap_group_on_exit: false,
     };
     let result = session.run_sync(request, CHOWN_TIMEOUT).await?;
     if !result.succeeded() {
@@ -550,6 +551,7 @@ pub fn prompt_request(
         group: Some(AGENT_GID),
         timeout_sec: options.timeout.map(|timeout| timeout.as_secs_f64()),
         stdin: false,
+        reap_group_on_exit: false,
     })
 }
 

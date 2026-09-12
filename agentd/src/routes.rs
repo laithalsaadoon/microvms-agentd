@@ -126,6 +126,7 @@ fn handler_for(endpoint: &schema::Endpoint) -> axum::routing::MethodRouter<AppSt
         ("POST", "/v1/exec/{id}/stdin") => post(exec::write_stdin),
         ("POST", "/v1/exec/{id}/ack") => post(exec::ack),
         ("POST", "/v1/exec/{id}/kill") => post(exec::kill),
+        ("GET", "/v1/procs") => get(exec::procs),
         // Two entries share each fs path, one per method. axum merges method
         // routers registered against the same path, so GET and PUT arrive here
         // separately and end up on one route.
@@ -587,6 +588,22 @@ pub fn surface_docs() -> Vec<schema::Endpoint> {
                  direct child — a shell that backgrounded a server leaves the \
                  interesting process outside the child pid",
                 schema::EXEC_KILL,
+            )
+        },
+        schema::Endpoint {
+            response: json_body::<exec::ProcsResponse>(),
+            ..row(
+                "GET",
+                "/v1/procs".into(),
+                Auth::Bearer,
+                "process accounting: every registered exec with its process group's \
+                 live pids, read from /proc so the guest needs no `ps`. `child_exited` \
+                 beside a non-empty `pids` is a command that finished while something it \
+                 backgrounded did not — the shape /v1/health's `busy` cannot show, and \
+                 the exec_id beside it is the one to pass to /v1/exec/{id}/kill. \
+                 `reap` echoes the start request's `reap_group_on_exit`. Entries whose \
+                 pgid was never captured list no pids. Read-only.",
+                schema::PROCS,
             )
         },
         schema::Endpoint {

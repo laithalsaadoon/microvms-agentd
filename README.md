@@ -450,6 +450,12 @@ user your workload runs as can write to the directory you choose; a root-owned
 `--setopt=install_weak_deps=0`.** The integer is what works; `False` is not
 accepted.
 
+**Install `procps-ng` if you want `ps` inside the VM.** The al2023 bases ship
+without it (`/bin/sh: ps: command not found`, issue #157). `microvm ps` needs
+nothing in the image — the daemon reads `/proc` itself — so add the package
+only for a workload that shells out to `ps` on its own:
+`RUN dnf -y --setopt=install_weak_deps=0 install procps-ng && dnf clean all`.
+
 **Keep `ENTRYPOINT []` and `CMD ["/agentd"]`.** That pair is the trust
 boundary: it is what guarantees no workload runs before the platform's run
 hook lands and the token arrives. An `ENTRYPOINT` that swallows `CMD` produces
@@ -485,10 +491,10 @@ protocol/        daemon↔client wire types; drift is a compile error
 agentd/          the in-VM daemon: exec, file transfer, one-shot bootstrap
 model/           stateright models of the daemon and client lifecycle
 microvms-core/   the client library: control plane, session, cost, sandbox
-microvms-cli/    the microvm binary: 26 commands, JSON envelopes, a manifest
+microvms-cli/    the microvm binary: 28 commands, JSON envelopes, a manifest
 microvms-py/     Python binding (PyO3)
 microvms-js/     Node binding (napi-rs)
-conformance/     the live suite: 165 checks against real AWS, via the CLI
+conformance/     the live suite: 181 checks against real AWS, via the CLI
 spec/            57 formal requirements in symspec, checked with Z3
 ```
 

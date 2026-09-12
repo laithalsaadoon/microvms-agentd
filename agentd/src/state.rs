@@ -109,9 +109,10 @@ struct HookLog {
 }
 
 /// Seconds since the epoch on this daemon's clock, for a hook observation's
-/// `fired_at`. Zero on a clock before 1970 rather than a panic, because this runs
-/// inside the platform's own hook request and a panic here fails a launch.
-fn epoch_secs() -> u64 {
+/// `fired_at` and an exec entry's `started_at`. Zero on a clock before 1970 rather
+/// than a panic, because this runs inside the platform's own hook request and a
+/// panic here fails a launch.
+pub(crate) fn epoch_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|since| since.as_secs())

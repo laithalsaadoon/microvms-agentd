@@ -38,7 +38,7 @@ read, `exec` owns idempotent start with ack-gated release, and `fs` owns streami
 own `/run` hook arrives from `127.0.0.1`, indistinguishable at the socket level from a request
 sent by a process inside the VM, so source-address filtering would reject a legitimate bootstrap
 and the one-shot property is the only defense left (`agentd/src/lib.rs:11-16`). `routes.rs`
-assembles the router by walking `surface_docs`, the same eighteen-endpoint list `/v1/schema`
+assembles the router by walking `surface_docs`, the same twenty-endpoint list `/v1/schema`
 publishes, so a documented route with no handler panics at startup, and each endpoint's declared
 auth mode decides which of the two routers it joins (`agentd/src/routes.rs:31-35`,
 `agentd/src/routes.rs:48-58`, `agentd/src/routes.rs:371`, `docs/schema.json:497-1154`).
@@ -85,7 +85,7 @@ the bindings drive, because their sandbox sits behind a lock one `AgentVm` canno
 
 ## microvms-cli
 
-`microvms-cli` builds the `microvm` binary: twenty-six subcommands in lifecycle order over
+`microvms-cli` builds the `microvm` binary: twenty-eight subcommands in lifecycle order over
 `microvms-core`, and nothing the library does not do (`microvms-cli/src/cli.rs:83`,
 `microvms-cli/src/main.rs:2`). Thinness is checked three ways rather than intended — the direct
 dependency set contains none of twelve denylisted transport and signing crates, no source file here names a transport or a

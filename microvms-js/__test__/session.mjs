@@ -144,6 +144,7 @@ test('exec options are a named bag, so no two can be transposed', async () => {
         timeoutSec: 30,
         stdin: true,
         execId: 'x-0000000000000009',
+        reapGroupOnExit: true,
       }),
     (error) => {
       // Past the conversion: every field was accepted and the failure is the wire.
@@ -199,6 +200,7 @@ test('every single-shot request rejects a refused connection as retryable', asyn
     run: () => session.run(['true']),
     runSync: () => session.runSync(['true']),
     kill: () => session.kill('x-0000000000000001'),
+    procs: () => session.procs(),
     fileExists: () => session.fileExists('/tmp/x'),
     downloadFile: () => session.downloadFile('/tmp/x'),
     downloadTar: () => session.downloadTar('/tmp'),

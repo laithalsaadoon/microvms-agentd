@@ -219,7 +219,7 @@ every bullet names the count. Shares are computed with
   plausible-looking wrong value against the correct `dec!(0.0811111030)` — so keep
   `scripts/check-live-rates.py` in the billable tier and treat a rate edit as a measurement.
 - `agentd/src/routes.rs` — `bgagent` automated identity (86% of 7 commits). This file splits
-  the 18 daemon endpoints into the Bearer-guarded `control` router and the `open` router at
+  the 20 daemon endpoints into the Bearer-guarded `control` router and the `open` router at
   `agentd/src/routes.rs:48-56`, which makes it the repository's authorization boundary; it
   should carry a named human reviewer on every change, since no commit on it currently does.
 - `docs/reference/cli.md` — sole human author (100% of 9 commits). A hand-written reference

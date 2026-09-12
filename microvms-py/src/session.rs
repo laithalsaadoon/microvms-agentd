@@ -163,6 +163,82 @@ impl PyHealth {
     }
 }
 
+/// One exec's process group, as `GET /v1/procs` reports it.
+///
+/// `child_exited` beside a non-empty `pids` is the shape worth reading: a command that
+/// finished while something it backgrounded did not, which `Health.busy` cannot show.
+/// The `exec_id` beside it is what `Session.kill` takes.
+#[pyclass(frozen, name = "ProcGroup", module = "microvms")]
+pub struct PyProcGroup {
+    exec_id: String,
+    pgid: Option<u32>,
+    started_at: u64,
+    child_exited: bool,
+    reap: bool,
+    pids: Vec<u32>,
+}
+
+impl PyProcGroup {
+    fn wrap(group: protocol::exec::ProcGroup) -> Self {
+        Self {
+            exec_id: group.exec_id,
+            pgid: group.pgid,
+            started_at: group.started_at,
+            child_exited: group.child_exited,
+            reap: group.reap,
+            pids: group.pids,
+        }
+    }
+}
+
+#[pymethods]
+impl PyProcGroup {
+    /// The exec this group belongs to — what `Session.kill` takes.
+    #[getter]
+    fn exec_id(&self) -> &str {
+        &self.exec_id
+    }
+
+    /// The process group id captured at spawn, or `None` when the child was reaped before
+    /// it could be read (then `pids` is empty: there is no group to scan for).
+    #[getter]
+    fn pgid(&self) -> Option<u32> {
+        self.pgid
+    }
+
+    /// Seconds since the epoch on the daemon's clock when the child was spawned.
+    #[getter]
+    fn started_at(&self) -> u64 {
+        self.started_at
+    }
+
+    /// Whether the exec's own child has exited. An acked exec still reads `True`.
+    #[getter]
+    fn child_exited(&self) -> bool {
+        self.child_exited
+    }
+
+    /// Whether the exec was started with `reap_group_on_exit`.
+    #[getter]
+    fn reap(&self) -> bool {
+        self.reap
+    }
+
+    /// Live pids whose process group is `pgid`, read from `/proc` inside the guest.
+    /// Zombies are not listed. Empty once the group is gone.
+    #[getter]
+    fn pids(&self) -> Vec<u32> {
+        self.pids.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ProcGroup(exec_id={:?}, pgid={:?}, child_exited={}, reap={}, pids={:?})",
+            self.exec_id, self.pgid, self.child_exited, self.reap, self.pids
+        )
+    }
+}
+
 /// Where a session lives, which decides how it is reached.
 ///
 /// Two variants because there are two real cases and they cannot be unified without
@@ -306,7 +382,10 @@ impl PySession {
     /// Starts a command and returns its handle. Does not wait.
     ///
     /// `command` is a list, or a string that becomes a one-element argv — never
-    /// whitespace-split. `shell=True` wants a single script string.
+    /// whitespace-split. `shell=True` wants a single script string. `reap_group_on_exit`
+    /// asks the daemon to signal the whole process group once the command's own child
+    /// exits, so nothing it backgrounded outlives it; off by default, which keeps the
+    /// backgrounded-grandchild-output guarantee for callers who rely on it.
     #[pyo3(signature = (
         command,
         *,
@@ -318,6 +397,7 @@ impl PySession {
         timeout_sec=None,
         stdin=false,
         exec_id=None,
+        reap_group_on_exit=false,
     ))]
     #[allow(
         clippy::too_many_arguments,
@@ -337,6 +417,7 @@ impl PySession {
         timeout_sec: Option<f64>,
         stdin: bool,
         exec_id: Option<String>,
+        reap_group_on_exit: bool,
     ) -> PyCoreResult<PyExecHandle> {
         let request = protocol::exec::StartRequest {
             exec_id: exec_id.unwrap_or_else(mint_exec_id),
@@ -348,6 +429,7 @@ impl PySession {
             group,
             timeout_sec,
             stdin,
+            reap_group_on_exit,
         };
         // The request is moved into the closure, so it is built before the detach rather
         // than inside it — a `Command` extraction needs the GIL and the closure does not
@@ -380,6 +462,7 @@ impl PySession {
         timeout_sec=None,
         stdin=false,
         exec_id=None,
+        reap_group_on_exit=false,
     ))]
     #[allow(
         clippy::too_many_arguments,
@@ -399,6 +482,7 @@ impl PySession {
         timeout_sec: Option<f64>,
         stdin: bool,
         exec_id: Option<String>,
+        reap_group_on_exit: bool,
     ) -> PyCoreResult<PyExecResult> {
         let request = protocol::exec::StartRequest {
             exec_id: exec_id.unwrap_or_else(mint_exec_id),
@@ -410,6 +494,7 @@ impl PySession {
             group,
             timeout_sec,
             stdin,
+            reap_group_on_exit,
         };
         let timeout = seconds(timeout)?;
         Ok(PyExecResult::wrap(self.detached(py, move |session| {
@@ -422,6 +507,20 @@ impl PySession {
         Ok(self.detached(py, |session| {
             runtime::block_on_detached(session.kill(exec_id))
         })?)
+    }
+
+    /// Process accounting: every registered exec with its group's live pids.
+    ///
+    /// The daemon reads `/proc` itself, so this needs no `ps` in the guest. A `ProcGroup`
+    /// with `child_exited` and a non-empty `pids` is a command that finished while
+    /// something it backgrounded did not; pass its `exec_id` to `kill`.
+    fn procs(&self, py: Python<'_>) -> PyCoreResult<Vec<PyProcGroup>> {
+        Ok(self
+            .detached(py, |session| runtime::block_on_detached(session.procs()))?
+            .procs
+            .into_iter()
+            .map(PyProcGroup::wrap)
+            .collect())
     }
 
     /// Writes one file, creating parents. `mode` is an **octal string** (`"0755"`), which

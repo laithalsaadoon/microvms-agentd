@@ -2,7 +2,7 @@
 
 The daemon's callable surface is HTTP, not MCP, gRPC, or JSON-RPC: there is no `.proto` file in the tree, and the only production router construction is the pair of `Router::new()` calls in `agentd/src/routes.rs:48-49`. The named unit a caller invokes is therefore a method-and-path pair, and this file has one H2 per pair, alphabetized on that string.
 
-Eighteen pairs exist, and the roster is closed by construction rather than by convention. One list, `surface_docs()`, is walked twice: once to build the router and once to serve `GET /v1/schema` (`agentd/src/routes.rs:371-626`, `agentd/src/routes.rs:51-59`, `agentd/src/routes.rs:361-363`). A path absent from that list is unroutable, and a path present in it with no arm in `handler_for` panics at startup rather than answering 404 to a documented route (`agentd/src/routes.rs:138`).
+Twenty pairs exist, and the roster is closed by construction rather than by convention. One list, `surface_docs()`, is walked twice: once to build the router and once to serve `GET /v1/schema` (`agentd/src/routes.rs:371-626`, `agentd/src/routes.rs:51-59`, `agentd/src/routes.rs:361-363`). A path absent from that list is unroutable, and a path present in it with no arm in `handler_for` panics at startup rather than answering 404 to a documented route (`agentd/src/routes.rs:138`).
 
 **Auth is per endpoint and takes three values.** `Bearer` endpoints sit behind `auth::require_token`, applied with `route_layer` so an unmatched path still falls through to the 404 fallback instead of being answered 401 (`agentd/src/routes.rs:66-69`). `Open` and `PlatformHook` endpoints go on an unguarded router (`agentd/src/routes.rs:53-58`). `PlatformHook` is unauthenticated because the platform holds no credential to present, and its request arrives over loopback indistinguishably from an in-VM process (`agentd/src/routes.rs:39-42`, `agentd/src/routes.rs:168-172`); the defense for `/run` is that it can succeed only once, not that the caller is identified. The auth middleware answers 503 when no token is installed at all, 503 when a token is presented while none is installed, and 401 when a presented token mismatches (`agentd/src/auth.rs:69-80`).
 
@@ -10,10 +10,11 @@ Every response on every endpoint carries the `microvms-agentd-version` header, s
 
 Failing `exec` endpoints return `ErrorBody { error, detail }`, where `error` is one of a closed set of slugs a client branches on and `detail` is prose for a log (`protocol/src/exec.rs:246-249`, `protocol/src/exec.rs:266-286`). Failing `fs` endpoints answer `text/plain` instead, because their bodies are opaque byte streams and there is no typed body module for them (`protocol/src/fs.rs:4-6`).
 
-Two places where `docs/PROTOCOL.md`, the hand-written contract, disagrees with the source and with the generated `docs/schema.json`:
+One place where `docs/PROTOCOL.md`, the hand-written contract, disagrees with the source and with the generated `docs/schema.json`:
 
-- Its route table lists 17 rows and omits `GET /v1/schema` (`docs/PROTOCOL.md:13-31`). That endpoint is served and is row 18 of the generated schema (`agentd/src/routes.rs:137`).
 - It describes `POST HOOKS/resume` as signalling in-memory state loss (`docs/PROTOCOL.md:19`). The source records the opposite as a dated measurement and records that the state-loss claim was inferred rather than measured (`agentd/src/routes.rs:261-275`). This file follows the measurement.
+
+Its route table used to omit `GET /v1/schema` and `GET /v1/tcp`; both rows are present now, beside the `GET /v1/procs` row added with them.
 
 ## GET `/v1/exec/{id}`
 
@@ -119,6 +120,26 @@ Reports liveness, daemon version, bootstrap state, disk headroom, identity-repai
 
 `agentd/src/routes.rs:314`
 
+## GET /v1/procs
+
+```rs
+pub async fn procs(State(state): State<AppState>) -> Response {
+```
+
+Process accounting: every registered exec with its process group's live pids, read from `/proc` inside the guest so the image needs no `ps` (`agentd/src/exec.rs`, `procs`; `agentd/src/routes.rs`, the `/v1/procs` row).
+
+**Auth:** Bearer. The answer names every pid the daemon spawned, and a caller without the token has no business with it.
+
+**Input:** none. No body, no query, no path parameters.
+
+**Output:** `application/json` body `ProcsResponse { procs: Vec<ProcGroup> }` with `ProcGroup { exec_id: String, pgid: Option<u32>, started_at: u64, child_exited: bool, reap: bool, pids: Vec<u32> }` (`protocol/src/exec.rs`). One entry per registered exec in any phase, registry order. `pgid` is `null` when the child was reaped before `Child::id()` answered, and such an entry lists no pids. `started_at` is epoch seconds on the daemon's clock, the same convention as a hook observation's `fired_at`. `pids` are the live pids whose pgrp — field 2 after the closing `)` of `/proc/<pid>/stat` — equals `pgid`; zombies (`Z`) are not live and are not listed.
+
+**Statuses:** 200; 401; 503 (`agentd/src/schema.rs`, `PROCS`).
+
+`child_exited` reads the write-once terminal marker rather than the polled result, for the reason `activity` gives: an ack takes the result, so a handler reading it would report every acked exec as running. The `/proc` walk runs on the blocking pool — one `read_dir` plus one small read per live pid — because it is synchronous filesystem I/O on a current-thread runtime. The row this route exists for is `child_exited: true` beside a non-empty `pids`: a command that finished while something it backgrounded did not (issue #157), whose `exec_id` is what `POST /v1/exec/{id}/kill` takes. `reap` echoes the start request's `reap_group_on_exit`, the opt-in under which the daemon escalates the group itself when the child exits.
+
+`agentd/src/exec.rs`
+
 ## GET /v1/schema
 
 ```rs
@@ -138,6 +159,30 @@ Serves the machine-readable wire contract: every route, shape, status code, and 
 Nothing here is secret. Every path, shape, and status code is in the published repository, and the limits are the operator's own configuration; the one sensitive fact — whether a token is installed — lives on `GET /v1/health` instead (`agentd/src/routes.rs:356-360`). Note a divergence internal to the source: the `surface_docs()` row declares the response as `octet_stream("this document")`, so `docs/schema.json` publishes `application/octet-stream`, while the handler returns `Json<serde_json::Value>`, which axum serves as `application/json` (`agentd/src/routes.rs:616` against `agentd/src/routes.rs:361-363`).
 
 `agentd/src/routes.rs:361`
+
+## GET /v1/tcp
+
+```rs
+pub async fn open(
+    State(state): State<AppState>,
+    Query(query): Query<TunnelQuery>,
+    upgrade: WebSocketUpgrade,
+) -> Response {
+```
+
+Upgrades to a WebSocket relayed to `127.0.0.1:<port>` inside the guest, so a caller outside the VM can speak an arbitrary TCP protocol to a server inside it (`agentd/src/tunnel.rs:126`, `agentd/src/routes.rs`, the `/v1/tcp` row).
+
+**Auth:** Bearer.
+
+**Input:** `TunnelQuery { port: u16, identity: bool }` as query string (`agentd/src/tunnel.rs`). `port` is required; `identity=1` asks for the Noise KK handshake against the per-VM key delivered in the launch payload before the dial.
+
+**Output:** a `101 Switching Protocols` and then binary WebSocket frames in both directions, each frame a byte range rather than a message — TCP has no message boundaries and neither does this. No JSON body on any path.
+
+**Statuses:** 101; 400 `malformed_request` when `?port` is absent or not a `u16`; 401; 503 (`agentd/src/schema.rs`, `TUNNEL_OPEN`). The real outcomes are **close codes**, because a WebSocket route leaves HTTP behind after its 101: 4502 nothing listening on the port, 4400 port 0, 4500 a mid-relay failure, 4401 this VM was launched without an identity seed, 4403 the handshake was refused.
+
+The dial is loopback-only and never resolves a name — a relay that could reach another host would be an open proxy inside the VM reachable with the agent token. One connection per WebSocket, deliberately: multiplexing would reimplement per-stream ids, flow control, and close handshakes the platform already provides per connection. The dial happens after the upgrade so a refused dial arrives as a close code with a reason; on the endpoint path every WebSocket failure a caller can observe would otherwise be a 1006 with no reason. Rests on a measured platform property: binary frames survive a port-scoped token byte-exact (`docs/PLATFORM.md`, 2026-08-29).
+
+`agentd/src/tunnel.rs:126`
 
 ## POST /aws/lambda-microvms/runtime/v1/ready
 

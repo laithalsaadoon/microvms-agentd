@@ -799,6 +799,49 @@ class OutputChunk:
         """
 
 @final
+class ProcGroup:
+    """
+    One exec's process group, as `GET /v1/procs` reports it.
+    
+    `child_exited` beside a non-empty `pids` is the shape worth reading: a command that
+    finished while something it backgrounded did not, which `Health.busy` cannot show.
+    The `exec_id` beside it is what `Session.kill` takes.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def child_exited(self, /) -> bool:
+        """
+        Whether the exec's own child has exited. An acked exec still reads `True`.
+        """
+    @property
+    def exec_id(self, /) -> str:
+        """
+        The exec this group belongs to — what `Session.kill` takes.
+        """
+    @property
+    def pgid(self, /) -> int |None:
+        """
+        The process group id captured at spawn, or `None` when the child was reaped before
+        it could be read (then `pids` is empty: there is no group to scan for).
+        """
+    @property
+    def pids(self, /) -> list[int]:
+        """
+        Live pids whose process group is `pgid`, read from `/proc` inside the guest.
+        Zombies are not listed. Empty once the group is gone.
+        """
+    @property
+    def reap(self, /) -> bool:
+        """
+        Whether the exec was started with `reap_group_on_exit`.
+        """
+    @property
+    def started_at(self, /) -> int:
+        """
+        Seconds since the epoch on the daemon's clock when the child was spawned.
+        """
+
+@final
 class RateTable:
     """
     The pinned rate table, and everything it says about itself.
@@ -1302,6 +1345,14 @@ class Session:
         """
         The port the proxy token is scoped to.
         """
+    def procs(self, /) -> list[ProcGroup]:
+        """
+        Process accounting: every registered exec with its group's live pids.
+        
+        The daemon reads `/proc` itself, so this needs no `ps` in the guest. A `ProcGroup`
+        with `child_exited` and a non-empty `pids` is a command that finished while
+        something it backgrounded did not; pass its `exec_id` to `kill`.
+        """
     @property
     def proxy_mint_count(self, /) -> int |None:
         """
@@ -1314,14 +1365,17 @@ class Session:
         and no `Deref`, so "treat `authToken` as a string" is as inexpressible here as it
         is there (TRAP-7).
         """
-    def run(self, /, command: Sequence[str] |str, *, shell: bool = False, cwd: str |None = None, env: dict[str, str] |None = None, user: int |None = None, group: int |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None) -> ExecHandle:
+    def run(self, /, command: Sequence[str] |str, *, shell: bool = False, cwd: str |None = None, env: dict[str, str] |None = None, user: int |None = None, group: int |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False) -> ExecHandle:
         """
         Starts a command and returns its handle. Does not wait.
         
         `command` is a list, or a string that becomes a one-element argv — never
-        whitespace-split. `shell=True` wants a single script string.
+        whitespace-split. `shell=True` wants a single script string. `reap_group_on_exit`
+        asks the daemon to signal the whole process group once the command's own child
+        exits, so nothing it backgrounded outlives it; off by default, which keeps the
+        backgrounded-grandchild-output guarantee for callers who rely on it.
         """
-    def run_sync(self, /, command: Sequence[str] |str, *, timeout: float = ..., shell: bool = False, cwd: str |None = None, env: dict[str, str] |None = None, user: int |None = None, group: int |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None) -> ExecResult:
+    def run_sync(self, /, command: Sequence[str] |str, *, timeout: float = ..., shell: bool = False, cwd: str |None = None, env: dict[str, str] |None = None, user: int |None = None, group: int |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False) -> ExecResult:
         """
         Start, wait, ack. The one-shot shape, for when output is all you want.
         """

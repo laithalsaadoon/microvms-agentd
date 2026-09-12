@@ -52,10 +52,10 @@ tutorials and a Reference tier generated from `microvm manifest`.
 ## Reference
 
 - [Public API](reference/public-api.md) — microvms-core and protocol exports,
-  binding surfaces, and the daemon's 18 HTTP routes.
-- [CLI](reference/cli.md) — all 17 `microvm` commands, the JSON envelope, the
+  binding surfaces, and the daemon's 20 HTTP routes.
+- [CLI](reference/cli.md) — all 28 `microvm` commands, the JSON envelope, the
   NDJSON stream exception, and the 14-row exit-code catalog.
-- [RPC tools](reference/rpc-tools.md) — the daemon's 18 endpoints one by one,
+- [RPC tools](reference/rpc-tools.md) — the daemon's 20 endpoints one by one,
   each with its handler signature, Bearer-or-open auth, and status codes.
 
 ## Behavior

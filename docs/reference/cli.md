@@ -1,6 +1,6 @@
 # microvms-agentd · CLI
 
-The `microvm` binary has twenty-six subcommands, declared as one `clap` `Subcommand` enum in `microvms-cli/src/cli.rs` and built from `microvms-cli/Cargo.toml:20-22`.
+The `microvm` binary has twenty-eight subcommands, declared as one `clap` `Subcommand` enum in `microvms-cli/src/cli.rs` and built from `microvms-cli/Cargo.toml:20-22`.
 
 ## Global flags
 
@@ -197,7 +197,11 @@ Flags:
 - `--stream` — stream output as it arrives rather than waiting for the whole thing; under `--json` or into a pipe this writes NDJSON. `microvms-cli/src/cli.rs:597-598`.
 - `--from-offset <BYTES>` — resume a stream at this byte offset; requires `--stream`. `microvms-cli/src/cli.rs:605-606`.
 - `--stdin` — give the command a stdin pipe, feed it this process's stdin, then close it. `microvms-cli/src/cli.rs:613-614`.
+- `--reap` — signal the command's whole process group once its own child exits, so nothing it backgrounded outlives it (`reap_group_on_exit: true` on the wire). Off by default, and the default is a contract: a backgrounded grandchild that inherited the output pipe keeps running and keeps writing. With the flag, `ps` afterwards shows the group empty and the exec's `writersMayBeAlive` reads false because the linger saw EOF. Conflicts with `--poll`. `microvms-cli/src/cli.rs:1127`.
+- `--kill-on-timeout` — on `ERR_TIMEOUT`, send one `POST /v1/exec/{id}/kill` and put the daemon's verdict in the failure envelope's `data.killed`. A plain `--timeout` is a client-side deadline that abandons the exec and leaves it running in the guest; this turns it into a stop. The exit code stays `ERR_TIMEOUT`, because the deadline is still what ended the wait. Conflicts with `--poll`, `--detach`, and `--stream`. `microvms-cli/src/cli.rs:1138`.
 - Plus `AttachFlags` and `RegionFlags`. `microvms-cli/src/cli.rs:616-620`.
+
+A timeout is not a stop. `ERR_TIMEOUT`'s suggestions say so in as many words and name `microvm kill <exec-id>` as the remedy, beside the older fact that the exec and its output are untouched and re-pollable. `microvms-cli/src/exit.rs:402`.
 
 ## health
 
@@ -231,6 +235,39 @@ Flags:
 
 - `<EXEC_ID>` — the exec whose output to release. Required. `microvms-cli/src/cli.rs:587-588`.
 - Plus `AttachFlags` and `RegionFlags`. `microvms-cli/src/cli.rs:590-594`.
+
+## kill
+
+```
+microvm kill [OPTIONS] --endpoint <ENDPOINT> --agent-token <AGENT_TOKEN> --microvm-id <MICROVM_ID> <EXEC_ID>
+```
+
+Stops a running exec: SIGTERM to its whole process group, SIGKILL after the daemon's grace (`POST /v1/exec/{id}/kill`). This is the stop button `exec --timeout` is not — a client-side timeout abandons an exec and leaves it running in the guest (issue #156). The VM is addressed the way every attached command addresses it, by `--name` or the identifier triple, and the exec by its id, which `exec --detach`, `exec --exec-id`, and `ps` all print.
+
+The envelope carries the daemon's own verdict. `killed: false` with exit 0 means the process group had already exited, which is the outcome a kill was asking for, so `microvm kill x-1 && collect` runs its second half either way. An unknown exec id is the daemon's 404, arriving as `ERR_PROTOCOL` with `data.kind: NotFound`.
+
+`microvms-cli/src/commands/attached.rs:852`
+
+Flags:
+
+- `<EXEC_ID>` — the exec whose process group to signal. Required. `microvms-cli/src/cli.rs:1332`.
+- Plus `AttachFlags` and `RegionFlags`.
+
+## ps
+
+```
+microvm ps [OPTIONS] --endpoint <ENDPOINT> --agent-token <AGENT_TOKEN> --microvm-id <MICROVM_ID>
+```
+
+Lists every exec's process group and its live pids (`GET /v1/procs`). The daemon reads `/proc` itself, so this works against the al2023 base image, which ships no `ps` (issue #157); nothing needs installing in the image for this command. The row worth reading is `childExited: true` with a non-empty `pids`: a command that finished while something it backgrounded did not, which `health`'s `busy` cannot show because busy is about the exec's own child. The `execId` on that row is what `kill` takes.
+
+`data.procs` is one object per registered exec in any phase: `{execId, pgid, startedAt, childExited, reap, pids}`. `pgid` is `null` (never absent) when the daemon captured none; `startedAt` is epoch seconds on the daemon's clock; `reap` echoes `exec --reap`. Zombies are not live and are not listed. `--dense` prints one TSV row per group — exec id, pgid, childExited, pid count, startedAt — exec id first, so `cut -f1` feeds `kill`.
+
+`microvms-cli/src/commands/attached.rs:904`
+
+Flags:
+
+- `AttachFlags` and `RegionFlags` only; this command has no arguments of its own. `microvms-cli/src/cli.rs:1345`.
 
 ## stdin
 
@@ -606,6 +643,8 @@ Each command declares its `type` discriminant and the `data` keys its success en
 | `exec` | `microvm.exec` |
 | `health` | `microvm.health` |
 | `ack` | `microvm.exec` |
+| `kill` | `microvm.kill` |
+| `ps` | `microvm.procs` |
 | `stdin` | `microvm.stdin` |
 | `cp` | `microvm.copy` |
 | `suspend` | `microvm.state` |

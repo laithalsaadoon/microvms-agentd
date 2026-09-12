@@ -1774,6 +1774,9 @@ pub struct StartSpec<'a> {
     pub user: Option<u32>,
     /// Numeric gid to demote to. `None` keeps the daemon's own group.
     pub group: Option<u32>,
+    /// Whether the daemon signals the whole process group once the child exits. Off keeps
+    /// the backgrounded-grandchild-output guarantee; `exec --reap` is the opt-in.
+    pub reap: bool,
 }
 
 impl<'a> StartSpec<'a> {
@@ -1787,6 +1790,7 @@ impl<'a> StartSpec<'a> {
             env: std::collections::HashMap::new(),
             user: None,
             group: None,
+            reap: false,
         }
     }
 }
@@ -1845,6 +1849,10 @@ pub fn start_request(spec: StartSpec<'_>) -> microvms_core::protocol::exec::Star
         // ever write to is a child that blocks forever the first time it reads. `exec --stdin`
         // sets this *and* feeds the pipe, which is the only combination that is safe.
         stdin: spec.stdin,
+        // Forwarded as asked and defaulted off. The daemon defaults a missing key to false
+        // too, so dropping this line would not fail anything — the exec would just quietly
+        // keep leaving its grandchildren running, which is why the guard asserts on the wire.
+        reap_group_on_exit: spec.reap,
     }
 }
 
@@ -2462,6 +2470,7 @@ mod tests {
             env: std::collections::HashMap::new(),
             user,
             group,
+            reap: false,
         });
 
         assert_eq!(from_run.command, from_exec.command);

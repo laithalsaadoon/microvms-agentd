@@ -277,9 +277,9 @@ mod tests {
         assert_eq!(listed, registered);
         assert_eq!(
             listed.len(),
-            26,
+            28,
             "the lifecycle seven (quickstart included), the two agent helpers, the attached \
-             ten (shell, sync, and attach included), and the local seven"
+             twelve (shell, sync, attach, kill, and ps included), and the local seven"
         );
     }
 
@@ -540,6 +540,8 @@ mod tests {
             "exec",
             "health",
             "ack",
+            "kill",
+            "ps",
             "stdin",
             "cp",
             "sync",
@@ -555,11 +557,11 @@ mod tests {
         for code in ["ERR_INVALID_ARG", "ERR_EXEC_FAILED", "ERR_INTERRUPTED"] {
             assert!(rendered.contains(code), "{code} missing");
         }
-        assert!(rendered.contains("26 commands"), "{rendered}");
+        assert!(rendered.contains("28 commands"), "{rendered}");
 
         // The dense rendering is one line per command with its parameters.
         let dense = render(&manifest, true);
-        assert_eq!(dense.lines().count(), 26);
+        assert_eq!(dense.lines().count(), 28);
         assert!(
             dense
                 .lines()

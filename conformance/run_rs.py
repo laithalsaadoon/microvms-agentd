@@ -6,7 +6,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Live conformance run driving the **Rust** client stack through the `microvm` CLI.
 
-This is the only live suite, and it now expresses **every named check** — 165 of them, with
+This is the only live suite, and it now expresses **every named check** — 181 of them, with
 none recorded SKIP. `conformance/run.py` was the oracle — 56 checks through the Python
 client — and it went away with that client once both suites ran green against real AWS on
 the same commit (Python 56/56, this one 38/38 with 34 recorded SKIP). Those 34 were the
@@ -145,34 +145,20 @@ only section that needs Bedrock, on both default models, and it prints the model
 used to stderr. An `agent-up` that fails before any VM exists records all fifteen as FAIL
 rather than SKIP: an account without the entitlement is a finding, not a gap.
 
-159 rather than 152: seven for issues #158, #160 and #161, the hygiene trio measured by the
-2026-09-11 seam probe. `drive_lifecycle` asserts the kept launch carries its agent token and
-`drive_config_and_sync` asserts a launch without `--keep` nulls it — the token has no consumer
-once the VM is gone and stdout outlives the process (#161). `drive_teardown` now terminates
-with `--delete-image` and neither `--image-identifier` nor `--image-name`, and asserts the
-envelope reports the image the run record supplied and names its build log group from the
-record's image name (#160). Then, before the suite deletes that group, it runs
-`scripts/verify-clean.py` and asserts two lines of its report: the suite's group is a LEAK,
-and the configured `--log-group` (which no prefix and no ledger record names) is
-UNCLASSIFIED rather than absent (#158) — the sweep now covers the whole
-`/aws/lambda-microvms/` namespace, and a group it cannot attribute is listed and counted
-instead of vanishing. A seventh writes a one-record state directory whose `leaked` names
-that configured group and runs the script against it with `--state-dir`, which turns the
-UNCLASSIFIED line into an attributed LEAK: the ledger rule proved on the real account, on a
-name no prefix matches.
-
-165 rather than 159: `drive_platform_posture` adds six for issues #154 and #155, on the
-suite's own VM, which is launched without `--egress`. A `curl` to `example.com` answering
-200 from that VM (the platform gives egress without a connector, measured 2026-09-11 and
-2026-09-12); the IMDSv2 token `PUT` answering 200 with a non-empty token; the
-`iam/security-credentials/` listing naming `execution_role`; the credential document served
-with a 200 and a body over 500 bytes (status and size only — the body is a live secret and
-is never read into this process); the same handshake answering 200 for a `--user 1000`
-exec; and the execution role itself, read back from IAM, granting only `logs:` actions with
-no managed policy attached. The first two are pinned to the measured posture on purpose
-and go red the day the platform starts honouring the omission, which is the signal to
-re-measure and append to `docs/PLATFORM.md`. Live because nothing local has an MMDS or a
-network connector; the section runs at release with the rest of the suite.
+181 rather than 165: `drive_kill_and_procs` adds sixteen for issues #156 and #157, the
+stop button and process accounting. A live group (`sleep 300 & echo started; wait`) listed
+by `microvm ps` with `childExited: false` and two or more pids, then `microvm kill`
+answering `killed: true`, the poll reporting a non-zero exit or a signal, and the group
+empty within fifteen seconds; the #157 shape — a backgrounded ticker whose exec exits 0 —
+listed with `childExited: true` and a live pid, its tick file growing across two reads
+four seconds apart and frozen after a kill of that exec id; the same shape under
+`exec --reap` leaving no live pid within `kill_grace` + 2 s and a tick file that stops;
+and `exec --timeout 2` on `sleep 30` raising `ERR_TIMEOUT` with a suggestion naming
+`microvm kill`, then `--kill-on-timeout` reporting `data.killed: true` and an empty group.
+Live because every one of these is a claim about processes the real daemon spawned in
+the real guest and read back out of the real `/proc` — no local guard sees a survivor.
+No `procps-ng` is added to the guest image for this: `microvm ps` through the daemon's
+own `/v1/procs` is the point.
 
 A hybrid driver, and both lanes are deliberate
 ----------------------------------------------
@@ -1596,6 +1582,210 @@ def drive_exec_identity(cli: Cli, launched: Envelope, results: Results) -> None:
         "unknown exec id is 404",
         "NotFound",
         lambda: cli.call("exec", "--poll", "never-existed", *attach),
+    )
+
+
+def drive_kill_and_procs(cli: Cli, launched: Envelope, results: Results) -> None:
+    """The stop button and process accounting (issues #156, #157). Sixteen checks.
+
+    Four shapes, each a claim about processes the real daemon spawned in the real guest:
+
+    (a) a live group — `sleep 300 & echo started; wait` — is listed by `ps` with the shell
+        still running and at least two pids, `kill` signals it, the poll reports a non-zero
+        exit or a signal, and the group reads empty within fifteen seconds;
+    (b) the #157 shape: a backgrounded ticker whose exec exits 0 is listed with
+        `childExited: true` and a live pid, its tick file grows across two reads four
+        seconds apart, and a `kill` of *that exec id* — issued after the exec finished —
+        freezes it, because the pgid was captured at spawn and the group is what is
+        signalled;
+    (c) the same shape under `exec --reap` leaves no live pid within `kill_grace` + 2 s and
+        a tick file that stops on its own;
+    (d) `exec --timeout 2` on `sleep 30` raises `ERR_TIMEOUT` whose suggestions name
+        `microvm kill`, and `--kill-on-timeout` reports `data.killed: true` with the group
+        empty afterwards.
+
+    Every process fact is read through `microvm ps`, never a `ps` in the guest: the
+    conformance image deliberately has none, which is the gap the route closes.
+    """
+    print("\n-- kill and procs (#156, #157) --")
+    attach = attach_args(cli, launched)
+
+    def group(exec_id: str) -> dict[str, Any] | None:
+        listed = cli.call("ps", *attach)
+        for entry in listed.data.get("procs") or []:
+            if entry.get("execId") == exec_id:
+                return entry
+        return None
+
+    def await_group(
+        exec_id: str, ready: Callable[[dict[str, Any]], bool], deadline_sec: float
+    ) -> dict[str, Any] | None:
+        """Polls `ps` until `ready` holds for the entry, or the deadline passes."""
+        deadline = time.monotonic() + deadline_sec
+        last = None
+        while time.monotonic() < deadline:
+            last = group(exec_id)
+            if last is not None and ready(last):
+                return last
+            time.sleep(1)
+        return last
+
+    def tick_count(path: str) -> int:
+        read = cli.call("exec", f"wc -l < {path} 2>/dev/null || echo 0", *attach)
+        raw = (read.data.get("stdout") or "0").strip()
+        return int(raw) if raw.isdigit() else 0
+
+    # (a) a live group, then a kill.
+    cli.call(
+        "exec",
+        "sleep 300 & echo started; wait",
+        "--exec-id",
+        "kp-a",
+        "--detach",
+        *attach,
+    )
+    live = await_group("kp-a", lambda g: len(g.get("pids") or []) >= 2, 15)
+    results.check(
+        "ps lists a live group with its shell running and the sleep beside it",
+        live is not None
+        and live.get("childExited") is False
+        and len(live.get("pids") or []) >= 2,
+        repr(live),
+    )
+    killed = cli.call("kill", "kp-a", *attach)
+    results.eq("kill reports the group was signalled", killed.data.get("killed"), True)
+    after = None
+    for _ in range(15):
+        after = cli.call("exec", "--poll", "kp-a", *attach)
+        if after.data.get("phase") != "running":
+            break
+        time.sleep(1)
+    results.check(
+        "the killed exec reports a non-zero exit or a signal death",
+        after is not None
+        and after.data.get("phase") != "running"
+        and after.data.get("exitCode") != 0,
+        f"phase={after.data.get('phase') if after else None} "
+        f"exitCode={after.data.get('exitCode') if after else None}",
+    )
+    empty = await_group("kp-a", lambda g: not g.get("pids"), 15)
+    results.check(
+        "ps shows the killed group empty",
+        empty is not None
+        and empty.get("childExited") is True
+        and not empty.get("pids"),
+        repr(empty),
+    )
+
+    # (b) the #157 shape: a survivor the exec left behind.
+    ticker = "(while true; do date +%s >> /tmp/night-tick; sleep 1; done &); sleep 1; echo bg"
+    finished = cli.call("exec", ticker, "--exec-id", "kp-b", *attach)
+    results.eq(
+        "an exec that backgrounded a ticker exits 0", finished.data.get("exitCode"), 0
+    )
+    survivor = group("kp-b")
+    results.check(
+        "ps lists the finished exec with a live pid it left behind",
+        survivor is not None
+        and survivor.get("childExited") is True
+        and len(survivor.get("pids") or []) >= 1,
+        repr(survivor),
+    )
+    first = tick_count("/tmp/night-tick")
+    time.sleep(4)
+    second = tick_count("/tmp/night-tick")
+    results.check(
+        "the survivor keeps ticking after its exec finished",
+        second > first,
+        f"{first} then {second} lines, 4 s apart",
+    )
+    results.ok(
+        "kill of the finished exec's id is accepted",
+        lambda: cli.call("kill", "kp-b", *attach),
+    )
+    await_group("kp-b", lambda g: not g.get("pids"), 15)
+    third = tick_count("/tmp/night-tick")
+    time.sleep(4)
+    fourth = tick_count("/tmp/night-tick")
+    results.check(
+        "the survivor is gone after the kill: the tick file stops",
+        third == fourth,
+        f"{third} then {fourth} lines, 4 s apart",
+    )
+
+    # (c) the same shape with --reap: the daemon signals the group when the shell exits.
+    reaped_ticker = "(while true; do date +%s >> /tmp/night-tick-reap; sleep 1; done &); sleep 1; echo bg"
+    reaped = cli.call("exec", reaped_ticker, "--exec-id", "kp-c", "--reap", *attach)
+    results.eq("exec --reap exits 0", reaped.data.get("exitCode"), 0)
+    # kill_grace is 10 s by default; the reap should be immediate because a sleeping shell
+    # loop dies to SIGTERM, but the claim is bounded by the grace plus slack.
+    gone = await_group("kp-c", lambda g: not g.get("pids"), 12)
+    results.check(
+        "ps shows no live pid for the reaped exec within kill_grace + 2 s",
+        gone is not None
+        and gone.get("childExited") is True
+        and gone.get("reap") is True
+        and not gone.get("pids"),
+        repr(gone),
+    )
+    before = tick_count("/tmp/night-tick-reap")
+    time.sleep(4)
+    later = tick_count("/tmp/night-tick-reap")
+    results.check(
+        "the reaped ticker stopped on its own",
+        before == later,
+        f"{before} then {later} lines, 4 s apart",
+    )
+
+    # (d) a timeout is not a stop, and --kill-on-timeout makes it one.
+    timed_out: KindError | None = None
+    try:
+        cli.call("exec", "sleep 30", "--timeout", "2", "--exec-id", "kp-d", *attach)
+    except KindError as exc:
+        timed_out = exc
+    results.check(
+        "exec --timeout raises ERR_TIMEOUT",
+        timed_out is not None
+        and timed_out.code == "ERR_TIMEOUT"
+        and timed_out.kind == "ExecTimeout",
+        repr(timed_out),
+    )
+    results.check(
+        "the timeout's suggestions name microvm kill",
+        timed_out is not None
+        and any("microvm kill" in line for line in timed_out.envelope.suggestions),
+        repr(timed_out.envelope.suggestions if timed_out else None),
+    )
+    # The abandoned exec is still running, as the suggestion says; stop it so it does not
+    # sit in the group table for the rest of the run.
+    cli.call("kill", "kp-d", *attach)
+
+    stopped: KindError | None = None
+    try:
+        cli.call(
+            "exec",
+            "sleep 30",
+            "--timeout",
+            "2",
+            "--kill-on-timeout",
+            "--exec-id",
+            "kp-e",
+            *attach,
+        )
+    except KindError as exc:
+        stopped = exc
+    results.check(
+        "exec --kill-on-timeout reports killed: true in the failure envelope",
+        stopped is not None
+        and stopped.code == "ERR_TIMEOUT"
+        and stopped.envelope.data.get("killed") is True,
+        repr(stopped.envelope.data if stopped else None),
+    )
+    emptied = await_group("kp-e", lambda g: not g.get("pids"), 15)
+    results.check(
+        "ps shows the timed-out-and-killed group empty",
+        emptied is not None and not emptied.get("pids"),
+        repr(emptied),
     )
 
 
@@ -4519,6 +4709,10 @@ def main() -> int:
             # on the execution role, which the conformance caller already has.
             drive_platform_posture(cli, launched, aws, results)
             drive_exec_identity(cli, launched, results)
+            # After the identity section because it leans on the same detach/poll surface
+            # that section just proved: every process fact here is read through `ps` and
+            # every stop through `kill`, against the same shared VM.
+            drive_kill_and_procs(cli, launched, results)
             # After the identity section because it leans on the same detach/poll/ack
             # surface that section just proved, so a rotation failure here points at the
             # rotation rather than at a broken poll.

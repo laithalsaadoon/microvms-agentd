@@ -80,14 +80,14 @@ pub struct Cli {
     pub quiet: bool,
 }
 
-/// The twenty commands.
+/// The twenty-eight commands.
 ///
 /// Variant order is the order `microvm --help` and the manifest list them in, which is
 /// lifecycle order rather than alphabetical: a reader meeting this surface for the first time
-/// wants `run` first, not `build`. The six *attached* commands — `exec`, `health`, `ack`,
-/// `stdin`, `cp`, `port-forward` — sit together after `build` because they share the same three
-/// identifiers and the same door ([`crate::seam::CoreSeam::attach_session`]), which is the
-/// distinction that
+/// wants `run` first, not `build`. The *attached* commands — `exec`, `health`, `ack`, `kill`,
+/// `ps`, `stdin`, `cp`, `port-forward` and their siblings — sit together after `build` because
+/// they share the same three identifiers and the same door
+/// ([`crate::seam::CoreSeam::attach_session`]), which is the distinction that
 /// matters when reading the list: everything above them creates or destroys, and everything in
 /// that block addresses a VM that already exists. `history` sits beside `ls` because they are
 /// the same kind of thing: a local read of what this machine's own state directory recorded.
@@ -160,6 +160,27 @@ pub enum Command {
     /// what hands over the output. A second ack is a 409, because the first one released it and
     /// answering 200 with an empty body would read as "the command produced no output".
     Ack(AckArgs),
+
+    /// Stop a running exec: SIGTERM its whole process group, SIGKILL after the daemon's grace.
+    ///
+    /// The stop button `exec --timeout` is not (issue #156): a client-side timeout abandons an
+    /// exec and leaves it running in the guest, while this reaches `POST /v1/exec/{id}/kill` and
+    /// signals the *group* — so a shell that backgrounded a server takes the server down with
+    /// it. The envelope carries the daemon's own `killed` verdict: `false` with exit 0 means the
+    /// group had already exited, which is the outcome a kill was asking for. The VM is addressed
+    /// the way every attached command addresses it — `--name` or the identifier triple — and
+    /// the exec by its id, which `exec --detach`, `exec --exec-id`, and `ps` all print.
+    Kill(KillArgs),
+
+    /// List what is running in a MicroVM: every exec's process group and its live pids.
+    ///
+    /// The daemon reads `/proc` itself (`GET /v1/procs`), so this works against the al2023 base
+    /// image, which ships no `ps` (issue #157). The row worth reading is `childExited: true`
+    /// with a non-empty `pids`: a command that finished while something it backgrounded did
+    /// not — the case `health`'s `busy` cannot show, because busy is about the exec's own
+    /// child. The `execId` on that row is what `kill` takes. Dense output is one TSV row per
+    /// group, exec id first, so `cut -f1` feeds `kill` directly.
+    Ps(PsArgs),
 
     /// Write to a running exec's stdin, and optionally close it.
     ///
@@ -1093,6 +1114,29 @@ pub struct ExecArgs {
     #[arg(long)]
     pub stdin: bool,
 
+    /// Signal the command's whole process group once its own child exits.
+    ///
+    /// Off by default, and the default is a contract: a backgrounded grandchild that inherited
+    /// the output pipe keeps running and keeps writing, which is how "the server I started in
+    /// the background keeps logging" works. With this flag the daemon runs the same
+    /// SIGTERM-then-SIGKILL escalation `kill` uses against the group as soon as the child
+    /// exits, so nothing the command left behind outlives it (issue #157). `ps` afterwards
+    /// shows the group empty, and the exec's `writersMayBeAlive` reads false because the
+    /// linger saw EOF rather than a deadline.
+    #[arg(long, conflicts_with = "poll")]
+    pub reap: bool,
+
+    /// On `ERR_TIMEOUT`, stop the exec rather than leaving it running.
+    ///
+    /// A plain `--timeout` is a client-side deadline: it abandons the exec and the command
+    /// keeps running in the guest (issue #156). With this flag the timeout is followed by one
+    /// `POST /v1/exec/{id}/kill`, best-effort, and the failure envelope's `data.killed` carries
+    /// the daemon's verdict. The exit code stays `ERR_TIMEOUT`, because the deadline is still
+    /// what ended the wait. Only meaningful on the wait-and-ack shape: `--detach` never waits,
+    /// `--stream` ends with the stream, and `--poll` starts nothing.
+    #[arg(long, conflicts_with_all = ["poll", "detach", "stream"])]
+    pub kill_on_timeout: bool,
+
     #[command(flatten)]
     pub attach: AttachFlags,
 
@@ -1277,6 +1321,28 @@ pub struct AckArgs {
     #[arg(value_name = "EXEC_ID")]
     pub exec_id: String,
 
+    #[command(flatten)]
+    pub attach: AttachFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct KillArgs {
+    /// The exec whose process group to signal.
+    #[arg(value_name = "EXEC_ID")]
+    pub exec_id: String,
+
+    #[command(flatten)]
+    pub attach: AttachFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct PsArgs {
     #[command(flatten)]
     pub attach: AttachFlags,
 
@@ -2103,10 +2169,10 @@ mod tests {
         assert!(big.contains("65535"), "{big}");
     }
 
-    /// Twenty-two subcommands, named as the manifest and the response table name them.
+    /// Twenty-eight subcommands, named as the manifest and the response table name them.
     ///
-    /// The block after `exec` is the attached one — `health`, `ack`, `stdin`, `cp`, `tunnel`,
-    /// `port-forward`, and `shell` beside it — and their position is asserted rather than incidental,
+    /// The block after `exec` is the attached one — `health`, `ack`, `kill`, `ps`, `stdin`, `cp`,
+    /// `tunnel`, `port-forward`, and `shell` beside it — and their position is asserted rather than incidental,
     /// because `--help`'s reading order is the only documentation of which commands need the
     /// identifier triple (`shell` sits with them because it addresses a running VM, though its
     /// credential is the minted shell token rather than the agent token). `history` sits beside
@@ -2128,6 +2194,8 @@ mod tests {
                 "exec",
                 "health",
                 "ack",
+                "kill",
+                "ps",
                 "stdin",
                 "cp",
                 "sync",
