@@ -4,15 +4,17 @@ The `microvm` binary has twenty-eight subcommands, declared as one `clap` `Subco
 
 ## Global flags
 
-These three are `global = true`, so they parse on either side of the subcommand. `microvm --json ls` and `microvm ls --json` are the same invocation. `microvms-cli/src/cli.rs:61-79`.
+These three are `global = true`, so they parse on either side of the subcommand. `microvm --json ls` and `microvm ls --json` are the same invocation. `microvms-cli/src/cli.rs:63-80`.
 
 Flags:
 
-- `--json` — emit the typed JSON envelope on stdout instead of human output; wins over every other format, including an interactive terminal. `microvms-cli/src/cli.rs:69-70`.
-- `--dense` — token-lean output, for a consumer paying per token. `microvms-cli/src/cli.rs:73-74`.
-- `--quiet` — suppress progress on stderr; warnings still print. `microvms-cli/src/cli.rs:77-78`.
+- `--json` — emit the typed JSON envelope on stdout instead of human output; wins over every other format, including an interactive terminal. `microvms-cli/src/cli.rs:67-72`.
+- `--dense` — token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with `--json`. `microvms-cli/src/cli.rs:74-76`.
+- `--quiet` — suppress progress on stderr; warnings still print. `microvms-cli/src/cli.rs:78-80`.
 
-The output format depends only on the two flags and on whether stdout is a terminal. `--json` is checked first, then `--dense`; after that, a terminal gets a ratatui surface and a pipe gets plain text. `microvms-cli/src/envelope.rs:301-308`.
+The output format depends only on the two flags and on whether stdout is a terminal. `--json` is checked first, then `--dense`; after that, a terminal gets a ratatui surface and a pipe gets plain text. `microvms-cli/src/envelope.rs:298-305`.
+
+The manifest publishes the three as `globalFlags` (#131), in the same parameter shape as a command's own, read off the root command's `global = true` arguments without building the tree — building would propagate each global into every subcommand's parameter list. `microvms-cli/src/manifest.rs:91-95`. The generated Reference overview renders that array as its "Global flags" table.
 
 ## Shared flag groups
 
@@ -413,13 +415,18 @@ Flags:
 microvm ls [OPTIONS]
 ```
 
-Lists what this CLI created and could not confirm it deleted. It reads the local ledger rather than asking AWS, because the ledger still names the resources a killed process never got to delete.
+Lists the local ledger of a state directory: what this CLI could not confirm it deleted, not what exists in the account. It reads `~/.microvm/runs/*.json` rather than asking AWS, because the ledger still names the resources a killed process never got to delete, and an entry can outlive the resource it names — the measurement behind #159 was 68 entries with populated `leaked` lists in an account both `scripts/verify-clean.py` and the live APIs showed empty. Every `microvm.runs` envelope therefore carries `source: "local-ledger"`, and the text and TUI header reads `local ledger of <state dir>: what this CLI could not confirm it deleted, not what exists in the account`. `microvms-cli/src/commands/local.rs:32-52`.
 
-`microvms-cli/src/commands/local.rs:23`
+`--remote` asks the other question. Through the same control plane every other command uses (`CoreSeam::control_plane`; one AWS service, no second client), it reads `ListMicrovms` and `ListMicrovmImages` to their last page and judges each identifier in a ledger entry's `leaked` list — the ledger's own statement of what is outstanding, which teardown narrows to what a delete did not report gone. An identifier found in either listing takes the listed state: alive is every MicroVM state but `TERMINATED` and every image state but `DELETING`/`DELETED`, the predicate `scripts/verify-clean.py` uses, so the two tools cannot disagree about a leak. An identifier absent from both is `gone` only when it is spelled as a MicroVM id (`microvm-…`) or an image ARN (`…:microvm-image:<name>`), the two things the listings could have shown; any other spelling, a service-created `/aws/lambda-microvms/…` log group above all, is something neither listing can see, and its absence says nothing. The entry is then `live` if any identifier is, else `unjudged` if any is, else `gone`; a record written for another region or one that cannot be read is `unjudged` outright. A record whose `leaked` list is empty, the shape a run that created nothing leaves, is judged by its named `microvmId`/`imageIdentifier` instead. `data.remote` is null without the flag and otherwise `{region, microvms: [{microvmId, state, imageArn}], images: [{imageArn, name, state}], entries: [{runId, microvmId, imageIdentifier, microvmState, imageState, status}], unknownToLedger: {microvms, images}}`, where `unknownToLedger` is what is alive in the account that no entry names — the sibling-client case the issue measured. `microvms-cli/src/commands/local.rs:256`.
+
+`--prune` (requires `--remote`) removes the ledger files of `gone` entries and lists their run ids in `data.pruned`, which is `[]` on every other invocation. Only `gone`: a live record is the one the ledger exists for, and an unjudged one names something these listings cannot answer for — for a leaked log group the ledger file is the only pointer there is (`microvms-cli/src/ledger.rs:6-9`), so removing it on the strength of a `TERMINATED` VM beside it would lose the resource. The removal goes through `ledger::remove`, which checks the run id against the ledger's own grammar before it becomes a path component. `microvms-cli/src/ledger.rs:167`.
 
 Flags:
 
-- `--state-dir <STATE_DIR>` — where the ledgers live; defaults to `$MICROVM_STATE_DIR` or `~/.microvm/runs`. `microvms-cli/src/cli.rs:733-734`.
+- `--state-dir <STATE_DIR>` — where the ledgers live; defaults to `$MICROVM_STATE_DIR` or `~/.microvm/runs`. `microvms-cli/src/cli.rs:1558-1559`.
+- `--remote` — list live MicroVMs and images from the account and mark each ledger entry `live`, `gone`, or `unjudged` by the identifiers in its `leaked` list; conflicts with `--watch`, which is ledger-only by contract. `microvms-cli/src/cli.rs:1598-1599`.
+- `--prune` — remove the ledger files of `gone` entries; requires `--remote`. `microvms-cli/src/cli.rs:1605-1606`.
+- `--region <REGION>` / `--unlisted-region <NAME>` — the region `--remote` lists; the shared `RegionFlags` group, ignored without `--remote`. `microvms-cli/src/cli.rs:1608-1609`.
 - `--watch` — re-read the ledger on an interval until Ctrl-C, `port-forward` style: snapshots on stderr, one summary envelope at the end (`data.watch = {refreshes, intervalSeconds, interrupted, calls}`, `null` for a plain `ls`), Ctrl-C exits 0 (#78). The loop is **ledger-only**: zero platform calls per refresh — no `GetMicrovm`, no `/v1/health` — so it resets no idle timer, keeps no VM alive, and bills nothing; `data.watch.calls` states that flatly and the text carries the measurement behind it. The distinction matters because an outside `/v1/health` poll *does* reset the platform idle timer (`docs/PLATFORM.md`, idle-timer section: a polled VM stayed RUNNING through 311s of a 60s window while the unpolled control suspended at 66s), so a health-polling watcher would keep every watched VM billing. The corollary: what a watch shows is what this CLI last recorded, not the platform's live state — a VM the platform suspended at its idle window still reads as this ledger wrote it. `microvms-cli/src/commands/local.rs`, `watch`.
 - `--interval-sec <SECONDS>` — seconds between ledger re-reads under `--watch`; default `2`, floor `0.1`. The default can be short *because* the loop is local-only; a health-polling watcher would instead need its interval judged against every watched VM's `maxIdleDurationSeconds`.
 - `--max-refreshes <N>` — stop after N snapshots instead of on Ctrl-C, for scripts; `0` is refused.

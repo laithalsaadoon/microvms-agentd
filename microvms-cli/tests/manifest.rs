@@ -152,6 +152,41 @@ fn every_published_domain_is_the_domain_the_parser_enforces() {
     );
 }
 
+/// **The published global flags are the ones the binary accepts, on either side of the
+/// subcommand.**
+///
+/// The in-crate test reads them off the clap tree; this one feeds each back to the real
+/// binary before and after `manifest`, which is what `global = true` promises and what the
+/// Reference tier will now state (#131). Three, because the manifest says three — a fourth
+/// global added to `Cli` reaches here without an edit, and one that stopped being global
+/// fails the trailing-position parse.
+#[test]
+fn every_published_global_flag_parses_on_both_sides_of_the_subcommand() {
+    let manifest = manifest();
+    let flags = manifest["globalFlags"]
+        .as_array()
+        .expect("the manifest publishes globalFlags");
+    assert_eq!(flags.len(), 3, "{flags:?}");
+    for flag in flags {
+        let name = flag["name"].as_str().expect("a name");
+        let spelled = format!("--{name}");
+        for argv in [
+            vec![spelled.as_str(), "manifest"],
+            vec!["manifest", spelled.as_str()],
+        ] {
+            let outcome = run(&argv, &[]);
+            assert_eq!(
+                outcome.exit_code(),
+                0,
+                "{spelled} is published as global but `{}` exits {}: {}",
+                argv.join(" "),
+                outcome.exit_code(),
+                outcome.stderr
+            );
+        }
+    }
+}
+
 /// The exit table the manifest publishes is the one the binary exits with.
 ///
 /// Both halves of the contract in one place: an agent reads `exitCodes` to build its own branch

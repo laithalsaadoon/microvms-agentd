@@ -66,6 +66,7 @@ import { readFileSync } from "node:fs"
  * @property {string} cli
  * @property {string} version
  * @property {ReadonlyArray<Command>} commands
+ * @property {ReadonlyArray<Parameter>} globalFlags the command-wide flags, published once (#131)
  * @property {ReadonlyArray<ExitCode>} exitCodes
  * @property {Envelope} envelope
  * @property {ReadonlyArray<string>} conventions
@@ -202,9 +203,12 @@ const checker = (source) => {
     },
     /** @param {unknown} value @param {string} path @returns {ReadonlyArray<unknown>} */
     nonEmptyArray: (value, path) => {
-      const list = check.array(value, path)
-      if (list.length === 0) throw drift(source, path, "a non-empty array", value)
-      return list
+      // One message for both ways of having nothing here: a renamed field reads as "absent",
+      // and the remedy is the same as for an empty list.
+      if (!Array.isArray(value) || value.length === 0) {
+        throw drift(source, path, "a non-empty array", value)
+      }
+      return value
     },
     /** @param {unknown} value @param {string} path @returns {ReadonlyArray<string>} */
     strings: (value, path) =>
@@ -238,8 +242,29 @@ export const validateManifest = (parsed, source = SOURCES.manifest) => {
   check.nonEmptyString(data.cli, "data.cli")
   check.nonEmptyString(data.version, "data.version")
 
+  /**
+   * One parameter, in the shape both a command's `parameters` and `globalFlags` carry.
+   *
+   * @param {unknown} item
+   * @param {string} at
+   * @returns {string} the parameter's name
+   */
+  const checkParameter = (item, at) => {
+    const parameter = check.record(item, at)
+    const name = check.nonEmptyString(parameter.name, `${at}.name`)
+    check.boolean(parameter.positional, `${at}.positional`)
+    check.boolean(parameter.required, `${at}.required`)
+    check.nonEmptyString(parameter.type, `${at}.type`)
+    check.stringOrNull(parameter.default, `${at}.default`)
+    if (parameter.choices !== null) check.strings(parameter.choices, `${at}.choices`)
+    check.string(parameter.help, `${at}.help`)
+    return name
+  }
+
   const commands = check.nonEmptyArray(data.commands, "data.commands")
   const names = new Set()
+  /** Every parameter name any command lists as its own, for the global-flag collision check. */
+  const owned = new Set()
   commands.forEach((entry, at) => {
     const where = `data.commands[${at}]`
     const command = check.record(entry, where)
@@ -251,15 +276,7 @@ export const validateManifest = (parsed, source = SOURCES.manifest) => {
     check.strings(command.responseKeys, `${where}.responseKeys`)
     check.boolean(command.supportsJson, `${where}.supportsJson`)
     check.array(command.parameters, `${where}.parameters`).forEach((item, index) => {
-      const at = `${where}.parameters[${index}]`
-      const parameter = check.record(item, at)
-      check.nonEmptyString(parameter.name, `${at}.name`)
-      check.boolean(parameter.positional, `${at}.positional`)
-      check.boolean(parameter.required, `${at}.required`)
-      check.nonEmptyString(parameter.type, `${at}.type`)
-      check.stringOrNull(parameter.default, `${at}.default`)
-      if (parameter.choices !== null) check.strings(parameter.choices, `${at}.choices`)
-      check.string(parameter.help, `${at}.help`)
+      owned.add(checkParameter(item, `${where}.parameters[${index}]`))
     })
     if (command.alternateResponse !== null) {
       const at = `${where}.alternateResponse`
@@ -268,6 +285,17 @@ export const validateManifest = (parsed, source = SOURCES.manifest) => {
       check.nonEmptyString(alternate.responseType, `${at}.responseType`)
       check.strings(alternate.responseKeys, `${at}.responseKeys`)
       check.nonEmptyString(alternate.stdout, `${at}.stdout`)
+    }
+  })
+
+  // The command-wide flags, published once (#131). A name a command also lists is the shape
+  // `Command::build()` produces by propagating globals into every subcommand, and a page built
+  // from it would print the flag on the overview and again on twenty-six command pages.
+  check.nonEmptyArray(data.globalFlags, "data.globalFlags").forEach((item, at) => {
+    const where = `data.globalFlags[${at}]`
+    const name = checkParameter(item, where)
+    if (owned.has(name)) {
+      throw drift(source, `${where}.name`, "a flag no command lists as its own", name)
     }
   })
 

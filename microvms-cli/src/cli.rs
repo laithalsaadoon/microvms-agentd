@@ -71,7 +71,7 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
 
-    /// Token-lean output, for a consumer paying per token.
+    /// Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json.
     #[arg(long, global = true)]
     pub dense: bool,
 
@@ -277,12 +277,15 @@ pub enum Command {
     /// CREATING cannot be deleted at all.
     Terminate(TerminateArgs),
 
-    /// List what this CLI created and could not confirm it deleted.
+    /// List what this CLI created and could not confirm it deleted; `--remote` asks the account too.
     ///
     /// Reads the local ledger rather than asking AWS. Deliberately: the question it answers
     /// is "what did I leave behind", and the resources worth asking about are the ones a
     /// killed process never got to report — which no ListMicrovms call can attribute back to
-    /// a command that died.
+    /// a command that died. That is a different question from "what exists", and the output
+    /// says which one it answered (#159): every envelope carries `source: "local-ledger"`,
+    /// and `--remote` adds the other answer by listing the account's MicroVMs and images
+    /// and marking each ledger entry live or gone.
     Ls(LsArgs),
 
     /// Print what was asked of one MicroVM and what the platform reported back.
@@ -1654,6 +1657,29 @@ pub struct LsArgs {
     /// itself.
     #[arg(long, requires = "watch")]
     pub max_refreshes: Option<u64>,
+
+    /// Ask the account too: list live MicroVMs and images and mark each ledger entry live, gone, or unjudged.
+    ///
+    /// Through the same control plane every other command uses — one AWS service, no
+    /// second client (#159). Each identifier in an entry's `leaked` list is judged:
+    /// `remote.entries[].status` is `live` when one is still listed alive, `gone` when
+    /// every one is a MicroVM id or image ARN the listings no longer carry, and `unjudged`
+    /// when one is something neither listing can see (a `/aws/lambda-microvms/…` log
+    /// group), or for a record from another region or one this CLI cannot read. Resources
+    /// still alive that no ledger entry names appear under `remote.unknownToLedger`.
+    /// Conflicts with `--watch`, which is ledger-only by contract.
+    #[arg(long, conflicts_with = "watch")]
+    pub remote: bool,
+
+    /// Remove the ledger files of `gone` entries. Requires `--remote`.
+    ///
+    /// Only `gone`: a live record is the one the ledger exists for, and an unjudged one is
+    /// a question this region cannot answer. The removed run ids are `data.pruned`.
+    #[arg(long, requires = "remote")]
+    pub prune: bool,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
 }
 
 #[derive(Args, Debug)]
@@ -2036,10 +2062,48 @@ mod tests {
         assert!(!from_flag.contains(&"eu-central-1".to_string()));
 
         // The parser really refuses it, rather than the domain merely omitting it.
-        // `logs` rather than `ls`, because `ls` reads a local ledger and deliberately carries no
-        // region flags at all — a test against it would pass for the wrong reason.
+        // `logs` was chosen when `ls` carried no region flags at all; `ls --remote` gained them
+        // in #159, so either would do now, and the probe stays where it was.
         let refused = Cli::try_parse_from(["microvm", "logs", "img", "--region", "eu-central-1"]);
         assert!(refused.is_err(), "eu-central-1 must not parse");
+    }
+
+    /// `ls --prune` needs `--remote`, and `--remote` cannot ride a `--watch` (#159).
+    ///
+    /// The first because a prune is a verdict from a listing, and there is no verdict
+    /// without one. The second because `--watch` is documented as zero platform calls per
+    /// refresh, and a remote watch would make that sentence false on every tick.
+    #[test]
+    fn ls_prune_requires_remote_and_remote_excludes_watch() {
+        let parsed = Cli::try_parse_from([
+            "microvm",
+            "ls",
+            "--remote",
+            "--prune",
+            "--region",
+            "us-east-1",
+        ])
+        .expect("remote with prune parses");
+        let Command::Ls(args) = parsed.command else {
+            panic!("an ls parses as an ls");
+        };
+        assert!(args.remote && args.prune);
+        assert_eq!(args.region.region, Some(RegionArg::UsEast1));
+
+        let plain = Cli::try_parse_from(["microvm", "ls"]).expect("a plain ls parses");
+        let Command::Ls(args) = plain.command else {
+            panic!("an ls parses as an ls");
+        };
+        assert!(!args.remote && !args.prune);
+
+        assert!(
+            Cli::try_parse_from(["microvm", "ls", "--prune"]).is_err(),
+            "a prune without a listing has nothing to judge by"
+        );
+        assert!(
+            Cli::try_parse_from(["microvm", "ls", "--watch", "--remote"]).is_err(),
+            "a watch is ledger-only by contract"
+        );
     }
 
     /// An off-table `--memory` is refused by the parser, before any handler.
@@ -2222,7 +2286,8 @@ mod tests {
     ///
     /// The absence half is the point: a `--region` on `history` would imply a remote read,
     /// and the command's whole claim is that it reads what this machine's state directory
-    /// recorded. Same shape as `ls`, which the region-domain test above already relies on.
+    /// recorded. `ls` used to share that shape; since #159 it carries `--region` for its
+    /// `--remote` half, and `history` has no remote half to carry one for.
     #[test]
     fn history_parses_a_vm_id_and_a_state_dir_and_carries_no_region() {
         let parsed =

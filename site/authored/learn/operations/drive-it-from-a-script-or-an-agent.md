@@ -16,7 +16,7 @@ Every command is built to be driven by something that is not a person at a termi
 
 ## 1. One envelope on stdout
 
-`--json` is a global flag, so `microvm --json ls` and `microvm ls --json` are the same invocation. It emits the typed JSON envelope on stdout instead of human output and wins over every other format, including an interactive terminal. Progress always goes to stderr, and `--quiet` suppresses progress but never a warning, so a leaked resource is still reported in quiet mode.
+`--json` is one of the three [global flags](/reference/#3-global-flags), so `microvm --json ls` and `microvm ls --json` are the same invocation. It emits the typed JSON envelope on stdout instead of human output and wins over every other format, including an interactive terminal. Progress always goes to stderr, and `--quiet` suppresses progress but never a warning, so a leaked resource is still reported in quiet mode.
 
 A success envelope carries `status`, `apiVersion`, `type`, and `data`. `type` is the discriminant to branch on first, and each command's `data` keys are published in the manifest as `responseKeys`:
 
@@ -74,7 +74,7 @@ Event kinds are `output` (with `stream`, `offset`, `bytes`, `text`, `lossy`), `g
 
 ## 5. Token-lean output
 
-`--dense` is the other global flag: token-lean output, for a consumer paying per token. It renders tab-separated text, one field per column; a dense failure is the code, then the message, tab-separated, so field one is always the code. `--json` wins over `--dense`, and `--dense --json` together emit the compact one-line JSON document rather than the pretty one. Neither depends on whether stdout is a terminal; without either, a terminal gets a human rendering and a pipe gets plain text.
+`--dense` is the second [global flag](/reference/#3-global-flags): token-lean output, for a consumer paying per token. It renders tab-separated text, one field per column; a dense failure is the code, then the message, tab-separated, so field one is always the code. `--json` wins over `--dense`, and `--dense --json` together emit the compact one-line JSON document rather than the pretty one. Neither depends on whether stdout is a terminal; without either, a terminal gets a human rendering and a pipe gets plain text.
 
 ## 6. Retries and idempotency
 

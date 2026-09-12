@@ -189,10 +189,11 @@ const overviewAnchor = (title) => {
 /**
  * Whether the manifest marks every command as accepting `--json`.
  *
- * The manifest carries no list of command-wide flags. What it carries is `supportsJson` on each
- * command, so that is the one global flag this tier can state. The three flags the CLI reads off raw
- * argv (`--json`, `--dense`, `--quiet`) never appear in any command's `parameters`, so there is nothing
- * to factor out of the per-command tables.
+ * The per-command fact beside the command-wide list: `globalFlags` names the flags that parse on either
+ * side of any subcommand (#131), and `supportsJson` is each command's own word that the first of them
+ * selects an envelope there. Both are stated on the overview, and this is the derived sentence about
+ * the second. None of the global flags appears in any command's `parameters`, which `validateManifest`
+ * refuses, so there is nothing to factor out of the per-command tables.
  *
  * @param {Manifest} manifest
  */
@@ -214,11 +215,12 @@ const parametersSection = (manifest, command) => {
     parameter.choices === null ? "any" : codeList(parameter.choices),
     cell(parameter.help)
   ])
+  const globals = manifest.data.globalFlags
   const json = command.supportsJson
     ? everyCommandSupportsJson(manifest)
-      ? `${code("--json")} is accepted here as on every command, and is left out of the table above for that reason; see ${link("Global flags", overviewAnchor("Global flags"))}.`
-      : `${code("--json")} is accepted here: the manifest marks this command ${code("supportsJson")}.`
-    : `The manifest does not mark this command ${code("supportsJson")}, so ${code("--json")} is not part of its surface.`
+      ? `The ${globals.length} global flags (${codeList(globals.map((flag) => `--${flag.name}`))}) are accepted here as on every command, and are left out of the table above for that reason; see ${link("Global flags", overviewAnchor("Global flags"))}.`
+      : `${code("--json")} is accepted here: the manifest marks this command ${code("supportsJson")}. The ${globals.length} global flags are listed under ${link("Global flags", overviewAnchor("Global flags"))}.`
+    : `The manifest does not mark this command ${code("supportsJson")}, so ${code("--json")} is not part of its surface. The other global flags are listed under ${link("Global flags", overviewAnchor("Global flags"))}.`
   return {
     title: "Parameters",
     body: [
@@ -782,10 +784,20 @@ const overviewPage = (manifest, schema) => {
       titled(
         "Global flags",
         [
+          `The manifest publishes ${data.globalFlags.length} command-wide flags under ${code("globalFlags")}. Each parses on either side of the subcommand, so ${code(`${data.cli} ${data.globalFlags[0]?.name === undefined ? "" : `--${data.globalFlags[0].name} `}ls`)} and ${code(`${data.cli} ls ${data.globalFlags[0]?.name === undefined ? "" : `--${data.globalFlags[0].name}`}`)} are the same invocation, and none appears in any command's own parameter table.`,
+          table(
+            ["Flag", "Type", "Default", "Help"],
+            data.globalFlags.map((flag) => [
+              code(`--${flag.name}`),
+              code(flag.type),
+              flag.default === null ? "none" : code(flag.default),
+              cell(flag.help)
+            ])
+          ),
           withoutJson.length === 0
             ? `The manifest marks each command with ${code("supportsJson")}, and all ${data.commands.length} set it. So ${code("--json")} is accepted by every command, selects the envelope described on ${pageLink(`${TIER}/envelope`, "The envelope")}, and is left out of every per-command parameter table rather than repeated ${data.commands.length} times.`
             : `${supportsJson.length} of the ${data.commands.length} commands set ${code("supportsJson")}; the ones that do not are ${codeList(withoutJson.map((command) => command.name))}. Each command page states which case it is in.`,
-          `The manifest names no other command-wide flag, so a flag a command page does not list is not part of that command's surface as the manifest states it.`
+          `The manifest names no command-wide flag beyond these ${data.globalFlags.length}, so a flag neither this table nor a command page lists is not part of that command's surface as the manifest states it.`
         ].join("\n\n")
       ),
       titled(

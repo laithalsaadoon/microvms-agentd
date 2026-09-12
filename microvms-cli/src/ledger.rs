@@ -194,6 +194,27 @@ impl Ledger {
     }
 }
 
+/// Removes the ledger file for `run_id` under `root` — `ls --remote --prune`'s one write (#159).
+///
+/// The id is checked against the ledger's own grammar (`<epoch>-<pid>`, so ASCII digits,
+/// letters, `-`, `_`) before it becomes a path component. The value comes from a record's
+/// `runId` field rather than from the file name, and a record is a file anyone can edit; a
+/// `runId` of `../names/x` must not turn a prune into a deletion elsewhere in the state
+/// directory.
+pub fn remove(root: &Path, run_id: &str) -> std::io::Result<()> {
+    let legal = !run_id.is_empty()
+        && run_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_');
+    if !legal {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("{run_id:?} is not a ledger run id"),
+        ));
+    }
+    std::fs::remove_file(root.join(format!("{run_id}.json")))
+}
+
 // ── the name registry ────────────────────────────────────────────────────────
 
 /// A VM name's shape: ASCII letters, digits, `-`, `_`, at most 128 bytes, and never the

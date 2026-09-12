@@ -15,6 +15,15 @@
 //! than shipping undescribed. That check is what keeps the table from being the artifact the
 //! generation rule forbids.
 //!
+//! # `globalFlags` is read off the root, never propagated
+//!
+//! The three `global = true` flags (`--json`, `--dense`, `--quiet`) are published once, under
+//! `globalFlags`, in the same parameter shape as a command's own (#131). They are read from the
+//! root command's arguments **without** calling `Command::build()`: building propagates every
+//! global into every subcommand's argument list, and the manifest would then list `--json`
+//! twenty-six times as if each command owned it. `supportsJson` stays on every command for the
+//! consumer that already reads it.
+//!
 //! # `choices` is the CLI-5 witness
 //!
 //! Closed set or null, per parameter. An option whose library counterpart is S1 — the size
@@ -77,11 +86,20 @@ pub fn build() -> Value {
         })
         .collect();
 
+    // See the module docs: the root's own arguments, filtered on the global bit. Never
+    // `.build()` first — that is the call that would put these on every subcommand.
+    let global_flags: Vec<Value> = command
+        .get_arguments()
+        .filter(|arg| arg.is_global_set())
+        .map(parameter)
+        .collect();
+
     json!({
         "apiVersion": API_VERSION,
         "cli": "microvm",
         "version": env!("CARGO_PKG_VERSION"),
         "commands": commands,
+        "globalFlags": global_flags,
         "exitCodes": EXIT_TABLE.iter().map(|row| json!({
             "exit": row.exit.as_u8(),
             "code": row.code,
@@ -233,6 +251,21 @@ pub fn render(manifest: &Value, dense: bool) -> String {
             "  {:<10} {}",
             command["name"].as_str().unwrap_or_default(),
             command["summary"].as_str().unwrap_or_default(),
+        ));
+    }
+    // The human view only: the dense rendering is one line per command, and a test pins
+    // that count, so the globals ride the JSON and this table rather than a dense row.
+    lines.push(String::new());
+    lines.push("global flags:".to_string());
+    for flag in manifest["globalFlags"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+    {
+        lines.push(format!(
+            "  --{:<8} {}",
+            flag["name"].as_str().unwrap_or_default(),
+            flag["help"].as_str().unwrap_or_default(),
         ));
     }
     lines.push(String::new());
@@ -570,6 +603,62 @@ mod tests {
                 .contains("microvm.run"),
             "{dense}"
         );
+    }
+
+    /// **The three global flags are published as `globalFlags`, and appear on no command.**
+    ///
+    /// Issue #131: the Reference tier is generated from this manifest, and until the flags were
+    /// in it the site could state `--json` (from `supportsJson`) and nothing about `--dense` or
+    /// `--quiet`. Read off the same clap tree as `commands`, in struct order, with the same
+    /// `parameter` shape — and asserted absent from every command's `parameters`, because the
+    /// wrong way to generate this is `Cli::command().build()`, which propagates a global into
+    /// every subcommand and would list `--json` twenty-six times over.
+    ///
+    /// **Guard proof.** Remove `global = true` from `quiet` in `cli.rs` and the names
+    /// assertion reads `["json", "dense"]`. Run 2026-09-12; failed exactly there.
+    #[test]
+    fn the_global_flags_are_published_once_and_on_no_command() {
+        let manifest = build();
+        let flags = manifest["globalFlags"]
+            .as_array()
+            .expect("globalFlags is an array");
+        let names: Vec<&str> = flags
+            .iter()
+            .map(|flag| flag["name"].as_str().unwrap_or_default())
+            .collect();
+        assert_eq!(names, ["json", "dense", "quiet"], "struct order, all three");
+        for flag in flags {
+            assert_eq!(flag["type"], "boolean", "{flag}");
+            assert_eq!(flag["choices"], Value::Null, "{flag}");
+            assert_eq!(flag["positional"], false, "{flag}");
+            assert_eq!(flag["required"], false, "{flag}");
+            assert!(
+                flag["help"].as_str().is_some_and(|help| !help.is_empty()),
+                "a global flag with no help is one an agent cannot choose: {flag}"
+            );
+        }
+        for command in manifest["commands"].as_array().expect("an array") {
+            for param in command["parameters"].as_array().expect("an array") {
+                let name = param["name"].as_str().unwrap_or_default();
+                assert!(
+                    !names.contains(&name),
+                    "{} lists the global flag --{name} as its own parameter; globals are \
+                     published once, under `globalFlags`",
+                    command["name"]
+                );
+            }
+        }
+        // `supportsJson` stays per command: a consumer that learned to read it keeps working.
+        for command in manifest["commands"].as_array().expect("an array") {
+            assert_eq!(command["supportsJson"], true);
+        }
+        // The human rendering names them; the dense one does not grow (its line count is
+        // one per command and a test pins it).
+        let human = render(&manifest, false);
+        assert!(human.contains("global flags:"), "{human}");
+        for name in names {
+            assert!(human.contains(&format!("--{name}")), "{human}");
+        }
     }
 
     /// The manifest round-trips as JSON, so it is emittable.

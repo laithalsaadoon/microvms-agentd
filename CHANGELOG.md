@@ -136,6 +136,50 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
   is still running in the guest, and that `microvm kill <exec-id>` or `exec --kill-on-timeout`
   is what stops it.
 
+### Added
+
+- **`microvm ls --remote` reconciles the local ledger against the account (#159).**
+  Through the same control plane every other command uses, it reads
+  `ListMicrovms` and `ListMicrovmImages` to their last page and judges each
+  identifier in a ledger entry's `leaked` list: the entry is `live` when one of them
+  is still listed alive (every MicroVM state but `TERMINATED`, every image state
+  but `DELETING`/`DELETED`, the predicate `scripts/verify-clean.py` uses), `gone`
+  when every one is a MicroVM id or image ARN the listings no longer carry, and
+  `unjudged` when one is something neither listing can see — a service-created
+  `/aws/lambda-microvms/…` log group above all, whose ledger record is the only
+  pointer to it (3 of 72 real records had that shape) — or when the record is from
+  another region or cannot be read. The envelope's new
+  `remote` object carries the region, both listings, the per-entry verdicts with
+  the listed `microvmState`/`imageState`, and `unknownToLedger`: what is alive in
+  the account that no entry names. `--prune` (requires `--remote`) removes the
+  files of `gone` entries and reports them in `pruned`; a live or unjudged record
+  is never removed. `--remote` conflicts with `--watch`, which stays ledger-only.
+  Measured 2026-09-12 05:35 UTC, us-east-1, against a copy of a developer's 72-entry
+  ledger in the shared conformance account: 72 entries, 3 `live` (their images still
+  exist), 69 `gone`; 9 MicroVMs listed, all `TERMINATED`; 61 of 63 listed images
+  unknown to the ledger; `--prune` on the copy removed 69 files and left 3. Four
+  permanent checks in `drive_named_vm`.
+- **The manifest publishes the global flags (#131).** `microvm manifest` gains a
+  `globalFlags` array — `--json`, `--dense`, `--quiet`, in the same parameter
+  shape as a command's own — read off the root command's `global = true`
+  arguments without building the tree, so no command lists them as its own.
+  The docs site's Reference overview renders them as a table under "Global
+  flags", every command page points there, and `validateManifest` refuses a
+  manifest that lists a global flag on a command. `--dense`'s help now states
+  its interaction with `--json`: tab-separated alone, compact one-line JSON with
+  `--json`.
+
+### Changed
+
+- **`microvm ls` says what it is.** Every `microvm.runs` envelope carries
+  `source: "local-ledger"`, `remote` (null unless `--remote` asked), and `pruned`
+  (`[]` unless `--prune` removed something), and the text and TUI header reads
+  `local ledger of <state dir>: what this CLI could not confirm it deleted, not
+  what exists in the account` (#159). The Reference's `ls` entry opens with the
+  same sentence. `ls` now accepts `--region`/`--unlisted-region` for the remote
+  half; the plain form still touches no AWS door, and the behavioral guard
+  asserts both halves.
+
 ## [0.7.0] — 2026-09-11
 
 ### Added

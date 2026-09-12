@@ -33,6 +33,7 @@
 # `microvms-core` needs only `microvms`.
 # `terraform -chdir=…`, the flag the live-suite page quotes.
 # `terraform.tfstate`, named where the live-suite page says what `terraform destroy` leaves behind.
+# `unjudged`, the `ls --remote` verdict for a record neither listing can speak for (a leaked log group).
 # bash's array of per-stage exit codes, quoted where the agent page warns against piping a gate.
 # carries a `flagWords` list that rejects the recurring British forms (`behaviour`, `colour`,
 # cspell splits on case and on `-`/`_`/`.`, so a compound like `runHookPayload` needs no entry and
@@ -94,5 +95,6 @@ subshells
 suspendable
 tfstate
 theagenticguy
+unjudged
 unparseable
 venv

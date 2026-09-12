@@ -6,7 +6,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Live conformance run driving the **Rust** client stack through the `microvm` CLI.
 
-This is the only live suite, and it now expresses **every named check** — 181 of them, with
+This is the only live suite, and it now expresses **every named check** — 185 of them, with
 none recorded SKIP. `conformance/run.py` was the oracle — 56 checks through the Python
 client — and it went away with that client once both suites ran green against real AWS on
 the same commit (Python 56/56, this one 38/38 with 34 recorded SKIP). Those 34 were the
@@ -159,6 +159,18 @@ Live because every one of these is a claim about processes the real daemon spawn
 the real guest and read back out of the real `/proc` — no local guard sees a survivor.
 No `procps-ng` is added to the guest image for this: `microvm ps` through the daemon's
 own `/v1/procs` is the point.
+
+185 rather than 181: `ls --remote` (issue #159) adds four in `drive_named_vm`, against the
+kept named VM and that section's own `--state-dir`. A plain `ls` naming its source as the
+local ledger with `remote` null and the kept run listed; `ls --remote` marking the kept run
+`live` while the account lists its VM (and not naming that VM as unknown to the ledger);
+after the terminate, a record naming only the terminated VM judged `gone` with nothing
+pruned unasked; and `ls --remote --prune` removing exactly the records judged `gone`, by
+file name. Live because the verdict is the service's: only a real `ListMicrovms` can say a
+VM this CLI launched is no longer there, and the fixtures' idea of a listing is what the
+2026-08-28 id-prefix defect passed against. The first live run of the prune check caught
+the check's own premise, not the CLI's: a `run --image` records no image, so the kept run's
+record named only the terminated VM and was `gone` as well.
 
 A hybrid driver, and both lanes are deliberate
 ----------------------------------------------
@@ -2347,7 +2359,7 @@ def drive_named_vm(
     """Named VMs (issue #67): register at launch, address by name, collide, release —
     and adopt across state directories (issue #66).
 
-    Eight checks against a VM this section launches and terminates itself, from the image
+    Twelve checks against a VM this section launches and terminates itself, from the image
     the suite already built (`run --image`, no second build). Its own VM rather than the
     suite's because registration happens only at launch — the suite's VM was launched
     before any name existed to give it.
@@ -2392,6 +2404,46 @@ def drive_named_vm(
             "run --keep --vm-name registered the name it reported",
             named.data.get("vmName"),
             vm_name,
+        )
+
+        # `ls` (issue #159): the plain form says what it is — a local ledger — and asks
+        # the account nothing; `--remote` asks, through the same control plane, and marks
+        # the kept run `live` because the service lists its VM. Both against this
+        # section's own state directory, which holds exactly the kept run's record.
+        plain = cli.call("ls", "--state-dir", str(state_dir))
+        results.check(
+            "plain ls names its source as the local ledger, remote null, and lists the kept run",
+            plain.data.get("source") == "local-ledger"
+            and plain.data.get("remote") is None
+            and plain.data.get("pruned") == []
+            and any(
+                run.get("microvmId") == microvm_id for run in plain.data.get("runs", [])
+            ),
+            f"source={plain.data.get('source')!r} remote={plain.data.get('remote')!r} "
+            f"runs={[run.get('microvmId') for run in plain.data.get('runs', [])]}",
+        )
+        listed = cli.call(
+            "ls", "--remote", "--state-dir", str(state_dir), "--region", cli.region
+        )
+        remote = listed.data.get("remote") or {}
+        mine = [
+            entry
+            for entry in remote.get("entries", [])
+            if entry.get("microvmId") == microvm_id
+        ]
+        results.check(
+            "ls --remote marks the kept run live while the account lists its VM",
+            listed.data.get("source") == "local-ledger"
+            and remote.get("region") == cli.region
+            and len(mine) == 1
+            and mine[0].get("status") == "live"
+            and mine[0].get("microvmState") in {"PENDING", "RUNNING"}
+            and microvm_id in {vm.get("microvmId") for vm in remote.get("microvms", [])}
+            and microvm_id
+            not in (remote.get("unknownToLedger") or {}).get("microvms", [])
+            and listed.data.get("pruned") == [],
+            f"region={remote.get('region')!r} entries={mine} "
+            f"pruned={listed.data.get('pruned')!r}",
         )
 
         first = cli.call(
@@ -2525,6 +2577,66 @@ def drive_named_vm(
             "an accepted terminate released the name for reuse",
             not (state_dir / "names" / f"{vm_name}.json").exists(),
             f"registry entry survives: {sorted(p.name for p in (state_dir / 'names').glob('*.json')) if (state_dir / 'names').exists() else []}",
+        )
+
+        # `ls --remote` after the terminate (issue #159). A record naming only the VM is
+        # what a process that died after its terminate was accepted leaves behind, and
+        # the listing — not the ledger — is what says it is gone. Written by hand so the
+        # check owns a record whose shape it knows; the kept run's own record is judged
+        # beside it, whatever a sibling change made terminate do with it. (First live
+        # run, 2026-09-12: a `run --image` records no image, so that record named only
+        # the terminated VM and was rightly `gone` too — the prune check below asserts
+        # against the verdicts, not against a guess about which records exist.)
+        gone_run_id = f"conformance-gone-{secrets.token_hex(4)}"
+        (state_dir / f"{gone_run_id}.json").write_text(
+            json.dumps(
+                {
+                    "runId": gone_run_id,
+                    "region": cli.region,
+                    "imageIdentifier": None,
+                    "imageName": None,
+                    "microvmId": microvm_id,
+                    "leaked": [microvm_id],
+                }
+            )
+        )
+        before = sorted(p.name for p in state_dir.glob("*.json"))
+        judged = cli.call(
+            "ls", "--remote", "--state-dir", str(state_dir), "--region", cli.region
+        )
+        verdicts = (judged.data.get("remote") or {}).get("entries", [])
+        entry = next((e for e in verdicts if e.get("runId") == gone_run_id), None)
+        results.check(
+            "ls --remote marks a record naming only the terminated VM gone and prunes nothing unasked",
+            entry is not None
+            and entry.get("status") == "gone"
+            and entry.get("microvmState") in (None, "TERMINATED")
+            and judged.data.get("pruned") == []
+            and sorted(p.name for p in state_dir.glob("*.json")) == before,
+            f"entry={entry} pruned={judged.data.get('pruned')!r}",
+        )
+        pruned = cli.call(
+            "ls",
+            "--remote",
+            "--prune",
+            "--state-dir",
+            str(state_dir),
+            "--region",
+            cli.region,
+        )
+        after = sorted(p.name for p in state_dir.glob("*.json"))
+        # Exactly the records the listing judged `gone` — the hand-written one among them —
+        # and nothing else: a `live` or `unjudged` record must still be on disk.
+        expected_gone = sorted(
+            str(e.get("runId")) for e in verdicts if e.get("status") == "gone"
+        )
+        results.check(
+            "ls --remote --prune removed exactly the records judged gone",
+            gone_run_id in expected_gone
+            and sorted(pruned.data.get("pruned") or []) == expected_gone
+            and after == sorted(set(before) - {f"{r}.json" for r in expected_gone}),
+            f"pruned={pruned.data.get('pruned')!r} gone={expected_gone} "
+            f"before={before} after={after}",
         )
 
 
