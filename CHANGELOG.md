@@ -6,6 +6,54 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
 
 ## Unreleased
 
+### Fixed
+
+- **`run` prints `agentToken` only for a kept VM (#161).** A run that tears its VM
+  down emits the key as `null`: the token had no consumer, and stdout outlives the
+  process, so a run that failed between printing and terminating left a live
+  credential in whatever captured it. The key stays so a consumer never guards
+  against a missing key; `--keep` still carries the value, since `exec` needs it.
+  Pinned by a `RunOutcome::to_data` test; the live suite asserts both shapes (a
+  kept launch carries it, a sync-mode run nulls it).
+- **`run --image <arn>` reports the launched image's name.** The envelope's
+  `imageName` for a launch from an existing image was the per-invocation default a
+  build would have used (`microvm-cli-<epoch>`), measured 2026-09-12 while
+  re-measuring #154/#155. It is now the ARN's last colon segment, which is the
+  image's name and the stem of its build log group. A kept launch from an
+  existing image still records no image of its own, so `terminate --delete-image`
+  on it stays explicit: the run did not build that image.
+- **`terminate --delete-image` reads the image off the run record (#160).** The
+  clap `requires` on `--image-identifier` is gone. `run --keep` leaves a record
+  naming the VM, the image, and the image's name, so the handler resolves both
+  from it — the build log group is named without `--image-name` too — and keeps
+  `ERR_INVALID_ARG`, before any call, for the case where neither a flag nor a
+  record names an image. The envelope's `imageIdentifier` reports what was
+  resolved. After the teardown the record is narrowed to what is still
+  outstanding (a kept image, a failed delete, the log group this CLI can only
+  name) and removed when nothing is, which is the same convention a `run`
+  teardown follows and the reason `ls` no longer keeps reporting a kept VM after
+  the command that removed it. The live suite's teardown now passes neither flag
+  and asserts the derived identifier and group.
+- **`scripts/verify-clean.py` sweeps the whole `/aws/lambda-microvms/` namespace
+  and classifies each group (#158).** Three prefixes missed a group left by an
+  image built with a custom `--name`, and the script called the account clean —
+  the false assurance its own docstring warns about. Now every group under the
+  service's namespace is classified: ours by prefix, ours because the local run
+  ledger names its image or lists the group under `leaked`, or *unclassified*,
+  which is listed and counted in the verdict line and never deleted — in the
+  shared account this project measures in, that list is other projects' groups
+  (about eighty on 2026-09-12), so by the script's own rule they are somebody
+  else's; `--strict` fails on them for an account that exists only for the
+  suite. Images get the same ledger oracle (name or ARN). `--delete` prunes what
+  it removed from the ledger records so `ls` stops reporting it. `--self-test`
+  proves the classification and verdict rules offline and `--state-dir` points at
+  another ledger. The live suite runs the script before deleting its own group
+  and asserts the group is a LEAK and the configured `--log-group` is
+  UNCLASSIFIED (158 checks, up from 152). Measured 2026-09-12, us-east-1: an
+  image built as `seam-probe-<epoch>` and torn down with `terminate
+  --delete-image` left `/aws/lambda-microvms/seam-probe-<epoch>`, which the
+  script named as a leak through the run record.
+
 ## [0.7.0] — 2026-09-11
 
 ### Added

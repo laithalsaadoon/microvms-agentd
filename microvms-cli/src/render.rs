@@ -231,11 +231,24 @@ impl RunOutcome {
         data.insert("imageName".into(), json!(self.image_name));
         data.insert("microvmId".into(), json!(self.microvm_id));
         data.insert("endpoint".into(), json!(self.endpoint));
-        // The agent token is in the payload deliberately: `run --keep` is followed by
-        // `microvm exec --agent-token`, and a caller who cannot read it cannot use the VM
-        // they are now paying for. It is never in a progress line, never in a `Debug`, and
-        // core keeps it out of both too.
-        data.insert("agentToken".into(), json!(self.agent_token));
+        // The agent token is in the payload for `--keep` deliberately: `run --keep` is
+        // followed by `microvm exec --agent-token`, and a caller who cannot read it cannot
+        // use the VM they are now paying for. It is never in a progress line, never in a
+        // `Debug`, and core keeps it out of both too.
+        //
+        // Without `--keep` the key stays and the value is null (issue #161). The VM this
+        // command just tore down has no consumer for its token, and stdout is captured by
+        // logs and transcripts that outlive the process — a run that failed between
+        // printing and terminating would leave a live credential in one. The key itself is
+        // kept so a consumer never guards against a missing key, the envelope's rule.
+        data.insert(
+            "agentToken".into(),
+            if self.kept {
+                json!(self.agent_token)
+            } else {
+                Value::Null
+            },
+        );
         data.insert("execExitCode".into(), json!(self.exec_exit_code));
         data.insert("stdout".into(), json!(self.stdout));
         data.insert("stderr".into(), json!(self.stderr));
@@ -903,6 +916,36 @@ mod tests {
         assert!(rendered.contains("microvm exec"), "{rendered}");
         assert!(rendered.contains("--agent-token deadbeef"), "{rendered}");
         assert!(rendered.contains("microvm terminate mvm-1"), "{rendered}");
+    }
+
+    /// **Issue #161.** A run that tears its VM down prints no token: the key stays (a consumer
+    /// never guards against a missing key) and its value is null, because the credential
+    /// would name a VM that no longer exists by the time anyone reads the log it landed in.
+    /// `--keep` is the one case with a consumer for it, so that path still carries it.
+    #[test]
+    fn a_run_that_was_not_kept_nulls_the_agent_token_in_its_envelope() {
+        let minted = RunOutcome {
+            agent_token: Some("deadbeef".into()),
+            kept: false,
+            ..RunOutcome::default()
+        };
+        let data = minted.to_data();
+        assert!(data.contains_key("agentToken"), "the key is always present");
+        assert_eq!(
+            data["agentToken"],
+            Value::Null,
+            "a torn-down VM's token must not reach stdout: {data:?}"
+        );
+
+        let kept = RunOutcome {
+            kept: true,
+            ..minted
+        };
+        assert_eq!(
+            kept.to_data()["agentToken"],
+            "deadbeef",
+            "--keep is the path with a consumer for the token"
+        );
     }
 
     /// An outcome with nothing to say says `done` rather than printing an empty line.

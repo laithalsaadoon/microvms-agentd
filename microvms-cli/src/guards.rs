@@ -1323,6 +1323,42 @@ async fn an_arn_image_identifier_launches_with_no_listing_call() {
     );
 }
 
+/// **A launch from an existing image reports that image's name, not the invocation's
+/// default.**
+///
+/// Measured 2026-09-12 during the platform re-measurement for issues #154/#155: `run --image
+/// <arn>` envelopes said `imageName: microvm-cli-<epoch>`, the per-invocation name a build
+/// would have used, for an image named something else entirely. The name is the ARN's last
+/// colon segment (docs/PLATFORM.md, "The image ARN separator is a colon"), so the envelope
+/// can say the true one with zero calls. It matters beyond cosmetics: the build log group is
+/// `/aws/lambda-microvms/<image-name>`, and a wrong name here is a wrong group everywhere
+/// downstream reads it.
+///
+/// Asserted on the failure envelope of a scripted `RunMicrovm` refusal, which carries the
+/// partial outcome — the same shape the interrupt guards read.
+#[tokio::test]
+async fn a_launch_from_an_existing_image_reports_that_images_name() {
+    let dir = TempDir::new("existing-image-name");
+    let transport = Arc::new(ScriptedTransport::new());
+    transport.answer("RunMicrovm", 400, r#"{"message": "scripted stop"}"#);
+    let seam = ScriptedSeam {
+        transport: Arc::clone(&transport),
+        clock: Arc::new(YieldingClock::default()),
+    };
+    let arn = "arn:aws:lambda:us-east-1:123456789012:microvm-image:existing-one";
+    // `run_args_for_image` sets `--name img`, the name a *build* would use; the launch must
+    // not report it for an image it did not build.
+    let command = Command::Run(run_args_for_image(arn, dir.0.clone()));
+    let (result, _) = dispatch_with(&seam, &command, full_infra()).await;
+    let failure = result.expect_err("the scripted RunMicrovm failure ends the run");
+    let envelope = crate::envelope::error(&failure);
+    assert_eq!(
+        envelope["data"]["imageName"], "existing-one",
+        "the envelope names the image that was launched: {envelope}"
+    );
+    assert_eq!(envelope["data"]["imageIdentifier"], arn);
+}
+
 /// **`run --launch-env` reaches the `runHookPayload` the daemon parses.**
 ///
 /// Asserted on the wire body rather than on `RunArgs`, because the flag existing and the
@@ -4657,6 +4693,178 @@ async fn a_terminate_appends_a_terminated_event_that_survives_the_command() {
     );
     assert_eq!(read[1]["terminateAccepted"], false);
     assert_eq!(read[1]["undeleted"], serde_json::json!(["mvm-1"]));
+}
+
+/// **Issue #160: `terminate --delete-image` reads the image off the kept run's ledger record
+/// when `--image-identifier` is not given, and retires that record once the teardown
+/// succeeds.**
+///
+/// `run --keep` leaves a record under the state directory naming the VM, the image, and the
+/// image's name (`Ledger::mark_outstanding`), so demanding the identifier back from the
+/// caller was asking for information the CLI already held. The derived name also lets the
+/// handler name the build log group without `--image-name`, which the explicit path could
+/// only do when the caller remembered both flags.
+///
+/// The record is retired on success because it recorded a kept VM as outstanding, and after
+/// this command nothing is: leaving it would make `ls` report a leak that this very command
+/// removed, which is the stale-ledger shape issue #159 measured at 68 entries.
+#[tokio::test]
+async fn a_terminate_with_delete_image_derives_the_image_from_the_kept_runs_ledger() {
+    let dir = TempDir::new("terminate-derives-image");
+    // What `run --keep` writes: outstanding, with both identifiers and the image's name.
+    let mut ledger = crate::ledger::Ledger::new("us-east-1", &dir.0);
+    ledger.record_image(
+        "arn:aws:lambda:us-east-1:123456789012:microvm-image:img",
+        "img",
+    );
+    ledger.record_microvm("mvm-1");
+    ledger.mark_outstanding();
+    assert_eq!(
+        crate::ledger::read_all(&dir.0).len(),
+        1,
+        "the staged record exists"
+    );
+
+    let transport = Arc::new(ScriptedTransport::new());
+    transport
+        .answer("TerminateMicrovm", 200, "{}")
+        // Core's delete lists the versions first (every page), then deletes the image.
+        .answer(
+            "ListMicrovmImageVersions",
+            200,
+            r#"{"items": [{
+                 "baseImageArn": "arn:aws:lambda:us-east-1:aws:microvm-image:al2023-1",
+                 "buildRoleArn": "arn:aws:iam::123456789012:role/build",
+                 "codeArtifact": {"uri": "s3://bucket/img.zip"},
+                 "imageArn": "arn:aws:lambda:us-east-1:123456789012:microvm-image:img",
+                 "imageVersion": "1", "state": "SUCCESSFUL", "status": "ACTIVE",
+                 "createdAt": 1754524800}]}"#,
+        )
+        .answer(
+            "DeleteMicrovmImage",
+            200,
+            r#"{"imageIdentifier": "arn:aws:lambda:us-east-1:123456789012:microvm-image:img",
+             "state": "DELETING"}"#,
+        );
+    let seam = ScriptedSeam {
+        transport: Arc::clone(&transport),
+        clock: Arc::new(YieldingClock::default()),
+    };
+    let command = Command::Terminate(TerminateArgs {
+        microvm_id: "mvm-1".into(),
+        image_identifier: None,
+        image_name: None,
+        delete_image: true,
+        wait: false,
+        state_dir: Some(dir.0.clone()),
+        region: region_flags(),
+    });
+    let (result, _) = dispatch_with(&seam, &command, full_infra()).await;
+    let rendered = result.expect("the derived identifier makes the teardown proceed");
+    let envelope = crate::envelope::ok(rendered.kind, rendered.data.clone());
+    assert_eq!(
+        transport.called("DeleteMicrovmImage"),
+        1,
+        "the derived image must reach the wire: {:?}",
+        transport.calls()
+    );
+    assert_eq!(
+        envelope["data"]["imageIdentifier"],
+        "arn:aws:lambda:us-east-1:123456789012:microvm-image:img",
+        "the envelope reports the identifier it resolved, not the flag it was not given"
+    );
+    assert_eq!(
+        envelope["data"]["undeletedLogGroups"],
+        serde_json::json!(["/aws/lambda-microvms/img"]),
+        "the derived name also names the build log group"
+    );
+    assert_eq!(envelope["data"]["leaked"], serde_json::json!([]));
+    // The record is narrowed, not dropped: the VM and image are gone, and the one thing this
+    // CLI could only name — the build log group — is what it now lists, exactly as a `run`
+    // teardown's record does. `scripts/verify-clean.py` reads that name back.
+    let after = crate::ledger::read_all(&dir.0);
+    assert_eq!(
+        after.len(),
+        1,
+        "the record survives while a group is named: {after:?}"
+    );
+    assert_eq!(
+        after[0]["leaked"],
+        serde_json::json!(["/aws/lambda-microvms/img"]),
+        "VM and image leave the outstanding list; the named group stays: {after:?}"
+    );
+
+    // And a terminate that deletes nothing but the VM leaves the image outstanding, because
+    // it still bills: the record narrows to the image alone.
+    let dir = TempDir::new("terminate-keeps-image");
+    let mut ledger = crate::ledger::Ledger::new("us-east-1", &dir.0);
+    ledger.record_image(
+        "arn:aws:lambda:us-east-1:123456789012:microvm-image:img",
+        "img",
+    );
+    ledger.record_microvm("mvm-2");
+    ledger.mark_outstanding();
+    let transport = Arc::new(ScriptedTransport::new());
+    transport.answer("TerminateMicrovm", 200, "{}");
+    let seam = ScriptedSeam {
+        transport: Arc::clone(&transport),
+        clock: Arc::new(YieldingClock::default()),
+    };
+    let command = Command::Terminate(TerminateArgs {
+        microvm_id: "mvm-2".into(),
+        image_identifier: None,
+        image_name: None,
+        delete_image: false,
+        wait: false,
+        state_dir: Some(dir.0.clone()),
+        region: region_flags(),
+    });
+    let (result, _) = dispatch_with(&seam, &command, full_infra()).await;
+    result.expect("a plain terminate succeeds");
+    let after = crate::ledger::read_all(&dir.0);
+    assert_eq!(
+        after[0]["leaked"],
+        serde_json::json!(["arn:aws:lambda:us-east-1:123456789012:microvm-image:img"]),
+        "the image the caller kept is still outstanding: {after:?}"
+    );
+}
+
+/// **Issue #160, the refusal half: with no record naming an image, `--delete-image` alone is
+/// still `ERR_INVALID_ARG`, before any AWS call.**
+///
+/// Moved here from a clap `requires` so the state directory decides. The row is unchanged —
+/// the request is refused locally — and so is the zero-call property: a terminate that
+/// cannot name what it would delete must not terminate first and ask second.
+#[tokio::test]
+async fn a_terminate_with_delete_image_and_no_record_is_refused_before_any_call() {
+    let dir = TempDir::new("terminate-no-record");
+    let transport = Arc::new(ScriptedTransport::new());
+    let seam = ScriptedSeam {
+        transport: Arc::clone(&transport),
+        clock: Arc::new(YieldingClock::default()),
+    };
+    let command = Command::Terminate(TerminateArgs {
+        microvm_id: "mvm-unknown".into(),
+        image_identifier: None,
+        image_name: None,
+        delete_image: true,
+        wait: false,
+        state_dir: Some(dir.0.clone()),
+        region: region_flags(),
+    });
+    let (result, _) = dispatch_with(&seam, &command, full_infra()).await;
+    let failure = result.expect_err("no record, no identifier: refused");
+    assert_eq!(failure.exit, Exit::InvalidArg, "{}", failure.message);
+    assert!(
+        failure.message.contains("--image-identifier"),
+        "the remedy is the flag: {}",
+        failure.message
+    );
+    assert!(
+        transport.calls().is_empty(),
+        "refused locally means zero calls: {:?}",
+        transport.calls()
+    );
 }
 
 /// **`exec` appends an `exec` event with the daemon's own report, and `--detach` appends one

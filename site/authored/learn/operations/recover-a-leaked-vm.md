@@ -42,7 +42,7 @@ microvm terminate <microvm-id> --wait
 microvm terminate <microvm-id> --delete-image --image-identifier <image-arn> --image-name <image-name>
 ```
 
-`terminate` takes the MicroVM id as its positional argument, or a registered name, which is resolved locally. `--wait` waits for `TERMINATED` rather than returning as soon as the call is accepted. `--delete-image` also deletes the image named by `--image-identifier`, and `--image-name` lets the CLI name its build log group, `/aws/lambda-microvms/<image-name>`, which the service created and Terraform never owns. The teardown envelope carries `leaked` and `undeletedLogGroups`, so a partial success is still machine readable.
+`terminate` takes the MicroVM id as its positional argument, or a registered name, which is resolved locally. `--wait` waits for `TERMINATED` rather than returning as soon as the call is accepted. `--delete-image` also deletes the image: for a VM this state directory launched with `run --keep`, the run record already names the image and its name, so `--image-identifier` and `--image-name` are overrides; for a VM launched elsewhere, pass them, and the CLI names the build log group, `/aws/lambda-microvms/<image-name>`, which the service created and Terraform never owns. The teardown envelope carries `leaked` and `undeletedLogGroups`, so a partial success is still machine readable.
 
 An image refuses deletion while its VM is still terminating, so one pass is sometimes not enough. Deleting the image early also saves nothing, because its snapshot has a one-week minimum retention; a leaked image is a small bill and a leaked running VM is the one to hurry for.
 

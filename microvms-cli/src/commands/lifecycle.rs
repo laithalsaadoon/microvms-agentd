@@ -726,6 +726,9 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
         if let Some(image) = &outcome.image_identifier {
             failure = failure.with_data("imageIdentifier", json!(image));
         }
+        if let Some(name) = &outcome.image_name {
+            failure = failure.with_data("imageName", json!(name));
+        }
         if !teardown.undeleted.is_empty() {
             failure = failure.with_data("undeleted", json!(teardown.undeleted));
         }
@@ -942,6 +945,14 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
             }
             ctx.out
                 .progress(&format!("launching from the existing image {resolved}"));
+            // The launched image's own identity, so the envelope does not report the
+            // per-invocation default a build would have used (measured 2026-09-12: a launch
+            // from `--image <arn>` said `imageName: microvm-cli-<epoch>`). The name is the
+            // ARN's last colon segment (docs/PLATFORM.md, "The image ARN separator is a
+            // colon"). Not recorded on the ledger: this run did not build the image, so a
+            // kept VM launched from it must not list the image as its own to tear down.
+            outcome.image_identifier = Some(resolved.clone());
+            outcome.image_name = Some(image_name_of(&resolved));
             resolved
         }
         None => {
@@ -2000,6 +2011,46 @@ pub async fn terminate<O: std::io::Write, E: std::io::Write>(
     let region = args.region.resolve(ctx.env)?;
     let microvm_id =
         crate::commands::resolve_vm_identifier(ctx, &args.microvm_id, args.state_dir.clone())?;
+    let ledger_root = state_dir(args.state_dir.clone(), ctx.env);
+
+    // The kept run's own record, when this state directory launched the VM. It names the
+    // image and the image's name, which is what lets `--delete-image` stand alone (issue
+    // #160), and it is what gets retired below once nothing it recorded is outstanding.
+    let mut record = crate::ledger::Ledger::open_for_vm(&ledger_root, &microvm_id);
+    let image_identifier: Option<String> = args.image_identifier.clone().or_else(|| {
+        record
+            .as_ref()
+            .and_then(|r| r.record.image_identifier.clone())
+    });
+    let image_name: Option<String> = args
+        .image_name
+        .clone()
+        .or_else(|| record.as_ref().and_then(|r| r.record.image_name.clone()));
+    // Refused before any call: a terminate that cannot name what it would delete must not
+    // terminate first and ask second. Same row the clap `requires` used to produce.
+    if args.delete_image && image_identifier.is_none() {
+        return Err(crate::exit::CliError::new(
+            Exit::InvalidArg,
+            format!(
+                "--delete-image needs an image, and no run record in {} names one for {}. \
+                 Pass --image-identifier <ARN> (and --image-name <NAME> to name its build log \
+                 group), or terminate without --delete-image.",
+                ledger_root.display(),
+                microvm_id
+            ),
+        )
+        .suggest("`microvm ls` lists this state directory's records and the images they name")
+        .suggest(
+            "a VM kept by `run --keep` from this state directory carries its image in the \
+             record, so `--delete-image` alone works for it",
+        ));
+    }
+    if args.image_identifier.is_none()
+        && let Some(identifier) = &image_identifier
+    {
+        ctx.out
+            .progress(&format!("image {identifier} read from the run record"));
+    }
     let plane = ctx.seam.control_plane(region).await?;
 
     ctx.out.progress(&format!("terminating {}", microvm_id));
@@ -2037,10 +2088,9 @@ pub async fn terminate<O: std::io::Write, E: std::io::Write>(
     // 2. The image, retrying — an image in CREATING refuses deletion and a VM still
     //    terminating holds a reference to it.
     if args.delete_image {
-        let identifier = args
-            .image_identifier
+        let identifier = image_identifier
             .as_deref()
-            .expect("clap's `requires` guarantees this");
+            .expect("the refusal above guarantees this");
         ctx.out.progress(&format!("deleting image {identifier}"));
         let deleted = plane
             .delete_image(
@@ -2062,7 +2112,7 @@ pub async fn terminate<O: std::io::Write, E: std::io::Write>(
         //    core's dependency set, so a clean-looking teardown over an accumulating group is
         //    the alternative — which is how six of them were found. Reported as a named leak,
         //    not an error.
-        if let Some(name) = &args.image_name {
+        if let Some(name) = &image_name {
             let group = format!(
                 "{}/{name}",
                 microvms_core::control::image::BUILD_LOG_GROUP_PREFIX
@@ -2076,11 +2126,34 @@ pub async fn terminate<O: std::io::Write, E: std::io::Write>(
             ));
         } else {
             ctx.out.warn(
-                "--image-name was not given, so this image's build log group could not even be \
-                 named. The group is /aws/lambda-microvms/<image-name> and the service created \
-                 it, which means nothing else will ever remove it.",
+                "--image-name was not given and no run record names the image, so its build \
+                 log group could not even be named. The group is \
+                 /aws/lambda-microvms/<image-name> and the service created it, which means \
+                 nothing else will ever remove it.",
             );
         }
+    }
+
+    // The kept run's record, narrowed to what this teardown left behind and removed when
+    // that is nothing. Without this a kept VM's record outlives the VM forever, and `microvm
+    // ls` keeps reporting a VM this command removed (issue #159 measured 68 such entries).
+    // An image the caller did not ask to delete stays outstanding, because it still bills,
+    // and a build log group this CLI could only name stays too — the same convention the
+    // `run` path follows, where core's teardown report lists the group under `undeleted`.
+    // `scripts/verify-clean.py` reads those names back as its oracle for custom-named images.
+    if let Some(record) = record.as_mut() {
+        let mut still: Vec<String> = Vec::new();
+        if leaked.contains(&microvm_id) {
+            still.push(microvm_id.clone());
+        }
+        if let Some(image) = &record.record.image_identifier
+            && (!args.delete_image || leaked.contains(image))
+        {
+            still.push(image.clone());
+        }
+        still.extend(log_groups.iter().cloned());
+        record.mark_deleted(&still);
+        record.clear();
     }
 
     // The teardown verdict, in the TeardownReport's own terms: whether the terminate call
@@ -2110,7 +2183,9 @@ pub async fn terminate<O: std::io::Write, E: std::io::Write>(
 
     let mut data = Map::new();
     data.insert("microvmId".into(), json!(microvm_id));
-    data.insert("imageIdentifier".into(), json!(args.image_identifier));
+    // The identifier that was resolved, flag or record, so a caller who passed neither reads
+    // what was deleted rather than the null they did not type.
+    data.insert("imageIdentifier".into(), json!(image_identifier));
     data.insert("leaked".into(), json!(leaked));
     // Separate from `leaked` because they are different claims: `leaked` is "a delete was
     // attempted and failed", and this is "no client here can delete it at all". Collapsing
@@ -2166,6 +2241,19 @@ fn name_record_for_kept(
         identity_host_seed: outcome.identity_host_seed.clone(),
         identity_vm_public_key: outcome.identity_vm_public_key.clone(),
     })
+}
+
+/// An image's name from its ARN: the last colon segment.
+///
+/// `arn:aws:lambda:<region>:<account>:microvm-image:<name>`, and the separator before the
+/// name is a colon rather than a slash (docs/PLATFORM.md, "The image ARN separator is a
+/// colon, and the slash form fails"). A bare name has no colon and is returned whole.
+fn image_name_of(identifier: &str) -> String {
+    identifier
+        .rsplit(':')
+        .next()
+        .unwrap_or(identifier)
+        .to_string()
 }
 
 /// A lifecycle wait with the caller's deadline and core's poll interval.
