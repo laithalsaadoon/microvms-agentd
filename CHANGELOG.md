@@ -6,6 +6,8 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
 
 ## Unreleased
 
+## [0.8.0] — 2026-09-12
+
 ### Fixed
 
 - **`run` prints `agentToken` only for a kept VM (#161).** A run that tears its VM
