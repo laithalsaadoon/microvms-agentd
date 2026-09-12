@@ -6,7 +6,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Live conformance run driving the **Rust** client stack through the `microvm` CLI.
 
-This is the only live suite, and it now expresses **every named check** — 159 of them, with
+This is the only live suite, and it now expresses **every named check** — 165 of them, with
 none recorded SKIP. `conformance/run.py` was the oracle — 56 checks through the Python
 client — and it went away with that client once both suites ran green against real AWS on
 the same commit (Python 56/56, this one 38/38 with 34 recorded SKIP). Those 34 were the
@@ -160,6 +160,19 @@ instead of vanishing. A seventh writes a one-record state directory whose `leake
 that configured group and runs the script against it with `--state-dir`, which turns the
 UNCLASSIFIED line into an attributed LEAK: the ledger rule proved on the real account, on a
 name no prefix matches.
+
+165 rather than 159: `drive_platform_posture` adds six for issues #154 and #155, on the
+suite's own VM, which is launched without `--egress`. A `curl` to `example.com` answering
+200 from that VM (the platform gives egress without a connector, measured 2026-09-11 and
+2026-09-12); the IMDSv2 token `PUT` answering 200 with a non-empty token; the
+`iam/security-credentials/` listing naming `execution_role`; the credential document served
+with a 200 and a body over 500 bytes (status and size only — the body is a live secret and
+is never read into this process); the same handshake answering 200 for a `--user 1000`
+exec; and the execution role itself, read back from IAM, granting only `logs:` actions with
+no managed policy attached. The first two are pinned to the measured posture on purpose
+and go red the day the platform starts honouring the omission, which is the signal to
+re-measure and append to `docs/PLATFORM.md`. Live because nothing local has an MMDS or a
+network connector; the section runs at release with the rest of the suite.
 
 A hybrid driver, and both lanes are deliberate
 ----------------------------------------------
@@ -1310,6 +1323,192 @@ def drive_health(cli: Cli, launched: Envelope, results: Results) -> None:
         f"present: {build_hooks!r}"
         if build_hooks
         else "ABSENT — the snapshot did not carry them; a finding, not a failure",
+    )
+
+
+# ── platform posture: egress without a connector, MMDS, the execution role ─────
+
+MMDS = "http://169.254.169.254"
+#: `curl -w '%{http_code}'` prints this when no connection was made at all. A guest that
+#: the platform had sealed would answer it, or a `curl=<exit>` marker, for every host.
+NO_CONNECTION = "000"
+#: The credential document measured 2026-09-11 and 2026-09-12 was 1164 bytes: `Code`,
+#: `LastUpdated`, `Type`, `AccessKeyId`, `SecretAccessKey`, a ~950-byte `Token`,
+#: `Expiration`. A body under this floor is not a credential document, whatever its status.
+CREDENTIAL_DOCUMENT_FLOOR_BYTES = 500
+#: The one API family the conformance execution role may grant (`conformance/infra/main.tf`,
+#: `WriteRuntimeLogs`). The guest holds this role through MMDS, so this prefix is the whole
+#: blast radius of anything the suite runs in a VM.
+EXECUTION_ROLE_ACTION_PREFIX = "logs:"
+
+
+def _guest_curl(cli: Cli, attach: list[str], script: str, *exec_flags: str) -> str:
+    """One shell line in the guest built around `curl`, returning its stdout stripped.
+
+    Every caller writes `-o /dev/null` and `-w` with a status or a size, never a body:
+    the credential path serves a live secret, and this suite's report is printed.
+    """
+    got = cli.call("exec", script, *attach, "--timeout", "60", *exec_flags)
+    return (got.data.get("stdout") or "").strip()
+
+
+def _status(url: str, *curl_flags: str) -> str:
+    flags = " ".join(curl_flags)
+    return (
+        f"curl -s -o /dev/null -w '%{{http_code}}' --max-time 10 {flags} {url} "
+        f"|| echo curl=$?"
+    )
+
+
+#: The IMDSv2 handshake, as one shell line: the PUT's status and the token's LENGTH,
+#: then the token is used for `$1` and discarded. The token itself is never printed.
+MMDS_HANDSHAKE = (
+    "code=$(curl -s -o /tmp/.mmds -w '%{http_code}' --max-time 5 -X PUT "
+    f"{MMDS}/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' "
+    "|| echo curl=$?); T=$(cat /tmp/.mmds 2>/dev/null); rm -f /tmp/.mmds; "
+    'echo "$code ${#T}"; '
+)
+
+
+def execution_role_actions(iam: Any, role_arn: str) -> tuple[list[str], list[str]]:
+    """Every grant the role's inline policies allow, plus any attached managed policy ARNs.
+
+    Both lists, because a managed policy attached beside the inline one is exactly how a
+    role's grant widens without its inline document changing. `Action` is normalised to a
+    list: IAM accepts a bare string and boto3 hands it back unchanged. An `Allow` statement
+    carrying `NotAction` grants everything *except* what it names, so each of those is
+    returned as `NotAction:<name>` — never under the `logs:` prefix, so the caller's
+    off-prefix test goes red on it. A reader that collected `Action` alone reported such a
+    role as its `logs:` actions and stayed green.
+    """
+    role_name = role_arn.rsplit("/", 1)[-1]
+    actions: list[str] = []
+    for policy_name in iam.list_role_policies(RoleName=role_name)["PolicyNames"]:
+        document = iam.get_role_policy(RoleName=role_name, PolicyName=policy_name)[
+            "PolicyDocument"
+        ]
+        statements = document.get("Statement", [])
+        if isinstance(statements, dict):
+            statements = [statements]
+        for statement in statements:
+            if statement.get("Effect") != "Allow":
+                continue
+            action = statement.get("Action", [])
+            actions.extend([action] if isinstance(action, str) else list(action))
+            not_action = statement.get("NotAction", [])
+            actions.extend(
+                f"NotAction:{name}"
+                for name in (
+                    [not_action] if isinstance(not_action, str) else not_action
+                )
+            )
+    attached = [
+        policy["PolicyArn"]
+        for policy in iam.list_attached_role_policies(RoleName=role_name)[
+            "AttachedPolicies"
+        ]
+    ]
+    return actions, attached
+
+
+def drive_platform_posture(
+    cli: Cli, launched: Envelope, aws: Any, results: Results
+) -> None:
+    """Issues #154 and #155: what the guest can reach, pinned to the MEASURED posture.
+
+    The suite's VM is launched **without** `--egress` (`drive_lifecycle`'s argv names no
+    connector), so it is the right VM for both questions, and every pin here is what
+    2026-09-11 (microvm 0.5.0) and 2026-09-12 (this tree's binaries) measured rather
+    than what `docs/PLATFORM.md` used to claim: the platform gives a connector-less VM
+    outbound network, Firecracker's MMDS answers the IMDSv2 handshake, and the
+    execution role's credential document is served to root and non-root alike. No
+    in-guest block was found — `ip`, `iptables` and `nft` are absent from
+    `al2023-minimal`, and the exec child's bounding set (`CapBnd a80425fb`) carries no
+    `CAP_NET_ADMIN` even under `--repair-identity`, so a blackhole route is `EPERM` as
+    root — which is why the fifth check is about the role and not about the guest.
+
+    **Two of these checks are meant to go red when the platform improves.** A VM that
+    stops reaching `example.com` without a connector, or an MMDS that stops answering,
+    is the platform starting to honour the omission; the response is to re-measure,
+    append to `docs/PLATFORM.md`, and flip the pin — never to loosen it into "either".
+    """
+    print(
+        "\n-- platform posture (egress without a connector, MMDS, the execution role) --"
+    )
+    attach = attach_args(cli, launched)
+
+    egress = _guest_curl(cli, attach, _status("https://example.com"))
+    results.check(
+        "the platform gives egress without a connector (goes red when it starts "
+        "honouring the omission)",
+        egress == "200",
+        f"curl https://example.com from a VM launched without --egress: {egress!r}; "
+        f"platform gives egress without a connector — when this fails the platform "
+        f"started honouring the omission: re-measure and update docs/PLATFORM.md",
+    )
+
+    handshake = _guest_curl(cli, attach, MMDS_HANDSHAKE)
+    put_status, _, token_len = handshake.partition(" ")
+    results.check(
+        "MMDS answers the IMDSv2 token handshake (goes red when the platform seals it)",
+        put_status == "200" and token_len.isdigit() and int(token_len) > 0,
+        f"PUT /latest/api/token: status {put_status!r}, token length {token_len}",
+    )
+
+    listing = _guest_curl(
+        cli,
+        attach,
+        MMDS_HANDSHAKE + f'curl -s --max-time 5 -H "X-aws-ec2-metadata-token: $T" '
+        f"{MMDS}/latest/meta-data/iam/security-credentials/",
+    )
+    role_listing = listing.split("\n")[-1] if listing else ""
+    results.eq(
+        "MMDS lists the execution role under iam/security-credentials/",
+        role_listing,
+        "execution_role",
+    )
+
+    document = _guest_curl(
+        cli,
+        attach,
+        MMDS_HANDSHAKE
+        + 'curl -s -o /dev/null -w "%{http_code} %{size_download}" --max-time 5 '
+        f'-H "X-aws-ec2-metadata-token: $T" '
+        f"{MMDS}/latest/meta-data/iam/security-credentials/execution_role",
+    )
+    doc_status, _, doc_size = (document.split("\n")[-1] if document else "").partition(
+        " "
+    )
+    results.check(
+        "the credential document is served (status and size only; the body is a secret)",
+        doc_status == "200"
+        and doc_size.isdigit()
+        and int(doc_size) > CREDENTIAL_DOCUMENT_FLOOR_BYTES,
+        f"GET .../security-credentials/execution_role: status {doc_status!r}, "
+        f"{doc_size} bytes (floor {CREDENTIAL_DOCUMENT_FLOOR_BYTES})",
+    )
+
+    # A non-root workload holds the role too. `agent-prompt` runs as uid 1000 on purpose
+    # (docs/AGENT-VMS.md), and this is the check that says the uid buys nothing here.
+    non_root = _guest_curl(cli, attach, MMDS_HANDSHAKE, "--user", "1000")
+    non_root_status = non_root.partition(" ")[0]
+    results.eq(
+        "a non-root exec reaches MMDS too (uid 1000, pinned to the measured posture)",
+        non_root_status,
+        "200",
+    )
+
+    # Since the guest holds the role, the role's grant is the sandbox's real boundary.
+    # Asserted against IAM rather than against `main.tf`'s text: the text is what someone
+    # intended, the role is what the guest gets.
+    role_arn = os.environ["MICROVM_EXECUTION_ROLE_ARN"]
+    actions, attached = execution_role_actions(aws.client("iam"), role_arn)
+    off_prefix = [a for a in actions if not a.startswith(EXECUTION_ROLE_ACTION_PREFIX)]
+    results.check(
+        "the conformance execution role grants only logs actions",
+        bool(actions) and not off_prefix and not attached,
+        f"{role_arn.rsplit('/', 1)[-1]}: {len(actions)} allowed actions, "
+        f"off-prefix {off_prefix!r}, attached managed policies {attached!r}",
     )
 
 
@@ -4136,6 +4335,55 @@ def self_test() -> int:
         )
         results.eq("and does not count as a pass", len(skip_probe.passed), 0)
 
+        # -- the IAM guard reads NotAction as a grant, offline -------------------
+        #
+        # `execution_role_actions` feeds "the conformance execution role grants only logs
+        # actions", and an `Allow` statement carrying `NotAction` grants everything
+        # *except* what it names. A reader that collected `Action` alone reported such a
+        # role as its `logs:` actions and stayed green (review of #163). Pinned here with a
+        # fake IAM client so the shape is asserted without a role to create.
+        class _FakeIam:
+            def __init__(self, statements: list[dict[str, Any]]) -> None:
+                self.statements = statements
+
+            def list_role_policies(self, **_: Any) -> dict[str, Any]:
+                return {"PolicyNames": ["inline"]}
+
+            def get_role_policy(self, **_: Any) -> dict[str, Any]:
+                return {"PolicyDocument": {"Statement": self.statements}}
+
+            def list_attached_role_policies(self, **_: Any) -> dict[str, Any]:
+                return {"AttachedPolicies": []}
+
+        logs_only = {
+            "Effect": "Allow",
+            "Action": ["logs:PutLogEvents"],
+            "Resource": "*",
+        }
+        fake_role = "arn:aws:iam::000000000000:role/self-test"
+        widened, _ = execution_role_actions(
+            _FakeIam(
+                [logs_only, {"Effect": "Allow", "NotAction": "iam:*", "Resource": "*"}]
+            ),
+            fake_role,
+        )
+        results.check(
+            "an Allow statement with NotAction counts as a grant outside logs:",
+            any(not a.startswith(EXECUTION_ROLE_ACTION_PREFIX) for a in widened),
+            repr(widened),
+        )
+        denied, _ = execution_role_actions(
+            _FakeIam(
+                [logs_only, {"Effect": "Deny", "NotAction": "logs:*", "Resource": "*"}]
+            ),
+            fake_role,
+        )
+        results.check(
+            "a Deny statement with NotAction grants nothing",
+            all(a.startswith(EXECUTION_ROLE_ACTION_PREFIX) for a in denied),
+            repr(denied),
+        )
+
         print("\n== self-test summary ==")
         print(f"  passed: {len(results.passed)}")
         print(f"  failed: {len(results.failed)}")
@@ -4265,6 +4513,11 @@ def main() -> int:
 
             drive_exec(cli, launched, results)
             drive_health(cli, launched, results)
+            # Platform posture (#154, #155) on the suite's own connector-less VM: the pins
+            # are the measured facts, and two of them are designed to go red the day the
+            # platform starts honouring an omitted egress connector. Needs `iam:Get/List`
+            # on the execution role, which the conformance caller already has.
+            drive_platform_posture(cli, launched, aws, results)
             drive_exec_identity(cli, launched, results)
             # After the identity section because it leans on the same detach/poll/ack
             # surface that section just proved, so a rotation failure here points at the

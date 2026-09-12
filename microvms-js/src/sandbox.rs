@@ -322,7 +322,8 @@ pub struct RunOptions {
     /// Shares the token's 4096-byte payload budget; the core refuses an over-ceiling
     /// payload before the launch, naming the byte count.
     pub launch_env: Option<std::collections::HashMap<String, String>>,
-    /// Whether to request the egress connector. Off means no outbound network.
+    /// Whether to request the egress connector. Off omits it from the request; measured
+    /// 2026-09-12 the platform gave a connector-less VM outbound network anyway.
     pub egress: Option<bool>,
     /// Whether to launch shell-capable: the ingress set becomes the measured pair
     /// `[HTTP_INGRESS, SHELL_INGRESS]`, which is what `microvm shell` attaches to.

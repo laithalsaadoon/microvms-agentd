@@ -130,9 +130,10 @@ every constraint the client believes, for that gate. See [constants](/reference/
 ### Egress
 
 Outbound network for a VM, granted at launch through an `INTERNET_EGRESS` network connector and
-requested from the CLI with `--egress`. Omitting it is how you get a VM with no outbound network. It is
-a launch-time property of the VM, not something the daemon can enforce or relax. See
-[Platform](/internals/platform/).
+requested from the CLI with `--egress`. Omitting it omits the connector from the launch request; measured
+2026-09-11 and 2026-09-12 the platform gave a connector-less VM outbound network anyway. It is a
+launch-time property of the VM, not something the daemon can enforce or relax. See
+[Platform](/internals/platform/) and [Trust](/internals/trust/).
 
 ### Envelope
 

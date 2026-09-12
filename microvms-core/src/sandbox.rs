@@ -186,7 +186,9 @@ pub struct RunRequest {
     /// payload's measured 4096-byte budget, and a caller near the ceiling with a launch env
     /// deserves to choose which feature gets the room.
     pub identity: bool,
-    /// Whether to request the egress connector. Off means no outbound network.
+    /// Whether to request the egress connector. Off omits it from the request; measured
+    /// 2026-09-12 the platform gave a connector-less VM outbound network anyway
+    /// (`docs/PLATFORM.md`).
     pub egress: bool,
     /// Whether to launch shell-capable: the ingress set becomes the measured pair
     /// `[HTTP_INGRESS, SHELL_INGRESS]` instead of `ALL_INGRESS`, which is what

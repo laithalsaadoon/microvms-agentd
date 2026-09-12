@@ -503,7 +503,10 @@ impl ControlPlane {
             image_version: request.image_version.clone(),
             execution_role_arn: request.execution_role_arn.clone(),
             ingress_network_connectors: ingress,
-            // Absent rather than empty: omitting egress is how you get no outbound network.
+            // Absent rather than empty: omitting egress omits the connector from the request.
+            // Measured 2026-09-11 and 2026-09-12 the platform still gave such a VM outbound
+            // network (`docs/PLATFORM.md`, "A VM launched without the egress connector still
+            // has outbound network").
             egress_network_connectors: (!egress.is_empty()).then_some(egress),
             idle_policy: ops::IdlePolicy {
                 max_idle_duration_seconds: request.max_idle_sec,
@@ -1103,8 +1106,10 @@ mod tests {
         assert_eq!(body["maximumDurationInSeconds"], 3600);
     }
 
-    /// Without egress, the member is **absent** — which is how you get a VM with no
-    /// outbound network.
+    /// Without egress, the member is **absent** — the request names no connector. What
+    /// the platform does with that omission is a measurement, not this test's claim:
+    /// `docs/PLATFORM.md`, "A VM launched without the egress connector still has
+    /// outbound network" (2026-09-11 and 2026-09-12).
     #[tokio::test]
     async fn a_launch_without_egress_omits_the_member_entirely() {
         let (plane, fake, _) = planted();

@@ -230,8 +230,11 @@ region interpolation breaks.
 **AC-2-2** `[P]` — **S3** — already satisfied
 Optional feature: Where outbound network access is requested, the client shall
 set the egress connector; otherwise the client shall omit the egress field.
-Derives from: "Network connectors are ARNs" — omitting egress entirely is how
-you get a VM with no outbound network.
+Derives from: "Network connectors are ARNs" — omitting egress omits the connector
+from the request. Measured 2026-09-11 and 2026-09-12 the platform still gave such a
+VM outbound network (`docs/PLATFORM.md`, "A VM launched without the egress connector
+still has outbound network"), so the sentences below describe the intended default,
+not a sealed VM.
 Today: satisfied — `egress: bool = False` at `sandbox.py:360`. S3 and
 deliberately so: no outbound network is the correct default for a daemon that
 needs none, but the cost of the default is that a task workload needing the

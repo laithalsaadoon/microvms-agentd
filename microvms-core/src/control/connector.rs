@@ -68,8 +68,10 @@ pub enum ConnectorIntent {
     ShellIngress,
     /// Lets the VM reach the internet.
     ///
-    /// Omitted by default, which is how you get a VM with no outbound network — the
-    /// right default for a daemon that needs none.
+    /// Omitted by default — the right default for a daemon that needs none. Omitting it
+    /// omits the connector from the request; measured 2026-09-11 and 2026-09-12 the
+    /// platform still gave such a VM outbound network (`docs/PLATFORM.md`, "A VM launched
+    /// without the egress connector still has outbound network").
     Egress,
 }
 

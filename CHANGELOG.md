@@ -54,6 +54,31 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
   --delete-image` left `/aws/lambda-microvms/seam-probe-<epoch>`, which the
   script named as a leak through the run record.
 
+### Measured
+
+- **A VM launched without the egress connector still has outbound network** (us-east-1,
+  2026-09-12, API version `2025-09-09`, `al2023-1` at 512 MiB, microvm 0.7.0 with the
+  tree's agentd; first measured 2026-09-11 with microvm 0.5.0 in #154). Two VMs from one
+  image, one with `--egress` and one without: `example.com` 200, `github.com` 200,
+  `sts.amazonaws.com` 302 from both. The request without the flag omitted
+  `egressNetworkConnectors`, as the client's tests pin. `docs/PLATFORM.md` gains the entry
+  and a bold pointer under "Network connectors are ARNs"; `docs/TRUST.md`'s **Egress**
+  paragraph and the README's guest-Dockerfile guidance no longer say the omission seals the
+  VM. The live suite's new `drive_platform_posture` pins the measured posture on its
+  connector-less VM and is written to go red the day the platform honours the omission.
+- **The guest reaches the execution role's credentials through MMDS, and no in-guest block
+  works** (same region, date and setup; first measured 2026-09-11 in #155). The IMDSv2
+  token `PUT` answers 200 with a 48-byte token, `iam/security-credentials/` lists
+  `execution_role`, and the credential document is served with a 200 and 1164 bytes — to
+  root and to a `--user 1000` exec, on both VMs. `ip`, `iptables` and `nft` are absent from
+  `al2023-minimal`; with `iproute` installed, `ip route add blackhole 169.254.169.254/32`
+  is `Operation not permitted` as root because the exec child's bounding set
+  (`CapBnd a80425fb`) has no `CAP_NET_ADMIN`, and `--repair-identity` does not widen it.
+  `docs/TRUST.md` gains "The execution role is the boundary": least privilege on the role
+  is the first control and the only one this client can name today. The suite now reads
+  the conformance execution role back from IAM and fails on any action outside `logs:`,
+  an `Allow` statement's `NotAction` included (six new checks; 165 in all).
+
 ## [0.7.0] — 2026-09-11
 
 ### Added
