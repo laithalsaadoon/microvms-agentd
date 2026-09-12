@@ -86,7 +86,7 @@ Launch with `--shell` and `microvm shell --name dev` opens an interactive root s
 microvm terminate dev
 ```
 
-The name is released when the terminate is accepted. `--wait` waits for `TERMINATED` rather than returning as soon as the call is accepted. `--delete-image --image-identifier <ARN>` also deletes the image, and `--image-name <NAME>` lets the CLI name its build log group, which the service created and Terraform never owns. Deleting the image early saves nothing, because its snapshot has a one-week minimum retention.
+The name is released when the terminate is accepted. `--wait` waits for `TERMINATED` rather than returning as soon as the call is accepted. `--delete-image` also deletes the image, read off the run record `run --keep` left (pass `--image-identifier <ARN>` and `--image-name <NAME>` only for a VM this state directory did not launch), and names its build log group, which the service created and Terraform never owns. Deleting the image early saves nothing, because its snapshot has a one-week minimum retention.
 
 ## 7. If something is interrupted
 

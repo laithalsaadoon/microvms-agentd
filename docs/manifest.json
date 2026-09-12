@@ -2437,7 +2437,7 @@
           {
             "choices": null,
             "default": null,
-            "help": "The image to delete, if --delete-image is given",
+            "help": "The image to delete, if --delete-image is given. Omitted, the image is read off the kept run's ledger record in the state directory",
             "name": "image-identifier",
             "positional": false,
             "required": false,
@@ -2446,7 +2446,7 @@
           {
             "choices": null,
             "default": null,
-            "help": "The image's name, needed to name its build log group",
+            "help": "The image's name, needed to name its build log group. Omitted, it is read off the same ledger record when one names the image",
             "name": "image-name",
             "positional": false,
             "required": false,

@@ -78,6 +78,43 @@ impl Ledger {
         }
     }
 
+    /// Every record under `root` that names `microvm_id`, newest first — reopened so a later
+    /// process can narrow and clear them.
+    ///
+    /// `terminate --delete-image` reads the image off the newest (issue #160): `run --keep`
+    /// left the record with the VM, the image, and the image's name, so the flag that asked
+    /// for the identifier back was asking for what the CLI already had. A retried launch can
+    /// leave two records naming one VM; a teardown that narrowed only the newest would leave
+    /// the older one reporting the VM forever, which is the stale `ls` shape issue #159
+    /// measured, so callers narrow all of them.
+    ///
+    /// Name records live under `root/names/` and are not run ledgers, so `read_dir` on the
+    /// root alone never sees them.
+    pub fn open_all_for_vm(root: &Path, microvm_id: &str) -> Vec<Self> {
+        let Ok(entries) = std::fs::read_dir(root) else {
+            return Vec::new();
+        };
+        let mut paths: Vec<PathBuf> = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+            .collect();
+        paths.sort();
+        paths
+            .into_iter()
+            .rev()
+            .filter_map(|path| {
+                let record: Record =
+                    serde_json::from_str(&std::fs::read_to_string(&path).ok()?).ok()?;
+                let names_it = record.microvm_id.as_deref() == Some(microvm_id);
+                names_it.then_some(Self {
+                    record,
+                    path: Some(path),
+                })
+            })
+            .collect()
+    }
+
     /// Where this ledger writes, or `None` for one that writes nowhere.
     ///
     /// `cfg(test)` because nothing in the shipped paths asks: a handler either flushes or does
@@ -413,6 +450,78 @@ mod tests {
         assert_eq!(read[0]["microvmId"], "mvm-1");
         assert_eq!(read[0]["leaked"], serde_json::json!(["arn:image"]));
         assert_eq!(read[0]["region"], "us-east-1");
+    }
+
+    /// **Issue #160.** A later process reopens the record that names a VM, newest first, and
+    /// sees nothing for a VM no record names.
+    ///
+    /// Newest first because a reused image launched twice under `--keep` leaves two records
+    /// naming two VMs; when one VM appears in two records (a retried launch), the later one
+    /// is the launch that succeeded. Name records under `names/` must never be read as run
+    /// ledgers: the registry file for a name carries a `microvmId` too, and mistaking it for
+    /// a run record would hand `terminate` a record with no image in it.
+    #[test]
+    fn a_record_reopens_by_vm_id_newest_first_and_never_from_the_name_registry() {
+        let dir = TempDir::new("reopen");
+        let mut older = Ledger::new("us-east-1", &dir.0);
+        older.record_image("arn:image-old", "img-old");
+        older.record_microvm("mvm-1");
+        older.mark_outstanding();
+        // A second record for the same VM, written later. `Ledger::new` keys on epoch+pid, so
+        // two records from one process in one second would collide; write this one by hand
+        // with a later-sorting name, which is what a later process produces.
+        let newer = Record {
+            run_id: "9999999999-1".into(),
+            region: "us-east-1".into(),
+            image_identifier: Some("arn:image-new".into()),
+            image_name: Some("img-new".into()),
+            microvm_id: Some("mvm-1".into()),
+            leaked: vec!["mvm-1".into(), "arn:image-new".into()],
+        };
+        std::fs::write(
+            dir.0.join("9999999999-1.json"),
+            serde_json::to_string(&newer).expect("serializes"),
+        )
+        .expect("writes");
+        // A name record naming the same VM, in the registry subdirectory.
+        let names = Names::new(&dir.0);
+        names
+            .register(&NameRecord {
+                name: "probe".into(),
+                microvm_id: "mvm-1".into(),
+                endpoint: "https://mvm-1.example".into(),
+                agent_token: "tok".into(),
+                region: "us-east-1".into(),
+                at: 1,
+                identity_host_seed: None,
+                identity_vm_public_key: None,
+            })
+            .expect("registers");
+
+        let mut all = Ledger::open_all_for_vm(&dir.0, "mvm-1");
+        assert_eq!(all.len(), 2, "both records naming the VM reopen");
+        let mut reopened = all.remove(0);
+        assert_eq!(
+            reopened.record.image_identifier.as_deref(),
+            Some("arn:image-new"),
+            "the newest record wins"
+        );
+        assert!(
+            Ledger::open_all_for_vm(&dir.0, "mvm-unknown").is_empty(),
+            "a VM no record names reopens nothing"
+        );
+        // And the reopened ledger writes back to the file it came from, so a narrow-and-clear
+        // in a later process lands on the right record.
+        reopened.mark_deleted(&[]);
+        reopened.clear();
+        assert!(
+            !dir.0.join("9999999999-1.json").exists(),
+            "cleared in place"
+        );
+        assert!(
+            older.path().is_some_and(|p| p.exists()),
+            "the older record is untouched"
+        );
     }
 
     /// A clean run leaves no ledger behind.

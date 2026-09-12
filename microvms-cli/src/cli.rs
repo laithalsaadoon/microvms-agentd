@@ -1523,18 +1523,25 @@ pub struct TerminateArgs {
     #[arg(value_name = "MICROVM_ID")]
     pub microvm_id: String,
 
-    /// The image to delete, if --delete-image is given.
+    /// The image to delete, if --delete-image is given. Omitted, the image is read off the
+    /// kept run's ledger record in the state directory.
     #[arg(long)]
     pub image_identifier: Option<String>,
 
-    /// The image's name, needed to name its build log group.
+    /// The image's name, needed to name its build log group. Omitted, it is read off the
+    /// same ledger record when one names the image.
     ///
     /// The service created that group, so `terraform destroy` never removes it.
     #[arg(long)]
     pub image_name: Option<String>,
 
     /// Also delete the image, and name its build log group.
-    #[arg(long, requires = "image_identifier")]
+    ///
+    /// Not a clap `requires` on `image_identifier` (issue #160): `run --keep` records the
+    /// image beside the VM, so demanding it back is asking for what the CLI holds. The
+    /// handler refuses with `ERR_INVALID_ARG` only when neither the flag nor a record
+    /// names an image.
+    #[arg(long)]
     pub delete_image: bool,
 
     /// Wait for TERMINATED rather than returning as soon as the call is accepted.
@@ -2802,14 +2809,22 @@ mod tests {
         );
     }
 
-    /// `--delete-image` cannot be asked for without the identifier it needs.
+    /// `--delete-image` parses without `--image-identifier`, because the handler can read
+    /// the image off the kept run's ledger record (issue #160).
     ///
-    /// The Python raised `ERR_INVALID_ARG` from the handler for this; clap's `requires`
-    /// makes it a parse failure, which is the same code by a shorter path.
+    /// This used to be a clap `requires`, which refused at parse time information the CLI
+    /// already held. The refusal still exists — `ERR_INVALID_ARG` from the handler when no
+    /// record names an image — and the guard for it is in `guards.rs`, where a state
+    /// directory can be staged. Parse-time is too early to know.
     #[test]
-    fn deleting_an_image_requires_naming_it() {
-        let refused = Cli::try_parse_from(["microvm", "terminate", "mvm-1", "--delete-image"]);
-        assert!(refused.is_err(), "--delete-image needs --image-identifier");
+    fn deleting_an_image_parses_without_the_identifier_the_ledger_can_supply() {
+        let parsed = Cli::try_parse_from(["microvm", "terminate", "mvm-1", "--delete-image"])
+            .expect("the identifier is derivable, so its absence is not a parse error");
+        let Command::Terminate(args) = parsed.command else {
+            panic!("expected terminate");
+        };
+        assert!(args.delete_image);
+        assert_eq!(args.image_identifier, None);
         Cli::try_parse_from([
             "microvm",
             "terminate",
