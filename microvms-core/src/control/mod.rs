@@ -462,7 +462,8 @@ pub struct RunMicrovmRequest {
     /// The execution role. Optional in the model; every real launch needs one.
     pub execution_role_arn: Option<String>,
     /// The connectors to request, as intents (TRAP-4). Ingress is required for a session
-    /// to work at all; omitting egress is how you get no outbound network.
+    /// to work at all; omitting egress omits the connector from the request (measured
+    /// 2026-09-12: the platform gave the VM outbound network anyway, `docs/PLATFORM.md`).
     pub connectors: Vec<ConnectorIntent>,
     /// The already-validated payload carrying the agent token.
     pub run_hook_payload: RunHookPayload,
@@ -1199,9 +1200,9 @@ mod tests {
         assert_eq!(request.dockerfile, None);
     }
 
-    /// The default launch requests ingress and **not** egress: omitting egress is how you
-    /// get a VM with no outbound network, which is the right default for a daemon that
-    /// needs none.
+    /// The default launch requests ingress and **not** egress: the right default for a
+    /// daemon that needs none. What the omission buys is measured in `docs/PLATFORM.md`
+    /// (2026-09-12: the platform gave the connector-less VM outbound network anyway).
     #[test]
     fn the_default_launch_requests_ingress_only() {
         let payload = RunHookPayload::for_agent_token("token").expect("a token fits");

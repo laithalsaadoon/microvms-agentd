@@ -461,6 +461,20 @@ stream idle timeout. The client treats 60 seconds of silence as a dead
 connection because the daemon's keepalive is 15; a longer interval makes
 healthy streams look dead. This too is refused locally.
 
+**The guest holds the execution role, and the image cannot take it away.**
+`http://169.254.169.254/` inside a VM is Firecracker's MMDS: an IMDSv2 token `PUT`
+answers 200 and `/latest/meta-data/iam/security-credentials/execution_role` serves
+the role's credentials to root and to a `--user 1000` exec alike (measured
+2026-09-11 and 2026-09-12, us-east-1; `docs/PLATFORM.md`). No in-guest block was
+measured working: `ip`, `iptables` and `nft` are absent from `al2023-minimal`, and
+installing `iproute` does not help, because the exec child's bounding set carries no
+`CAP_NET_ADMIN` (even under `--repair-identity`), so `ip route add blackhole
+169.254.169.254/32` is refused as root. Omitting `--egress` does not seal the VM
+today either: a connector-less VM reached the public internet on the same dates. So
+size the execution role for the daemon alone (CloudWatch Logs) and hand the workload
+its own scoped credential; `docs/TRUST.md`, "The execution role is the boundary",
+has the argument.
+
 [examples/coding-agents-on-bedrock/Dockerfile](examples/coding-agents-on-bedrock/Dockerfile)
 is a working guest Dockerfile that respects all of the above.
 
@@ -474,7 +488,7 @@ microvms-core/   the client library: control plane, session, cost, sandbox
 microvms-cli/    the microvm binary: 26 commands, JSON envelopes, a manifest
 microvms-py/     Python binding (PyO3)
 microvms-js/     Node binding (napi-rs)
-conformance/     the live suite: 159 checks against real AWS, via the CLI
+conformance/     the live suite: 165 checks against real AWS, via the CLI
 spec/            57 formal requirements in symspec, checked with Z3
 ```
 

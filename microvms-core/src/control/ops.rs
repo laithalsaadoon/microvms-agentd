@@ -316,8 +316,9 @@ pub struct RunMicrovmWire {
     pub execution_role_arn: Option<String>,
     /// Derived ARNs, never caller strings (TRAP-4).
     pub ingress_network_connectors: Vec<String>,
-    /// Absent rather than empty when egress was not asked for: omitting it is how you
-    /// get a VM with no outbound network.
+    /// Absent rather than empty when egress was not asked for. Omitting it is the request
+    /// the docs call sealed; measured 2026-09-12 the platform still gave the VM outbound
+    /// network (`docs/PLATFORM.md`), which the live suite pins.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub egress_network_connectors: Option<Vec<String>>,
     pub idle_policy: IdlePolicy,
@@ -1648,7 +1649,7 @@ mod tests {
                 .as_object()
                 .expect("object")
                 .contains_key("egressNetworkConnectors"),
-            "omitting egress is how you get no outbound network"
+            "omitting egress must omit the connector list, not send an empty one"
         );
     }
 

@@ -176,6 +176,11 @@ not the bare string `ALL_INGRESS`, which is rejected with
 `INTERNET_EGRESS`, and omitting egress entirely is how you get a VM with no
 outbound network.
 
+**The omission claim above was measured wrong on 2026-09-11 and again on 2026-09-12: a VM
+launched with no egress connector reached the public internet. See "A VM launched without
+the egress connector still has outbound network" at the end of this file.** The ARN shape
+and the `Malformed network connector ARN` rejection stand as measured.
+
 ## `CreateMicrovmAuthToken` returns a header map
 
 Measured 2026-08-05. The `authToken` field is a map of header name to value, not a
@@ -1500,3 +1505,79 @@ Two things the run showed that the numbers alone do not:
   `/usr/bin`'s 3.12.14 (`pyvenv.cfg`: `home = /usr/bin`). The baked layer is therefore on
   the interpreter the Dockerfile installed. A caller running Python in the guest should
   call `/project/.venv/bin/python` directly, or pass a `PATH` through `--launch-env`.
+
+## A VM launched without the egress connector still has outbound network
+
+Measured 2026-09-12, us-east-1, API version `2025-09-09`, base image `al2023-1` /
+`public.ecr.aws/amazonlinux/amazonlinux:2023-minimal`, baseline memory 512 MiB, microvm
+0.7.0 with the tree's agentd (health `version` `0.1.0`), guest kernel
+`6.1.166-24.303.amzn2023.aarch64`. Issue #154 first measured this on 2026-09-11 with
+microvm 0.5.0 and the 0.5.0 release daemon; this entry is the re-measurement on the
+current tree, and the posture did not change.
+
+Two VMs from one image (`microvm run --keep`, then `run --keep --image <arn>`), one
+launched without `--egress` and one with it. The request without the flag omitted
+`egressNetworkConnectors` entirely — `RunRequest` defaults `egress: false` and the field
+is `skip_serializing_if = "Option::is_none"` (`microvms-core/src/control/ops.rs`), which
+the client's own tests pin. The platform gave both VMs the same reach:
+
+| From the guest (`curl -s -o /dev/null -w '%{http_code}' --max-time 10`) | Without `--egress` | With `--egress` |
+|---|---|---|
+| `https://example.com` | 200 | 200 |
+| `https://github.com` | 200 | 200 |
+| `https://sts.amazonaws.com` | 302 | 302 |
+
+So there is currently no measured way to launch a sealed VM from this client, and the
+"Network connectors are ARNs" entry above is corrected by pointer rather than deleted. What
+that changes for a consumer is in `docs/TRUST.md`, "The execution role is the boundary".
+The live suite pins this posture on its own connector-less VM
+(`conformance/run_rs.py`, `drive_platform_posture`), and the pin is written to go red the
+day the platform starts honouring the omission: that red is the signal to re-measure and
+append here.
+
+## The guest reaches the execution role's credentials through MMDS, and no in-guest block works
+
+Measured 2026-09-12, us-east-1, API version `2025-09-09`, base image `al2023-1` /
+`public.ecr.aws/amazonlinux/amazonlinux:2023-minimal`, baseline memory 512 MiB, microvm
+0.7.0 with the tree's agentd, guest kernel `6.1.166-24.303.amzn2023.aarch64`. Issue #155
+first measured the credential path on 2026-09-11 with microvm 0.5.0; this entry re-measures
+it on the current tree, adds the mitigation attempts, and the posture did not change.
+Credential values were never printed or stored: the credential document was fetched with
+`-o /dev/null -w '%{http_code} %{size_download}'` only.
+
+The exec environment is clean (`env` lists `PWD`, `SHLVL`, `_`; no `~/.aws`), and
+`http://169.254.169.254/` is Firecracker's MMDS. It answers the same way on the VM without
+`--egress` and the VM with it:
+
+| Request from the guest | Answer |
+|---|---|
+| `GET /latest/meta-data/iam/security-credentials/` with no token | 401 `No MMDS token provided…` |
+| `PUT /latest/api/token` with `X-aws-ec2-metadata-token-ttl-seconds: 60` | 200, a 48-byte token |
+| `GET /latest/meta-data/` (with the token) | 200: `iam/`, `placement/`, `tags/` |
+| `GET /latest/meta-data/iam/security-credentials/` | 200: `execution_role` |
+| `GET /latest/meta-data/iam/security-credentials/execution_role` | 200, 1164 bytes (a full `AccessKeyId`/`SecretAccessKey`/`Token`/`Expiration` document, per #155) |
+| `GET /latest/meta-data/placement/` | 200: `availability-zone-id` (`use1-az6`), `region` (`us-east-1`) |
+| `GET /latest/meta-data/tags/instance/` | 200: one key, `aws_instance-group-symmetric-key` (a 44-byte value; not read) |
+| The token `PUT` from a `microvm exec --user 1000` | 200 — a non-root workload holds the role too |
+
+Every in-guest mitigation tried failed, so the recipe this project can give is on the role,
+not in the guest:
+
+| Attempt (as root in the guest) | Result |
+|---|---|
+| `ip`, `iptables`, `nft`, `route`, `capsh` on `al2023-minimal` | all absent |
+| Capabilities of the exec child and of `agentd` (pid 1), default launch | `CapEff = CapBnd = 00000000a80425fb`: the Docker default set, no `CAP_NET_ADMIN`, no `CAP_SYS_ADMIN` |
+| The same under `--repair-identity` (`additionalOsCapabilities: ["ALL"]`) | identical mask; the bounding set did not widen |
+| `dnf install iproute` on the `--egress` VM (needs `PATH` and `HOME` in `--env`; a bare `dnf -q` exits 1) | installs |
+| `ip route add blackhole 169.254.169.254/32` | `RTNETLINK answers: Operation not permitted` |
+| `ip route add unreachable …`, `ip rule add to … blackhole`, `ip link set eth0 mtu` | all `Operation not permitted` |
+| `echo 1 > /proc/sys/net/ipv4/conf/eth0/route_localnet` | `Read-only file system` |
+| The token `PUT` after every attempt | still 200, as root and as uid 1000 |
+
+Every route, rule and link change above answered `Operation not permitted` as root, and
+the bounding set carries no `CAP_NET_ADMIN`, so there is no route, netfilter, or sysctl
+path to a block, whatever the image installs: **least privilege on the execution role is
+the only control this client can name today**. The conformance stack's own
+execution role grants `logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:PutLogEvents`
+and nothing else (`conformance/infra/main.tf`, `WriteRuntimeLogs`), and the live suite
+reads that grant back from IAM on every run (`drive_platform_posture`).

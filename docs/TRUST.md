@@ -345,12 +345,64 @@ key with it. That is the same boundary the whole contract states at the top — 
 daemon is *distinct from* the workload, never *protected from* it. Same class as the
 unenforced-list entries; documented, not overclaimed.
 
+## The execution role is the boundary
+
+Measured 2026-09-11 (microvm 0.5.0, issue #155) and again 2026-09-12 on this tree's
+binaries, us-east-1, API version `2025-09-09`, recorded in `docs/PLATFORM.md` under "The
+guest reaches the execution role's credentials through MMDS": `http://169.254.169.254/`
+inside the guest is Firecracker's MMDS. An IMDSv2 token `PUT` answers 200, and
+`/latest/meta-data/iam/security-credentials/execution_role` answers 200 with a full
+credential document for the role `RunMicrovm` was given. It answers root and a `--user
+1000` exec alike, on a VM launched with `--egress` and on one launched without it.
+
+The guarantee above — the agent token never enters an exec'd child's environment — is
+intact, and it is not the relevant boundary here. The workload does not need the agent
+token to do damage outside the VM; it holds the VM's AWS identity. Whatever the
+execution role can do, anything the sandbox runs can do, and with egress open by default
+(see **Egress** below) it can do it from inside the VM.
+
+Two controls follow, in order:
+
+1. **Least privilege on the execution role is the first control, and today it is the
+   only one this client can name.** Grant the role exactly what the daemon needs, which
+   is CloudWatch Logs for its own stdout, and grant nothing on behalf of the workload:
+   a workload that needs S3 should receive a scoped credential through the launch
+   channel or a file, never through the VM's role. The conformance stack is the worked
+   example: its execution role's single inline statement allows
+   `logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:PutLogEvents` on
+   `log-group:*` and nothing else (`conformance/infra/main.tf`, the
+   `aws_iam_policy_document.execution` block), and the live suite reads the grant back
+   from IAM on every run and fails on any action outside `logs:`, counting an `Allow`
+   statement's `NotAction` as one (`conformance/run_rs.py`, `drive_platform_posture`).
+2. **Blocking `169.254.169.254` inside the guest would be the second control, and no
+   in-guest recipe was measured working.** `ip`, `iptables` and `nft` are absent from
+   `al2023-minimal`; installing `iproute` and adding a blackhole route as root answers
+   `RTNETLINK answers: Operation not permitted`, because the exec child's bounding set
+   (`CapBnd 00000000a80425fb`, the Docker default) carries no `CAP_NET_ADMIN`, and
+   `--repair-identity`'s `additionalOsCapabilities: ["ALL"]` does not widen it. The
+   netfilter and `/proc/sys` paths need the same capability and the latter is mounted
+   read-only. Until the platform offers a network policy or the guest gains
+   `CAP_NET_ADMIN`, a consumer should treat the role as reachable and size it
+   accordingly.
+
+This section exists because the earlier reading of this document — no credentials in
+the environment, so no credentials — was true and beside the point. A conformance
+fixture that asserts on `env` proves nothing about the role; the fixture that matters
+asserts on the role's policy, which is what the suite now does.
+
 ## What this contract does not cover
 
 **Egress.** Nothing here constrains what the workload can reach. Egress is a
 launch-time property of the MicroVM's network connectors, and a guest daemon cannot
-enforce it against a root process. Omitting `INTERNET_EGRESS` is how you get a VM with
-no outbound network, and that call belongs to whoever calls `RunMicrovm`.
+enforce it against a root process. This document used to say that omitting
+`INTERNET_EGRESS` is how you get a VM with no outbound network; measured 2026-09-11
+and 2026-09-12 in us-east-1 (API version `2025-09-09`, `docs/PLATFORM.md`, "A VM
+launched without the egress connector still has outbound network"), a VM launched with
+no egress connector reached `example.com`, `github.com` and `sts.amazonaws.com` exactly
+as the `--egress` VM did. Omitting the connector is still the right request — the
+client sends no egress list, and the live suite pins the measured posture so a change
+is noticed — but today it does not seal the VM, and that call belongs to the platform
+rather than to whoever calls `RunMicrovm`.
 
 **Secret delivery beyond the run hook.** The `runHookPayload` string is the only
 per-VM differentiator the platform offers, and its ceiling is 4096 bytes, measured
