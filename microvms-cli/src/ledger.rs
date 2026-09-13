@@ -289,6 +289,19 @@ pub struct NameRecord {
     /// (`LaunchIdentity::keep`), so no record anywhere lets anyone impersonate the VM.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity_vm_public_key: Option<String>,
+    /// The egress posture label of the launch this name was registered for, when the
+    /// registering command is the one that launched the VM.
+    ///
+    /// `None` is a real answer and not a gap: `microvm attach` registers a VM it did not
+    /// launch, and a record written before this field existed knows nothing either. A later
+    /// command reading `None` must say the weakest true thing about the VM's network rather
+    /// than inherit a claim — `agent-up`'s refresh path is the caller, and reporting the
+    /// `open` its own fresh path uses would mislabel a connector-less VM someone attached.
+    ///
+    /// The label rather than the enum, because this file is a wire format read by later
+    /// versions: `EgressPosture::from_label` answers `None` for a spelling it does not know.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub egress_posture: Option<String>,
 }
 
 /// The name→VM registry: one JSON file per live name, under `<root>/names/`.
@@ -336,6 +349,7 @@ impl Names {
                 at: 0,
                 identity_host_seed: None,
                 identity_vm_public_key: None,
+                egress_posture: None,
             }),
         }
     }
@@ -516,6 +530,7 @@ mod tests {
                 at: 1,
                 identity_host_seed: None,
                 identity_vm_public_key: None,
+                egress_posture: None,
             })
             .expect("registers");
 
@@ -666,6 +681,7 @@ mod tests {
             at: 1754524800,
             identity_host_seed: None,
             identity_vm_public_key: None,
+            egress_posture: None,
         }
     }
 

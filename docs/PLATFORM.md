@@ -1535,6 +1535,36 @@ The live suite pins this posture on its own connector-less VM
 day the platform starts honouring the omission: that red is the signal to re-measure and
 append here.
 
+**Re-measured 2026-09-13**, us-east-1, API version `2025-09-09`, base image `al2023-1`,
+baseline memory 1024 MiB, microvm 0.8.0 with the tree's agentd, on the suite's own
+connector-less VM (`microvm-fc48f201-80b6-30f9-a968-32edaa623164`). The posture did not
+change, and two hosts were added because a package registry is the class of surprise that
+actually costs something — an external review of an unrelated tool had DuckDB fetch a
+242 MB extension from `extensions.duckdb.org` inside a VM launched without `--egress`
+(2026-09-12, that reviewer's measurement, `curl` status 301 there and `pypi.org` 200):
+
+| From the guest, no `--egress` (`curl -s -o /dev/null -w '%{http_code}' --max-time 10`) | Answer |
+|---|---|
+| `https://example.com` | 200 |
+| `https://pypi.org` | 200 |
+| `https://pypi.org` with `https_proxy=http://127.0.0.1:1` in the exec env | `000` and `curl` exit 7 (could not connect to proxy) |
+
+The third row is the whole measured basis for `--deny-egress` and for the `best-effort`
+posture: a well-behaved client fails closed when the proxy variables point at a black hole,
+while the network path is untouched — the same VM, same second, answered 200 without them.
+Nothing about it is enforcement, and the client's label says `best-effort` rather than
+`sealed` for that reason. All three rows are named checks in `drive_platform_posture` now,
+so every future live run re-measures them (188 checks, up from 185).
+
+**The service model has no seal to ask for, re-read 2026-09-13 against botocore 1.43.83.**
+`RunMicrovmRequest`'s outbound surface is exactly one member, `egressNetworkConnectors`
+(`NetworkConnectorList`, `max: 10`, members are opaque strings), and the whole 24-operation
+API carries no VPC, subnet, security-group, network-policy or deny-all shape — the only
+other network members anywhere are `ingressNetworkConnectors` and the image-level egress
+lists (`max: 1`). So "omit the connector" is not merely the current recommendation, it is
+the strongest request the API can express, and a client cannot do better at the network
+layer until the service adds a member.
+
 ## The guest reaches the execution role's credentials through MMDS, and no in-guest block works
 
 Measured 2026-09-12, us-east-1, API version `2025-09-09`, base image `al2023-1` /

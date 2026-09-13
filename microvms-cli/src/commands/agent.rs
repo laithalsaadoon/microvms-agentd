@@ -111,6 +111,14 @@ struct UpOutcome {
     credential_expires_at: u64,
     project: Option<(usize, usize)>,
     agentd: Value,
+    /// What this VM's outbound network is.
+    ///
+    /// A field rather than a call inside `render`, because the two paths know different
+    /// things: a fresh launch asked for the connector (AGENT-9) and can say `open`, while a
+    /// refresh attaches to a VM it did not launch and must read the posture off the name
+    /// record — which is `None` for a VM `microvm attach` registered, and then the weakest
+    /// true claim is what gets reported.
+    egress_posture: microvms_core::control::EgressPosture,
 }
 
 impl UpOutcome {
@@ -141,6 +149,9 @@ impl UpOutcome {
                 None => Value::Null,
             },
         );
+        // What the VM has, not what this command's launches ask for: the refresh path
+        // attaches to a VM it did not launch (see the field).
+        data.insert("egressPosture".into(), json!(self.egress_posture.as_str()));
         data.insert("agentd".into(), self.agentd);
 
         let hours_left = self
@@ -175,6 +186,11 @@ impl UpOutcome {
             ));
         }
         lines.push(format!("agents: {agents_line}"));
+        lines.push(format!(
+            "egress: {} — {}",
+            self.egress_posture.as_str(),
+            self.egress_posture.describe()
+        ));
         lines.push(format!(
             "credentials: Bedrock bearer token, about {hours_left} h left; re-run this \
              command to refresh"
@@ -268,6 +284,8 @@ async fn refresh<O: std::io::Write, E: std::io::Write>(
         "{} is registered to {}; refreshing its credentials rather than launching",
         args.vm_name, record.microvm_id
     ));
+    // Read before `record` is consumed field by field below.
+    let record_posture = record.egress_posture.clone();
     // The flag wins over the record, as every attached command reads it.
     let region = if args.region.region.is_some() || args.region.unlisted_region.is_some() {
         args.region.resolve(ctx.env)?
@@ -326,8 +344,31 @@ async fn refresh<O: std::io::Write, E: std::io::Write>(
         credential_expires_at: epoch_of(minted.expires_at),
         project: packed.map(|work| (work.archive.len(), work.members)),
         agentd: Value::Null,
+        // Off the record, never off this command's own launch shape. A refresh attaches to
+        // whatever the name points at, and `microvm attach` can register a connector-less
+        // `run --keep` under any name — reporting `open` there would be the mislabelling
+        // this whole change exists to remove. A record with no posture (written by `attach`,
+        // or by a version that predates the field) falls back to the default, which is the
+        // weakest true statement about any running VM: it reaches the internet and nothing
+        // stops it.
+        egress_posture: posture_of(&record_posture),
     }
     .render())
+}
+
+/// The posture a name record names, or the weakest true claim when it names none.
+///
+/// `None` is what `microvm attach` writes — it registers a VM it did not launch — and what a
+/// record written before the field existed carries. The fallback is
+/// [`microvms_core::control::EgressPosture::default`], which is the posture of a launch that
+/// asked for nothing and is therefore the weakest statement available: the VM reaches the
+/// internet and nothing stops it. Never `open`, which would claim a connector nobody here
+/// saw requested, and never `sealed`, which is the claim this type exists to refuse.
+fn posture_of(label: &Option<String>) -> microvms_core::control::EgressPosture {
+    label
+        .as_deref()
+        .and_then(microvms_core::control::EgressPosture::from_label)
+        .unwrap_or_default()
 }
 
 fn epoch_of(at: std::time::SystemTime) -> u64 {
@@ -513,6 +554,9 @@ async fn fresh<O: std::io::Write, E: std::io::Write>(
         at: epoch_secs(),
         identity_host_seed: None,
         identity_vm_public_key: None,
+        // AGENT-9: this launch requested the connector, and the record says so — a later
+        // `agent-up --vm-name <same name>` refresh reads it rather than assuming.
+        egress_posture: Some(agents::agent_vm_egress_posture().as_str().to_string()),
     };
     Names::new(root).register(&record).map_err(|error| {
         CliError::new(
@@ -558,6 +602,9 @@ async fn fresh<O: std::io::Write, E: std::io::Write>(
         credential_expires_at: expires_at,
         project: packed.map(|work| (work.archive.len(), work.members)),
         agentd: agentd_report,
+        // This command launched the VM one screen up, with the connector (AGENT-9), so the
+        // posture comes off that launch request rather than being spelled here.
+        egress_posture: agents::agent_vm_egress_posture(),
     }
     .render())
 }
@@ -825,6 +872,49 @@ mod tests {
         assert_eq!(both[0].model(), "global.openai.gpt-5.6-sol");
         assert_eq!(both[1].agent, Agent::ClaudeCode);
         assert_eq!(both[1].cli_version, None);
+    }
+
+    /// **A refresh reports the posture of the VM the name points at, not `open`.**
+    ///
+    /// Caught in review of the change that added the label: `agent-up`'s fresh path launches
+    /// with the connector (AGENT-9) and can say `open`, but the refresh path attaches to
+    /// whatever the name registry points at, and `microvm attach` can register a
+    /// connector-less `run --keep` under any name. Reporting `open` for that VM would be the
+    /// same class of mislabelling the posture key exists to remove — a claim about a launch
+    /// this process did not perform.
+    ///
+    /// **Falsification** — 2026-09-13. Make the refresh arm read
+    /// `agents::agent_vm_egress_posture()` instead of `posture_of(&record_posture)`, as the
+    /// first version of this change did, and the `unsealed` cases below read `open`.
+    #[test]
+    fn a_refresh_reads_the_posture_off_the_record_and_never_assumes_open() {
+        use microvms_core::control::EgressPosture;
+
+        assert_eq!(
+            posture_of(&Some("unsealed".into())),
+            EgressPosture::Unsealed,
+            "a connector-less VM someone attached stays connector-less in the report"
+        );
+        assert_eq!(
+            posture_of(&Some("best-effort".into())),
+            EgressPosture::BestEffort
+        );
+        assert_eq!(
+            posture_of(&Some("open".into())),
+            EgressPosture::Open,
+            "and a VM this command did launch with the connector still reads open"
+        );
+        // No posture on the record: `attach` wrote it, or a version that predates the field
+        // did. The fallback is the weakest true claim, never `open` and never `sealed`.
+        assert_eq!(posture_of(&None), EgressPosture::default());
+        assert_eq!(posture_of(&None), EgressPosture::Unsealed);
+        assert_eq!(
+            posture_of(&Some("sealed-ish".into())),
+            EgressPosture::default(),
+            "an unreadable label is not a posture to report as measured"
+        );
+        // The fresh path's own claim, for contrast: it launched with the connector.
+        assert_eq!(agents::agent_vm_egress_posture(), EgressPosture::Open);
     }
 
     /// The envelope's `agents` array carries the command a caller would stream.

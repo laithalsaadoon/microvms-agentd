@@ -38,6 +38,164 @@
 
 use crate::region::Region;
 
+/// Whether the platform is measured to honour an **omitted** egress connector.
+///
+/// `false`, and that is a measurement rather than a guess: on 2026-09-11 (microvm 0.5.0,
+/// issue #154), 2026-09-12 (0.7.0) and 2026-09-13, us-east-1, API version `2025-09-09`, a
+/// VM launched with no `egressNetworkConnectors` member reached `example.com`,
+/// `github.com`, `pypi.org` and `extensions.duckdb.org` exactly as a `--egress` VM did
+/// (`docs/PLATFORM.md`, "A VM launched without the egress connector still has outbound
+/// network").
+///
+/// This constant exists so that "no egress" has **one** spelling in the client. Every
+/// posture label, every envelope key and every human line derives from
+/// [`EgressPosture::for_launch`], so the day the platform starts honouring the omission
+/// the repair is this one `bool` — not a search for the places that claimed a seal. The
+/// live suite pins the measurement against this constant
+/// (`conformance/run_rs.py`, `drive_platform_posture`), so a platform that starts sealing
+/// goes red here rather than silently making the label pessimistic.
+pub const PLATFORM_HONOURS_OMITTED_EGRESS: bool = false;
+
+/// What a launch's outbound network actually is, as opposed to what was requested.
+///
+/// # Why a request flag is not an answer
+///
+/// `egress: false` says what the client asked for. It does not say what the VM got, and
+/// for three measurement dates running those are different things: the omission is the
+/// strongest request `RunMicrovm` accepts — the API's whole outbound surface is
+/// `egressNetworkConnectors`, a list of connector ARNs, with no deny-all, VPC-only or
+/// policy member to set (service model `2025-09-09`) — and the platform grants outbound
+/// network anyway. A caller reading `egress: false` as "sealed" is the mistake this type
+/// exists to make unwriteable: an external review reached `extensions.duckdb.org` from a
+/// VM launched without `--egress` and installed a 242 MB DuckDB extension, which was
+/// documented platform behaviour and read as a client defect, because the envelope said
+/// `egress: false` and nothing said what that means.
+///
+/// So the client reports the posture, always, and names the weakest of the two claims it
+/// can support.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum EgressPosture {
+    /// `INTERNET_EGRESS` is on the request: the VM has outbound network by design.
+    Open,
+    /// No connector requested, and the platform does not honour the omission. The VM
+    /// reaches the internet. **This is the posture of a default launch today.**
+    Unsealed,
+    /// No connector requested, plus the advisory in-guest deny
+    /// ([`crate::sandbox::RunRequest::deny_egress`]). A well-behaved client refuses to
+    /// leave the VM; a workload that ignores its environment does not.
+    BestEffort,
+    /// No connector requested, and the platform honours the omission: no outbound path.
+    ///
+    /// Unreachable while [`PLATFORM_HONOURS_OMITTED_EGRESS`] is `false`, and reachable by
+    /// flipping that one constant when a re-measurement earns it.
+    Sealed,
+}
+
+impl EgressPosture {
+    /// The posture of a launch that requested `egress` and asked for `deny_egress`.
+    ///
+    /// A platform seal outranks the advisory deny, because it is the stronger claim of the
+    /// two and the advisory one is then redundant.
+    pub fn for_launch(egress: bool, deny_egress: bool) -> Self {
+        match (egress, PLATFORM_HONOURS_OMITTED_EGRESS, deny_egress) {
+            (true, _, _) => EgressPosture::Open,
+            (false, true, _) => EgressPosture::Sealed,
+            (false, false, true) => EgressPosture::BestEffort,
+            (false, false, false) => EgressPosture::Unsealed,
+        }
+    }
+
+    /// The wire spelling, which is what an envelope and a `--json` consumer branch on.
+    ///
+    /// Four values and no `Option`: a consumer never has to guard against a missing
+    /// posture, and none of the four is the empty string a `bool` degrades into.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            EgressPosture::Open => "open",
+            EgressPosture::Unsealed => "unsealed",
+            EgressPosture::BestEffort => "best-effort",
+            EgressPosture::Sealed => "sealed",
+        }
+    }
+
+    /// Whether outbound traffic is refused by something other than the workload's goodwill.
+    ///
+    /// Only [`EgressPosture::Sealed`] answers `true`. [`EgressPosture::BestEffort`] does
+    /// not, and that is the whole reason this predicate exists rather than a
+    /// `posture != Open` test at each call site.
+    pub fn is_sealed(self) -> bool {
+        matches!(self, EgressPosture::Sealed)
+    }
+
+    /// The posture a stored label names, or `None` for a string this version does not know.
+    ///
+    /// The inverse of [`EgressPosture::as_str`], and it exists for one caller: the CLI's
+    /// name registry persists the label of the launch a name was registered for, and
+    /// `agent-up`'s refresh path reads it back in a later process rather than assuming the
+    /// posture of the launch it did not perform. `None` rather than a default, so the caller
+    /// decides what an unreadable record means instead of inheriting a claim.
+    pub fn from_label(label: &str) -> Option<Self> {
+        [
+            EgressPosture::Open,
+            EgressPosture::Unsealed,
+            EgressPosture::BestEffort,
+            EgressPosture::Sealed,
+        ]
+        .into_iter()
+        .find(|posture| posture.as_str() == label)
+    }
+
+    /// One sentence a human can act on, printed beside the label.
+    ///
+    /// Each names the mechanism rather than a verdict, because "no egress" read as a
+    /// verdict is the defect.
+    pub fn describe(self) -> &'static str {
+        match self {
+            EgressPosture::Open => {
+                "the INTERNET_EGRESS connector is on the request; the VM reaches the \
+                 internet by design"
+            }
+            EgressPosture::Unsealed => {
+                "no egress connector was requested, and the platform does not honour the \
+                 omission: the VM still reaches the internet (measured 2026-09-11, \
+                 2026-09-12 and 2026-09-13, us-east-1; docs/PLATFORM.md). Not a seal — \
+                 size the execution role accordingly (docs/TRUST.md)"
+            }
+            EgressPosture::BestEffort => {
+                "no egress connector, plus the advisory proxy deny in the launch \
+                 environment: a well-behaved client (curl, uv, pip, npm) refuses to leave \
+                 the VM, and a workload that ignores its environment reaches the internet \
+                 anyway. Not a seal"
+            }
+            EgressPosture::Sealed => {
+                "no egress connector, and the platform honours the omission: the VM has no \
+                 outbound path"
+            }
+        }
+    }
+}
+
+/// The posture of a launch that asks for nothing, which is the honest default in both
+/// directions: `Sealed` would be the defect this type exists to prevent, and `Open` would
+/// overclaim what a connector-less launch was given.
+///
+/// **Derived through [`EgressPosture::for_launch`] rather than named.** A `#[default]`
+/// attribute on `Unsealed` was the first spelling and it was wrong: it hardcodes the answer
+/// past [`PLATFORM_HONOURS_OMITTED_EGRESS`], so the day that constant flips, a default
+/// posture would keep saying `unsealed` while every derived one said `sealed` — the
+/// one-constant repair this type is built around, broken by its own `Default`.
+impl Default for EgressPosture {
+    fn default() -> Self {
+        EgressPosture::for_launch(false, false)
+    }
+}
+
+impl std::fmt::Display for EgressPosture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// The Lambda-managed connectors this client will name, and no others.
 ///
 /// Named for the *intent* rather than for the wire value, because the intent is what a
@@ -123,6 +281,126 @@ impl ConnectorIntent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **The posture of a default launch is `unsealed`, never `sealed`.**
+    ///
+    /// The label a caller reads for `egress: false` is the whole finding: an omitted
+    /// connector is the strongest request the API accepts and the platform grants outbound
+    /// network anyway, so the client must not spell that state as a seal.
+    ///
+    /// **Falsification** — flip [`PLATFORM_HONOURS_OMITTED_EGRESS`] to `true` and this
+    /// test fails on the first assertion (it reads `sealed`), which is exactly the
+    /// re-measurement gate the constant is for. Done on 2026-09-13, seen red, restored.
+    #[test]
+    fn a_launch_with_no_connector_is_unsealed_and_not_sealed() {
+        let posture = EgressPosture::for_launch(false, false);
+        assert_eq!(posture, EgressPosture::Unsealed);
+        assert_eq!(posture.as_str(), "unsealed");
+        assert!(
+            !posture.is_sealed(),
+            "omitting the connector does not seal the VM; it is measured not to"
+        );
+        // The constant itself is not asserted here: clippy refuses an assertion on a
+        // constant, and the three assertions above already fail when it flips, which is the
+        // behaviour that matters rather than the value.
+    }
+
+    /// The other three postures, and the two rules that order them: `--egress` is `open`
+    /// whatever else was asked for, and a platform seal outranks the advisory deny.
+    #[test]
+    fn the_posture_table_is_the_whole_domain() {
+        assert_eq!(EgressPosture::for_launch(true, false), EgressPosture::Open);
+        assert_eq!(
+            EgressPosture::for_launch(true, true),
+            EgressPosture::Open,
+            "asking for egress is asking for egress; the advisory deny cannot dress it as \
+             anything narrower"
+        );
+        assert_eq!(
+            EgressPosture::for_launch(false, true),
+            EgressPosture::BestEffort
+        );
+        assert_eq!(EgressPosture::BestEffort.as_str(), "best-effort");
+        assert!(
+            !EgressPosture::BestEffort.is_sealed(),
+            "best effort is not a seal, and this predicate is the only place that decides it"
+        );
+        assert!(EgressPosture::Sealed.is_sealed());
+    }
+
+    /// Every posture renders a distinct non-empty label and a sentence that says what the
+    /// mechanism is, because a consumer branches on the label and a human reads the line.
+    #[test]
+    fn every_posture_has_a_distinct_label_and_a_description() {
+        let postures = [
+            EgressPosture::Open,
+            EgressPosture::Unsealed,
+            EgressPosture::BestEffort,
+            EgressPosture::Sealed,
+        ];
+        let labels: Vec<&str> = postures.iter().map(|posture| posture.as_str()).collect();
+        for (i, a) in labels.iter().enumerate() {
+            assert!(!a.is_empty());
+            for b in &labels[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
+        for posture in postures {
+            assert!(posture.describe().len() > 40, "{posture}");
+        }
+        // The two postures that are not seals must say so in words, not only in the
+        // predicate: the human line is what a reviewer reads.
+        for posture in [EgressPosture::Unsealed, EgressPosture::BestEffort] {
+            assert!(
+                posture.describe().contains("Not a seal"),
+                "{posture} must state that it is not a seal: {}",
+                posture.describe()
+            );
+        }
+    }
+
+    /// **`Default` derives through `for_launch`, so one constant still decides everything.**
+    ///
+    /// The first spelling of this was `#[default] Unsealed`, which hardcodes the answer past
+    /// [`PLATFORM_HONOURS_OMITTED_EGRESS`] — flip the constant and a defaulted posture keeps
+    /// saying `unsealed` while every derived one says `sealed`. Caught in review of the
+    /// change that introduced it.
+    ///
+    /// **Falsification** — 2026-09-13. Restore `#[derive(Default)]` with `#[default]` on
+    /// `Unsealed`, flip the constant to `true`, and this test fails while the label tests
+    /// still pass. With the manual impl, the same flip keeps them equal.
+    #[test]
+    fn the_default_posture_is_the_derived_one() {
+        assert_eq!(
+            EgressPosture::default(),
+            EgressPosture::for_launch(false, false),
+            "a defaulted posture must be the posture of a launch that asks for nothing, \
+             derived from the same constant"
+        );
+    }
+
+    /// Every label round-trips, and an unknown one is `None` rather than a guess.
+    ///
+    /// The registry stores the label, so a record written by a later version — or corrupted
+    /// — must not be read as a posture this version would then report as measured.
+    #[test]
+    fn every_label_round_trips_and_an_unknown_one_is_none() {
+        for posture in [
+            EgressPosture::Open,
+            EgressPosture::Unsealed,
+            EgressPosture::BestEffort,
+            EgressPosture::Sealed,
+        ] {
+            assert_eq!(EgressPosture::from_label(posture.as_str()), Some(posture));
+        }
+        assert_eq!(EgressPosture::from_label("sealed-ish"), None);
+        assert_eq!(EgressPosture::from_label(""), None);
+        assert_eq!(
+            EgressPosture::from_label("Open"),
+            None,
+            "the labels are the wire spelling, and case is part of it"
+        );
+    }
 
     /// The exact ARN, as a literal, for the region the measurements were taken in. The
     /// format came from a measurement rather than from the ARN grammar, so a

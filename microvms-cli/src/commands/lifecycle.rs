@@ -269,6 +269,31 @@ pub fn merge_config(
     report("egress", json!(egress.value), egress.source);
     merged.egress = egress.value;
 
+    // `--deny-egress` is SetTrue and merges exactly as `--egress` does. The clap
+    // `conflicts_with` catches the two flags together; the file can also disagree with a
+    // flag, so the pair is re-checked after both merges below — and core refuses it a third
+    // time, because a library caller reaches none of this.
+    let deny_egress = crate::config::pick(args.deny_egress, args.deny_egress, config.deny_egress);
+    report("denyEgress", json!(deny_egress.value), deny_egress.source);
+    merged.deny_egress = deny_egress.value;
+
+    // The pair is refused here as well as by clap, because the file can disagree with a flag
+    // and clap sees only the command line: `deny-egress = true` in microvm.toml under a
+    // typed `--egress` reaches this line with both merged true. Core refuses it a third time
+    // for a library caller who reaches neither. The posture itself is not a knob and is not
+    // reported here — it is derived once, on the envelope's own `egressPosture` key.
+    if merged.egress && merged.deny_egress {
+        return Err(crate::exit::CliError::new(
+            crate::exit::Exit::InvalidArg,
+            "--egress and --deny-egress (or `egress` and `deny-egress` in microvm.toml) ask \
+             for opposite things: --egress puts the INTERNET_EGRESS connector on the launch, \
+             --deny-egress points the guest's proxy variables at a black hole so a \
+             well-behaved client refuses to leave the VM. Pick one. Neither seals the VM."
+                .to_string(),
+        )
+        .suggest("drop one of them; `microvm run --json` reports egressPosture either way"));
+    }
+
     // `--auto-resume` is SetTrue like `--egress` and merges the same way: the file can
     // enable it for a project, the flag can only add it, and `auto-resume = false` in a
     // file is the default restated rather than an override.
@@ -579,6 +604,13 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
     let mut sandbox = ctx.seam.open_sandbox(region, args.port).await?;
     let mut outcome = RunOutcome {
         image_name: Some(name.clone()),
+        // Derived from the merged knobs rather than from the launch, so a run that fails
+        // before the launch still reports what it was going to be — and derived in core, so
+        // the CLI cannot hold a different opinion than the library about the same request.
+        egress_posture: microvms_core::control::EgressPosture::for_launch(
+            args.egress,
+            args.deny_egress,
+        ),
         ..RunOutcome::default()
     };
     let mut exec_report: Option<ExecReport> = None;
@@ -1002,6 +1034,9 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
     }
     if args.egress {
         request = request.with_egress();
+    }
+    if args.deny_egress {
+        request = request.with_deny_egress();
     }
     if args.shell {
         request = request.with_shell();
@@ -2273,6 +2308,10 @@ fn name_record_for_kept(
         // their absence is a launch without the flag, never a failed launch.
         identity_host_seed: outcome.identity_host_seed.clone(),
         identity_vm_public_key: outcome.identity_vm_public_key.clone(),
+        // The posture this launch actually got, so a later command addressing the name
+        // reports it rather than assuming one. `agent-up --vm-name <this name>` is the
+        // caller: its refresh path would otherwise report the `open` its own launches use.
+        egress_posture: Some(outcome.egress_posture.as_str().to_string()),
     })
 }
 

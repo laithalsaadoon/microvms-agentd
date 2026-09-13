@@ -221,6 +221,15 @@ pub struct RunOutcome {
     pub identity_host_seed: Option<String>,
     /// The VM's public key, base64 — the pin. Public by construction.
     pub identity_vm_public_key: Option<String>,
+    /// What this run's outbound network **is**: `open`, `unsealed`, `best-effort`, or
+    /// `sealed`.
+    ///
+    /// Not the same fact as `resolvedConfig.egress`, which is what was *asked for*. A
+    /// connector-less launch reports `unsealed`, because the platform gives such a VM
+    /// outbound network (measured three dates, `docs/PLATFORM.md`) — a caller who read
+    /// `egress: false` as a seal downloaded a 242 MB DuckDB extension from a VM they
+    /// believed had no network. Defaults to `unsealed` rather than to a claim.
+    pub egress_posture: microvms_core::control::EgressPosture,
 }
 
 impl RunOutcome {
@@ -268,6 +277,10 @@ impl RunOutcome {
             "identityVmPublicKey".into(),
             json!(self.identity_vm_public_key),
         );
+        // Always present and never null: a consumer branching on outbound reach must not
+        // have to infer it from `resolvedConfig.egress`, which answers a different question
+        // (what was requested) and reads as a seal when it is not one.
+        data.insert("egressPosture".into(), json!(self.egress_posture.as_str()));
         data
     }
 
@@ -289,6 +302,9 @@ impl RunOutcome {
                 ),
                 format!("running_sec\t{:.1}", self.running_seconds),
                 format!("leaked\t{}", self.leaked.join(",")),
+                // Appended rather than inserted: a shell reading field one of line one is
+                // the dense contract, and every existing line keeps its position.
+                format!("egress\t{}", self.egress_posture.as_str()),
             ]
             .join("\n");
         }
@@ -329,9 +345,14 @@ impl RunOutcome {
         {
             lines.push(format!("cost: {render}"));
         }
-        if lines.is_empty() {
-            return "done".to_string();
-        }
+        // Unconditional, and that is the point: the run that read as sealed printed nothing
+        // about its network at all. The line names the mechanism, not a verdict, because
+        // "egress: false" as a verdict is the defect (docs/TRUST.md, **Egress**).
+        lines.push(format!(
+            "egress: {} — {}",
+            self.egress_posture.as_str(),
+            self.egress_posture.describe()
+        ));
         lines.join("\n")
     }
 }
@@ -875,6 +896,7 @@ mod tests {
         let dense = outcome.render(true);
         assert!(dense.starts_with("exit\t7"), "{dense}");
         assert!(dense.contains("leaked\tarn:image"), "{dense}");
+        assert!(dense.contains("egress\tunsealed"), "{dense}");
         // Field one is readable with `cut -f2`, which is the whole point.
         let first = dense.lines().next().expect("a line");
         assert_eq!(first.split('\t').nth(1), Some("7"));
@@ -948,10 +970,27 @@ mod tests {
         );
     }
 
-    /// An outcome with nothing to say says `done` rather than printing an empty line.
+    /// **Every run report states its egress posture, including the one with nothing else to
+    /// say.**
+    ///
+    /// This test used to assert `done` for an outcome with no output, no leak and no cost.
+    /// The posture line replaces it: a run whose report said nothing about its network is
+    /// how `--egress`-off came to be read as a seal, and the default posture is `unsealed`
+    /// rather than a claim.
+    ///
+    /// **Falsification** — 2026-09-13. Make the posture line conditional on `kept` and this
+    /// goes red; drop it and the `unsealed` assertion goes red.
     #[test]
-    fn a_launch_with_no_exec_renders_done() {
-        assert_eq!(RunOutcome::default().render(false), "done");
+    fn a_launch_with_no_exec_still_states_its_egress_posture() {
+        let rendered = RunOutcome::default().render(false);
+        assert_eq!(
+            rendered,
+            format!(
+                "egress: unsealed — {}",
+                microvms_core::control::EgressPosture::Unsealed.describe()
+            )
+        );
+        assert!(!rendered.contains(": sealed"), "{rendered}");
     }
 
     /// An advisory renders WARN and does not decide the exit code.

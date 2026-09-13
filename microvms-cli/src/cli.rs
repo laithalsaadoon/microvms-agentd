@@ -722,8 +722,30 @@ pub struct RunArgs {
     pub repair_identity: bool,
 
     /// Give the VM outbound network. Omitted by default — a daemon needs none.
+    ///
+    /// Omitting this is NOT a seal: the platform gives a connector-less VM outbound
+    /// network anyway (measured 2026-09-11, 2026-09-12 and 2026-09-13; docs/PLATFORM.md).
+    /// Every run reports what it actually got as `egressPosture`.
     #[arg(long)]
     pub egress: bool,
+
+    /// Ask the guest's own clients to refuse outbound requests. Advisory, never a seal.
+    ///
+    /// There is nothing to ask the platform for — `RunMicrovm`'s whole outbound surface
+    /// is the egress connector list, and omitting it is measured not to seal the VM — and
+    /// nothing to ask the guest kernel for either, because neither the exec child nor
+    /// `agentd` holds `CAP_NET_ADMIN`, so a route, an nftables rule or a namespace is
+    /// `EPERM` (docs/PLATFORM.md). What is left is the environment: this sets
+    /// `http_proxy`/`https_proxy`/`all_proxy` in both cases to `http://127.0.0.1:1`, in
+    /// the launch env, so `curl`, `uv`, `pip` and `npm` fail closed rather than quietly
+    /// downloading. A workload that unsets them, or a client that never read them, reaches
+    /// the internet exactly as before — which is why the run reports `egressPosture:
+    /// best-effort` and never `sealed`.
+    ///
+    /// Refused with `--egress`. Spends about 200 bytes of the payload's 4096-byte
+    /// ceiling, and a `--launch-env` on one of those keys keeps the caller's own value.
+    #[arg(long, conflicts_with = "egress")]
+    pub deny_egress: bool,
 
     /// Launch shell-capable, so `microvm shell` can attach later.
     ///

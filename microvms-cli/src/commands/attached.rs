@@ -1874,6 +1874,10 @@ pub async fn attach_vm<O: std::io::Write, E: std::io::Write>(
                     at: 0,
                     identity_host_seed: args.identity_host_seed.clone(),
                     identity_vm_public_key: args.identity_vm_public_key.clone(),
+                    // `attach` registers a VM it did not launch, so it knows nothing
+                    // about the connectors that launch asked for. `None`, and the
+                    // reader says the weakest true thing rather than assume.
+                    egress_posture: None,
                 },
                 region,
             )

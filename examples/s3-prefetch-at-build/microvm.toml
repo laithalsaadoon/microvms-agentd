@@ -9,8 +9,14 @@
 # documented in examples/coding-agents-on-bedrock/microvm.toml.
 memory = 512
 
-# No egress, deliberately — that is the demonstration. The data this VM
-# reads from /opt/prefetch arrived at image-build time and rides the
-# snapshot, so the launched VM needs no outbound network and makes no S3
-# call at all.
+# No egress connector requested, deliberately — that is the demonstration.
+# The data this VM reads from /opt/prefetch arrived at image-build time and
+# rides the snapshot, so the launched VM needs no outbound network and makes
+# no S3 call at all.
+#
+# `egress = false` is the default restated, and it does NOT seal the VM: the
+# platform gives a connector-less VM outbound network anyway, measured three
+# times (docs/PLATFORM.md). The run reports `egressPosture: unsealed` for
+# exactly that reason. What this demo proves is that no S3 call is NEEDED,
+# not that one is impossible.
 egress = false

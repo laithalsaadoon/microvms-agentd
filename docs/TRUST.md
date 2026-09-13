@@ -395,14 +395,51 @@ asserts on the role's policy, which is what the suite now does.
 **Egress.** Nothing here constrains what the workload can reach. Egress is a
 launch-time property of the MicroVM's network connectors, and a guest daemon cannot
 enforce it against a root process. This document used to say that omitting
-`INTERNET_EGRESS` is how you get a VM with no outbound network; measured 2026-09-11
-and 2026-09-12 in us-east-1 (API version `2025-09-09`, `docs/PLATFORM.md`, "A VM
-launched without the egress connector still has outbound network"), a VM launched with
-no egress connector reached `example.com`, `github.com` and `sts.amazonaws.com` exactly
-as the `--egress` VM did. Omitting the connector is still the right request — the
-client sends no egress list, and the live suite pins the measured posture so a change
-is noticed — but today it does not seal the VM, and that call belongs to the platform
-rather than to whoever calls `RunMicrovm`.
+`INTERNET_EGRESS` is how you get a VM with no outbound network; measured 2026-09-11,
+2026-09-12 and 2026-09-13 in us-east-1 (API version `2025-09-09`, `docs/PLATFORM.md`,
+"A VM launched without the egress connector still has outbound network"), a VM launched
+with no egress connector reached `example.com`, `github.com`, `sts.amazonaws.com`,
+`pypi.org` and `extensions.duckdb.org` exactly as the `--egress` VM did. Omitting the
+connector is still the right request — the client sends no egress list, and the live
+suite pins the measured posture so a change is noticed — but today it does not seal the
+VM, and that call belongs to the platform rather than to whoever calls `RunMicrovm`.
+
+**So this client reports the posture rather than the request, in four values.** A
+consumer that read `egress: false` as "sealed" was reading a request flag as a
+guarantee, and the cost of that reading is measurable: an external review of an
+unrelated tool had DuckDB fetch a 242 MB extension inside a VM launched without
+`--egress` (2026-09-12). Every `run` and `agent-up` envelope now carries
+`egressPosture`, and every human run report prints it:
+
+| Posture | Mechanism | Enforced by |
+|---|---|---|
+| `open` | `--egress` puts `INTERNET_EGRESS` on the launch | the platform, by design |
+| `unsealed` | no connector requested, and the platform grants outbound network anyway | **nothing** |
+| `best-effort` | `--deny-egress`: `http_proxy`/`https_proxy`/`all_proxy`, both cases, set to `http://127.0.0.1:1` in the launch env | the workload's own clients |
+| `sealed` | no connector and no outbound path | the platform — **unreachable today** |
+
+`sealed` exists as a value and is unreachable on purpose: the client's belief lives in
+one constant (`microvms_core::control::PLATFORM_HONOURS_OMITTED_EGRESS`, `false`), the
+live suite measures the guest against it on every run, and a platform that starts
+honouring the omission turns those checks red. Flipping that constant is then the whole
+repair, and every label, envelope and printed line follows it. A default launch is
+`unsealed`, never `sealed`, because a default that claimed a seal is the defect this
+type exists to prevent.
+
+**`--deny-egress` is advisory and the label says so.** It stops `curl`, `uv`, `pip` and
+`npm` — the accidental download, which is the common case and the one that cost 242 MB
+— and it does nothing against a workload that unsets or overrides those proxy
+variables — six of them, `http_proxy`/`https_proxy`/`all_proxy` in both cases, and a
+client reading only the spelling that was left in place is enough — or that uses a client
+which never read them. It is not a security boundary and must not be
+reported as one. Two stronger things were considered and are not here: a default-drop
+nftables policy applied at boot (refused — `agentd` runs with `CapBnd
+00000000a80425fb`, no `CAP_NET_ADMIN`, so the image cannot install one either), and a
+seccomp filter on the exec'd child refusing `socket(AF_INET)`, which a root workload
+could not lift but which needs `pre_exec` in the daemon's spawn path — a rule this
+project holds for a documented deadlock reason (`agentd/src/exec.rs`, module docs), and
+a protocol change besides. If the platform never offers a network policy, that filter is
+the next thing to measure, and it belongs in a proposal rather than in a patch.
 
 **Secret delivery beyond the run hook.** The `runHookPayload` string is the only
 per-VM differentiator the platform offers, and its ceiling is 4096 bytes, measured

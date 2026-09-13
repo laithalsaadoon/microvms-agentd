@@ -85,6 +85,30 @@ pub const DEFAULT_DELETE_ATTEMPTS: u32 = 20;
 /// The gap between image-delete attempts.
 pub const DEFAULT_DELETE_BACKOFF: Duration = Duration::from_secs(15);
 
+/// Where the advisory deny points a well-behaved client: a loopback port nothing serves.
+///
+/// Loopback rather than an unroutable public address, because a refused connection is
+/// immediate and a black-holed one costs the workload a connect timeout per request. Port 1
+/// is privileged, so a demoted workload cannot answer it by accident.
+pub const DENY_EGRESS_PROXY_URL: &str = "http://127.0.0.1:1";
+
+/// The environment variables the advisory deny sets, in both spellings clients read.
+///
+/// Both cases on purpose: `curl` and most Unix clients read the lowercase names, Python's
+/// `requests`/`urllib3`, npm and the AWS SDKs read the uppercase ones, and a client that
+/// reads only the spelling this list omits is a hole in a mechanism that is advisory to
+/// begin with. `no_proxy` is deliberately absent: the launch environment starts empty
+/// (`agentd` clears it and applies only what the hook delivered), so there is no inherited
+/// exemption to overwrite, and each key spends payload budget.
+pub const DENY_EGRESS_ENV_KEYS: [&str; 6] = [
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+];
+
 /// How often a lifecycle wait polls.
 const LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -190,6 +214,33 @@ pub struct RunRequest {
     /// 2026-09-12 the platform gave a connector-less VM outbound network anyway
     /// (`docs/PLATFORM.md`).
     pub egress: bool,
+    /// Whether to seal the guest as far as a client can, which is not far
+    /// ([`crate::control::EgressPosture::BestEffort`]).
+    ///
+    /// **This is advisory, and the type says so in its posture rather than in a comment.**
+    /// There is no network-layer seal to ask for: `RunMicrovm`'s whole outbound surface is
+    /// `egressNetworkConnectors` (service model `2025-09-09`), omitting it is the strongest
+    /// request there is, and the platform grants outbound network anyway. There is no
+    /// in-guest seal either — `ip`, `iptables` and `nft` are absent from `al2023-minimal`,
+    /// and the exec child *and `agentd` itself* run with `CapBnd 00000000a80425fb`, which
+    /// carries no `CAP_NET_ADMIN` and no `CAP_SYS_ADMIN`, so a route, a netfilter rule, a
+    /// sysctl and a network namespace are all `EPERM` at boot as much as at exec time
+    /// (`docs/PLATFORM.md`, measured 2026-09-12).
+    ///
+    /// What is left is the guest's *environment*: this sets the proxy variables every
+    /// well-behaved HTTP client reads ([`DENY_EGRESS_ENV_KEYS`]) to a black hole
+    /// ([`DENY_EGRESS_PROXY_URL`]), delivered in the launch env, so `curl`, `uv`, `pip` and
+    /// `npm` fail closed instead of quietly downloading 242 MB. A workload that unsets them,
+    /// or a client that never read them, reaches the internet exactly as before — which is
+    /// why the posture is `best-effort` and never `sealed`.
+    ///
+    /// Refused together with [`RunRequest::egress`]: the two ask for opposite things, and
+    /// the refusal is local (`ERR_INVALID_ARG`) rather than a silent precedence rule.
+    ///
+    /// It spends about 200 bytes of the payload's measured 4096-byte ceiling, and a caller
+    /// who already set one of those keys keeps their own value
+    /// ([`RunRequest::effective_launch_env`]).
+    pub deny_egress: bool,
     /// Whether to launch shell-capable: the ingress set becomes the measured pair
     /// `[HTTP_INGRESS, SHELL_INGRESS]` instead of `ALL_INGRESS`, which is what
     /// `CreateMicrovmShellAuthToken` requires and what `microvm shell` attaches to.
@@ -219,6 +270,7 @@ impl Default for RunRequest {
             launch_env: std::collections::HashMap::new(),
             identity: false,
             egress: false,
+            deny_egress: false,
             shell: false,
             max_idle_sec: 600,
             suspended_sec: 600,
@@ -249,6 +301,40 @@ impl RunRequest {
     pub fn with_egress(mut self) -> Self {
         self.egress = true;
         self
+    }
+
+    /// Applies the advisory in-guest deny. See [`RunRequest::deny_egress`] for what it is
+    /// and, more importantly, for what it is not.
+    #[must_use]
+    pub fn with_deny_egress(mut self) -> Self {
+        self.deny_egress = true;
+        self
+    }
+
+    /// What this launch's outbound network **is**, as opposed to what it asked for.
+    ///
+    /// The one derivation, so the CLI's envelope, the CLI's human line and any embedding
+    /// consumer cannot disagree about the same launch.
+    pub fn egress_posture(&self) -> crate::control::EgressPosture {
+        crate::control::EgressPosture::for_launch(self.egress, self.deny_egress)
+    }
+
+    /// The launch environment as the guest will see it: the caller's, plus the advisory
+    /// proxy deny when [`RunRequest::deny_egress`] is on.
+    ///
+    /// The caller's own value wins on a shared key. A launch that already routes through a
+    /// proxy of its own has said where its traffic goes, and overwriting that with a black
+    /// hole would break a working configuration in the name of a posture this client
+    /// already declines to call a seal.
+    pub fn effective_launch_env(&self) -> std::collections::HashMap<String, String> {
+        let mut env = self.launch_env.clone();
+        if self.deny_egress {
+            for key in DENY_EGRESS_ENV_KEYS {
+                env.entry(key.to_string())
+                    .or_insert_with(|| DENY_EGRESS_PROXY_URL.to_string());
+            }
+        }
+        env
     }
 
     /// Requests a shell-capable launch. See [`RunRequest::shell`].
@@ -749,6 +835,21 @@ impl Sandbox {
             )));
         }
 
+        // Opposite intents, refused before the call rather than resolved by a precedence
+        // rule nobody would find: `--egress` asks the platform for outbound network and
+        // `--deny-egress` asks the guest's own clients to refuse it, so a launch carrying
+        // both would report `open` while its workload's tools failed closed.
+        if request.egress && request.deny_egress {
+            return Err(Error::invalid_arg(
+                "egress and deny_egress ask for opposite things: egress puts the \
+                 INTERNET_EGRESS connector on the launch, and deny_egress sets the guest's \
+                 proxy variables to a black hole so a well-behaved client refuses to leave \
+                 the VM. Pick one. Neither seals the VM — omitting the connector is measured \
+                 not to (docs/PLATFORM.md), and the deny is advisory."
+                    .to_string(),
+            ));
+        }
+
         let Some(identifier) = request
             .image_identifier
             .clone()
@@ -778,7 +879,7 @@ impl Sandbox {
         // the caller did not know they were filling.
         let payload = RunHookPayload::for_launch_with_identity(
             &agent_token,
-            &request.launch_env,
+            &request.effective_launch_env(),
             launch_identity.as_ref(),
         )?;
 
@@ -1381,6 +1482,97 @@ mod tests {
             "https://gateway.example"
         );
         assert_eq!(inner["env"]["PATH"], "/usr/local/bin:/usr/bin:/bin");
+    }
+
+    /// **The advisory deny reaches the guest's environment, and it changes nothing else
+    /// about the request.**
+    ///
+    /// Read off `runHookPayload` for the reason the launch-env test gives, and the connector
+    /// member is asserted absent in the same body: `deny_egress` must not quietly ask the
+    /// platform for anything, because the whole claim is that the platform has nothing to
+    /// ask for.
+    ///
+    /// **Falsification** — 2026-09-13. Make `run` build the payload from
+    /// `request.launch_env` instead of `request.effective_launch_env()` and the two
+    /// `https_proxy` assertions go red while every other launch test stays green; restored
+    /// after.
+    #[tokio::test]
+    async fn the_advisory_deny_reaches_the_launch_environment_in_both_spellings() {
+        let (mut sandbox, recorder, _) = planted();
+        answer_launch(&recorder);
+        let request = RunRequest::new().with_image("arn:image").with_deny_egress();
+        assert_eq!(
+            request.egress_posture(),
+            crate::control::EgressPosture::BestEffort
+        );
+        sandbox.run(request).await.expect("launches");
+
+        let body = recorder.first_body("RunMicrovm");
+        let inner: serde_json::Value =
+            serde_json::from_str(body["runHookPayload"].as_str().expect("a string"))
+                .expect("the payload is itself JSON");
+        for key in crate::sandbox::DENY_EGRESS_ENV_KEYS {
+            assert_eq!(
+                inner["env"][key], DENY_EGRESS_PROXY_URL,
+                "{key} must point at the black hole: {inner}"
+            );
+        }
+        assert!(
+            body.get("egressNetworkConnectors").is_none(),
+            "the advisory deny asks the platform for nothing: {body}"
+        );
+    }
+
+    /// A caller's own proxy value survives the deny, and a launch that never asked for the
+    /// deny carries none of the keys.
+    #[test]
+    fn the_deny_never_overwrites_a_callers_own_proxy_and_is_absent_by_default() {
+        let kept = RunRequest::new()
+            .with_deny_egress()
+            .with_launch_env("https_proxy", "http://proxy.internal:3128")
+            .effective_launch_env();
+        assert_eq!(kept["https_proxy"], "http://proxy.internal:3128");
+        assert_eq!(kept["http_proxy"], DENY_EGRESS_PROXY_URL);
+
+        let plain = RunRequest::new().effective_launch_env();
+        assert!(
+            plain.is_empty(),
+            "a launch that did not ask for the deny sends byte-for-byte what it always sent: \
+             {plain:?}"
+        );
+        assert_eq!(
+            RunRequest::new().egress_posture(),
+            crate::control::EgressPosture::Unsealed,
+            "and its posture is the measured one, not a seal"
+        );
+    }
+
+    /// **`egress` and `deny_egress` together are refused locally, with zero calls.**
+    ///
+    /// The same shape as the over-budget refusal below: a launch carrying both would report
+    /// `open` while the workload's own tools failed closed, and AWS has no opinion to
+    /// return about it.
+    ///
+    /// **Falsification** — 2026-09-13. Delete the refusal in `run` and this test fails on
+    /// `expect_err`; the launch then succeeds and reports posture `open`. Restored after.
+    #[tokio::test]
+    async fn asking_for_egress_and_the_deny_together_is_refused_before_any_call() {
+        let (mut sandbox, recorder, _) = planted();
+        answer_launch(&recorder);
+        let mut request = RunRequest::new().with_image("arn:image").with_egress();
+        request.deny_egress = true;
+
+        let error = sandbox
+            .run(request)
+            .await
+            .expect_err("opposite intents are not resolved by a precedence rule");
+        assert_eq!(error.kind(), ErrorKind::InvalidArg);
+        assert!(error.to_string().contains("opposite things"), "{error}");
+        assert_eq!(
+            recorder.calls().len(),
+            0,
+            "a locally-refused launch costs nothing"
+        );
     }
 
     /// **A pinned `imageVersion` reaches the wire through the sandbox**, and an unpinned
