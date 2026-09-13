@@ -252,6 +252,7 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 log_group: None,
                 log_stream: None,
                 egress: false,
+                deny_egress: false,
                 shell: false,
                 launch_env: Vec::new(),
                 user: None,
@@ -1361,6 +1362,7 @@ fn run_args_for_image(identifier: &str, state_dir: std::path::PathBuf) -> RunArg
         log_group: None,
         log_stream: None,
         egress: false,
+        deny_egress: false,
         shell: false,
         launch_env: Vec::new(),
         user: None,
@@ -1976,6 +1978,106 @@ async fn a_broken_config_file_is_refused_with_its_own_row_and_zero_doors() {
         seam.doors(),
         Vec::<Door>::new(),
         "a config refusal must cost zero billable calls"
+    );
+}
+
+/// **`--deny-egress` reaches the guest's environment and asks the platform for nothing.**
+///
+/// The two halves of the advisory deny, both read off the `RunMicrovm` body rather than off
+/// a struct: the proxy variables are in the `runHookPayload` env in both spellings, and
+/// `egressNetworkConnectors` is absent — the mechanism is entirely in the guest, because the
+/// platform has no outbound control to ask for (`docs/PLATFORM.md`). The posture the
+/// envelope will carry is asserted beside them, so the label and the request are pinned by
+/// one test.
+///
+/// **Falsification** — 2026-09-13. Drop the `with_deny_egress()` call from the launch arm in
+/// `lifecycle::launch` and the `http_proxy` assertion goes red while the connector assertion
+/// still passes; make the posture `sealed` for a connector-less launch and the label
+/// assertion goes red. Both were run and restored.
+#[tokio::test]
+async fn deny_egress_reaches_the_launch_env_and_asks_the_platform_for_nothing() {
+    let dir = TempDir::new("deny-egress");
+    let transport = Arc::new(ScriptedTransport::new());
+    transport.answer("RunMicrovm", 400, r#"{"message": "scripted stop"}"#);
+    let seam = ScriptedSeam {
+        transport: Arc::clone(&transport),
+        clock: Arc::new(YieldingClock::default()),
+    };
+    let mut args = run_args_for_image(
+        "arn:aws:lambda:us-east-1:123456789012:microvm-image/img",
+        dir.0.clone(),
+    );
+    args.deny_egress = true;
+
+    let (result, _) = dispatch_with(&seam, &Command::Run(args), full_infra()).await;
+    result.expect_err("the scripted RunMicrovm failure ends the run after the request is built");
+
+    let body = transport.first_body("RunMicrovm");
+    assert!(
+        body.get("egressNetworkConnectors").is_none(),
+        "the advisory deny must not put a connector on the request: {body}"
+    );
+    let payload: serde_json::Value =
+        serde_json::from_str(body["runHookPayload"].as_str().expect("a payload string"))
+            .expect("the payload is itself JSON");
+    for key in microvms_core::sandbox::DENY_EGRESS_ENV_KEYS {
+        assert_eq!(
+            payload["env"][key],
+            microvms_core::sandbox::DENY_EGRESS_PROXY_URL,
+            "{key} must reach the guest: {payload}"
+        );
+    }
+    assert_eq!(
+        microvms_core::control::EgressPosture::for_launch(false, true).as_str(),
+        "best-effort",
+        "and the run reports the advisory deny as best-effort, never as a seal"
+    );
+}
+
+/// **A default run reports `unsealed`, and `--egress` with `--deny-egress` is refused across
+/// the flag/file boundary.**
+///
+/// The refusal is here rather than only in clap because clap sees the command line and the
+/// file is the other half: `deny-egress = true` in `microvm.toml` under a typed `--egress`
+/// arrives at `merge_config` with both merged true, and clap's `conflicts_with` never fires.
+/// Zero doors, because a locally-refused launch must cost nothing.
+///
+/// **Falsification** — 2026-09-13. Delete the pair check in `merge_config` and the refusal
+/// assertion goes red (the run proceeds and reports `open` while the guest's clients fail
+/// closed). Restored after.
+#[tokio::test]
+async fn a_default_run_is_unsealed_and_the_egress_pair_is_refused_across_the_file_boundary() {
+    let posture = microvms_core::control::EgressPosture::for_launch(false, false);
+    assert_eq!(
+        posture.as_str(),
+        "unsealed",
+        "the default launch asks for no connector, and that is measured not to seal the VM"
+    );
+
+    let file = ConfigFile::new("deny-egress-pair", "deny-egress = true\n");
+    let mut args = run_args_for_image(
+        "arn:aws:lambda:us-east-1:123456789012:microvm-image/img",
+        std::env::temp_dir(),
+    );
+    args.egress = true;
+    args.config = crate::cli::ConfigFlags {
+        config: Some(file.0.clone()),
+        no_config: false,
+    };
+
+    let Err(error) = crate::commands::lifecycle::merge_config(&args, &|_| None) else {
+        panic!("opposite intents are refused before any call");
+    };
+    assert_eq!(error.exit, Exit::InvalidArg, "{}", error.message);
+    assert!(
+        error.message.contains("opposite things"),
+        "{}",
+        error.message
+    );
+    assert!(
+        error.message.contains("Neither seals the VM"),
+        "the refusal must not imply that either one would: {}",
+        error.message
     );
 }
 
@@ -4997,6 +5099,7 @@ async fn a_taken_vm_name_is_refused_before_any_door_with_its_own_row() {
             at: 1,
             identity_host_seed: None,
             identity_vm_public_key: None,
+            egress_posture: None,
         })
         .expect("registers");
 
@@ -5058,6 +5161,7 @@ async fn a_name_resolves_on_the_lifecycle_wire_and_a_terminate_by_id_frees_it() 
             at: 1,
             identity_host_seed: None,
             identity_vm_public_key: None,
+            egress_posture: None,
         })
         .expect("registers");
 
@@ -5172,6 +5276,7 @@ async fn an_attached_command_by_name_carries_the_registered_triple() {
             at: 1,
             identity_host_seed: None,
             identity_vm_public_key: None,
+            egress_posture: None,
         })
         .expect("registers");
 
@@ -5858,6 +5963,7 @@ fn adoptable_record(name: &str, id: &str) -> crate::ledger::NameRecord {
         at: 1_754_524_800,
         identity_host_seed: None,
         identity_vm_public_key: None,
+        egress_posture: None,
     }
 }
 

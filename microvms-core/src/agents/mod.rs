@@ -215,6 +215,17 @@ pub fn launch_request_for(
     request
 }
 
+/// The egress posture every agent VM launches with (AGENT-9).
+///
+/// Derived from the launch request rather than asserted, so the CLI's `agent-up` envelope
+/// reports what [`launch_request_for`] actually asks for. `open`, and deliberately so:
+/// neither coding agent reaches Bedrock without the connector. An operator who wants an
+/// agent VM that cannot reach anything else needs a network control this platform does not
+/// offer — see `docs/TRUST.md`, **Egress**.
+pub fn agent_vm_egress_posture() -> crate::control::EgressPosture {
+    launch_request_for(&[], "arn:image", None).egress_posture()
+}
+
 /// The stem of the image name: `agent-vm-<agents>` in profile order (AGENT-3). The
 /// caller appends the artifact content hash, exactly as `build --reuse` does.
 pub fn image_stem(specs: &[AgentSpec]) -> String {

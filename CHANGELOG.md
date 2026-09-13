@@ -6,6 +6,63 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
 
 ## Unreleased
 
+### Security
+
+- **Every run reports what its outbound network actually is, and "no `--egress`" no longer
+  reads as a seal.** A defensive review of an unrelated tool reported that a VM launched
+  without `--egress` reached `extensions.duckdb.org` (301) and `pypi.org` (200) and that a
+  DuckDB `INSTALL lance` downloaded a 242 MB extension inside it. The platform behaviour was
+  already measured and documented (`docs/PLATFORM.md`, "A VM launched without the egress
+  connector still has outbound network", 2026-09-11 and 2026-09-12); what this client owned
+  was the claim it made about it, which was `egress: false` in the envelope's
+  `resolvedConfig` and nothing else. A request flag read as a guarantee.
+
+  There is no seal to switch on. `RunMicrovm`'s whole outbound surface is
+  `egressNetworkConnectors`, a list of connector ARNs, with no deny-all, VPC-only or policy
+  member in the service model (`2025-09-09`, re-read against botocore 1.43.83 on
+  2026-09-13), so omitting it is already the strongest request there is. Nor is there an
+  in-guest one: `ip`, `iptables` and `nft` are absent from `al2023-minimal`, and the exec
+  child **and `agentd` itself** run with `CapBnd 00000000a80425fb` — no `CAP_NET_ADMIN`, no
+  `CAP_SYS_ADMIN` — so a route, an nftables rule, a sysctl and a network namespace are all
+  `EPERM`, at boot as much as at exec time.
+
+  So the client reports the posture instead of the request. `microvms_core::control::
+  EgressPosture` has four values — `open`, `unsealed`, `best-effort`, `sealed` — derived in
+  one place from the request and from one constant,
+  `PLATFORM_HONOURS_OMITTED_EGRESS` (`false`, with the three measurement dates on it).
+  `run`, `quickstart` and `agent-up` carry `egressPosture` in the envelope, always present
+  and never null; the human report prints it with the mechanism named; the dense form adds
+  an `egress` field. A default launch is `unsealed`, never `sealed`. The day the platform
+  honours the omission, flipping that one constant moves every label, and the live suite is
+  what earns the flip.
+- **`--deny-egress`, the strongest thing this client can do, and labelled as what it is.**
+  Sets `http_proxy`, `https_proxy` and `all_proxy` (both cases) to `http://127.0.0.1:1` in
+  the launch environment, so `curl`, `uv`, `pip` and `npm` fail closed instead of quietly
+  downloading; the posture is `best-effort`, because a workload that unsets three variables
+  or uses a client that never read them reaches the internet exactly as before. It asks the
+  platform for nothing and adds no kernel enforcement, and the docs say so in those words
+  (`docs/TRUST.md`, **Egress**). Also a `microvm.toml` key (`deny-egress`), refused beside
+  `--egress` three times over: clap on the command line, `merge_config` when the file
+  supplies the other half, and `microvms-core` for a library caller who reaches neither.
+  A caller's own `--launch-env` on one of those keys keeps their value.
+- **The name registry records the posture of the launch, so `agent-up`'s refresh path does
+  not assume one.** `agent-up` launches with the connector (AGENT-9) and its fresh path can
+  say `open`; its *refresh* path attaches to whatever the name points at, and `microvm
+  attach` can register a connector-less `run --keep` under any name. `NameRecord` gains an
+  optional `egressPosture` label — written by `run --keep --vm-name` and by `agent-up`'s own
+  launch, absent for a record `attach` wrote or one predating the field — and the refresh
+  reads it back, falling back to the weakest true claim (`unsealed`) rather than to `open`.
+  `EgressPosture::default()` derives through `for_launch` for the same reason: a `#[default]`
+  attribute would have hardcoded `unsealed` past the one constant everything else follows.
+  Both were review findings on this change, each now a test that was watched failing.
+- **Three live checks (188, up from 185).** `drive_platform_posture` now measures a package
+  registry from the connector-less VM (`pypi.org` — the harm class, not a reachability
+  curiosity), asserts the launch envelope's own `egressPosture` against what the guest can
+  reach, and measures the advisory proxy stopping `curl` on that same VM while the platform
+  keeps routing. Four of that section's checks are now written to go red the day the
+  platform seals a connector-less VM; that red is the signal to re-measure, append to
+  `docs/PLATFORM.md`, and flip the constant.
+
 ## [0.8.0] — 2026-09-12
 
 ### Fixed

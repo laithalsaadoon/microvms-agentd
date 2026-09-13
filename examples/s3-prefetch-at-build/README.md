@@ -11,7 +11,11 @@ This recipe moves both to image-build time. The build fetches the S3 prefix
 into `/opt/prefetch` while the snapshot VM is starting up, the snapshot is
 captured *after* that finishes, and every VM launched from the image starts
 with the data already on disk. The launched VM makes no S3 call at all — the
-demo launches without `--egress` to prove it.
+demo launches without `--egress`, which requests no outbound connector, to
+show the data is already there. That omission is not a seal: the platform
+gives a connector-less VM outbound network anyway (`docs/PLATFORM.md`), and
+the run says so as `egressPosture: unsealed`. The demonstration is that no
+S3 call is needed, not that one could not be made.
 
 ```bash
 # from the repo root, with the Getting-started prerequisites in place:

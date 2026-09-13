@@ -325,6 +325,11 @@ pub struct RunOptions {
     /// Whether to request the egress connector. Off omits it from the request; measured
     /// 2026-09-12 the platform gave a connector-less VM outbound network anyway.
     pub egress: Option<bool>,
+    /// Whether to apply the advisory in-guest deny: the proxy variables every well-behaved
+    /// HTTP client reads, pointed at a black hole, in the launch environment. Never a seal —
+    /// the platform gives a connector-less VM outbound network and the guest holds no
+    /// `CAP_NET_ADMIN` — and refused together with `egress`.
+    pub deny_egress: Option<bool>,
     /// Whether to launch shell-capable: the ingress set becomes the measured pair
     /// `[HTTP_INGRESS, SHELL_INGRESS]`, which is what `microvm shell` attaches to.
     pub shell: Option<bool>,
@@ -579,6 +584,7 @@ impl Sandbox {
             // binding-level verify API exists to consume the material.
             identity: defaults.identity,
             egress: options.egress.unwrap_or(defaults.egress),
+            deny_egress: options.deny_egress.unwrap_or(defaults.deny_egress),
             shell: options.shell.unwrap_or(defaults.shell),
             max_idle_sec: options.max_idle_sec.unwrap_or(defaults.max_idle_sec),
             suspended_sec: options.suspended_sec.unwrap_or(defaults.suspended_sec),

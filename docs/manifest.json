@@ -125,6 +125,15 @@
           {
             "choices": null,
             "default": null,
+            "help": "Ask the guest's own clients to refuse outbound requests. Advisory, never a seal",
+            "name": "deny-egress",
+            "positional": false,
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "choices": null,
+            "default": null,
             "help": "Launch shell-capable, so `microvm shell` can attach later",
             "name": "shell",
             "positional": false,
@@ -334,6 +343,7 @@
           "vmName",
           "leaked",
           "cost",
+          "egressPosture",
           "resolvedConfig",
           "configPath",
           "sync",
@@ -433,6 +443,7 @@
           "vmName",
           "leaked",
           "cost",
+          "egressPosture",
           "resolvedConfig",
           "configPath",
           "sync",
@@ -856,6 +867,7 @@
           "credentialExpiresAt",
           "workdir",
           "project",
+          "egressPosture",
           "agentd"
         ],
         "responseType": "microvm.agent",

@@ -621,6 +621,7 @@ impl PySandbox {
         agent_token=None,
         launch_env=None,
         egress=false,
+        deny_egress=false,
         shell=false,
         max_idle_sec=None,
         suspended_sec=None,
@@ -654,6 +655,12 @@ impl PySandbox {
         // parameter is a compile error.
         launch_env: Option<std::collections::HashMap<String, String>>,
         egress: bool,
+        // `deny_egress` is the advisory in-guest deny: proxy variables pointed at a black
+        // hole in the launch env, so a well-behaved client refuses to leave the VM. Never a
+        // seal — the platform gives a connector-less VM outbound network and the guest holds
+        // no CAP_NET_ADMIN — and refused together with `egress`. Not a doc comment: a doc
+        // comment on a function parameter is a compile error.
+        deny_egress: bool,
         shell: bool,
         max_idle_sec: Option<u32>,
         suspended_sec: Option<u32>,
@@ -678,6 +685,7 @@ impl PySandbox {
             // binding-level verify API exists to consume the material.
             identity: defaults.identity,
             egress,
+            deny_egress,
             shell,
             max_idle_sec: max_idle_sec.unwrap_or(defaults.max_idle_sec),
             suspended_sec: suspended_sec.unwrap_or(defaults.suspended_sec),

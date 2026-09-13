@@ -126,6 +126,12 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 28] = [
             "vmName",
             "leaked",
             "cost",
+            // What the launch's outbound network IS: open | unsealed | best-effort |
+            // sealed. A different fact from `resolvedConfig.egress`, which is what was
+            // asked for — a connector-less launch asks for nothing and is `unsealed`,
+            // because the platform grants it outbound network anyway (docs/PLATFORM.md).
+            // Always present, never null, and never `sealed` while that measurement holds.
+            "egressPosture",
             // What each config-mergeable knob resolved to, as {value, source} with source
             // one of flag/config/default — and which file supplied the config values
             // (null when none did). Issue #73: a caller who stopped passing flags reads
@@ -165,6 +171,7 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 28] = [
             "vmName",
             "leaked",
             "cost",
+            "egressPosture",
             "resolvedConfig",
             "configPath",
             "sync",
@@ -213,6 +220,11 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 28] = [
             "credentialExpiresAt",
             "workdir",
             "project",
+            // Always `open` here, and stated rather than implied: `agent-up` launches with
+            // the egress connector because neither coding agent reaches Bedrock without it
+            // (AGENT-9), so an operator reading this envelope never has to infer the
+            // network posture of an agent VM from the helper's documentation.
+            "egressPosture",
             "agentd",
         ],
     ),

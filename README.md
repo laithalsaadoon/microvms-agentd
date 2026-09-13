@@ -35,7 +35,7 @@ microvm run --exec "echo hello from a microvm"
   [project sync](#running-a-project-through-a-vm),
   [coding agent](#running-coding-agents-inside-a-microvm),
   [library](#calling-it-from-code), [scripting](#using-it-from-scripts-and-agents),
-  and [cost](#what-it-costs) paths
+  [cost](#what-it-costs), and [egress](#what-no-egress-means) paths
 - [Writing your own guest Dockerfile](#writing-your-own-guest-dockerfile) — the
   traps that cost a build cycle, and how to spend none of them
 - [The workspace](#the-workspace)
@@ -346,8 +346,9 @@ bash examples/code-server-remote-dev/run.sh
 [examples/s3-prefetch-at-build](examples/s3-prefetch-at-build/) bakes an S3
 prefix into the image at build time — the fetch runs in the snapshot VM
 before the snapshot is captured, so every launched VM starts with the data on
-disk and makes no S3 call at all (the demo launches without `--egress` to
-prove it). Issue #81 records the measured 5–10 second first-S3-call penalty
+disk and makes no S3 call at all (the demo launches without `--egress`, which
+requests no outbound connector — not a seal; see
+[What "no egress" means](#what-no-egress-means)). Issue #81 records the measured 5–10 second first-S3-call penalty
 this sidesteps:
 
 ```bash
@@ -412,6 +413,49 @@ lower bound whenever any line is unpriced, so a breach means the true cost is
 at least that far over. `--on-breach` is required beside `--max-cost` and has
 no default: `warn` reports the breach on stderr and exits 0, `abort` exits 12
 (`ERR_PRECONDITION`).
+
+### What "no egress" means
+
+**It does not mean the VM is sealed.** `--egress` puts the `INTERNET_EGRESS`
+connector on the launch; omitting it sends no egress list at all, which is the
+strongest thing `RunMicrovm` accepts — the API's whole outbound surface is that
+list of connector ARNs, with no deny-all, VPC-only or policy option (service
+model `2025-09-09`). Measured on 2026-09-11, 2026-09-12 and 2026-09-13 in
+us-east-1, a VM launched with no egress connector reached `example.com`,
+`github.com`, `pypi.org` and `extensions.duckdb.org` exactly as a `--egress` VM
+did. So a workload's package manager, model download or `INSTALL` still leaves
+the VM. A reviewer of an unrelated tool met this the expensive way: a DuckDB
+query in a "no egress" VM downloaded a 242 MB extension.
+
+Because that is easy to misread, **every run reports what it actually got**, in
+the envelope and in the human output:
+
+```console
+$ microvm run agentd --exec 'echo hi'
+hi
+egress: unsealed — no egress connector was requested, and the platform does not
+honour the omission: the VM still reaches the internet …
+```
+
+`egressPosture` is one of four values, and a consumer can branch on it:
+
+| Posture | What it means |
+|---|---|
+| `open` | `--egress`: the connector is on the request, by design |
+| `unsealed` | no connector, and the platform grants outbound network anyway — **the default today** |
+| `best-effort` | `--deny-egress`: the guest's proxy variables point at a black hole, so `curl`, `uv`, `pip` and `npm` fail closed. A workload that ignores its environment does not |
+| `sealed` | no connector and no outbound path. **Unreachable today**, and it appears the day a re-measurement earns flipping one constant in `microvms-core` |
+
+`--deny-egress` is the strongest thing a client can do here, and it is
+deliberately not called a seal. There is no in-guest seal to reach for: `ip`,
+`iptables` and `nft` are absent from `al2023-minimal`, and the exec child *and
+`agentd` itself* run with `CapBnd 00000000a80425fb` — no `CAP_NET_ADMIN`, no
+`CAP_SYS_ADMIN` — so a route, an nftables rule, a sysctl and a network
+namespace are all `EPERM`, at boot as much as at exec time. Until the platform
+offers a network policy, treat outbound as reachable and put the control on the
+execution role: [docs/TRUST.md](docs/TRUST.md), "The execution role is the
+boundary". [docs/PLATFORM.md](docs/PLATFORM.md) carries the measurements with
+their dates, and the live suite re-measures all of it on every run.
 
 ## Writing your own guest Dockerfile
 
@@ -485,8 +529,12 @@ the role's credentials to root and to a `--user 1000` exec alike (measured
 measured working: `ip`, `iptables` and `nft` are absent from `al2023-minimal`, and
 installing `iproute` does not help, because the exec child's bounding set carries no
 `CAP_NET_ADMIN` (even under `--repair-identity`), so `ip route add blackhole
-169.254.169.254/32` is refused as root. Omitting `--egress` does not seal the VM
-today either: a connector-less VM reached the public internet on the same dates. So
+169.254.169.254/32` is refused as root. `agentd` (pid 1) holds the same bounding set,
+so a default-drop policy applied at boot by the image is refused for the same reason —
+there is no Dockerfile that seals this guest. Omitting `--egress` does not seal the VM
+either: a connector-less VM reached the public internet on the same dates, which is why
+every run reports `egressPosture` and why the strongest flag here, `--deny-egress`,
+reports `best-effort` (see [What "no egress" means](#what-no-egress-means)). So
 size the execution role for the daemon alone (CloudWatch Logs) and hand the workload
 its own scoped credential; `docs/TRUST.md`, "The execution role is the boundary",
 has the argument.
@@ -504,7 +552,7 @@ microvms-core/   the client library: control plane, session, cost, sandbox
 microvms-cli/    the microvm binary: 28 commands, JSON envelopes, a manifest
 microvms-py/     Python binding (PyO3)
 microvms-js/     Node binding (napi-rs)
-conformance/     the live suite: 185 checks against real AWS, via the CLI
+conformance/     the live suite: 188 checks against real AWS, via the CLI
 spec/            57 formal requirements in symspec, checked with Z3
 ```
 

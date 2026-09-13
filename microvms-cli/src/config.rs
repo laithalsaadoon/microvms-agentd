@@ -68,6 +68,11 @@ pub struct ProjectConfig {
     pub region: Option<String>,
     /// `run --egress`: give the VM outbound network.
     pub egress: Option<bool>,
+    /// `run --deny-egress`: the advisory in-guest deny — proxy variables pointed at a
+    /// black hole so a well-behaved client refuses to leave the VM. Never a seal, and the
+    /// run's `egressPosture` says `best-effort` rather than `sealed`. Refused together
+    /// with `egress = true`, by the same rule the flags follow.
+    pub deny_egress: Option<bool>,
     /// `run --shell`: launch shell-capable (`[HTTP_INGRESS, SHELL_INGRESS]`), so
     /// `microvm shell` can attach later.
     pub shell: Option<bool>,
