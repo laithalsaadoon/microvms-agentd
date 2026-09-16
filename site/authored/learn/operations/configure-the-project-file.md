@@ -32,7 +32,7 @@ Every knob in the file already exists as a `run` flag. The file adds no capabili
 
 `run` and `doctor` look for `./microvm.toml` beside the invocation when `--config` is not given. `--config <PATH>` reads that file instead, and its absence is `ERR_CONFIG`, because a path you typed and got wrong must not silently become "no config"; the implicit default's absence means a project configured by flags, which is not an error. `--no-config` ignores any `microvm.toml`, even a malformed one, so flags and built-in defaults apply. `build` reads no config file, which is why `build --log-stream` requires `build --log-group` on the command line.
 
-Field names are the flag names, so the file reads like the command line it replaces.
+Most field names match their flags; the repeatable connector flag uses the plural array key `egress-network-connectors`.
 
 ## 2. Every key
 
@@ -43,7 +43,9 @@ Field names are the flag names, so the file reads like the command line it repla
 | `exec`             | `run --exec`           | The shell command to run in the VM.                                                                                                              |
 | `memory`           | `run --memory`         | Baseline MiB. Validated against the same closed set as the flag: `512`, `1024`, `2048`, `4096`, `8192`.                                          |
 | `region`           | `run --region`         | An unlisted region is refused at load with the remedy named: pass `--unlisted-region` on the command line.                                       |
-| `egress`           | `run --egress`         | Give the VM outbound network.                                                                                                                    |
+| `egress`           | `run --egress`         | Request the managed internet connector; false does not isolate networking.                                                                                                                    |
+| `egress-network-connectors` | `run --egress-network-connector` | Existing VPC connector ARNs. Explicit flags replace the configured list; conflicts with `egress`. |
+| `deny-egress` | `run --deny-egress` | Set advisory proxy variables; does not isolate networking. |
 | `shell`            | `run --shell`          | Launch shell-capable, so `microvm shell` can attach later.                                                                                       |
 | `auto-resume`      | `run --auto-resume`    | Let the platform resume a suspended VM on an incoming request.                                                                                   |
 | `max-idle-sec`     | `run --max-idle-sec`   | Suspend after this much inbound-traffic idleness.                                                                                                |

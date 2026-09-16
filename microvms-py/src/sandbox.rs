@@ -425,9 +425,8 @@ impl PySandbox {
 
     /// The suspended window this sandbox asked for at launch, in seconds.
     ///
-    /// `None` before a launch, and for a sandbox that did not send the launch — this client
-    /// is the only party that can name the number, because `suspendedDurationSeconds`
-    /// exists only in the `RunMicrovm` request and `GetMicrovm` does not return it.
+    /// `None` before this sandbox launches a VM. This accessor reports the requested
+    /// window; `GetMicrovm` also returns the service's idle policy.
     #[getter]
     fn suspended_window_seconds(&self) -> Option<f64> {
         self.read(|sandbox| {
@@ -602,6 +601,10 @@ impl PySandbox {
 
     /// Launches a MicroVM, waits for RUNNING, and returns its session.
     ///
+    /// `egress` requests the managed INTERNET_EGRESS connector. Omission does not block
+    /// outbound traffic. For no egress, pass existing VPC connector ARNs through
+    /// `egress_network_connectors`, using a VPC without an internet gateway or NAT
+    /// gateway. `deny_egress` sets advisory proxy variables that workloads can bypass.
     /// # What the core refuses here, and this file does not
     ///
     /// A second `run` on one sandbox, with **zero** control-plane calls: the agent token is
@@ -621,6 +624,7 @@ impl PySandbox {
         agent_token=None,
         launch_env=None,
         egress=false,
+        egress_network_connectors=None,
         deny_egress=false,
         shell=false,
         max_idle_sec=None,
@@ -655,6 +659,7 @@ impl PySandbox {
         // parameter is a compile error.
         launch_env: Option<std::collections::HashMap<String, String>>,
         egress: bool,
+        egress_network_connectors: Option<Vec<String>>,
         // `deny_egress` is the advisory in-guest deny: proxy variables pointed at a black
         // hole in the launch env, so a well-behaved client refuses to leave the VM. Never a
         // seal — the platform gives a connector-less VM outbound network and the guest holds
@@ -685,6 +690,7 @@ impl PySandbox {
             // binding-level verify API exists to consume the material.
             identity: defaults.identity,
             egress,
+            egress_network_connectors: egress_network_connectors.unwrap_or_default(),
             deny_egress,
             shell,
             max_idle_sec: max_idle_sec.unwrap_or(defaults.max_idle_sec),

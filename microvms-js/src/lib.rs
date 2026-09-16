@@ -9,12 +9,8 @@
 //! making mistakes *unavailable* rather than rejected, and a binding is exactly where that
 //! gets given back for free.
 //!
-//! It is not a place where validation lives. There is no local range check, no state check, no
-//! region check, no size check anywhere in these files. Every rejection a JS caller sees came
-//! from the core, with the core's message naming the `docs/PLATFORM.md` finding that measured
-//! the behaviour. Where a gap in the core would let a mistake through, the rule this crate was
-//! built under is to note the gap and leave it — a guard added here is the copy every JS
-//! caller hits and the copy nothing else tests.
+//! Service limits and lifecycle validation live in the core. The binding checks that
+//! JavaScript numbers convert losslessly to Rust integers before passing them on.
 //!
 //! # `#[napi]` classes, never `#[napi(object)]`, for anything that carries a closure
 //!
@@ -83,6 +79,7 @@ pub mod cost;
 pub mod errors;
 pub mod exec;
 pub mod hooks;
+mod numbers;
 pub mod process;
 pub mod region;
 pub mod sandbox;

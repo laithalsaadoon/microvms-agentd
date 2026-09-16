@@ -410,9 +410,12 @@ impl SizeClass {
     /// Off-table figures are refused rather than snapped to a neighbour: the two plausible
     /// readings differ in both memory and rate, and neither has been measured.
     #[napi(factory)]
-    pub fn from_baseline_mib(mib: u32) -> napi::Result<SizeClass, String> {
+    pub fn from_baseline_mib(mib: f64) -> napi::Result<SizeClass, String> {
         Ok(SizeClass {
-            inner: CoreSizeClass::from_baseline_mib(mib).map_err(js)?,
+            inner: CoreSizeClass::from_baseline_mib(
+                crate::numbers::u32_number(mib, "mib").map_err(js)?,
+            )
+            .map_err(js)?,
         })
     }
 
@@ -856,7 +859,7 @@ pub struct RunUsageOptions<'a> {
     /// projected — nobody timed that week either.
     pub image_retained: Option<ClassInstance<'a, Duration>>,
     /// Each cycle pays a snapshot write plus a read.
-    pub suspend_resume_cycles: Option<u32>,
+    pub suspend_resume_cycles: Option<f64>,
     /// The suspend snapshot's size. Defaults to the baseline memory footprint.
     pub snapshot_gb: Option<f64>,
     /// Whether a launch happened. A launch reads a snapshot.
@@ -882,7 +885,12 @@ pub fn run_report(
         image_build: options.image_build.map(|duration| duration.inner),
         image_gb: options.image_gb,
         image_retained: options.image_retained.map(|duration| duration.inner),
-        suspend_resume_cycles: options.suspend_resume_cycles.unwrap_or(0),
+        suspend_resume_cycles: crate::numbers::optional_u32(
+            options.suspend_resume_cycles,
+            "suspendResumeCycles",
+        )
+        .map_err(js)?
+        .unwrap_or(0),
         snapshot_gb: options.snapshot_gb,
         launched: options.launched.unwrap_or(true),
     };
@@ -911,7 +919,7 @@ pub struct PlanUsageOptions {
     pub suspended_seconds: Option<f64>,
     pub image_gb: Option<f64>,
     pub image_retained_seconds: Option<f64>,
-    pub suspend_resume_cycles: Option<u32>,
+    pub suspend_resume_cycles: Option<f64>,
     pub snapshot_gb: Option<f64>,
     pub launched: Option<bool>,
     pub label: Option<String>,
@@ -934,7 +942,12 @@ pub fn estimate_run(
         suspended_seconds: options.suspended_seconds.unwrap_or(0.0),
         image_gb: options.image_gb,
         image_retained_seconds: options.image_retained_seconds,
-        suspend_resume_cycles: options.suspend_resume_cycles.unwrap_or(0),
+        suspend_resume_cycles: crate::numbers::optional_u32(
+            options.suspend_resume_cycles,
+            "suspendResumeCycles",
+        )
+        .map_err(js)?
+        .unwrap_or(0),
         snapshot_gb: options.snapshot_gb,
         launched: options.launched.unwrap_or(true),
     };
@@ -956,7 +969,7 @@ pub fn estimate_run(
 pub fn compare_residency(
     size: &SizeClass,
     hold_seconds: f64,
-    cycles: Option<u32>,
+    cycles: Option<f64>,
     rates: Option<&RateTable>,
 ) -> napi::Result<ResidencyComparison, String> {
     let hold = cost::duration_of_secs_f64(hold_seconds).map_err(js)?;
@@ -965,7 +978,9 @@ pub fn compare_residency(
         inner: cost::compare_residency(
             size.inner,
             hold,
-            cycles.unwrap_or(1),
+            crate::numbers::optional_u32(cycles, "cycles")
+                .map_err(js)?
+                .unwrap_or(1),
             &table,
             CalendarDate::today_utc(),
         )

@@ -1,10 +1,36 @@
 # microvms-agentd · Public API
 
-Four crates carry a public surface. `microvms-core` is the client library: the control plane, the in-VM daemon client, the cost engine, and every trap closure in one crate (`microvms-core/src/lib.rs:2-3`), exposing eleven public modules and re-exporting `protocol` so consumers name wire types through core rather than depending on `protocol` directly (`microvms-core/src/lib.rs:67-81`). `protocol` states the wire contract as types, shared by the daemon and every client. `microvms-py` and `microvms-js` are thin bindings that hold no validation of their own — every refusal a caller sees is raised by the core, with the core's message naming the `docs/PLATFORM.md` finding behind it (`microvms-py/src/lib.rs:12-18`).
+Use the SDKs to launch remote sandboxes for agents, execute tools, transfer files,
+and collect results. Start with a complete example in the
+[SDK tutorial](https://laithalsaadoon.github.io/microvms-agentd/learn/tutorial/from-code/), or the package guide for
+[Rust](../../microvms-core/README.md), [Python](../../microvms-py/README.md),
+or [Node/TypeScript](../../microvms-js/README.md).
 
-`microvms-cli` is not part of this surface. It declares exactly one `[[bin]]` and no `src/lib.rs`, so it exports nothing a binding could depend on, and `tests/dependency_direction.rs` fails if a lib target ever appears (`microvms-cli/Cargo.toml:13-23`). Its commands are documented in `reference/cli.md`.
+| Task | API |
+| --- | --- |
+| Launch a VM from an existing image | `Sandbox` and `RunRequest` |
+| Execute a command or transfer files | `Session` |
+| Stream, wait for, or cancel a command | `ExecHandle` |
+| Run Claude Code or Codex with Bedrock access | `AgentVm` |
+| Terminate and check cleanup | `TeardownOpts` and `TeardownReport` |
+| Build images or call the control plane directly | `ControlPlane` and `CreateImageRequest` |
 
-Thirty-one symbols are listed, ranked by inbound reference count within each surface. Seven public names fall below the cut and are not documented here: `CreateImageRequest` (`microvms-core/src/control/mod.rs:286`), `RunMicrovmRequest` (`microvms-core/src/control/mod.rs:439`), `run_report` (`microvms-core/src/cost.rs:1771`), `estimate_run` (`microvms-core/src/cost.rs:1893`), `RunRequest` (`microvms-core/src/sandbox.rs:170`), `Lifecycle` (`microvms-core/src/sandbox.rs:121`), and `TeardownReport` (`microvms-core/src/sandbox.rs:459`).
+`microvms-core` is the Rust client. The Python `microvms` package and Node
+`microvms` package expose bindings to it. Core re-exports `protocol`, the shared
+wire types. This page is a selected API reference; see
+[Rust API docs](https://docs.rs/microvms-core) for the complete Rust surface and
+[CLI reference](cli.md) for `microvm` commands.
+
+## Launch networking
+
+Rust `RunMicrovmRequest` and `RunRequest` accept `egress_network_connectors`.
+Python `run` accepts `egress_network_connectors=[arn]`; Node `run` accepts
+`egressNetworkConnectors: [arn]`. These attach existing VPC connector ARNs;
+creation and VPC configuration use the separate AWS Lambda core API.
+
+Custom connectors conflict with the managed `egress` option. Supplying an ARN
+does not certify isolation: no internet egress requires a VPC without an IGW
+or NAT gateway and no alternative internet route. See [Networking](../NETWORKING.md).
 
 ## microvms-core
 
@@ -88,6 +114,34 @@ pub struct Sandbox {
 One MicroVM's whole life: the state machine, the suspended window, and explicit teardown.
 
 `microvms-core/src/sandbox.rs:548`
+
+### RunRequest
+
+```rs
+let mut request = RunRequest::new().with_image(&image_arn);
+request.execution_role_arn = Some(execution_role_arn);
+let session = sandbox.run(request).await?;
+```
+
+Use `microvms_core::sandbox::RunRequest` to launch an image containing `agentd`.
+Pass the actual image ARN returned by a build; the SDK does not perform the CLI's
+friendly image-name lookup. Defaults are a ten-minute idle window, a ten-minute
+suspended window, a one-hour maximum lifetime, and no auto-resume. Network
+connector omission does not establish internet isolation; see launch networking
+above. Wait for `session.wait_until_ready` before executing commands.
+
+### TeardownOpts and TeardownReport
+
+```rs
+let report = sandbox.terminate(TeardownOpts::default()).await;
+```
+
+These types live in `microvms_core::sandbox`. Termination returns a report
+instead of an error: inspect `failures` and `undeleted`. Defaults request VM
+termination and retain the image and logs. Add `.waiting_for_terminated()` to the
+options when the caller must observe the final state. `Sandbox` does not clean
+up on drop, so call `terminate` on both success and failure paths; the
+[Rust quickstart](../../microvms-core/README.md) shows that pattern.
 
 ### AgentVm
 

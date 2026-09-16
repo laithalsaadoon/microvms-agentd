@@ -322,23 +322,22 @@ pub struct RunOptions {
     /// Shares the token's 4096-byte payload budget; the core refuses an over-ceiling
     /// payload before the launch, naming the byte count.
     pub launch_env: Option<std::collections::HashMap<String, String>>,
-    /// Whether to request the egress connector. Off omits it from the request; measured
-    /// 2026-09-12 the platform gave a connector-less VM outbound network anyway.
+    /// Request the managed INTERNET_EGRESS connector. Omission does not block egress.
     pub egress: Option<bool>,
-    /// Whether to apply the advisory in-guest deny: the proxy variables every well-behaved
-    /// HTTP client reads, pointed at a black hole, in the launch environment. Never a seal —
-    /// the platform gives a connector-less VM outbound network and the guest holds no
-    /// `CAP_NET_ADMIN` — and refused together with `egress`.
+    /// Existing VPC network connector ARNs. For no egress, use a VPC without an
+    /// internet gateway or NAT gateway. Cannot be combined with `egress: true`.
+    pub egress_network_connectors: Option<Vec<String>>,
+    /// Set advisory HTTP proxy variables. Workloads can ignore or override them;
+    /// use a VPC without an internet gateway or NAT gateway for no egress.
     pub deny_egress: Option<bool>,
     /// Whether to launch shell-capable: the ingress set becomes the measured pair
     /// `[HTTP_INGRESS, SHELL_INGRESS]`, which is what `microvm shell` attaches to.
     pub shell: Option<bool>,
-    pub max_idle_sec: Option<u32>,
-    /// The window a resume is refused past (STATE-12). Exists **only** in the launch request:
-    /// `GetMicrovm` does not return it, so this client is the only party that can name it.
-    pub suspended_sec: Option<u32>,
+    pub max_idle_sec: Option<f64>,
+    /// Requested suspended window, in seconds; the service also reports its idle policy.
+    pub suspended_sec: Option<f64>,
     pub auto_resume: Option<bool>,
-    pub max_duration_sec: Option<u32>,
+    pub max_duration_sec: Option<f64>,
     /// How long to wait for RUNNING.
     pub ready_timeout: Option<f64>,
     /// A label for the run token. Never the token.
@@ -358,7 +357,7 @@ pub struct TeardownOptions {
     /// in the core's dependency set, and reporting a leak beats reporting a clean teardown
     /// over one.
     pub delete_log_group: Option<bool>,
-    pub delete_attempts: Option<u32>,
+    pub delete_attempts: Option<f64>,
     pub delete_backoff: Option<f64>,
     /// `false` by default: the caller is on the way out, and a teardown that blocked five
     /// minutes on a state nobody reads is five minutes of a CI job. The report then honestly
@@ -373,7 +372,9 @@ impl TeardownOptions {
         let mut opts = TeardownOpts {
             delete_image: self.delete_image.unwrap_or(false),
             delete_log_group: self.delete_log_group.unwrap_or(false),
-            delete_attempts: self.delete_attempts.unwrap_or(defaults.delete_attempts),
+            delete_attempts: crate::numbers::optional_u32(self.delete_attempts, "deleteAttempts")
+                .map_err(js_async)?
+                .unwrap_or(defaults.delete_attempts),
             delete_backoff: match self.delete_backoff {
                 Some(backoff) => seconds_async(backoff)?,
                 None => defaults.delete_backoff,
@@ -495,9 +496,8 @@ impl Sandbox {
 
     /// The suspended window this sandbox asked for at launch, in seconds.
     ///
-    /// `null` before a launch, and for a sandbox that did not send the launch — this client is
-    /// the only party that can name the number, because `suspendedDurationSeconds` exists only
-    /// in the `RunMicrovm` request.
+    /// `null` before this sandbox launches a VM. This accessor reports the requested
+    /// window; `GetMicrovm` also returns the service's idle policy.
     #[napi]
     pub async fn suspended_window_seconds_async(&self) -> Option<f64> {
         self.inner
@@ -584,14 +584,22 @@ impl Sandbox {
             // binding-level verify API exists to consume the material.
             identity: defaults.identity,
             egress: options.egress.unwrap_or(defaults.egress),
+            egress_network_connectors: options.egress_network_connectors.unwrap_or_default(),
             deny_egress: options.deny_egress.unwrap_or(defaults.deny_egress),
             shell: options.shell.unwrap_or(defaults.shell),
-            max_idle_sec: options.max_idle_sec.unwrap_or(defaults.max_idle_sec),
-            suspended_sec: options.suspended_sec.unwrap_or(defaults.suspended_sec),
+            max_idle_sec: crate::numbers::optional_u32(options.max_idle_sec, "maxIdleSec")
+                .map_err(js_async)?
+                .unwrap_or(defaults.max_idle_sec),
+            suspended_sec: crate::numbers::optional_u32(options.suspended_sec, "suspendedSec")
+                .map_err(js_async)?
+                .unwrap_or(defaults.suspended_sec),
             auto_resume: options.auto_resume.unwrap_or(defaults.auto_resume),
-            max_duration_sec: options
-                .max_duration_sec
-                .unwrap_or(defaults.max_duration_sec),
+            max_duration_sec: crate::numbers::optional_u32(
+                options.max_duration_sec,
+                "maxDurationSec",
+            )
+            .map_err(js_async)?
+            .unwrap_or(defaults.max_duration_sec),
             ready_timeout: match options.ready_timeout {
                 Some(timeout) => seconds_async(timeout)?,
                 None => defaults.ready_timeout,

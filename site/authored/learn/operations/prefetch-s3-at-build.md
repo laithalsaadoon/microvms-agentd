@@ -77,7 +77,7 @@ microvm exec "du -sh /opt/prefetch && ls -la /opt/prefetch | head -20" \
   --user 1000 --group 1000 "${ATTACH[@]}" --timeout 60
 ```
 
-The example's `microvm.toml` pins `egress = false` and `memory = 512`: the launched VM needs no outbound network to have the data, and the demo only proves the tree is present. Running the check as uid 1000 also proves the wrapper's `chown` did its job.
+The example's `microvm.toml` pins `egress = false` and `memory = 512`. The data is already present, but `egress = false` does not disable internet access; see [Networking](/internals/networking/). Running the check as uid 1000 also proves the wrapper's `chown` did its job.
 
 ## 7. Rebuilds and cost
 

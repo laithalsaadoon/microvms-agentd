@@ -5,13 +5,14 @@ API to run a command inside one and no API to move a file into or out of one
 (`docs/PLATFORM.md:20-23`). Every harness built on the service has to supply both itself.
 This repository is that supply — `agentd`, a static daemon baked into the VM image, plus the
 `microvm` CLI and the Rust, Python, and Node libraries that talk to it (`README.md:11-15`).
-Nothing is published: `publish = false` sits in `[workspace.package]` and every member
-inherits it (`Cargo.toml:32`), so consumers build the two binaries from source. The audience
+The CLI and libraries are distributed through crates.io, PyPI, and npm; the
+daemon is a release binary. Selected crates opt into publishing despite the
+workspace default of `publish = false`. The audience
 is whoever builds a sandbox product on MicroVMs — an agent harness, a CI runner, a
 code-execution service.
 
 The client's real work is absorbing the platform's surprises once. `docs/PLATFORM.md`
-records seventeen measured findings, fifteen of which a client can act on, and most are
+records dated findings, many of which are
 traps in the specific sense that the platform's answer points away from the cause: an
 unsupported region answers `AccessDeniedException` with a null message, a `clientToken`
 replay wedges an image in `CREATING` for fifteen hours with no error at all

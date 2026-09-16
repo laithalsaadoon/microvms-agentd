@@ -214,32 +214,15 @@ pub struct RunRequest {
     /// 2026-09-12 the platform gave a connector-less VM outbound network anyway
     /// (`docs/PLATFORM.md`).
     pub egress: bool,
-    /// Whether to seal the guest as far as a client can, which is not far
-    /// ([`crate::control::EgressPosture::BestEffort`]).
+    /// Customer-managed Lambda VPC egress connector ARNs. See
+    /// [`RunMicrovmRequest::egress_network_connectors`].
+    pub egress_network_connectors: Vec<String>,
+    /// Sets advisory proxy-deny environment variables for clients that honor them.
+    /// Workloads can bypass these variables. Internet isolation requires a VPC egress
+    /// connector using a VPC without an internet gateway or NAT gateway.
     ///
-    /// **This is advisory, and the type says so in its posture rather than in a comment.**
-    /// There is no network-layer seal to ask for: `RunMicrovm`'s whole outbound surface is
-    /// `egressNetworkConnectors` (service model `2025-09-09`), omitting it is the strongest
-    /// request there is, and the platform grants outbound network anyway. There is no
-    /// in-guest seal either — `ip`, `iptables` and `nft` are absent from `al2023-minimal`,
-    /// and the exec child *and `agentd` itself* run with `CapBnd 00000000a80425fb`, which
-    /// carries no `CAP_NET_ADMIN` and no `CAP_SYS_ADMIN`, so a route, a netfilter rule, a
-    /// sysctl and a network namespace are all `EPERM` at boot as much as at exec time
-    /// (`docs/PLATFORM.md`, measured 2026-09-12).
-    ///
-    /// What is left is the guest's *environment*: this sets the proxy variables every
-    /// well-behaved HTTP client reads ([`DENY_EGRESS_ENV_KEYS`]) to a black hole
-    /// ([`DENY_EGRESS_PROXY_URL`]), delivered in the launch env, so `curl`, `uv`, `pip` and
-    /// `npm` fail closed instead of quietly downloading 242 MB. A workload that unsets them,
-    /// or a client that never read them, reaches the internet exactly as before — which is
-    /// why the posture is `best-effort` and never `sealed`.
-    ///
-    /// Refused together with [`RunRequest::egress`]: the two ask for opposite things, and
-    /// the refusal is local (`ERR_INVALID_ARG`) rather than a silent precedence rule.
-    ///
-    /// It spends about 200 bytes of the payload's measured 4096-byte ceiling, and a caller
-    /// who already set one of those keys keeps their own value
-    /// ([`RunRequest::effective_launch_env`]).
+    /// Refused with [`RunRequest::egress`]. Existing caller-supplied proxy variables win;
+    /// the added variables share the 4096-byte run-hook payload budget.
     pub deny_egress: bool,
     /// Whether to launch shell-capable: the ingress set becomes the measured pair
     /// `[HTTP_INGRESS, SHELL_INGRESS]` instead of `ALL_INGRESS`, which is what
@@ -270,6 +253,7 @@ impl Default for RunRequest {
             launch_env: std::collections::HashMap::new(),
             identity: false,
             egress: false,
+            egress_network_connectors: Vec::new(),
             deny_egress: false,
             shell: false,
             max_idle_sec: 600,
@@ -296,10 +280,17 @@ impl RunRequest {
         self
     }
 
-    /// Requests the egress connector, which is what gives the VM outbound network.
+    /// Requests the managed internet egress connector. Omission does not block internet access.
     #[must_use]
     pub fn with_egress(mut self) -> Self {
         self.egress = true;
+        self
+    }
+
+    /// Routes egress through a customer-managed Lambda network connector.
+    #[must_use]
+    pub fn with_egress_network_connector(mut self, arn: impl Into<String>) -> Self {
+        self.egress_network_connectors.push(arn.into());
         self
     }
 
@@ -886,6 +877,7 @@ impl Sandbox {
         let mut wire = RunMicrovmRequest::new(&identifier, payload);
         wire.image_version = request.image_version.clone();
         wire.execution_role_arn = request.execution_role_arn.clone();
+        wire.egress_network_connectors = request.egress_network_connectors.clone();
         wire.max_idle_sec = request.max_idle_sec;
         wire.suspended_sec = request.suspended_sec;
         wire.auto_resume = request.auto_resume;
@@ -1336,6 +1328,23 @@ mod tests {
                 "CreateMicrovmAuthToken",
                 Answer::ok(fake::auth_token_response("proxy-token")),
             );
+    }
+
+    #[tokio::test]
+    async fn vpc_egress_configuration_survives_the_sandbox_launch() {
+        let (mut sandbox, recorder, _) = planted();
+        answer_launch(&recorder);
+        let arn = "arn:aws:lambda:us-east-1:123456789012:network-connector:isolated-vpc";
+        let request = RunRequest::new()
+            .with_image("arn:image")
+            .with_egress_network_connector(arn);
+        assert_eq!(
+            request.egress_posture(),
+            crate::control::EgressPosture::Unsealed
+        );
+        sandbox.run(request).await.expect("launch");
+        let body = recorder.first_body("RunMicrovm");
+        assert_eq!(body["egressNetworkConnectors"], serde_json::json!([arn]));
     }
 
     /// A launched sandbox in RUNNING, which is where four of the twelve keys start.

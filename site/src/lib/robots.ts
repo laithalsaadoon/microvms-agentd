@@ -39,7 +39,7 @@ export const robotsPolicy = (
   sitemap: string
 ): string => `# The AI-crawler policy for microvms-agentd's documentation.
 #
-# This corpus is public source documentation for a source-only project. Being read is the reason it
+# This corpus is public documentation for microvms-agentd. Being read is the reason it
 # exists, so every class below is allowed — and allowed EXPLICITLY, because the alternative is the same
 # access with no record of the decision. RFC 9309 s2.3.1.3: a crawler that cannot fetch robots.txt "MAY
 # access any resources on the server", so an absent file is the most permissive policy available.

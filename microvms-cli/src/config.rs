@@ -66,8 +66,10 @@ pub struct ProjectConfig {
     /// diagnostic exactly as `--unlisted-region` does, and [`load`] refuses nothing here —
     /// resolution happens where the flag's does.
     pub region: Option<String>,
-    /// `run --egress`: give the VM outbound network.
+    /// `run --egress`: request the managed INTERNET_EGRESS connector.
     pub egress: Option<bool>,
+    /// Existing VPC connector ARNs; explicit --egress-network-connector flags replace this list.
+    pub egress_network_connectors: Option<Vec<String>>,
     /// `run --deny-egress`: the advisory in-guest deny — proxy variables pointed at a
     /// black hole so a well-behaved client refuses to leave the VM. Never a seal, and the
     /// run's `egressPosture` says `best-effort` rather than `sealed`. Refused together

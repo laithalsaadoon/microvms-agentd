@@ -38,9 +38,10 @@ pub struct RunHookTimeout {
 impl RunHookTimeout {
     /// A run-family timeout, or a refusal naming **both** ceilings.
     #[napi(constructor)]
-    pub fn new(seconds: u32) -> napi::Result<RunHookTimeout, String> {
+    pub fn new(seconds: f64) -> napi::Result<RunHookTimeout, String> {
         Ok(RunHookTimeout {
-            inner: CoreRun::try_new(seconds).map_err(js)?,
+            inner: CoreRun::try_new(crate::numbers::u32_number(seconds, "seconds").map_err(js)?)
+                .map_err(js)?,
         })
     }
 
@@ -72,9 +73,10 @@ pub struct BuildHookTimeout {
 impl BuildHookTimeout {
     /// A build-family timeout, or a refusal naming both ceilings.
     #[napi(constructor)]
-    pub fn new(seconds: u32) -> napi::Result<BuildHookTimeout, String> {
+    pub fn new(seconds: f64) -> napi::Result<BuildHookTimeout, String> {
         Ok(BuildHookTimeout {
-            inner: CoreBuild::try_new(seconds).map_err(js)?,
+            inner: CoreBuild::try_new(crate::numbers::u32_number(seconds, "seconds").map_err(js)?)
+                .map_err(js)?,
         })
     }
 

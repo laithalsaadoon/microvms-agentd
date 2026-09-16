@@ -89,6 +89,7 @@ procps
 pyproject
 pytest
 rustup
+sandboxed
 setopt
 stateright
 subshells

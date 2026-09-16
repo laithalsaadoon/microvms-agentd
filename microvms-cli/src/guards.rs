@@ -252,6 +252,7 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 log_group: None,
                 log_stream: None,
                 egress: false,
+                egress_network_connectors: Vec::new(),
                 deny_egress: false,
                 shell: false,
                 launch_env: Vec::new(),
@@ -1362,6 +1363,7 @@ fn run_args_for_image(identifier: &str, state_dir: std::path::PathBuf) -> RunArg
         log_group: None,
         log_stream: None,
         egress: false,
+        egress_network_connectors: Vec::new(),
         deny_egress: false,
         shell: false,
         launch_env: Vec::new(),
@@ -1985,8 +1987,8 @@ async fn a_broken_config_file_is_refused_with_its_own_row_and_zero_doors() {
 ///
 /// The two halves of the advisory deny, both read off the `RunMicrovm` body rather than off
 /// a struct: the proxy variables are in the `runHookPayload` env in both spellings, and
-/// `egressNetworkConnectors` is absent — the mechanism is entirely in the guest, because the
-/// platform has no outbound control to ask for (`docs/PLATFORM.md`). The posture the
+/// `egressNetworkConnectors` is absent — this advisory mechanism runs entirely in the guest.
+/// Enforced no-egress requires a custom VPC connector and isolated VPC routing. The posture the
 /// envelope will carry is asserted beside them, so the label and the request are pinned by
 /// one test.
 ///
@@ -2032,6 +2034,46 @@ async fn deny_egress_reaches_the_launch_env_and_asks_the_platform_for_nothing() 
         "best-effort",
         "and the run reports the advisory deny as best-effort, never as a seal"
     );
+}
+
+#[tokio::test]
+async fn vpc_connector_reaches_the_launch_request() {
+    let dir = TempDir::new("vpc-connector");
+    let transport = Arc::new(ScriptedTransport::new());
+    transport.answer("RunMicrovm", 400, r#"{"message": "scripted stop"}"#);
+    let seam = ScriptedSeam {
+        transport: Arc::clone(&transport),
+        clock: Arc::new(YieldingClock::default()),
+    };
+    let mut args = run_args_for_image(
+        "arn:aws:lambda:us-east-1:123456789012:microvm-image/img",
+        dir.0.clone(),
+    );
+    let connector = "arn:aws:lambda:us-east-1:123456789012:network-connector:private";
+    args.egress_network_connectors = vec![connector.to_string()];
+    let (result, _) = dispatch_with(&seam, &Command::Run(args), full_infra()).await;
+    result.expect_err("scripted stop after serializing the request");
+    assert_eq!(
+        transport.first_body("RunMicrovm")["egressNetworkConnectors"],
+        serde_json::json!([connector]),
+    );
+}
+
+#[test]
+fn configured_managed_egress_cannot_bypass_an_explicit_vpc_connector() {
+    let file = ConfigFile::new("vpc-egress-conflict", "egress = true\n");
+    let mut args = run_args_for_image("arn:image", std::env::temp_dir());
+    args.egress_network_connectors =
+        vec!["arn:aws:lambda:us-east-1:123456789012:network-connector:private".into()];
+    args.config = crate::cli::ConfigFlags {
+        config: Some(file.0.clone()),
+        no_config: false,
+    };
+    let Err(error) = crate::commands::lifecycle::merge_config(&args, &|_| None) else {
+        panic!("managed internet egress must not override the VPC intent");
+    };
+    assert_eq!(error.exit, Exit::InvalidArg);
+    assert!(error.message.contains("INTERNET_EGRESS"));
 }
 
 /// **A default run reports `unsealed`, and `--egress` with `--deny-egress` is refused across
@@ -7119,4 +7161,32 @@ async fn a_sync_dir_without_an_image_is_refused_before_any_call() {
         seam.doors().is_empty(),
         "a local refusal must cost zero doors"
     );
+}
+
+#[test]
+fn vpc_connectors_from_config_are_replaced_by_explicit_flags() {
+    let file = ConfigFile::new(
+        "vpc-config",
+        "egress-network-connectors = ['arn:aws:lambda:us-east-1:123456789012:network-connector:configured']\n",
+    );
+    let mut args = run_args_for_image("arn:image", std::env::temp_dir());
+    args.config = crate::cli::ConfigFlags {
+        config: Some(file.0.clone()),
+        no_config: false,
+    };
+    let merged = crate::commands::lifecycle::merge_config(&args, &|_| None).expect("config");
+    assert_eq!(
+        merged.args.egress_network_connectors,
+        ["arn:aws:lambda:us-east-1:123456789012:network-connector:configured"]
+    );
+    args.egress_network_connectors =
+        vec!["arn:aws:lambda:us-east-1:123456789012:network-connector:flag".into()];
+    let merged = crate::commands::lifecycle::merge_config(&args, &|_| None).expect("flag");
+    assert_eq!(
+        merged.args.egress_network_connectors,
+        args.egress_network_connectors
+    );
+    args.egress_network_connectors.clear();
+    args.egress = true;
+    assert!(crate::commands::lifecycle::merge_config(&args, &|_| None).is_err());
 }

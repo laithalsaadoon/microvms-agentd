@@ -1,89 +1,144 @@
 ---
-title: Run your first command in a MicroVM
-description: Create the AWS prerequisites, export the values the CLI reads, check the machine with microvm doctor, run microvm quickstart, then read what happened and what it cost.
+title: Configure AWS and run your first sandbox
+description: Set up AWS once, give an agent a project in a MicroVM, and copy its results back.
 editUrl: false
 sidebar:
   order: 2
 ---
 
-This tutorial runs a hello-world inside a real Lambda MicroVM and tears it down. Expect the first run to take a few minutes; most of that is the server-side image build.
+Give a coding agent a copy of your project in its own AWS Lambda MicroVM.
+It can inspect files, edit code, and run commands in `/workspace`; you
+choose which results to bring back to your machine.
 
-At the end of this page a command will have run inside a MicroVM, the VM will be gone, you will have read its cost, and you will hold an image you can launch again without rebuilding.
+With the [CLI installed](/learn/tutorial/install/) and AWS configured,
+you can start the workflow below in 90 seconds. A first image build takes
+several minutes, and the agent's task takes additional time. These commands
+create billable AWS resources.
 
-You need the `microvm` CLI, so [install it](/learn/tutorial/install/) first.
+## Configure AWS
 
-## 1. What you need
+You need AWS CLI v2, your normal AWS credential configuration, and a region
+where your account can use Lambda MicroVMs. Supported region names are
+`us-east-1`, `us-east-2`, `us-west-2`, `eu-west-1`, and `ap-northeast-1`.
+Use `gh` or `curl` for the CLI's automatic daemon download.
 
-An AWS account with Lambda MicroVMs access in a service region (`us-east-1`, `us-east-2`, `us-west-2`, `eu-west-1`, `ap-northeast-1`), and AWS credentials in your environment. The daemon binary is not on this list: the CLI provisions it.
+Image builds need an S3 artifact bucket, a build role, and an execution
+role in your account. Your caller needs permission to manage MicroVMs,
+upload the artifact, and pass those roles. For coding agents, it also
+needs Bedrock model invocation permissions and access to the chosen model.
+The default Claude Code profile uses `global.anthropic.claude-opus-5`;
+the [agent guide](/learn/operations/run-coding-agents-on-bedrock/) covers
+Codex and model overrides.
 
-A region outside that list is refused locally, because the service answers an unpriced region with an `AccessDeniedException` whose message is null, which reads as an IAM problem and is not one. `--unlisted-region` is the spelled-out opt-in if you know better.
-
-## 2. Create the AWS prerequisites
-
-An image build needs an S3 bucket for the code artifact, a build role, and an execution role. The repository ships a small Terraform stack that creates exactly those. From a clone:
+Export your existing infrastructure values, replacing the examples:
 
 ```bash
-mise run live:infra
-cd conformance/infra
-export MICROVM_BUCKET=$(terraform output -raw s3_bucket)
-export MICROVM_BUILD_ROLE_ARN=$(terraform output -raw build_role_arn)
-export MICROVM_EXECUTION_ROLE_ARN=$(terraform output -raw execution_role_arn)
-cd ../..
+export AWS_REGION=us-east-1
+export MICROVM_BUCKET=your-artifact-bucket
+export MICROVM_BUILD_ROLE_ARN=arn:aws:iam::123456789012:role/microvm-build
+export MICROVM_EXECUTION_ROLE_ARN=arn:aws:iam::123456789012:role/microvm-execution
 ```
 
-If you already have a bucket and roles, export those instead. The stack is a convenience, and the CLI only reads the environment values, or the matching flags `--bucket`, `--build-role-arn`, and `--execution-role-arn`.
+Use `AWS_PROFILE` if your credentials are in a named profile. These examples
+use Bash-compatible shell syntax; in PowerShell, set environment variables
+with `$env:NAME = "value"`. Matching `--bucket`, `--build-role-arn`,
+`--execution-role-arn`, and `--region` flags are also available.
 
-The stack also creates a managed policy for reading build logs (`terraform output -raw logs_read_policy_arn`). Attach it to the identity you run the AWS CLI with, and `microvm logs <image-name>` will hand you a working `aws logs tail` command. That command needs AWS CLI v2; `aws logs tail` does not exist in v1.
+If you need the bucket and roles, the repository includes a Terraform
+example. With Git and Terraform 1.6+ installed, run this once:
 
-## 3. Check the machine
+```bash
+git clone https://github.com/laithalsaadoon/microvms-agentd.git
+cd microvms-agentd
+terraform -chdir=conformance/infra init
+terraform -chdir=conformance/infra apply -var="region=us-east-1"
+export AWS_REGION=us-east-1
+export MICROVM_BUCKET=$(terraform -chdir=conformance/infra output -raw s3_bucket)
+export MICROVM_BUILD_ROLE_ARN=$(terraform -chdir=conformance/infra output -raw build_role_arn)
+export MICROVM_EXECUTION_ROLE_ARN=$(terraform -chdir=conformance/infra output -raw execution_role_arn)
+```
+
+This is an example infrastructure stack; it does not grant your caller
+Bedrock model access. Keep the guest execution role minimal because the
+workload can access its credentials. The stack also creates a separate
+build-log reader policy for the operator.
 
 ```bash
 microvm doctor
 ```
 
-`doctor` is the one command that must work with nothing configured, because its job is to report what is missing. Its check order is the diagnosis order: the project config file, then the region (a wrong one produces the null-message denial above), then whether the credential chain resolves at all, then the bucket and the two role values by name, then whether the Terraform stack is applied, then the managed base images the service publishes. With `--binary <path>` it also checks a daemon binary's architecture.
+`doctor` reports setup findings and remedies. Check those before launching;
+it does not prove that your chosen Bedrock model is available to your account.
 
-When something is wrong, `doctor` names the broken prerequisite and prints the command that fills it. Under `--json` it is a success envelope with `ok: false` and exit code 12 (`ERR_PRECONDITION`), because the check succeeded: it found what was wrong.
+## Run an agent on your project
 
-## 4. Run it
+Change to the project directory you want the agent to review, then run:
+
+```bash
+microvm agent-up --vm-name review --agent claude-code --project .
+microvm agent-prompt --name review \
+  "Review this project and write your findings to REVIEW.md."
+microvm cp --name review vm:/workspace/REVIEW.md ./REVIEW.md
+microvm terminate review --wait
+```
+
+`agent-up` prepares the image, starts the VM, uploads your project, and
+installs a short-lived Bedrock token. `agent-prompt` runs as uid 1000 in
+`/workspace`. The copy command retrieves the actual file the agent wrote.
+Your project upload skips `.git`, `target`, `node_modules`, and `.venv`;
+other files are included. Dependencies excluded from the upload may need
+to be installed inside the VM.
+
+`agent-up` keeps the VM until you terminate it or its lifetime policy
+expires. The default is a one-hour maximum, suspension after ten minutes
+of inbound inactivity, and termination after ten minutes suspended.
+Its image remains for reuse on the next launch.
+
+The VM has outbound access to reach Bedrock. Omitting `--egress` on a
+general `run` does not disable outbound traffic. For no egress, use a
+custom VPC connector in a VPC without an internet gateway, NAT gateway, or
+other internet route;
+`--deny-egress` only sets proxy variables that workloads can bypass.
+See [Networking](/internals/networking/).
+
+## Run a command without an agent
+
+For a hello-world with automatic VM and image cleanup:
 
 ```bash
 microvm quickstart
 ```
 
-`quickstart` is exactly `microvm run --exec "echo hello from a microvm"` with every decision already made. Once it works, use `run` and its flags directly. Both accept the same `--region`, `--bucket`, and role flags as `doctor`.
-
-## 5. What happened, step by step
-
-1. **The daemon was provisioned.** The CLI fetched its own version's `agentd` release asset, verified it, and cached it under `~/.microvm`.
-2. **An image was built.** The CLI wrote the default Dockerfile (the one `microvm dockerfile` prints), zipped it with the daemon into a build artifact, uploaded the artifact to your bucket, and asked the service to build. The image name defaults to a per-invocation name, because reusing one is how a `clientToken` replay wedges an image; [Debug a failed build](/learn/operations/debug-a-failed-build/) explains that trap.
-3. **A VM was launched.** The launch carried a per-VM agent token in the platform's one-shot `runHookPayload`, so no secret was ever in the image. The daemon installs the token when the hook lands; until then every control route answers 503.
-4. **The command ran.** The CLI opened an authenticated session to the VM's endpoint and ran the exec. Its stdout and stderr came back on the envelope.
-5. **The cost was reported and the VM was torn down.** Teardown is the default so an interrupted session does not leave a billable VM behind. If anything could not be deleted, its identifier is named as leaked rather than dropped.
-
-Under `--json` the whole run is one envelope of type `microvm.run`, with `imageIdentifier`, `imageName`, `microvmId`, `execExitCode`, `stdout`, `stderr`, `buildSeconds`, `runningSeconds`, `leaked`, and `cost` among its keys.
-
-## 6. The cost line
-
-Every run reports an estimate built from pinned, dated, per-region ARM rates. Dollar figures are estimates derived from published rates, never an invoice. Anything the engine cannot price is reported as unpriced with a reason rather than as zero, and a total containing an unpriced line renders as a lower bound. The server-side build is the usual unpriced line: AWS does not publish a build rate.
-
-Sizing follows one rule. The baseline you request with `--memory` (default `2048`) is your bill floor while the VM runs, the VM is provisioned at four times that from the start, and usage above the baseline bills per second by what is consumed. There is no scaling event. [Read the cost report](/learn/operations/read-the-cost-report/) covers the whole report.
-
-## 7. Keep the image
-
-The image snapshot has a one-week minimum retention, so deleting an image early saves nothing and rebuilding one costs minutes. Build once under a name, then launch it as often as you like:
+For repeated CLI runs or the [SDK examples](/learn/tutorial/from-code/),
+build a general-purpose image once:
 
 ```bash
-microvm build --reuse --name hello
-microvm run --image hello --exec "uname -m"
+microvm build --name agent-tools --json
+microvm run --image agent-tools --exec "uname -m"
 ```
 
-`--reuse` keys the image name to a hash of the build inputs and skips the build when that name already exists, reporting `reused: true`. `--image` takes an ARN or a bare name; a name is resolved to its ARN through the account's image listing before the launch.
+The guest prints `aarch64`. Each `run` tears down its VM by default, while
+the existing image stays available. The CLI accepts an image name;
+SDKs need its ARN. Copy `data.imageIdentifier` from the build's JSON into
+`MICROVM_IMAGE` for the SDK examples:
 
-:::agent
+```bash
+export MICROVM_IMAGE='paste-the-image-ARN-here'
+```
 
-**For an agent.** Run everything above with `--json` and read the envelope rather than the terminal rendering. `data.execExitCode` is the command's exit, `data.cost.total` is the estimate, and `data.leaked` is empty on a clean run. A failure envelope's `code` is stable and its `exitCode` matches `$?`; `ERR_PRECONDITION` (exit 12) means run `microvm doctor` and read its `checks`.
+Replace the example value with the exact ARN the build returned. With
+`--reuse`, `build` appends a content hash to the name; use the returned
+`imageIdentifier` or complete `imageName` in CLI commands instead of the
+`agent-tools` prefix.
 
-:::
+## Check cleanup and cost
 
-Next: [keep a VM running and work inside it](/learn/tutorial/long-lived-vm/).
+`--json` returns structured results. On cleanup failures, inspect
+`data.leaked`; `microvm ls --remote` helps find remaining resources.
+Cost totals are estimates and are lower bounds when some items are
+unpriced. Images have a one-week minimum retention charge, so reusing
+them avoids repeated builds and snapshots.
+
+Next: [run both coding agents](/learn/operations/run-coding-agents-on-bedrock/),
+[use an SDK](/learn/tutorial/from-code/), or
+[keep a VM and work by name](/learn/tutorial/long-lived-vm/).

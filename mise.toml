@@ -291,7 +291,10 @@ description = "Fail if a hardcoded API constraint no longer matches botocore's s
 # value nobody ships and report agreement. Measured 2026-08-08: 0.4s warm, against 0.006s
 # for the built binary, which is nothing beside the rest of `check`. `--rust-binary` exists
 # for anyone who wants that trade knowingly.
-run = "./scripts/check-model-drift.py"
+run = [
+  "./scripts/check-model-drift.py",
+  "uv run --with 'boto3>=1.40' python -m unittest discover -s scripts -p 'test_model_drift.py'",
+]
 
 [tasks.build]
 description = "Release build for the shipping target"

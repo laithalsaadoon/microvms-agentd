@@ -140,8 +140,8 @@ pub struct ExecOptions {
     pub shell: Option<bool>,
     pub cwd: Option<String>,
     pub env: Option<HashMap<String, String>>,
-    pub user: Option<u32>,
-    pub group: Option<u32>,
+    pub user: Option<f64>,
+    pub group: Option<f64>,
     /// The daemon's own kill deadline for the child, distinct from a client-side `wait`.
     pub timeout_sec: Option<f64>,
     /// Whether to open a stdin pipe. Writing without this is a 409.
@@ -180,8 +180,11 @@ impl ExecOptions {
     /// — a number or an object is rejected by the conversion before this runs. A bare string
     /// becomes a **one-element** argv rather than being whitespace-split; see the module
     /// docs.
-    fn into_request(self, command: Either<String, Vec<String>>) -> protocol::exec::StartRequest {
-        protocol::exec::StartRequest {
+    fn into_request(
+        self,
+        command: Either<String, Vec<String>>,
+    ) -> Result<protocol::exec::StartRequest, AsyncError> {
+        Ok(protocol::exec::StartRequest {
             exec_id: self.exec_id.unwrap_or_else(mint_exec_id),
             command: match command {
                 Either::A(single) => vec![single],
@@ -190,12 +193,12 @@ impl ExecOptions {
             shell: self.shell.unwrap_or(false),
             cwd: self.cwd,
             env: self.env.unwrap_or_default(),
-            user: self.user,
-            group: self.group,
+            user: crate::numbers::optional_u32(self.user, "user").map_err(js_async)?,
+            group: crate::numbers::optional_u32(self.group, "group").map_err(js_async)?,
             timeout_sec: self.timeout_sec,
             stdin: self.stdin.unwrap_or(false),
             reap_group_on_exit: self.reap_group_on_exit.unwrap_or(false),
-        }
+        })
     }
 }
 
@@ -216,12 +219,12 @@ pub struct SpawnOptions {
     /// The byte to start reading at. Non-zero resumes output a previous process was reading —
     /// which, with a stable `exec.execId`, is how a spawned process survives *this* process
     /// restarting.
-    pub offset: Option<i64>,
+    pub offset: Option<f64>,
     /// Whether to reconnect after a cut. Defaults to true, and turning it off is what makes a
     /// suspend/resume look like a stream that ended.
     pub reconnect: Option<bool>,
     /// How many reconnects before the streams error. A bound rather than forever.
-    pub max_reconnects: Option<u32>,
+    pub max_reconnects: Option<f64>,
     /// How long the body may be silent before the connection is treated as dead, in seconds.
     pub idle_timeout: Option<f64>,
     /// What to do when the daemon reports evicted output. Defaults to `'error'`; see
@@ -245,9 +248,11 @@ impl SpawnOptions {
     fn stream_options(&self) -> Result<StreamOptions, AsyncError> {
         let defaults = StreamOptions::default();
         Ok(StreamOptions {
-            offset: self.offset.unwrap_or(0).max(0) as u64,
+            offset: crate::numbers::offset_number(self.offset.unwrap_or(0.0)).map_err(js_async)?,
             reconnect: self.reconnect.unwrap_or(defaults.reconnect),
-            max_reconnects: self.max_reconnects.unwrap_or(defaults.max_reconnects),
+            max_reconnects: crate::numbers::optional_u32(self.max_reconnects, "maxReconnects")
+                .map_err(js_async)?
+                .unwrap_or(defaults.max_reconnects),
             error_on_gap: false,
             idle_timeout: match self.idle_timeout {
                 Some(idle) => seconds_async(idle)?,
@@ -383,7 +388,7 @@ impl Session {
     ) -> Result<ExecHandle, AsyncError> {
         let request = options
             .unwrap_or_else(ExecOptions::empty)
-            .into_request(command);
+            .into_request(command)?;
         let live = self.live().await;
         let session = live.session().map_err(js_async)?;
         Ok(ExecHandle::wrap(
@@ -423,7 +428,7 @@ impl Session {
             .exec
             .take()
             .unwrap_or_else(ExecOptions::empty)
-            .into_request(command);
+            .into_request(command)?;
         let live = self.live().await;
         let session = live.session().map_err(js_async)?;
         let handle = session.run(request).await.map_err(js_async)?;
@@ -450,7 +455,7 @@ impl Session {
     ) -> Result<ExecResult, AsyncError> {
         let options = options.unwrap_or_else(ExecOptions::empty);
         let timeout = seconds_async(options.timeout.unwrap_or(DEFAULT_RUN_SYNC_TIMEOUT))?;
-        let request = options.into_request(command);
+        let request = options.into_request(command)?;
         let live = self.live().await;
         let session = live.session().map_err(js_async)?;
         Ok(ExecResult::wrap(
@@ -575,11 +580,11 @@ impl Session {
     /// daemon reached directly takes no proxy headers, so an empty object is exactly what its
     /// requests carry.
     #[napi]
-    pub async fn connect_headers(&self, port: u16) -> Result<HashMap<String, String>, AsyncError> {
+    pub async fn connect_headers(&self, port: f64) -> Result<HashMap<String, String>, AsyncError> {
         let live = self.live().await;
         let session = live.session().map_err(js_async)?;
         Ok(session
-            .connect_headers(port)
+            .connect_headers(crate::numbers::u16_number(port, "port").map_err(js_async)?)
             .await
             .map_err(js_async)?
             .into_iter()
@@ -601,11 +606,11 @@ impl Session {
     ///
     /// The middle string **contains the credential**. Same rule as `connectHeaders`.
     #[napi]
-    pub async fn connect_subprotocols(&self, port: u16) -> Result<Option<Vec<String>>, AsyncError> {
+    pub async fn connect_subprotocols(&self, port: f64) -> Result<Option<Vec<String>>, AsyncError> {
         let live = self.live().await;
         let session = live.session().map_err(js_async)?;
         Ok(session
-            .connect_subprotocols(port)
+            .connect_subprotocols(crate::numbers::u16_number(port, "port").map_err(js_async)?)
             .await
             .map_err(js_async)?
             // `Vec` rather than a three-tuple, because napi has no fixed-length array type and

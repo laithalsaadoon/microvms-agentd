@@ -116,7 +116,7 @@
           {
             "choices": null,
             "default": null,
-            "help": "Give the VM outbound network. Omitted by default — a daemon needs none",
+            "help": "Request the managed INTERNET_EGRESS connector",
             "name": "egress",
             "positional": false,
             "required": false,
@@ -125,7 +125,16 @@
           {
             "choices": null,
             "default": null,
-            "help": "Ask the guest's own clients to refuse outbound requests. Advisory, never a seal",
+            "help": "Existing VPC network connector ARN. Repeat for multiple connectors",
+            "name": "egress-network-connector",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Set proxy environment variables that discourage outbound HTTP requests",
             "name": "deny-egress",
             "positional": false,
             "required": false,

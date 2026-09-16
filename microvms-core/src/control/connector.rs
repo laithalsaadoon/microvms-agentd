@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Network connectors: a closed intent enum, and the ARN each one derives (TRAP-4).
+//! Managed connector intents and customer-managed VPC egress connector validation.
 //!
 //! # Why an enum rather than a string
 //!
@@ -38,70 +38,78 @@
 
 use crate::region::Region;
 
-/// Whether the platform is measured to honour an **omitted** egress connector.
-///
-/// `false`, and that is a measurement rather than a guess: on 2026-09-11 (microvm 0.5.0,
-/// issue #154), 2026-09-12 (0.7.0) and 2026-09-13, us-east-1, API version `2025-09-09`, a
-/// VM launched with no `egressNetworkConnectors` member reached `example.com`,
-/// `github.com`, `pypi.org` and `extensions.duckdb.org` exactly as a `--egress` VM did
-/// (`docs/PLATFORM.md`, "A VM launched without the egress connector still has outbound
-/// network").
-///
-/// This constant exists so that "no egress" has **one** spelling in the client. Every
-/// posture label, every envelope key and every human line derives from
-/// [`EgressPosture::for_launch`], so the day the platform starts honouring the omission
-/// the repair is this one `bool` — not a search for the places that claimed a seal. The
-/// live suite pins the measurement against this constant
-/// (`conformance/run_rs.py`, `drive_platform_posture`), so a platform that starts sealing
-/// goes red here rather than silently making the label pessimistic.
+/// Validates a customer-managed connector ARN before launching a billable VM.
+pub(super) fn require_egress_connector_arn(arn: &str, region: &Region) -> Result<(), crate::Error> {
+    let parts: Vec<&str> = arn.splitn(6, ':').collect();
+    let valid = parts.len() == 6
+        && (1..=crate::constants::MAX_NETWORK_CONNECTOR_LEN).contains(&arn.len())
+        && parts[0] == "arn"
+        && parts[1] == "aws"
+        && parts[2] == "lambda"
+        && parts[3] == region.as_str()
+        && parts[4].len() == 12
+        && parts[4].bytes().all(|byte| byte.is_ascii_digit())
+        && parts[5]
+            .strip_prefix("network-connector:")
+            .is_some_and(|resource| {
+                let mut parts = resource.split(':');
+                let name = parts.next().unwrap_or_default();
+                let version = parts.next();
+                !name.is_empty()
+                    && name
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+                    && version.is_none_or(|version| {
+                        !version.is_empty()
+                            && !version.starts_with('0')
+                            && version.bytes().all(|byte| byte.is_ascii_digit())
+                    })
+                    && parts.next().is_none()
+            });
+    if !valid {
+        return Err(crate::Error::invalid_arg(format!(
+            "egressNetworkConnectors requires a customer-managed Lambda network connector ARN \
+             in {} (arn:aws:lambda:{}:<12-digit-account>:network-connector:<id>[:<version>]); \
+             create the VPC egress connector through lambda-core first",
+            region.as_str(),
+            region.as_str(),
+        )));
+    }
+    Ok(())
+}
+
+/// Compatibility constant: omitting an egress connector does not block internet access.
+/// Isolation requires a VPC egress connector and a VPC without an internet gateway
+/// or NAT gateway. A launch flag cannot establish the VPC's routing configuration.
 pub const PLATFORM_HONOURS_OMITTED_EGRESS: bool = false;
 
-/// What a launch's outbound network actually is, as opposed to what was requested.
+/// Conservative network posture inferred from launch options.
 ///
-/// # Why a request flag is not an answer
-///
-/// `egress: false` says what the client asked for. It does not say what the VM got, and
-/// for three measurement dates running those are different things: the omission is the
-/// strongest request `RunMicrovm` accepts — the API's whole outbound surface is
-/// `egressNetworkConnectors`, a list of connector ARNs, with no deny-all, VPC-only or
-/// policy member to set (service model `2025-09-09`) — and the platform grants outbound
-/// network anyway. A caller reading `egress: false` as "sealed" is the mistake this type
-/// exists to make unwriteable: an external review reached `extensions.duckdb.org` from a
-/// VM launched without `--egress` and installed a 242 MB DuckDB extension, which was
-/// documented platform behaviour and read as a client defect, because the envelope said
-/// `egress: false` and nothing said what that means.
-///
-/// So the client reports the posture, always, and names the weakest of the two claims it
-/// can support.
+/// Customer-managed connector ARNs do not prove internet isolation: their VPC routing
+/// must be checked separately. No combination of flags is automatically `Sealed`.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum EgressPosture {
     /// `INTERNET_EGRESS` is on the request: the VM has outbound network by design.
     Open,
-    /// No connector requested, and the platform does not honour the omission. The VM
-    /// reaches the internet. **This is the posture of a default launch today.**
+    /// Internet isolation has not been verified. This is the default launch posture.
     Unsealed,
-    /// No connector requested, plus the advisory in-guest deny
-    /// ([`crate::sandbox::RunRequest::deny_egress`]). A well-behaved client refuses to
-    /// leave the VM; a workload that ignores its environment does not.
+    /// Advisory in-guest proxy denial ([`crate::sandbox::RunRequest::deny_egress`]).
+    /// A workload can bypass it by ignoring its environment.
     BestEffort,
-    /// No connector requested, and the platform honours the omission: no outbound path.
-    ///
-    /// Unreachable while [`PLATFORM_HONOURS_OMITTED_EGRESS`] is `false`, and reachable by
-    /// flipping that one constant when a re-measurement earns it.
+    /// Internet isolation verified separately through VPC routing configuration.
+    /// Retained for stored labels; never inferred by [`EgressPosture::for_launch`].
     Sealed,
 }
 
 impl EgressPosture {
     /// The posture of a launch that requested `egress` and asked for `deny_egress`.
     ///
-    /// A platform seal outranks the advisory deny, because it is the stronger claim of the
-    /// two and the advisory one is then redundant.
+    /// These flags cannot verify VPC routing, so this never returns `Sealed`.
     pub fn for_launch(egress: bool, deny_egress: bool) -> Self {
-        match (egress, PLATFORM_HONOURS_OMITTED_EGRESS, deny_egress) {
-            (true, _, _) => EgressPosture::Open,
-            (false, true, _) => EgressPosture::Sealed,
-            (false, false, true) => EgressPosture::BestEffort,
-            (false, false, false) => EgressPosture::Unsealed,
+        match (egress, deny_egress) {
+            (true, _) => EgressPosture::Open,
+            (false, true) => EgressPosture::BestEffort,
+            (false, false) => EgressPosture::Unsealed,
         }
     }
 
@@ -156,34 +164,23 @@ impl EgressPosture {
                  internet by design"
             }
             EgressPosture::Unsealed => {
-                "no egress connector was requested, and the platform does not honour the \
-                 omission: the VM still reaches the internet (measured 2026-09-11, \
-                 2026-09-12 and 2026-09-13, us-east-1; docs/PLATFORM.md). Not a seal — \
-                 size the execution role accordingly (docs/TRUST.md)"
+                "internet isolation is unverified. Use a VPC egress connector with a VPC \
+                 without an internet gateway or NAT gateway; connector omission does not \
+                 block internet access. Not a seal"
             }
             EgressPosture::BestEffort => {
-                "no egress connector, plus the advisory proxy deny in the launch \
-                 environment: a well-behaved client (curl, uv, pip, npm) refuses to leave \
-                 the VM, and a workload that ignores its environment reaches the internet \
-                 anyway. Not a seal"
+                "advisory proxy-deny environment variables affect clients that honor them; \
+                 workloads can bypass them. Not a seal"
             }
             EgressPosture::Sealed => {
-                "no egress connector, and the platform honours the omission: the VM has no \
-                 outbound path"
+                "internet isolation requires separately verified VPC routing without an \
+                 internet gateway or NAT gateway; launch flags alone do not establish it"
             }
         }
     }
 }
 
-/// The posture of a launch that asks for nothing, which is the honest default in both
-/// directions: `Sealed` would be the defect this type exists to prevent, and `Open` would
-/// overclaim what a connector-less launch was given.
-///
-/// **Derived through [`EgressPosture::for_launch`] rather than named.** A `#[default]`
-/// attribute on `Unsealed` was the first spelling and it was wrong: it hardcodes the answer
-/// past [`PLATFORM_HONOURS_OMITTED_EGRESS`], so the day that constant flips, a default
-/// posture would keep saying `unsealed` while every derived one said `sealed` — the
-/// one-constant repair this type is built around, broken by its own `Default`.
+/// Defaults to the posture of a launch with no network flags.
 impl Default for EgressPosture {
     fn default() -> Self {
         EgressPosture::for_launch(false, false)
@@ -196,7 +193,7 @@ impl std::fmt::Display for EgressPosture {
     }
 }
 
-/// The Lambda-managed connectors this client will name, and no others.
+/// Lambda-managed connector intents. Customer-managed VPC connectors use explicit ARNs.
 ///
 /// Named for the *intent* rather than for the wire value, because the intent is what a
 /// caller has: "let the proxy reach the VM" and "let the VM reach the internet". The
@@ -282,15 +279,17 @@ impl ConnectorIntent {
 mod tests {
     use super::*;
 
-    /// **The posture of a default launch is `unsealed`, never `sealed`.**
-    ///
-    /// The label a caller reads for `egress: false` is the whole finding: an omitted
-    /// connector is the strongest request the API accepts and the platform grants outbound
-    /// network anyway, so the client must not spell that state as a seal.
-    ///
-    /// **Falsification** — flip [`PLATFORM_HONOURS_OMITTED_EGRESS`] to `true` and this
-    /// test fails on the first assertion (it reads `sealed`), which is exactly the
-    /// re-measurement gate the constant is for. Done on 2026-09-13, seen red, restored.
+    #[test]
+    fn customer_connector_arn_length_uses_the_run_microvm_limit() {
+        let prefix = "arn:aws:lambda:us-east-1:123456789012:network-connector:";
+        let maximum = crate::constants::MAX_NETWORK_CONNECTOR_LEN;
+        let arn = format!("{prefix}{}", "x".repeat(maximum - prefix.len()));
+        require_egress_connector_arn(&arn, &Region::UsEast1).expect("at the request limit");
+        require_egress_connector_arn(&format!("{arn}x"), &Region::UsEast1)
+            .expect_err("one over the request limit");
+    }
+
+    /// An omitted connector cannot establish internet isolation.
     #[test]
     fn a_launch_with_no_connector_is_unsealed_and_not_sealed() {
         let posture = EgressPosture::for_launch(false, false);
@@ -300,13 +299,10 @@ mod tests {
             !posture.is_sealed(),
             "omitting the connector does not seal the VM; it is measured not to"
         );
-        // The constant itself is not asserted here: clippy refuses an assertion on a
-        // constant, and the three assertions above already fail when it flips, which is the
-        // behaviour that matters rather than the value.
     }
 
     /// The other three postures, and the two rules that order them: `--egress` is `open`
-    /// whatever else was asked for, and a platform seal outranks the advisory deny.
+    /// whatever else was asked for, and proxy denial is only advisory.
     #[test]
     fn the_posture_table_is_the_whole_domain() {
         assert_eq!(EgressPosture::for_launch(true, false), EgressPosture::Open);
@@ -359,23 +355,14 @@ mod tests {
         }
     }
 
-    /// **`Default` derives through `for_launch`, so one constant still decides everything.**
-    ///
-    /// The first spelling of this was `#[default] Unsealed`, which hardcodes the answer past
-    /// [`PLATFORM_HONOURS_OMITTED_EGRESS`] — flip the constant and a defaulted posture keeps
-    /// saying `unsealed` while every derived one says `sealed`. Caught in review of the
-    /// change that introduced it.
-    ///
-    /// **Falsification** — 2026-09-13. Restore `#[derive(Default)]` with `#[default]` on
-    /// `Unsealed`, flip the constant to `true`, and this test fails while the label tests
-    /// still pass. With the manual impl, the same flip keeps them equal.
+    /// Defaults and explicitly empty launch options report the same posture.
     #[test]
     fn the_default_posture_is_the_derived_one() {
         assert_eq!(
             EgressPosture::default(),
             EgressPosture::for_launch(false, false),
             "a defaulted posture must be the posture of a launch that asks for nothing, \
-             derived from the same constant"
+             derived from the same launch options"
         );
     }
 

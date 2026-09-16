@@ -17,7 +17,7 @@ This page is for contributors. At the end of it you will know what `mise run che
 
 ## 1. Two tiers, split by cost
 
-`mise run check` is the definition of done for a change: lint, security, every Rust test tier, the schema and stub freshness gates, the model-drift gate against the pinned botocore service model, the publish-set check, the live tier's own wiring check, and the release cross-compile. It runs offline, with no network, no credentials, and no money. The pre-push hook and CI both run it.
+`mise run check` is the definition of done for a change: lint, security, every Rust test tier, the schema and stub freshness gates, the model-drift gate against the pinned botocore service model, the publish-set check, the live tier's own wiring check, and the release cross-compile. It creates no AWS resources. Tool installation, security rules, and advisory updates can require network access. The pre-push hook and CI both run it.
 
 `mise run live` is the set of suites that talk to real AWS. It creates real MicroVMs in your account and costs money whether it passes or fails, so it is never wired to a hook or to push. A gate that spends money on every push is a gate people disable with `--no-verify`, and `--no-verify` also skips the checks worth having. The hook does print an advisory when the daemon has changed since the last recorded live run.
 

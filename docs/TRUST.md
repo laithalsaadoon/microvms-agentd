@@ -1,493 +1,174 @@
 # The trust contract for a control daemon inside a Lambda MicroVM
 
-AWS Lambda MicroVMs give you an isolated Firecracker VM and no way to run anything
-in it: no exec API, no file-transfer API. So every team building a coding-agent
-sandbox on this substrate writes an in-VM daemon to supply both, and every one of
-them inherits the same problem. The workload that daemon serves is a coding agent —
-an untrusted, model-driven process that runs arbitrary code by design — and it lives
-in the same network namespace as the API that controls its own sandbox. Bedrock
-AgentCore addresses this with an external credential broker. A customer on raw
-MicroVMs has no broker.
-
-This document is the contract for that boundary, written so it can be implemented
-without adopting `microvms-agentd`. Every claim about the platform carries its date
-and region or is labeled as AWS documentation. Every claim about this
-implementation names the file. Where the design is a judgment call rather than a
-forced move, it says so and names the alternative.
+`agentd` authenticates control requests inside a VM that may run hostile
+workloads. It does not isolate itself from a root workload. This document
+states the guarantees, deployment assumptions, and limits. [Protocol](PROTOCOL.md)
+defines the wire behavior; [Platform](PLATFORM.md) records dated AWS evidence.
 
 ## The threat model
 
-The adversary is the workload running inside the VM. Attackers on the internet are
-handled by the platform's endpoint authentication, described in the next section.
+A guest process can connect to the daemon over loopback, including lifecycle
+hook paths. A process without the agent token must not gain control through
+an authentication bypass or a second bootstrap. The token lives in daemon
+memory and is not written to disk or logged by the daemon.
 
-The daemon holds a bearer token delivered at launch and uses it to authorize
-`/v1/exec/*` and `/v1/fs/*`. The adversary is any process inside the VM that the
-harness did not intend to have that token: a background process baked into the base
-image, a subprocess the agent spawned, or the agent itself reaching for authority
-over its own sandbox rather than merely using it.
-
-It can open a TCP connection to the daemon's port from inside the VM and send any
-bytes on it, including the platform's own hook paths and any header value it likes.
-It can poll the unauthenticated `/v1/health`. Once it holds the token it can run
-commands as root, because that is what the control API is for.
-
-The adversary also has limits, and those limits are what make the contract
-tractable. It cannot reach the
-daemon from outside the VM without a platform-minted credential (below). It cannot
-find the token in the logs: the token and the payload carrying it are never logged,
-and the run-hook handler logs only outcomes (`agentd/src/routes.rs`, `run_hook`). It
-cannot read the token off disk, because the token never goes to disk. The installed
-token lives in a `Mutex<Option<Vec<u8>>>` in process memory, and nothing writes it
-out (`agentd/src/state.rs`). It cannot make an unauthorized request cause the daemon to
-allocate a request body.
-
-One boundary is out of scope for this contract. A workload that already has root in
-the VM can read the daemon's memory through `/proc/<pid>/mem` or `ptrace`, and the
-token is in that memory. That follows from Linux process semantics rather than from
-anything we measured, and nothing here defends against it. Since the control API
-grants root by design, a token holder and a root workload are the same principal.
-Everything below is about keeping a *non*-token holder from becoming one.
+An authorized caller can execute as root. A root workload can potentially read
+daemon memory with `ptrace` or `/proc/<pid>/mem`, change files, or exhaust guest
+resources. User demotion is a convenience, not a separate sandbox. The model
+and authentication tests do not prove isolation from guest root.
 
 ## What the platform gives you for free
 
-The platform provides two properties that shrink the problem materially. Both come
-from AWS documentation rather than our measurement.
+AWS documents two relevant properties:
 
-Every request to a MicroVM endpoint requires an `X-aws-proxy-auth` JWE scoped to a
-specific MicroVM ID and port set, with a maximum lifetime of 60 minutes
-(`microvms-networking.html`). There is no unauthenticated internet path to the
-daemon's port. Port scoping is the useful half: a token minted for port 9000 cannot
-reach port 8080, so a task workload and a control plane can share a VM with external
-access handed to only one. The cost is that the 60-minute ceiling puts endpoint-token
-minting inside every client retry path.
+- Endpoint requests require a proxy credential scoped to the VM and permitted
+  ports, with a maximum lifetime of 60 minutes. This credential is separate
+  from the agent token. Clients refresh it for later requests.
+- External traffic starts only after the run hook returns HTTP 200. This
+  protects launch-time bootstrap from external traffic, but not from a
+  process already running inside the guest.
 
-External traffic begins only after the `/run` hook returns 200
-(`microvms-launching.html`). That is what makes it safe to deliver a per-VM secret
-through `runHookPayload` at launch instead of baking a shared secret into an image
-snapshot. It closes the first-writer race *through the endpoint*, and says nothing
-about processes already running inside the VM.
+Port scope was measured on 2026-08-15, us-east-1, API `2025-09-09`: a token
+for 9000 could not access 8080. Guest loopback traffic bypasses this proxy.
 
 ## Why source-address filtering is wrong, not merely weak
 
-The intuitive control is to accept the bootstrap hook only from the platform. Do not
-implement it. It breaks every launch, which makes it a defect rather than a weak
-defense resting on an unverified assumption.
-
-We measured this on 2026-08-04 in us-east-1 by instrumenting the daemon to log
-`client_address` on every request and reading the result out of CloudWatch:
-
-```
-PROBE hook=run            client_address=('127.0.0.1', 36932)   headers={... 'host': 'localhost:9000'}
-PROBE control=/exec/start client_address=('127.0.0.1', 36926)
-```
-
-The endpoint proxy terminates outside the VM and forwards inward over loopback. The
-platform's own lifecycle hooks and the harness's control requests both arrive from
-`127.0.0.1` on ephemeral ports. At the socket level they look the same as a request
-sent by a process inside the VM. A rule rejecting loopback callers on the bootstrap
-route therefore rejects the platform's legitimate bootstrap. We tried it, and
-`PLATFORM.md` records that the attempt broke 39 tests. Those failures were reporting
-the real defect rather than a harness artifact.
-
-The same run produced one more observation, worth recording because it looks like an
-attack in a log and is not. Something in the platform's path probes the port with TLS
-before bootstrap, so a plaintext HTTP server receives a ClientHello and answers
-`400 Bad request version ("\x13\x01\x13\x02...")`. The correct response is a 400 and a
-debug-level log line. Taking the listener down in response would be a defect.
+Measured 2026-08-04, us-east-1, API `2025-09-09`: platform hooks and proxied
+control requests arrived from `127.0.0.1`. A loopback filter cannot identify
+AWS and rejecting loopback rejects legitimate bootstrap. The platform does
+not present an authentication credential to the run hook.
 
 ## The five defenses that remain
 
-**One-shot bootstrap.** The first `/run` carrying a token installs it and answers
-200. A later `/run` carrying the *identical* token also answers 200, because the
-platform may retry its own hook and telling it the VM is broken fails a launch that
-is fine. A later `/run` carrying a *different* token answers 409 and changes nothing
-(`agentd/src/state.rs`, `Bootstrap`; `agentd/src/routes.rs`, `run_hook`). This is the
-only defense available on that route. Its sufficiency is checked by a model:
-`model/src/lib.rs` uses stateright to enumerate every interleaving of platform,
-client, and in-VM attacker, and holds `bootstrap is one-shot` and `only the
-installed token is accepted` across all of them.
+1. **One-shot bootstrap.** The first valid run hook installs the token and
+   returns 200. An identical replay returns 200; a different token returns
+   409 without modifying state. Replays must remain idempotent because a
+   failed run hook can cause AWS to terminate the VM. Implemented in
+   `agentd/src/state.rs` and `agentd/src/routes.rs`.
+2. **Constant-time comparison on bytes.** Bootstrap and request guards compare
+   equal-length byte strings with `subtle::ct_eq`, avoiding Unicode decoding
+   errors. Token length remains observable. Implemented in `agentd/src/auth.rs`.
+3. **Authorization before request-body processing.** Protected routes reject
+   unauthorized requests before parsing or buffering their body. A bounded
+   drain (64 KiB by default) reduces connection resets; excess data closes the
+   connection rather than causing an unbounded allocation.
+4. **Explicit child environments.** Exec uses `env_clear()` and adds only the
+   launch/request environment. The installed agent token is never implicitly
+   inherited. Caller-supplied environment values are intentionally available
+   to child processes. User changes use `Command::uid`/`gid`; avoid Rust
+   `pre_exec` closures in a multithreaded process because inherited locks can
+   deadlock after fork. Implemented in `agentd/src/exec.rs`.
+5. **Distinct status codes.** Protected routes return 503 before bootstrap and
+   401 for an invalid token afterward. Unknown routes return 404. `/v1/health`
+   and `/v1/schema` remain unauthenticated; health exposes bootstrap state so
+   callers can check readiness.
 
-The identical-replay rule is where a naive implementation gets it backwards.
-Answering 409 to a replay is safer in isolation and worse in practice. The platform
-terminates the VM on a failed run hook before forwarding any traffic, so the failure
-is invisible from outside and the VM is gone before you can look inside it.
-Replay-200 has a cost: an attacker who somehow learns the harness's token can
-confirm it by replaying the hook. We accept that cost, because an attacker holding
-the token already has the control API.
-
-**Constant-time comparison, on bytes.** Both the bootstrap check and the per-request
-authorization compare with `subtle`'s `ct_eq` over raw bytes, never over decoded
-strings (`agentd/src/auth.rs`, `constant_time_eq` and `bearer_bytes`). Comparing raw
-bytes matters because the header is entirely attacker-controlled. Python's
-`hmac.compare_digest` raises `TypeError` on `str` inputs containing non-ASCII
-characters, so `Authorization: Bearer tökén` killed the predecessor's handler thread
-and returned `RemoteDisconnected` instead of a status the client could act on. That
-exact input is now a unit test (`agentd/src/auth.rs`,
-`a_non_ascii_header_is_compared_not_crashed`) and a live conformance check
-(`conformance/run_rs.py`, "non-ASCII token header answered, not a dropped
-connection"). The conformance check keeps the same name it had in the deleted Python
-oracle, and it now asserts the 401 directly rather than the exception a client mapped
-it to. The client sending it has to put the bytes on the wire itself, because `httpx`
-encodes a `str` header as ASCII and refuses anything else. The driver therefore
-builds `b"Bearer " + token.encode("utf-8")`. We verified this on 2026-08-09: the
-`str` form raises `UnicodeEncodeError` before the request leaves, which would make
-this property untestable rather than merely untested.
-
-This defense has a known limit. Length inequality short-circuits before the
-constant-time compare, so token length is observable. The justification is that the
-length is fixed by whoever minted the token and is not secret. If your tokens have
-variable length and their length is meaningful, that reasoning does not transfer.
-
-**Authorization before body.** The token guard runs as middleware before the request
-body is polled, so a rejected request never causes the daemon to buffer
-(`agentd/src/auth.rs`, `require_token`). The predecessor buffered first and checked
-second, which let an unauthorized caller force a 256 MB allocation on a VM whose
-baseline can be 512 MiB. An OOM-killed daemon inside a MicroVM is unrecoverable,
-because there is no supervisor, no SSH, and no console. A rejected request still
-drains a bounded prefix of its body, 64 KiB by default. Draining is needed because
-leaving unread bytes in the kernel buffer makes hyper close with a TCP RST, which a
-pooled client sees as a transport error instead of the status you just chose.
-Draining without a cap would itself be the denial-of-service you just prevented, so
-past the cap the status goes out and the connection closes.
-
-**The token is absent from child environments.** Every exec'd child starts from an
-empty environment via `env_clear()`, and only the variables the launch and the
-request named are added (`agentd/src/exec.rs`, `build_command`). Nothing on that path
-reads `std::env`. The test proves it by running `/usr/bin/env` in a child and
-asserting empty output
-(`the_agent_token_never_reaches_the_child_environment`). Privilege demotion, when
-requested, goes through `Command::uid`/`gid` rather than a `pre_exec` closure, so the
-uid change happens in C between fork and exec. A closure there would run in a forked
-child of a threaded process, where an allocator lock another thread held at fork time
-is held forever.
-
-The launch environment does not weaken this, and it is the one addition that could
-have. The run-hook payload now carries both the token and an optional `env` map, so
-the hazard is a code path that forwards the first into the second.
-`AppState::bootstrap` takes them as two separate parameters and there is no struct
-field holding both, which is what makes such a path unwritable rather than merely
-unwritten. A second test
-(`a_launch_environment_does_not_carry_the_agent_token_into_a_child`) installs a
-launch env, spawns `/usr/bin/env`, and asserts the child's environment is *exactly*
-that map. Asserting the whole environment rather than "does not contain the token" is
-deliberate: a token forwarded under some other key would satisfy a substring check on
-the token's own name, and an extra variable of any name is what a leak looks like.
-
-This defense has three limits. Demotion is opt-in per request, so the default child
-is root. The defense only matters when the child is *not* the token holder, which is
-true of a task subprocess and false of the agent harness itself. And a launch env is
-material the *caller* chose to put in every child's environment, so anything a caller
-places there is readable by every process they exec — which is the point of the
-channel and is worth stating rather than assuming they know.
-
-**Honest status codes, as a security property.** The three codes are chosen for what
-they leak and how they mislead. `503` means no token is installed yet. `401` means a
-token is installed and yours is wrong. `404` means the route does not exist.
-Collapsing 503 into 401 tells a client to go find better credentials when the real
-answer is "wait". Collapsing either into 404 is worse, because clients map 404 onto
-"file not found", so a protocol error surfaces as a phantom missing artifact. One
-defect hid for a review round in exactly that way. `token_matches`
-returns `None` for the unbootstrapped case specifically so the caller must decide
-(`agentd/src/state.rs`), and the middleware is applied with axum's `route_layer` so an
-unmatched path falls through to 404 rather than being answered 401
-(`agentd/src/routes.rs`).
-
-This design accepts one leak. `GET /v1/health` is unauthenticated and reports
-`bootstrapped`, so any in-VM process can detect the pre-bootstrap window precisely
-rather than guess at it. That is a judgment call. It does not change the outcome,
-because one-shot bootstrap means the winner wins regardless of who is watching, but
-it removes timing obscurity a different design could have kept. The alternative,
-authenticating `/v1/health`, costs an orchestrator its only liveness probe during the
-window it most needs one.
+`model/` explores bootstrap interleavings and tests both compliant and broken
+deployments. Unit and conformance tests exercise the implementation. The
+model does not cover identity repair, filesystem confinement, or all Linux
+process behavior.
 
 ## The unenforced invariant
 
-The contract rests on one assumption that no code in the daemon enforces, so it is
-stated here explicitly.
+**Run the daemon as the image's `CMD`, and start workloads only after bootstrap
+and readiness.** Use `ENTRYPOINT []` and `CMD ["/agentd"]`. Review the base image
+and startup behavior for processes that could run before the daemon.
 
-**The daemon must be the container `CMD`, and the harness must issue its first exec
-only after readiness succeeds.** Concretely, that means `ENTRYPOINT []` plus
-`CMD ["/agentd"]`, with no init system and no other process started first. That is
-what makes "no in-VM workload runs before bootstrap completes" true. It is also what
-makes an omitted `cwd` inherit the image `WORKDIR`, and what makes identity repair
-sound.
-
-The invariant breaks when a base image starts a background process — an init system,
-a preloaded agent, a D-Bus daemon — before the daemon binds its listener. Such a
-process can send `/run` first, and one-shot bootstrap then works *for* it. It becomes
-the installed token holder, and the platform's real hook gets the 409.
-
-The model checks both sides of the invariant.
-`Config::deployment_invariant_held` passes every safety property over the whole
-reachable state space. `Config::deployment_invariant_broken` flips a single flag that
-lets the attacker act before bootstrap, and the test asserts stateright *finds* the
-counterexample and that its path contains an attacker `RunHook` (`model/src/lib.rs`,
-`breaking_the_deployment_invariant_lets_the_attacker_in`). The "attacker never
-authorized" property is stated unconditionally on purpose. A property that consults
-the config it is meant to discriminate goes vacuous in the very run where it should
-fail. The model's scope has a limit: it checks the bootstrap and exec half of this
-contract, and does not model identity repair, the fs routes, or anything below.
-
-Enforcement belongs to whoever builds the image, because a daemon cannot check this
-about itself. It is an image-review property: inspect the base image's entrypoint,
-its systemd units, and anything a package install added.
+A pre-existing hostile process could win the first run-hook request and
+install its own token. One-shot bootstrap then preserves the wrong principal.
+The daemon cannot verify the image's full startup history. The model includes
+this misconfiguration and confirms an attacker can win that race.
 
 ## Identity repair for derived VMs
 
-One image is snapshotted once and restored N times, so every byte in that snapshot is
-identical across every VM, including the files whose only purpose is to be unique per
-machine. This has a concrete security consequence. `systemd-random-seed` credits
-`/var/lib/systemd/random-seed` into the kernel pool at boot, so N VMs credit the same
-seed, and a key generated in VM 7 can repeat a key generated in VM 3.
+Restored images can share files and cached userspace state. Firecracker
+VMGenID and Linux kernel reseeding do not repair identifiers already stored
+on disk or cached by applications. Optional identity repair runs during
+bootstrap and reports its result through health.
 
-The platform already repairs part of this. Each `RunMicrovm` is a Firecracker
-restore, which bumps VMGenID, and Linux ≥ 5.18 reseeds the kernel CSPRNG from that
-notification (documented kernel behavior). So `getrandom(2)` and `/dev/urandom` are
-already distinct per VM with no help from you, and re-seeding from userspace would
-add nothing while needing `RNDADDENTROPY`. What VMGenID does *not* touch is any
-identifier already committed to a file.
+`agentd/src/identity.rs` uses a fresh 128-bit seed to:
 
-The caller owns the rest, as a checklist. `agentd/src/identity.rs` implements all of
-it and reports each step on `/v1/health`.
+- Rewrite `/etc/machine-id` and set the hostname.
+- Remove `/var/lib/systemd/random-seed` rather than sharing its snapshot value.
+- Attempt to shadow `/proc/sys/kernel/random/boot_id` with a bind mount.
+- Remove configured cached identity files, including `/var/lib/dbus/machine-id`
+  by default.
 
-1. Mint one fresh 128-bit value from `/dev/urandom` and derive everything from it, so
-   a VM's hostname and machine id agree in logs. Read a bounded buffer rather than the
-   whole file, because `/dev/urandom` never reaches EOF.
-2. Rewrite `/etc/machine-id` as 32 lowercase hex digits plus a newline. The file is
-   0444 on a booted system, so unlink it first and restore the mode afterwards;
-   opening it for write is EACCES even as root on some filesystems.
-3. Set the hostname.
-4. **Delete** `/var/lib/systemd/random-seed`. Do not rewrite it. A rewritten file is
-   captured by the next snapshot and recreates the shared-seed problem one generation
-   down; an absent file is unambiguous, since systemd's load step treats it as nothing
-   to credit and writes a fresh one at shutdown from the already-reseeded pool.
-5. Shadow `/proc/sys/kernel/random/boot_id` with a bind mount, formatted `8-4-4-4-12`
-   because readers parse the dashes. It cannot be written: procfs refuses even for
-   root, since the value is generated per boot and has no backing store.
-6. Remove cached per-VM credentials that the snapshot captured. Only a configured
-   list can be removed — `/var/lib/dbus/machine-id` by default — and a credential in
-   a place nobody named survives.
+Repair cannot revoke values a process already read, update arbitrary
+application caches, or override missing kernel capabilities. A bind mount is
+namespace-local. Failures leave the daemon serving and set `identity_degraded`;
+callers that require repaired identity must check it. Opting out is reported
+separately through `identity_repaired`.
 
-The checklist has sharp edges. All of them are noted in the implementation's own
-comments, and none of them are fixable there. A bind mount needs `CAP_SYS_ADMIN` in
-the current mount namespace and is refused outright in a container that did not ask
-for it. A bind mount is also namespace-local, so a child in a fresh mount namespace,
-or an already-running process holding an open fd on the original, still sees the
-snapshot value. Already-read values cannot be recalled, which is why repair is only
-sound before any workload starts; this is the `CMD` invariant again. And a daemon
-baked into the image that cached a derived identifier in memory keeps it until it
-restarts.
-
-Every failure is logged and then ignored, and the daemon serves on. That is
-deliberate. A duplicate `machine-id` is a real security problem, but an unreachable
-VM with work in it is a worse and unrecoverable one. The condition is surfaced as
-`identity_degraded` on `/v1/health` so an orchestrator can drain the VM rather than
-discovering the duplication from a repeated key months later. Opting out of repair is
-supported, because a fleet keyed by machine id wants stable identity.
-`identity_repaired: false` distinguishes that choice from a repair that found nothing
-to do.
-
-The `CAP_SYS_ADMIN` failure mode this section previously listed as expected but
-unmeasured has since been measured, and it was real. On 2026-08-06 in us-east-1 a live
-run reported `identity_degraded: true`. Writing `/etc/machine-id` succeeded, while
-`sethostname` and the bind mount over `/proc/sys/kernel/random/boot_id` both returned
-`EPERM` even though the daemon runs as root. The MicroVM drops `CAP_SYS_ADMIN` unless
-the image is created with `additionalOsCapabilities: ["ALL"]`. With that set, all three
-steps succeed and the same probe reports `identity_degraded: false`. Both facts are
-recorded in `PLATFORM.md`, and the conformance suite now asserts
-`identity_degraded == false`, so the capability requirement cannot be dropped silently.
-
-Two lessons carry beyond the fix. First, a partial success is the dangerous shape.
-The filesystem write succeeds, so repair looks like it works until you check the two
-steps that need the kernel's permission rather than the filesystem's. Second, the
-unit tests could not have caught this. They inject a `Layout` inside a tempdir and a
-fake platform, which is correct for testing the logic but structurally unable to
-observe a capability the real VM lacks.
+The August 2026 measurement succeeded with `additionalOsCapabilities: ["ALL"]`.
+September measurements found a restricted capability set even when repair was
+requested. Those observations are both retained in [Platform](PLATFORM.md);
+requesting `ALL` is not proof that every repair operation succeeded.
 
 ## Tunnel identity: proving which VM answered
 
-Everything above trusts the endpoint proxy to route a request to the VM its JWE names.
-That trust is usually fine — the JWE is scoped to one `microvmId` and the proxy
-enforces the scope (measured: a wrong-port token is refused) — but it is trust in
-AWS-operated middleware, and TLS terminates *at* that middleware. A caller who wants
-the binding to hold without the proxy in the loop can ask for it:
-`microvm run --keep --identity` and then `microvm tunnel --verify-identity`.
+`microvm run --keep --identity` provisions keys for
+`microvm tunnel --verify-identity`. A Noise KK handshake runs inside the
+WebSocket and terminates in the daemon. The host supplies the VM seed and
+host public key through one-shot bootstrap; both sides pin the other's public
+key. Subsequent tunnel data is encrypted with ChaCha20-Poly1305, beyond the
+proxy's TLS termination. See `protocol/src/identity.rs`.
 
-The mechanism is a Noise KK handshake inside the tunnel's WebSocket, terminated in the
-daemon rather than at the proxy. At launch the host generates two x25519 seeds and
-delivers the VM's seed plus the host's public key in the `runHookPayload`, beside the
-agent token and under the same one-shot bootstrap rule — only the winning bootstrap
-installs identity, so a losing racer cannot substitute a key. Each side then pins the
-other's public half before the first byte moves: `KK` means a wrong key on either side
-fails the handshake's own decryption, so there is no verifier code that could forget
-to check. Everything after the handshake is ChaCha20-Poly1305 ciphertext, opaque to
-the proxy that carries it.
+The local name record stores the host secret and VM public pin; it does not
+retain the VM secret. A stolen record can authorize the same tunnels its
+agent token already permits, but does not provide the VM key needed to
+impersonate it. Protect local records accordingly.
 
-Why not TLS: the service model has no client-certificate parameter
-(`CreateMicrovmAuthToken` takes an identifier, ports, and an expiry — nothing else),
-so platform-layer mTLS is unavailable, and tunnel-layer rustls is unavailable to the
-*daemon* because both of its crypto providers compile C that the
-`aarch64-unknown-linux-musl` shipping build cannot link (measured 2026-08-29:
-`cc-rs` requires `aarch64-linux-musl-gcc`, absent locally and in CI). Noise KK is the
-same proof shape with pure-Rust primitives, and `protocol/src/identity.rs` carries the
-full argument.
-
-What a stolen record buys is deliberately narrow. The registry keeps the host's secret
-and the VM's *public* pin; the VM's own secret is dropped on the host side the moment
-the launch payload is built. So a copied `NameRecord` lets its holder check a VM's
-identity and open tunnels — which the agent token in the same file already allowed —
-and lets no one impersonate the VM to its launcher.
-
-**The honest limit.** The handshake proves the far end is *agentd in the VM you
-launched*. It does not prove the VM is uncompromised: the workload runs as uid 0 and
-can read the daemon's memory through `ptrace` or `/proc/<pid>/mem`, taking the derived
-key with it. That is the same boundary the whole contract states at the top — the
-daemon is *distinct from* the workload, never *protected from* it. Same class as the
-unenforced-list entries; documented, not overclaimed.
+This proves key possession by the endpoint, not that the guest remains
+uncompromised. A root workload may read daemon keys from memory. It also does
+not authenticate arbitrary plain HTTP or unverified tunnel traffic.
 
 ## The execution role is the boundary
 
-Measured 2026-09-11 (microvm 0.5.0, issue #155) and again 2026-09-12 on this tree's
-binaries, us-east-1, API version `2025-09-09`, recorded in `docs/PLATFORM.md` under "The
-guest reaches the execution role's credentials through MMDS": `http://169.254.169.254/`
-inside the guest is Firecracker's MMDS. An IMDSv2 token `PUT` answers 200, and
-`/latest/meta-data/iam/security-credentials/execution_role` answers 200 with a full
-credential document for the role `RunMicrovm` was given. It answers root and a `--user
-1000` exec alike, on a VM launched with `--egress` and on one launched without it.
+Measured 2026-09-11 and 2026-09-12, us-east-1, API `2025-09-09`: the guest
+could retrieve the execution role's temporary credentials from Firecracker
+MMDS at `169.254.169.254`. Both root and uid 1000 could do so, with and without
+the managed internet connector. An empty child environment does not hide
+metadata credentials.
 
-The guarantee above — the agent token never enters an exec'd child's environment — is
-intact, and it is not the relevant boundary here. The workload does not need the agent
-token to do damage outside the VM; it holds the VM's AWS identity. Whatever the
-execution role can do, anything the sandbox runs can do, and with egress open by default
-(see **Egress** below) it can do it from inside the VM.
+Grant the execution role only permissions every workload may use. The
+conformance role grants CloudWatch logging; its policy is checked during live
+verification. Deliver additional workload credentials with their own scope
+and lifetime instead of broadening the shared VM role.
 
-Two controls follow, in order:
-
-1. **Least privilege on the execution role is the first control, and today it is the
-   only one this client can name.** Grant the role exactly what the daemon needs, which
-   is CloudWatch Logs for its own stdout, and grant nothing on behalf of the workload:
-   a workload that needs S3 should receive a scoped credential through the launch
-   channel or a file, never through the VM's role. The conformance stack is the worked
-   example: its execution role's single inline statement allows
-   `logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:PutLogEvents` on
-   `log-group:*` and nothing else (`conformance/infra/main.tf`, the
-   `aws_iam_policy_document.execution` block), and the live suite reads the grant back
-   from IAM on every run and fails on any action outside `logs:`, counting an `Allow`
-   statement's `NotAction` as one (`conformance/run_rs.py`, `drive_platform_posture`).
-2. **Blocking `169.254.169.254` inside the guest would be the second control, and no
-   in-guest recipe was measured working.** `ip`, `iptables` and `nft` are absent from
-   `al2023-minimal`; installing `iproute` and adding a blackhole route as root answers
-   `RTNETLINK answers: Operation not permitted`, because the exec child's bounding set
-   (`CapBnd 00000000a80425fb`, the Docker default) carries no `CAP_NET_ADMIN`, and
-   `--repair-identity`'s `additionalOsCapabilities: ["ALL"]` does not widen it. The
-   netfilter and `/proc/sys` paths need the same capability and the latter is mounted
-   read-only. Until the platform offers a network policy or the guest gains
-   `CAP_NET_ADMIN`, a consumer should treat the role as reachable and size it
-   accordingly.
-
-This section exists because the earlier reading of this document — no credentials in
-the environment, so no credentials — was true and beside the point. A conformance
-fixture that asserts on `env` proves nothing about the role; the fixture that matters
-asserts on the role's policy, which is what the suite now does.
+Tested in-guest metadata blocks failed: the capability set lacked
+`CAP_NET_ADMIN`, and route/rule/link changes returned `EPERM`. Relevant sysctl
+paths were read-only. No tested guest-side block was effective. VPC internet
+isolation does not remove metadata access or make an overprivileged role safe.
 
 ## What this contract does not cover
 
-**Egress.** Nothing here constrains what the workload can reach. Egress is a
-launch-time property of the MicroVM's network connectors, and a guest daemon cannot
-enforce it against a root process. This document used to say that omitting
-`INTERNET_EGRESS` is how you get a VM with no outbound network; measured 2026-09-11,
-2026-09-12 and 2026-09-13 in us-east-1 (API version `2025-09-09`, `docs/PLATFORM.md`,
-"A VM launched without the egress connector still has outbound network"), a VM launched
-with no egress connector reached `example.com`, `github.com`, `sts.amazonaws.com`,
-`pypi.org` and `extensions.duckdb.org` exactly as the `--egress` VM did. Omitting the
-connector is still the right request — the client sends no egress list, and the live
-suite pins the measured posture so a change is noticed — but today it does not seal the
-VM, and that call belongs to the platform rather than to whoever calls `RunMicrovm`.
+**Internet isolation.** No internet egress requires a VPC without an internet
+gateway or NAT gateway, attached with a custom VPC connector. Check subnet
+routes for other paths, including IPv6, transit networks, and proxies.
+[Networking](NETWORKING.md) gives the boto3 setup. Connector lifecycle belongs
+to the separate Lambda core API; a MicroVM launch supplies its ARN.
 
-**So this client reports the posture rather than the request, in four values.** A
-consumer that read `egress: false` as "sealed" was reading a request flag as a
-guarantee, and the cost of that reading is measurable: an external review of an
-unrelated tool had DuckDB fetch a 242 MB extension inside a VM launched without
-`--egress` (2026-09-12). Every `run` and `agent-up` envelope now carries
-`egressPosture`, and every human run report prints it:
+Omitting `--egress` only omits the managed connector. Default-network tests
+still reached public sites. `--deny-egress` sets proxy variables and cannot
+constrain a workload that ignores them. The package does not audit custom
+connector routing; its posture values are conservative:
 
-| Posture | Mechanism | Enforced by |
-|---|---|---|
-| `open` | `--egress` puts `INTERNET_EGRESS` on the launch | the platform, by design |
-| `unsealed` | no connector requested, and the platform grants outbound network anyway | **nothing** |
-| `best-effort` | `--deny-egress`: `http_proxy`/`https_proxy`/`all_proxy`, both cases, set to `http://127.0.0.1:1` in the launch env | the workload's own clients |
-| `sealed` | no connector and no outbound path | the platform — **unreachable today** |
+| `egressPosture` | Meaning |
+|---|---|
+| `open` | Managed internet connector requested |
+| `unsealed` | Internet isolation has not been established by the client |
+| `best-effort` | Guest proxy variables discourage outbound HTTP clients |
+| `sealed` | Retained for stored labels; not inferred from a launch request |
 
-`sealed` exists as a value and is unreachable on purpose: the client's belief lives in
-one constant (`microvms_core::control::PLATFORM_HONOURS_OMITTED_EGRESS`, `false`), the
-live suite measures the guest against it on every run, and a platform that starts
-honouring the omission turns those checks red. Flipping that constant is then the whole
-repair, and every label, envelope and printed line follows it. A default launch is
-`unsealed`, never `sealed`, because a default that claimed a seal is the defect this
-type exists to prevent.
+**Credential rotation.** The serialized `runHookPayload` has a measured
+4096-byte limit shared by the token, environment, and identity material. It is
+delivered once and is not a rotation channel. The client validates the full
+payload before calling AWS. Use an authenticated session or an external
+credential broker for subsequent delivery and refresh.
 
-**`--deny-egress` is advisory and the label says so.** It stops `curl`, `uv`, `pip` and
-`npm` — the accidental download, which is the common case and the one that cost 242 MB
-— and it does nothing against a workload that unsets or overrides those proxy
-variables — six of them, `http_proxy`/`https_proxy`/`all_proxy` in both cases, and a
-client reading only the spelling that was left in place is enough — or that uses a client
-which never read them. It is not a security boundary and must not be
-reported as one. Two stronger things were considered and are not here: a default-drop
-nftables policy applied at boot (refused — `agentd` runs with `CapBnd
-00000000a80425fb`, no `CAP_NET_ADMIN`, so the image cannot install one either), and a
-seccomp filter on the exec'd child refusing `socket(AF_INET)`, which a root workload
-could not lift but which needs `pre_exec` in the daemon's spawn path — a rule this
-project holds for a documented deadlock reason (`agentd/src/exec.rs`, module docs), and
-a protocol change besides. If the platform never offers a network policy, that filter is
-the next thing to measure, and it belongs in a proposal rather than in a patch.
-
-**Secret delivery beyond the run hook.** The `runHookPayload` string is the only
-per-VM differentiator the platform offers, and its ceiling is 4096 bytes, measured
-2026-08-07 in us-east-1 against API version `2025-09-09` and recorded in `PLATFORM.md`.
-This section previously cited a 16 KB ceiling from `STRATEGY.md` and flagged it as
-unmeasured. The real figure is a quarter of that, so the budget is tighter than this
-contract used to claim. The correction was made on 2026-08-07.
-
-One bearer token fits with room to spare, and so does the 128-bit identity seed the
-repair steps above need. Anything at credential scale does not fit. A single set of
-AWS session credentials runs well past a kilobyte once the session token is included,
-so a handful of them exhausts the budget. Rotation is also out of reach at any size,
-because the payload is delivered exactly once at launch and there is no second
-delivery. The smaller ceiling makes the conclusion firmer rather than changing it.
-
-The launch-environment channel shares this budget and does not enlarge it, which is
-the whole reason it is worth mentioning here. Before it existed the ceiling was
-effectively unreachable — a bearer token is a few dozen bytes — and a caller filling
-`env` with credentials is spending the token's room. `microvms-core`'s
-`RunHookPayload::for_launch` refuses an over-budget payload locally, before any
-control-plane call, and the refusal names how many of the bytes the env accounted for
-rather than only the total: without that split a caller cannot tell whether to shorten
-the token or drop a variable. The check is client-side because it has to be. The
-platform rejects an over-ceiling `runHookPayload` at `RunMicrovm`, so the request never
-reaches the guest and the daemon has nothing to enforce; botocore does not enforce it
-either, so the local check is the only signal before AWS answers.
-`runHookPayload` is a bootstrap channel for one small secret, and it should be sized
-for the token that unlocks a broker rather than for the material the broker holds.
-This contract has nothing to say about how you get that material in. That is the gap
-AgentCore's credential broker fills and that a raw-MicroVM customer has to fill
-themselves.
-
-**Anything requiring privileges the guest does not have.** The bind mount above is
-the visible case. There is no seccomp confinement, no user-namespace isolation of the
-workload from the daemon, and no attempt at either.
-
-**Confining `/v1/fs/*` paths.** `PUT /v1/fs/file` writes wherever the caller asks and
-`GET` reads wherever the caller asks. A reviewer pushed back on this and we documented
-the reasoning rather than changing it (`agentd/src/fs.rs`, module docs). The same
-bearer token authorizes `POST /v1/exec/start`, which runs arbitrary commands as root
-by design, so a token holder can already reach every byte in the VM with one exec
-call. A root prefix would add no security while breaking real behavior, because
-harnesses write credentials into home directories, drop config into `/etc`, and stage
-scratch in `/tmp`. If your control API does *not* grant arbitrary exec, this
-reasoning does not transfer and you should confine those paths.
-
-The one write path that *is* confined is `PUT /v1/fs/tar`, and the difference between
-the two routes is the argument for confining it. There the member paths come out of
-an uploaded archive rather than from a caller who named them, so an archive can carry
-a path its uploader never intended. That gap is the entire traversal class, and the
-extraction rules that close it are in `PROTOCOL.md`.
+**Workload confinement.** There is no seccomp or user-namespace boundary
+between workload and daemon. Single-file APIs intentionally accept arbitrary
+guest paths because the same authorized principal can execute as root. Tar
+uploads are confined because member names originate in an archive and may
+not be paths its uploader intended; see [Protocol](PROTOCOL.md).

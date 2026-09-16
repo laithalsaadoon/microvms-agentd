@@ -308,10 +308,10 @@ pub struct AgentLaunchOptions {
     pub image_identifier: String,
     /// The execution role. Optional in the model; every real launch needs one.
     pub execution_role_arn: Option<String>,
-    pub max_idle_sec: Option<u32>,
-    pub suspended_sec: Option<u32>,
+    pub max_idle_sec: Option<f64>,
+    pub suspended_sec: Option<f64>,
     pub auto_resume: Option<bool>,
-    pub max_duration_sec: Option<u32>,
+    pub max_duration_sec: Option<f64>,
 }
 
 /// One VM with coding agents in it: the sandbox plus the specs it is built for.
@@ -500,14 +500,17 @@ impl AgentVm {
             options.execution_role_arn,
         );
         if let Some(idle) = options.max_idle_sec {
-            request.max_idle_sec = idle;
+            request.max_idle_sec =
+                crate::numbers::u32_number(idle, "maxIdleSec").map_err(js_async)?;
         }
         if let Some(suspended) = options.suspended_sec {
-            request.suspended_sec = suspended;
+            request.suspended_sec =
+                crate::numbers::u32_number(suspended, "suspendedSec").map_err(js_async)?;
         }
         request.auto_resume = options.auto_resume.unwrap_or(request.auto_resume);
         if let Some(ceiling) = options.max_duration_sec {
-            request.max_duration_sec = ceiling;
+            request.max_duration_sec =
+                crate::numbers::u32_number(ceiling, "maxDurationSec").map_err(js_async)?;
         }
         {
             let mut guard = self.sandbox.lock().await;
