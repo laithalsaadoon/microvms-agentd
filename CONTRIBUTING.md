@@ -1,248 +1,132 @@
 # Contributing
 
-This project is a reference contract for running an untrusted workload inside an
-AWS Lambda MicroVM. It is not a product. Every claim in it has been checked, so
-reviews are judged on evidence rather than taste. Read
-`docs/STRATEGY.md` for what the project is for, `docs/PROTOCOL.md` for the wire
-contract you must not silently change, and `docs/TRUST.md` for the threat model.
+The shared implementation lives in `microvms-core`; the CLI and bindings adapt
+that implementation. Read [Protocol](docs/PROTOCOL.md) before changing wire
+behavior and [Trust](docs/TRUST.md) before changing authentication or execution.
 
-## Running the verification tiers
-
-## The command surface
-
-`mise` runs every project command. Your change is ready when `mise run check`
-passes:
+## Setup and checks
 
 ```bash
-mise run install   # once per clone: installs the git hooks
-mise run check     # every local gate. ~45s, no network, no AWS, no cost.
-mise run live      # the real-AWS suites. BILLABLE, ~15 min. Deliberate only.
-mise tasks         # everything else
+mise install
+mise run install       # install git hooks
+mise run check         # code, security, tests, schema, stubs, API drift, packaging, build
+mise tasks             # all available tasks
 ```
 
-The pre-push hook and CI both run `check`. `live` is never wired to a hook
-because it launches real MicroVMs and costs money on every push. People disable
-a gate like that with `--no-verify`, and `--no-verify` also skips the checks
-worth having. The hook does print an advisory when the daemon has changed since
-the last recorded live run. No local tier can see a platform change, and every
-AWS-facing defect this project has hit was invisible until a real run.
+`check` does not create AWS resources. Initial dependency downloads, security
+rule loading, and advisory updates can require network access. Documentation,
+binding integration tests, and formal requirements have additional setup;
+consult their tasks in `mise.toml` and the CI workflows.
 
-`check` composes the tiers below, and each tier is runnable alone when you
-want a tighter loop.
-
-There are six tiers, and each one catches a defect class the others cannot
-see. `cargo test --all` runs all of them; run them individually while
-iterating.
+Useful checks while iterating:
 
 ```bash
-cargo test -p agentd --lib             # daemon unit tests
-cargo test -p agentd-model             # stateright: every reachable bootstrap/exec state
-cargo test --test proptest_tar         # tar confinement + CPython data-filter parity
-cargo test --test turmoil_transport    # deterministic network and time faults
-cargo test --test panic_guard          # a panicking handler must not kill the daemon
-cargo test --test schema_artifact      # docs/schema.json matches the served protocol
-cargo test --all                       # all of the above
+cargo test -p agentd --lib
+cargo test -p agentd-model
+cargo test -p microvms-core
+cargo test -p microvms-cli
+cargo test --test proptest_tar
+cargo test --test turmoil_transport
+cargo test --all
+./conformance/run_rs.py --self-test
+uvx ruff check .
+uvx ruff format --check .
 ```
 
-Then the gates that are not `cargo test`:
+Use `-p microvms-protocol` for the protocol package; its Rust import is
+`protocol`. The shipping daemon target is `aarch64-unknown-linux-musl`.
+`.cargo/config.toml` selects `rust-lld`; no external cross compiler is needed.
+
+Python builds with maturin and tests under `microvms-py/tests/`. Node builds
+with `npm run build` and tests with `npm test` in `microvms-js/`.
+
+For a new invariant guard, demonstrate that the test catches the intended
+failure, restore the implementation, and record the result in the PR. In
+network simulation tests, coordinate child processes through stdin rather than
+wall-clock sleeps: child processes and the simulator use different clocks.
+
+## Generated contracts and API changes
+
+Regenerate affected contracts and include their diffs:
 
 ```bash
-cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
-cargo run -p agentd --bin schema -- --check   # regenerate with the same command minus --check
-cargo build --release -p agentd --target aarch64-unknown-linux-musl
+mise run schema        # docs/schema.json
+mise run manifest      # docs/manifest.json
+mise run stubs         # Python declarations
+mise run model:check   # implemented constraints versus the installed boto3 model
 ```
 
-`mise run security` is the supply-chain gate, five checks with one exit:
-semgrep over the shipped source, betterleaks over the full git history, the
-SPDX header gate (`scripts/check-license-headers.py`, covering every tracked
-`.rs`, `.py`, `.pyi`, `.mjs`, `.sh`, and `.tf` file), `cargo deny check`
-against the dependency-license policy in `deny.toml`, and actionlint over the
-workflows. The pre-commit hook runs the header gate when a matching file is
-staged, `cargo deny` when a manifest or `deny.toml` changes, and actionlint
-when a workflow changes.
+Use current boto3 models and AWS documentation to identify capabilities the
+package should expose, verify request serialization, and check CLI/SDK parity.
+The [MicroVM API](https://docs.aws.amazon.com/lambda/latest/microvm-api/Welcome.html)
+manages images and VMs; [Lambda core](https://docs.aws.amazon.com/lambda/latest/lambda-core/Welcome.html)
+manages VPC connectors. Document the package's supported workflows and limits.
 
-`aarch64-unknown-linux-musl` is the shipping target and CI builds it on every
-push. `.cargo/config.toml` pins `rust-lld`, so `rustup target add
-aarch64-unknown-linux-musl` is the only setup step. You do not need an external
-cross toolchain.
+To check implemented constraints against the latest SDK without creating AWS
+resources, run `uv run --upgrade --script scripts/check-model-drift.py`.
 
-Python tooling covers the live suite's driver and the two drift gates. There is
-no Python client any more; `clients/python` is in git history, and the clients
-are the `microvm` CLI and the `microvms-py` / `microvms-js` bindings.
+The `spec` and `spec:core` tasks are separate from `check`. They require
+compatible symspec tooling; `spec:core` currently names a local checkout and
+is not portable. A passing `check` does not verify those documents.
+`cargo test -p agentd-model` runs the portable state-machine checks.
+
+## Documentation
+
+Edit `site/authored/` for tutorials and landing pages, and top-level `docs/*.md`
+for contracts and measured findings. `site/src/content/docs/` is generated and
+ignored. The CLI reference comes from `docs/manifest.json`; historical source
+analyses under `docs/architecture/`, `reference/`, `behavior/`, `analysis/`,
+`diagrams/`, and `insights/` may need regeneration after a refactor.
 
 ```bash
-./scripts/check-lint-coverage.py          # proves ruff sees every Python file
-uvx ruff check . && uvx ruff format --check .
-./conformance/run_rs.py --self-test       # the live suite's offline half. Free.
-./scripts/check-live-rates.py --twin-only # the pinned rate tables agree. Offline, free.
+mise run docs:check     # lint, spelling, build, typecheck, output checks
+mise run docs:browsers  # browser setup
+mise run docs:gate      # also accessibility and browser performance checks
 ```
 
-Requirements verification (Node ≥ 22):
+For platform observations, record the date, region, API version, and whether
+the evidence comes from AWS documentation, a model, or a live request. Keep
+previous measurements when behavior changes and append a correction. Model
+fields do not establish runtime enforcement: an omitted internet connector,
+for example, does not prove no egress. Internet isolation requires a VPC
+without an IGW or NAT gateway and with no alternative internet route.
+
+## Live verification
+
+Changes to AWS behavior need a live exercise of the changed path and a named
+regression check in `conformance/run_rs.py`. State explicitly when live
+verification was not performed. Documentation and other local-only changes
+do not need a billable run.
 
 ```bash
-npm install -g symspec
-symspec download-model                        # sha256-pinned local model, then offline
-symspec check spec/agentd.symspec.json --strict
+mise run live                # builds binaries, provisions infrastructure, tests AWS
+mise run live:verify-clean   # independently check for remaining resources
+mise run live:destroy        # remove the Terraform stack when finished
 ```
 
-`--strict` fails when the document could not be verified, not only when
-something was proven wrong. If you add a requirement whose wording shares
-vocabulary with no peer, symspec says so. The usual fix is a glossary link
-committed in the document rather than a looser gate.
+For a targeted run, rebuild `target/release/microvm` first: `check` does not
+build that release CLI. `--keep` retains resources and their charges. Inspect
+MicroVMs, images, and service-created `/aws/lambda-microvms/` log groups after
+cleanup; Terraform does not own every resource the service creates.
 
-The documentation site has its own pair of gates, outside `check` because they
-need a `pnpm install`:
+## Releases and reviews
+
+The release workflow publishes `microvms-protocol`, `microvms-core`, and
+`microvms-cli` to crates.io, `microvms` to PyPI, and
+`@theagenticguy/microvms` to npm. `agentd` ships as a GitHub release binary.
 
 ```bash
-mise run docs:check   # fast, offline: lint + spell, brace gate, build, typecheck, dist probes
-mise run docs:gate    # docs:check plus axe, layout stability and Lighthouse. What CI runs.
-mise run docs:browsers  # once per machine: the Chromium the browser tiers drive
-mise run docs:lint    # biome + cspell alone
-mise run docs:links   # every external link in the built site. Reports; never gates.
+mise run publish:check
+mise run publish:dry-run     # registry access and a committed tree required
+mise run release:tag vX.Y.Z  # creates/pushes a release tag; publishes artifacts
 ```
 
-`site/src/gates.ts` declares what the browser tiers audit and what they tolerate.
-Its baselines are ratchets: a violation outside `KNOWN_A11Y_FAILURES` fails, and
-an entry there that stops firing fails too, so a fix cannot leave its suppression
-behind. `DENYLIST` in the same file names the tokens that must never reach a
-public page, and the node tier scans every built page and twin for them.
+Before a release, synchronize the Cargo, Python, and Node versions, regenerate
+the Python stub, and check the tag with
+`./scripts/check-publishable.py --tag=vX.Y.Z`. Use the release task rather
+than manually pushing an old tag. Registry versions are immutable.
 
-CI (`.github/workflows/ci.yml`) runs fmt, clippy, the test tiers on three
-platforms, the schema staleness check, the security job (semgrep, betterleaks
-over history, license headers, cargo-deny, actionlint), the SBOM and
-vulnerability scans, the model-drift gate plus ruff, the binding suites, and
-the aarch64-musl cross-compile. It does not run symspec: the v5 tool that can
-read `spec/core.symspec.json` is not yet published anywhere, so requirements
-verification is `mise run spec` and `mise run spec:core`, run locally.
-
-## Prove your guard fires
-
-**A new test that guards an invariant is not accepted until you have watched it
-fail.** Break the invariant deliberately in the code under test, confirm that
-*your specific test* fails, restore the code, confirm green, and say in the PR
-which break each new test caught.
-
-This requirement exists because two tests in this repo's own history passed
-against broken code:
-
-- A tar property asserted only that nothing landed outside the extraction root.
-  Removing the `?` from `parts.pop()?` turned `../x` into `x`. That member is
-  one the contract says to refuse, but it was extracted under a different name,
-  and the whole proptest suite stayed green, because a filesystem walk cannot
-  see a rewrite that lands inside the root. The properties now assert the
-  expected *verdict* computed from the generated input, and the same break
-  fails immediately.
-- In the Python predecessor, `test_create_token_is_not_a_permanent_key` passed
-  against broken code because it varied an input that nothing varies in reality.
-  In reality, a content-derived `clientToken` is a permanent idempotency key
-  that wedges an image in `CREATING`. That behavior cost roughly 15 hours and
-  two wedged images to discover.
-
-The same shape appears in the model tier. A property written as
-`cfg.attacker_allowed || !state.breached` is vacuously true in exactly the
-configuration where it should fail. State safety properties unconditionally and
-let configurations differ. The model deliberately runs one configuration with
-the deployment invariant broken and asserts that stateright *finds* the attack
-path. That run demonstrates what breaking the invariant costs instead of
-asserting that the invariant is fine.
-
-There is one more trap if you touch `turmoil_transport`. A simulator has two
-clocks. Everything inside the simulation runs on virtual time, but a spawned
-child does not. `sleep 2` in `/bin/sh` takes two real seconds while the
-simulation may advance thirty virtual ones. A server-side deadline measured in
-virtual time against real pipe I/O therefore expires in milliseconds of wall
-clock. Never pace a child with `sleep`. Instead, block it on `read` and release
-it with an explicit stdin write, so the harness controls when the child
-proceeds. Do not loosen an assertion to match a simulator artifact, because
-that encodes the artifact as expected behavior.
-
-## The live conformance suite
-
-`conformance/run_rs.py` tests the real binary against real AWS, which makes it
-the ground truth anchor; the model tier checks a model, not the binary itself.
-It is also the only part of this repo that spends money. `mise run live` runs
-it alongside the signer checks (`live:paths`, `live:versions`), the rate-drift
-check, and the leak check. To run it by hand:
-
-```bash
-terraform -chdir=conformance/infra init
-terraform -chdir=conformance/infra apply
-cargo build --release -p agentd --target aarch64-unknown-linux-musl
-cargo build --release -p microvms-cli
-conformance/run_rs.py \
-  --binary target/aarch64-unknown-linux-musl/release/agentd \
-  --microvm-binary target/release/microvm
-```
-
-`conformance/run.py`, the 56-check Python oracle, and the standalone
-suspend/resume probe were here until the Rust port drove this suite green
-against real AWS on the same commit. Both are in git history. The
-suspend/resume assertions they fed still run inside this suite. The 34
-protocol-detail checks that only the Python client could express run here
-now: the CLI grew `health`, `ack`, `cp` (with `--tar`), `exec --stream`, and
-`stdin` (see `docs/CLI-COVERAGE-PLAN.md`), and every former SKIP became a
-real check under the name run.py gave it. The suite expresses every named
-check with none skipped.
-
-`--self-test` is the offline half. It drives the envelope-to-exception mapping
-against a stub `microvm` and touches no account, so it is free and belongs in
-any PR that changes `conformance/`.
-
-It needs real AWS credentials in a Lambda MicroVMs region, and it creates real
-resources: an S3 artifact, a MicroVM image build (up to a 45-minute timeout), and
-a running MicroVM. A run costs money whether it passes or fails. `--keep` skips
-teardown and leaks everything, so use it only while debugging a failure you
-cannot reproduce otherwise.
-
-**Verify teardown independently. Do not trust a success message.** The scripts
-delete the MicroVM, the image, and the log group in `finally`, and
-`terraform destroy` handles the stack. However, the service creates
-`/aws/lambda-microvms/<image-name>` itself, so Terraform never owns that log
-group, and `destroy` reports success while the group survives. Six leaked that
-way before anyone noticed. After a run, list MicroVMs, images, and log groups
-under `/aws/lambda-microvms/` and confirm nothing tagged
-`agentd:purpose=conformance` remains.
-
-## Platform claims need a date, a region, and an API version
-
-`docs/PLATFORM.md` records observations of someone else's system, and those
-drift. Every entry carries when it was measured, in which region, and under
-which API version, and says explicitly whether it is our measurement or AWS
-documentation. Without those three, the next reader cannot tell whether the
-claim is still true. If you contradict an existing entry, do not delete it.
-Add your measurement with its date so the drift is visible.
-
-## Comments
-
-Comments explain constraints and why a choice was made, especially where the
-obvious alternative is wrong. A comment should not restate what the next line
-does. If a comment would be invalidated by a rename, delete it. The best
-examples in the tree record a defect the code is defending against: the
-`panic = "unwind"` note in `Cargo.toml`, or the loopback entry in
-`docs/PLATFORM.md` explaining why a source-address rule is wrong rather than
-merely weak.
-
-## Commit messages
-
-Explain why, name what was measured, and state what is unverified. See
-`git log` for examples; every commit here states its evidence and its gaps.
-
-## What this project will not accept
-
-Per `docs/STRATEGY.md`, these are declined regardless of quality:
-
-- **An orchestrator.** Scheduling, pooling, and task routing belong to the
-  consumer.
-- **A fork or process-tree snapshot implementation.** This is unavailable above
-  the hypervisor. A measurement of the best guest-side approximation is
-  welcome, but an implementation is not.
-- **AgentCore parity on exec or PTY.** AgentCore already covers this ground.
-
-A turn-boundary suspend protocol is also out. `idlePolicy` already
-auto-suspends, so wiring an existing hook to a suspend call is a short example
-rather than a feature.
-
-## Reporting security issues
-
-See `SECURITY.md`. Do not open a public issue for a vulnerability.
+PRs should explain the problem, the resulting behavior, validation, and any
+remaining uncertainty. Keep scheduling and pooling in consumer applications;
+see [Strategy](docs/STRATEGY.md) for scope. Report suspected vulnerabilities
+through [Security](SECURITY.md).

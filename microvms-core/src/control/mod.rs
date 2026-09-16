@@ -465,6 +465,10 @@ pub struct RunMicrovmRequest {
     /// to work at all; omitting egress omits the connector from the request (measured
     /// 2026-09-12: the platform gave the VM outbound network anyway, `docs/PLATFORM.md`).
     pub connectors: Vec<ConnectorIntent>,
+    /// Customer-managed Lambda VPC egress connector ARNs, created through `lambda-core`.
+    /// Cannot be combined with [`ConnectorIntent::Egress`]. Internet isolation requires
+    /// a VPC without an internet gateway or NAT gateway; an ARN alone proves no isolation.
+    pub egress_network_connectors: Vec<String>,
     /// The already-validated payload carrying the agent token.
     pub run_hook_payload: RunHookPayload,
     /// `maximumDurationInSeconds`, checked against 1..=28800 when the request is sent.
@@ -481,8 +485,8 @@ pub struct RunMicrovmRequest {
     /// with a reason rather than an oversight, and the drift gate pins the 0 so a future floor is
     /// noticed. Its ceiling is unstated.
     ///
-    /// This value exists **only in the request** — the client is the only party that can
-    /// name the window it asked for, which is what STATE-12's refusal rests on.
+    /// The requested value drives the local resume window. The service also reports its
+    /// active policy in [`Microvm::idle_policy`].
     pub suspended_sec: u32,
     /// `idlePolicy.autoResumeEnabled`.
     pub auto_resume: bool,
@@ -499,6 +503,7 @@ impl RunMicrovmRequest {
             image_version: None,
             execution_role_arn: None,
             connectors: vec![ConnectorIntent::AllIngress],
+            egress_network_connectors: Vec::new(),
             run_hook_payload,
             max_duration_sec: 3_600,
             max_idle_sec: 600,
@@ -508,12 +513,19 @@ impl RunMicrovmRequest {
         }
     }
 
-    /// Adds the egress connector, which is what gives the VM outbound network.
+    /// Requests the managed internet egress connector. Omission does not block internet access.
     #[must_use]
     pub fn with_egress(mut self) -> Self {
         if !self.connectors.contains(&ConnectorIntent::Egress) {
             self.connectors.push(ConnectorIntent::Egress);
         }
+        self
+    }
+
+    /// Routes egress through a customer-managed Lambda network connector.
+    #[must_use]
+    pub fn with_egress_network_connector(mut self, arn: impl Into<String>) -> Self {
+        self.egress_network_connectors.push(arn.into());
         self
     }
 
@@ -1328,6 +1340,7 @@ mod tests {
             image_version: _,
             execution_role_arn: _,
             connectors: _,
+            egress_network_connectors: _,
             run_hook_payload: _,
             max_duration_sec: _,
             max_idle_sec: _,

@@ -481,21 +481,37 @@ impl ControlPlane {
             })
             .map(|intent| intent.arn(&self.region))
             .collect();
-        let egress: Vec<String> = request
+        let mut egress: Vec<String> = request
             .connectors
             .iter()
             .filter(|intent| matches!(intent, super::ConnectorIntent::Egress))
             .map(|intent| intent.arn(&self.region))
             .collect();
 
-        if ingress.len() + egress.len() > crate::constants::MAX_NETWORK_CONNECTORS {
-            return Err(Error::invalid_arg(format!(
-                "{} network connectors were requested, over the NetworkConnectorList ceiling of \
-                 {} (service model {}).",
-                ingress.len() + egress.len(),
-                crate::constants::MAX_NETWORK_CONNECTORS,
-                crate::constants::MODEL_API_VERSION,
-            )));
+        if !egress.is_empty() && !request.egress_network_connectors.is_empty() {
+            return Err(Error::invalid_arg(
+                "INTERNET_EGRESS cannot be combined with customer-managed egress connectors: \
+                 choose managed internet egress or VPC routing",
+            ));
+        }
+        for arn in request.egress_network_connectors {
+            super::connector::require_egress_connector_arn(&arn, &self.region)?;
+            egress.push(arn);
+        }
+
+        // Each request member is a NetworkConnectorList with its own limit.
+        for (member, count) in [
+            ("ingressNetworkConnectors", ingress.len()),
+            ("egressNetworkConnectors", egress.len()),
+        ] {
+            if count > crate::constants::MAX_NETWORK_CONNECTORS {
+                return Err(Error::invalid_arg(format!(
+                    "{member} has {count} network connectors, over the NetworkConnectorList \
+                     ceiling of {} (service model {}).",
+                    crate::constants::MAX_NETWORK_CONNECTORS,
+                    crate::constants::MODEL_API_VERSION,
+                )));
+            }
         }
 
         let wire = ops::RunMicrovmWire {
@@ -1129,6 +1145,75 @@ mod tests {
             "omitting egress is the whole mechanism: {body}"
         );
         assert!(body.get("ingressNetworkConnectors").is_some());
+    }
+
+    #[tokio::test]
+    async fn customer_vpc_connector_arns_reach_the_egress_member_unchanged() {
+        let (plane, fake, _) = planted();
+        fake.answer(
+            "RunMicrovm",
+            Answer::ok(fake::microvm_response("PENDING", None)),
+        );
+        let payload = RunHookPayload::for_agent_token("token").expect("fits");
+        let mut request = RunMicrovmRequest::new("arn:image", payload);
+        let arns: Vec<String> = (0..10)
+            .map(|id| format!("arn:aws:lambda:us-east-1:123456789012:network-connector:vpc-{id}:1"))
+            .collect();
+        request.egress_network_connectors = arns.clone();
+        plane
+            .run_microvm(request)
+            .await
+            .expect("ten egress connectors plus ingress fits");
+        let body = fake.first_body("RunMicrovm");
+        assert_eq!(body["egressNetworkConnectors"], serde_json::json!(arns));
+        assert_eq!(
+            body["ingressNetworkConnectors"].as_array().unwrap().len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_customer_egress_connectors_are_refused_before_launch() {
+        let valid = "arn:aws:lambda:us-east-1:123456789012:network-connector:vpc-test";
+        let invalid = [
+            "VPC_EGRESS",
+            "arn:aws:lambda:us-west-2:123456789012:network-connector:vpc-test",
+            "arn:aws:lambda:us-east-1:aws:network-connector:aws-network-connector:INTERNET_EGRESS",
+            "arn:aws:lambda:us-east-1:123456789012:network-connector:",
+            "arn:aws:lambda:us-east-1:123456789012:network-connector:vpc-test:0",
+            "arn:aws:lambda:us-east-1:123456789012:network-connector:vpc-test/other",
+        ];
+        for arn in invalid {
+            let (plane, fake, _) = planted();
+            let payload = RunHookPayload::for_agent_token("token").expect("fits");
+            let error = plane
+                .run_microvm(
+                    RunMicrovmRequest::new("arn:image", payload).with_egress_network_connector(arn),
+                )
+                .await
+                .expect_err(arn);
+            assert_eq!(error.kind(), ErrorKind::InvalidArg);
+            assert!(
+                error.to_string().contains("egressNetworkConnectors"),
+                "{error}"
+            );
+            assert!(fake.calls().is_empty());
+        }
+        for (internet, count) in [(true, 1), (false, 11)] {
+            let (plane, fake, _) = planted();
+            let payload = RunHookPayload::for_agent_token("token").expect("fits");
+            let mut request = RunMicrovmRequest::new("arn:image", payload);
+            request.egress_network_connectors = vec![valid.to_string(); count];
+            if internet {
+                request = request.with_egress();
+            }
+            let error = plane
+                .run_microvm(request)
+                .await
+                .expect_err("invalid routing request");
+            assert_eq!(error.kind(), ErrorKind::InvalidArg);
+            assert!(fake.calls().is_empty());
+        }
     }
 
     /// **A pinned `imageVersion` reaches the wire, and an unpinned launch omits the member.**

@@ -1,626 +1,194 @@
 # microvms-agentd
 
-[![ci](https://github.com/laithalsaadoon/microvms-agentd/actions/workflows/ci.yml/badge.svg)](https://github.com/laithalsaadoon/microvms-agentd/actions/workflows/ci.yml)
-[![live conformance](https://github.com/laithalsaadoon/microvms-agentd/actions/workflows/live-conformance.yml/badge.svg)](https://github.com/laithalsaadoon/microvms-agentd/actions/workflows/live-conformance.yml)
-[![release](https://github.com/laithalsaadoon/microvms-agentd/actions/workflows/release.yml/badge.svg)](https://github.com/laithalsaadoon/microvms-agentd/actions/workflows/release.yml)
-[![docs](https://github.com/laithalsaadoon/microvms-agentd/actions/workflows/docs.yml/badge.svg)](https://laithalsaadoon.github.io/microvms-agentd/)
-[![OpenSSF Scorecard](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.scorecard.dev%2Fprojects%2Fgithub.com%2Flaithalsaadoon%2Fmicrovms-agentd&query=%24.score&label=openssf%20scorecard)](https://scorecard.dev/viewer/?uri=github.com/laithalsaadoon/microvms-agentd)
+**Run AI agents in sandboxed AWS MicroVMs from your terminal or application.**
+Give a coding agent a copy of your project, let it edit files and run tools in a
+remote VM, and bring back the results. Use the `microvm` CLI or the Python,
+JavaScript/TypeScript, and Rust SDKs to launch sandboxes, execute commands,
+transfer files, stream output, and tear everything down.
 
-[![crates.io](https://img.shields.io/crates/v/microvms-cli.svg?label=crates.io)](https://crates.io/crates/microvms-cli)
-[![docs.rs](https://img.shields.io/docsrs/microvms-core?label=docs.rs)](https://docs.rs/microvms-core)
-[![PyPI](https://img.shields.io/pypi/v/microvms.svg?label=PyPI)](https://pypi.org/project/microvms/)
-[![npm](https://img.shields.io/npm/v/%40theagenticguy%2Fmicrovms.svg?label=npm)](https://www.npmjs.com/package/@theagenticguy/microvms)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+VMs run in AWS Lambda MicroVMs; no local Docker daemon or hypervisor is needed.
+The bundled `agentd` daemon handles commands inside each VM.
 
-Run commands and move files in and out of AWS Lambda MicroVMs.
-
-The service gives you an isolated Firecracker VM but no exec API and no
-file-transfer API. This project supplies both: `agentd` is a small daemon baked
-into your VM image, and the `microvm` CLI (plus Rust, Python, and Node
-libraries) talks to it. One command provisions the daemon, builds an image,
-launches a VM, runs your command inside it, reports the cost, and tears
-everything down.
-
-```bash
-microvm run --exec "echo hello from a microvm"
-```
-
-## Contents
-
-- [Install](#install) — the CLI (binstall or crates.io) and the three libraries
-- [Quick start](#quick-start) — AWS prerequisites and `microvm quickstart`
-- [Why this exists](#why-this-exists)
-- [How it works](#how-it-works) — control plane, session plane, and the
-  [long-lived VM](#working-with-a-long-lived-vm),
-  [project sync](#running-a-project-through-a-vm),
-  [coding agent](#running-coding-agents-inside-a-microvm),
-  [library](#calling-it-from-code), [scripting](#using-it-from-scripts-and-agents),
-  [cost](#what-it-costs), and [egress](#what-no-egress-means) paths
-- [Writing your own guest Dockerfile](#writing-your-own-guest-dockerfile) — the
-  traps that cost a build cycle, and how to spend none of them
-- [The workspace](#the-workspace)
-- [Developing](#developing)
-- [License](#license)
+[Get started](https://laithalsaadoon.github.io/microvms-agentd/learn/tutorial/first-run/) ·
+[CLI reference](https://laithalsaadoon.github.io/microvms-agentd/reference/) ·
+[SDK examples](https://laithalsaadoon.github.io/microvms-agentd/learn/tutorial/from-code/) ·
+[Documentation](https://laithalsaadoon.github.io/microvms-agentd/)
 
 ## Install
 
-One artifact gets you running: the `microvm` CLI. The `agentd` daemon binary
-that gets baked into your VM images is the CLI's own component — `run`,
-`build`, and `quickstart` provision the release asset for their own version
-automatically, verify it, and cache it under `~/.microvm`.
+| Interface | Install | First example |
+|---|---|---|
+| CLI | `cargo binstall microvms-cli --no-confirm` | [Run an agent below](#run-a-coding-agent-in-a-sandbox) |
+| Python 3.9+ | `pip install microvms` | [Python quickstart](microvms-py/README.md) |
+| Node 22.13+ | `npm install @theagenticguy/microvms` | [JavaScript / TypeScript quickstart](microvms-js/README.md) |
+| Rust | `cargo add microvms-core` | [Rust quickstart](microvms-core/README.md) |
 
-**The CLI**, prebuilt from the release assets (seconds), or compiled from
-crates.io (minutes):
+The CLI command requires [cargo-binstall](https://github.com/cargo-bins/cargo-binstall).
+Without it, download a CLI binary for your OS from
+[Releases](https://github.com/laithalsaadoon/microvms-agentd/releases/latest),
+or compile with `cargo install microvms-cli --locked`.
+The CLI downloads and verifies its matching ARM64 Linux daemon automatically.
+See [installation](https://laithalsaadoon.github.io/microvms-agentd/learn/tutorial/install/)
+for supported hosts and source builds.
 
-```bash
-cargo binstall microvms-cli           # installs the `microvm` binary, prebuilt
-cargo install microvms-cli --locked   # the same binary, compiled locally
-```
+## Start in 90 seconds
 
-Release assets cover Linux (x86_64, aarch64, glibc 2.17 floor), macOS (arm64,
-x86_64), and Windows (x64), each with a signed build-provenance attestation
-beside it. There is deliberately no Homebrew formula: a tap is a second
-repository with its own release cadence to maintain, and binstall plus these
-assets already cover macOS.
+With the CLI installed and AWS resources ready, copy the configuration below
+and start a sandbox. **The first image build takes several minutes; the
+90-second path gets the workflow started, not AWS provisioning completed.**
 
-**The daemon binary**, only if you want to manage it yourself (a custom build,
-an airgapped machine): it is a static `aarch64-unknown-linux-musl` build,
-because Lambda MicroVMs are ARM64-only and a static binary bakes into any base
-image with no interpreter and no dynamic loader. Verify it the same way the
-CLI does before passing it as the positional or `$MICROVM_AGENTD`:
-
-```bash
-gh release download --repo laithalsaadoon/microvms-agentd --pattern agentd
-gh attestation verify agentd --repo laithalsaadoon/microvms-agentd
-chmod +x agentd
-```
-
-**The libraries**, for calling the same lifecycle from code:
+You need AWS CLI v2, `gh` or `curl` for the daemon download, configured AWS
+credentials, Lambda MicroVMs access, an
+S3 artifact bucket, and build/execution IAM roles. Replace these example values:
 
 ```bash
-cargo add microvms-core                   # Rust; API reference on docs.rs
-uv add microvms                           # Python >= 3.9; or pip install microvms
-npm install @theagenticguy/microvms       # Node >= 22.13
-```
-
-The Python package ships abi3 wheels for Linux (x86_64, aarch64), macOS
-(arm64, x86_64), and Windows (x64), so one wheel per platform covers CPython
-3.9 and everything after it. The npm package carries all four platform
-binaries in one package. All three registries are published through OIDC
-trusted publishing from [release.yml](.github/workflows/release.yml): no
-long-lived registry token exists anywhere, PyPI uploads carry PEP 740
-attestations, and npm publishes with provenance.
-
-Building from source remains one task: `mise install && mise run build`
-cross-compiles the daemon, and `mise run install:cli` installs the CLI from
-the working tree. `agentd` itself is deliberately not on crates.io, because
-the daemon reaches a consumer as a binary inside a task image, and the GitHub
-release is that channel.
-
-## Quick start
-
-**What you need:** an AWS account with Lambda MicroVMs access in a service
-region (`us-east-1`, `us-east-2`, `us-west-2`, `eu-west-1`, `ap-northeast-1`),
-AWS credentials in your environment, and the `microvm` CLI from
-[Install](#install). The daemon binary is not on this list: the CLI provisions
-it.
-
-**1. Create the AWS prerequisites.**
-
-A MicroVM image build needs an S3 bucket for the code artifact, a build role,
-and an execution role. The repo ships a small Terraform stack that creates
-exactly those three things (clone the repo and run `mise run live:infra`, or
-read [conformance/infra](conformance/infra/) and create equivalents by hand):
-
-```bash
-mise run live:infra
-cd conformance/infra
-export MICROVM_BUCKET=$(terraform output -raw s3_bucket)
-export MICROVM_BUILD_ROLE_ARN=$(terraform output -raw build_role_arn)
-export MICROVM_EXECUTION_ROLE_ARN=$(terraform output -raw execution_role_arn)
-cd ../..
-```
-
-If you already have a bucket and roles, export those instead; the stack is a
-convenience, and the CLI only reads the three environment values.
-
-The stack also creates a managed policy for reading build logs
-(`terraform output -raw logs_read_policy_arn`). Attach it to the identity you
-run the AWS CLI with, and `microvm logs <image-name>` hands you a working
-`aws logs tail` command. That command needs **AWS CLI v2** — `aws logs tail`
-does not exist in v1.
-
-**2. Check the machine.**
-
-```bash
+export AWS_REGION=us-east-1
+export MICROVM_BUCKET=your-artifact-bucket
+export MICROVM_BUILD_ROLE_ARN=arn:aws:iam::123456789012:role/microvm-build
+export MICROVM_EXECUTION_ROLE_ARN=arn:aws:iam::123456789012:role/microvm-execution
 microvm doctor
 ```
 
-`doctor` checks your credentials, the region, and the three environment
-values. When something is wrong it names the broken prerequisite and suggests
-the fix. (Managing your own daemon binary? `--binary <path>` checks its
-architecture too.)
+Need those resources first? The
+[AWS setup guide](https://laithalsaadoon.github.io/microvms-agentd/learn/tutorial/first-run/)
+includes a Terraform path and required permissions. Commands below create
+billable AWS resources.
 
-**3. Run your first command in a MicroVM.**
+## Run a coding agent in a sandbox
+
+Your AWS caller needs permission to invoke the selected Bedrock model, and
+your account needs access to it. From a project directory, run Claude Code:
+
+```bash
+microvm agent-up --vm-name review --agent claude-code --project .
+microvm agent-prompt --name review --agent claude-code \
+  "Review this project and write your findings to REVIEW.md."
+microvm cp --name review vm:/workspace/REVIEW.md ./REVIEW.md
+microvm terminate review --wait
+```
+
+The CLI builds or reuses an image, copies your project into `/workspace`, and
+runs the agent as a non-root user in the VM. Inspect the downloaded `REVIEW.md`
+for its findings. Terminate the VM when done, including after a failed task;
+`agent-up` keeps it alive for follow-up prompts. The reusable image is retained.
+
+The CLI mints a short-lived Bedrock token from your AWS identity; no
+separate model-provider API key is needed. For Codex CLI, replace
+`--agent claude-code` with `--agent codex` in both commands. See the
+[agent guide](https://laithalsaadoon.github.io/microvms-agentd/learn/operations/run-coding-agents-on-bedrock/)
+for model selection, both agents in one VM, and credential refresh.
+
+## Run any command
+
+No model access is needed for a regular sandbox:
 
 ```bash
 microvm quickstart
 ```
 
-This provisions the daemon (this CLI's own release asset, provenance-verified
-through `gh` when it is on PATH, checksummed through the release's SHA256SUMS
-otherwise), builds an image with it as the entrypoint, launches a VM, runs a
-hello-world, prints its output and the run's cost, and tears the VM down.
-Teardown is the default so an interrupted session does not leave a billable VM
-behind. `quickstart` is exactly `microvm run --exec "echo hello from a
-microvm"` — once it works, use `run` and its knobs directly. Expect the first
-run to take a few minutes; most of it is the image build, and the image
-snapshot has a one-week minimum retention, so keep and reuse it (`--image`)
-rather than rebuilding.
-
-## Why this exists
-
-Lambda MicroVMs launch a Firecracker VM from a container image and give it a
-per-instance HTTPS endpoint, and that is all: no exec API, no file API, no
-way to ask what is running inside. Every team that adopts the platform ends
-up hand-rolling the same in-VM daemon; Harbor and Omnigent each carry one
-baked into their task images (see
-[docs/HARNESS-CAPABILITIES.md](docs/HARNESS-CAPABILITIES.md)).
-
-This repo is that daemon and its client built once, fully, and verified: exec
-that survives auth-token rotation, tar transfer that cannot escape its target
-directory, suspend/resume that preserves running processes, cost reporting
-from pinned rates, and a conformance suite that proves all of it against real
-VMs. The platform also has sharp edges: error responses that point away from
-their causes, a `clientToken` replay that wedges an image in `CREATING` for
-fifteen hours, a memory request that silently selects a 4x-larger VM. Each one
-was measured once, recorded in [docs/PLATFORM.md](docs/PLATFORM.md) with its
-date and region, and then closed in the client: illegal states either do not
-construct (regions and sizes are closed enums) or are rejected locally with an
-error that names the finding, before any billable call.
-
-## How it works
-
-```text
-your machine                        AWS
-────────────                        ───
-microvm CLI ──[control plane]──▶ Lambda MicroVMs API
-   │                                 │ build image / run / suspend / terminate
-   │                                 ▼
-   └──[session, HTTPS + proxy auth]▶ per-VM endpoint ──▶ agentd (in the VM)
-                                                          exec · files · health
-```
-
-The **control plane** (`microvms-core`) wraps the service API: image builds
-from a Dockerfile with local pre-flight of the platform's two build traps,
-launch with per-VM secrets through the one-shot `runHookPayload`, suspend and
-resume, teardown that never raises and reports leaked identifiers. The
-**session plane** talks to `agentd` through the VM's authenticated endpoint:
-idempotent detached exec (caller-minted ids, start/poll/ack, output never
-destroyed unread), SSE streaming with byte-cursor resume, streamed file
-transfer, tar extraction confined with `openat2` so a hostile archive cannot
-write outside its target, and HTTP/WebSocket port forwarding into the guest.
-The token the endpoint requires rotates hourly; detached execs outlive it by
-design.
-
-### Working with a long-lived VM
-
-Pass `--keep` to leave the VM running, and `--vm-name` to register a local
-name for it, so no later command needs the endpoint, agent token, and
-MicroVM id pasted back in:
+This builds an image, runs hello-world, reports the result and estimated cost,
+and attempts cleanup. For your own commands, build once and reuse the image:
 
 ```bash
-microvm run --keep --vm-name dev
-
-microvm exec --name dev "python3 -V"
-microvm cp ./data.csv vm:/tmp/data.csv --name dev
-microvm cp --tar ./project.tar vm:/workspace --name dev
-microvm suspend dev          # freeze: memory, filesystem, and token survive
-microvm resume dev           # thaw; a running process resumes mid-flight
-microvm terminate dev        # stop paying; the name is released
+microvm build --name agent-tools --json
+microvm run --image agent-tools --exec "uname -m"
+microvm run . --image agent-tools --exec "ls -la"
 ```
 
-The name is a purely local fact: the registry lives in the CLI's state
-directory, carries the whole identifier triple, and costs zero AWS calls to
-resolve. The explicit `--endpoint`/`--agent-token`/`--microvm-id` flags still
-work everywhere, for a VM some other machine launched.
+Expected architecture output: `aarch64`; the second run lists your uploaded
+project. Add your runtimes and dependencies with a
+[custom image](https://laithalsaadoon.github.io/microvms-agentd/learn/operations/write-a-guest-dockerfile/)
+before running tests. `run` cleans up the VM by default; add
+`--keep --vm-name dev` to keep working with `microvm exec --name dev "..."`,
+then `microvm terminate dev --wait`.
 
-`exec` also streams (`--stream`), feeds stdin (`--stdin`), starts a command
-and returns immediately (`--detach`), and reads an existing exec back
-(`--poll <id>`). Suspend and resume preserve memory, the filesystem, and
-running processes, and a suspended VM bills at a small fraction of a running
-one. If a run is interrupted, `microvm ls` lists what this CLI created and
-could not confirm it deleted, so nothing leaks silently. That is a local
-ledger, not the account: the output says so (`data.source` is
-`"local-ledger"`, and the header names the state directory), because an
-entry can outlive the resource it names. `microvm ls --remote` asks the
-account too, through the same control plane, and judges each identifier in
-an entry's `leaked` list against the real `ListMicrovms` and
-`ListMicrovmImages`: `live` if one is still listed alive, `gone` if every
-one is a MicroVM id or image ARN the listings no longer carry, `unjudged`
-if one is something those listings cannot see (a service-created log
-group). Whatever is alive that no entry names is reported as unknown to
-the ledger, and `--prune` removes the files of `gone` entries only.
-`microvm ls --watch` re-reads that ledger every two seconds until Ctrl-C
-(`--interval-sec` changes the cadence). The loop reads local files only and
-never polls a VM's `/v1/health`, the call that resets its idle timer, so
-watching keeps nothing alive and bills for nothing.
+## Use a sandbox from code
 
-### Running a project through a VM
-
-When the positional argument to `run` is a directory rather than a binary,
-`run` becomes a pack-run-collect round trip against an existing image:
+Copy `data.imageIdentifier` from the build output above into `MICROVM_IMAGE`.
+If you skipped that step, first run `microvm build --name agent-tools --json`.
+SDKs need the image ARN, rather than a name resolved by the CLI. They use the same AWS credentials and
+`MICROVM_EXECUTION_ROLE_ARN` configured above.
 
 ```bash
-microvm run . --image ci-image --exec "make test"
+export MICROVM_IMAGE='paste-the-image-ARN-here'
 ```
 
-The tree is packed locally (`.git`, `target`, `node_modules`, and `.venv`
-skipped whole; symlinks preserved as links, never followed), uploaded to
-`/workspace` in the guest, and the command runs there. Afterwards, members
-matching the `artifacts` globs in `microvm.toml` come back into the local
-directory, including when the command failed, because a failing run's report
-is the artifact CI most wants. An over-budget tree is refused locally, before
-any archive bytes are allocated or any AWS call is made.
+**JavaScript / TypeScript:** after installing the npm package, save as
+`sandbox.mjs` and run `node sandbox.mjs`:
 
-`microvm build --project <dir>` bakes the project's dependencies into the
-image so launches skip installing them. Exactly one ecosystem's manifest and
-lockfile pair enters the build context (`pyproject.toml` + `uv.lock`,
-`package.json` + `package-lock.json`, or `Cargo.toml` + `Cargo.lock`), nothing
-else in the directory enters the shared snapshot, and the derived Dockerfile
-installs from the lockfile (`uv sync --locked`, `npm ci`, `cargo fetch`). With
-`--reuse`, the pair joins the image's content hash: two projects with
-identical dependency files share an image, and a lockfile edit builds a fresh
-one.
+```js
+import { Region, Sandbox } from '@theagenticguy/microvms';
 
-### Running coding agents inside a MicroVM
-
-Two commands bring up a VM with Claude Code or Codex CLI in it, headless,
-against Bedrock, with no vendor API key anywhere, and hand it a task:
-
-```bash
-microvm agent-up --vm-name dev --agent claude-code --agent codex
-microvm agent-prompt --name dev "Create hello.py that prints hello from a microvm, run it, and show the output."
-microvm terminate dev
+const vm = await Sandbox.create(Region.parse(process.env.AWS_REGION ?? 'us-east-1'));
+try {
+  const session = await vm.run({
+    imageIdentifier: process.env.MICROVM_IMAGE,
+    executionRoleArn: process.env.MICROVM_EXECUTION_ROLE_ARN,
+  });
+  const result = await session.runSync(['echo', 'hello from a sandbox']);
+  process.stdout.write(result.stdout);
+  process.stderr.write(result.stderr);
+  if (!result.ok) process.exitCode = result.exitCode ?? 1;
+} finally {
+  console.error('Cleanup:', await vm.terminate());
+}
 ```
 
-`agent-up` builds an image carrying the agent CLIs (reused when nothing
-changed), launches a kept VM with `--egress`, mints a short-lived Bedrock
-bearer token from your own AWS credentials, installs it as a file the agents
-source, and hands `/workspace` to uid 1000. `agent-prompt` runs the agent's
-headless command as that user and returns its output; `--agent` picks one
-when two are installed. Re-running `agent-up` against the same name refreshes
-the token instead of launching. Claude Code uses its native Bedrock mode
-(`CLAUDE_CODE_USE_BEDROCK=1`); Codex talks to Bedrock's OpenAI-compatible
-Responses endpoint through a short provider config the command writes.
-[docs/AGENT-VMS.md](docs/AGENT-VMS.md) is the specification and the record of
-the scope decision it changed.
-[examples/coding-agents-on-bedrock](examples/coding-agents-on-bedrock/) is the
-same recipe done by hand as a shell script, one `microvm` call per step, for a
-reader who wants to see each decision.
-
-The same layer is in both SDKs as `AgentVm`, one method per step, with the
-artifact upload left to you because S3 is not in the client's dependency set:
+**Python:** after installing `microvms`, save as `sandbox.py` and run
+`python sandbox.py`:
 
 ```python
-vm = microvms.AgentVm(microvms.Region.us_east_1(), [microvms.AgentSpec.codex()])
-vm.launch(image_identifier=image_arn, execution_role_arn=exec_role)
-token = vm.install_access()  # minted in process; token.expires_at
-print(vm.prompt_sync("codex", "Create hello.py that prints hello, run it.").stdout)
-vm.terminate()
+import os
+import sys
+from microvms import Region, Sandbox
+
+vm = Sandbox(Region.parse(os.environ.get("AWS_REGION", "us-east-1")))
+try:
+    session = vm.run(
+        image_identifier=os.environ["MICROVM_IMAGE"],
+        execution_role_arn=os.environ["MICROVM_EXECUTION_ROLE_ARN"],
+    )
+    result = session.run_sync(["echo", "hello from a sandbox"])
+    print(result.stdout, end="")
+    print(result.stderr, end="", file=sys.stderr)
+    if not result.ok:
+        raise SystemExit(result.exit_code or 1)
+finally:
+    print("Cleanup:", vm.terminate().to_dict(), file=sys.stderr)
 ```
 
-`find_image`, `image_name`, `build_artifact`, and `build_image` cover the image;
-`installed_agents`, `install_agent_access`, and `prompt_agent` do the same over
-a bare `Session` for a process holding only the identifier triple. Node is the
-same shape, async (`AgentVm.create`, `findImage`, `installAccess`,
-`promptSync`). Every refusal is the core's, and the token has no constructor
-and one door, `expose()`.
+Both print `hello from a sandbox` and request VM termination. Check the cleanup
+report for failures or undeleted resources. For complete setup, agent prompts
+via `AgentVm`, file transfer, and streaming, see the
+[SDK guide](https://laithalsaadoon.github.io/microvms-agentd/learn/tutorial/from-code/).
+Rust has a [complete Cargo example](microvms-core/README.md).
 
-Two open-source harnesses run coding agents inside Lambda MicroVMs the same
-way, each carrying its own hand-rolled daemon:
-**Harbor** ([harbor-framework/harbor#2469](https://github.com/harbor-framework/harbor/pull/2469))
-for agent evaluation and **Omnigent**
-([omnigent-ai/omnigent#2217](https://github.com/omnigent-ai/omnigent/pull/2217))
-for server-managed sessions. Both integrations predate this repo's daemon;
-this project is the same architecture built out fully, with the daemon, the
-verified client, and the platform findings shared across any harness instead
-of rediscovered per integration.
-[docs/HARNESS-CAPABILITIES.md](docs/HARNESS-CAPABILITIES.md) maps their
-contracts onto this platform and ranks what is still missing.
+## Sandbox boundaries and cleanup
 
-### Remote dev: code-server over `port-forward`
+The agent works in a remote VM on the project copy you upload. `agent-up`
+enables outbound networking so agents can reach Bedrock. **VM isolation does
+not mean internet isolation:** omitting `--egress` does not disable internet
+access, and `--deny-egress` sets proxy variables that workloads can bypass.
+For enforced internet isolation, use a custom VPC connector with no IGW, NAT,
+or other internet route; see [Networking](docs/NETWORKING.md).
 
-[examples/code-server-remote-dev](examples/code-server-remote-dev/) runs
-VS Code in the browser against a MicroVM: one script builds an image carrying
-code-server, launches a named VM that idle-suspends and auto-resumes, and
-forwards local port 8080 to it. Re-running the script reattaches instead of
-relaunching, and `microvm shell` opens a real PTY beside the IDE:
+Workloads can access the VM execution role's credentials through metadata, so
+give that role only permissions every workload may use. `agentd` does not
+isolate itself from a root workload. Agent credentials live inside the VM;
+copy back selected results instead of archiving the entire workspace.
+See [Trust](docs/TRUST.md) and [Security](SECURITY.md).
 
-```bash
-bash examples/code-server-remote-dev/run.sh
-```
+Cleanup can fail. Inspect `leaked` in CLI JSON output or SDK cleanup reports,
+and use `microvm ls --remote` to check remaining resources. Images have a
+one-week minimum retention charge; reuse them. See
+[costs](https://laithalsaadoon.github.io/microvms-agentd/learn/operations/read-the-cost-report/)
+and [recovery](https://laithalsaadoon.github.io/microvms-agentd/learn/operations/recover-a-leaked-vm/).
 
-### Prefetching S3 content into the image snapshot
+## Next steps
 
-[examples/s3-prefetch-at-build](examples/s3-prefetch-at-build/) bakes an S3
-prefix into the image at build time — the fetch runs in the snapshot VM
-before the snapshot is captured, so every launched VM starts with the data on
-disk and makes no S3 call at all (the demo launches without `--egress`, which
-requests no outbound connector — not a seal; see
-[What "no egress" means](#what-no-egress-means)). Issue #81 records the measured 5–10 second first-S3-call penalty
-this sidesteps:
+- [Run a project and collect artifacts](https://laithalsaadoon.github.io/microvms-agentd/learn/tutorial/run-a-project/)
+- [Use JSON and streaming in automation](https://laithalsaadoon.github.io/microvms-agentd/learn/operations/drive-it-from-a-script-or-an-agent/); `microvm manifest` describes the installed CLI.
+- [Build a custom image](https://laithalsaadoon.github.io/microvms-agentd/learn/operations/write-a-guest-dockerfile/) or [embed agentd](docs/EMBEDDING.md).
+- [Contribute](CONTRIBUTING.md): `mise run check` checks code; `mise run docs:check` checks documentation.
 
-```bash
-PREFETCH_URI=s3://my-bucket/models/ bash examples/s3-prefetch-at-build/run.sh
-```
-
-### Calling it from code
-
-The same lifecycle is available as a library, with the same defaults and the
-same guardrails:
-
-- **Rust**: [`microvms-core`](https://docs.rs/microvms-core); the CLI is a
-  thin layer over it.
-- **Python**: [`microvms`](https://pypi.org/project/microvms/), built with
-  maturin. Typed: the wheel ships a stub and a PEP 561 `py.typed`, so mypy,
-  pyright, and `ty` see the real signatures and the Rust doc comments rather
-  than `Any`.
-- **Node**: [`@theagenticguy/microvms`](https://www.npmjs.com/package/@theagenticguy/microvms),
-  built with napi-rs. Typed: `index.d.ts` ships beside the addon.
-
-The agent layer rides along: `AgentVm`, `AgentSpec`, and `BearerToken` in both
-bindings, with the CLI's `agent-up` and `agent-prompt` steps as methods
-([docs/AGENT-VMS.md](docs/AGENT-VMS.md), "The bindings").
-
-Both binding stubs are generated from the Rust source, never hand-written, so
-the trap closures are visible to a type checker and not only at runtime: a
-dollar amount is a `str` a checker refuses to add, `Duration` has no
-constructor that omits provenance, and the two hook timeouts are unrelated
-classes rather than two ints. Neither stub can go stale unnoticed: `mise run
-stubs:check` regenerates the Python stub and fails on any difference, and
-Node's `index.d.ts` is regenerated before every test run. See
-[docs/reference/public-api.md](docs/reference/public-api.md) for the surface.
-
-### Using it from scripts and agents
-
-Every command takes `--json` and then emits exactly one JSON envelope on
-stdout; progress goes to stderr. Success carries `type` and `data`; failure
-carries a stable `code`, a mapped `exitCode`, and `suggestions`. The one
-exception is `exec --stream`, which emits NDJSON events and the envelope last.
-`microvm manifest` prints the whole command surface as JSON, generated from
-the CLI's own argument tree, so a tool can discover the surface without
-parsing help text. Details in [docs/reference/cli.md](docs/reference/cli.md).
-
-### What it costs
-
-Every run reports a cost estimate built from pinned, dated, per-region ARM
-rates; `mise run live:rates` checks the pinned table against the AWS Pricing
-API. Anything the engine cannot price is reported as unpriced with a reason
-rather than as zero, and a total containing an unpriced line renders as a
-lower bound. Note the image snapshot's one-week minimum retention: deleting an
-image early saves nothing, so reuse is the economical habit.
-
-Sizing follows one rule: the minimum you request is your bill floor (25% of
-the provisioned capacity), 4x the minimum is your hard ceiling, and both are
-fixed at provision time; there is no scaling event. For peaky workloads
-(builds, test runs, agent sessions), pick a low minimum and let peaks ride
-the always-present 4x headroom, which bills only by what is consumed.
-
-`microvm cost --max-cost <USD> --on-breach warn|abort` checks a run's report
-or a plan against a budget. The comparison uses the priced total, which is a
-lower bound whenever any line is unpriced, so a breach means the true cost is
-at least that far over. `--on-breach` is required beside `--max-cost` and has
-no default: `warn` reports the breach on stderr and exits 0, `abort` exits 12
-(`ERR_PRECONDITION`).
-
-### What "no egress" means
-
-**It does not mean the VM is sealed.** `--egress` puts the `INTERNET_EGRESS`
-connector on the launch; omitting it sends no egress list at all, which is the
-strongest thing `RunMicrovm` accepts — the API's whole outbound surface is that
-list of connector ARNs, with no deny-all, VPC-only or policy option (service
-model `2025-09-09`). Measured on 2026-09-11, 2026-09-12 and 2026-09-13 in
-us-east-1, a VM launched with no egress connector reached `example.com`,
-`github.com`, `pypi.org` and `extensions.duckdb.org` exactly as a `--egress` VM
-did. So a workload's package manager, model download or `INSTALL` still leaves
-the VM. A reviewer of an unrelated tool met this the expensive way: a DuckDB
-query in a "no egress" VM downloaded a 242 MB extension.
-
-Because that is easy to misread, **every run reports what it actually got**, in
-the envelope and in the human output:
-
-```console
-$ microvm run agentd --exec 'echo hi'
-hi
-egress: unsealed — no egress connector was requested, and the platform does not
-honour the omission: the VM still reaches the internet …
-```
-
-`egressPosture` is one of four values, and a consumer can branch on it:
-
-| Posture | What it means |
-|---|---|
-| `open` | `--egress`: the connector is on the request, by design |
-| `unsealed` | no connector, and the platform grants outbound network anyway — **the default today** |
-| `best-effort` | `--deny-egress`: the guest's proxy variables point at a black hole, so `curl`, `uv`, `pip` and `npm` fail closed. A workload that ignores its environment does not |
-| `sealed` | no connector and no outbound path. **Unreachable today**, and it appears the day a re-measurement earns flipping one constant in `microvms-core` |
-
-`--deny-egress` is the strongest thing a client can do here, and it is
-deliberately not called a seal. There is no in-guest seal to reach for: `ip`,
-`iptables` and `nft` are absent from `al2023-minimal`, and the exec child *and
-`agentd` itself* run with `CapBnd 00000000a80425fb` — no `CAP_NET_ADMIN`, no
-`CAP_SYS_ADMIN` — so a route, an nftables rule, a sysctl and a network
-namespace are all `EPERM`, at boot as much as at exec time. Until the platform
-offers a network policy, treat outbound as reachable and put the control on the
-execution role: [docs/TRUST.md](docs/TRUST.md), "The execution role is the
-boundary". [docs/PLATFORM.md](docs/PLATFORM.md) carries the measurements with
-their dates, and the live suite re-measures all of it on every run.
-
-## Writing your own guest Dockerfile
-
-Start from the client's own stanza rather than from scratch:
-
-```bash
-microvm dockerfile
-```
-
-prints the Dockerfile that a default build bakes, generated by the same code
-that builds it, with the platform constraints annotated inline. Append your
-`RUN` layers to that output and pass the result to `--dockerfile`. Each item
-below cost a real build cycle to find, and a server-side cycle is roughly
-three minutes plus a wedged image name you cannot reuse (`clientToken` is a
-permanent idempotency key). `microvm doctor` names every missing prerequisite
-and prints the command that fills it, which is faster than reading the rest of
-this section.
-
-**Build it locally under arm64 first.** A `dnf` typo or a missing package is
-free to find here and expensive to find server-side:
-
-```bash
-docker buildx build --platform linux/arm64 -t guest-check -f guest.Dockerfile .
-```
-
-With `qemu-aarch64` binfmt registered this builds the real target architecture
-on an x86 host. Two errors in the example Dockerfile were caught this way in
-seconds.
-
-**`ENV AGENTD_PORT` must agree with the client's port**: `--port`, default
-9000 (`DEFAULT_AGENT_PORT`). The platform dials its build-time `ready` and
-`validate` hooks on the port from the create call, so a guest listening
-elsewhere answers neither, and the build fails with `CREATE_FAILED` after a
-completely clean build log. The daemon's own `agentd listening` line appears,
-with the wrong address, and no error line follows. The client refuses that
-disagreement locally now, including the case where the Dockerfile names no
-port while you have moved the client off the default with `--port`: an unset
-variable leaves the daemon on 9000 rather than on your port.
-
-**Set a `WORKDIR` explicitly.** `al2023-minimal` leaves `WorkingDir` empty, so
-an omitted `--cwd` on every later `exec` resolves against `/`. Check that the
-user your workload runs as can write to the directory you choose; a root-owned
-`WORKDIR` under a non-root workload fails at the first write.
-
-**On `-minimal` bases, spell weak dependencies off as
-`--setopt=install_weak_deps=0`.** The integer is what works; `False` is not
-accepted.
-
-**Install `procps-ng` if you want `ps` inside the VM.** The al2023 bases ship
-without it (`/bin/sh: ps: command not found`, issue #157). `microvm ps` needs
-nothing in the image — the daemon reads `/proc` itself — so add the package
-only for a workload that shells out to `ps` on its own:
-`RUN dnf -y --setopt=install_weak_deps=0 install procps-ng && dnf clean all`.
-
-**Keep `ENTRYPOINT []` and `CMD ["/agentd"]`.** That pair is the trust
-boundary: it is what guarantees no workload runs before the platform's run
-hook lands and the token arrives. An `ENTRYPOINT` that swallows `CMD` produces
-a VM whose daemon never starts, and the symptom is a run-hook timeout that
-mentions neither.
-
-**Leave `AGENTD_SSE_KEEPALIVE_SECS` alone** unless you also raise the client's
-stream idle timeout. The client treats 60 seconds of silence as a dead
-connection because the daemon's keepalive is 15; a longer interval makes
-healthy streams look dead. This too is refused locally.
-
-**The guest holds the execution role, and the image cannot take it away.**
-`http://169.254.169.254/` inside a VM is Firecracker's MMDS: an IMDSv2 token `PUT`
-answers 200 and `/latest/meta-data/iam/security-credentials/execution_role` serves
-the role's credentials to root and to a `--user 1000` exec alike (measured
-2026-09-11 and 2026-09-12, us-east-1; `docs/PLATFORM.md`). No in-guest block was
-measured working: `ip`, `iptables` and `nft` are absent from `al2023-minimal`, and
-installing `iproute` does not help, because the exec child's bounding set carries no
-`CAP_NET_ADMIN` (even under `--repair-identity`), so `ip route add blackhole
-169.254.169.254/32` is refused as root. `agentd` (pid 1) holds the same bounding set,
-so a default-drop policy applied at boot by the image is refused for the same reason —
-there is no Dockerfile that seals this guest. Omitting `--egress` does not seal the VM
-either: a connector-less VM reached the public internet on the same dates, which is why
-every run reports `egressPosture` and why the strongest flag here, `--deny-egress`,
-reports `best-effort` (see [What "no egress" means](#what-no-egress-means)). So
-size the execution role for the daemon alone (CloudWatch Logs) and hand the workload
-its own scoped credential; `docs/TRUST.md`, "The execution role is the boundary",
-has the argument.
-
-[examples/coding-agents-on-bedrock/Dockerfile](examples/coding-agents-on-bedrock/Dockerfile)
-is a working guest Dockerfile that respects all of the above.
-
-## The workspace
-
-```text
-protocol/        daemon↔client wire types; drift is a compile error
-agentd/          the in-VM daemon: exec, file transfer, one-shot bootstrap
-model/           stateright models of the daemon and client lifecycle
-microvms-core/   the client library: control plane, session, cost, sandbox
-microvms-cli/    the microvm binary: 28 commands, JSON envelopes, a manifest
-microvms-py/     Python binding (PyO3)
-microvms-js/     Node binding (napi-rs)
-conformance/     the live suite: 188 checks against real AWS, via the CLI
-spec/            57 formal requirements in symspec, checked with Z3
-```
-
-Three crates publish to crates.io (`microvms-protocol`, `microvms-core`,
-`microvms-cli`); the bindings publish to PyPI and npm; `agentd` publishes as
-an attested release binary. The publish set is an allowlist in
-[Cargo.toml](Cargo.toml), with each deliberate absence explained next to it.
-
-## Developing
-
-```bash
-mise run install         # git hooks
-mise run check           # the definition of done: lint, security, all test
-                         # tiers, schema freshness, stub freshness, model
-                         # drift, cross-compile
-```
-
-Verification runs at six tiers: Z3 proofs over the spec, stateright models,
-property tests, network-fault simulation (turmoil), a drift gate comparing the
-hardcoded service constraints against the pinned botocore model, and the live
-conformance suite. The live tier is separate because it creates real MicroVMs
-and costs money:
-
-```bash
-mise run live            # paths, versions, conformance, rates, leak check; ~15 min
-mise run live:destroy    # tear the Terraform stack back down
-```
-
-Supply-chain gates run in `mise run security`, in the git hooks, and in CI:
-semgrep, secret scanning over the full git history, SPDX license headers on
-every tracked source file, `cargo deny` (dependency licenses against a
-measured allowlist, yanked crates, untrusted registries), and actionlint over
-the workflows. CI publishes CycloneDX and SPDX SBOMs per commit, three
-scanners audit them (grype, trivy, osv-scanner), every accepted finding lives
-in an ignore file with its reason, and Dependabot watches cargo, Actions, and
-npm weekly. [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/laithalsaadoon/microvms-agentd)
-audits the repository's own maintenance posture weekly from
-[scorecard.yml](.github/workflows/scorecard.yml), and its findings land as
-code-scanning alerts. Releases are tag-triggered through
-[release.yml](.github/workflows/release.yml): a guard job proves the tag, the
-manifests, and the publish set agree before anything irreversible starts, and
-every registry is reached through OIDC trusted publishing rather than a stored
-token. [CONTRIBUTING.md](CONTRIBUTING.md) has the workflow;
-[docs/README.md](docs/README.md) indexes the rest of the documentation,
-starting with the
-[system overview](docs/architecture/system-overview.md) and the
-[debugging guide](docs/insights/debugging-guide.md).
-
-The same documentation is published at
-**<https://laithalsaadoon.github.io/microvms-agentd/>**, built by `site/` and
-deployed by `.github/workflows/docs.yml`, in three tiers: Learn (tutorials and
-task-shaped how-tos, authored under `site/authored/learn/`), Reference
-(generated from `microvm manifest`, one page per command plus the exit codes,
-envelope, response types, and wire schema), and Internals (`docs/`: the
-hand-written platform findings and design documents, then the tree generated
-from the source). Every page is also served as raw Markdown at its own path
-with `.md` appended, the whole corpus comes as `llms.txt`, `llms-full.txt` and
-`llms-small.txt`, every `path:line` citation is a commit-pinned link into this
-repository, and the Mermaid diagrams are rendered to SVG at build time so they
-are present in a fetch that runs no JavaScript.
-[For agents](https://laithalsaadoon.github.io/microvms-agentd/agents/) is the
-page that names which surface answers which question. `mise run docs:check`
-builds and gates it locally, and the gates over the built output cover
-accessibility, layout stability, a Lighthouse budget, link and census checks,
-spelling, and lint beside the existing probes.
-
-## License
-
-Apache-2.0. Every source file carries an `SPDX-License-Identifier` line, and
-dependency licenses are enforced against the allowlist in
-[deny.toml](deny.toml).
+[Documentation index](docs/README.md) · [Apache-2.0 license](LICENSE)

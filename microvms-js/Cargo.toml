@@ -5,8 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "the napi-rs bindings over microvms-core"
-# Nothing publish-shaped. `package.json` carries `"private": true` for the npm
-# side; this is the crates.io side of the same statement.
+# Distributed through npm; this binding crate is not published to crates.io.
 publish = false
 
 # `cdylib` only, and that is the difference from `microvms-py`: a Node addon is

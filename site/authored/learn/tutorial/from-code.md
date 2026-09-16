@@ -1,163 +1,311 @@
 ---
-title: Drive it from code
-description: The same lifecycle as a Rust crate, a Python package, and a Node package, with value types that refuse the platform's traps, shown through the typed example the repository ships.
+title: Use the SDKs
+description: Install the Python, JavaScript, TypeScript, or Rust SDK; run commands and coding agents in sandboxed MicroVMs.
 editUrl: false
 sidebar:
   order: 5
 ---
 
-The `microvm` CLI is a thin layer over the `microvms-core` crate, and the Python and Node packages are thin bindings over the same crate. Whatever the CLI refuses locally, the libraries refuse too, and most of those refusals are visible to a type checker before anything runs.
+Use the SDKs to give your agent a disposable Linux workspace: upload inputs,
+run tools, read their output, download results, and terminate the VM.
+`Sandbox` runs your own commands; `AgentVm` adds Claude Code and Codex through
+Amazon Bedrock.
 
-At the end of this page you will know which package to add, what the typed surface refuses to construct, and you will have run the credential-free half of the Python example the repository ships.
+With AWS configured and an existing image, pick a language below and run
+your first command in about 90 seconds. One-time AWS setup and image builds
+take longer.
 
-## 1. Pick a library
+## Before you start
 
-```bash
-cargo add microvms-core                   # Rust; API reference on docs.rs
-uv add microvms                           # Python >= 3.9; or pip install microvms
-npm install @theagenticguy/microvms       # Node >= 22.13
+Complete [AWS setup](/learn/tutorial/first-run/) and export
+`AWS_REGION` and `MICROVM_EXECUTION_ROLE_ARN`. You need Lambda MicroVMs access
+and AWS credentials on the machine running the SDK. SDKs use the normal AWS
+credential chain; they do not read the CLI's `microvm.toml` configuration.
+
+Use the [CLI](/learn/tutorial/install/) to build an image containing `agentd`:
+
+```sh
+microvm build --name agent-tools --json
+export MICROVM_IMAGE='paste data.imageIdentifier from the result'
 ```
 
-The Python stub and the Node `index.d.ts` are generated from the Rust source, never hand-written, and `mise run stubs:check` fails on any difference between the Python stub and the compiled module. [Public API](/reference/public-api/) lists the Rust surface the bindings wrap.
+Use the image **ARN**, in the same account and region as your credentials.
+The CLI resolves image names; these SDK calls take the ARN directly.
+The CLI handles daemon provisioning and artifact upload. If your team has
+already built a compatible image, set `MICROVM_IMAGE` to its ARN and skip
+the build.
 
-## 2. The traps are in the types
+The shell examples use Bash or Zsh. In PowerShell, set environment variables
+with `$env:NAME='value'`.
 
-The constraints the platform enforces at runtime are shapes these packages refuse to construct. A dollar amount is a string a checker refuses to add, so it cannot be silently summed with a float. A `Duration` has no constructor that omits its provenance, so a projected figure cannot be mistaken for a measured one. The run-hook and build-hook timeouts are unrelated classes rather than two integers, so the two ceilings cannot be transposed. A raw token cannot be passed where a session is expected. Each planted bypass has a test that goes red if the door reopens.
+## Python
 
-## 3. Python, without credentials
+Requires CPython 3.9+. Install in a virtual environment:
 
-`microvms-py/examples/typed_usage.py` is a typed consumer that exists so a checker has something to be right about. Its value and cost surface runs with no AWS account. These functions are quoted from it:
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install microvms
+```
+
+On Windows, activate with `.venv\Scripts\Activate.ps1`.
+Save this as `hello.py`:
 
 ```python
-from microvms import (
-    CostReport,
-    Duration,
-    EstimatedUsd,
-    SizeClass,
-    Total,
-    estimate_run,
-    run_report,
-)
+import os
+import sys
+from microvms import Region, Sandbox
 
-
-def size_for(baseline_mib: int) -> SizeClass:
-    """The class a `minimumMemoryInMiB` selects. Refuses off-table figures (TRAP-10)."""
-    return SizeClass.from_baseline_mib(baseline_mib)
-
-
-def plan_cost(size: SizeClass, seconds: float) -> CostReport:
-    """A projection, before anything is launched."""
-    return estimate_run(size, running_seconds=seconds)
-
-
-def measured_cost(size: SizeClass, ran_for: float) -> CostReport:
-    """A report over a phase a clock actually timed."""
-    return run_report(size, running=Duration.measured(ran_for))
-
-
-def render_total(report: CostReport) -> str:
-    """The figure as a string, which is the only thing the money types will give up."""
-    total: Total = report.total
-    floor: EstimatedUsd = total.floor
-    amount: str = floor.amount
-    if total.is_lower_bound:
-        return f"at least {amount}"
-    return amount
+image = os.environ["MICROVM_IMAGE"]
+role = os.environ["MICROVM_EXECUTION_ROLE_ARN"]
+vm = Sandbox(Region.parse(os.environ.get("AWS_REGION", "us-east-1")))
+try:
+    session = vm.run(image_identifier=image, execution_role_arn=role)
+    result = session.run_sync(["echo", "hello from a sandbox"])
+    print(result.stdout, end="")
+    print(result.stderr, end="", file=sys.stderr)
+    if not result.ok:
+        raise RuntimeError(f"Command exited with {result.exit_code}")
+finally:
+    cleanup = vm.terminate()
+    if cleanup.failures or cleanup.undeleted:
+        print("Cleanup needs attention:", cleanup.to_dict(), file=sys.stderr)
 ```
 
-`Duration.measured` rather than `Duration(...)`: the stub has no `__new__` for `Duration`, so the provenance cannot be omitted here any more than it can in Rust. `amount` is annotated `str` because that is what the stub says it is; if the stub ever typed it as a float, the annotation would stop agreeing with it. Run the example's `main()` with the package installed:
-
-```bash
-pip install microvms
-python3 microvms-py/examples/typed_usage.py
+```sh
+python hello.py
 ```
 
-## 4. Python, the lifecycle
+Expected output: `hello from a sandbox`.
 
-The same file writes the lifecycle for the checker, and never runs it in any gate, because `Sandbox()` resolves credentials and would create a real MicroVM:
+Methods are synchronous. `session.run_sync()` starts a command, waits for
+completion, returns stdout/stderr and an exit code, and acknowledges the
+saved output. Nonzero command exits are results; library failures raise
+exceptions with `code`, `kind`, `wire_kind`, and `retryable` attributes.
 
-```python
-def launch(region: Region, size: SizeClass) -> str:
-    run_timeout, build_timeout = hook_timeouts()
-    with Sandbox(region) as sandbox:
-        image = sandbox.build_image(
-            name="example",
-            binary=b"",
-            code_artifact_uri="s3://example/artifact.zip",
-            build_role_arn="arn:aws:iam::123456789012:role/example",
-            size=size,
-            run_hook_timeout=run_timeout,
-            build_hook_timeout=build_timeout,
-        )
-        sandbox.run(image_identifier=image.identifier)
-        try:
-            sandbox.resume()
-        except WindowClosedError as closed:
-            return f"{closed.code} retryable={closed.retryable}"
-        except MicrovmError as error:
-            return f"{error.kind}: {error}"
-        endpoint = sandbox.endpoint
-        return endpoint if endpoint is not None else "no endpoint"
+## JavaScript / TypeScript
+
+Requires Node.js 22.13.0+. The package includes TypeScript declarations.
+
+```sh
+npm install @theagenticguy/microvms
 ```
 
-`image.identifier` is the ARN string; a checker refuses `run(image_identifier=image)`, which is the kind of mistake that used to survive until a control-plane rejection. `hook_timeouts()` in the same file returns `RunHookTimeout(30), BuildHookTimeout(1800)`, the two classes the transposition trap is closed by. Every raised exception carries `.code` and `.retryable` on the base class, so a caller reads them instead of parsing a message; the codes are the same `ERR_*` strings the CLI's envelope carries, listed at [Exit codes](/reference/exit-codes/).
-
-## 5. Node
-
-The napi-rs binding is async-native: an exported async function runs on napi's managed runtime and returns a real `Promise`, and exec output arrives as a `ReadableStream<Uint8Array>`. The smoke tests in `microvms-js/__test__/smoke.mjs` run with no AWS account, and this helper is quoted from them:
+Save this as `hello.mjs`:
 
 ```js
-import { Duration, SizeClass, runReport } from '../index.js';
+import { Region, Sandbox } from '@theagenticguy/microvms';
 
-function report() {
-  return runReport(SizeClass.defaultClass(), {
-    running: Duration.measured(3600),
-    imageGb: 2,
-    label: 'smoke',
-  });
+const imageIdentifier = process.env.MICROVM_IMAGE;
+const executionRoleArn = process.env.MICROVM_EXECUTION_ROLE_ARN;
+if (!imageIdentifier || !executionRoleArn) {
+  throw new Error('Set MICROVM_IMAGE and MICROVM_EXECUTION_ROLE_ARN first');
+}
+const vm = await Sandbox.create(Region.parse(process.env.AWS_REGION ?? 'us-east-1'));
+try {
+  const session = await vm.run({ imageIdentifier, executionRoleArn });
+  const result = await session.runSync(['echo', 'hello from a sandbox']);
+  process.stdout.write(result.stdout);
+  process.stderr.write(result.stderr);
+  if (!result.ok) process.exitCode = 1;
+} finally {
+  const cleanup = await vm.terminate();
+  if (cleanup.failures.length || cleanup.undeleted.length) {
+    console.error('Cleanup needs attention:', cleanup);
+    process.exitCode = 1;
+  }
 }
 ```
 
-`imageGb` is what makes the build line appear, so this report is deliberately incomplete, and its `total` is a lower bound. The same file asserts that `Number(usd)`, `+usd`, `usd * 2`, and `JSON.stringify(usd)` never yield a bare number, because JavaScript coerces far more eagerly than Python does and each of those is a separate door.
-
-One thing to know before reading an error: napi types the async path over its own closed status enum, so a custom code survives a synchronous throw and is collapsed to `GenericFailure` on a Promise rejection. Read `err.cause.message` for the `ERR_*` code and `err.cause.cause.message` for the fine-grained wire kind.
-
-## 6. Coding agents from code
-
-The agent layer is `AgentVm` in both packages: the same steps `microvm agent-up` and `agent-prompt` take, one method each. The Python shape, with the S3 upload left to you:
-
-```python
-vm = microvms.AgentVm(
-    microvms.Region.us_east_1(),
-    [microvms.AgentSpec.claude_code(), microvms.AgentSpec.codex()],
-)
-image = vm.find_image(binary=agentd, build_role_arn=BUILD_ROLE)  # content-named reuse
-if image is None:
-    name = vm.image_name(binary=agentd, build_role_arn=BUILD_ROLE)
-    s3.put_object(
-        Bucket=BUCKET,
-        Key=f"{name}.zip",
-        Body=vm.build_artifact(binary=agentd, build_role_arn=BUILD_ROLE),
-    )
-    image = vm.build_image(
-        binary=agentd,
-        build_role_arn=BUILD_ROLE,
-        code_artifact_uri=f"s3://{BUCKET}/{name}.zip",
-    ).identifier
-vm.launch(image_identifier=image, execution_role_arn=EXEC_ROLE)
-token = vm.install_access()  # minted in process; token.expires_at
-result = vm.prompt_sync(
-    "codex", "Create hello.py that prints hello from a microvm, run it."
-)
-vm.terminate()
+```sh
+node hello.mjs
 ```
 
-Node is the same, async: `AgentVm.create(region, [{ agent: 'codex' }])`, `findImage`, `buildArtifact`, `buildImage`, `launch`, `installAccess`, `prompt` or `promptSync`, `terminate`. A process holding only a session refreshes credentials with `installed_agents`, `mint_bedrock_token`, and `install_agent_access`, and runs a task with `prompt_agent`. `vm.sandbox` and `vm.session` reach the same VM under the same lock. Every refusal is the core's: an unknown agent name, an empty or repeated spec set, a blank task, a token lifetime past twelve hours. `BearerToken` has no constructor and prints only its length; `expose()` is the one door to the text. [Run coding agents on Bedrock](/learn/operations/run-coding-agents-on-bedrock/) explains each step's reason, and [Agent VMs](/internals/agent-vms/) is the specification.
+Expected output: `hello from a sandbox`.
 
-## 7. Rust
+`runSync()` returns a Promise, like other methods that contact AWS or the
+guest. It starts a command, waits, and acknowledges the saved output.
+A nonzero exit is a result; an async library failure rejects with its
+`ERR_*` code in `error.cause.message`.
 
-`microvms-core` is the crate the CLI is a thin layer over, with the control plane (image builds, launch, suspend, resume, teardown), the session plane (exec, streaming, file transfer, port forwarding), the cost engine, and the closed enums for regions and size classes. The API reference is on [docs.rs](https://docs.rs/microvms-core), and [Public API](/reference/public-api/) lists the types by name.
+Both examples terminate the VM in `finally`, including when a command
+fails. Cleanup reports failures through `failures` and `undeleted`.
+By default it returns when termination is accepted; use
+`terminate(wait_for_terminated=True)` in Python or
+`terminate({ waitForTerminated: true })` in JavaScript to observe completion.
+The image remains available for reuse.
 
-Whatever language you drive it from, the daemon's wire contract is the same: [Protocol](/internals/protocol/) is the reading, [wire schema](/reference/wire-schema/) is the JSON Schema the daemon also serves at `GET /v1/schema`, and [Embedding](/internals/embedding/) is what a harness client has to implement.
+## Run a coding agent
 
-This is the last tutorial. The [operations pages](/learn/) answer the questions that come up once something is running.
+`AgentVm` installs model access after launch and runs the agent as UID/GID
+1000 in `/workspace`. Each task can have its own VM and files. This example
+asks Claude Code to write and run a Python script, then downloads that
+specific file to your machine.
+
+First configure [Bedrock access](/learn/operations/run-coding-agents-on-bedrock/).
+Prepare an agent image once, keeping its ARN for later SDK launches.
+The command below starts a temporary VM, so terminate it after capturing
+the image ARN. For Python users:
+
+```sh
+MICROVM_AGENT_IMAGE="$(microvm agent-up --vm-name sdk-image --agent claude-code --json |
+  python -c 'import json, sys; print(json.load(sys.stdin)["data"]["imageIdentifier"])')"
+export MICROVM_AGENT_IMAGE
+microvm terminate sdk-image --wait
+```
+
+For Node users, replace the `python -c ...` part with
+`node -pe 'JSON.parse(require("node:fs").readFileSync(0, "utf8")).data.imageIdentifier'`.
+
+### Python agent
+
+Save as `agent.py`:
+
+```python
+import os
+import sys
+from microvms import AgentVm, Region
+
+image = os.environ["MICROVM_AGENT_IMAGE"]
+role = os.environ["MICROVM_EXECUTION_ROLE_ARN"]
+vm = AgentVm(Region.parse(os.environ.get("AWS_REGION", "us-east-1")))
+try:
+    session = vm.launch(image_identifier=image, execution_role_arn=role)
+    vm.install_access()
+    result = vm.prompt_sync(
+        "claude-code",
+        "Create /workspace/hello.py that prints hello from a sandbox. Run it.",
+    )
+    print(result.stdout, end="")
+    print(result.stderr, end="", file=sys.stderr)
+    if not result.ok:
+        raise RuntimeError(f"Agent exited with {result.exit_code}")
+    with open("hello-from-agent.py", "wb") as artifact:
+        artifact.write(session.download_file("/workspace/hello.py"))
+finally:
+    cleanup = vm.terminate()
+    if cleanup.failures or cleanup.undeleted:
+        print("Cleanup needs attention:", cleanup.to_dict(), file=sys.stderr)
+```
+
+```sh
+python agent.py
+```
+
+### JavaScript agent
+
+Save as `agent.mjs`:
+
+```js
+import { writeFile } from 'node:fs/promises';
+import { AgentVm, Region } from '@theagenticguy/microvms';
+
+const imageIdentifier = process.env.MICROVM_AGENT_IMAGE;
+const executionRoleArn = process.env.MICROVM_EXECUTION_ROLE_ARN;
+if (!imageIdentifier || !executionRoleArn) {
+  throw new Error('Set MICROVM_AGENT_IMAGE and MICROVM_EXECUTION_ROLE_ARN first');
+}
+const vm = await AgentVm.create(Region.parse(process.env.AWS_REGION ?? 'us-east-1'));
+try {
+  const session = await vm.launch({ imageIdentifier, executionRoleArn });
+  await vm.installAccess();
+  const result = await vm.promptSync(
+    'claude-code',
+    'Create /workspace/hello.py that prints hello from a sandbox. Run it.',
+  );
+  process.stdout.write(result.stdout);
+  process.stderr.write(result.stderr);
+  if (!result.ok) throw new Error(`Agent exited with ${result.exitCode}`);
+  await writeFile('hello-from-agent.py', await session.downloadFile('/workspace/hello.py'));
+} finally {
+  const cleanup = await vm.terminate();
+  if (cleanup.failures.length || cleanup.undeleted.length) {
+    console.error('Cleanup needs attention:', cleanup);
+    process.exitCode = 1;
+  }
+}
+```
+
+```sh
+node agent.mjs
+```
+
+Both examples create `hello-from-agent.py` locally. The download checks that
+the agent actually produced its artifact: an agent process can exit zero
+without completing the requested task.
+
+For Codex, build with `--agent codex` and match the SDK's agent selection:
+
+| Language | Create | Prompt |
+| --- | --- | --- |
+| Python | `AgentVm(region, [AgentSpec.codex()])` (import `AgentSpec`) | `vm.prompt_sync("codex", task)` |
+| JavaScript | `AgentVm.create(region, [{ agent: 'codex' }])` | `vm.promptSync('codex', task)` |
+
+`prompt_sync` / `promptSync` defaults to a 900-second task deadline.
+Override with `timeout=...` in Python or `{ timeoutSec: ... }` in JavaScript.
+The selected agent must be installed in the image.
+`AgentVm` enables internet egress for Bedrock calls.
+
+## Connect your own agent tools
+
+Keep your orchestrator in your application and point its command and file
+tools at a session. For example, use these calls inside the `try` block
+after obtaining `session`:
+
+| Task | Python | JavaScript |
+| --- | --- | --- |
+| Start a command without waiting | `session.run(["python3", "job.py"])` | `await session.run(['python3', 'job.py'])` |
+| Upload an input | `session.upload_file("/workspace/input.txt", b"hello")` | `await session.uploadFile('/workspace/input.txt', Buffer.from('hello'))` |
+| Download a result | `session.download_file("/workspace/result.txt")` | `await session.downloadFile('/workspace/result.txt')` |
+| Upload a project tar archive | `session.upload_tar("/workspace", tar_bytes)` | `await session.uploadTar('/workspace', tarBytes)` |
+
+`run()` returns an `ExecHandle` for polling, streaming, or reattaching by
+exec ID. Use `wait_and_ack()` / `waitAndAck()` when collecting its final
+output. JavaScript also offers `spawn()` with readable byte streams.
+Pass `shell=True` / `{ shell: true }` for shell-script strings; argv
+arrays need no shell option.
+
+For arbitrary agent-generated commands, set the exec's `user` and `group`
+to a non-root UID/GID and make its workspace writable by that user.
+The built-in `AgentVm` prompt methods already select UID/GID 1000.
+Keep the VM execution role limited to the task's needs.
+
+VM isolation does not imply blocked outbound networking. Omitting
+`egress` does not block traffic, and `deny_egress` / `denyEgress` only sets
+advisory proxy variables. For a network boundary, use a customer-managed
+VPC connector and a VPC without internet or NAT gateways; see
+[Networking](/learn/operations/configure-networking/).
+
+## Rust
+
+```sh
+cargo add microvms-core
+```
+
+`microvms-core` is the Rust SDK behind the CLI and bindings.
+Use `Sandbox::new(region).await`, `RunRequest` for launch,
+`Session::run_sync` for command results, and `Sandbox::terminate`
+for cleanup. The async API also includes `agents::AgentVm`, file transfer,
+streaming, suspend/resume, and cost estimates.
+
+[Run the complete Rust example](https://github.com/laithalsaadoon/microvms-agentd/tree/main/microvms-core#run-your-first-command)
+to launch the same image and execute a command.
+[docs.rs](https://docs.rs/microvms-core) documents the Rust methods and
+request types. [Public API](/reference/public-api/) maps the available
+surfaces. The [Python package guide](https://github.com/laithalsaadoon/microvms-agentd/tree/main/microvms-py)
+and [Node package guide](https://github.com/laithalsaadoon/microvms-agentd/tree/main/microvms-js)
+cover supported hosts.
+
+## Build and operate beyond the quickstart
+
+The SDKs expose `build_artifact` / `buildArtifact` and
+`build_image` / `buildImage` for custom images. Upload the artifact bytes
+to S3 before calling the build method; the SDK does not perform that upload.
+Build once and reuse the resulting image ARN across fresh sandboxes.
+
+- [Run coding agents on Bedrock](/learn/operations/run-coding-agents-on-bedrock/)
+  covers model access and repeated agent tasks.
+- [Read the cost report](/learn/operations/read-the-cost-report/) covers
+  estimates, measured durations, and retained resources.
+- [Embedding](/internals/embedding/) describes the daemon contract for a
+  custom harness or transport.

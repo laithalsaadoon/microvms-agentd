@@ -170,18 +170,12 @@ test('stream options are optional and default without an argument', async () => 
   assert.ok(handle.stream({ offset: 5, reconnect: false, maxReconnects: 3, errorOnGap: true }));
 });
 
-test('a negative offset is clamped rather than sent as a negative byte position', async () => {
-  // JS has no unsigned integer, so `offset: -1` is writable where in Rust it is not. Clamping to
-  // zero is the honest reading — "start at the beginning" — and the alternative would be a query
-  // string the daemon refuses. Asserted through the offset the attach actually asks for.
-  const server = await startSseServer([[outputFrame(0, 'AA'), exitFrame(2)]]);
-  try {
-    const handle = await handleAgainst(server);
-    await drain(handle.stream({ offset: -5, idleTimeout: 5 }));
-    assert.deepEqual(server.offsetsRequested(), [0]);
-  } finally {
-    await server.close();
-  }
+test('a negative offset is refused without starting a stream', async () => {
+  const handle = await offlineHandle();
+  assert.throws(() => handle.stream({ offset: -1 }), (error) => {
+    assert.equal(codeOf(error), 'ERR_INVALID_ARG');
+    return true;
+  });
 });
 
 // -- the event objects ---------------------------------------------------------

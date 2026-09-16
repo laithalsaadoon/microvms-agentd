@@ -299,13 +299,13 @@ impl AsyncGenerator for ExecStream {
 #[napi(object)]
 pub struct StreamOptionsInput {
     /// The byte to start at. Non-zero resumes a stream a previous process was reading.
-    pub offset: Option<i64>,
+    pub offset: Option<f64>,
     /// Whether to reconnect after a cut. `false` ends the stream at the cut instead, which
     /// is what a caller doing its own reconnection wants.
     pub reconnect: Option<bool>,
     /// How many reconnects before giving up. A bound rather than forever, because a stream
     /// that drops every time is a condition a caller needs reported.
-    pub max_reconnects: Option<u32>,
+    pub max_reconnects: Option<f64>,
     /// Turns a gap into a rejection instead of an event. What a caller that must have
     /// complete output wants.
     pub error_on_gap: Option<bool>,
@@ -365,9 +365,11 @@ impl ExecHandle {
         let defaults = StreamOptions::default();
         let options = options.unwrap_or_default();
         let resolved = StreamOptions {
-            offset: options.offset.unwrap_or(0).max(0) as u64,
+            offset: crate::numbers::offset_number(options.offset.unwrap_or(0.0)).map_err(js)?,
             reconnect: options.reconnect.unwrap_or(defaults.reconnect),
-            max_reconnects: options.max_reconnects.unwrap_or(defaults.max_reconnects),
+            max_reconnects: crate::numbers::optional_u32(options.max_reconnects, "maxReconnects")
+                .map_err(js)?
+                .unwrap_or(defaults.max_reconnects),
             error_on_gap: options.error_on_gap.unwrap_or(defaults.error_on_gap),
             idle_timeout: match options.idle_timeout {
                 Some(idle) => seconds(idle)?,

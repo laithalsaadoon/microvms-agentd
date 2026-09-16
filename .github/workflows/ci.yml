@@ -310,6 +310,8 @@ jobs:
       # table — the values no model states, which lost their cross-client reader
       # when the Python client was deleted.
       - run: ./scripts/check-model-drift.py
+      - name: Model loader regression tests
+        run: uv run --with 'boto3>=1.40' python -m unittest discover -s scripts -p 'test_model_drift.py'
 
       # Every Python file, linted here rather than in a job of its own. `conformance/run_rs.py`
       # is the live suite's driver and the `scripts/` gates are this job's own tooling, so the

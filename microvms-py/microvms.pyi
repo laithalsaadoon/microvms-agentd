@@ -1168,10 +1168,14 @@ class Sandbox:
         token survived the freeze, and re-delivering it would hit the daemon's one-shot
         bootstrap and be refused — a 409 that reads like a broken VM.
         """
-    def run(self, /, *, image_identifier: str |None = None, image_version: str |None = None, execution_role_arn: str |None = None, agent_token: str |None = None, launch_env: dict[str, str] |None = None, egress: bool = False, deny_egress: bool = False, shell: bool = False, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None, ready_timeout: float |None = None, token_scope: str |None = None) -> Session:
+    def run(self, /, *, image_identifier: str |None = None, image_version: str |None = None, execution_role_arn: str |None = None, agent_token: str |None = None, launch_env: dict[str, str] |None = None, egress: bool = False, egress_network_connectors: Sequence[str] |None = None, deny_egress: bool = False, shell: bool = False, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None, ready_timeout: float |None = None, token_scope: str |None = None) -> Session:
         """
         Launches a MicroVM, waits for RUNNING, and returns its session.
         
+        `egress` requests the managed INTERNET_EGRESS connector. Omission does not block
+        outbound traffic. For no egress, pass existing VPC connector ARNs through
+        `egress_network_connectors`, using a VPC without an internet gateway or NAT
+        gateway. `deny_egress` sets advisory proxy variables that workloads can bypass.
         # What the core refuses here, and this file does not
         
         A second `run` on one sandbox, with **zero** control-plane calls: the agent token is
@@ -1222,9 +1226,8 @@ class Sandbox:
         """
         The suspended window this sandbox asked for at launch, in seconds.
         
-        `None` before a launch, and for a sandbox that did not send the launch — this client
-        is the only party that can name the number, because `suspendedDurationSeconds`
-        exists only in the `RunMicrovm` request and `GetMicrovm` does not return it.
+        `None` before this sandbox launches a VM. This accessor reports the requested
+        window; `GetMicrovm` also returns the service's idle policy.
         """
     def terminate(self, /, *, delete_image: bool = False, delete_log_group: bool = False, delete_attempts: int |None = None, delete_backoff: float |None = None, wait_for_terminated: bool = False) -> TeardownReport:
         """

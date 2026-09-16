@@ -11,7 +11,7 @@ build-backend = "maturin"
 [project]
 name = "microvms"
 version = "0.8.0"
-description = "Python bindings over microvms-core: the MicroVMs client with every trap closure"
+description = "Python client for AWS Lambda MicroVMs"
 requires-python = ">=3.9"
 readme = "README.md"
 # PEP 639: an SPDX expression, which is why there is no

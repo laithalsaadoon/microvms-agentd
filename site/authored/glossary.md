@@ -129,11 +129,10 @@ every constraint the client believes, for that gate. See [constants](/reference/
 
 ### Egress
 
-Outbound network for a VM, granted at launch through an `INTERNET_EGRESS` network connector and
-requested from the CLI with `--egress`. Omitting it omits the connector from the launch request; measured
-2026-09-11 and 2026-09-12 the platform gave a connector-less VM outbound network anyway. It is a
-launch-time property of the VM, not something the daemon can enforce or relax. See
-[Platform](/internals/platform/) and [Trust](/internals/trust/).
+Outbound network traffic. `--egress` requests the managed internet connector;
+omitting it does not disable internet access. No internet egress requires a
+VPC without an IGW or NAT gateway, attached through a custom connector.
+`--deny-egress` only sets proxy variables. See [Networking](/internals/networking/).
 
 ### Envelope
 

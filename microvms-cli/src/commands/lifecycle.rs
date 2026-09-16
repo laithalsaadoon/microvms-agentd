@@ -268,6 +268,25 @@ pub fn merge_config(
     let egress = crate::config::pick(args.egress, args.egress, config.egress);
     report("egress", json!(egress.value), egress.source);
     merged.egress = egress.value;
+    let connectors = crate::config::pick(
+        !args.egress_network_connectors.is_empty(),
+        args.egress_network_connectors.clone(),
+        config.egress_network_connectors,
+    );
+    report(
+        "egressNetworkConnectors",
+        json!(connectors.value),
+        connectors.source,
+    );
+    merged.egress_network_connectors = connectors.value;
+    if merged.egress && !merged.egress_network_connectors.is_empty() {
+        return Err(crate::exit::CliError::new(
+            crate::exit::Exit::InvalidArg,
+            "--egress (or egress = true in microvm.toml) cannot be combined with \
+             --egress-network-connector: INTERNET_EGRESS bypasses VPC isolation."
+                .to_string(),
+        ));
+    }
 
     // `--deny-egress` is SetTrue and merges exactly as `--egress` does. The clap
     // `conflicts_with` catches the two flags together; the file can also disagree with a
@@ -1035,6 +1054,7 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
     if args.egress {
         request = request.with_egress();
     }
+    request.egress_network_connectors = args.egress_network_connectors.clone();
     if args.deny_egress {
         request = request.with_deny_egress();
     }

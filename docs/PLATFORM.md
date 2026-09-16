@@ -1,1613 +1,595 @@
 # AWS Lambda MicroVMs: measured platform behavior
 
-Everything here is an observation of someone else's system, so every entry
-carries the date, region, and API version it was measured under. Re-verify before
-relying on any of it in a new region or after an API version bump. Where a claim
-comes from documentation rather than our own run, it says so.
+A compact record of runtime observations. Unless stated otherwise, measurements
+used us-east-1, MicroVM API `2025-09-09`, and an ARM64 `al2023-minimal` guest.
+Dates apply to observations, not guarantees about current service behavior.
+Original experiments and full narratives remain in git history.
 
-Measurement context unless stated otherwise: us-east-1, API version `2025-09-09`,
-`al2023-minimal` aarch64 base image, measured 2026-08-01 through 2026-08-04
-during the Harbor PR #2469 integration.
-
-> **Merge note, 2026-08-15.** The entries dated 2026-08-15 in this file were added on
-> `fix/pagination-and-ignored-fields` (PR #26) from that branch's live run. Two other
-> branches were adding entries to this same file on the same day from their own live runs,
-> so a conflict here is expected and the resolution is a **union** — these are independent
-> measurements of different operations, not competing accounts of one. Nothing here
-> supersedes another branch's entry; if two entries describe the same operation, keep both
-> and reconcile in a follow-up rather than deleting a measurement someone ran.
+For current operation shapes, see the [AWS MicroVM documentation](https://docs.aws.amazon.com/lambda/latest/microvm-api/Welcome.html).
+For internet isolation, use [Networking](NETWORKING.md): a VPC without an IGW
+or NAT gateway is required; connector omission and proxy variables do not seal
+the default network. The September 2026 correction below distinguishes the
+separate Lambda core API from the MicroVM API.
 
 ## The service provides no exec and no file transfer
 
-There is no API to run a command in a MicroVM and no API to move a file into or
-out of one. This project exists to provide those two operations.
-
-`CreateMicrovmShellAuthToken` exists in the API. It requires a `SHELL_INGRESS`
-connector, the documentation scopes it to debugging, and it recommends disabling it
-in production. **The claim that it is not programmatically drivable was wrong, and
-was measured wrong on 2026-08-15** — see "The shell endpoint is a real PTY over a
-WebSocket" below. It is still not a substitute for this project, because it gives one
-interactive shell session rather than addressable execs, but a caller who needs a PTY
-can drive it from code.
+Lambda MicroVMs have no addressable command-execution or file-transfer API;
+`agentd` supplies those operations. The service does offer a programmatically
+usable PTY through `CreateMicrovmShellAuthToken` (measured 2026-08-15), which
+corrects the earlier claim that its shell was console-only. A PTY does not
+provide detached exec IDs, separated output streams, or exit-status records.
 
 ## Hooks are served under a fixed prefix, and two of them are build-time
 
-Measured 2026-08-05. The platform calls
-`POST /aws/lambda-microvms/runtime/v1/<hook>`, where `<hook>` is one of `ready`,
-`validate`, `run`, `resume`, `suspend`, `terminate`. A daemon serving a bare
-`/run` is never bootstrapped.
-
-`ready` and `validate` are image-*build* hooks: the build calls them to decide
-whether the snapshot it just produced is usable, before any instance exists and
-therefore before any token has been delivered. They must answer 200 without
-regard to bootstrap state. Gating them on a token fails the build rather than the
-run, which is a confusing place to discover the mistake.
+Measured 2026-08-05. Hooks are
+`POST /aws/lambda-microvms/runtime/v1/<hook>` for `ready`, `validate`, `run`,
+`resume`, `suspend`, and `terminate`. `ready` and `validate` run during image
+build, before token delivery, and must succeed without bootstrap. The model
+allows 3600-second build-hook timeouts and 60-second runtime-hook timeouts.
 
 ## `runHookPayload` arrives wrapped, not as the body
 
-Measured 2026-08-05. Finding this cost a full build-and-run cycle. The platform
-wraps the string passed to `RunMicrovm` as `runHookPayload` inside an outer JSON
-object rather than delivering it as the request body, so the body is:
+Measured 2026-08-05. The platform sends an outer JSON object containing the
+string supplied to `RunMicrovm`:
 
 ```json
 {"runHookPayload": "{\"agent_token\": \"...\"}"}
 ```
 
-The caller's own JSON is one `serde_json`/`json.loads` deeper. A daemon that reads
-its fields from the top level answers 400, and the platform then terminates the VM
-with `Run lifecycle hook returned HTTP status 400. Please check your hook endpoint
-and application logs for more details.` before forwarding any traffic. Because no
-traffic was ever forwarded, the failure is invisible from outside the VM, and the
-VM is gone before you can look inside it. Read `GetMicrovm`'s `stateReason` first
-when a launch dies young.
+Decode both layers. Reading `agent_token` from the outer object fails the run
+hook; AWS can terminate the VM before forwarding traffic. Read `stateReason`
+from `GetMicrovm` when launch fails.
 
 ## The `runHookPayload` ceiling is 4096 bytes, and the service model states it twice, differently
 
-Measured 2026-08-07, us-east-1, API version `2025-09-09`. The real ceiling is 4096
-bytes. `STRATEGY.md` asserted a 16 KB `runHookPayload` and `TRUST.md` repeated it
-while flagging it as unmeasured, so the documented figure was four times the real
-one. Because the error overstated the limit, a reader planning from it would try to
-fit four times the secret material that actually fits. Both files were corrected
-2026-08-07.
+Measured 2026-08-07; model rechecked 2026-09-16 with botocore 1.43.95.
+The inclusive limit is **4096 bytes of the serialized payload**. The model's
+member documentation still says 16,384, but its referenced shape says 4096.
+The client checks the smaller, measured limit before calling AWS.
 
-### Where the 16 KB figure came from: the model itself
+| Payload size | Measured response with an invalid image identifier |
+|---|---|
+| 4096 bytes | Passed length validation, then rejected the image ARN |
+| 4097 bytes | Rejected `runHookPayload` length |
 
-This is worth stating plainly, because it makes the bug reproducible by someone doing the
-right thing. `service-2.json` for API version `2025-09-09` carries **both** numbers. The
-member's documentation string reads:
-
-> Per-MicroVM initialization data delivered as the request body of the /run lifecycle hook.
-> Use to pass tenant-specific configuration such as session IDs or secret references.
-> **Maximum: 16,384 bytes.**
-
-while the shape that member names, `RunMicrovmRequestRunHookPayloadString`, declares
-`{"max": 4096, "min": 0}`. The shape is what the service validates against, as the bracket
-below shows. So a reader who checks the model's prose rather than its shape reproduces the
-4x error and can cite the model while doing it.
-
-Both figures are now pinned in `microvms-core/src/constants.rs` —
-`MAX_RUN_HOOK_PAYLOAD_BYTES` and `DOCUMENTED_RUN_HOOK_PAYLOAD_BYTES` — and the drift gate
-compares the second against the model's actual documentation string. When AWS fixes the
-prose, that check goes red and the warning can be deleted; until then the wrong number has
-a name, so a commit "correcting" 4096 to 16384 fails a test instead of looking plausible.
-
-The boundary was bracketed from both sides by calling `RunMicrovm` with a deliberately
-bogus `imageIdentifier`, so nothing could be created and nothing was billed:
-
-| Payload length | Result |
-| --- | --- |
-| 4096 bytes | passes the length check, fails only on the bogus ARN (`Malformed ARN - doesn't start with 'arn:'`) |
-| 4097 bytes | `1 validation error detected: Value at 'runHookPayload' failed to satisfy constraint: Member must have length less than or equal to 4096` |
-
-So 4096 is inclusive. The bogus-ARN technique generalizes to other request-validation
-boundaries. To probe one without creating a billable resource, make one other field
-invalid in a way that fails later than the constraint under test, then read which
-error comes back.
-
-botocore does not enforce this client-side. The oversized request goes to the wire and
-the server rejects it, so a caller building a payload gets no local signal that it is too
-large. A length check before the call is worth having.
-
-That check now exists and is reachable, which it effectively was not before. This client
-refuses an over-ceiling payload in `RunHookPayload::for_launch`, before any control-plane
-call. It matters more since the payload started carrying a launch `env` map alongside the
-token: a bearer token is a few dozen bytes and fit with room to spare, so the ceiling was
-unreachable through the typed constructor, while a caller putting credentials in `env`
-reaches it easily. Note also that the *daemon* cannot enforce this ceiling at all — an
-over-ceiling `runHookPayload` is rejected at `RunMicrovm` and the request never reaches
-the guest — so the client is the only place the check can live.
-
-The figure was also available without measuring. The botocore service model for
-`lambda-microvms` version `2025-09-09` declares
-`RunMicrovmRequestRunHookPayloadString` with `max: 4096`. That model is a
-machine-readable statement of the service's constraints. This project had been
-restating those constraints in prose by hand, and one of them was wrong by 4x. The
-model states other useful constraints, none of them measured by us:
-
-| Constraint | Value |
-| --- | --- |
-| `Architecture` enum | exactly `['ARM_64']`, so a MicroVM cannot be x86 |
-| `Capability` enum | exactly `['ALL']` |
-| `run`, `resume`, `suspend`, `terminate` hook timeouts | max 60 seconds |
-| `ready` and `validate` image-build hook timeouts | max 3600 seconds, 60x the run-time hooks |
-| `maximumDurationInSeconds` | max 28800 (8 hours) |
-| `ImageName` | max 64 chars, pattern `[a-zA-Z0-9-_]+` |
-
-The 60x gap between the two hook families follows from what they are for. A build hook
-waits on a Dockerfile, while a run hook waits on a daemon that is already booted. A
-daemon that takes more than 60 seconds to answer `/run` fails the launch, and there is
-no way to ask for more time.
-
-A drift checker exists at `scripts/check-model-drift.py` and is wired into
-`mise run check`. With it in place, a documented constraint that no longer matches
-the shipped model fails the check mechanically instead of waiting for someone to
-notice the prose.
+This corrects the earlier 16 KB claim. The budget includes the token, launch
+environment, identity material, and JSON escaping. See the
+[AWS RunMicrovm documentation](https://docs.aws.amazon.com/lambda/latest/microvm-api/API_RunMicrovm.html) for current shape constraints.
 
 ## Calling an unpriced region returns `AccessDeniedException` with a null message
 
-Measured 2026-08-07 by calling `ListMicrovms` in eight regions. The five regions that
-price MicroVMs all answered successfully: us-east-1, us-east-2, us-west-2, eu-west-1,
-ap-northeast-1. eu-central-1, ap-southeast-2, and sa-east-1 each returned
-`AccessDeniedException` with the message field `None`.
+Measured 2026-08-07 with `ListMicrovms`. `us-east-1`, `us-east-2`,
+`us-west-2`, `eu-west-1`, and `ap-northeast-1` succeeded. `eu-central-1`,
+`ap-southeast-2`, and `sa-east-1` returned `AccessDeniedException` with a null
+message. This can resemble an IAM problem; a null message alone is not proof
+of its cause.
 
-That response is indistinguishable from a genuine IAM denial, so someone who typos a
-region ends up auditing a policy that is fine. The null message is the way to tell
-them apart, because a real denial names the principal and the action.
-
-Nothing earlier in the call path catches it either. `boto3.client("lambda-microvms",
-region_name=...)` constructs successfully for any region and resolves to
-`https://lambda.<region>.amazonaws.com`, because the service model's `endpointPrefix` is
-`lambda`. So the first API call is the only thing that reports the problem, and it
-reports the wrong cause.
-
-Two resolver calls disagree with each other, so both results are recorded here.
-`endpoint_resolver.get_available_endpoints("lambda-microvms")` returns an empty list.
-`session.get_available_regions("lambda-microvms")` returns 34 regions, the full
-Lambda set, since resolution keys off the shared `lambda` prefix. Neither answer is the
-five-region truth, so do not use either as a support check. Keep the supported list
-explicitly and validate the caller's region against it before the first call.
+The shared Lambda endpoint resolver can list ordinary Lambda regions that do
+not support MicroVMs. SDK endpoint availability is not a MicroVM service
+availability check. The package validates its known regions and permits an
+explicit `--unlisted-region` override.
 
 ## Network connectors are ARNs
 
-Measured 2026-08-05. `ingressNetworkConnectors` takes
-`arn:aws:lambda:<region>:aws:network-connector:aws-network-connector:ALL_INGRESS`,
-not the bare string `ALL_INGRESS`, which is rejected with
-`Malformed network connector ARN`. Egress uses the same shape with
-`INTERNET_EGRESS`, and omitting egress entirely is how you get a VM with no
-outbound network.
+Measured 2026-08-05. Managed connectors use ARNs such as
+`arn:aws:lambda:<region>:aws:network-connector:aws-network-connector:ALL_INGRESS`.
+The bare value `ALL_INGRESS` fails with `Malformed network connector ARN`.
+`INTERNET_EGRESS`, `HTTP_INGRESS`, and `SHELL_INGRESS` use the same form.
 
-**The omission claim above was measured wrong on 2026-09-11 and again on 2026-09-12: a VM
-launched with no egress connector reached the public internet. See "A VM launched without
-the egress connector still has outbound network" at the end of this file.** The ARN shape
-and the `Malformed network connector ARN` rejection stand as measured.
+**Correction, 2026-09-16:** custom VPC connectors are created by the separate
+`lambda-core` service and attached through `egressNetworkConnectors`. The
+old claim that omitting a managed connector disables egress was disproved in
+September. Use a VPC without an IGW or NAT gateway for internet isolation;
+see [Networking](NETWORKING.md).
 
 ## `CreateMicrovmAuthToken` returns a header map
 
-Measured 2026-08-05. The `authToken` field is a map of header name to value, not a
-string. The API is shaped this way to allow schemes that need more than one header.
-Read `authToken["X-aws-proxy-auth"]`. Requests also need `X-aws-proxy-port` naming
-which of the token's allowed ports the request targets.
+Measured 2026-08-05. `authToken` is a header map, not a string. Read
+`authToken["X-aws-proxy-auth"]`, and send `X-aws-proxy-port` with the target
+port. Preserve the header-map contract rather than assuming the response can
+never contain another header.
 
 ## MicroVM states, and terminal states reached before `RUNNING`
 
-`PENDING → RUNNING → SUSPENDING/SUSPENDED → TERMINATING → TERMINATED`. A VM that
-reaches any terminal state *before* `RUNNING` died during startup, which for a
-hook-serving daemon almost always means a lifecycle hook failed. Poll for
-`RUNNING` and fail fast on the terminal states with `stateReason` attached.
-Polling through them wastes minutes and then reports a connection error that hides
-the cause.
+Typical progression is `PENDING → RUNNING → SUSPENDING → SUSPENDED`, with
+resume and termination transitions. Poll for the desired state and stop on
+terminal states, reporting `stateReason`. A VM that terminates before
+`RUNNING` failed startup; continuing to poll hides the useful error. Use the
+[AWS GetMicrovm documentation](https://docs.aws.amazon.com/lambda/latest/microvm-api/API_GetMicrovm.html) for the complete state enum.
 
 ## The build log group survives Terraform
 
-Measured 2026-08-05. The service creates `/aws/lambda-microvms/<image-name>`
-itself, so a Terraform stack never owns it and `terraform destroy` leaves it
-behind. The leftover group costs only storage, but it means a clean stack destroy
-does not leave a clean account. Query for the log group separately, or delete it in
-teardown.
+Measured 2026-08-05. AWS creates `/aws/lambda-microvms/<image-name>` outside
+the Terraform stack. `terraform destroy` does not remove it. Verify log
+groups separately after VM/image cleanup.
 
 ## Root in the guest is not enough: `sethostname` and bind mounts need `additionalOsCapabilities`
 
-Measured 2026-08-06, us-east-1, `al2023-1` base. The daemon runs as root inside
-the MicroVM, and that is still not sufficient for anything requiring
-`CAP_SYS_ADMIN`. With no `additionalOsCapabilities` on `CreateMicrovmImage`:
+Measured 2026-08-06 with `al2023-1`. Without `additionalOsCapabilities`,
+writing `/etc/machine-id` succeeded while `sethostname` and the bind mount over
+`/proc/sys/kernel/random/boot_id` returned `EPERM`. Requesting `["ALL"]` made
+all three succeed in that run; `ALL` is the model's only capability value.
 
-| Operation | Result |
-| --- | --- |
-| Write `/etc/machine-id` | succeeds |
-| `sethostname` | `EPERM` (`Operation not permitted`, os error 1) |
-| Bind mount over `/proc/sys/kernel/random/boot_id` | `EPERM` |
-
-Passing `additionalOsCapabilities=["ALL"]` at image creation makes all three
-succeed, confirmed by the same probe reporting `identity_degraded: false` where it
-previously reported `true`.
-
-Two things make this easy to miss. First, the filesystem write succeeds, so identity
-repair looks like it works until you check the two steps that need the kernel's
-permission rather than the filesystem's. Second, the daemon logs the failure and
-keeps serving, which produces a healthy-looking VM whose hostname and `boot_id` are
-shared with every sibling from the same snapshot. Logging and continuing is still
-the right behavior, because a daemon that stopped serving on this failure would
-strand the VM.
-
-`ALL` is the only accepted value in the `2025-09-09` API; there is no way to
-request `CAP_SYS_ADMIN` alone. A caller who does not need hostname or `boot_id`
-repair should leave it unset rather than widen the guest for nothing.
-
-This was found by a live run after the unit tests passed, because those tests
-inject a fake layout and a fake platform. The guard had been verified against
-fakes at every tier but never against the real platform, and the real platform
-was where it failed.
+**Later evidence, 2026-09-12:** the daemon and child capability bounding sets
+lacked `CAP_SYS_ADMIN` and `CAP_NET_ADMIN`, including with identity repair
+requested. Do not treat the earlier success or `["ALL"]` as a portable
+privilege guarantee. Inspect `identity_degraded` on health and the current
+capability mask. The metadata section below records the later measurements.
 
 ## `minimumMemoryInMiB` selects a *baseline*, and the guest reports the *peak*
 
-Measured 2026-08-07, us-east-1, `al2023-1`. Requesting
-`resources=[{"minimumMemoryInMiB": 512}]` produced a guest reporting
-`MemTotal: 2037648 kB` (~2 GB). Requesting 2048 produced `MemTotal: 8209056 kB`
-(~8 GB).
+Measured 2026-08-07 with `al2023-1`. A 512 MiB baseline produced
+`MemTotal: 2037648 kB`; 2048 MiB produced `8209056 kB`. These match the
+documented size classes:
 
-Both match AWS's documented sizing table exactly (`microvms-images.html`), which
-pairs each baseline with a peak ceiling four times its size:
+| Baseline memory / vCPU | Provisioned ceiling memory / vCPU |
+|---|---|
+| 0.5 GiB / 0.25 | 2 GiB / 1 |
+| 1 GiB / 0.5 | 4 GiB / 2 |
+| 2 GiB / 1 | 8 GiB / 4 |
+| 4 GiB / 2 | 16 GiB / 8 |
+| 8 GiB / 4 | 32 GiB / 16 |
 
-| Baseline (billed while running) | Peak (provisioned ceiling) |
-| --- | --- |
-| 0.5 GB / 0.25 vCPU | 2 GB / 1 vCPU |
-| 1 GB / 0.5 vCPU | 4 GB / 2 vCPU |
-| 2 GB / 1 vCPU (default) | 8 GB / 4 vCPU |
-| 4 GB / 2 vCPU | 16 GB / 8 vCPU |
-| 8 GB / 4 vCPU | 32 GB / 16 vCPU |
-
-So `minimumMemoryInMiB` chooses a size class, and the number the guest reports in
-`/proc/meminfo` is that class's **peak**, not its baseline. That the guest reports
-the peak specifically is our inference from two matching measurements; AWS
-documents the table but not the `MemTotal` mapping.
-
-**The peak is provisioned from the start.** Confirmed with the service team,
-2026-08: the VM is provisioned at 4x the requested minimum from the moment it
-exists. There is no vertical scaling, no sampling, and no resize event of any
-kind — nothing changes size during a run, and app code never observes a resource
-change. The peak is always present. AWS's own pricing docs say "burst", which
-misleads (it implies dynamic scaling that does not happen); the service team
-committed to doc fixes the week of 2026-08-26. This repo used to inherit that
-"burst" vocabulary and no longer does.
-
-**Billing follows the baseline you requested, not the peak the guest reports.**
-AWS: "You pay the baseline rate while your MicroVM is running and only pay for what
-you actively use above the baseline, billed per second." An earlier version of this
-section said a caller "should not assume they are billed for the request", which was
-exactly backwards. The requested minimum is the bill's floor — 25% of the
-provisioned capacity, always paid while the VM runs — and usage above the minimum
-is billed by consumption, per second. Corrected 2026-08-07 after reading the
-pricing page rather than inferring from the size.
-
-Three consequences follow for a caller. You cannot use this field to *constrain* a VM, so a
-memory-pressure test must generate pressure against what the guest reports rather
-than what was requested. Guest swap is absent (`SwapTotal: 0 kB`), so pressure goes
-straight to the OOM killer with no paging phase — and the ceiling it enforces is the
-always-present peak, not the baseline. And picking a small baseline is a real cost
-lever rather than a cosmetic one, since baseline is the floor you pay for every
-running second while the 4x headroom above it bills only by what is consumed —
-which makes a low minimum the right choice for peaky workloads whose steady state
-is small.
+The service team confirmed in August 2026 that the ceiling is provisioned at
+launch; there is no resize event. AWS documents billing at the requested
+baseline while running, plus consumption above it. This corrects the earlier
+inference that the reported peak was the billing floor. Memory-pressure tests
+must use the guest's ceiling, not the requested baseline. Swap was absent.
 
 ## What actually costs money
 
-Measured 2026-08-07 from the AWS Pricing API, us-east-1, with live
-`pricing.get_products(ServiceCode="AWSLambda")` calls filtered to usage types
-containing `MicroVM`.
+Queried 2026-08-07 from AWS Pricing in us-east-1, `ServiceCode="AWSLambda"`.
+These are dated USD rates, not a current invoice:
 
-**Get the rates from the Pricing API, not from the pricing page.** An earlier version
-of this section said MicroVMs "has no standalone pricing page: the rates appear only
-inside worked examples on the Lambda pricing page". The first half is still true and the
-second is wrong: the Pricing API carries MicroVM rates directly, as seven named usage
-types under `AWSLambda`, so they are queryable rather than only readable out of prose.
-Corrected 2026-08-07 after querying the API rather than continuing to restate the page.
-A caller who needs current rates should query, since a hand-copied table drifts and this
-one did.
+| Usage | Rate |
+|---|---|
+| ARM vCPU-second | 0.0000276944 |
+| ARM memory GiB-second | 0.0000036667 |
+| Snapshot read GiB | 0.0015467699 |
+| Snapshot write GiB | 0.0037977138 |
+| Snapshot storage GiB-hour | 0.0001111111 |
 
-The seven line items, us-east-1, exactly as returned:
+The API also returned non-ARM compute rates; MicroVMs support `ARM_64` only.
+Rates existed in five regions. us-east-2/us-west-2 matched us-east-1; eu-west-1
+and ap-northeast-1 were higher. Regional usage types have prefixes that must
+be removed before comparing the same dimension.
 
-| Usage type | Rate | Unit |
-| --- | --- | --- |
-| `Lambda-MicroVM-vCPU-Second-ARM` | 0.0000276944 | per vCPU-second |
-| `Lambda-MicroVM-vCPU-Second` | 0.0000326557 | per vCPU-second |
-| `Lambda-MicroVM-Memory-GB-Second-ARM` | 0.0000036667 | per GB-second |
-| `Lambda-MicroVM-Memory-GB-Second` | 0.0000043235 | per GB-second |
-| `Lambda-MicroVM-Snapshot-Read-GB` | 0.0015467699 | per GB |
-| `Lambda-MicroVM-Snapshot-Write-GB` | 0.0037977138 | per GB |
-| `Lambda-MicroVM-Snapshot-Storage-GB-Hour` | 0.0001111111 | per GB-hour |
-
-Data transfer is not among them and bills at standard AWS rates, including MicroVM to
-your own VPC.
-
-**Snapshot storage was understated.** This section listed $0.08 per GB-month. The API
-prices storage per GB-hour, and $0.0001111111 per GB-hour is $0.0811111030 at AWS's own
-730-hour month, so the old figure was 1.37% low. Corrected 2026-08-07. The one-week
-minimum retention still applies. The rest of the old table survived the check: read was
-0.00155 against 0.0015467699 (0.21% high), write 0.0038 against 0.0037977138 (0.06%
-high), and both compute rates matched to the digit.
-
-**There are two compute rates 17.9% apart, and only the ARM one can ever apply.** The
-service model's `Architecture` enum has exactly one member, `ARM_64`, so a MicroVM
-cannot be x86 and the non-ARM line items are unreachable for this service. The old table
-used the ARM figures and was correct by luck rather than by construction. The Pricing API
-returns both rates, and the Lambda pricing page gives a reader no obvious signal about
-which applies, so someone pricing a fleet by hand can land on the non-ARM column and
-overstate compute by 17.9%.
-
-**Only five regions price MicroVMs, and rates vary by region.** us-east-1,
-us-east-2, us-west-2, eu-west-1, and ap-northeast-1 return the seven line items;
-eu-central-1, ap-southeast-2, and sa-east-1 return none. us-east-2 and us-west-2 are
-identical to us-east-1 on every line item. The other two are not:
-
-| Region | ARM compute | Snapshot read | Snapshot write | Snapshot storage |
-| --- | --- | --- | --- | --- |
-| us-east-2, us-west-2 | same | same | same | same |
-| eu-west-1 | +5.3% | +6.0% | +7.0% | +19.0% |
-| ap-northeast-1 | +16.4% | +19.9% | +22.6% | +20.0% |
-
-So a Tokyo caller who estimates from us-east-1 rates understates their bill by up to
-22%, and the largest gaps are on the snapshot dimensions rather than on compute, which
-matters most for a design that leans on a suspended pool.
-
-One measurement trap produces a confident wrong answer. us-east-1 usage types are
-unprefixed while every other region carries a location prefix,
-`USW2-Lambda-MicroVM-Snapshot-Read-GB` and so on. Comparing raw `usagetype` strings
-across regions therefore matches nothing outside us-east-1. The first pass at this table
-came out as NaNs, which reads as "no regional variation" rather than as a join bug. Strip
-the prefix before comparing.
-
-vCPU and memory bill as two separate line items rather than one blended
-GB-second, and there is no per-request charge: instances bill per second. No
-MicroVMs free tier is published; the Lambda free tier is Functions-only. No
-minimum billing increment is published.
-
-Three cost behaviors affect a create-and-destroy test suite like this repo's:
-
-**Image storage has a one-week minimum.** A 2 GB image deleted sixty seconds after
-creation still bills about a week of storage, roughly four cents. Our conformance
-suite builds a fresh image per run, so "it costs pennies" is right per run but the
-floor is the image rather than the compute.
-
-**Idle time while RUNNING is billed at baseline.** This differs from AgentCore
-Runtime, which charges no CPU during I/O wait. On raw MicroVMs, wall-clock time in
-`RUNNING` costs baseline whether or not anything is executing, so suspension is the
-only way to stop paying.
-
-**A suspended VM is cheap to keep, but each suspend/resume cycle has a fixed
-cost.** A suspended 2 GB VM pays
-only snapshot storage, about $0.16 a month. Leaving the same VM running at baseline
-costs roughly $100 a month. That difference of two orders of magnitude is what makes
-a warm suspended pool viable. But each suspend/resume cycle pays a snapshot write
-plus a read, about $0.011 for a 2 GB VM, so the thing to avoid is suspending and
-resuming constantly rather than suspending for a long time.
-
-**Not published:** whether the server-side image build is billed as compute. The
-build starts a real MicroVM to run the Dockerfile, so it plausibly is, but AWS does
-not say and we have not measured it. Do not assume either way. The Pricing API does not
-settle it either, and that is now a checked finding rather than an assumption: none of
-the seven MicroVM usage types names a build, so if build time is billed it arrives on one
-of the existing compute or snapshot dimensions rather than on a line item of its own. A
-reader auditing a bill for a distinct build charge will not find one, which is not the
-same as the build being free.
+Image storage has a one-week minimum. Running idle VMs still incur baseline
+charges; suspended VMs incur snapshot storage and transitions incur reads and
+writes. Data transfer is separate. Server-side build compute billing remains
+unverified and is reported as unpriced, not zero. The old $0.08/GiB-month
+storage estimate was rounded low; the API rate gives $0.081111103 at 730 hours.
+Use `microvm cost` and `scripts/check-live-rates.py` rather than copying rates
+from this record.
 
 ## Seeing an OOM: the process case works, the VM case is still unmeasured
 
-Measured 2026-08-07, us-east-1, via `conformance/probe_oom.py` (deleted with the
-Python client after the Rust port went live-green; the probe is in git history and
-this entry is its result). The customer
-question is "is there a `dmesg`?" and it splits in two.
+Measured 2026-08-07. `dmesg` was readable and
+`/sys/fs/cgroup/memory.events` exposed `oom`, `oom_kill`, and `oom_group_kill`,
+all zero in the tested VM. No actual OOM was induced: the first probe required
+an absent Python interpreter; a second hit the `/dev/shm` limit instead of
+RAM pressure. A guest-wide OOM's `stateReason` therefore remains unmeasured.
 
-**A process killed inside a living VM should be visible in two places, and the
-plumbing for both is confirmed present.** What was actually measured: `dmesg` runs in
-the guest and is readable with no extra privileges (it returned successfully, empty,
-because no OOM occurred), and `/sys/fs/cgroup/memory.events` exists and exposes
-`oom`, `oom_kill`, and `oom_group_kill` counters — all reading 0 on an unpressured
-VM. Those counters are the right thing for a supervisor to poll rather than
-discovering a kill after the fact.
-
-The daemon reports a killing signal on the exec result, so a caller would see
-SIGKILL rather than an exit code; that path is covered by unit tests but has not
-been exercised by a real OOM. Treat "you will see signal 9 and a dmesg line" as
-sound reasoning from confirmed plumbing rather than as an observation.
-
-**Whether a guest-wide OOM populates `stateReason` remains unmeasured, because we
-could not make one happen.** Two attempts failed, for the following reasons:
-
-1. The first probe allocated with `python3`, which the `amazonlinux:2023-minimal`
-   base image does not have. It reported `command not found` with exit code 127 and
-   every downstream check passed. The probe measured nothing while looking like a
-   clean result. This project has hit the same failure mode repeatedly, where a
-   run reports green without ever exercising the behavior under test.
-2. The second allocated with `dd` into `/dev/shm`, which is tmpfs and therefore
-   capped near half of RAM. `dd` stopped at 64 MiB against a 1 GiB request and
-   exited 0, so again no memory pressure. tmpfs limits are a filesystem ceiling,
-   not a memory one.
-
-So `stateReason` was `null` and the state `RUNNING` throughout, which says only
-that we never applied real pressure. A future probe needs an allocator that touches
-anonymous memory the kernel must back and cannot silently cap. A small static
-binary shipped in the image is the obvious answer, since the guest has no
-interpreter and no compiler.
-
-What the runs *did* establish: the daemon survived 64 MiB of output under
-concurrent allocation with `truncated: true` on the result, so the output cap holds
-under pressure, and `/v1/health` stayed reachable and bootstrapped throughout.
+The daemon remained reachable while processing 64 MiB of output and reported
+`truncated: true`. Unit tests cover signal reporting, but do not establish
+what AWS reports after a guest-wide OOM.
 
 ## Suspend/resume is a freeze and restore, not a stop and start
 
-Measured 2026-08-05, us-east-1, `al2023-1` base, 1024 MiB baseline, via
-`conformance/probe_suspend_resume.py` (deleted with the Python client after the Rust
-port went live-green, so the probe is in git history and this entry is its result).
-The same assertions now run inside `conformance/run_rs.py`'s suspend/resume section.
-`SuspendMicrovm`, held 45 seconds, then `ResumeMicrovm`. Everything survived:
+Measured 2026-08-05, `al2023-1`, 1024 MiB baseline, held suspended for 45
+seconds. Token, files, exec records, unread output, background process, and
+endpoint URL all survived. A one-second ticker had a 51-second gap, then
+advanced six times in six seconds after resume.
 
-| What | Result |
-| --- | --- |
-| In-memory agent token | survived — `/v1/health` reports `bootstrapped: true` |
-| Filesystem | survived |
-| Exec records, including unacked output | survived |
-| A backgrounded process | survived and kept running after resume |
-| Endpoint URL | unchanged |
-
-A ticker writing `date +%s` once a second provided the direct evidence. The
-largest gap between consecutive ticks was 51 seconds, which matches the suspension
-plus transition time, and the tick file grew by 6 lines over 6 seconds after resume.
-The guest is frozen rather than killed, and its processes continue from the point
-where they stopped.
-
-Two consequences follow. Pause/resume needs no token re-delivery and no
-re-bootstrap, which makes a warm suspended sandbox pool viable. Suspend an idle VM
-instead of terminating it, and the next task lands in a VM that still has its
-filesystem, its installed tools, and its credentials. Separately, a guest process
-that measures wall time sees the suspension as a single jump, so anything holding a
-timeout, a lease, or a TLS session across a suspend will observe it expire at once.
-
-This corrects an earlier claim in the daemon's own resume-hook docstring, which
-asserted that bootstrap state being in memory made a resumed VM unable to serve the
-control API. That claim was inferred from where the state lives rather than
-measured, and the measurement showed it was wrong.
+Resume continues frozen memory and processes; it does not require bootstrap
+again. Wall-clock leases and credentials can expire during suspension. These
+observations corrected the earlier claim that an in-memory token was lost.
 
 ## Traffic ordering around the `/run` hook
 
-Documented (`microvms-launching.html`): "Your MicroVM begins receiving external
-traffic after the `/run` hook returns HTTP 200. Until then, the endpoint does not
-forward requests to your application."
-
-This is what makes it safe to deliver a per-VM secret through `runHookPayload` at
-launch instead of baking it into a shared snapshot. It closes the first-writer
-race *through the endpoint*. It says nothing about processes already running
-inside the VM, which is the subject of the next entry.
+AWS documents that external traffic is forwarded only after `/run` returns
+HTTP 200. This permits launch-time secret delivery without baking secrets into
+a shared image. It does not protect bootstrap from a process already running
+inside the guest. See [Trust](TRUST.md).
 
 ## The platform's own hook arrives over loopback
 
-Measured 2026-08-04, us-east-1, by instrumenting the daemon to log
-`client_address` on every request and reading the result from CloudWatch:
-
-```
-PROBE hook=run            client_address=('127.0.0.1', 36932)   headers={... 'host': 'localhost:9000'}
-PROBE control=/exec/start client_address=('127.0.0.1', 36926)
-```
-
-The endpoint proxy terminates outside the VM and forwards over loopback. Both the
-platform's lifecycle hooks and the harness's control requests arrive from
-`127.0.0.1`.
-
-A source-address rule that rejects loopback callers on the bootstrap route would
-reject the platform's own legitimate bootstrap and break every launch. Do not
-implement it. This inverts the usual intuition, in which a loopback filter looks
-like a safe extra control. An earlier attempt broke 39 tests, and those failures
-were reporting a real defect rather than a harness artifact.
-
-Because in-VM traffic is indistinguishable from platform traffic at the socket
-level, the one-shot bootstrap is the only available defense on that route. Its
-sufficiency is checked mechanically in `model/`.
+Measured 2026-08-04. Lifecycle hooks and proxied control requests both
+arrived from `127.0.0.1` on ephemeral ports. A loopback-address filter cannot
+distinguish AWS from a guest process, and rejecting loopback rejects legitimate
+bootstrap. Use the one-shot bootstrap contract and prevent workloads from
+starting before it completes.
 
 ## Something probes the port with TLS before bootstrap
 
-Measured in the same 2026-08-04 run. The daemon receives raw TLS handshake bytes
-on its plaintext port:
-
-```
-code 400, message Bad request version ("\x13\x01\x13\x02...")
-```
-
-That is a TLS ClientHello reaching a plaintext HTTP server. Something in the
-platform's path probes the port with TLS first. The probe is harmless. The correct
-response is a 400 and a debug-level log, and it must not take the listener down.
-It is documented here because it looks like an attack in logs.
+Measured 2026-08-04. TLS ClientHello bytes reached the daemon's plaintext
+port before bootstrap and produced HTTP 400. The source component was not
+identified. Reject malformed traffic without terminating the listener.
 
 ## Endpoint authentication
 
-Documented (`microvms-networking.html`): every request to a MicroVM endpoint
-requires an `X-aws-proxy-auth` JWE scoped to a specific MicroVM ID, a specific
-port set, and an expiry of at most 60 minutes, minted by
-`create-microvm-auth-token`.
+AWS documents proxy JWEs scoped to a VM, allowed ports, and an expiry of at
+most 60 minutes. Clients must mint fresh credentials for later requests.
+Measured 2026-08-15 against a listener on port 8080:
 
-There is no unauthenticated internet path to the daemon's port. Port scoping is
-the useful part: a token minted for port 9000 cannot reach port 8080, so a task
-workload and a control plane can share a VM with access handed out to only one.
+| `allowedPorts` | HTTPS request to 8080 |
+|---|---|
+| `[{"port":9000}]` | 403, `Access to port denied` |
+| `[{"port":9000},{"port":8080}]` | 200 |
+| `[{"allPorts":{}}]` | 200 |
+| `[{"range":{"startPort":8000,"endPort":9100}}]` | 200 |
 
-The 60-minute ceiling means a long-running trial will mint a fresh token
-mid-flight. Token minting therefore sits inside the retry path, and boto/HTTP
-errors from minting must be handled wherever a request can be retried.
-
-### `allowedPorts` is a union of three forms, and the scoping is enforced
-
-Measured 2026-08-15, us-east-1, API version `2025-09-09`. One VM with a listener on
-8080, four tokens, varying **only** `allowedPorts` — so the token's scope is the whole
-of the difference:
-
-| `allowedPorts` | `GET :8080` through the endpoint |
-| --- | --- |
-| `[{"port": 9000}]` | **403 `Access to port denied`** |
-| `[{"port": 9000}, {"port": 8080}]` | 200, the guest's own server answered |
-| `[{"allPorts": {}}]` | 200 |
-| `[{"range": {"startPort": 8000, "endPort": 9100}}]` | 200 |
-
-So the documented sentence above — "a token minted for port 9000 cannot reach port
-8080" — is exactly true, and it is enforced at the proxy rather than at mint time. The
-mint of a token for a port with nothing listening succeeds; a request through it
-answers **502** rather than 403, which is the distinction between "not authorized" and
-"authorized, nothing there". That pair is the only diagnostic separating a scope
-mistake from a dead server, and it is worth more than it looks: **on the WebSocket path
-both are close code 1006 with no reason string.**
-
-`PortSpecification` is a Smithy tagged union with three members — `port`, `range`
-(`startPort`/`endPort`, both required), and `allPorts` (no members, wire form `{}`).
-The wire form is the member name as the sole key. A client emitting a discriminator
-field instead — which is what most enum serializers do by default — sends a member the
-shape does not declare and is rejected.
-
-**One token can cover several ports, which is what makes a per-port credential helper
-possible at all.** A client reaching more than one port on a VM has a choice: one token
-per port, or one token naming all of them. Naming them together is fewer control-plane
-calls and one refresh schedule instead of several; the cost is a credential whose leak
-reaches further, which is why `allPorts` should not be a default.
+These are tagged-union wire forms, with one member per item. A permitted port
+with no listener returned 502. WebSocket failures instead appeared as close
+code 1006 without a reason; use an authenticated HTTPS request to diagnose
+port scope versus an unavailable listener.
 
 ## `clientToken` is a permanent idempotency key
 
-Measured 2026-08-02, us-east-1. A `clientToken` derived from a
-stable resource identity replays forever: after an image is deleted and recreated
-under the same name, the service replays the original create as a no-op. The
-image sits in `CREATING` with its builds never scheduled
-(`list-microvm-image-builds` shows every build `PENDING` with `updatedAt` never
-advancing past `createdAt`).
+Measured 2026-08-02. Reusing a content-derived create token after deleting
+an image replayed the original creation rather than scheduling new builds.
+Two images remained `CREATING` for roughly 15 hours, with builds stuck
+`PENDING` and unchanged timestamps.
 
-An image in `CREATING` cannot be deleted, and its only version cannot be deleted
-because it is the last one. Two images were wedged this way for roughly 15 hours
-before the service timed them out.
-
-Client guidance: scope a create token to a single build attempt (fold in a
-per-instance random value, not only content-derived digests), and detect the
-stalled state by probing `list-microvm-image-builds` after a grace period rather
-than burning the full build timeout in silence.
+Use a fresh token for a new logical build, retaining it only for retries of
+that attempt. Detect stalled builds with `ListMicrovmImageBuilds` after a
+grace period. This observation concerns MicroVM image creation; it is not a
+claim about every AWS service's idempotency lifetime.
 
 ## Build logs go to `/aws/lambda-microvms/<image-name>`
 
-Measured 2026-08-05. The prefix is not `/aws/lambda/microvms/*`. An IAM policy granting the
-wrong prefix produces server-side builds with no logs at all, and every failure
-then reports `reason=unknown` — which reads as the service failing to populate
-`stateReason` when it is really the caller's own policy discarding the logs.
-
-Build roles also need ECR permissions if any task points `docker_image` at a
-same-account ECR repository; without them the build fails outright.
+Measured 2026-08-05. The log prefix is `/aws/lambda-microvms/`, not
+`/aws/lambda/microvms/`. Build roles need CloudWatch permissions on the correct
+group and ECR access for private source images. Incorrect logging permissions
+can hide the underlying container error.
 
 ## An image build is three VMs and three log streams, and `logStream` is an exact name
 
-Measured 2026-08, us-east-1, API version 2025-09-09.
+Measured August 2026. A build used a docker-build VM and snapshot VMs for
+Graviton 3 and 4; application startup logs came from the snapshot VMs.
+Default logging used a per-image group and separate randomly named streams.
 
-One `CreateMicrovmImage` runs **three VMs**, each emitting its own log stream:
-
-1. **docker-build** — zip pull and docker image build, the VM that assembles the image
-   from the code artifact.
-2. **snapshot build for Graviton 3** — boots the image and snapshots it. The snapshot VM
-   is the one that **starts the app**, so application startup logs land here.
-3. **snapshot build for Graviton 4** — the same snapshot pass for the other chipset
-   generation; also starts the app.
-
-With no logging configuration (the default), the service creates a new log group per
-image and each stream gets a random name.
-
-The request's `logging` member (`{"disabled": {}} | {"cloudWatch": {logGroup, logStream}}`
-in the model) changes that — and its `logStream` is an **exact stream name, never a
-prefix**. Prefixes are unsupported (a feature request is filed). Setting both `logGroup`
-and `logStream` therefore collapses all three of a build's streams into **one** stream —
-and successive or concurrent builds of different images become indistinguishable inside
-it, because every build writes to the same exact name.
-
-This client's response is a per-build discriminator: it **never sends a configured
-`logStream` verbatim**. The configured value is treated as a family prefix and the wire
-carries `<configured>/<16 hex>` with fresh CSPRNG per create attempt (the same nonce
-mechanism as the `clientToken`, which is the other permanent-name trap on this call). The
-resolved exact name is returned on the create result and on `microvm build`'s envelope as
-`logStream`, because the discriminator exists nowhere else. A configured value is
-therefore capped at 495 characters — the shape's 512 minus the suffix's 17 — and refused
-when it carries `:` or `*` (the shape's pattern is `[^:*]*`).
-
-A configured `logGroup` must still be somewhere the build role can write:
-`logs:CreateLogGroup`/`CreateLogStream`/`PutLogEvents` on the group, or the build writes
-no logs at all — the same silent outcome as the wrong-prefix policy above. The
-conformance account grants `/aws/lambda-microvms/*` only, so configured groups there stay
-under that prefix.
+The API's configured `logStream` is an exact name, so all build phases write
+to that stream. This client adds `/<16 hex>` to a configured prefix for each
+create attempt and returns the resolved name. User prefixes are capped at
+495 characters to fit the 512-character shape; `:` and `*` are forbidden.
+The configured group must be writable by the build role.
 
 ## A failed build's `stateReason` lives on the **build**, not on the version or the image
 
-Measured 2026-08-15, us-east-1, against a deliberately failing Dockerfile (`RUN … && exit
-42`) and confirmed against two unrelated failures already in the account.
+Measured 2026-08-15 across three failed builds. `GetMicrovmImage` had no
+reason field; version summaries returned `stateReason: null`; build summaries
+from `ListMicrovmImageBuilds` contained the reason. Follow
+`latestFailedImageVersion`, list its builds, and inspect every failed build.
 
-Three shapes could carry the reason, and only one does:
-
-| shape | member | populated on a real failure |
-| --- | --- | --- |
-| `GetMicrovmImageOutput` | — | no such member at all |
-| `MicrovmImageVersionSummary` | `stateReason` | **`null`**, with `state: FAILED` |
-| `MicrovmImageBuildSummary` | `stateReason` | **yes** |
-
-So `GetMicrovmImage` reports `CREATE_FAILED` and structurally cannot say why;
-`ListMicrovmImageVersions` reports `FAILED` and, measured across three separate failures,
-said nothing; and `ListMicrovmImageBuilds` carries the sentence. Reaching it costs two
-listings, and `GetMicrovmImage`'s `latestFailedImageVersion` names which version to ask
-about.
-
-Observed reasons, which are worth reading for how much they vary:
-
-```text
-The container image build failed.                 (a RUN exiting non-zero)
-Ready hook invocation timed out after PT5M        (a daemon that never became ready)
-```
-
-Both are terser than a log line and more specific than any guess. Note also that **each
-failed version had two builds**, both `FAILED` with the same reason — so a diagnostic
-reporting "the" build's reason should expect a list.
-
-Where the earlier entry about log permissions still applies: `The container image build
-failed.` names the failure without naming the cause inside the container, so the build log
-group remains the only place the `exit 42` itself appears. The reason and the log group are
-complementary rather than redundant.
+Observed reasons included `The container image build failed.` and
+`Ready hook invocation timed out after PT5M`. CloudWatch logs provide the
+container-level detail; a summary reason does not replace them.
 
 ## `idlePolicy`
 
-Documented, and confirmed useful in practice. Idle time is measured by inbound
-traffic through the proxy, so an abandoned VM auto-suspends and then terminates
-rather than billing to the 8-hour `maximumDurationInSeconds` ceiling.
+AWS documents idleness as inbound endpoint traffic, not guest CPU activity.
+Set `maxIdleDurationSeconds`, `suspendedDurationSeconds`, and
+`autoResumeEnabled` deliberately. The suspended timeout can terminate a VM
+before a later manual resume; the maximum VM duration also applies.
 
-Clients that suspend deliberately to preserve state hit a sharp edge. The
-launch-time `idlePolicy` terminates a suspended VM after
-`suspended_timeout_sec`, so a "resume later" affordance silently stops working
-once that window passes. State the window wherever a resume path is offered.
-
-### A guest-side request cannot reset the idle timer
-
-This follows from the loopback measurement above rather than from a separate
-experiment, and it is recorded here because the wrong conclusion is the attractive
-one. Idleness is measured by inbound traffic through the endpoint proxy. That proxy
-terminates *outside* the VM and forwards over loopback ("The platform's own hook
-arrives over loopback"), so traffic a guest process sends to the daemon's own port
-is generated on the far side of the thing doing the measuring and never passes
-through it.
-
-The consequence is a real workload hazard, not a theoretical one. A workload holding
-an outbound connection receives no inbound traffic, and neither does one that is
-simply computing; multi-hour agent runs have been observed past 400 minutes. Such a
-VM can be auto-suspended mid-work while it is busy.
-
-So an in-VM "keep myself alive" route is not implementable against this platform. A
-daemon that offered one would answer 200 and change nothing, and the failure would
-surface as a suspend during exactly the long run the route was added to protect —
-the least debuggable moment available. What works instead is a poll from **outside**
-the VM, which is real inbound traffic; `GET /v1/health` carries `busy` and `execs` so
-that such a poll can be informed by whether the workload is actually running rather
-than being unconditional. See `PROTOCOL.md`, "Idle policy, and why liveness is a
-field rather than a route".
-
-**Since measured**, in "An outside poll of `/v1/health` does reset the idle timer"
-below: a polled VM stayed `RUNNING` through 311 seconds against a 60-second idle
-window while an unpolled control suspended at 66 seconds. The orchestrator-poll
-pattern is an observed outcome rather than an inference.
-
-### `GetMicrovm` returns all three members, in `RUNNING` and in `SUSPENDED`
-
-Measured 2026-08-15, us-east-1, two read-only `GetMicrovm` calls against one VM launched
-with `--max-idle-sec 600 --suspended-sec 600`:
-
-```json
-"idlePolicy": {
-  "maxIdleDurationSeconds": 600,
-  "suspendedDurationSeconds": 600,
-  "autoResumeEnabled": false
-}
-```
-
-Identical in both states. This settles a claim that had gone the other way in the client's
-own comments — that `suspendedDurationSeconds` "exists only in the request", which made the
-client's own record the only authority on the window that terminates a suspended VM. The
-model agrees with the service: there is one `IdlePolicy` shape, used by
-`RunMicrovmRequest`, `RunMicrovmResponse`, and `GetMicrovmResponse` alike, and it marks all
-three members required.
-
-The practical consequence is for the sharp edge above: the window a "resume later"
-affordance depends on is **readable from the platform**, so a client can report the window
-the service says it is enforcing rather than the one it remembers asking for.
+Measured 2026-08-15: `GetMicrovm` echoed all three policy fields unchanged in
+`RUNNING` and `SUSPENDED`. The older claim that the suspended timeout existed
+only in requests was wrong. External health polls kept a VM running; guest
+loopback requests do not traverse the endpoint's idle accounting.
 
 ## Pagination cursors are URL-safe base64, and the padding still has to be encoded
 
-Measured 2026-08-15, us-east-1, over 26 consecutive `ListMicrovmImages` cursors and 2
-`ListMicrovmImageVersions` cursors.
-
-Cursors are **688–800 bytes**. Their alphabet is URL-safe base64: alphanumerics plus `-`
-and `_` in every cursor sampled, plus `=` padding in 6 of the 26. **No cursor carried `+`
-or `/`** — which is worth recording precisely because the obvious defensive reasoning
-("tokens are opaque base64, so expect `+` and `/`") predicts characters that never arrive,
-and a reader who checks for those two and stops will conclude no encoding is needed.
-
-Encoding is still required, for `=` alone. The same signed request, twice, differing only
-in whether the cursor's padding was percent-encoded:
-
-```text
-GET …/microvm-images?nameFilter=bonk&maxResults=1&nextToken=…%3D   -> 200
-GET …/microvm-images?nameFilter=bonk&maxResults=1&nextToken=…=     -> 400 {"message":null}
-```
-
-A **400 with a null message**, which is this service's shape for a request it cannot parse
-— the same null-message signature an unpriced region answers with, recorded above. It does
-not name the cursor, the query, or the member. So the symptom of an unencoded cursor is a
-blank 400 on page *two* of a listing whose page one worked, which points at neither
-pagination nor encoding.
-
-`-` and `_` are RFC 3986 unreserved, so a correct encoder passes them through unchanged and
-the value the service gets back is the value it minted.
+Measured 2026-08-15 over 28 cursors. Tokens were 688–800 bytes of URL-safe
+base64, including `=` padding in six samples. An encoded `%3D` request
+succeeded; the otherwise identical raw `=` request returned HTTP 400 with a
+null message. Treat cursors as opaque and percent-encode query values before
+signing. The absence of `+` or `/` does not make encoding optional.
 
 ## `maxResults` is applied before `nameFilter`, so a page can be empty while matches remain
 
-Measured 2026-08-15, us-east-1. `ListMicrovmImages` with `nameFilter=bonk&maxResults=1`
-against an account holding 22 images, 10 of which match:
-
-* The **first page carries zero items** and a `nextToken`.
-* Walking the cursor to exhaustion takes **26 pages** to yield the 10 matching images.
-
-So the service pages over the unfiltered collection and then filters the page, rather than
-filtering and then paging. Two consequences for any caller:
-
-1. **An empty page is not the end of the listing.** A loop that stops when `items` is empty
-   finds nothing at all here. The only termination condition is an absent `nextToken`.
-2. **Page count is bounded by the account's total, not by the match count.** A `nameFilter`
-   narrows the *result*, not the work, so a small page size over a large account is many
-   round trips.
-
-This is also why `nameFilter` cannot answer "the image named X" on its own: the filter is a
-documented **substring** match, so the exact-name comparison has to happen client-side, and
-it has to happen across every page.
+Measured 2026-08-15. With 22 images, ten matching `nameFilter=bonk`, and
+`maxResults=1`, the first page was empty and the complete listing took 26
+pages. Follow `nextToken` until absent even when a page contains no items.
+`nameFilter` is a substring filter; exact-name lookup must compare names
+across the complete listing.
 
 ## A second `CreateMicrovmImage` under an existing name is refused, so a client without `UpdateMicrovmImage` cannot make a second version
 
-Measured 2026-08-15, us-east-1. `CreateMicrovmImage` with the name of an image that already
-exists answers HTTP 400:
-
-```text
-ValidationException: A MicroVM image with the name '<name>' already exists in this account
-```
-
-`UpdateMicrovmImage` (`PUT /2025-09-09/microvm-images/{imageIdentifier}`) is the only
-operation that adds a version — its own documentation says it "triggers a new version
-build" — and it has PUT semantics, so `codeArtifact`, `baseImageArn`, and `buildRoleArn`
-must all be supplied on every call.
-
-The consequence is a coverage limit worth stating plainly rather than discovering: a client
-that does not implement `UpdateMicrovmImage` **cannot produce a multi-version image**, so
-any behaviour that only appears with more than one version — multi-version deletion, a
-version listing that spans pages at the default page size — is unreachable live through
-that client and can only be covered by fakes. Multi-version images do exist in this account
-(`omnigent-host-vpc` carries versions 1.0, 2.0, and 3.0), created by something that does
-call `UpdateMicrovmImage`.
+Measured 2026-08-15. Creating an existing image name returned HTTP 400,
+`ValidationException: A MicroVM image with the name '<name>' already exists
+in this account`. Use `UpdateMicrovmImage` to create another version. Its
+PUT request requires `codeArtifact`, `baseImageArn`, and `buildRoleArn`.
+A client limited to create calls cannot produce a multi-version image.
 
 ## The image ARN separator is a colon, and the slash form fails as `AccessDeniedException`
 
-Measured 2026-08-15, us-east-1, confirmed five runs out of five with hand-signed requests
-and again through the client's own encoder.
+Measured 2026-08-15. Customer image ARNs use
+`arn:aws:lambda:<region>:<account>:microvm-image:<name>`. The colon form
+returned 200; an encoded slash form returned 403 `AccessDeniedException`.
+An unencoded slash created extra path segments and returned HTML 404.
 
-`ListMicrovmImages` returns customer image ARNs spelled
-`arn:aws:lambda:<region>:<account>:microvm-image:<name>` — a **colon** before the name, the
-same separator the managed bases use, and the only form the model's `TaggableResource`
-pattern admits. `GetMicrovmImage` accepts exactly that and answers 200.
-
-The slash form `…:microvm-image/<name>` answers **403 `AccessDeniedException`**: "User …
-is not authorized to perform: lambda:GetMicrovmImage on resource …". IAM evaluates the
-malformed ARN as a resource no policy matches, so the answer is a *permissions* message
-about a resource that exists and is permitted. That misdirection is why the wrong spelling
-can survive review: it reads as an IAM problem, and the natural response is to widen a
-policy that was never too narrow.
-
-An unencoded slash is different again and worth distinguishing, since a client that failed
-to percent-encode the identifier would hit it instead: the raw `/` splits into extra path
-segments and the request answers **404** with an HTML body, from the gateway rather than
-from the service.
-
-### The gateway can answer 502 for `GetMicrovmImage`
-
-Observed once on 2026-08-15 while measuring the above: a `GetMicrovmImage` request answered
-**502 Bad Gateway** with an nginx HTML body rather than a service envelope, where an
-immediate hand-signed repeat of the identical URL answered 403 five times out of five. So a
-5xx on this operation can come from in front of the service and says nothing about the
-request. Anything asserting on a specific 4xx here should retry past a 5xx and never past a
-4xx — a 4xx is the answer.
+One transient gateway 502 with an HTML body preceded consistent 403 responses.
+Do not interpret a gateway error as service validation, or widen IAM solely
+because a malformed ARN produced an authorization error.
 
 ## Most public ARM64 base images have no WORKDIR
 
-Measured 2026-08-05. `al2023-minimal`, `python:3.12-slim`, and `node:20-slim` all
-leave `WorkingDir` empty. Anything that tests WORKDIR inheritance needs a purpose
--built image with `WORKDIR` set, since there is nothing to inherit otherwise.
+Measured 2026-08-05. The inspected `al2023-minimal`, `python:3.12-slim`,
+and `node:20-slim` images left `WorkingDir` empty. Set `WORKDIR` explicitly
+and ensure the workload user can write there.
 
 ## A WebSocket reaches a guest server through the endpoint, and the proxy strips its own subprotocols
 
-> **Merge note.** `feat/live-measurements` adds a section under this same heading from an
-> independent run. The two agree on every shared observation — the three-value handshake
-> works, the guest sees no `sec-websocket-protocol`, a full-length JWE is token-legal, a
-> fourth application value reaches the guest, every failure is 1006 — so either text can be
-> kept. **What is only here** is the fourth row of the table below and the paragraph after
-> it: the credentials came out of `Session::connect_subprotocols`, and that is what exposed
-> the port-scope defect. Keep that part regardless of which prose survives.
+Measured in two independent runs on 2026-08-15. Both reached a guest echo
+server with this offered subprotocol list:
 
-Measured 2026-08-15, us-east-1, API version `2025-09-09`, from an existing
-`coding-agents-b8ea1298a3b2` image. The guest ran a hand-rolled RFC 6455 echo server on
-node 18 (the image has no `ws` package and node has no built-in WebSocket *server*),
-logging every request header it received. The host connected with node's global
-`WebSocket` — the client shape that matters, because it is the one that cannot set a
-request header and is therefore the reason the platform moves auth into subprotocols.
+```text
+lambda-microvms
+lambda-microvms.authentication.<jwe>
+lambda-microvms.port.<port>
+```
 
-**Every credential in this run came from `Session::connect_subprotocols(port)` and
-`connect_headers(port)` through the built napi addon, not from strings assembled by the
-test.** That distinction is the whole value of the run: a test that spells the three
-values itself measures the platform, and the platform was never in doubt.
+One run obtained credentials through the built Node binding's
+`Session.connect_subprotocols` and `connect_headers`, verifying the helper as
+well as the protocol. Text frames round-tripped in order. An 899-byte auth
+subprotocol remained token-legal without escaping.
 
-| Question | Observation |
-| --- | --- |
-| Does the upgrade succeed with our helper's output | Yes. `readyState` 1 against `wss://<endpoint>/` |
-| What `Sec-WebSocket-Protocol` reaches the guest | **Nothing.** Absent from `req.headers` *and* from `rawHeaders`, so not a normalization artifact |
-| Must the guest echo a subprotocol | **No.** A 101 naming none is accepted, and the client still reports `ws.protocol === "lambda-microvms"` |
-| Do frames flow both ways | Yes. Three text frames out, three prefixed echoes back, in order |
-| Does a full-length JWE survive as a subprotocol name | Yes. An 899-byte auth value, zero non-RFC-7230-token bytes |
+The proxy consumed its three subprotocols; none reached the guest. A fourth
+application subprotocol did reach it and could be negotiated. When the guest
+selected none, the client still observed `lambda-microvms`, supplied by the
+proxy. Client-visible `ws.protocol` alone is therefore not evidence of guest
+negotiation. HTTPS similarly stripped the proxy auth and port headers.
 
-The offered list is `["lambda-microvms", "lambda-microvms.authentication.<jwe>",
-"lambda-microvms.port.<n>"]` at lengths 15, 899, and 25. The JWE is token-legal by
-construction rather than by luck: compact-serialization JWE is base64url segments joined
-by `.`, and every one of those bytes is a tchar. No length limit was reached and nothing
-is re-encoded, so a caller does not escape or chunk the token.
-
-**The proxy strips its own headers on the plain-HTTPS path too.** The same guest, asked
-with `connect_headers(8080)`, answered 200 and reported `x-aws-proxy-auth` absent and
-`x-aws-proxy-port` absent from what it received. So neither transport leaks the
-credential into the VM, and a server inside needs no MicroVM awareness on either.
-
-**An application subprotocol passes through and the guest may negotiate it.** A fourth
-value alongside the three platform ones arrives as `sec-websocket-protocol:
-my-app-protocol`, alone, with all three platform values still stripped. If the guest
-names it in its 101 the client observes `ws.protocol === "my-app-protocol"`; if the guest
-names nothing the client observes `lambda-microvms`, which the proxy supplies on the
-guest's behalf. **So client-visible `ws.protocol` is not evidence about the guest** and
-must not be used as a negotiation check.
-
-**Every handshake failure is close code 1006 with no reason, and that is the reason the
-header path matters.** A token minted for the wrong port, a missing auth value, a dead
-TCP connection: all 1006, indistinguishable. The same wrong port on a plain authenticated
-`GET` answers 403 `Access to port denied` — or 502 when the scope is right and nothing is
-listening. That HTTPS request is the only way to tell a scope mistake from a dead server,
-which is why a client offering `connect_subprotocols` should offer `connect_headers`
-beside it.
+Missing credentials, missing marker, and wrong-port tokens all produced
+opaque 1006 closes. Diagnose using the HTTPS status as described under endpoint
+authentication.
 
 ## Binary frames survive a port-scoped WebSocket, and an upgrade cannot be replayed over HTTPS
 
-Measured 2026-08-29, us-east-1, API version `2025-09-09`, against a guest RFC 6455 echo
-server (stdlib Python, hand-rolled framing) on port 8090. Two findings, and the second is
-the one that closes an open question in the sections above.
+Measured 2026-08-29 against a guest echo server on 8090. A real port-scoped
+`wss://` connection returned 101 and preserved binary frames byte-for-byte,
+including `00 FF FE 80 7F 00` and a 300-byte extended-length frame.
 
-**An upgrade re-issued as an ordinary HTTPS `GET` is refused by the proxy.** Forwarding a
-client's handshake with `Upgrade: websocket` and `Connection: Upgrade` as request headers —
-the shape an HTTP reverse proxy would use — answers **400** with an `x-amzn-requestid` on
-the response, and the guest logs **no handshake at all**. The same handshake sent from
-inside the guest to `127.0.0.1:8090` answers 101, so the guest server is not the variable.
-This is consistent with "Endpoint authentication" above rather than a new rule: on the
-endpoint the WebSocket credential travels as `Sec-WebSocket-Protocol` values because the
-browser `WebSocket` constructor cannot set a header, so the HTTPS request path has no way to
-express a WebSocket upgrade. A client wanting a tunnel must open a real `wss://` handshake.
-
-**Binary frames survive byte-exact on a port-scoped token.** Opening `wss://<endpoint>/`
-with the three values from `Session::connect_subprotocols(8090)`:
-
-| Question | Observation |
-| --- | --- |
-| Handshake status | **101 Switching Protocols** |
-| Offered subprotocol lengths | 15, 884, 25 — the marker, the JWE, the port |
-| Client-visible `ws.protocol` | `lambda-microvms` (the proxy's, not the guest's) |
-| What reached the guest | **No `sec-websocket-protocol` header**, so all three were consumed by the proxy |
-| Frame opcode the guest received | **`2` (binary)** on all three frames |
-| Byte fidelity | **Byte-exact** both directions, including a `0x00 0xFF 0xFE 0x80 0x7F 0x00` payload |
-| Extended-length path | A 300-byte frame round-tripped, so the 126-length header form works |
-
-The `0x00`/`0xFF` payload is the load-bearing case: a proxy that silently round-tripped
-binary through utf-8 would return the correct *length* for an ascii payload and corrupt
-those bytes, so an ascii-only probe cannot distinguish the two.
-
-This settles what the two prior WebSocket sections left open between them. "What the
-endpoint speaks" establishes binary frames on the `SHELL_INGRESS` path, but with a
-**portless** shell token; the 2026-08-15 run establishes a port-scoped WebSocket reaching a
-guest server, but with **text** frames. Binary-through-port-scoped is the corner a
-TCP-over-WebSocket relay depends on, and it works.
-
-### A tunnel's token is scoped to the daemon's port, not to the port it reaches
-
-Measured 2026-08-29 while bringing up the TCP relay. A WebSocket to `/v1/tcp?port=5432`
-terminates at **the daemon**, and the daemon dials `127.0.0.1:5432` from inside the guest — so
-the proxy only ever sees a request for the daemon's port (9000). A token minted for 5432
-therefore authorizes a port the request never addresses, and the handshake is refused as close
-code **1006 with no reason**, which is indistinguishable from a dead guest server.
-
-This is worth recording as a platform-shaped trap rather than as a client bug, because the
-intuition it violates is the one the rest of this document teaches: every other port-scoped
-call names the port it wants to *reach*. On a relayed route the port travels in the request
-(here, the query string) and the credential belongs to the hop. Diagnosing it took a
-loopback-vs-proxy bisection — the same relay worked from inside the guest — because 1006
-carries no information at all.
+Forwarding an upgrade through an ordinary HTTPS request returned 400 and
+never reached the guest; a tunnel must perform a real WebSocket handshake.
+For `/v1/tcp?port=5432`, scope the proxy token to the daemon's listening port
+(default 9000): the daemon makes the onward connection inside the guest.
+Scoping the token to 5432 instead produced the same opaque 1006 failure.
 
 ## The guest kernel is 6.1, which `openat2` needs
 
-Measured 2026-08-14, us-east-1, `al2023-1` base: `uname -r` inside a running VM
-reports `6.1.166-24.303.amzn2023.aarch64`.
-
-The daemon's tar extraction resolves every member through `openat2` with
-`RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS`, which the kernel has supported since
-5.6. Recording the measured version means that dependency rests on a number
-someone checked rather than on an assumption about what Amazon Linux 2023
-ships. A guest older than 5.6 would answer `ENOSYS` and fail extraction rather
-than fall back to weaker confinement, which is the intended behavior.
+Measured 2026-08-14 with `al2023-1`: kernel
+`6.1.166-24.303.amzn2023.aarch64`. Tar extraction uses `openat2` with
+`RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS`, available since Linux 5.6. Unsupported
+kernels fail extraction rather than silently weakening confinement.
 
 ## A WebSocket reaches a guest server through the endpoint, and the proxy strips its own subprotocols
 
-Measured 2026-08-15, us-east-1, API version `2025-09-09`, from an existing
-`coding-agents-b8ea1298a3b2` image. The guest ran a hand-rolled RFC 6455 echo server
-under node 18 (the image has no `ws` package and node has no built-in WebSocket
-*server*), logging every request header it received. The host connected with node 22's
-global `WebSocket`, which is the only client shape that matters here because it is the
-one that cannot set a request header and therefore the reason the platform moves auth
-into subprotocols at all.
-
-The documented three-value handshake works, and everything it implies works:
-
-| Question | Observation |
-| --- | --- |
-| Does the upgrade succeed | Yes. `open` with `readyState` 1 against `wss://<endpoint>/` |
-| What `Sec-WebSocket-Protocol` reaches the guest | **Nothing.** `req.headers['sec-websocket-protocol']` is absent — verified against `rawHeaders`, so it is not a normalization artifact |
-| Must the guest echo a subprotocol in its 101 | **No.** A 101 naming none is accepted and the client still reports `ws.protocol === "lambda-microvms"` |
-| Does a full-length JWE survive as a subprotocol name | Yes. 868-byte JWE, so the auth subprotocol is 899 bytes |
-| Do frames flow both ways | Yes. Six text frames sent and six echoes received in order on one connection |
-
-So the offered list is `["lambda-microvms", "lambda-microvms.authentication.<jwe>",
-"lambda-microvms.port.<n>"]` at lengths 15, 899, and 25, and the guest sees none of
-them. The three values are consumed by the proxy.
-
-**The JWE is token-legal by construction rather than by luck, which is worth stating
-because it is the risk that looked most likely to sink this.** RFC 6455 requires each
-subprotocol name to be an RFC 7230 token, and a token excludes the separators. The
-minted JWE is compact-serialization JWE — five base64url segments joined by `.` — and
-every byte of it is drawn from `[A-Za-z0-9_-]` plus the `.` separators, all of which are
-tchars. Checked directly: the 868-byte token contains zero non-token characters. No
-length limit was reached at 899 bytes, and nothing in the handshake is base64-re-encoded,
-so a caller does not have to escape or chunk the token.
-
-**Two absences are rejections, not degradations.** Dropping the auth subprotocol, and
-dropping the bare `lambda-microvms` marker while keeping the other two, both fail the
-same way: the browser-shaped client reports an opaque `error` event and then close code
-**1006** with no reason string. Port scoping is enforced on this path exactly as it is on
-the header path — a token minted for 8081 offered with `lambda-microvms.port.8080` is
-also 1006. Since 1006 is what a client is given for a dead TCP connection too, a caller
-debugging a handshake gets no signal distinguishing a bad token from a bad port from a
-network fault, and must fall back to a plain authenticated HTTPS `GET` on the same port
-to tell them apart. That request does answer usefully.
-
-**An application subprotocol passes through, and the guest may negotiate it.** This is
-the part the documentation's "Lambda removes MicroVM-specific subprotocols" does not
-say, and it is what makes a real protocol possible over this transport. Offering a
-fourth value alongside the three platform ones delivers exactly that one to the guest
-(`sec-websocket-protocol: my-app-protocol`, with the three platform values still
-stripped). If the guest names it in its 101, the client observes
-`ws.protocol === "my-app-protocol"`; if the guest names nothing, the client observes
-`lambda-microvms`, which the proxy supplies on the guest's behalf. So the client-visible
-`ws.protocol` is not evidence about the guest and must not be used as a negotiation
-check.
-
-What follows for a caller: a subprotocol helper that returns the three strings is usable
-as written, the guest side of a WebSocket application needs no MicroVM awareness at all,
-and an application that wants its own subprotocol appends it as a fourth value rather
-than replacing any of the three.
+The independent 2026-08-15 run confirmed the same handshake, stripping,
+application negotiation, and opaque failure behavior. Its observations are
+consolidated in the earlier WebSocket section; this heading remains for
+existing links.
 
 ## An outside poll of `/v1/health` does reset the idle timer, and the control half proves it
 
-Measured 2026-08-15, us-east-1, API version `2025-09-09`, from an existing
-`coding-agents-b8ea1298a3b2` image. Two VMs launched with identical settings —
-`maxIdleDurationSeconds: 60` (the model's minimum: `IdlePolicy.maxIdleDurationSeconds`
-declares `min: 60`), `suspendedDurationSeconds: 900`, `autoResumeEnabled: false` — each
-running a detached `sleep 300`, with `GetMicrovm` sampled every ~20 seconds for about
-five minutes. The only difference between them was whether the host polled
-`/v1/health` through the endpoint on each sample.
+Measured 2026-08-15 with two VMs running detached `sleep 300`, a 60-second
+idle timeout, and a 900-second suspended timeout. The VM polled through its
+endpoint every roughly 20 seconds remained `RUNNING` through 311 seconds.
+The unpolled control was `SUSPENDED` at 66 seconds and remained so.
 
-| Elapsed (s) | Polled every ~20s | Control, no polls |
-| --- | --- | --- |
-| 1 | RUNNING | RUNNING |
-| 22–45 | RUNNING | RUNNING |
-| 66 | RUNNING | **SUSPENDED** |
-| 100–311 | RUNNING throughout | SUSPENDED throughout |
-
-The control is the load-bearing half. It suspended at the first sample past its 60-second
-window and stayed suspended for the remaining four minutes, which is what establishes that
-the polled VM's 311 seconds of `RUNNING` is the polling and not a lax platform. Both halves
-are needed and the first alone would have proved nothing.
-
-**A guest that is busy does not, by itself, keep a VM alive.** The control held a running
-`sleep 300` in the daemon the entire time it was suspended. Idle is measured by inbound
-traffic through the proxy, exactly as `idlePolicy` documents, and in-guest work is
-invisible to it. So a long exec with no outside traffic will be suspended out from under
-its caller at the idle window, and the process survives (suspend is a freeze, not a kill)
-but nothing external can reach it until someone resumes it.
-
-**This makes the outside-poll pattern sound.** An orchestrator that polls `/v1/health`
-on an interval shorter than `maxIdleDurationSeconds` holds a long run alive. `/v1/health`
-is the right route for it: it already exists on `main`, it is the one unauthenticated
-route, and each poll is one small request. A 20-second interval against a 60-second
-window gives two missed polls of margin.
-
-Note what this measurement does *not* cover. It says nothing about whether any
-particular field in the health response is present — the route alone is what resets the
-timer, and any inbound request through the proxy would presumably do the same, though only
-`/v1/health` was measured. A caller adding `busy`/`execs` to the response is choosing
-*what the poller learns*, not changing whether the poll keeps the VM alive.
+External polling keeps a busy VM alive; guest work alone does not. Poll health
+at an interval below the idle timeout when preserving an active exec is the
+caller's intention. A local ledger watcher does not have this effect.
 
 ## The 4096-byte `runHookPayload` ceiling is on the whole string, env map included
 
-Measured 2026-08-15, us-east-1, API version `2025-09-09`. The 2026-08-07 bracketing used a
-token-only payload, which left open whether a payload carrying an `env` map is measured
-differently — a plausible worry, since env is the field a caller is most likely to grow
-past the limit. It is not. The ceiling is on the serialized string and nothing about its
-contents changes it.
-
-Bracketed the same way, with a deliberately bogus `imageIdentifier` so nothing was created
-or billed, against payloads of exactly 4096 and 4097 bytes shaped
-`{"agent_token":"...","env":{"FOO":"bar","PAD":"xxx..."}}`:
-
-| Payload length | Result |
-| --- | --- |
-| 4096 bytes | `Malformed ARN - doesn't start with 'arn:'` — past the length check, failing only on the bogus ARN |
-| 4097 bytes | `1 validation error detected: Value at 'runHookPayload' failed to satisfy constraint: Member must have length less than or equal to 4096` |
-
-Byte-identical to the token-only result. So a client that refuses locally above 4096 bytes
-is refusing exactly what the platform would refuse, and a local check on the fully
-serialized payload — after the env map is folded in, not before — is the correct guard.
+Measured 2026-08-15 using a payload containing both `agent_token` and an
+`env` map. Exactly 4096 serialized bytes passed length validation; 4097 failed
+before image resolution, matching the token-only measurement. Validate the
+whole serialized string after combining fields.
 
 ## The shell endpoint is a real PTY over a WebSocket, and it is programmatically drivable
 
-Measured 2026-08-15, us-east-1, API version `2025-09-09`. This entry **refutes** the
-claim this document opened with, and which `microvms-core/src/control/connector.rs`
-records as its reason for omitting a `SHELL_INGRESS` variant: that
-`CreateMicrovmShellAuthToken` is a console-only debugging path, not drivable from code.
-It is drivable from code, it took one node script, and it provides a capability the exec
-API does not have.
+Measured 2026-08-15. A programmable shell requires `HTTP_INGRESS` plus
+`SHELL_INGRESS`. `ALL_INGRESS` alone cannot mint shell credentials. Combining
+`ALL_INGRESS` with `SHELL_INGRESS` launched a VM but failed later at token
+creation, so validate that combination before launch.
 
-**Getting a shell token requires a connector combination the client cannot currently
-express, and the failure is late.** Three findings, in the order they were hit:
+`CreateMicrovmShellAuthToken` returns a proxy header map and has no
+`allowedPorts` parameter. Connect to the VM's WebSocket endpoint with the
+marker and authentication subprotocols; no port subprotocol is required.
+Ordinary HTTPS with the shell token returned 502.
 
-1. `CreateMicrovmShellAuthToken` on a VM launched with `ALL_INGRESS` only:
-   `ValidationException: Shell access requires SHELL_INGRESS network connector to be
-   configured on the MicroVM.`
-2. `RunMicrovm` **accepts** `[SHELL_INGRESS, ALL_INGRESS]` and the VM reaches `RUNNING`
-   with both listed in `GetMicrovm`. The rejection arrives later, from the token call:
-   `ValidationException: ALL_INGRESS cannot be combined with other ingress network
-   connectors; use HTTP_INGRESS and/or SHELL_INGRESS instead`. So an invalid connector
-   set is launchable and bills until something asks for a shell token.
-3. **`HTTP_INGRESS` exists** and is not in this client's enum. `[HTTP_INGRESS,
-   SHELL_INGRESS]` launches and mints a shell token successfully. `ALL_INGRESS` is
-   evidently the union that cannot be intersected, and the finer-grained pair is what a
-   VM needs to have both a daemon endpoint and a shell.
+| Message | Meaning |
+|---|---|
+| Initial text `{"type":"session_init","session_id":"<uuid>"}` | Session identifier |
+| Binary frames | Raw terminal input/output |
+| Text `{"type":"resize","cols":120,"rows":40}` | Resize; `stty size` reported `40 120` |
+| Close 1000, `shell exited` | Shell finished |
 
-**The shell token is the same kind of credential as the ordinary one.** It is a
-`TokenParts` map with the single key `X-aws-proxy-auth`, and its value is a compact JWE
-with the identical protected header as an ordinary proxy token — `{"kid": "...", "alg":
-"dir", "enc": "A256GCM"}`, same `kid`. The lengths differed only by payload (767 vs 823
-bytes on the same VM). What differs is the *request*: `CreateMicrovmShellAuthToken` has no
-`allowedPorts` parameter at all, only `microvmIdentifier` and `expirationInMinutes`. The
-shell is not a port.
-
-**What the endpoint speaks.** Not SSH, and not HTTP: an authenticated HTTPS `GET` with the
-shell token answers **502** with an empty body, with or without an `X-aws-proxy-port`
-header. It is a **WebSocket on the same endpoint URL**, opened with the same subprotocol
-mechanism as any other WebSocket through the proxy but with **no port subprotocol** —
-`["lambda-microvms", "lambda-microvms.authentication.<shell-jwe>"]` is sufficient, and
-adding `lambda-microvms.port.<n>` neither helps nor hurts.
-
-The session then speaks a small mixed protocol:
-
-- One **text** frame on connect: `{"type":"session_init","session_id":"<uuid>"}`.
-- **Binary** frames thereafter, carrying raw terminal bytes in both directions.
-- Client input is raw keystrokes as sent, so `"echo hi\n"` runs `echo hi`.
-- A **JSON control frame** resizes the terminal: `{"type":"resize","cols":120,"rows":40}`
-  is honored, after which `stty size` in the guest reports `40 120`. Before any resize it
-  reports `0 0`.
-- Close on `exit` is clean: code **1000**, reason **`shell exited`**.
-
-**It is a genuine PTY, which is the capability our exec API lacks.** Observed inside the
-session, verbatim: `tty` reports `/dev/pts/2`; `id` reports `uid=0(root) gid=0(root)`;
-`TERM=xterm`; the prompt is `λ $` with bracketed-paste sequences (`ESC[?2004h`), so input
-is echoed by a line discipline rather than by the application; `sleep 60 &` yields
-`[1] 87` and `jobs` reports `[1]+ Running`, so job control is present; and a `0x03`
-byte raises SIGINT, after which `echo $?` reports **130**. None of that is reachable
-through `POST /v1/exec`, which gives a child pipes and no controlling terminal.
-
-Two sharp edges for anyone building on it. An unrecognized control frame is **not
-rejected** — `{"type":"window_size",...}` was delivered into the shell as literal
-keystrokes, producing `bash: type:window_sizestty: command not found`, so a typo in a
-control message corrupts the terminal instead of erroring. And there is no exit-status
-channel: the shell's own exit is a WebSocket close, so a caller wanting a command's
-status must ask the shell for it (`echo $?`) and parse it out of the terminal stream.
-
-**What this means for the design.** The docs' framing was right about intent and wrong
-about capability, and this document repeated the wrong half. `SHELL_INGRESS` is a
-first-class interactive-terminal surface: one session per connection, addressed by nothing,
-with output as an unstructured byte stream. It is not a substitute for an exec API — there
-are no exec ids, no idempotency, no separated stdout/stderr, no exit codes, and no
-concurrent addressable commands. But it is the answer to "can a caller get a PTY", and the
-answer is yes, without us building one. A PTY surface in this project would be a
-convenience wrapper over this WebSocket rather than new platform capability. Whether to
-grow one is now a product decision on a measured capability rather than a guess, and the
-connector enum's omission of `SHELL_INGRESS` should be re-justified on the grounds that
-actually hold — one interactive session is not programmatic exec — rather than on
-"not programmatically drivable", which is false.
+The session was a root PTY with job control; Ctrl-C produced status 130.
+Unknown control messages became literal shell input rather than errors.
+There is no structured per-command exit-status channel. This corrects the
+original claim that the shell could not be driven programmatically; the
+package now exposes it through `microvm shell`.
 
 ## Tagging works on images and not on MicroVMs, and `RunMicrovm` takes no tags
 
-Measured 2026-08-15, us-east-1, API version `2025-09-09`. The operations are
-`TagResource`, `UntagResource`, and `ListTags`, and the parameter naming the target is
-`--resource` rather than the `--resource-arn` most AWS services use.
-
-An **image** ARN tags and reads back cleanly. Tagging
-`arn:aws:lambda:us-east-1:<acct>:microvm-image:<name>` twice accumulated both keys, and
-`ListTags` returned `{"Tags": {"probe": "live-measure", "probe2": "second"}}`. The tags also
-appear on `GetMicrovmImage` under a `tags` field. `UntagResource --tag-keys` removed them,
-leaving `{"Tags": {}}`. Existence is checked: a nonexistent image name answers
-`ResourceNotFoundException: MicroVMImage not found for MicroVMImageID: <arn>`.
-
-A **running MicroVM cannot be tagged at all**, and the way it fails is worth recording
-because it reveals that the shared Lambda ARN grammar has not been extended for this
-resource. Both the constructed ARN
-`arn:aws:lambda:us-east-1:<acct>:microvm:microvm-<uuid>` and the bare MicroVM id are
-rejected by a regex that enumerates the taggable Lambda resource types — `function`,
-`lite-function`, `web-function`, `layer`, `code-signing-config`, `event-source-mapping`,
-`capacity-provider`, `network-connector` — and lists **neither `microvm` nor
-`microvm-image`**. So the image case works despite the pattern rather than because of it,
-and the MicroVM case has no spelling that would satisfy it. Do not spend time hunting for
-the right MicroVM ARN form; there is not one.
-
-At create time the two operations differ. `CreateMicrovmImage` accepts `--tags`, so an
-image can be born tagged. **`RunMicrovm` has no tags parameter**, which together with the
-above means a MicroVM instance cannot be tagged at any point in its life. Cost allocation
-by tag therefore cannot attribute per-VM compute; the image is the finest-grained taggable
-unit. A caller wanting per-run attribution needs a tagged image per run, which trades
-against the one-week snapshot storage minimum.
+Measured 2026-08-15. Image tags could be created, accumulated, listed,
+and removed. `GetMicrovmImage` echoed them. Attempts to tag a running
+MicroVM by ARN or bare ID failed. `RunMicrovm` has no tags field in the
+2025-09-09 model, still true in the 2026-09-16 SDK refresh. Do not assume
+image tags provide per-instance compute attribution.
 
 ## Build introspection returns snapshot sizes and a chipset generation, not logs
 
-Measured 2026-08-15, us-east-1, API version `2025-09-09`, against the existing
-`coding-agents-b8ea1298a3b2` image.
+Measured 2026-08-15. `ListMicrovmImageBuilds` requires an image identifier
+and version and returned two builds, for Graviton generations 3 and 4.
+`GetMicrovmImageBuild` added `snapshotBuild` sizes: 579080192 memory bytes,
+2357084160 code-install bytes, and 24297472 disk-snapshot bytes for the tested
+image. It did not return logs or `stateReason`; use build summaries and
+CloudWatch for failure details.
 
-`ListMicrovmImageBuilds` requires **both** `--image-identifier` and `--image-version`;
-omitting the version is a client-side `ParamValidation` failure, so there is no way to list
-an image's builds across versions in one call.
-
-The answer for one version is **two builds, one per Graviton generation**, and this is the
-useful finding — a single `CreateMicrovmImage` fans out into a build per chipset:
-
-```
-buildId=b5855cc4-... buildState=SUCCESSFUL architecture=ARM_64 chipset=GRAVITON chipsetGeneration=4
-buildId=ea7ef2ca-... buildState=SUCCESSFUL architecture=ARM_64 chipset=GRAVITON chipsetGeneration=3
-```
-
-Both carry the same `createdAt` as the image. So "the build" is a fan-out, and a partially
-failed image is a state a caller should expect: one generation could fail while the other
-succeeds.
-
-`GetMicrovmImageBuild` adds exactly one thing over the list entry, a `snapshotBuild`
-breakdown:
-
-| Field | Value for this image |
-| --- | --- |
-| `memorySnapshotSizeInBytes` | 579080192 (~552 MiB) |
-| `codeInstallSizeInBytes` | 2357084160 (~2.2 GiB) |
-| `diskSnapshotSizeInBytes` | 24297472 (~23 MiB) |
-
-**It returns no logs, no failure reason, and no timing.** There is no log field, no
-`stateReason`, and no started/finished timestamps — only the one `createdAt`. This confirms
-from the other direction why the build log group matters: CloudWatch at
-`/aws/lambda-microvms/<image-name>` is the *only* place a failed build's evidence lives,
-because build introspection will not tell you why anything failed. The three snapshot sizes
-are, however, the quantities the snapshot read/write/storage line items bill on, so they are
-what to multiply a storage estimate from rather than the Dockerfile's image size.
-
-`GetMicrovmImageVersion` is the richer call and echoes the whole creation request back:
-`baseImageArn` with `baseImageVersion`, `buildRoleArn`, the `codeArtifact` S3 URI,
-`egressNetworkConnectors`, `cpuConfigurations`, `resources` with `minimumMemoryInMiB`, and
-the full `hooks` structure including the port and every hook's enabled flag and timeout. It
-carries both a `state` (`SUCCESSFUL`) and a `status` (`ACTIVE`), which are separate fields.
-Reading it is the way to find out what an image was actually built with when the caller no
-longer has the request.
+`GetMicrovmImageVersion` echoes build configuration, including resources,
+hooks, connectors, and base version. `state` (build outcome) and `status`
+(launch eligibility) are separate. Use snapshot dimensions for estimates and
+preserve absent dimensions as unknown rather than zero.
 
 ## The managed base image has two versions, and its versions are bare integers
 
-Measured 2026-08-15, us-east-1, API version `2025-09-09`.
-`ListManagedMicrovmImages` returns exactly one item,
-`arn:aws:lambda:us-east-1:aws:microvm-image:al2023-1`, created 2026-06-17 and updated
-2026-07-21. So a client hardcoding one managed base is not currently missing anything.
-
-`ListManagedMicrovmImageVersions` — which takes `--image-identifier`, the full ARN, not the
-name — returns **two** versions: `"1"` (created 2026-07-21) and `"0"` (created 2026-06-17).
-The version strings are bare integers, where a custom image's versions are `"1.0"`. Two
-things follow. A client that omits `baseImageVersion` is taking whatever the service
-defaults to rather than pinning, and since a second version has already appeared, that
-default has already moved once. And version strings are not comparable across managed and
-custom images, so code that parses one format will not parse the other.
-
-Worth noting against the above: `GetMicrovmImageVersion` on an image built from this base
-reports `baseImageVersion: "1.0"`, not `"1"` or `"0"`. The version the service echoes back
-for a base is spelled differently from any version the base's own listing offers, so the
-two cannot be compared as strings and a caller should not try.
+Measured 2026-08-15. The managed-image listing returned `al2023-1`, with
+versions `"0"` and `"1"`. The version readback of a derived image normalized
+its base version to `"1.0"`. This is a dated listing, not a claim that AWS
+will always offer one image or two versions. Discover current versions and
+retain their service-provided strings rather than treating every version as
+an integer or a common semantic-version format.
 
 ## Every field `GetMicrovm` returns for a running VM
 
-Measured 2026-08-15, us-east-1, API version `2025-09-09`. Recorded verbatim, with the account id redacted, so the client
-can be audited for fields it ignores. A VM launched from a custom image with both
-connectors:
+Measured 2026-08-15. A healthy response contained `microvmId`, `state`,
+`endpoint`, `imageArn`, `imageVersion`, `executionRoleArn`, `idlePolicy`,
+`maximumDurationInSeconds`, `startedAt`, `ingressNetworkConnectors`, and
+`egressNetworkConnectors`.
 
-```json
-{
-    "microvmId": "microvm-a991cd0b-3321-3e2c-a982-d5c4db52b17a",
-    "state": "RUNNING",
-    "endpoint": "30d00336-db07-f4f5-79c1-8571c22bef9e.lambda-microvm.us-east-1.on.aws",
-    "imageArn": "arn:aws:lambda:us-east-1:123456789012:microvm-image:coding-agents-b8ea1298a3b2",
-    "imageVersion": "1.0",
-    "executionRoleArn": "arn:aws:iam::123456789012:role/agentd-conformance-exec-b2111c56",
-    "idlePolicy": {
-        "maxIdleDurationSeconds": 1800,
-        "suspendedDurationSeconds": 600,
-        "autoResumeEnabled": false
-    },
-    "maximumDurationInSeconds": 10800,
-    "startedAt": "2026-08-15T17:17:28.601000+00:00",
-    "ingressNetworkConnectors": [
-        "arn:aws:lambda:us-east-1:aws:network-connector:aws-network-connector:ALL_INGRESS"
-    ],
-    "egressNetworkConnectors": [
-        "arn:aws:lambda:us-east-1:aws:network-connector:aws-network-connector:INTERNET_EGRESS"
-    ]
-}
-```
-
-Eleven fields. Note what is **absent on a healthy VM**: no `stateReason` (it appears only
-on a failure, which is why TRAP-8 reads it on the terminal states), and no `runHookPayload`
-echo — the launch secret is not readable back out of the control plane, which is the
-behavior a per-VM token delivery depends on. There is also no field reporting the size
-class: `minimumMemoryInMiB` lives on the image version, not the instance, so the only way
-to know a running VM's memory from the API is to fetch its image version.
-
-`autoResumeEnabled` is the field most worth flagging. It is **required** in the
-`IdlePolicy` structure and it is echoed here, and a client that always sends `false` is
-declining a platform feature — a VM with it enabled resumes itself on an incoming request
-rather than needing an explicit `ResumeMicrovm`. Its interaction with the idle timer was
-not measured. `run --auto-resume` now sends `true` (issue #68), and the conformance
-suite carries the measurement as a written section (`drive_auto_resume`: launch with the
-flag, suspend, exec with no explicit resume, then let the idle window elapse unpolled) —
-pending its first live run.
+`runHookPayload` was not echoed. `stateReason` was absent on the healthy VM.
+Memory sizing belongs to the image version, not the instance response. The
+idle policy echoed `autoResumeEnabled`; the package exposes it through
+`--auto-resume`. See [AWS GetMicrovm](https://docs.aws.amazon.com/lambda/latest/microvm-api/API_GetMicrovm.html) for
+the complete current response shape, including optional fields.
 
 ## A detached exec survives the 60-minute proxy-token ceiling
 
-Measured 2026-08-15, us-east-1, API version `2025-09-09`, from an existing
-`coding-agents-b8ea1298a3b2` image at the 2 GB baseline. A **75-minute** detached exec
-(`--detach --exec-id probe4-rotation`) wrote a numbered timestamp every 10 seconds for 450
-iterations and then printed a marker. It ran from 17:17:52Z to 18:32:44Z, crossing the
-proxy token's 60-minute ceiling at 18:17:52Z, and was reattached and polled afterwards
-from a fresh process.
+Measured 2026-08-15. A 75-minute detached exec produced all 450 expected
+ten-second ticks and exited zero without truncation. The tick gap across the
+60-minute credential boundary was ten seconds. Fresh client processes minted
+new proxy credentials; the guest exec record survived independently.
 
-It survived, and the output is continuous across the boundary:
-
-| Check | Observation |
-| --- | --- |
-| Final poll | `phase: exited`, `exitCode: 0`, `truncated: false` |
-| Ticks recovered | 450 of 450, indices contiguous 0..449, plus the `DONE-PROBE4` marker |
-| Span | 74.87 minutes |
-| Largest gap between consecutive ticks | 11 seconds (nominal 10) |
-| Ticks before / after the 60-minute mark | 360 / 90 |
-| The pair straddling the boundary | `1786817864 -> 1786817874`, a gap of **10 seconds** |
-
-The straddling pair is the measurement. A token rotation that disturbed the exec would
-show up as an outlier gap there, and the gap is nominal — indistinguishable from every
-other tick. Nothing in the guest observed the boundary, which follows from where the state
-lives: the exec record is in the daemon, keyed by exec id, and the proxy token is a
-property of the *caller's* connection. Tokens were re-minted naturally throughout, once per
-`microvm` invocation, roughly every eight minutes across the whole run.
-
-**Two conditions this depended on, both worth stating because a caller can get either
-wrong.** The VM was launched with `maxIdleDurationSeconds: 1800` and polled from outside
-every eight minutes; without that traffic it would have suspended at the idle window
-regardless of how healthy the exec was (see the idle-timer entry above). And the exec's
-output was only readable at the end: a poll against a *running* exec returns
-`{"exec_id":"...","phase":"running"}` with **no partial stdout**, verified directly against
-the daemon's route. A caller wanting mid-flight visibility into a long exec must either
-stream it or have the command write to a file and fetch that file, which is what this probe
-did to observe progress while it ran.
-
-Cost: 75 minutes of a 2 GB / 1 vCPU baseline is $0.1576 of compute at the recorded
-us-east-1 rates ($0.0000276944 per vCPU-second and $0.0000036667 per GB-second, so
-4500 vCPU-seconds plus 9000 GB-seconds), plus $0.0031 for one 2 GB snapshot read: about
-**$0.16**. Wall-clock time is the whole cost of this measurement, and it cannot be
-shortened, because the thing being measured is a one-hour boundary.
+The VM had a 30-minute idle window and external traffic every eight minutes.
+Without that traffic, idle suspension would remain possible. Polling a
+running exec returned its phase without partial stdout; use streaming or a
+file for progress. Recorded compute plus snapshot-read estimate: about $0.16.
 
 ## `INACTIVE` is a real retire: `RunMicrovm` refuses the version, pinned or not
 
-Measured 2026-08-16, us-east-1, API version `2025-09-09`, on a purpose-built image
-(`microvm-cli-cpc-ok`) whose only version was `1.0`.
-
-`UpdateMicrovmImageVersion` is a `PATCH` to
-`/2025-09-09/microvm-images/{imageIdentifier}/versions/{imageVersion}` whose body is one
-member, `status`, taking `ACTIVE` or `INACTIVE`. It is the model's only non-destructive way
-to take a version out of service — `DeleteMicrovmImageVersion` is the alternative, and it is
-irreversible, refuses an image's last version, and destroys the readback a post-mortem needs.
-
-The status is enforced, and that is the whole finding. With version `1.0` set `INACTIVE`:
-
-| request | answer |
-| --- | --- |
-| `RunMicrovm --image-version 1.0` | **404** `No active version found for MicroVM image <arn> and version 1.0` |
-| `RunMicrovm` with no version at all | **404** `No active version found for MicroVM image <arn>` |
-| `GetMicrovmImageVersion` | 200, `state: SUCCESSFUL`, `status: INACTIVE` |
-| set back to `ACTIVE`, then `RunMicrovm --image-version 1.0` | launches |
-
-Three things follow. The refusal is a `ResourceNotFoundException` rather than a
-`ConflictException` or a validation error, so a caller reading the code alone would think the
-image had been deleted — the *message* is what distinguishes them, and it names the version.
-An **unpinned** launch is refused too when no version is active, so retiring an image's only
-version takes the whole image out of service rather than falling back. And `state` and `status`
-are genuinely separate fields: the retired version stayed `SUCCESSFUL`, so a client reading
-`state` alone cannot tell a retired version from a live one.
-
-Retiring and restoring cost nothing and took under a second each. Existing VMs were not
-checked against a retire in this measurement; the model documents `INACTIVE` as blocking new
-launches only, and nothing observed contradicts that.
+Measured 2026-08-16. After setting the sole image version to `INACTIVE`,
+both pinned and unpinned launches returned 404 `No active version found`.
+Readback still showed `state: SUCCESSFUL`, `status: INACTIVE`. Restoring
+`ACTIVE` allowed launch. `UpdateMicrovmImageVersion` changes eligibility
+without deleting the version. Effects on already-running VMs were not measured.
 
 ## A launch with no `executionRoleArn` **succeeds**, so there is no free `RunMicrovm` probe
 
-Measured 2026-08-16, us-east-1, at the cost of one leaked MicroVM.
-
-The technique this file records for bracketing `runHookPayload` — make one field invalid in a
-way that fails later than the constraint under test, then read which error comes back — has no
-`RunMicrovm` equivalent that omits the execution role. `executionRoleArn` is optional in the
-model and the service means it: a `RunMicrovm` carrying an image, a payload, and an ingress
-connector but **no execution role** was accepted and created
-`microvm-337c4bb6-d1f1-3540-ab7a-29cec8120d16`, which had to be terminated by hand.
-
-So a test that wants to know how `RunMicrovm` answers something must expect to create a VM.
-`microvms-core/tests/live_versions.rs` does exactly that and terminates on the next line; the
-bogus-`imageIdentifier` technique still works for members validated before the image is
-resolved, but "leave a required-looking field out" is not one of them.
+Measured 2026-08-16. Omitting `executionRoleArn` created a real VM;
+the field is optional in the service model. Missing a required-looking field
+is not a safe dry run. Invalid image identifiers can bracket earlier
+validation, but every probe must account for the possibility of creating a
+billable resource.
 
 ## `GetMicrovmImageBuild`'s `snapshotBuild` is absent on a container-build failure and partial on a hook timeout
 
-Measured 2026-08-16, us-east-1, across three builds of two deliberately failing images and one
-successful one. The shape of `snapshotBuild` is itself a diagnosis, and it has three forms:
+Measured 2026-08-16 across successful and deliberately failed images.
+Preserve this optional structure and its optional fields:
 
-| build outcome | `snapshotBuild` |
-| --- | --- |
-| `SUCCESSFUL` | all three members: `memorySnapshotSizeInBytes` 574869504, `codeInstallSizeInBytes` 214093824, `diskSnapshotSizeInBytes` 23474176 |
-| `FAILED`, ready hook timed out (`bonk-sandbox-v4`) | **`codeInstallSizeInBytes` alone**, 1724940288 |
-| `FAILED`, `RUN … && exit 42` (`microvm-cli-cpc-fail`) | **member absent entirely** |
+| Outcome | `snapshotBuild` |
+|---|---|
+| Successful | Memory, code-install, and disk-snapshot sizes present |
+| Ready-hook timeout | Only `codeInstallSizeInBytes` present |
+| Container build failure | Entire member absent |
 
-That distinguishes two failures a `stateReason` cannot. `The container image build failed.`
-with no `snapshotBuild` is a Dockerfile that broke before anything was installed. `Ready hook
-invocation timed out after PT5M` with a `codeInstallSizeInBytes` and no snapshots is 1.7 GB of
-code installed and then a daemon that never became ready — which points at the daemon rather
-than at the build. A client that defaulted the absent members to `0` would erase the
-distinction, which is why all three are `Option` in `microvms-core`.
-
-Both failing images produced **two** failed builds, one per Graviton generation (4 and 3), with
-identical reasons. So a diagnostic should expect a list, and the fan-out means a partially
-failed image — one generation succeeding, the other not — is a state to expect.
+Filling missing values with zero erases the distinction between an unbuilt
+image and installed code whose daemon never became ready. Both tested
+failures appeared in builds for Graviton 3 and 4.
 
 ## `baseImageVersion` is accepted, validated, and normalised on the way back
 
-Measured 2026-08-16, us-east-1. `CreateMicrovmImage` takes a `baseImageVersion` and the three
-things it does with one are each worth knowing.
+Measured 2026-08-16. `baseImageVersion: "999"` for `al2023-1` failed with
+HTTP 400 before creating an image. A build pinned to `"1"` read back as
+`"1.0"`. Discover valid request versions through the managed-version listing;
+do not compare echoed strings literally with listing strings.
 
-It is **validated before anything is created**. `--base-image-version 999` against `al2023-1`
-answers `400 ValidationException: No managed MicroVM Image with arn <base-arn> and version 999
-is available`, and `GetMicrovmImage` on the name afterwards answers
-`ResourceNotFoundException` — so a bogus pin costs the artifact upload and creates no image.
-That makes it a cheap way to enumerate what the base accepts, though
-`ListManagedMicrovmImageVersions` answers the same question for free.
-
-It is **normalised**. A build pinned with `baseImageVersion: "1"` reads back
-`baseImageVersion: "1.0"` from `GetMicrovmImageVersion`. So there are now three spellings of a
-base version in play: `"0"` and `"1"` from `ListManagedMicrovmImageVersions`, `"1.0"` echoed by
-the version readback, and `"1.0"`-style versions on custom images. The echoed value cannot be
-fed back into a request and cannot be compared against the managed listing's strings.
-
-And it is **recorded**, which is the point. An unpinned build also reports a
-`baseImageVersion` on its version readback, so the value is not evidence that a pin happened —
-what pinning buys is that two builds weeks apart sit on the same base rather than on whatever
-the default has moved to.
+An unpinned build also reports a base version, so readback alone does not
+prove the caller pinned one. Retain the original request for reproducibility.
 
 ## A guest listening on the wrong port fails the build with a clean build log
 
-Measured 2026-08-16, us-east-1, API version `2025-09-09`, base image `al2023-1` /
-`public.ecr.aws/amazonlinux/amazonlinux:2023-minimal`, baseline memory 8192 MiB.
-
-A guest whose `AGENTD_PORT` disagrees with the create call's `hooks.port` fails
-the build with `CREATE_FAILED`, a fully populated and green build log, and no port
-named anywhere except `GetMicrovmImageVersion`'s `hooks.port`. Every docker layer
-succeeds, the daemon's own `agentd listening` line appears with the wrong `addr`,
-and there is no error line at all — the build-time `ready` and `validate` hooks
-are dialled on the port from the create call, so a daemon listening elsewhere
-answers none of them.
-
-`GetMicrovmImage` reports `state: CREATE_FAILED` and `latestFailedImageVersion`
-with no reason field, so the port is only visible by fetching the image *version*
-and comparing `hooks.port` against the Dockerfile by hand. The existing diagnostic
-sends the reader to the build log group and to build-role log permissions, and
-both are demonstrably fine in this failure, which is what makes it expensive.
-
-The same applies when the Dockerfile names no port at all: an unset `AGENTD_PORT`
-leaves the daemon on its own default of 9000, so a client that moved off 9000
-produces this failure with nothing in the Dockerfile to point at. Both halves are
-now refused before the billable call (`require_matching_agentd_port`).
+Measured 2026-08-16, `al2023-1`, 8192 MiB baseline. A mismatch between
+`AGENTD_PORT` and `hooks.port` produced `CREATE_FAILED` despite successful
+Docker layers and clean startup logs: AWS called hooks on the wrong port.
+The same happens when the daemon defaults to 9000 but the client selects
+another port. Compare version readback with the Dockerfile; the client now
+rejects known mismatches before building.
 
 ## A baked environment layer removes the guest's env init, measured with `build --project`
 
-Measured 2026-09-02, us-east-1, API version `2025-09-09`, base image `al2023-1` /
-`public.ecr.aws/amazonlinux/amazonlinux:2023-minimal`, baseline memory 1024 MiB. The
-project was the smallest thing `--project` accepts: a `pyproject.toml` with one pure-Python
-dependency (`attrs`, `requires-python >= 3.12`) and the `uv.lock` uv 0.12.1 wrote for it.
-Every figure is one run of the real `microvm` binary from the #74 branch; wall clock is the
-CLI invocation timed from the shell, `runningSeconds` and `buildSeconds` are the envelope's.
+Measured 2026-09-02, `al2023-1`, 1024 MiB baseline, a Python project with
+one `attrs` dependency:
 
-| Step | Measured |
+| Operation | Time |
 |---|---|
-| `build --project --reuse`, first time (`w4-proj-e1a980660956`) | 126.6 s wall clock, `reused: false` |
-| The same command again, files unchanged | 0.48 s wall clock, `reused: true`, same name, no build |
-| `build --project --reuse` after a lockfile-only edit (`w4-proj-174a7d39d989`) | 125.1 s, `reused: false` |
-| The default projectless image, for comparison (`run <agentd>`) | `buildSeconds` 110.1 s |
-| Fresh VM from the project image, no `--egress`, `--exec` importing from the venv | 11.6 s wall / 11.13 s `runningSeconds`; a second VM 12.9 s / 12.44 s |
-| The same import on the warm VM (`microvm exec`, three calls) | 1.5 s, 1.7 s, 1.6 s |
-| Fresh VM from the plain image, `--egress`, `--exec` bootstrapping in-guest then importing | 31.85 s `runningSeconds` |
+| First `build --project --reuse` | 126.6 s |
+| Same dependency files, reused image | 0.48 s |
+| Lockfile-only edit, new build | 125.1 s |
+| Fresh VM importing from baked environment | 11.13–12.44 s running |
+| Plain VM installing dependencies then importing | 31.85 s running |
 
-The in-guest bootstrap on the plain VM, timed with `date` inside the exec: `dnf install
-python3.12 python3.12-pip` 21.6 s, `pip3.12 install uv` 1.4 s, `uv sync --locked` 0.7 s —
-23.6 s of environment init in a 31.85-second run, and it needs `--egress` to exist at all.
-The project image spends none of it at launch: the VM answers the import in 11.1–12.4 s
-with no network, so the launch-to-first-import delta for this project is **about 20 s, or
-roughly 65% of the run**, paid for once by a build that is about 15 s longer (110 s to
-126 s). dnf's share dominates here, so this is the floor of the delta rather than a typical
-value: a project with more or heavier dependencies moves the `uv sync` line, which is the
-one the layer removes entirely.
+The lockfile edit changed the image hash and installed dependency version.
+This small sample saved roughly 20 seconds per launch; it is not a general
+benchmark. The earlier description of a launch without `--egress` as having
+no network was incorrect: the measurement showed dependency reuse, not
+network isolation.
 
-Two things the run showed that the numbers alone do not:
-
-- **The lockfile is the identity, and the layer follows it.** The edit between the first and
-  third rows changed only `uv.lock` (attrs 26.1.0 to 25.4.0; `pyproject.toml` byte-identical),
-  the content hash moved from `e1a980660956` to `174a7d39d989`, and a VM launched from the
-  second image imported `attrs 25.4.0` where the first imported `26.1.0`.
-- **The exec environment carries no `PATH` and no `HOME`.** `env` inside an exec printed
-  neither. `sh` still finds `dnf`, `pip3.12` and `uv` through its built-in default search
-  path, but uv's interpreter discovery reads `PATH`, saw no system interpreter, and
-  downloaded a managed CPython 3.14.7 (28.8 MiB) for the from-scratch `uv sync` — while the
-  same command inside the image build, where Docker sets `PATH`, created the venv on
-  `/usr/bin`'s 3.12.14 (`pyvenv.cfg`: `home = /usr/bin`). The baked layer is therefore on
-  the interpreter the Dockerfile installed. A caller running Python in the guest should
-  call `/project/.venv/bin/python` directly, or pass a `PATH` through `--launch-env`.
+Exec starts with a minimal environment. In this run no `PATH` or `HOME` was
+present; uv downloaded another interpreter despite one being installed. Use
+the baked venv's absolute executable path or supply the required environment.
 
 ## A VM launched without the egress connector still has outbound network
 
-Measured 2026-09-12, us-east-1, API version `2025-09-09`, base image `al2023-1` /
-`public.ecr.aws/amazonlinux/amazonlinux:2023-minimal`, baseline memory 512 MiB, microvm
-0.7.0 with the tree's agentd (health `version` `0.1.0`), guest kernel
-`6.1.166-24.303.amzn2023.aarch64`. Issue #154 first measured this on 2026-09-11 with
-microvm 0.5.0 and the 0.5.0 release daemon; this entry is the re-measurement on the
-current tree, and the posture did not change.
+Measured 2026-09-11, 2026-09-12, and 2026-09-13, us-east-1, API
+`2025-09-09`, `al2023-1`, baselines 512 and 1024 MiB. Launches omitting
+`egressNetworkConnectors` reached public destinations:
 
-Two VMs from one image (`microvm run --keep`, then `run --keep --image <arn>`), one
-launched without `--egress` and one with it. The request without the flag omitted
-`egressNetworkConnectors` entirely — `RunRequest` defaults `egress: false` and the field
-is `skip_serializing_if = "Option::is_none"` (`microvms-core/src/control/ops.rs`), which
-the client's own tests pin. The platform gave both VMs the same reach:
-
-| From the guest (`curl -s -o /dev/null -w '%{http_code}' --max-time 10`) | Without `--egress` | With `--egress` |
-|---|---|---|
-| `https://example.com` | 200 | 200 |
-| `https://github.com` | 200 | 200 |
-| `https://sts.amazonaws.com` | 302 | 302 |
-
-So there is currently no measured way to launch a sealed VM from this client, and the
-"Network connectors are ARNs" entry above is corrected by pointer rather than deleted. What
-that changes for a consumer is in `docs/TRUST.md`, "The execution role is the boundary".
-The live suite pins this posture on its own connector-less VM
-(`conformance/run_rs.py`, `drive_platform_posture`), and the pin is written to go red the
-day the platform starts honouring the omission: that red is the signal to re-measure and
-append here.
-
-**Re-measured 2026-09-13**, us-east-1, API version `2025-09-09`, base image `al2023-1`,
-baseline memory 1024 MiB, microvm 0.8.0 with the tree's agentd, on the suite's own
-connector-less VM (`microvm-fc48f201-80b6-30f9-a968-32edaa623164`). The posture did not
-change, and two hosts were added because a package registry is the class of surprise that
-actually costs something — an external review of an unrelated tool had DuckDB fetch a
-242 MB extension from `extensions.duckdb.org` inside a VM launched without `--egress`
-(2026-09-12, that reviewer's measurement, `curl` status 301 there and `pypi.org` 200):
-
-| From the guest, no `--egress` (`curl -s -o /dev/null -w '%{http_code}' --max-time 10`) | Answer |
+| Destination | Result without managed egress connector |
 |---|---|
-| `https://example.com` | 200 |
-| `https://pypi.org` | 200 |
-| `https://pypi.org` with `https_proxy=http://127.0.0.1:1` in the exec env | `000` and `curl` exit 7 (could not connect to proxy) |
+| `example.com` | 200 |
+| `github.com` | 200 |
+| `sts.amazonaws.com` | 302 |
+| `pypi.org` | 200 |
+| `pypi.org` with an invalid HTTPS proxy | curl exit 7, HTTP status `000` |
 
-The third row is the whole measured basis for `--deny-egress` and for the `best-effort`
-posture: a well-behaved client fails closed when the proxy variables point at a black hole,
-while the network path is untouched — the same VM, same second, answered 200 without them.
-Nothing about it is enforcement, and the client's label says `best-effort` rather than
-`sealed` for that reason. All three rows are named checks in `drive_platform_posture` now,
-so every future live run re-measures them (188 checks, up from 185).
+The proxy-variable result is the basis for `--deny-egress`; it changes client
+behavior without removing the network path.
 
-**The service model has no seal to ask for, re-read 2026-09-13 against botocore 1.43.83.**
-`RunMicrovmRequest`'s outbound surface is exactly one member, `egressNetworkConnectors`
-(`NetworkConnectorList`, `max: 10`, members are opaque strings), and the whole 24-operation
-API carries no VPC, subnet, security-group, network-policy or deny-all shape — the only
-other network members anywhere are `ingressNetworkConnectors` and the image-level egress
-lists (`max: 1`). So "omit the connector" is not merely the current recommendation, it is
-the strongest request the API can express, and a client cannot do better at the network
-layer until the service adds a member.
+**Correction, 2026-09-16:** the earlier model review incorrectly concluded
+that no VPC control existed because it inspected only `lambda-microvms`.
+Boto3/botocore 1.43.95 also exposes `lambda-core` API `2026-04-30`, whose
+`CreateNetworkConnector` accepts VPC subnets and security groups. AWS documents
+attaching the active connector ARN through `RunMicrovm.egressNetworkConnectors`.
+No internet egress requires a VPC without an IGW or NAT gateway, with no
+alternative internet path. These are SDK/documentation findings; a VPC-isolated
+launch was not live-measured in this refresh. See [Networking](NETWORKING.md).
 
 ## The guest reaches the execution role's credentials through MMDS, and no in-guest block works
 
-Measured 2026-09-12, us-east-1, API version `2025-09-09`, base image `al2023-1` /
-`public.ecr.aws/amazonlinux/amazonlinux:2023-minimal`, baseline memory 512 MiB, microvm
-0.7.0 with the tree's agentd, guest kernel `6.1.166-24.303.amzn2023.aarch64`. Issue #155
-first measured the credential path on 2026-09-11 with microvm 0.5.0; this entry re-measures
-it on the current tree, adds the mitigation attempts, and the posture did not change.
-Credential values were never printed or stored: the credential document was fetched with
-`-o /dev/null -w '%{http_code} %{size_download}'` only.
+Measured 2026-09-11 and 2026-09-12, `al2023-1`, 512 MiB baseline.
+`169.254.169.254` served the execution role through Firecracker MMDS:
 
-The exec environment is clean (`env` lists `PWD`, `SHLVL`, `_`; no `~/.aws`), and
-`http://169.254.169.254/` is Firecracker's MMDS. It answers the same way on the VM without
-`--egress` and the VM with it:
-
-| Request from the guest | Answer |
+| Request | Response |
 |---|---|
-| `GET /latest/meta-data/iam/security-credentials/` with no token | 401 `No MMDS token provided…` |
-| `PUT /latest/api/token` with `X-aws-ec2-metadata-token-ttl-seconds: 60` | 200, a 48-byte token |
-| `GET /latest/meta-data/` (with the token) | 200: `iam/`, `placement/`, `tags/` |
-| `GET /latest/meta-data/iam/security-credentials/` | 200: `execution_role` |
-| `GET /latest/meta-data/iam/security-credentials/execution_role` | 200, 1164 bytes (a full `AccessKeyId`/`SecretAccessKey`/`Token`/`Expiration` document, per #155) |
-| `GET /latest/meta-data/placement/` | 200: `availability-zone-id` (`use1-az6`), `region` (`us-east-1`) |
-| `GET /latest/meta-data/tags/instance/` | 200: one key, `aws_instance-group-symmetric-key` (a 44-byte value; not read) |
-| The token `PUT` from a `microvm exec --user 1000` | 200 — a non-root workload holds the role too |
+| Credential GET without token | 401 |
+| IMDSv2 token PUT | 200 |
+| Credential GET with token | 200, full temporary credential document |
+| Token PUT as uid 1000 | 200 |
 
-Every in-guest mitigation tried failed, so the recipe this project can give is on the role,
-not in the guest:
+Both managed-egress and connector-less VMs behaved alike. Credential values
+were neither printed nor retained.
 
-| Attempt (as root in the guest) | Result |
-|---|---|
-| `ip`, `iptables`, `nft`, `route`, `capsh` on `al2023-minimal` | all absent |
-| Capabilities of the exec child and of `agentd` (pid 1), default launch | `CapEff = CapBnd = 00000000a80425fb`: the Docker default set, no `CAP_NET_ADMIN`, no `CAP_SYS_ADMIN` |
-| The same under `--repair-identity` (`additionalOsCapabilities: ["ALL"]`) | identical mask; the bounding set did not widen |
-| `dnf install iproute` on the `--egress` VM (needs `PATH` and `HOME` in `--env`; a bare `dnf -q` exits 1) | installs |
-| `ip route add blackhole 169.254.169.254/32` | `RTNETLINK answers: Operation not permitted` |
-| `ip route add unreachable …`, `ip rule add to … blackhole`, `ip link set eth0 mtu` | all `Operation not permitted` |
-| `echo 1 > /proc/sys/net/ipv4/conf/eth0/route_localnet` | `Read-only file system` |
-| The token `PUT` after every attempt | still 200, as root and as uid 1000 |
+The daemon and child reported `CapBnd 00000000a80425fb`, lacking
+`CAP_NET_ADMIN` and `CAP_SYS_ADMIN`, including with identity repair requested.
+After installing `iproute`, route/rule/link changes still returned `EPERM`;
+relevant `/proc/sys` writes were read-only. No tested in-guest metadata block
+worked. This limits the earlier August capability observation.
 
-Every route, rule and link change above answered `Operation not permitted` as root, and
-the bounding set carries no `CAP_NET_ADMIN`, so there is no route, netfilter, or sysctl
-path to a block, whatever the image installs: **least privilege on the execution role is
-the only control this client can name today**. The conformance stack's own
-execution role grants `logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:PutLogEvents`
-and nothing else (`conformance/infra/main.tf`, `WriteRuntimeLogs`), and the live suite
-reads that grant back from IAM on every run (`drive_platform_posture`).
+Use least privilege on the execution role. VPC internet isolation does not
+remove metadata credentials. The conformance role permits CloudWatch logging
+and its policy is checked by `drive_platform_posture`.

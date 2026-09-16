@@ -316,9 +316,8 @@ pub struct RunMicrovmWire {
     pub execution_role_arn: Option<String>,
     /// Derived ARNs, never caller strings (TRAP-4).
     pub ingress_network_connectors: Vec<String>,
-    /// Absent rather than empty when egress was not asked for. Omitting it is the request
-    /// the docs call sealed; measured 2026-09-12 the platform still gave the VM outbound
-    /// network (`docs/PLATFORM.md`), which the live suite pins.
+    /// Managed internet or customer-managed VPC egress connector ARNs.
+    /// Absent when neither was requested; omission does not block internet access.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub egress_network_connectors: Option<Vec<String>>,
     pub idle_policy: IdlePolicy,

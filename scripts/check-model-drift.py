@@ -4,76 +4,20 @@
 # dependencies = ["boto3>=1.40"]
 # ///
 # SPDX-License-Identifier: Apache-2.0
-#
-# boto3 is here for the botocore it bundles, which is what carries the model. It used
-# to carry httpx and cyclopts too, because importing `microvms_agentd.sandbox` ran that
-# package's `__init__` and pulled the wire layer and the CLI with it. The Python client
-# is gone, so those two went with it.
-"""Check the constraints the client hardcodes against the shipped service model.
+"""Compare Rust API constraints with boto3's current Lambda MicroVM model.
 
-botocore ships a machine-readable model for `lambda-microvms` that states many of
-the constraints this project had been restating in prose by hand. Nobody had
-compared the two, and the prose was wrong: `docs/STRATEGY.md` and `docs/TRUST.md`
-published a 16 KB `runHookPayload` ceiling against a model that says 4096 — wrong
-by 4x in the dangerous direction, since it tells a caller four times as much secret
-material fits as actually does. It had survived multiple review passes because a
-number in prose has nothing to disagree with.
-
-This gives it something to disagree with. Every constraint the client hardcodes is
-read back out of the model and compared. A mismatch is drift and fails the build,
-in either direction: the model tightening means we now accept something AWS
-rejects, and the model loosening means we refuse something valid.
-
-*A checker that reports clean while a constraint has drifted is worse than no
-checker*, because it converts an unknown into false assurance. That exact failure
-has already happened here — `scripts/verify-clean.py` reported an account clean while
-a log group billed, because its prefix list knew two of the four name prefixes (see
-the comment above `NAME_PREFIXES`). The response is the same one: this script
-enumerates every check by name, and is loud about the constraints the model states
-that it does *not* bind to anything in our code. A green tick over three silent
-checks is the failure mode, so the count and the uncovered list always print.
-
-Needs no network and no credentials — the model is a file inside botocore — so this
-belongs in `mise run check` alongside `schema:check`, whose argument it shares: a
-generated artifact consumers trust *because* it is generated is the most dangerous
-thing to leave stale.
-
-There is ONE client now, and two of these comparisons lost their second reader
----------------------------------------------------------------------------
-
-`microvms-core` carries every constraint in `microvms-core/src/constants.rs`, and
-`microvm constants --emit-json` prints them as one object. That is the only client.
-This script used to run each named comparison twice — once against the Python
-module's values, once against the Rust object's — and then a third time against each
-other; the Python client was deleted once the Rust port went live-green, so the
-client-vs-client pass went with it.
-
-**Two values were only ever checked by that cross-comparison, and they are now
-checked against literals in this file.** `MICROVM_REGIONS` is measurement-backed
-only: no service model states it, and the two botocore calls that look like they
-might substitute for one disagree with each other (see the note where it is checked).
-`SIZE_CLASSES` is read from AWS documentation and two measured rows, not from any
-shape. So the model can say nothing about either, and Python-vs-Rust was the whole of
-their verification. `PINNED_REGIONS` and `PINNED_SIZE_CLASSES` below are that second
-reader, restored as a deliberate copy rather than left as a self-comparison that
-cannot fail — which is what the two `c.record` calls degenerated to the moment the
-other client went away.
-
-Failing loudly when the Rust side cannot be read is the whole discipline here.
-"there is no binary so nothing disagreed" is the same false assurance as "there is
-no model so nothing disagreed", which is why `--rust-binary`'s absence is a
-`SystemExit` naming the build command rather than a skipped section. With one client
-left there is no honest `--skip-rust` case, so that flag is gone: skipping the only
-client would leave this script comparing nothing at all.
-
-Exit 0 when every checked constraint agrees, 1 on drift, a missing model, or a Rust
-source that could not be read.
+Reads `microvm constants --emit-json` from a fresh cargo build. Fails on changed
+constraints, unavailable models, new API versions, or missing Rust constants.
+Regions and size classes are checked against documented/measured tables because
+the service model does not describe them. Unchecked constraints are reported.
+No AWS calls or credentials are needed; initial dependency resolution may use the
+network. To audit against the latest SDK, run:
+`uv run --upgrade --script scripts/check-model-drift.py`.
 """
 
 from __future__ import annotations
 
 import argparse
-import gzip
 import json
 import subprocess
 import sys
@@ -104,46 +48,30 @@ RUST_SOURCE_ARGV = (
 )
 
 
-def load_model() -> tuple[dict[str, Any], Path]:
-    """The service model, resolved through botocore rather than by hardcoded path.
-
-    Through the loader because the path embeds the Python version and the botocore
-    version's data layout, so a venv rebuild or an SDK upgrade moves it. A hardcoded
-    path that stops resolving is the same defect as a stale constant: it makes the
-    check silently unrunnable rather than loudly wrong.
-
-    Raises rather than returning a sentinel, and the caller does not catch it. An
-    absent model must fail this script — "the model was not there so nothing
-    disagreed" is exactly the false assurance the docstring above is about.
-    """
+def load_model() -> tuple[dict[str, Any], str]:
+    """Load the effective boto3 model and fail if its latest API version changed."""
+    import boto3
     import botocore
+    from botocore.exceptions import DataNotFoundError, UnknownServiceError
 
-    root = Path(botocore.__file__).parent / "data" / SERVICE
-    if not root.is_dir():
+    loader = boto3.Session()._session.get_component("data_loader")
+    try:
+        latest = loader.determine_latest_version(SERVICE, "service-2")
+        if latest != API_VERSION:
+            raise SystemExit(
+                f"latest {SERVICE} API version is {latest}, expected {API_VERSION}. "
+                "Review the new model and update the Rust client and drift checks."
+            )
+        model = loader.load_service_model(SERVICE, "service-2", api_version=latest)
+    except (DataNotFoundError, UnknownServiceError) as error:
         raise SystemExit(
-            f"no service model for {SERVICE} under {root}. botocore "
-            f"{botocore.__version__} either predates the service or dropped it. This "
-            "check cannot run without the model, and skipping it would report clean "
-            "on constraints nothing verified — install a botocore that ships it."
-        )
-
-    versions = sorted(p.name for p in root.iterdir() if p.is_dir())
-    if API_VERSION not in versions:
-        raise SystemExit(
-            f"botocore ships {SERVICE} API versions {versions}, not {API_VERSION}. "
-            "Every constraint in this repo was read from that version, so a different "
-            "one is not a drift result — it is a different question. Re-read the "
-            "constraints against the new version and bump API_VERSION here."
-        )
-
-    for name in ("service-2.json.gz", "service-2.json"):
-        path = root / API_VERSION / name
-        if not path.exists():
-            continue
-        opener = gzip.open if path.suffix == ".gz" else open
-        with opener(path, "rt") as handle:  # type: ignore[operator]
-            return json.load(handle), path
-    raise SystemExit(f"no service-2.json[.gz] under {root / API_VERSION}")
+            f"cannot load {SERVICE} with botocore {botocore.__version__}: {error}. "
+            "Install a boto3 release that includes the service model."
+        ) from error
+    return (
+        model,
+        f"boto3 {boto3.__version__}, botocore {botocore.__version__} data loader",
+    )
 
 
 #: Every constant name the gate compares, spelled as `microvms-core`'s `as_json()` keys
@@ -187,6 +115,7 @@ CONSTANT_NAMES = (
     "CAPABILITIES",
     "ARCHITECTURES",
     "MAX_NETWORK_CONNECTORS",
+    "MAX_NETWORK_CONNECTOR_LEN",
     "MAX_IMAGE_EGRESS_CONNECTORS",
     "IMAGE_VERSION_STATUSES",
     "HOOK_STATES",
@@ -817,6 +746,13 @@ def check(src: Source, model: dict[str, Any]) -> Checker:
     c.bound("hooks.port max", "HooksPortInteger", "max", src.get("MAX_HOOK_PORT"))
 
     # List ceilings. `ResourcesList` max 1 is why "two memory floors" is unaskable.
+    c.bound(
+        "NetworkConnector max length",
+        "NetworkConnector",
+        "max",
+        src.get("MAX_NETWORK_CONNECTOR_LEN"),
+    )
+    c.bound("NetworkConnector min length", "NetworkConnector", "min", 1)
     c.bound(
         "NetworkConnectorList max",
         "NetworkConnectorList",

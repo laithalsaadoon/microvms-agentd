@@ -51,8 +51,8 @@ const BASE = normalizeBase(process.env.DOCS_BASE ?? "/microvms-agentd/")
 
 const SITE_TITLE = "microvms-agentd"
 const SITE_DESCRIPTION =
-  "A verified client stack and in-VM daemon for AWS Lambda MicroVMs, in Rust: the wire protocol, " +
-  "the trust boundary, and measured platform behavior."
+  "Run AI agents in sandboxed AWS MicroVMs from the CLI or Python, JavaScript, TypeScript, " +
+  "and Rust SDKs."
 
 const REPO_URL = "https://github.com/laithalsaadoon/microvms-agentd"
 

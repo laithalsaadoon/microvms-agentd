@@ -1,296 +1,66 @@
-# CLAUDE.md
+# Repository guide
 
-Verified client stack + in-VM daemon for AWS Lambda MicroVMs, in Rust. Nothing is on a
-registry yet; see **Publishing** below for which crates are configured to go and which are
-`publish = false` on purpose. Read `docs/PLATFORM.md` (measured platform findings),
-`docs/PROTOCOL.md` (wire contract — never change silently), `docs/TRUST.md` (threat model),
-`docs/STRATEGY.md` (scope; orchestrators and fork-snapshots are declined).
+Rust client stack and guest daemon for AWS Lambda MicroVMs. Start with
+[README.md](README.md), [CONTRIBUTING.md](CONTRIBUTING.md), and
+[docs/README.md](docs/README.md). Wire behavior is specified in
+[docs/PROTOCOL.md](docs/PROTOCOL.md); security constraints are in
+[docs/TRUST.md](docs/TRUST.md).
 
 ## Commands
 
-`mise` is the front door.
-
 ```bash
-mise run install     # once per clone: git hooks (lefthook)
-mise run check       # THE definition of done: lint, security, test, schema:check,
-                     #   stubs:check, model:check, live:check, build. Offline, free.
-mise run live        # real-AWS conformance + rates + leak check. BILLABLE (~15 min).
-                     #   Never run casually; never wire to a hook.
-mise run docs:check  # the docs site, fast and offline: install, lint + spell, brace gate,
-                     #   build, typecheck, the node probes over dist/. NOT inside `check`.
-mise run docs:gate   # docs:check plus the browser tiers: axe + probes, layout stability,
-                     #   Lighthouse floors and byte budget. What docs.yml runs. Needs
-                     #   `mise run docs:browsers` once per machine.
-mise run docs:lint   # biome + cspell alone, while editing site/ or site/authored/
-mise run docs:links  # every EXTERNAL link in the built site, via lychee. Reports; never gates.
-mise tasks           # everything else
+mise run check         # local code, security, tests, contracts, drift, packaging, build
+mise run docs:check    # documentation build and checks
+mise run live          # billable AWS verification
+mise run live:verify-clean
 ```
 
-Never pipe a gate into `head` or `tail`. The pipeline exits with the pager's status, so a
-failing tier reads as success — `mise run check | tail` returns 0 while `[security] ERROR
-task failed` scrolls past. Run it bare, or read `${PIPESTATUS[0]}`.
+`check` does not create AWS resources. Some tools need network access for
+installation or advisory/rule updates. It does not run the documentation,
+formal requirements, or live AWS tiers. See CONTRIBUTING.md for targeted tests
+and setup; do not infer live verification from local test results.
 
-Two names in that list mean less than they look like:
+## Code map
 
-- `model:check` asserts hardcoded API constants still match botocore's service model. It
-  does not touch the stateright models — those run as `cargo test -p agentd-model`.
-- `check` has no vulnerability tier: `vuln` (grype/trivy/osv-scanner) is not in its
-  `depends`. Advisories still fail the gate through `cargo deny check` inside `security`,
-  which is how a transitive RUSTSEC hit surfaces. Fix those with `cargo update -p <crate>`
-  and read the resulting `Cargo.lock` diff before committing — a targeted bump in this
-  workspace also re-resolves neighbouring edges.
-- `check` also says nothing about the docs site. `docs:check` and `docs:gate` are out of its
-  `depends` for the reason `spec` is out: they need a `pnpm install`, and a gate that fails
-  on a fresh clone is a gate people learn to skip. `.github/workflows/docs.yml` runs
-  `docs:gate`'s tiers on every push and pull request, with no path filter — a change under
-  `agentd/src/` can break that build, because the site resolves every `path:line` citation
-  against git at a pinned commit and fails when a cited path is gone. The browser tiers carry
-  declared baselines in `site/src/gates.ts` (`KNOWN_A11Y_FAILURES`, `KNOWN_LAYOUT_SHIFTS`)
-  and they are ratchets, not exemptions: a finding outside the list fails, and an entry that
-  stops firing fails too. The same file holds `DENYLIST`, the tokens that must never reach a
-  public page, and the byte budget beside its measurement. External links are
-  `docs:links` and the weekly `links.yml`, which report and never gate: a link that rotted
-  overnight is not a defect in the commit being pushed.
+- `protocol/`: shared types; package name `microvms-protocol`, import `protocol`.
+- `agentd/`: lifecycle hooks, authenticated execution, files, tunnels.
+- `microvms-core/`: AWS control plane, sessions, lifecycle, cost, agent helpers.
+- `microvms-cli/`: `microvm` commands and JSON envelopes.
+- `microvms-py/`, `microvms-js/`: thin PyO3 and napi-rs bindings.
+- `model/`, `spec/`, `conformance/`: portable model tests, formal requirements,
+  and live AWS checks.
 
-Individual tiers:
+Dependencies flow from CLI and bindings to core to protocol. The daemon
+depends on protocol. Keep shared validation and AWS behavior in core.
 
-```bash
-cargo test --all                             # all six Rust tiers
-cargo test -p agentd --lib                   # daemon unit tests
-cargo test -p agentd-model                   # stateright model checking
-cargo test --test proptest_tar               # tar confinement properties
-cargo test --test turmoil_transport          # simulated network/time faults
-cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
-cargo run -p agentd --bin schema -- --check  # docs/schema.json freshness
-cargo build --release -p agentd --target aarch64-unknown-linux-musl  # shipping target
-uvx ruff check . && uvx ruff format --check .  # selection lives in ruff.toml
-./scripts/check-lint-coverage.py             # proves that selection is not empty
-./conformance/run_rs.py --self-test          # live suite's offline half; free
-./scripts/check-live-rates.py --twin-only    # pinned rate tables agree; offline
-```
+When `.codegraph/` exists, use `codegraph explore` before text searches to
+locate or understand code. Confirm ambiguous cross-crate symbol matches from
+the actual source. The daemon route census is `docs/schema.json` because
+routes are generated from a schema.
 
-Pass ruff a `.`, never a directory list. It discovers by extension, so naming
-`conformance scripts` silently lints `run_rs.py` and nothing else — the extensionless
-PEP 723 gates in `scripts/` are invisible to that form, which is why the selection lives in
-`ruff.toml` and `check-lint-coverage.py` exists to prove the walk found something.
+## Maintenance rules
 
-Bindings: `microvms-py` builds via maturin (`maturin develop --uv`, pytest in
-`microvms-py/tests/`); `microvms-js` via `npm run build` / `npm test` in `microvms-js/`
-(napi-rs, Node >= 22.13).
+- Use `microvm manifest` for the current command contract. Regenerate
+  `docs/manifest.json`, `docs/schema.json`, and Python stubs when affected.
+- Edit `site/authored/` and top-level `docs/*.md`; generated content under
+  `site/src/content/docs/` is overwritten. Generated source analyses contain
+  line-number citations that can become stale.
+- Append dated corrections to platform measurements. Include region, API
+  version, and evidence source; never infer runtime guarantees from SDK shapes.
+- No internet egress requires a VPC without an IGW or NAT gateway. Omitting
+  `--egress` and setting `--deny-egress` do not enforce network isolation.
+- Keep secrets out of shared images. The guest can access its execution role
+  through metadata, so use least privilege even with VPC isolation.
+- Preserve the image bootstrap invariant: `agentd` is `CMD`, and workloads
+  start only after readiness. Root workloads are not isolated from the daemon.
+- Demonstrate that new invariant guards catch their intended failure. AWS
+  changes need a live exercise and a persistent conformance check, or an
+  explicit statement that they remain unverified against AWS.
+- Rebuild the release CLI before targeted live checks. Verify cleanup of VMs,
+  images, and service-created log groups independently.
+- `spec:core` references a local symspec checkout; formal requirements are
+  separate from `check`. Portable state checks use `cargo test -p agentd-model`.
 
-## Live verification — the rule that is not negotiable
-
-`mise run check` is the definition of done for a *change*. It is **not** the definition
-of done for a *task*. The local gate proves the code agrees with itself; it cannot prove
-the code agrees with AWS, and only a live run can. This repo's history is a list of
-things every local test passed while being wrong: the null-message unsupported-region
-trap, the clientToken replay that wedges an image, the 409 bootstrap replay against a
-token spelled "None", the proxy-token port scoping (2026-08-15) — and most recently the
-id-prefix defect (2026-08-28): the fixtures spell MicroVM ids `mvm-*`, the real service
-spells them `microvm-*`, and a resolution path keyed on the fixture prefix passed 196
-unit tests, every behavioral guard, and the process-boundary suite while refusing every
-real VM id on its first live run. A fixture convention is not a service fact.
-
-**A feature that touches the platform surface is not verified until it has run against
-real AWS.** The closing discipline for any such task:
-
-1. `mise run check` green. Necessary, never sufficient.
-2. A **live exercise of the new path itself** — the full suite (`mise run live`) or a
-   targeted round trip with the real binary against the conformance account
-   (`build --reuse` makes repeat image builds nearly free). Rebuild
-   `target/release/microvm` explicitly first: `check` does not, and a live run against
-   a stale binary verifies nothing.
-3. A **permanent named check in `conformance/run_rs.py`** for the new surface, so the
-   live tier covers it on every future run. A one-time manual pass decays; keep the
-   suite's count honest in its header and in `live:conformance-rs`'s description.
-4. `mise run live:verify-clean` (or `microvm ls`) after — leave the account clean.
-
-A PR that skips step 2 must say so in its body, in plain words, as an unverified claim.
-"The fakes pass" and "it works" are different sentences. Purely local changes
-(rendering, docs, `ls`/`history`/`cost`) are exempt; when in doubt, it is not exempt.
-
-## Requirements workflow (symspec, EARS)
-
-`spec/core.symspec.json` — 51 formal requirements for microvms-core, with a state model
-and three lifecycle invariants proved in Z3 (`mise run spec:core`; uses the v5 CLI by
-absolute path, not the `symspec` on PATH). `spec/agentd.symspec.json` — daemon
-bootstrap/control-token requirements (`mise run spec`).
-
-Both spec tasks sit outside `mise run check` and both need a working environment before
-they say anything: `spec:core`'s runner is an absolute path into a developer's home
-directory, so it is `MODULE_NOT_FOUND` on a machine that lacks that checkout, and
-`spec/agentd.symspec.json` declares `schemaVersion` (document format v2) against a CLI that
-requires `docVersion` (v3), which fails `ERR_SCHEMA_VERSION` with no read-compatibility.
-Treat a green `check` as saying nothing about the 57 requirements, and reach for
-`cargo test -p agentd-model` for the claims that are runnable everywhere.
-
-Per CONTRIBUTING.md:
-
-```bash
-npm install -g symspec && symspec download-model
-symspec check spec/agentd.symspec.json --strict
-```
-
-`--strict` fails when a claim could NOT be verified, not only when disproven. New
-requirements sharing vocabulary with no peer need a glossary link, not a looser gate.
-
-## Layout
-
-- `protocol/` — daemon<->client wire types; drift is a compile error. The *package* is
-  `microvms-protocol`, because `protocol` is taken on crates.io, and every dependent renames
-  it back with `package = "microvms-protocol"`. So `use protocol::` is correct in source and
-  wrong in a manifest, and `cargo test -p protocol` fails with "package not found" —
-  the selector is `-p microvms-protocol`.
-- `agentd/` — the in-VM daemon (exec, file transfer, one-shot bootstrap)
-- `model/` — stateright models of daemon and client lifecycle
-- `microvms-core/` — the client library; the type system carries every trap closure
-- `microvms-cli/` — the `microvm` binary: 28 commands, JSON envelopes, `manifest`.
-  No lib target; allowlisted deps (6), asserted by `tests/thinness.rs`. The count is
-  compile-enforced by `RESPONSE_TYPES: [_; 28]` in `src/commands/mod.rs`.
-- `microvms-py/`, `microvms-js/` — thin PyO3 / napi-rs bindings over core. Only the
-  Python side has a drift gate: `microvms.pyi` is checked by `stubs:check`, while
-  `microvms-js/index.d.ts` is gitignored and nothing compares it to the crate.
-- `conformance/` — `run_rs.py`, the live suite (billable); `--self-test` is free. Read the
-  check count off a run's summary block, which derives it, rather than from any prose.
-- `spec/` — formal requirements
-- `docs/` — hand-written and authoritative at the top level (`PROTOCOL`, `PLATFORM`,
-  `TRUST`, `STRATEGY`, `EMBEDDING`, `HARNESS-CAPABILITIES`, `AGENT-VMS`); generated under
-  `architecture/`, `reference/`, `behavior/`, `analysis/`, `diagrams/`, `insights/`, every
-  claim carrying a machine-verified `path:line` citation. `docs/README.md` is the index.
-  Those citations anchor to line numbers, so a refactor silently aims them at the wrong
-  code while they still read as authoritative — regenerate the affected files instead of
-  editing a stale one, and let the hand-written document win any disagreement.
-- `site/` — the Astro + Starlight build that publishes `docs/` to GitHub Pages, and with it
-  the machine surface: a raw `.md` twin per page, the three `llms.txt` bundles, per-page
-  `rel="alternate"` and JSON-LD, commit-pinned citation permalinks, and Mermaid rendered to
-  SVG at build time. `site/src/content/docs/` is GENERATED in full and gitignored — edit
-  `docs/` for a published page or `site/authored/` for the landing and agent pages; an edit
-  in the content directory is discarded by the next sync with no diff to show for it.
-  `docs/README.md` is deliberately unpublished, because the sidebar is that file generated.
-
-Dependency direction: cli -> core -> protocol; bindings -> core; agentd -> protocol.
-`site/` depends on `docs/` and on git, and never writes to either.
-
-## Publishing
-
-Nothing is on a registry yet. Three crates are configured to go, and the set is asserted by
-equality in `scripts/check-publishable.py` — a fourth crate that quietly becomes publishable
-fails `mise run check`.
-
-| Artifact | Registry | Name |
-|---|---|---|
-| `protocol/` | crates.io | `microvms-protocol` |
-| `microvms-core/` | crates.io | `microvms-core` |
-| `microvms-cli/` | crates.io | `microvms-cli` (the binary stays `microvm`) |
-| `microvms-py/` | PyPI | `microvms` |
-| `microvms-js/` | npm | `@theagenticguy/microvms` — one package, all four addons inside |
-
-`agentd` and `agentd-model` are `publish = false` on purpose, each with the reason in its own
-manifest: the daemon reaches a consumer as a static aarch64 binary baked into a task image,
-and the model is a proof harness. The workspace default is `publish = false`, so a new member
-is unpublishable until someone opts it in.
-
-Two gates, split by whether they need the network:
-
-```bash
-mise run publish:check    # in `check`. Offline: the publish set, and metadata cargo requires
-mise run publish:dry-run  # NOT in `check`. Needs the registry; runs in ci.yml
-```
-
-`cargo publish --workspace --dry-run` cannot run offline — it exits 101 with "attempting to
-make an HTTP request" — which is why the dry run is out of a gate documented as offline. What
-`check` covers is the manifest half: a missing `readme` file, a sixth keyword, a path
-dependency with no `version`.
-
-`publish:check` also reads every `-p <crate>` in `ci.yml`, `docs.yml`, and `mise.toml` and
-fails on one that names no package. A rename is the only thing that breaks those, and the
-failure is uneven: ubuntu's tiers use `--all` and stay green while the macOS and Windows tiers,
-which name crates explicitly, are the only ones that go red. Markdown is deliberately out of
-scope — the counterexample four paragraphs up is a `-p protocol` this gate would otherwise
-flag.
-
-A release is one tag, and `mise run release:tag vX.Y.Z` is how to create it — never `git tag`
-followed by `git push`. `git tag` refuses to overwrite and that refusal does not stop a
-following push, so a tag name left over from an earlier attempt gets pushed still pointing at
-its old commit. Nothing downstream catches it: an ancestry check passes an old commit on main,
-and the tag-versus-manifest check passes it too, because every version here read `0.1.0` for
-weeks.
-
-`.github/workflows/release.yml` fires on `v*` and publishes all three registries plus the daemon
-binary, holding no secrets: every credential is minted from the OIDC token GitHub issues to that
-run. Bumping a version means bumping it in three unrelated files — the Cargo manifests,
-`microvms-py/pyproject.toml`, `microvms-js/package.json` — and
-`./scripts/check-publishable.py --tag=vX.Y.Z` is what refuses a tag that disagrees with any of
-them. A version bump also changes `microvms-py/microvms.pyi`, because the stub declares
-`__version__` from `microvms_core::VERSION`, so `mise run stubs` belongs in the same commit.
-
-Renaming `release.yml` invalidates **eleven** trusted-publisher configurations at once (three
-crates, one PyPI project, the npm root and four platform packages), and npm does not validate
-its configuration on save — the error appears only at publish time.
-
-Three things about the registry surface that a manifest does not make obvious:
-
-- Every version is immutable on all three registries. There is no second `0.1.0`, so a
-  first release is worth tagging `0.1.0-rc.1` and yanking rather than burning the number.
-- npm requires the package to exist before a trusted publisher can be configured, and there
-  is no org- or scope-level configuration. **That is why the addon ships as one package rather
-  than the usual napi layout of one per platform:** OIDC cannot create a package, so a
-  per-platform layout needs a fresh non-OIDC publish, with a credential to match, every time a
-  triple is added. One package makes a new triple a matrix entry. The generated loader already
-  prefers a local `./<binaryName>.<suffix>.node` over any per-platform package, so this needs
-  no loader change — it costs 12.2 MB packed against roughly 3 MB.
-- crates.io has the same first-publish requirement, plus a **verified email address on the
-  account**, which no dry run surfaces because `cargo publish --dry-run` never reaches the
-  upload endpoint. PyPI needs neither: a pending publisher creates the project on first use,
-  so the Python side never needs a token.
-- `npm trust github <package> --workflow release.yml --environment release --allow-publish` is
-  the CLI equivalent of the website's trusted-publisher form, and needs **npm 12**. It refuses
-  a bypass-2FA granular token on purpose, so it runs against an `npm login` session with an
-  interactive challenge.
-- The npm package is scoped **because a granular token can only be restricted to packages
-  that already exist, or to a scope.** The five packages a bootstrap has to create do not
-  exist yet, so an unscoped name would require an all-packages token — write access to the 19
-  unrelated packages this account already owns. `@theagenticguy` was an empty scope, so a
-  token restricted to it reaches exactly the new packages and nothing else. That reasoning
-  applies again every time a platform triple is added, because a new platform package is
-  another package OIDC cannot create.
-- `npm publish --dry-run` is **not** safe here. napi's `prepublishOnly` runs `napi
-  prepublish`, which really publishes the platform packages. Use `--ignore-scripts`.
-
-## Rules
-
-- A new guard test is not done until you have watched it fail: break the invariant,
-  see YOUR test go red, restore, state in the PR which break it caught.
-- Platform claims in `docs/PLATFORM.md` need a date, a region, and an API version;
-  contradictions are appended, never deleted.
-- After any live run, verify teardown independently (`mise run live:verify-clean`);
-  service-created log groups under `/aws/lambda-microvms/` outlive `terraform destroy`.
-- Comments record constraints and defects defended against, never narration.
-- `.erpaval/` holds ERPAVal session packets (`sessions/`), specs, and compounded
-  lessons (`solutions/`) — consult solutions before re-deriving a fix.
-- No `.rs` or `.py` file carries a `TODO` / `HACK` / `FIXME` marker, so grepping for them
-  finds nothing and proves nothing. The debt register is `docs/insights/tech-debt.md`,
-  declined scope is `docs/STRATEGY.md`, and defect classes already paid for are
-  `.erpaval/solutions/`.
-- `scripts/generate-py-stubs.py` pins `maturin@1.14.1` on purpose. Later maturin writes
-  `generate-stubs` output into the module's package directory instead of `--out`, so
-  bumping the pin breaks `stubs:check` rather than improving it.
-
-## CodeGraph
-
-A codegraph index exists (`.codegraph/`, gitignored); use `codegraph` for impact and
-reference queries across the workspace. `codegraph explore` returns verbatim line-numbered
-source plus blast radius and flags symbols with no covering tests, which beats grep for
-anything structural. Subagents should invoke it by absolute path — the mise shim is not
-always on a subshell's `PATH`.
-
-Two edges where the index misleads, both worth knowing before you trust a count:
-
-- `-k route` only sees `.route()` calls with a literal path argument. The daemon builds its
-  routes from a schema, so a route query returns test fixtures, never the real 20-endpoint
-  surface. Use `docs/schema.json` for that census.
-- Symbol lookup is name-resolved, not crate-qualified. `Sandbox`, `Session`, and
-  `Duration` each exist in several crates, so callers and coverage cross-attribute between
-  them and can imply an edge the asserted dependency direction forbids. Rank with the
-  counts, then confirm each edge from a `use` line or call site.
+Publishing and version changes are documented in CONTRIBUTING.md. Do not
+change the stub generator's maturin pin without checking its output-path
+behavior. Run Ruff on `.` so the repository selection is respected.

@@ -334,6 +334,9 @@ pub const ARCHITECTURES: [&str; 1] = ["ARM_64"];
 /// `NetworkConnectorList.max` — the **VM-level** list, which `RunMicrovm` sends.
 pub const MAX_NETWORK_CONNECTORS: usize = 10;
 
+/// `NetworkConnector.max` — the maximum ARN length accepted by `RunMicrovm`.
+pub const MAX_NETWORK_CONNECTOR_LEN: usize = 2048;
+
 /// The **image-level** egress list's max, which is `1` and not `10`.
 ///
 /// Six shapes in the model declare an image-level `egressNetworkConnectors` with
@@ -692,6 +695,10 @@ pub fn as_json() -> Value {
         ("ARCHITECTURES", json!(ARCHITECTURES)),
         ("MAX_NETWORK_CONNECTORS", json!(MAX_NETWORK_CONNECTORS)),
         (
+            "MAX_NETWORK_CONNECTOR_LEN",
+            json!(MAX_NETWORK_CONNECTOR_LEN),
+        ),
+        (
             "MAX_IMAGE_EGRESS_CONNECTORS",
             json!(MAX_IMAGE_EGRESS_CONNECTORS),
         ),
@@ -787,6 +794,7 @@ mod tests {
                 "MAX_LOG_STREAM_LEN",
                 "MAX_MICROVM_HOOK_TIMEOUT_SEC",
                 "MAX_NETWORK_CONNECTORS",
+                "MAX_NETWORK_CONNECTOR_LEN",
                 "MAX_NON_BLANK_LEN",
                 "MAX_PORT",
                 "MAX_RESOURCES",

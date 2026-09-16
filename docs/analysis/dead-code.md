@@ -62,9 +62,9 @@ seeds every path with `DEFAULT_REQUEST_TIMEOUT` (`microvms-core/src/session/mod.
 out of the table.
 
 1. No unseen downstream consumer. `microvms-core` is a library crate, so a `pub` method is
-   reachable by anything that depends on it. `CLAUDE.md` states the workspace is
-   source-only and nothing publishes to crates.io, PyPI, or npm, so there is no semver
-   contract to honour.
+   reachable by anything that depends on it. The package is published on crates.io and has language bindings. This analysis
+   cannot establish the absence of downstream callers, so removing public API
+   requires a compatibility decision; lack of local references is insufficient.
 2. No binding re-exports it. `microvms-py/microvms.pyi` contains no `with_timeout`, and no
    `withTimeout` exists in `microvms-js`.
 3. No host runtime dispatches to it. Its only attribute is `#[must_use]` — no `#[napi]`,
