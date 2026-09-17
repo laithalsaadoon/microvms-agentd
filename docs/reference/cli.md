@@ -765,7 +765,7 @@ Two options carry a closed set rather than free text, and the parser refuses eve
 
 The escape hatch is a separate flag rather than a permissive parser. `--unlisted-region <NAME>` conflicts with `--region` and carries its cost in its help text, so a reader of a command line can see that someone opted in. `microvms-cli/src/cli.rs:31-37`.
 
-Four options — `--client-token`, `--capabilities`, `--connector`, and `--architecture` — are deliberately absent, because `microvms-core` has no parameter for the values they would carry. A test asserts their absence over every argument of every subcommand. `microvms-cli/src/cli.rs:21-29`, `microvms-cli/src/cli.rs:2913-2937`.
+Four option names — `--client-token`, `--capabilities`, `--connector`, and `--architecture` — are deliberately absent. Three of them because `microvms-core` has no parameter for the values they would carry; `--connector` because the intent is spelled `--egress` (the managed connector) or `--egress-network-connector <ARN>` (an existing VPC connector, see above). A test asserts the absence of all four names over every argument of every subcommand. `microvms-cli/src/cli.rs:21-29`, `microvms-cli/src/cli.rs:2911-2935`.
 
 In the manifest, a boolean flag reports `type: "boolean"` and `choices: null` even though clap gives a `SetTrue` flag the possible values `["true", "false"]`. Publishing those would put a `choices` array on every flag and make the closed-domain field unreadable. `microvms-cli/src/manifest.rs:151-170`.
 

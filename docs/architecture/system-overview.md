@@ -24,8 +24,8 @@ Seven crates carry that (`Cargo.toml:2-10`), and the seams follow defect classes
 layers. `protocol` is the wire contract as types: pure data, serde plus schemars, no tokio,
 no axum, no base64 (`protocol/src/lib.rs:16-21`, 66 LOC). Both the daemon and the client
 compile against it, so a renamed field fails a build instead of a consumer's runtime
-(`agentd/Cargo.toml:11-15`). `agentd` is the daemon, ten modules across 13,659 LOC
-(`agentd/src/lib.rs:31-40`, 43 LOC) — `state` owns the one-shot bootstrap, `auth` decides
+(`agentd/Cargo.toml:11-15`). `agentd` is the daemon, twelve modules across 13,659 LOC
+(`agentd/src/lib.rs:31-42`, 45 LOC) — `state` owns the one-shot bootstrap, `auth` decides
 before a body byte is read, `exec` and `fs` own idempotent exec and streaming tar. Its
 router is assembled by walking the same endpoint list `/v1/schema` publishes, so a
 documented route with no handler panics at startup (`agentd/src/routes.rs:29-35`, 807 LOC);
@@ -45,7 +45,7 @@ field private so the Z3 proofs are proofs about the code
 than zero (`microvms-core/src/cost.rs:22-27`).
 
 `microvms-cli` ships `microvm` with twenty-eight subcommands
-(`microvms-cli/src/cli.rs:95-351`, 3,008 LOC), each invocation writing exactly one JSON
+(`microvms-cli/src/cli.rs:95-351`, 3,024 LOC), each invocation writing exactly one JSON
 envelope to stdout and progress to stderr (`microvms-cli/src/envelope.rs:4-11`). It has no
 lib target (`microvms-cli/Cargo.toml:21-23`) and no second path to AWS: a twelve-crate denylist
 of HTTP clients, signers, and credential chains is asserted against `cargo metadata`
