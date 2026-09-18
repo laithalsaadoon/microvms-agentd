@@ -173,7 +173,7 @@ price of live AWS runs.
    Consulting them before a fix costs minutes; rediscovering one costs a session.
 7. `mise.toml` — the command surface. `mise run check` is the local gate; `mise run live` is
    billable and manual.
-8. `microvms-core/src/` — the largest crate at 30,903 lines and 1,572 symbols.
+8. `microvms-core/src/` — the largest crate at 39,097 lines and 1,572 symbols.
    `constants.rs` and `cost.rs` are where the measured platform values land in code.
 9. `docs/STRATEGY.md` — scope, audience, and the labeling discipline every claim follows:
    measured, documented, vendor-claimed, or inferred.

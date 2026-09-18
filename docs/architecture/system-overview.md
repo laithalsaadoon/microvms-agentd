@@ -22,22 +22,23 @@ rejected locally before any call, S3 correct by default and overridable
 
 Seven crates carry that (`Cargo.toml:2-10`), and the seams follow defect classes rather than
 layers. `protocol` is the wire contract as types: pure data, serde plus schemars, no tokio,
-no axum, no base64 (`protocol/src/lib.rs:16-21`, 66 LOC). Both the daemon and the client
+no axum, no base64 (`protocol/src/lib.rs:16-21`, 68 LOC). Both the daemon and the client
 compile against it, so a renamed field fails a build instead of a consumer's runtime
-(`agentd/Cargo.toml:11-15`). `agentd` is the daemon, twelve modules across 13,659 LOC
+(`agentd/Cargo.toml:11-15`). `agentd` is the daemon, twelve modules across 16,280 LOC
 (`agentd/src/lib.rs:31-42`, 45 LOC) — `state` owns the one-shot bootstrap, `auth` decides
 before a body byte is read, `exec` and `fs` own idempotent exec and streaming tar. Its
 router is assembled by walking the same endpoint list `/v1/schema` publishes, so a
-documented route with no handler panics at startup (`agentd/src/routes.rs:29-35`, 807 LOC);
+documented route with no handler panics at startup (`agentd/src/routes.rs:29-35`, 993 LOC);
 there are twenty, split into a Bearer-guarded `control` router and an `open` one
 (`agentd/src/routes.rs:51-59`, `agentd/src/routes.rs:110-140`). It runs as the container
 `CMD` on a current-thread runtime sized for a 512 MiB guest (`agentd/src/main.rs:4-6`,
 `agentd/src/main.rs:24-27`).
 
-`microvms-core` is the client library and the largest crate — 30,903 LOC over 26 files, nine
-modules its own doc comment splits into foundation and product surface
-(`microvms-core/src/lib.rs:61-73`). `control` speaks hand-signed SigV4 rest-json because
-`lambda-microvms` has no SDK crate (`microvms-core/src/control/mod.rs:2-3`); `session` is
+`microvms-core` is the client library and the largest crate — 39,097 LOC over 34 files, eleven
+modules, nine of which its own doc comment splits into foundation and product surface, with
+`agents` as the one layer above them (`microvms-core/src/lib.rs:61-77`). `control` speaks
+hand-signed SigV4 rest-json because `lambda-microvms` has no SDK crate
+(`microvms-core/src/control/mod.rs:2-3`); `session` is
 the in-VM client, carrying proxy auth and the byte-offset cursor that makes an interrupted
 stream resumable (`microvms-core/src/session/mod.rs:4-7`); `sandbox` keeps every lifecycle
 field private so the Z3 proofs are proofs about the code
