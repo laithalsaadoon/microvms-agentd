@@ -112,11 +112,11 @@ Reports liveness, daemon version, bootstrap state, disk headroom, identity-repai
 
 **Input:** none. No body, no query, no path parameters, per the signature at `agentd/src/routes.rs:352`.
 
-**Output:** `application/json` body `Health { version: Cow<'static, str>, bootstrapped: bool, disk: Option<DiskHealth>, identity_degraded: bool, identity_repaired: bool, busy: bool, execs: usize }`, with `DiskHealth { available_bytes: u64, reserve_bytes: u64, under_pressure: bool }` (`protocol/src/health.rs:11-118`, `protocol/src/health.rs:138-147`).
+**Output:** `application/json` body `Health { version: Cow<'static, str>, bootstrapped: bool, disk: Option<DiskHealth>, identity_degraded: bool, identity_repaired: bool, busy: bool, execs: usize, hooks: Vec<HookObservation>, hooks_dropped: u64 }`, with `DiskHealth { available_bytes: u64, reserve_bytes: u64, under_pressure: bool }` and `HookObservation { hook: String, fired_at: u64 }` (`protocol/src/health.rs:11-118`, `protocol/src/health.rs:125-134`, `protocol/src/health.rs:138-147`).
 
 **Statuses:** 200, always, bootstrapped or not (`agentd/src/schema.rs:653-662`).
 
-`disk: null` is distinct from zero: unmeasurable free space is not a full disk, and a monitor conflating them would page on a missing `statvfs` (`protocol/src/health.rs:31-33`). `busy` and `execs` are the only two fields carrying `#[serde(default)]`, because the daemon is baked into an image while a client is installed separately, so a required field would make a health call fail outright against an older daemon — turning a missing signal into an unreachable VM (`protocol/src/health.rs:68-74`). `busy` means producing, not unfinished: an exec waiting to be acked is not busy, so `busy: false` with a non-zero `execs` is a VM holding unacked output somebody still has to collect (`protocol/src/health.rs:63-67`). The field lives here rather than on a guest-callable keepalive route because the platform measures idleness at an endpoint proxy that terminates outside the guest, so in-guest traffic cannot reset the idle timer (`agentd/src/routes.rs:335-351`).
+`disk: null` is distinct from zero: unmeasurable free space is not a full disk, and a monitor conflating them would page on a missing `statvfs` (`protocol/src/health.rs:31-33`). `busy`, `execs`, `hooks`, and `hooks_dropped` are the only fields carrying `#[serde(default)]`, because the daemon is baked into an image while a client is installed separately, so a required field would make a health call fail outright against an older daemon — turning a missing signal into an unreachable VM (`protocol/src/health.rs:68-74`). `busy` means producing, not unfinished: an exec waiting to be acked is not busy, so `busy: false` with a non-zero `execs` is a VM holding unacked output somebody still has to collect (`protocol/src/health.rs:63-67`). The field lives here rather than on a guest-callable keepalive route because the platform measures idleness at an endpoint proxy that terminates outside the guest, so in-guest traffic cannot reset the idle timer (`agentd/src/routes.rs:335-351`).
 
 `agentd/src/routes.rs:352`
 
@@ -187,14 +187,14 @@ The dial is loopback-only and never resolves a name — a relay that could reach
 ## POST /aws/lambda-microvms/runtime/v1/ready
 
 ```rs
-async fn ready_hook() -> StatusCode {
+async fn ready_hook(State(state): State<AppState>) -> StatusCode {
 ```
 
 Answers the platform's image-build readiness probe (`agentd/src/routes.rs:453-455`).
 
 **Auth:** PlatformHook (`agentd/src/routes.rs:452`) — unauthenticated; the prefix is fixed by the service and cannot be renamed or moved under `/v1` (`protocol/src/hook.rs:15`, `agentd/src/routes.rs:39-42`).
 
-**Input:** none. The handler takes no extractors at all, per the signature at `agentd/src/routes.rs:270`.
+**Input:** none on the wire. The handler's only extractor is `State<AppState>`, used to record the firing that `GET /v1/health` reports under `hooks`, per the signature at `agentd/src/routes.rs:270`.
 
 **Output:** a bare `StatusCode`, no body, per the signature at `agentd/src/routes.rs:270`.
 
@@ -237,7 +237,7 @@ Installs the per-VM agent token once, plus the optional launch environment that 
 
 **Auth:** PlatformHook (`agentd/src/routes.rs:472`) — unauthenticated because the platform has no credential to present; the defense is that this route can succeed only once (`agentd/src/routes.rs:168-173`).
 
-**Input:** `application/json` body `RunHookEnvelope { run_hook_payload: Option<String> }`, serialized under the platform's own camelCase key `runHookPayload` (`protocol/src/hook.rs:27-30`). The caller's own JSON is one `serde_json` parse deeper inside that string, and parses to `RunHook { agent_token: String, env: HashMap<String, String> }` (`protocol/src/hook.rs:46-72`): `{"runHookPayload": "{\"agent_token\": \"...\", \"env\": {\"KEY\": \"VALUE\"}}"}`. `agent_token` is required and non-empty; `env` is optional, values must be strings, and unknown keys are ignored (`protocol/src/hook.rs:145-189`).
+**Input:** `application/json` body `RunHookEnvelope { run_hook_payload: Option<String> }`, serialized under the platform's own camelCase key `runHookPayload` (`protocol/src/hook.rs:27-30`). The caller's own JSON is one `serde_json` parse deeper inside that string, and parses to `RunHook { agent_token: String, env: HashMap<String, String>, identity_seed: Option<String>, identity_host_public_key: Option<String> }` (`protocol/src/hook.rs:46-72`): `{"runHookPayload": "{\"agent_token\": \"...\", \"env\": {\"KEY\": \"VALUE\"}}"}`. `agent_token` is required and non-empty; `env` is optional, values must be strings; the two `identity_*` halves are optional and must be strings when present; unknown keys are ignored (`protocol/src/hook.rs:145-189`).
 
 **Output:** a bare status, no body on success; on refusal, `text/plain` naming the problem (`agentd/src/routes.rs:216`).
 
@@ -288,14 +288,14 @@ The draining behavior is the `surface_docs()` row's documented contract for this
 ## POST /aws/lambda-microvms/runtime/v1/validate
 
 ```rs
-async fn validate_hook() -> StatusCode {
+async fn validate_hook(State(state): State<AppState>) -> StatusCode {
 ```
 
 Answers the platform's image-build validation probe (`agentd/src/routes.rs:462-464`).
 
 **Auth:** PlatformHook (`agentd/src/routes.rs:461`).
 
-**Input:** none, per the signature at `agentd/src/routes.rs:281`.
+**Input:** none on the wire; the handler takes `State<AppState>` to record the firing, per the signature at `agentd/src/routes.rs:281`.
 
 **Output:** a bare `StatusCode`, no body, per the signature at `agentd/src/routes.rs:281`.
 
@@ -318,7 +318,7 @@ Starts a command under a caller-minted `exec_id`, idempotently on that id (`agen
 
 **Auth:** Bearer (`agentd/src/routes.rs:520`).
 
-**Input:** `application/json` body `StartRequest { exec_id: String, command: Vec<String>, shell: bool, cwd: Option<String>, env: HashMap<String, String>, user: Option<u32>, group: Option<u32>, timeout_sec: Option<f64>, stdin: bool }`. Every field after `command` carries `#[serde(default)]`, so a request may be as small as `{"exec_id":"e1","command":["true"]}` (`protocol/src/exec.rs:104-152`).
+**Input:** `application/json` body `StartRequest { exec_id: String, command: Vec<String>, shell: bool, cwd: Option<String>, env: HashMap<String, String>, user: Option<u32>, group: Option<u32>, timeout_sec: Option<f64>, stdin: bool, reap_group_on_exit: bool }`. Every field after `command` carries `#[serde(default)]`, so a request may be as small as `{"exec_id":"e1","command":["true"]}` (`protocol/src/exec.rs:104-152`).
 
 **Output:** `application/json` body `StartResponse { exec_id: String, phase: Phase }` (`protocol/src/exec.rs:221-224`).
 
