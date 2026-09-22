@@ -250,7 +250,7 @@ Bootstrap is one-shot, and an identical replay is 200 because the platform may r
 ## POST /aws/lambda-microvms/runtime/v1/suspend
 
 ```rs
-async fn suspend_hook() -> StatusCode {
+async fn suspend_hook(State(state): State<AppState>) -> StatusCode {
 ```
 
 Acknowledges and logs an incoming suspend (`agentd/src/routes.rs:494`).
@@ -268,7 +268,7 @@ Acknowledges and logs an incoming suspend (`agentd/src/routes.rs:494`).
 ## POST /aws/lambda-microvms/runtime/v1/terminate
 
 ```rs
-async fn terminate_hook() -> StatusCode {
+async fn terminate_hook(State(state): State<AppState>) -> StatusCode {
 ```
 
 Acknowledges termination, which begins graceful shutdown with in-flight requests draining (`agentd/src/routes.rs:511`).
