@@ -59,7 +59,7 @@ Builds an image, launches a VM, runs a command, reports the cost, and tears the 
 Flags:
 
 - `[BINARY_OR_DIR]` — the aarch64 agentd binary to bake in as the image CMD (ignored when `--image` names an image to launch instead), or a directory to sync. The two readings cannot collide: a path is a directory or it is not. See "Sync mode" below. `microvms-cli/src/cli.rs`, `RunArgs::binary`.
-- `--image <IDENTIFIER>` — launch this existing image instead of building one. Takes an ARN or a bare image name: a name is resolved to its ARN through the account's image listing (exact match, every page read) before the launch, with a progress line naming the resolved ARN. An identifier already shaped like an ARN passes through with zero extra calls. The envelope's `imageName` reports the launched image's own name (the ARN's last colon segment), never the per-invocation default a build would have used. A name that resolves to nothing fails locally with `ERR_PRECONDITION` naming the name and suggesting `microvm build` — the service's own answer to a bare name is HTTP 400 "Malformed ARN", which says nothing about names. `microvms-cli/src/commands/lifecycle.rs:965-979`, resolution in `microvms-core/src/control/image.rs:411-475`.
+- `--image <IDENTIFIER>` — launch this existing image instead of building one. Takes an ARN or a bare image name: a name is resolved to its ARN through the account's image listing (exact match, every page read) before the launch, with a progress line naming the resolved ARN. An identifier already shaped like an ARN passes through with zero extra calls. The envelope's `imageName` reports the launched image's own name (the ARN's last colon segment), never the per-invocation default a build would have used. A name that resolves to nothing fails locally with `ERR_PRECONDITION` naming the name and suggesting `microvm build` — the service's own answer to a bare name is HTTP 400 "Malformed ARN", which says nothing about names. `microvms-cli/src/commands/lifecycle.rs:984-998`, resolution in `microvms-core/src/control/image.rs:411-475`.
 - `--image-version <VERSION>` — launch this exact image version instead of the image's latest active one. Omitted takes whatever `latestActiveImageVersion` is at the moment the call lands, which is right for the ordinary case and wrong for the two that matter: a canary wants the version it just built rather than whatever became latest while it was starting, and a rollback wants the known-good version, which "latest" cannot name once a bad version is the latest one. A version the control plane has set `INACTIVE` refuses to launch when named here — measured, the answer is HTTP 404 `No active version found for MicroVM image <arn> and version <v>`, which is what makes a retire real rather than advisory. Free text rather than a closed set, because a version's legal values are an account fact only `ListManagedMicrovmImageVersions` can answer; the constraint that *is* knowable is checked before any call, so an empty version, one over 2048 characters, or one containing whitespace anywhere fails locally with `ERR_INVALID_ARG` and the reason. A version pasted from a terminal carries a trailing newline, which is that case. `microvms-core/src/control/mod.rs`'s `require_valid_version`, wiring in `microvms-cli/src/commands/lifecycle.rs`.
 - `--artifact-uri <S3_URI>` — where the build artifact already is; `microvms-core` builds the artifact bytes and takes the URI but does not upload. `microvms-cli/src/cli.rs:671-672`.
 - `--exec <COMMAND>` — a shell command to run in the VM. When it is omitted, the run only launches and tears down, which is how you check that an image boots. `microvms-cli/src/cli.rs:677-678`.
@@ -74,16 +74,16 @@ Flags:
 - `--deny-egress` — set proxy variables pointing to an unreachable local proxy. Reports `best-effort`; workloads can bypass it. This is not network enforcement and conflicts with `--egress`. Also the `deny-egress` config key.
 - `--launch-env <KEY=VALUE>` — set one launch-environment variable for every exec in the VM; repeatable. Delivered in the same `runHookPayload` as the agent token, at launch, so it never touches the shared image snapshot and never touches disk. The daemon applies it as the *base* environment of every exec, with `exec --env` on the same key winning. Same parser as `exec --env`, so the first `=` splits, an empty VALUE is legal, and a missing `=` or empty KEY is refused at parse time. The whole payload shares a 4096-byte ceiling with the token, checked locally before the launch: an over-budget env fails with the byte count and the env's share of it, rather than as an AWS `ValidationException` after the call. The total must fit after serialization; large credential sets belong on `microvm cp` after bootstrap or on a role the workload assumes. `microvms-cli/src/cli.rs`, wiring in `microvms-cli/src/commands/lifecycle.rs`.
 - `--keep` — retain the VM and image; the VM continues to incur charges until stopped, suspended, or terminated according to its lifecycle. `--keep` is also the only case in which the envelope's `agentToken` carries a value: a run that tears its VM down emits the key as `null`, because stdout outlives the process and the token would name a VM that no longer exists (#161). `microvms-cli/src/cli.rs:800-801`, `microvms-cli/src/render.rs`, `RunOutcome::to_data`.
-- `--timeout <TIMEOUT>` — how long to wait for the exec, in seconds; default `300`. `microvms-cli/src/cli.rs:838-839`.
-- `--max-idle-sec <MAX_IDLE_SEC>` — suspend the VM after this much inbound-traffic idleness; default `600`. `microvms-cli/src/cli.rs:842-843`.
-- `--suspended-sec <SUSPENDED_SEC>` — terminate the VM after this long suspended; a resume attempted after this window fails because the VM no longer exists. Default `600`. `microvms-cli/src/cli.rs:846-847`.
+- `--timeout <TIMEOUT>` — how long to wait for the exec, in seconds; default `300`. `microvms-cli/src/cli.rs:836-837`.
+- `--max-idle-sec <MAX_IDLE_SEC>` — suspend the VM after this much inbound-traffic idleness; default `600`. `microvms-cli/src/cli.rs:840-841`.
+- `--suspended-sec <SUSPENDED_SEC>` — terminate the VM after this long suspended; a resume attempted after this window fails because the VM no longer exists. Default `600`. `microvms-cli/src/cli.rs:844-845`.
 - `--auto-resume` — let the platform resume a suspended VM on an incoming request, instead of requiring an explicit `microvm resume`; omitted by default. Sets `idlePolicy.autoResumeEnabled` on the launch. Also a `microvm.toml` key (`auto-resume`). `microvms-cli/src/cli.rs`, merge in `merge_config`.
-- `--max-duration-sec <MAX_DURATION_SEC>` — hard ceiling on the VM's life; refused above 28800 before any call. Default `3600`. `microvms-cli/src/cli.rs:854-855`.
-- `--port <PORT>` — the daemon's port inside the guest. `microvms-cli/src/cli.rs:858-859`.
-- `--state-dir <STATE_DIR>` — where the run ledger is written; defaults to `$MICROVM_STATE_DIR` or `~/.microvm/runs`. `microvms-cli/src/cli.rs:862-863`.
+- `--max-duration-sec <MAX_DURATION_SEC>` — hard ceiling on the VM's life; refused above 28800 before any call. Default `3600`. `microvms-cli/src/cli.rs:852-853`.
+- `--port <PORT>` — the daemon's port inside the guest. `microvms-cli/src/cli.rs:856-857`.
+- `--state-dir <STATE_DIR>` — where the run ledger is written; defaults to `$MICROVM_STATE_DIR` or `~/.microvm/runs`. `microvms-cli/src/cli.rs:860-861`.
 - `--config <PATH>` — read this project config file instead of `./microvm.toml`. Naming a file that does not exist is refused with `ERR_CONFIG`: a typed path that is wrong must not silently become "no config". Conflicts with `--no-config`. `microvms-cli/src/cli.rs`, `ConfigFlags`.
 - `--no-config` — ignore any `microvm.toml`, even a malformed one; flags and built-in defaults apply. `microvms-cli/src/cli.rs`, `ConfigFlags`.
-- Plus `RegionFlags` and `InfraFlags`. `microvms-cli/src/cli.rs:875-879`.
+- Plus `RegionFlags` and `InfraFlags`. `microvms-cli/src/cli.rs:873-877`.
 
 Precedence, when a config file is in play: a typed flag beats the file, and the file beats the built-in default. "Typed" is read off the parse (`clap`'s `value_source`), not off the value, so `--memory 2048` overrides a file that says `4096` even though 2048 is also the default. The merge happens in exactly one place (`merge_config` in `microvms-cli/src/commands/lifecycle.rs`, per-knob precedence in `config::pick`) and its outcome is reported in the success envelope's `resolvedConfig` key — each knob's winning value and the source it came from (`flag`, `config`, `env`, or `default`; `env` appears only on the region, the one knob whose chain continues past the file into `$AWS_REGION`/`$AWS_DEFAULT_REGION`) — so a caller never has to re-derive which source won. `egress` and `denyEgress` are two of those knobs; the conservative assessment of internet isolation is a separate top-level envelope key, `egressPosture` (`open` | `unsealed` | `best-effort` | `sealed`), because a request flag is not an answer — see docs/TRUST.md, **Egress**. One deliberate pairing rule: a typed `BINARY` positional with no typed `--image` suppresses the file's `image`, because `run` builds exactly when the merged image is absent, and a file that silently won that pair would run the caller's tests against a stale pinned image. A positional that names a directory does not suppress it — sync mode launches, so the file's pinned image is exactly what `run .` wants. See "Project config" below for the file itself.
 
@@ -101,23 +101,23 @@ microvm build [OPTIONS] [BINARY]
 
 Builds a MicroVM image and waits for it to be usable. Nothing is torn down afterward. The image is the durable artifact, and because its snapshot has a one-week minimum retention, deleting it early saves nothing.
 
-`microvms-cli/src/commands/lifecycle.rs:1296`
+`microvms-cli/src/commands/lifecycle.rs:1316`
 
 Flags:
 
-- `[BINARY]` — the aarch64 agentd binary to bake in as the image CMD. Omitted, the CLI provisions its own version's release asset and caches it under the state directory; `$MICROVM_AGENTD` names a binary without touching the command line. `microvms-cli/src/cli.rs:918-919`.
-- `--artifact-uri <S3_URI>` — where the build artifact already is, as an `s3://` URI. `microvms-cli/src/cli.rs:928-929`.
-- `--name <NAME>` — image name; defaults to a per-invocation name. `microvms-cli/src/cli.rs:932-933`.
-- `--memory <MEMORY>` — baseline MiB, selecting a documented size class; default `2048`. `microvms-cli/src/cli.rs:936-937`.
-- `--dockerfile <DOCKERFILE>` — a Dockerfile to use instead of the library's default. `microvms-cli/src/cli.rs:940-941`.
+- `[BINARY]` — the aarch64 agentd binary to bake in as the image CMD. Omitted, the CLI provisions its own version's release asset and caches it under the state directory; `$MICROVM_AGENTD` names a binary without touching the command line. `microvms-cli/src/cli.rs:916-917`.
+- `--artifact-uri <S3_URI>` — where the build artifact already is, as an `s3://` URI. `microvms-cli/src/cli.rs:926-927`.
+- `--name <NAME>` — image name; defaults to a per-invocation name. `microvms-cli/src/cli.rs:930-931`.
+- `--memory <MEMORY>` — baseline MiB, selecting a documented size class; default `2048`. `microvms-cli/src/cli.rs:934-935`.
+- `--dockerfile <DOCKERFILE>` — a Dockerfile to use instead of the library's default. `microvms-cli/src/cli.rs:938-939`.
 - `--project <DIR>` — bake an environment layer from the directory's dependency files (#74). Exactly one ecosystem's manifest+lockfile pair must be present — `pyproject.toml`+`uv.lock`, `package.json`+`package-lock.json`, or `Cargo.toml`+`Cargo.lock` — and only that pair enters the shared image snapshot, under names fixed by the ecosystem (nothing else in the directory can enter, which is what keeps a `.env` out of a snapshot every VM shares). The derived Dockerfile copies the pair into the working directory (`/project` when none is named) and installs from the lockfile with the lockfile-faithful spelling: `uv sync --locked`, `npm ci`, or `cargo fetch --locked`, each refusing a lockfile that disagrees with its manifest rather than quietly re-resolving. Launches from the image then start with dependencies already installed — the 31–48% env-init share of launch time `docs/STRATEGY.md` measures is paid once at build. A caller `--dockerfile` that never mentions the lockfile is refused before the upload, because it would bake no layer while building cleanly. Missing lockfile, missing manifest, and two-ecosystem directories are each refused naming their remedy. Measured launch delta, and why in-guest code should call `/project/.venv/bin/python` directly rather than `uv` (an exec sees no `PATH`): `docs/PLATFORM.md`, "A baked environment layer removes the guest's env init". `microvms-cli/src/commands/lifecycle.rs`'s `read_project_files`, the entries in `microvms-core/src/control/artifact.rs`.
 - `--base-image-version <VERSION>` — pin the managed base image to one version instead of taking the service's default. Without this a build floats: the managed base's version list is not static — `al2023-1` carried one version in June and two by July — so two builds of identical inputs weeks apart can sit on different bases and neither recorded which. The build succeeds either way; the difference shows up in the guest. The legal values come from `ListManagedMicrovmImageVersions`, which `microvm doctor` prints as its `base-image-versions` check, and they are bare integers for a managed base (`0`, `1`) where a custom image's versions are `1.0`. A bogus pin is refused by the service before anything is created (HTTP 400 `No managed MicroVM Image with arn <base-arn> and version 999 is available`), but it costs the artifact upload first, so the `Version` shape's own constraints — non-empty, at most 2048 characters, no whitespace anywhere — are checked locally before the upload. Note that the value comes back **normalised**: a build pinned with `1` reads back `baseImageVersion: "1.0"` from `GetMicrovmImageVersion`, so the echoed value cannot be fed back into a request. `microvms-cli/src/commands/lifecycle.rs`'s `BuildSpec`, guard in `microvms-core/src/control/image.rs`'s `create_image`.
 - `--log-group <GROUP>` — CloudWatch log group for the build's logs, instead of the service-created `/aws/lambda-microvms/<image-name>`. Letters, digits, and `_ - / . #` only, up to 512 characters, validated locally before the artifact upload. The build role must be able to write to whatever this names (`logs:CreateLogGroup`/`CreateLogStream`/`PutLogEvents`); a group outside a granted prefix builds with **no logs at all**, the same silent outcome as the wrong-prefix policy in `docs/PLATFORM.md`.
 - `--log-stream <STREAM>` — log stream name **prefix** inside `--log-group`; requires it. The platform's `logging.logStream` member is an exact stream name — prefixes are unsupported — and one image build is three VMs writing three streams (docker build, Graviton 3 snapshot, Graviton 4 snapshot), so a fixed configured name would collapse every build's logs into one indistinguishable stream. The client therefore appends `/<16 hex>` of fresh randomness per build attempt, and the envelope reports the resolved exact name as `logStream` — the only place it exists. No `:` or `*` (the shape's pattern is `[^:*]*`); up to 495 characters (the platform's 512 minus the suffix's 17). See `docs/PLATFORM.md`, "An image build is three VMs and three log streams".
 - `--repair-identity` — request identity repair and additional OS capabilities. Inspect health for `identity_degraded`; requested capabilities do not guarantee every repair succeeds.
-- `--reuse` — reuse an existing image whose build inputs match, instead of building. Computes a sha256 over the build inputs (the daemon binary's bytes, the Dockerfile, and — with `--project` — the manifest and lockfile, names and bytes both), derives the image name `<name>-<hash12>` — where the prefix is `--name` or the stable stem `microvm-cli` — and checks the listing for that exact name. A hit skips the build entirely and reports the existing image with `reused: true` in the envelope; a miss builds under the derived name, so the next invocation with the same inputs hits. The hash is in the name because recreating an image under a previously-used fixed name can serve a stale snapshot (measured; the same hazard class as the clientToken replay in `docs/PLATFORM.md`) — content-keying gives both properties at once: unchanged inputs reuse their image, changed inputs get a fresh name and a fresh build. With `--project` that is #74's promise: two projects with identical dependency files share a layer, and a lockfile edit builds a fresh one. `--memory` is not part of the identity, so a reused image keeps the size class it was created with; the envelope's `size` is the requested class and the text says so. `microvms-cli/src/commands/lifecycle.rs:1370-1376`, the hash at `microvms-core/src/control/artifact.rs`'s `artifact_content_hash`.
-- `--port <PORT>` — the daemon's port inside the guest. `microvms-cli/src/cli.rs:1010-1011`.
-- Plus `RegionFlags` and `InfraFlags`. `microvms-cli/src/cli.rs:1013-1017`.
+- `--reuse` — reuse an existing image whose build inputs match, instead of building. Computes a sha256 over the build inputs (the daemon binary's bytes, the Dockerfile, and — with `--project` — the manifest and lockfile, names and bytes both), derives the image name `<name>-<hash12>` — where the prefix is `--name` or the stable stem `microvm-cli` — and checks the listing for that exact name. A hit skips the build entirely and reports the existing image with `reused: true` in the envelope; a miss builds under the derived name, so the next invocation with the same inputs hits. The hash is in the name because recreating an image under a previously-used fixed name can serve a stale snapshot (measured; the same hazard class as the clientToken replay in `docs/PLATFORM.md`) — content-keying gives both properties at once: unchanged inputs reuse their image, changed inputs get a fresh name and a fresh build. With `--project` that is #74's promise: two projects with identical dependency files share a layer, and a lockfile edit builds a fresh one. `--memory` is not part of the identity, so a reused image keeps the size class it was created with; the envelope's `size` is the requested class and the text says so. `microvms-cli/src/commands/lifecycle.rs:1390-1396`, the hash at `microvms-core/src/control/artifact.rs`'s `artifact_content_hash`.
+- `--port <PORT>` — the daemon's port inside the guest. `microvms-cli/src/cli.rs:1008-1009`.
+- Plus `RegionFlags` and `InfraFlags`. `microvms-cli/src/cli.rs:1011-1015`.
 
 The success envelope always carries `reused` (`false` for a plain build) and `logStream` (`null` when no `--log-stream` was configured; a reused image also reports `null`, because no build ran and no stream was resolved), so a consumer never guards for either key. `microvms-cli/src/commands/mod.rs`.
 
@@ -189,21 +189,21 @@ Runs one command in a MicroVM that is already running. The single subcommand cov
 
 Flags:
 
-- `[COMMAND]` — a shell command to run in the VM; omitted only with `--poll`. `microvms-cli/src/cli.rs:1023-1024`.
-- `--timeout <TIMEOUT>` — how long to wait for the command, in seconds; default `300`. `microvms-cli/src/cli.rs:1027-1028`.
-- `--cwd <CWD>` — working directory. When omitted, the command inherits the image WORKDIR, which is not the same as passing `/`. `microvms-cli/src/cli.rs:1034-1035`.
-- `--env <KEY=VALUE>` — set one environment variable for the command; repeatable. These flags are the child's whole environment: the daemon starts every exec from an empty one and applies exactly this map, so there is no inherited PATH to append to. Split at the first `=`, so a value may itself contain `=`; an empty VALUE is legal (`--env EMPTY=`), and a missing `=` or an empty KEY is refused at parse time. `microvms-cli/src/cli.rs:1050-1051`.
-- `--user <UID>` — numeric uid to run the command as; omitted runs as the daemon's own user. Numeric because that is the protocol's type and the daemon's mechanism (`Command::uid`, between fork and exec) — a name would need an `/etc/passwd` lookup inside a guest whose base image may not have one. `microvms-cli/src/cli.rs:1060-1061`.
-- `--group <GID>` — numeric gid to run the command as; omitted keeps the daemon's own group. `microvms-cli/src/cli.rs:1064-1065`.
-- `--exec-id <ID>` — use this exec id instead of a fresh one, making a retry idempotent; the daemon returns success for a known id without spawning a second child. `microvms-cli/src/cli.rs:1084-1085`.
-- `--poll <ID>` — read an existing exec's status and output instead of starting anything; read-only server-side, does not ack. Conflicts with `--exec-id`, `--stream`, `--stdin`, `--cwd`, `--detach`, `--env`, `--user`, `--group`. `microvms-cli/src/cli.rs:1093-1094`.
-- `--detach` — start the command and return immediately, without waiting and without acking; prints the exec id and `phase: running`. Conflicts with `--stream` and `--stdin`. `microvms-cli/src/cli.rs:1113-1114`.
-- `--stream` — stream output as it arrives rather than waiting for the whole thing; under `--json` or into a pipe this writes NDJSON. `microvms-cli/src/cli.rs:1123-1124`.
-- `--from-offset <BYTES>` — resume a stream at this byte offset; requires `--stream`. `microvms-cli/src/cli.rs:1131-1132`.
-- `--stdin` — give the command a stdin pipe, feed it this process's stdin, then close it. `microvms-cli/src/cli.rs:1139-1140`.
-- `--reap` — signal the command's whole process group once its own child exits, so nothing it backgrounded outlives it (`reap_group_on_exit: true` on the wire). Off by default, and the default is a contract: a backgrounded grandchild that inherited the output pipe keeps running and keeps writing. With the flag, `ps` afterwards shows the group empty and the exec's `writersMayBeAlive` reads false because the linger saw EOF. Conflicts with `--poll`. `microvms-cli/src/cli.rs:1151-1152`.
-- `--kill-on-timeout` — on `ERR_TIMEOUT`, send one `POST /v1/exec/{id}/kill` and put the daemon's verdict in the failure envelope's `data.killed`. A plain `--timeout` is a client-side deadline that abandons the exec and leaves it running in the guest; this turns it into a stop. The exit code stays `ERR_TIMEOUT`, because the deadline is still what ended the wait. Conflicts with `--poll`, `--detach`, and `--stream`. `microvms-cli/src/cli.rs:1162-1163`.
-- Plus `AttachFlags` and `RegionFlags`. `microvms-cli/src/cli.rs:1165-1169`.
+- `[COMMAND]` — a shell command to run in the VM; omitted only with `--poll`. `microvms-cli/src/cli.rs:1021-1022`.
+- `--timeout <TIMEOUT>` — how long to wait for the command, in seconds; default `300`. `microvms-cli/src/cli.rs:1025-1026`.
+- `--cwd <CWD>` — working directory. When omitted, the command inherits the image WORKDIR, which is not the same as passing `/`. `microvms-cli/src/cli.rs:1032-1033`.
+- `--env <KEY=VALUE>` — set one environment variable for the command; repeatable. These flags are the child's whole environment: the daemon starts every exec from an empty one and applies exactly this map, so there is no inherited PATH to append to. Split at the first `=`, so a value may itself contain `=`; an empty VALUE is legal (`--env EMPTY=`), and a missing `=` or an empty KEY is refused at parse time. `microvms-cli/src/cli.rs:1048-1049`.
+- `--user <UID>` — numeric uid to run the command as; omitted runs as the daemon's own user. Numeric because that is the protocol's type and the daemon's mechanism (`Command::uid`, between fork and exec) — a name would need an `/etc/passwd` lookup inside a guest whose base image may not have one. `microvms-cli/src/cli.rs:1058-1059`.
+- `--group <GID>` — numeric gid to run the command as; omitted keeps the daemon's own group. `microvms-cli/src/cli.rs:1062-1063`.
+- `--exec-id <ID>` — use this exec id instead of a fresh one, making a retry idempotent; the daemon returns success for a known id without spawning a second child. `microvms-cli/src/cli.rs:1082-1083`.
+- `--poll <ID>` — read an existing exec's status and output instead of starting anything; read-only server-side, does not ack. Conflicts with `--exec-id`, `--stream`, `--stdin`, `--cwd`, `--detach`, `--env`, `--user`, `--group`. `microvms-cli/src/cli.rs:1091-1092`.
+- `--detach` — start the command and return immediately, without waiting and without acking; prints the exec id and `phase: running`. Conflicts with `--stream` and `--stdin`. `microvms-cli/src/cli.rs:1111-1112`.
+- `--stream` — stream output as it arrives rather than waiting for the whole thing; under `--json` or into a pipe this writes NDJSON. `microvms-cli/src/cli.rs:1121-1122`.
+- `--from-offset <BYTES>` — resume a stream at this byte offset; requires `--stream`. `microvms-cli/src/cli.rs:1129-1130`.
+- `--stdin` — give the command a stdin pipe, feed it this process's stdin, then close it. `microvms-cli/src/cli.rs:1137-1138`.
+- `--reap` — signal the command's whole process group once its own child exits, so nothing it backgrounded outlives it (`reap_group_on_exit: true` on the wire). Off by default, and the default is a contract: a backgrounded grandchild that inherited the output pipe keeps running and keeps writing. With the flag, `ps` afterwards shows the group empty and the exec's `writersMayBeAlive` reads false because the linger saw EOF. Conflicts with `--poll`. `microvms-cli/src/cli.rs:1149-1150`.
+- `--kill-on-timeout` — on `ERR_TIMEOUT`, send one `POST /v1/exec/{id}/kill` and put the daemon's verdict in the failure envelope's `data.killed`. A plain `--timeout` is a client-side deadline that abandons the exec and leaves it running in the guest; this turns it into a stop. The exit code stays `ERR_TIMEOUT`, because the deadline is still what ended the wait. Conflicts with `--poll`, `--detach`, and `--stream`. `microvms-cli/src/cli.rs:1160-1161`.
+- Plus `AttachFlags` and `RegionFlags`. `microvms-cli/src/cli.rs:1163-1167`.
 
 A timeout is not a stop. `ERR_TIMEOUT`'s suggestions say so in as many words and name `microvm kill <exec-id>` as the remedy, beside the older fact that the exec and its output are untouched and re-pollable. `microvms-cli/src/exit.rs:402`.
 
@@ -223,7 +223,7 @@ And it reports `hooks`, the daemon's own record of every lifecycle-hook invocati
 
 Flags:
 
-- `AttachFlags` and `RegionFlags` only; this command has no arguments of its own. `microvms-cli/src/cli.rs:1172-1179`.
+- `AttachFlags` and `RegionFlags` only; this command has no arguments of its own. `microvms-cli/src/cli.rs:1170-1177`.
 
 ## ack
 
@@ -237,8 +237,8 @@ Releases a finished exec's buffered output, which starts its collection clock. A
 
 Flags:
 
-- `<EXEC_ID>` — the exec whose output to release. Required. `microvms-cli/src/cli.rs:1346-1347`.
-- Plus `AttachFlags` and `RegionFlags`. `microvms-cli/src/cli.rs:1349-1353`.
+- `<EXEC_ID>` — the exec whose output to release. Required. `microvms-cli/src/cli.rs:1344-1345`.
+- Plus `AttachFlags` and `RegionFlags`. `microvms-cli/src/cli.rs:1347-1351`.
 
 ## kill
 
@@ -254,7 +254,7 @@ The envelope carries the daemon's own verdict. `killed: false` with exit 0 means
 
 Flags:
 
-- `<EXEC_ID>` — the exec whose process group to signal. Required. `microvms-cli/src/cli.rs:1359-1360`.
+- `<EXEC_ID>` — the exec whose process group to signal. Required. `microvms-cli/src/cli.rs:1357-1358`.
 - Plus `AttachFlags` and `RegionFlags`.
 
 ## ps
@@ -271,7 +271,7 @@ Lists every exec's process group and its live pids (`GET /v1/procs`). The daemon
 
 Flags:
 
-- `AttachFlags` and `RegionFlags` only; this command has no arguments of its own. `microvms-cli/src/cli.rs:1369-1376`.
+- `AttachFlags` and `RegionFlags` only; this command has no arguments of its own. `microvms-cli/src/cli.rs:1367-1374`.
 
 ## stdin
 
@@ -285,10 +285,10 @@ Writes to a running exec's stdin and optionally closes it. It only works on an e
 
 Flags:
 
-- `<EXEC_ID>` — the exec to write to; must have been started with `exec --stdin`. Required. `microvms-cli/src/cli.rs:1381-1382`.
-- `--data <DATA>` — what to write; `-` reads this process's stdin, and omitting the flag writes nothing. The value is raw bytes either way, and core base64-encodes them for the wire. `microvms-cli/src/cli.rs:1388-1389`.
-- `--eof` — close stdin after any `--data` is written, in the same request rather than a second one. `microvms-cli/src/cli.rs:1396-1397`.
-- Plus `AttachFlags` and `RegionFlags`. `microvms-cli/src/cli.rs:1399-1403`.
+- `<EXEC_ID>` — the exec to write to; must have been started with `exec --stdin`. Required. `microvms-cli/src/cli.rs:1379-1380`.
+- `--data <DATA>` — what to write; `-` reads this process's stdin, and omitting the flag writes nothing. The value is raw bytes either way, and core base64-encodes them for the wire. `microvms-cli/src/cli.rs:1386-1387`.
+- `--eof` — close stdin after any `--data` is written, in the same request rather than a second one. `microvms-cli/src/cli.rs:1394-1395`.
+- Plus `AttachFlags` and `RegionFlags`. `microvms-cli/src/cli.rs:1397-1401`.
 
 ## cp
 
@@ -302,11 +302,11 @@ Copies a file or a tar archive between here and a running MicroVM: `cp ./local v
 
 Flags:
 
-- `<SRC>` — source; `vm:/path` reads from the VM, anything else is a local path. Required. `microvms-cli/src/cli.rs:1409-1410`.
-- `<DST>` — destination; `vm:/path` writes to the VM, anything else is a local path. Required. `microvms-cli/src/cli.rs:1413-1414`.
-- `--tar` — move a whole directory tree as an uncompressed tar archive; the `vm:` side is a directory the daemon packs or extracts, the local side is a `.tar` file. `microvms-cli/src/cli.rs:1437-1438`.
-- `--mode <OCTAL>` — permissions for an uploaded file, octal as a string; conflicts with `--tar`, since a tar carries its members' own modes. `microvms-cli/src/cli.rs:1445-1446`.
-- Plus `AttachFlags` and `RegionFlags`. `microvms-cli/src/cli.rs:1448-1452`.
+- `<SRC>` — source; `vm:/path` reads from the VM, anything else is a local path. Required. `microvms-cli/src/cli.rs:1407-1408`.
+- `<DST>` — destination; `vm:/path` writes to the VM, anything else is a local path. Required. `microvms-cli/src/cli.rs:1411-1412`.
+- `--tar` — move a whole directory tree as an uncompressed tar archive; the `vm:` side is a directory the daemon packs or extracts, the local side is a `.tar` file. `microvms-cli/src/cli.rs:1435-1436`.
+- `--mode <OCTAL>` — permissions for an uploaded file, octal as a string; conflicts with `--tar`, since a tar carries its members' own modes. `microvms-cli/src/cli.rs:1443-1444`.
+- Plus `AttachFlags` and `RegionFlags`. `microvms-cli/src/cli.rs:1446-1450`.
 
 ## sync
 
@@ -368,13 +368,13 @@ microvm suspend [OPTIONS] <MICROVM_ID>
 
 Freezes a MicroVM, which keeps its memory, filesystem, token, and endpoint. The operation is a freeze and restore rather than a stop and start.
 
-`microvms-cli/src/commands/lifecycle.rs:1908`
+`microvms-cli/src/commands/lifecycle.rs:1928`
 
 Flags:
 
 - `<MICROVM_ID>` — the MicroVM to freeze: a MicroVM id, or a name `run --keep --vm-name` registered (resolved locally, zero extra calls; an unknown name fails with `ERR_PRECONDITION` before any call). Required.
-- `--timeout <TIMEOUT>` — how long to wait for the state transition, in seconds; default `300`. `microvms-cli/src/cli.rs:1582-1583`.
-- Plus `RegionFlags`. `microvms-cli/src/cli.rs:1589-1590`.
+- `--timeout <TIMEOUT>` — how long to wait for the state transition, in seconds; default `300`. `microvms-cli/src/cli.rs:1580-1581`.
+- Plus `RegionFlags`. `microvms-cli/src/cli.rs:1587-1588`.
 
 ## resume
 
@@ -384,13 +384,13 @@ microvm resume [OPTIONS] <MICROVM_ID>
 
 Thaws a suspended MicroVM and reports its endpoint. Past the launch-time `suspendedDurationSeconds` window the VM has been terminated, so the resume fails.
 
-`microvms-cli/src/commands/lifecycle.rs:1979`
+`microvms-cli/src/commands/lifecycle.rs:1999`
 
 Flags:
 
 - `<MICROVM_ID>` — the MicroVM to thaw: a MicroVM id, or a registered name (resolved locally). Required.
-- `--timeout <TIMEOUT>` — how long to wait for RUNNING, in seconds; default `300`. `microvms-cli/src/cli.rs:1600-1601`.
-- Plus `RegionFlags`. `microvms-cli/src/cli.rs:1607-1608`.
+- `--timeout <TIMEOUT>` — how long to wait for RUNNING, in seconds; default `300`. `microvms-cli/src/cli.rs:1598-1599`.
+- Plus `RegionFlags`. `microvms-cli/src/cli.rs:1605-1606`.
 
 ## terminate
 
@@ -400,7 +400,7 @@ microvm terminate [OPTIONS] <MICROVM_ID>
 
 Tears down a MicroVM and optionally its image and build log group. When part of the teardown fails, the command still exits successfully and reports the leaked identifier.
 
-`microvms-cli/src/commands/lifecycle.rs:2050`
+`microvms-cli/src/commands/lifecycle.rs:2070`
 
 Flags:
 
@@ -408,8 +408,8 @@ Flags:
 - `--image-identifier <IMAGE_IDENTIFIER>` — the image to delete, if `--delete-image` is given. Omitted, the image is read off the kept run's record in the state directory: `run --keep` wrote the VM, the image, and the image's name there, so the flag is an override rather than a requirement (#160). `microvms-cli/src/cli.rs`, `TerminateArgs::image_identifier`.
 - `--image-name <IMAGE_NAME>` — the image's name, needed to name its build log group; the service created that group, so `terraform destroy` never removes it. Omitted, it is read off the same record when one names the image. `microvms-cli/src/cli.rs`, `TerminateArgs::image_name`.
 - `--delete-image` — also delete the image and name its build log group. With neither the flag nor a record naming an image, the command is refused locally with `ERR_INVALID_ARG` before any call. After the teardown the run record is narrowed to what is still outstanding — a kept image, a failed delete, and the build log group this CLI can only name — and removed when nothing is, so `ls` stops reporting a VM this command removed. `microvms-cli/src/cli.rs`, `TerminateArgs::delete_image`; `microvms-cli/src/commands/lifecycle.rs`, `terminate`; `microvms-cli/src/ledger.rs`, `Ledger::open_for_vm`.
-- `--wait` — wait for TERMINATED rather than returning as soon as the call is accepted. `microvms-cli/src/cli.rs:1639-1640`.
-- Plus `RegionFlags`. `microvms-cli/src/cli.rs:1646-1647`.
+- `--wait` — wait for TERMINATED rather than returning as soon as the call is accepted. `microvms-cli/src/cli.rs:1637-1638`.
+- Plus `RegionFlags`. `microvms-cli/src/cli.rs:1644-1645`.
 
 ## ls
 
@@ -425,10 +425,10 @@ Lists the local ledger of a state directory: what this CLI could not confirm it 
 
 Flags:
 
-- `--state-dir <STATE_DIR>` — where the ledgers live; defaults to `$MICROVM_STATE_DIR` or `~/.microvm/runs`. `microvms-cli/src/cli.rs:1653-1654`.
-- `--remote` — list live MicroVMs and images from the account and mark each ledger entry `live`, `gone`, or `unjudged` by the identifiers in its `leaked` list; conflicts with `--watch`, which is ledger-only by contract. `microvms-cli/src/cli.rs:1693-1694`.
-- `--prune` — remove the ledger files of `gone` entries; requires `--remote`. `microvms-cli/src/cli.rs:1700-1701`.
-- `--region <REGION>` / `--unlisted-region <NAME>` — the region `--remote` lists; the shared `RegionFlags` group, ignored without `--remote`. `microvms-cli/src/cli.rs:1703-1704`.
+- `--state-dir <STATE_DIR>` — where the ledgers live; defaults to `$MICROVM_STATE_DIR` or `~/.microvm/runs`. `microvms-cli/src/cli.rs:1651-1652`.
+- `--remote` — list live MicroVMs and images from the account and mark each ledger entry `live`, `gone`, or `unjudged` by the identifiers in its `leaked` list; conflicts with `--watch`, which is ledger-only by contract. `microvms-cli/src/cli.rs:1691-1692`.
+- `--prune` — remove the ledger files of `gone` entries; requires `--remote`. `microvms-cli/src/cli.rs:1698-1699`.
+- `--region <REGION>` / `--unlisted-region <NAME>` — the region `--remote` lists; the shared `RegionFlags` group, ignored without `--remote`. `microvms-cli/src/cli.rs:1701-1702`.
 - `--watch` — re-read the ledger on an interval until Ctrl-C, `port-forward` style: snapshots on stderr, one summary envelope at the end (`data.watch = {refreshes, intervalSeconds, interrupted, calls}`, `null` for a plain `ls`), Ctrl-C exits 0 (#78). The loop is **ledger-only**: zero platform calls per refresh — no `GetMicrovm`, no `/v1/health` — so it resets no idle timer, keeps no VM alive, and bills nothing; `data.watch.calls` states that flatly and the text carries the measurement behind it. The distinction matters because an outside `/v1/health` poll *does* reset the platform idle timer (`docs/PLATFORM.md`, idle-timer section: a polled VM stayed RUNNING through 311s of a 60s window while the unpolled control suspended at 66s), so a health-polling watcher would keep every watched VM billing. The corollary: what a watch shows is what this CLI last recorded, not the platform's live state — a VM the platform suspended at its idle window still reads as this ledger wrote it. `microvms-cli/src/commands/local.rs`, `watch`.
 - `--interval-sec <SECONDS>` — seconds between ledger re-reads under `--watch`; default `2`, floor `0.1`. The default can be short *because* the loop is local-only; a health-polling watcher would instead need its interval judged against every watched VM's `maxIdleDurationSeconds`.
 - `--max-refreshes <N>` — stop after N snapshots instead of on Ctrl-C, for scripts; `0` is refused.
@@ -470,8 +470,8 @@ The envelope's `data` carries `tailCommand` (`aws logs tail <group> --since 1h -
 
 Flags:
 
-- `<IMAGE_NAME>` — the image whose log group to name. Required. `microvms-cli/src/cli.rs:1721-1722`.
-- Plus `RegionFlags`. `microvms-cli/src/cli.rs:1724-1725`.
+- `<IMAGE_NAME>` — the image whose log group to name. Required. `microvms-cli/src/cli.rs:1719-1720`.
+- Plus `RegionFlags`. `microvms-cli/src/cli.rs:1722-1723`.
 
 ## cost
 
@@ -485,15 +485,15 @@ Reports what a run cost or what a plan will cost, with every figure labelled. Do
 
 Flags:
 
-- `--estimate` — treat the durations as a plan rather than as timings, so every duration is labelled projected. `microvms-cli/src/cli.rs:1734-1735`.
-- `--compare` — also print running versus suspended for the same hold, with the break-even. `microvms-cli/src/cli.rs:1738-1739`.
-- `--memory <MEMORY>` — baseline MiB, selecting a documented size class; default `2048`. `microvms-cli/src/cli.rs:1742-1743`.
-- `--running-sec <RUNNING_SEC>` — seconds the VM spent, or will spend, RUNNING; billed at baseline whether or not anything is executing. Default `0`. `microvms-cli/src/cli.rs:1749-1750`.
-- `--suspended-sec <SUSPENDED_SEC>` — seconds spent suspended; storage only, no compute line. Default `0`. `microvms-cli/src/cli.rs:1753-1754`.
-- `--build-sec <BUILD_SEC>` — seconds the image build took; appears as an unpriced line. Default `0`. `microvms-cli/src/cli.rs:1760-1761`.
-- `--image-gb <IMAGE_GB>` — image size in GB; adds storage with its one-week minimum retention. `microvms-cli/src/cli.rs:1764-1765`.
-- `--cycles <CYCLES>` — suspend/resume cycles, each paying a snapshot write plus a read; default `1`. `microvms-cli/src/cli.rs:1768-1769`.
-- `--hold-sec <HOLD_SEC>` — the hold to compare running against suspended over, in seconds; default `3600`. `microvms-cli/src/cli.rs:1772-1773`.
+- `--estimate` — treat the durations as a plan rather than as timings, so every duration is labelled projected. `microvms-cli/src/cli.rs:1732-1733`.
+- `--compare` — also print running versus suspended for the same hold, with the break-even. `microvms-cli/src/cli.rs:1736-1737`.
+- `--memory <MEMORY>` — baseline MiB, selecting a documented size class; default `2048`. `microvms-cli/src/cli.rs:1740-1741`.
+- `--running-sec <RUNNING_SEC>` — seconds the VM spent, or will spend, RUNNING; billed at baseline whether or not anything is executing. Default `0`. `microvms-cli/src/cli.rs:1747-1748`.
+- `--suspended-sec <SUSPENDED_SEC>` — seconds spent suspended; storage only, no compute line. Default `0`. `microvms-cli/src/cli.rs:1751-1752`.
+- `--build-sec <BUILD_SEC>` — seconds the image build took; appears as an unpriced line. Default `0`. `microvms-cli/src/cli.rs:1758-1759`.
+- `--image-gb <IMAGE_GB>` — image size in GB; adds storage with its one-week minimum retention. `microvms-cli/src/cli.rs:1762-1763`.
+- `--cycles <CYCLES>` — suspend/resume cycles, each paying a snapshot write plus a read; default `1`. `microvms-cli/src/cli.rs:1766-1767`.
+- `--hold-sec <HOLD_SEC>` — the hold to compare running against suspended over, in seconds; default `3600`. `microvms-cli/src/cli.rs:1770-1771`.
 - `--max-cost <USD>` — a budget the report's total is checked against (#77). The comparison is against the *priced* total, which is a lower bound whenever any line is unpriced — so a detected breach has already been exceeded by an unknown margin. The verdict lands in `data.budget` (`{maxUsd, onBreach, basis, breached, overageAtLeastUsd}`, `null` with no budget), in the text, and in the dense rendering; `basis` says whether the compared total was `exact` or `lower-bound`. A breach is always a stderr warning, `--quiet` included. Requires `--on-breach`. `microvms-cli/src/commands/cost.rs`, budget gate.
 - `--on-breach <warn|abort>` — what a `--max-cost` breach does, and deliberately without a default: because the compared total can be a lower bound, whether a breach warns (exit 0) or aborts is the caller's judgement. `abort` exits `ERR_PRECONDITION` (12) *after* the full report is written — the same success-envelope-then-non-zero mechanism as `run`'s workload exit — so a CI gate branches on 12 while still receiving the figures. No new exit code: 12 is an existing row, and 12-vs-2 distinguishes "over budget" from "bad flag". `microvms-cli/src/cli.rs`, `OnBreach`.
 
@@ -519,9 +519,9 @@ Both are advisory because nothing about a build depends on either read succeedin
 
 Flags:
 
-- `--binary <BINARY>` — the agentd binary to check the architecture of. `microvms-cli/src/cli.rs:1814-1815`.
-- `--infra-dir <INFRA_DIR>` — the Terraform stack directory; defaults to `./conformance/infra`. `microvms-cli/src/cli.rs:1818-1819`.
-- Plus `RegionFlags` and `InfraFlags`. `microvms-cli/src/cli.rs:1821-1828`.
+- `--binary <BINARY>` — the agentd binary to check the architecture of. `microvms-cli/src/cli.rs:1812-1813`.
+- `--infra-dir <INFRA_DIR>` — the Terraform stack directory; defaults to `./conformance/infra`. `microvms-cli/src/cli.rs:1816-1817`.
+- Plus `RegionFlags` and `InfraFlags`. `microvms-cli/src/cli.rs:1819-1826`.
 
 ## manifest
 
@@ -547,7 +547,7 @@ Emits every service constraint this client believes, for the drift gate that `sc
 
 Flags:
 
-- `--emit-json` — emit the raw constants object without an envelope. This is the one stdout write in this binary that is not an envelope. `microvms-cli/src/cli.rs:1839-1840`.
+- `--emit-json` — emit the raw constants object without an envelope. This is the one stdout write in this binary that is not an envelope. `microvms-cli/src/cli.rs:1837-1838`.
 
 ## dockerfile
 
@@ -563,9 +563,9 @@ This is a local command: no account is involved, and the stanza is built from co
 
 Flags:
 
-- `--from <IMAGE_REF>` — the image ref for the `FROM` line; defaults to the managed al2023 base's pair, `public.ecr.aws/amazonlinux/amazonlinux:2023-minimal`. Only change this when you are also changing `baseImageArn`. `microvms-cli/src/cli.rs:1845-1852`.
-- `--port <PORT>` — the port agentd listens on inside the guest; default `9000`. Reaches both `ENV AGENTD_PORT` and `EXPOSE`. `microvms-cli/src/cli.rs:1854-1856`.
-- `--workdir <DIR>` — a working directory to create and set, as both a `RUN mkdir -p` and a `WORKDIR`. Strongly recommended, because the managed base declares no WorkingDir. `microvms-cli/src/cli.rs:1858-1864`.
+- `--from <IMAGE_REF>` — the image ref for the `FROM` line; defaults to the managed al2023 base's pair, `public.ecr.aws/amazonlinux/amazonlinux:2023-minimal`. Only change this when you are also changing `baseImageArn`. `microvms-cli/src/cli.rs:1843-1850`.
+- `--port <PORT>` — the port agentd listens on inside the guest; default `9000`. Reaches both `ENV AGENTD_PORT` and `EXPOSE`. `microvms-cli/src/cli.rs:1852-1854`.
+- `--workdir <DIR>` — a working directory to create and set, as both a `RUN mkdir -p` and a `WORKDIR`. Strongly recommended, because the managed base declares no WorkingDir. `microvms-cli/src/cli.rs:1856-1862`.
 
 The JSON envelope carries the stanza text plus the base image pair — `baseImageName` for deriving `baseImageArn` and `baseImageDockerRef` for the `FROM` — so a consumer holds both halves of the agreement the platform enforces. `microvms-cli/src/commands/mod.rs:455-465`.
 
