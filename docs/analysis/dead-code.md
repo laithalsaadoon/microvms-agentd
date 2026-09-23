@@ -101,7 +101,7 @@ Two files are compiled only under `cfg(test)` and are live test code, not dead s
 
 | Path | Symbol | Imported from |
 | --- | --- | --- |
-| `microvms-cli/src/commands/lifecycle.rs:1168` | `_DocsOnly` (alias of `ControlPlane`) | `microvms_core::control::ControlPlane`, re-bound from `microvms-cli/src/commands/lifecycle.rs:70` |
+| `microvms-cli/src/commands/lifecycle.rs:2377` | `_DocsOnly` (alias of `ControlPlane`) | `microvms_core::control::ControlPlane`, re-bound from `microvms-cli/src/commands/lifecycle.rs:70` |
 | `microvms-cli/src/commands/attached.rs:932` | `_DocsOnly` (alias of `ErrorKind`) | `microvms_core::ErrorKind`, re-bound from `microvms-cli/src/commands/attached.rs:40` |
 
 **Confidence: high that nothing names `_DocsOnly`; do not delete either line on its own.**
@@ -118,7 +118,7 @@ three-line construct (doc comment, attribute, `use`), and rebuilding:
 - `cargo doc --no-deps -p microvms-cli` emits the same eight warnings with or without the
   constructs, and neither `ControlPlane` nor `ErrorKind` appears among them. The stated
   reason — "Re-exported so `[ControlPlane]` is nameable in this module's docs"
-  (`microvms-cli/src/commands/lifecycle.rs:1166`) — is not the mechanism. The intra-doc link
+  (`microvms-cli/src/commands/lifecycle.rs:2375`) — is not the mechanism. The intra-doc link
   at `microvms-cli/src/commands/lifecycle.rs:10` resolves from the `:70` import directly.
 
 The two differ in whether the whole construct earns its place:
@@ -127,9 +127,9 @@ The two differ in whether the whole construct earns its place:
   what makes `[ControlPlane]` at `microvms-cli/src/commands/lifecycle.rs:10` resolve. Removing
   the pair means removing that doc link. Load-bearing as a unit.
 - `ErrorKind` is named nowhere in `microvms-cli/src/commands/attached.rs` except its import
-  at `:40` and the two `_DocsOnly` lines at `:930-932`. The only documentation that links
+  at `:40` and the two `_DocsOnly` lines at `:2794-2796`. The only documentation that links
   `[ErrorKind]` is the doc comment justifying the import that makes it resolvable. Removable
-  as a unit — `:40`'s `ErrorKind`, plus all three lines at `:930-932`.
+  as a unit — `:40`'s `ErrorKind`, plus all three lines at `:2794-2796`.
 
 **Non-Rust surfaces, both clean.** `uvx ruff check --select F401,F811,F841` over all 17
 tracked `.py` files plus `microvms-py/microvms.pyi` reports no findings; F401 is in the
