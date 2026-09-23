@@ -86,7 +86,7 @@ classDiagram
 | Node or edge | Citations |
 | --- | --- |
 | `CoreSeam` | trait `microvms-cli/src/seam.rs:136`; methods `microvms-cli/src/seam.rs:138`, `:141`, `:148`, `:172`; `AwsSeam` impl `:179`, `:183`, `:201`, `:225` |
-| `Sandbox` | struct `microvms-core/src/sandbox.rs:422`; methods `:551`, `:648`, `:755`, `:837`, `:935` |
+| `Sandbox` | struct `microvms-core/src/sandbox.rs:539`; methods `:710`, `:814`, `:958`, `:1040`, `:1138` |
 | `ControlPlane` | struct `microvms-core/src/control/mod.rs:160`; methods `microvms-core/src/control/image.rs:157`, `microvms-core/src/control/microvm.rs:356`, `:435`, `:563`, `:581` |
 | `Session` | struct `microvms-core/src/session/mod.rs:184`; methods `:329`, `:342`, `:380`, `:408`, `:444` |
 | `ExecHandle` | struct `microvms-core/src/session/exec.rs:213`; methods `:228`, `:248`, `:285`, `:624`, `:654` |
@@ -96,8 +96,8 @@ classDiagram
 | `CoreSeam --> ControlPlane` | `microvms-cli/src/seam.rs:138`, impl `:179` |
 | `CoreSeam --> Sandbox` | `microvms-cli/src/seam.rs:141`, impl `:183` |
 | `CoreSeam --> Session` | `microvms-cli/src/seam.rs:148`, impl `:201` |
-| `Sandbox --> ControlPlane` | `microvms-core/src/sandbox.rs:65-67`, `:553`, `:696`, `:773`, `:859`, `:951` |
-| `Sandbox --> Session` | `microvms-core/src/sandbox.rs:70`, `:535`, `:648` |
+| `Sandbox --> ControlPlane` | `microvms-core/src/sandbox.rs:65-67`, `:712`, `:893`, `:976`, `:1062`, `:1154` |
+| `Sandbox --> Session` | `microvms-core/src/sandbox.rs:70`, `:677`, `:814` |
 | `Session --> ExecHandle` | `microvms-core/src/session/mod.rs:380`, `:403` |
 | `Session ..> Routes` | `microvms-core/src/session/mod.rs:331`, `:382`; `microvms-core/src/session/files.rs:45`, `:52` |
 | `ExecHandle ..> Routes` | `microvms-core/src/session/exec.rs:233`, `:592`, `:659` |

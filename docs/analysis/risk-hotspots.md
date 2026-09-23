@@ -38,7 +38,7 @@ that are not references to it. `Duration` (`microvms-js/src/cost.rs:60`) is the 
 instance: it is the only node of that name in the index, so every `Duration` in the workspace
 resolves onto it, and it is credited with coverage from
 `microvms-core/tests/turmoil_client.rs`, a file containing zero references to `microvms-js`.
-`live` (`microvms-js/src/session.rs:274`) and `data` (`microvms-py/src/exec.rs:236`) are
+`live` (`microvms-js/src/session.rs:321`) and `data` (`microvms-py/src/exec.rs:236`) are
 likewise sole holders of their names. So per-symbol dependent counts below are what the index
 records rather than verified call sites, and the direction of the bias on `error` counts is
 toward understating them. Fourth, ownership carries no bus-factor information: one
@@ -156,13 +156,13 @@ that `suspend`/`resume`/`terminate` require (`microvms-js/src/session.rs:14-18`)
 
 **Findings.** 25 error, 0 warn, from 27 symbols with inbound dependents out of 33 total. The
 two the index ranks highest by dependent count are the lock-acquiring internals rather than
-the public methods — `Live::session` at 18 (`microvms-js/src/session.rs:244`) and the `live()`
-guard-taker at 17 (`microvms-js/src/session.rs:274`) — though both names are short enough that
+the public methods — `Live::session` at 18 (`microvms-js/src/session.rs:291`) and the `live()`
+guard-taker at 17 (`microvms-js/src/session.rs:321`) — though both names are short enough that
 those counts are inflated by the name-resolution caveat above; `into_request` (3,
-`microvms-js/src/session.rs:142`), `in_sandbox` (3, `microvms-js/src/session.rs:264`) and
-`port` (3, `microvms-js/src/session.rs:306`) follow. Those two functions are where the
+`microvms-js/src/session.rs:183`), `in_sandbox` (3, `microvms-js/src/session.rs:311`) and
+`port` (3, `microvms-js/src/session.rs:353`) follow. Those two functions are where the
 "held for exactly one method call and no more" invariant in the doc comment at
-`microvms-js/src/session.rs:272-273` actually lives, and a lock-scope regression in them is
+`microvms-js/src/session.rs:319-320` actually lives, and a lock-scope regression in them is
 the class of defect a dynamic suite detects only as a hang. `codegraph affected
 microvms-js/src/session.rs -d 1` does return two tests —
 `agentd/tests/turmoil_transport.rs` and `microvms-core/tests/turmoil_client.rs` — reached
