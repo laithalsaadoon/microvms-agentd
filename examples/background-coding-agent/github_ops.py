@@ -12,6 +12,7 @@ import os
 import re
 import tarfile
 from functools import cache
+from itertools import islice
 
 import boto3
 import requests
@@ -122,7 +123,8 @@ def stage(repo_name: str, number: int, note: str | None):
         ref = repo.get_branch(base_ref).commit.sha
         comments = "".join(
             f"\n### Comment by @{comment.user.login}\n\n{comment.body}\n"
-            for comment in issue.get_comments()[:30]
+            # Iterate rather than slice: PyGithub's slice of an empty list raises.
+            for comment in islice(issue.get_comments(), 30)
         )
         request = (
             f"Issue {issue.html_url} on `{base_ref}` at {ref}.\n\n"
