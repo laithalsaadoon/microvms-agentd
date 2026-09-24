@@ -580,6 +580,9 @@ pub struct Sandbox {
 
     // ── the symspec's five variables ─────────────────────────────────────────
     lifecycle: Lifecycle,
+    /// Every transition of `lifecycle`, for a reader that must not take the caller's lock
+    /// (a keepalive task running while the same sandbox is busy inside a long exec).
+    lifecycle_watch: tokio::sync::watch::Sender<Lifecycle>,
     token_installed: bool,
     image_exists: bool,
     was_terminated: bool,
@@ -594,6 +597,9 @@ pub struct Sandbox {
     /// The launch's agent token, held until the session that carries it is built. Kept out
     /// of `Debug` like every other credential here.
     pending_agent_token: Option<String>,
+    /// `maxIdleDurationSeconds` from our own `RunMicrovm` request: a keepalive's cadence
+    /// is checked against it.
+    idle_window: Option<Duration>,
     /// The clock reading when the suspend call was accepted, or `None` when not suspended.
     suspended_at: Option<Duration>,
     /// Set by [`Sandbox::terminate`], so `Drop` can tell an abandoned VM from a torn-down
@@ -651,6 +657,7 @@ impl Sandbox {
             session: None,
             session_backend: None,
             lifecycle: Lifecycle::Pending,
+            lifecycle_watch: tokio::sync::watch::Sender::new(Lifecycle::Pending),
             token_installed: false,
             image_exists: false,
             was_terminated: false,
@@ -658,6 +665,7 @@ impl Sandbox {
             suspended_window: None,
             launch_adoptable: false,
             pending_agent_token: None,
+            idle_window: None,
             suspended_at: None,
             torn_down: false,
             tunnel_identity: None,
@@ -719,6 +727,26 @@ impl Sandbox {
     /// The suspended window this sandbox asked for at launch, once it has launched.
     pub fn suspended_window(&self) -> Option<Duration> {
         self.suspended_window
+    }
+
+    /// A receiver that sees every lifecycle transition without taking this sandbox's lock.
+    ///
+    /// A binding's keepalive reads it between polls: a sandbox busy inside a long exec
+    /// holds the lock the whole time, which is exactly when the keepalive must keep polling,
+    /// and a suspend or terminate must end the keepalive before its next poll auto-resumes
+    /// the VM.
+    pub fn watch_lifecycle(&self) -> tokio::sync::watch::Receiver<Lifecycle> {
+        self.lifecycle_watch.subscribe()
+    }
+
+    fn set_lifecycle(&mut self, lifecycle: Lifecycle) {
+        self.lifecycle = lifecycle;
+        self.lifecycle_watch.send_replace(lifecycle);
+    }
+
+    /// The idle window this sandbox asked for at launch, once it has launched.
+    pub fn idle_window(&self) -> Option<Duration> {
+        self.idle_window
     }
 
     /// The tunnel identity, when the launch asked for one ([`RunRequest::identity`]).
@@ -943,12 +971,13 @@ impl Sandbox {
         self.tunnel_identity = launch_identity.map(crate::identity::LaunchIdentity::keep);
 
         // STATE-1: the launch was accepted.
-        self.lifecycle = Lifecycle::Pending;
+        self.set_lifecycle(Lifecycle::Pending);
         self.image_exists = true;
         // Recorded here rather than after the wait, because the window the idlePolicy
         // enforces was set by *this* request and a launch that then fails still leaves a VM
         // the caller may have to reason about.
         self.suspended_window = Some(Duration::from_secs(u64::from(request.suspended_sec)));
+        self.idle_window = Some(Duration::from_secs(u64::from(request.max_idle_sec)));
         self.microvm = Some(launched);
         // A caller-supplied client token can adopt the VM an earlier attempt launched, which
         // may have idle-suspended since (#195); a minted token always launches afresh.
@@ -1012,7 +1041,7 @@ impl Sandbox {
 
         // STATE-2. The platform reported the run hook succeeded, so the token is in the
         // guest's memory — and this is the one place that counts it (STATE-3).
-        self.lifecycle = Lifecycle::Running;
+        self.set_lifecycle(Lifecycle::Running);
         self.token_installed = true;
         self.bootstrap_count += 1;
         self.microvm = Some(running);
@@ -1055,7 +1084,7 @@ impl Sandbox {
         // first would leave a failed call (a throttle, a dead transport) stuck in a state
         // neither suspend nor resume accepts, bricking the handle over one bad request.
         self.control.suspend(&id).await?;
-        self.lifecycle = Lifecycle::Suspending;
+        self.set_lifecycle(Lifecycle::Suspending);
         // Stamped after the call and before the wait, not after the wait: the idlePolicy's
         // window starts when the platform begins suspending, so timing it from SUSPENDED
         // would under-count the transition and call a closed window open.
@@ -1075,7 +1104,7 @@ impl Sandbox {
         // state to report rather than an exception out of the middle of a teardown, so the
         // wait *wants* TERMINATED — and recording it here is what stops a resume from being
         // offered afterwards (STATE-11).
-        self.lifecycle = match settled.state.as_str() {
+        let settled_lifecycle = match settled.state.as_str() {
             "SUSPENDED" => Lifecycle::Suspended,
             "TERMINATED" => {
                 self.was_terminated = true;
@@ -1091,6 +1120,7 @@ impl Sandbox {
                 ));
             }
         };
+        self.set_lifecycle(settled_lifecycle);
         self.microvm = Some(settled);
         Ok(())
     }
@@ -1156,7 +1186,7 @@ impl Sandbox {
             )
             .await?;
 
-        self.lifecycle = Lifecycle::Running;
+        self.set_lifecycle(Lifecycle::Running);
         // STATE-8, through the endpoint the service just reported rather than the one held:
         // the URL is measured not to change, and reading it from the response is what makes
         // that a fact this code depends on rather than an assumption it encodes.
@@ -1234,7 +1264,7 @@ impl Sandbox {
             // STATE-9. Recorded before the call, so a terminate whose call fails still marks
             // the VM as one this client asked to destroy — which is what stops a later
             // resume (STATE-11) rather than leaving the sandbox looking resumable.
-            self.lifecycle = Lifecycle::Terminating;
+            self.set_lifecycle(Lifecycle::Terminating);
             self.was_terminated = true;
 
             match self.control.terminate(&id).await {
@@ -1260,7 +1290,7 @@ impl Sandbox {
                 {
                     // STATE-10.
                     Ok(settled) => {
-                        self.lifecycle = Lifecycle::Terminated;
+                        self.set_lifecycle(Lifecycle::Terminated);
                         self.microvm = Some(settled);
                     }
                     // Not a leak: the platform accepted the terminate, so the VM is on its
@@ -2169,11 +2199,52 @@ mod tests {
     /// the fake answers TERMINATED, so this test fails with an `ErrorKind::LaunchDied` after
     /// a `ResumeMicrovm` call, naming neither the window nor the seconds elapsed. Verified;
     /// see the packet's guard proofs.
+    /// A keepalive reads this receiver instead of the lock, so every transition must reach
+    /// it: a suspend it missed would be undone by the keepalive's next poll auto-resuming
+    /// the VM.
+    #[tokio::test]
+    async fn the_lifecycle_watch_follows_every_transition() {
+        let (mut sandbox, recorder, _clock) = planted();
+        let watch = sandbox.watch_lifecycle();
+        assert_eq!(*watch.borrow(), Lifecycle::Pending);
+        recorder
+            .answer(
+                "RunMicrovm",
+                Answer::ok(fake::microvm_response("PENDING", None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("RUNNING", None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("SUSPENDED", None)),
+            )
+            .answer(
+                "CreateMicrovmAuthToken",
+                Answer::ok(fake::auth_token_response("proxy-token")),
+            )
+            .answer("SuspendMicrovm", Answer::ok(fake::empty_response()));
+        sandbox
+            .run(RunRequest::new().with_image("arn:image"))
+            .await
+            .expect("launches");
+        assert_eq!(*watch.borrow(), Lifecycle::Running);
+        sandbox.suspend().await.expect("suspends");
+        assert_eq!(*watch.borrow(), Lifecycle::Suspended);
+        assert_eq!(*watch.borrow(), sandbox.lifecycle());
+    }
+
     #[tokio::test]
     async fn a_resume_past_the_suspended_window_is_refused_before_the_wire() {
         // A short window, so the arithmetic is legible: sixty seconds asked for at launch.
         let (mut sandbox, recorder, clock) = suspended_with_window(60).await;
         assert_eq!(sandbox.suspended_window(), Some(Duration::from_secs(60)));
+        assert_eq!(
+            sandbox.idle_window(),
+            Some(Duration::from_secs(600)),
+            "the launch's own maxIdleDurationSeconds, which a keepalive checks its cadence against"
+        );
 
         // The window closes. This is the whole of what the clock injection buys.
         clock.advance(Duration::from_secs(61));

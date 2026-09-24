@@ -33,6 +33,7 @@ pub mod exec;
 pub mod files;
 pub mod forward;
 pub mod http;
+pub mod keepalive;
 pub mod proxy;
 pub mod shell;
 pub mod sse;
@@ -49,6 +50,7 @@ pub use forward::{
 pub use http::{
     ChunkSource, HttpBackend, HttpRequest, HttpResponse, OpenStream, ReqwestBackend, SharedBackend,
 };
+pub use keepalive::{KeepAwake, KeepAwakeEnd, KeepAwakeReport, KeepAwakeTask, RunningGate};
 pub use proxy::{
     Clock, DEFAULT_AGENT_PORT, DEFAULT_REFRESH_AFTER, MAX_TOKEN_LIFETIME, PROXY_AUTH_HEADER,
     PROXY_PORT_HEADER, ProxyAuth, ProxyToken, TokenMinter, TokioClock, WS_AUTH_SUBPROTOCOL_PREFIX,
@@ -203,6 +205,10 @@ fn unauthenticated(mut request: HttpRequest) -> HttpRequest {
 }
 
 /// The control API of one running MicroVM.
+///
+/// `Clone` shares the transport, including the cached proxy token, so a clone moved into a
+/// background task (a keepalive) sees the same refresh a resume triggers.
+#[derive(Clone)]
 pub struct Session {
     transport: Arc<Transport>,
     endpoint: String,
@@ -404,6 +410,20 @@ impl Session {
     pub async fn health(&self) -> Result<protocol::health::Health, Error> {
         self.transport
             .send_json(unauthenticated(HttpRequest::new("GET", "/v1/health")))
+            .await
+    }
+
+    /// Keeps the VM awake by polling health until `stop` resolves or the policy ends it.
+    ///
+    /// See [`keepalive`]: idleness is inbound traffic only, so this is the supported way to
+    /// hold a VM up while an exec works without client traffic.
+    pub async fn keep_awake(
+        &self,
+        policy: &KeepAwake,
+        stop: impl std::future::Future<Output = ()>,
+    ) -> Result<KeepAwakeReport, Error> {
+        policy
+            .run(|| async { self.health().await.map(Some) }, stop)
             .await
     }
 
@@ -970,6 +990,39 @@ mod tests {
             header(&recorder.last(), "authorization").as_deref(),
             Some("Bearer agent-token-abcdef")
         );
+    }
+
+    /// A keepalive poll is exactly the health route, unauthenticated but proxy-authorized:
+    /// the proxy headers are what make it inbound traffic the idle meter counts.
+    #[tokio::test(start_paused = true)]
+    async fn keep_awake_polls_health_through_the_proxy_until_the_vm_is_idle() {
+        let busy = |busy: bool| {
+            let mut body = health_body(true);
+            body["busy"] = serde_json::json!(busy);
+            Reply::ok(body)
+        };
+        let recorder = Recorder::with([busy(true), busy(true), busy(false)]);
+        let (session, _, _) = session_with(Arc::clone(&recorder));
+        let report = session
+            .clone()
+            .keep_awake(
+                &KeepAwake::new(None).while_busy(true),
+                std::future::pending(),
+            )
+            .await
+            .expect("keepalive");
+        assert_eq!((report.end, report.polls), (KeepAwakeEnd::Idle, 3));
+        let seen = recorder.requests();
+        assert_eq!(seen.len(), 3);
+        for request in &seen {
+            assert_eq!(
+                (request.method, request.path.as_str()),
+                ("GET", "/v1/health")
+            );
+            assert_eq!(header(request, "authorization"), None);
+            assert!(header(request, PROXY_AUTH_HEADER).is_some());
+            assert!(header(request, PROXY_PORT_HEADER).is_some());
+        }
     }
 
     /// A session with no minter sends no proxy headers at all, which is the shape for

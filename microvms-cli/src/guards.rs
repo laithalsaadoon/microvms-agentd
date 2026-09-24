@@ -30,8 +30,9 @@ use microvms_core::{Error, ErrorKind, Region};
 
 use crate::cli::{
     AckArgs, AttachArgs, AttachFlags, BuildArgs, Cli, Command, CostArgs, CpArgs, DoctorArgs,
-    ExecArgs, Explicit, HealthArgs, InfraFlags, LogsArgs, LsArgs, MemoryMib, PortForwardArgs,
-    RegionFlags, ResumeArgs, RunArgs, StdinArgs, SuspendArgs, TerminateArgs, TunnelArgs,
+    ExecArgs, Explicit, HealthArgs, InfraFlags, KeepaliveArgs, LogsArgs, LsArgs, MemoryMib,
+    PortForwardArgs, RegionFlags, ResumeArgs, RunArgs, StdinArgs, SuspendArgs, TerminateArgs,
+    TunnelArgs,
 };
 use crate::commands::{Ctx, Rendered};
 use crate::envelope::{Format, Output};
@@ -397,6 +398,18 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
         (
             "health",
             Command::Health(HealthArgs {
+                attach: attach_flags(),
+                region: region_flags(),
+            }),
+            Door::AttachSession,
+        ),
+        (
+            "keepalive",
+            Command::Keepalive(KeepaliveArgs {
+                interval: None,
+                while_busy: false,
+                for_sec: None,
+                idle_window: None,
                 attach: attach_flags(),
                 region: region_flags(),
             }),
@@ -5081,6 +5094,96 @@ async fn health_reports_the_identity_flags_and_warns_without_failing_on_a_degrad
         "a duplicate machine-id is a condition an operator has to be told about: {stderr}"
     );
     assert!(stderr.contains("warning: diskUnderPressure"), "{stderr}");
+}
+
+/// `microvm keepalive` polls only unauthenticated health, and ends when the VM goes idle.
+///
+/// The idle window comes from `GetMicrovm`; this seam refuses the control plane, so the command
+/// must fall back to the platform minimum and say so rather than refuse to keep the VM awake.
+#[tokio::test(start_paused = true)]
+async fn keepalive_polls_health_until_idle_and_names_the_window_it_assumed() {
+    let script = DaemonScript::new();
+    for busy in [true, true, false] {
+        script.reply(
+            200,
+            &format!(
+                r#"{{"version": "0.1.0", "bootstrapped": true, "disk": null,
+                     "identity_degraded": false, "identity_repaired": true,
+                     "busy": {busy}, "execs": 1}}"#
+            ),
+        );
+    }
+    let command = Command::Keepalive(KeepaliveArgs {
+        interval: Some(1.0),
+        while_busy: true,
+        for_sec: None,
+        idle_window: None,
+        attach: attach_flags(),
+        region: region_flags(),
+    });
+    let (result, _, stderr) = against_daemon(&script, &command).await;
+    let rendered = result.expect("keeps the VM awake");
+    assert_eq!(script.paths(), ["GET /v1/health"; 3]);
+    assert_eq!(rendered.kind, "microvm.keepalive");
+    assert_eq!(rendered.data["end"], "idle");
+    assert_eq!(rendered.data["polls"], 3);
+    assert_eq!(rendered.data["lastBusy"], false);
+    assert_eq!(rendered.data["idleWindowSec"], 60.0);
+    assert!(
+        stderr.contains("assuming the platform minimum of 60s"),
+        "an assumed window must be stated: {stderr}"
+    );
+}
+
+/// An interval over half the window is refused before the first poll.
+#[tokio::test]
+async fn keepalive_refuses_an_interval_that_could_let_the_vm_suspend() {
+    let script = DaemonScript::new();
+    let command = Command::Keepalive(KeepaliveArgs {
+        interval: Some(31.0),
+        while_busy: false,
+        for_sec: None,
+        idle_window: None,
+        attach: attach_flags(),
+        region: region_flags(),
+    });
+    let (result, _, _) = against_daemon(&script, &command).await;
+    let error = result.expect_err("refused");
+    assert_eq!(error.exit, Exit::InvalidArg);
+    assert!(
+        error.message.contains("half the 60s idle window"),
+        "{}",
+        error.message
+    );
+    assert!(script.paths().is_empty(), "nothing may be polled first");
+}
+
+/// `--for` ends it while busy; an explicit `--idle-window` is used as given.
+#[tokio::test(start_paused = true)]
+async fn keepalive_for_ends_it_even_while_busy() {
+    let script = DaemonScript::new();
+    for _ in 0..3 {
+        script.reply(
+            200,
+            r#"{"version": "0.1.0", "bootstrapped": true, "disk": null,
+                 "identity_degraded": false, "identity_repaired": true,
+                 "busy": true, "execs": 1}"#,
+        );
+    }
+    let command = Command::Keepalive(KeepaliveArgs {
+        interval: Some(1.0),
+        while_busy: true,
+        for_sec: Some(2.5),
+        idle_window: Some(600.0),
+        attach: attach_flags(),
+        region: region_flags(),
+    });
+    let (result, _, stderr) = against_daemon(&script, &command).await;
+    let rendered = result.expect("runs");
+    assert_eq!(rendered.data["end"], "elapsed");
+    assert_eq!(rendered.data["polls"], 3);
+    assert_eq!(rendered.data["idleWindowSec"], 600.0);
+    assert!(!stderr.contains("assuming"), "{stderr}");
 }
 
 /// A daemon that has not bootstrapped is a success envelope with a non-zero code.

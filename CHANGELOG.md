@@ -177,6 +177,23 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
 
 ### Added
 
+- **A supported keepalive for busy VMs (issue #199).** Idleness is inbound requests
+  through the endpoint proxy and nothing else: measured 2026-09-23 in us-east-1, a
+  CPU-busy exec was suspended 60 to 70 seconds after the last request under a 60-second
+  `maxIdleDurationSeconds`. `microvms_core::session::KeepAwake` is the poll every caller
+  used to hand-roll: unauthenticated `GET /v1/health` at an interval capped at half the
+  idle window (the platform minimum of 60 seconds when the window is unknown), retryable
+  failures retried after one second up to three in a row, optional end on `busy: false`
+  or after a maximum duration, and a stop future. `KeepAwake::spawn` runs it as a task
+  that stops when dropped. Python `Session.keep_awake(...)` (a context manager with
+  `wait()` and `stop()`), JavaScript `session.keepAwake({...})` (`done()` and `stop()`),
+  and `microvm keepalive` (`--interval`, `--while-busy`, `--for`, `--idle-window`; the
+  window is read from `GetMicrovm` when not given) all use it. A keepalive on a
+  sandbox-held session ends when that sandbox suspends or terminates, because its next
+  poll would auto-resume the VM. It reads the new `Sandbox::watch_lifecycle` rather than
+  the sandbox lock, which a long exec holds for its whole run. `Session` is now `Clone`
+  (a clone shares the transport), and `Sandbox::idle_window` reports the launch's window.
+  29 commands now, from 28.
 - **A stop button and process accounting for execs (issues #156, #157).** The daemon
   gains `GET /v1/procs`, a bearer route answering `{procs: [{exec_id, pgid, started_at,
   child_exited, reap, pids}]}` — every registered exec with the live pids of its process

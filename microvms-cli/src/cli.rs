@@ -82,7 +82,7 @@ pub struct Cli {
     pub quiet: bool,
 }
 
-/// The twenty-eight commands.
+/// The twenty-nine commands.
 ///
 /// Variant order is the order `microvm --help` and the manifest list them in, which is
 /// lifecycle order rather than alphabetical: a reader meeting this surface for the first time
@@ -154,6 +154,15 @@ pub enum Command {
     /// and `diskUnderPressure` are conditions no other command reports, and both are reasons to
     /// drain a VM rather than to keep scheduling work onto it.
     Health(HealthArgs),
+
+    /// Keep a running MicroVM awake while work runs inside it, by polling its health.
+    ///
+    /// The platform counts only inbound requests through the endpoint as activity, so an exec
+    /// working with no client traffic is suspended once `maxIdleDurationSeconds` passes. This
+    /// polls `/v1/health` from outside until `--while-busy` sees no running exec, `--for`
+    /// passes, or ctrl-c. The interval may be at most half the idle window, which is read from
+    /// the control plane (or assumed to be the 60-second minimum when it cannot be read).
+    Keepalive(KeepaliveArgs),
 
     /// Release a finished exec's buffered output, which starts its collection clock.
     ///
@@ -1234,6 +1243,31 @@ pub struct ExecArgs {
     /// `--stream` ends with the stream, and `--poll` starts nothing.
     #[arg(long, conflicts_with_all = ["poll", "detach", "stream"])]
     pub kill_on_timeout: bool,
+
+    #[command(flatten)]
+    pub attach: AttachFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct KeepaliveArgs {
+    /// Seconds between health polls. Default: a third of the idle window, at most 20.
+    #[arg(long, value_name = "SECONDS")]
+    pub interval: Option<f64>,
+
+    /// Stop once the daemon reports no running exec.
+    #[arg(long)]
+    pub while_busy: bool,
+
+    /// Stop after this many seconds, busy or not.
+    #[arg(long = "for", value_name = "SECONDS")]
+    pub for_sec: Option<f64>,
+
+    /// The VM's `maxIdleDurationSeconds`. Read from the control plane when omitted.
+    #[arg(long, value_name = "SECONDS")]
+    pub idle_window: Option<f64>,
 
     #[command(flatten)]
     pub attach: AttachFlags,
@@ -2360,9 +2394,9 @@ mod tests {
         assert!(big.contains("65535"), "{big}");
     }
 
-    /// Twenty-eight subcommands, named as the manifest and the response table name them.
+    /// Twenty-nine subcommands, named as the manifest and the response table name them.
     ///
-    /// The block after `exec` is the attached one — `health`, `ack`, `kill`, `ps`, `stdin`, `cp`,
+    /// The block after `exec` is the attached one — `health`, `keepalive`, `ack`, `kill`, `ps`, `stdin`, `cp`,
     /// `tunnel`, `port-forward`, and `shell` beside it — and their position is asserted rather than incidental,
     /// because `--help`'s reading order is the only documentation of which commands need the
     /// identifier triple (`shell` sits with them because it addresses a running VM, though its
@@ -2384,6 +2418,7 @@ mod tests {
                 "agent-prompt",
                 "exec",
                 "health",
+                "keepalive",
                 "ack",
                 "kill",
                 "ps",

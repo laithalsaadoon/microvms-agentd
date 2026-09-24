@@ -4351,6 +4351,112 @@ def drive_idle_keepalive(
             )
 
 
+def drive_keepalive_helper(
+    cli: Cli, launched: Envelope, aws: Any, results: Results
+) -> None:
+    """`microvm keepalive` holds a *busy* VM awake past its idle window (#199).
+
+    `drive_idle_keepalive` proves that outside polling resets the idle timer on an idle VM.
+    This is the case the helper exists for: a VM whose exec keeps a CPU busy with no client
+    traffic, which the platform still counts as idle (measured 2026-09-23: suspended 60 to 70
+    seconds after the last request under a 60-second window). Three measurements and the
+    section's own teardown:
+
+    1. `keepalive --for` holds the busy VM RUNNING for nearly three idle windows, polling at
+       the interval it chose, and reports the window it read from `GetMicrovm` and that the
+       VM was busy.
+    2. The control: once the keepalive stops, the same VM, still busy, suspends. Without
+       this half, a platform that stopped metering would pass the first half vacuously.
+
+    About six minutes on its own VM, launched from the image the suite already built.
+    """
+    print("\n-- keepalive helper holds a busy VM awake (#199) --")
+    idle_window = 60
+    hold = 170
+    print(f"  slow check: ~{hold + 150}s against a {idle_window}s idle window")
+    second = cli.call(
+        "run",
+        "--image",
+        str(launched.data["imageIdentifier"]),
+        "--name",
+        f"microvm-cli-conformance-keepalive-{secrets.token_hex(4)}",
+        "--memory",
+        str(BASELINE_MEMORY_MIB),
+        "--keep",
+        "--region",
+        cli.region,
+        "--max-idle-sec",
+        str(idle_window),
+        "--suspended-sec",
+        "600",
+        "--max-duration-sec",
+        "1800",
+        timeout=15 * 60,
+    )
+    microvm_id = str(second.data["microvmId"])
+    attach = attach_args(cli, second)
+    plane = aws.client(SERVICE)
+    try:
+        # Busy for longer than both halves together, so the control half is a busy VM too.
+        cli.call(
+            "exec",
+            f"end=$(( $(date +%s) + {hold + 240} )); "
+            'while [ "$(date +%s)" -lt "$end" ]; do :; done',
+            "--exec-id",
+            "keepalive-busy",
+            "--detach",
+            *attach,
+        )
+        held = cli.call("keepalive", "--for", str(hold), *attach, timeout=hold + 120.0)
+        state = plane.get_microvm(microvmIdentifier=microvm_id)["state"]
+        results.check(
+            "microvm keepalive holds a busy VM awake past its idle window",
+            state == "RUNNING" and held.data.get("end") == "elapsed",
+            f"{state} after {hold}s against a {idle_window}s window; "
+            f"end={held.data.get('end')!r} polls={held.data.get('polls')!r} "
+            f"interval={held.data.get('intervalSec')!r}",
+        )
+        results.eq(
+            "the keepalive read the VM's idle window from the control plane",
+            held.data.get("idleWindowSec"),
+            float(idle_window),
+        )
+        results.eq(
+            "the keepalive saw the busy exec",
+            held.data.get("lastBusy"),
+            True,
+        )
+
+        print(f"  keepalive stopped; waiting for the {idle_window}s window to elapse")
+        suspended_state = None
+        wait_deadline = time.monotonic() + idle_window * 2.5
+        while time.monotonic() < wait_deadline:
+            time.sleep(20)
+            suspended_state = plane.get_microvm(microvmIdentifier=microvm_id)["state"]
+            if suspended_state != "RUNNING":
+                break
+        results.check(
+            "the same busy VM suspends once the keepalive stops",
+            suspended_state in {"SUSPENDING", "SUSPENDED"},
+            f"{suspended_state} after the window elapsed with the exec still busy",
+        )
+    finally:
+        try:
+            torn = cli.call(
+                "terminate", microvm_id, "--wait", "--region", cli.region, timeout=300.0
+            )
+        except Exception as exc:  # noqa: BLE001 - a teardown failure is a finding
+            results.check(
+                "the keepalive-check VM was terminated", False, f"{microvm_id}: {exc!r}"
+            )
+        else:
+            results.check(
+                "the keepalive-check VM was terminated",
+                not torn.data.get("leaked"),
+                f"{microvm_id} leaked={torn.data.get('leaked')!r}",
+            )
+
+
 def drive_auto_resume(cli: Cli, launched: Envelope, aws: Any, results: Results) -> None:
     """`run --auto-resume`: a suspended VM resumes itself on an incoming request (#68).
 
@@ -5807,6 +5913,8 @@ def main() -> int:
             # waiting delay nothing, and so a failure in any cheaper section is reported
             # before this one spends its time.
             drive_idle_keepalive(cli, launched, aws, results)
+            # The busy-VM case of the same meter, through the supported helper (#199).
+            drive_keepalive_helper(cli, launched, aws, results)
 
             print("\n== daemon logs ==")
             lines = read_daemon_logs(

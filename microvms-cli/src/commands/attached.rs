@@ -41,8 +41,8 @@ use microvms_core::{Error, ErrorKind};
 use serde_json::{Map, Value, json};
 
 use crate::cli::{
-    AckArgs, AttachArgs, AttachFlags, CpArgs, ExecArgs, HealthArgs, KillArgs, PsArgs, RegionFlags,
-    StdinArgs,
+    AckArgs, AttachArgs, AttachFlags, CpArgs, ExecArgs, HealthArgs, KeepaliveArgs, KillArgs,
+    PsArgs, RegionFlags, StdinArgs,
 };
 use crate::commands::{Ctx, Rendered, STREAM_RESPONSE, response_type};
 use crate::exit::{CliError, Exit};
@@ -659,6 +659,99 @@ fn phase_name(phase: microvms_core::protocol::exec::Phase) -> &'static str {
 }
 
 // ── health ──────────────────────────────────────────────────────────────────
+
+/// `microvm keepalive`: hold a VM awake from outside while an exec works inside it.
+///
+/// Idleness is inbound requests through the endpoint proxy and nothing else, so a VM running a
+/// long exec with no client traffic suspends when `maxIdleDurationSeconds` passes (measured
+/// 2026-09-23: a CPU-busy exec was suspended 60 to 70 seconds after the last request under a
+/// 60-second window). The poll policy is the core's [`microvms_core::session::KeepAwake`];
+/// this handler supplies the idle window and the ctrl-c stop.
+///
+/// The window comes from `GetMicrovm` when `--idle-window` is not given. A lookup that fails is
+/// not a reason to refuse: the keepalive then assumes the platform's 60-second minimum, the one
+/// assumption that cannot be too generous, and says so.
+pub async fn keepalive<O: std::io::Write, E: std::io::Write>(
+    ctx: &mut Ctx<'_, O, E>,
+    args: &KeepaliveArgs,
+    interrupt: crate::commands::lifecycle::Interrupt<'_>,
+) -> Result<Rendered, CliError> {
+    let (session, microvm_id) = attach(ctx, &args.region, &args.attach).await?;
+    let seconds = |value: f64| microvms_core::cost::duration_of_secs_f64(value);
+    let idle_window = match args.idle_window {
+        Some(window) => Some(seconds(window)?),
+        None => match idle_window_of(ctx, &args.region, &microvm_id).await {
+            Some(window) => Some(window),
+            None => {
+                ctx.out.progress(
+                    "could not read the VM's idle window; assuming the platform minimum of 60s",
+                );
+                None
+            }
+        },
+    };
+    let mut policy = microvms_core::session::KeepAwake::new(idle_window)
+        .while_busy(args.while_busy)
+        .max_duration(args.for_sec.map(seconds).transpose()?);
+    if let Some(interval) = args.interval {
+        policy = policy.interval(seconds(interval)?);
+    }
+    policy.validate()?;
+    ctx.out.progress(&format!(
+        "keeping {microvm_id} awake: health every {:.0}s against a {:.0}s idle window{}",
+        policy.interval_value().as_secs_f64(),
+        policy.idle_window_value().as_secs_f64(),
+        if args.while_busy {
+            ", until nothing is running"
+        } else {
+            ""
+        },
+    ));
+    let report = session.keep_awake(&policy, interrupt).await?;
+
+    let mut data = Map::new();
+    data.insert("microvmId".into(), json!(microvm_id));
+    data.insert("end".into(), json!(report.end.as_str()));
+    data.insert("polls".into(), json!(report.polls));
+    data.insert("lastBusy".into(), json!(report.last_busy));
+    data.insert("elapsedSec".into(), json!(report.elapsed.as_secs_f64()));
+    data.insert(
+        "intervalSec".into(),
+        json!(policy.interval_value().as_secs_f64()),
+    );
+    data.insert(
+        "idleWindowSec".into(),
+        json!(policy.idle_window_value().as_secs_f64()),
+    );
+    let text = format!(
+        "{microvm_id}: kept awake {:.0}s over {} poll(s), ended {}",
+        report.elapsed.as_secs_f64(),
+        report.polls,
+        report.end
+    );
+    let dense = format!(
+        "{microvm_id}\t{}\t{}\t{:.1}",
+        report.end,
+        report.polls,
+        report.elapsed.as_secs_f64()
+    );
+    let (kind, _) = response_type("keepalive");
+    Ok(Rendered::ok(kind, data, text, dense))
+}
+
+/// The VM's `maxIdleDurationSeconds`, or `None` when the control plane cannot say.
+async fn idle_window_of<O: std::io::Write, E: std::io::Write>(
+    ctx: &mut Ctx<'_, O, E>,
+    region: &RegionFlags,
+    microvm_id: &str,
+) -> Option<std::time::Duration> {
+    let region = region.resolve(ctx.env).ok()?;
+    let plane = ctx.seam.control_plane(region).await.ok()?;
+    let policy = plane.get_microvm(microvm_id).await.ok()?.idle_policy?;
+    Some(std::time::Duration::from_secs(u64::from(
+        policy.max_idle_duration_seconds,
+    )))
+}
 
 /// Asks a running VM's daemon whether it is up, and what its identity repair achieved.
 ///

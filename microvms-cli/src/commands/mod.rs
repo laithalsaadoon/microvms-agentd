@@ -106,7 +106,7 @@ pub struct Ctx<'a, O: Write, E: Write> {
 /// command added without an entry fails rather than shipping undescribed. That check is the
 /// only thing that keeps this table from being the hand-maintained artifact the manifest is
 /// forbidden to be.
-pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 28] = [
+pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 29] = [
     (
         "run",
         "microvm.run",
@@ -274,6 +274,21 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 28] = [
             // old daemon. Issue #80: the validate hook's only trace anywhere.
             "hooks",
             "hooksDropped",
+        ],
+    ),
+    (
+        "keepalive",
+        "microvm.keepalive",
+        &[
+            "microvmId",
+            // Why it ended: stopped (ctrl-c), idle (--while-busy saw nothing running),
+            // elapsed (--for), or not-running.
+            "end",
+            "polls",
+            "lastBusy",
+            "elapsedSec",
+            "intervalSec",
+            "idleWindowSec",
         ],
     ),
     (

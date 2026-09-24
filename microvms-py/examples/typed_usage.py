@@ -137,7 +137,12 @@ def launch(region: Region, size: SizeClass) -> str:
         # `image_identifier` is the ARN string, which `Image.identifier` is the typed way
         # to reach. A checker refuses `run(image_identifier=image)` here, which is the kind
         # of mistake that used to survive until a control-plane rejection.
-        sandbox.run(image_identifier=image.identifier)
+        session = sandbox.run(image_identifier=image.identifier)
+        # The keepalive's report is typed: `end` is a str, `last_busy` may be None.
+        with session.keep_awake(while_busy=True) as keepalive:
+            report = keepalive.wait(timeout=600.0)
+            if report is not None and report.last_busy is None:
+                return f"{report.end} after {report.polls} polls"
         try:
             sandbox.resume()
         except WindowClosedError as closed:

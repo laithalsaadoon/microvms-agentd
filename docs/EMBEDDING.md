@@ -175,6 +175,52 @@ request, and it carries `busy` and `execs` so the poll is informed rather than
 unconditional — an orchestrator can stop keeping a drained VM alive instead of
 billing it to the duration ceiling.
 
+### The supported keepalive
+
+The core ships that loop as `KeepAwake`, and every surface exposes it:
+
+| Surface | Call |
+| --- | --- |
+| Rust | `session.keep_awake(&KeepAwake::new(window).while_busy(true), stop).await` or `KeepAwake::spawn` for a background task |
+| Python | `with session.keep_awake(while_busy=True) as keepalive: ...` (also `wait()` and `stop()`) |
+| JavaScript | `const keepalive = await session.keepAwake({ whileBusy: true }); await keepalive.done();` |
+| CLI | `microvm keepalive --name NAME --while-busy` |
+
+It polls `/v1/health` at an interval of at most half the idle window, so one
+missed poll cannot let the VM suspend. The default interval is a third of the
+window, at most 20 seconds. When the caller does not know the window, the policy
+assumes the platform minimum of 60 seconds. A sandbox-held session knows its own
+window, and the CLI reads it from `GetMicrovm`. Retryable poll failures are
+retried after one second, up to three in a row. `while_busy` ends the loop once
+no exec is running.
+
+A keepalive on a sandbox-held session ends as soon as that sandbox suspends or
+terminates, because the next poll would otherwise auto-resume the VM the caller
+just suspended. It reads the sandbox's lifecycle, not its lock, so it keeps
+polling while a long `run_sync` holds the lock. Stop a keepalive yourself before
+suspending the VM any other way, for example from the CLI.
+
+Measured 2026-09-23 in us-east-1: with `maxIdleDurationSeconds=60`, a CPU-busy
+exec was suspended between 60 and 70 seconds after the last inbound request,
+and a held-open exec output stream with steady output kept the VM running for
+150 seconds with no other requests (`docs/PLATFORM.md`).
+
+### Choosing `maxIdleDurationSeconds`
+
+- **An orchestrator that stays connected** (a CLI session, a notebook, a
+  service): keep the short default and run the keepalive for the length of the
+  work. The VM suspends soon after the orchestrator goes away, which is the
+  cheap failure.
+- **An orchestrator that disconnects between polls** (a durable workflow that
+  suspends between steps): the orchestrator's own poll cadence is the
+  keepalive. Set the window comfortably above the longest gap between polls,
+  including retries, or accept that the VM suspends and auto-resumes on the next
+  poll.
+- **Streaming output**: a client holding an exec stream open receives traffic
+  continuously, which kept a VM awake in the measurement above. It is not a
+  substitute for a keepalive: the stream ends when the exec does, and a reconnect
+  gap longer than the window suspends the VM.
+
 ## Lifecycle from a process that did not launch the VM
 
 A durable workflow step, a reaper, or another machine often holds only an identifier.

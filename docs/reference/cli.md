@@ -1,6 +1,6 @@
 # microvms-agentd · CLI
 
-The `microvm` binary has twenty-eight subcommands, declared as one `clap` `Subcommand` enum in `microvms-cli/src/cli.rs` and built from `microvms-cli/Cargo.toml:20-22`.
+The `microvm` binary has twenty-nine subcommands, declared as one `clap` `Subcommand` enum in `microvms-cli/src/cli.rs` and built from `microvms-cli/Cargo.toml:20-22`.
 
 ## Global flags
 
@@ -224,6 +224,24 @@ And it reports `hooks`, the daemon's own record of every lifecycle-hook invocati
 Flags:
 
 - `AttachFlags` and `RegionFlags` only; this command has no arguments of its own. `microvms-cli/src/cli.rs:1170-1177`.
+
+## keepalive
+
+```
+microvm keepalive [OPTIONS] --endpoint <ENDPOINT> --agent-token <AGENT_TOKEN> --microvm-id <MICROVM_ID>
+```
+
+Holds a VM awake from outside while an exec works inside it. The platform counts only inbound requests through the endpoint as activity, so a long exec with no client traffic is suspended when `maxIdleDurationSeconds` passes (measured 2026-09-23 in us-east-1: a CPU-busy exec was suspended 60 to 70 seconds after the last request under a 60-second window). This polls the unauthenticated `/v1/health` until `--while-busy` sees no running exec, `--for` passes, or ctrl-c, then reports `end` (`idle`, `elapsed`, `stopped`), `polls`, `lastBusy`, `elapsedSec`, `intervalSec`, and `idleWindowSec`. The poll policy is the core's `KeepAwake`, shared with the bindings' `Session.keep_awake` / `session.keepAwake`.
+
+The interval may be at most half the idle window, so one missed poll cannot let the VM suspend. The window is read from `GetMicrovm` unless `--idle-window` names it; when the lookup fails the command assumes the platform's 60-second minimum and says so on stderr.
+
+Flags:
+
+- `--interval <SECONDS>` — seconds between polls. Default: a third of the idle window, at most 20.
+- `--while-busy` — stop once the daemon reports no running exec.
+- `--for <SECONDS>` — stop after this long, busy or not.
+- `--idle-window <SECONDS>` — the VM's `maxIdleDurationSeconds`, instead of reading it from the control plane.
+- Plus `AttachFlags` and `RegionFlags`.
 
 ## ack
 
