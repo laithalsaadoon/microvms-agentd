@@ -28,7 +28,15 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
   `ERR_INTERRUPTED`. SIGPIPE stays ignored, as std sets it: resetting it would kill a
   teardown mid-way. Specified in `spec/core.symspec.json`, checked by the Stateright model
   in `model/src/output.rs`, the Gherkin scenarios in
-  `microvms-cli/tests/features/closed_output.feature`, a bolero fuzz harness, and guards.
+  `microvms-cli/tests/features/closed_output.feature`, a bolero fuzz harness, and guards. The
+  CLI-9 scenario runs against a real VM in `mise run live` (`MICROVM_BDD_ATTACH`); plain
+  `cargo test` leaves it out and says why.
+
+- **`mise run spec` and `mise run spec:core` run again.** `spec:core` named a node path in
+  one home directory that had moved, and the `symspec` on PATH (1.2.1) reads only
+  `docVersion: 3`. Both go through `scripts/check-spec.sh`, which refuses an absent or
+  pre-1.0 CLI by name, and `spec/agentd.symspec.json` is migrated to v3 with keys
+  AGENTD-1..6. Both documents report zero error findings.
 
 ## [0.9.0] — 2026-09-24
 

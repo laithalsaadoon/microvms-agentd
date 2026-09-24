@@ -2409,6 +2409,66 @@ def drive_closed_output(cli: Cli, launched: Envelope, results: Results) -> None:
                 plane.terminate_microvm(microvmIdentifier=vm)
 
 
+#: The `@live` scenario in `microvms-cli/tests/features/closed_output.feature` this suite runs.
+BDD_LIVE_SCENARIO = "a streamed exec stops when its stdout reader closes"
+
+
+def bdd_scenario_outcome(junit_xml: str, scenario: str) -> str:
+    """`passed`, `failed`, `skipped`, or `missing` for one scenario in cucumber's JUnit report.
+
+    `missing` is its own answer rather than a pass: a runner that filtered the scenario out
+    (for example because `MICROVM_BDD_ATTACH` never reached it) exits 0 with the scenario
+    absent, and reading that as green is how a live check goes vacuous.
+    """
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.fromstring(junit_xml)
+    except ET.ParseError:
+        return "missing"
+    for case in root.iter("testcase"):
+        if scenario in (case.get("name") or ""):
+            if case.find("failure") is not None or case.find("error") is not None:
+                return "failed"
+            if case.find("skipped") is not None:
+                return "skipped"
+            return "passed"
+    return "missing"
+
+
+def drive_closed_output_bdd(cli: Cli, launched: Envelope, results: Results) -> None:
+    """CLI-9's Gherkin scenario, run by the cucumber runner against the suite's kept VM.
+
+    `cargo test` leaves the `@live` scenario out; here `MICROVM_BDD_ATTACH` carries this VM's
+    attach flags so it runs for real: a streamed ticker whose stdout reader leaves after the
+    first chunk exits ERR_INTERRUPTED promptly, names the exec, and leaves it running. The
+    scenario kills its exec whatever the outcome. The JUnit report, not the exit code alone,
+    decides the check, so a scenario that never ran is a FAIL.
+    """
+    print("\n-- closed output, Gherkin (#216: the CLI-9 @live scenario) --")
+    repo = Path(__file__).resolve().parents[1]
+    with tempfile.TemporaryDirectory() as tmp:
+        junit = Path(tmp) / "bdd-junit.xml"
+        env = {
+            **os.environ,
+            "MICROVM_BDD_ATTACH": json.dumps(attach_args(cli, launched)),
+            "CUCUMBER_JUNIT": str(junit),
+        }
+        argv = ["cargo", "test", "-q", "-p", "microvms-cli", "--test", "bdd"]
+        cli.log.append(command_for_log(argv) + "  # MICROVM_BDD_ATTACH=<attach flags>")
+        run = subprocess.run(
+            argv, cwd=repo, env=env, capture_output=True, text=True, timeout=1800
+        )
+        outcome = bdd_scenario_outcome(
+            junit.read_text() if junit.exists() else "", BDD_LIVE_SCENARIO
+        )
+    results.check(
+        "CLI-9 the Gherkin scenario streams, stops, and detaches against the live VM",
+        run.returncode == 0 and outcome == "passed",
+        f"rc={run.returncode} scenario={outcome} tail={run.stdout[-300:]!r}",
+    )
+
+
 def drive_stdin(cli: Cli, launched: Envelope, results: Results) -> None:
     """stdin: five checks. `cat` cannot exit until stdin closes, so this fails by hanging.
 
@@ -5721,6 +5781,29 @@ def check_run_section(results: "Results") -> None:
     )
 
 
+def check_bdd_outcome(results: "Results") -> None:
+    """The JUnit reader tells a passed scenario from a failed, skipped, or absent one."""
+    name = BDD_LIVE_SCENARIO
+
+    def report(body: str) -> str:
+        return f'<testsuites><testsuite name="closed_output">{body}</testsuite></testsuites>'
+
+    other = '<testcase name="Scenario: help with stdout closed"/>'
+    cases = {
+        "passed": report(f'{other}<testcase name="Scenario: {name}"/>'),
+        "failed": report(f'<testcase name="Scenario: {name}"><failure/></testcase>'),
+        "skipped": report(f'<testcase name="Scenario: {name}"><skipped/></testcase>'),
+        "missing": report(other),
+    }
+    seen = {want: bdd_scenario_outcome(xml, name) for want, xml in cases.items()}
+    results.check(
+        "the Gherkin JUnit reader tells passed from failed, skipped, and absent",
+        all(want == got for want, got in seen.items())
+        and bdd_scenario_outcome("not xml", name) == "missing",
+        repr(seen),
+    )
+
+
 def self_test() -> int:
     """Drives the envelope-to-exception mapping against the stub. No AWS, no money.
 
@@ -5740,6 +5823,7 @@ def self_test() -> int:
         check_log_privacy(cli, results, Path(tmp))
         check_closing_reader_helper(results)
         check_run_section(results)
+        check_bdd_outcome(results)
 
         # -- the success side -------------------------------------------------
         ok = cli.call("ok")
@@ -6380,6 +6464,14 @@ def main() -> int:
             run_section(results, "streaming", drive_streaming, cli, launched, results)
             run_section(
                 results, "closed_output", drive_closed_output, cli, launched, results
+            )
+            run_section(
+                results,
+                "closed_output_bdd",
+                drive_closed_output_bdd,
+                cli,
+                launched,
+                results,
             )
             run_section(results, "stdin", drive_stdin, cli, launched, results)
             run_section(

@@ -78,14 +78,17 @@ Feature: A closed stdout or stderr never crashes the CLI or changes its outcome
 
   Rule: CLI-9 — a stream whose reader leaves stops, detaches, and says how to reattach
 
-    @CLI-9 @needs-daemon
+    @CLI-9 @live
     Scenario: a streamed exec stops when its stdout reader closes
-      # The shipped binary reaches a daemon only through the AWS control plane, which mints
-      # its proxy token, so this cannot run offline. It is covered in-crate by the guard
-      # `a_stream_whose_reader_leaves_stops_detaches_and_exits_interrupted` in
-      # `microvms-cli/src/guards.rs`, over a scripted daemon, and by the fuzz harness.
-      Given a daemon reachable without AWS credentials
-      When I stream an exec and close stdout after the first event
-      Then the CLI exited with code 11
-      And stderr names the exec id
+      # Needs a running VM, which the shipped binary reaches only through the AWS control
+      # plane. `cargo test` leaves it out and says so; `mise run live` runs it against the
+      # suite's kept VM by setting MICROVM_BDD_ATTACH (see conformance/run_rs.py,
+      # `drive_closed_output_bdd`). In-crate, the guard
+      # `a_stream_whose_reader_leaves_stops_detaches_and_exits_interrupted` covers it over a
+      # scripted daemon.
+      Given a VM attached through MICROVM_BDD_ATTACH
+      When I stream a ticker exec and close stdout after the first chunk
+      Then the CLI exited with code 11 within 30 seconds
+      And the CLI did not panic
+      And stderr names the exec id and how to reattach
       And the exec is still running on the daemon

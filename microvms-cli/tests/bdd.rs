@@ -4,7 +4,8 @@
 //! The scenarios live in `tests/features/*.feature`, tagged with the requirement each one
 //! verifies; this file is their step definitions and runner. It is a `harness = false` test,
 //! so `cargo test` runs it on every CI system, and it writes a JUnit report when
-//! `CUCUMBER_JUNIT` names a file.
+//! `CUCUMBER_JUNIT` names a file. Give that path absolutely: `cargo test` runs this binary from
+//! the package directory, so a relative one resolves under `microvms-cli/`.
 //!
 //! # Closing a reader deterministically
 //!
@@ -15,8 +16,13 @@
 //! (`>&-`) would not reproduce #216: a write to a closed descriptor is `EBADF`, which std's
 //! stdout treats as success.
 //!
-//! Scenarios tagged `@needs-daemon` have steps no definition here matches, so they report
-//! as skipped: the shipped binary reaches a daemon only through the AWS control plane.
+//! # Live scenarios
+//!
+//! Scenarios tagged `@live` need a running VM, which the shipped binary reaches only through
+//! the AWS control plane. They run when `MICROVM_BDD_ATTACH` holds the attach flags as a JSON
+//! array (`["--endpoint", …, "--agent-token", …, "--microvm-id", …, "--region", …]`), which
+//! `conformance/run_rs.py` sets for the live suite's kept VM, with the caller's AWS
+//! credentials inherited. Without it they are left out, and the runner says so on stderr.
 
 #[allow(dead_code)]
 mod support;
@@ -25,7 +31,7 @@ use std::io::{self, Read};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
-use cucumber::{World, WriterExt, cli, then, when, writer};
+use cucumber::{World, WriterExt, cli, given, then, when, writer};
 
 /// How long one invocation may take before the step fails. A command blocked writing into a
 /// pipe nobody reads is the hang this bounds.
@@ -37,6 +43,13 @@ const TABLE_ROWS: i32 = 17;
 /// Rust's runtime exits 101 after a panic, outside the exit table.
 const PANIC_STATUS: i32 = 101;
 
+/// The environment variable that turns the `@live` scenarios on (see the module docs).
+const LIVE_ATTACH: &str = "MICROVM_BDD_ATTACH";
+
+/// A ticker that outlives any bound here, so a stream that stops did so because its reader
+/// left and not because the command ended.
+const TICKER: &str = r#"i=0; while [ "$i" -lt 600 ]; do echo "tick-$i"; i=$((i+1)); sleep 1; done"#;
+
 #[derive(Debug, Default, World)]
 struct Cli {
     /// The exit code, or `None` when the child died by a signal.
@@ -45,6 +58,12 @@ struct Cli {
     signal: Option<i32>,
     /// Everything the child wrote to stderr, when stderr was read.
     stderr: Option<String>,
+    /// The attach flags of a live VM, from [`LIVE_ATTACH`].
+    attach: Option<Vec<String>>,
+    /// The exec a live scenario started, killed after the scenario whatever its outcome.
+    exec_id: Option<String>,
+    /// How long the last invocation took.
+    elapsed: Option<Duration>,
 }
 
 /// The arguments after `microvm` in a step's command text.
@@ -195,6 +214,111 @@ fn did_not_panic(world: &mut Cli) {
     }
 }
 
+// ── live: CLI-9 through a real VM ───────────────────────────────────────────
+
+/// `microvm` with `args` and the caller's environment, which carries the AWS credentials the
+/// control plane needs to mint the proxy token.
+fn live_command(args: &[&str], attach: &[String]) -> Command {
+    let mut command = Command::new(support::binary());
+    command.args(args).args(attach).stdin(Stdio::null());
+    command
+}
+
+/// The `data` object of the envelope a `--json` invocation printed.
+fn envelope_data(stdout: &[u8]) -> serde_json::Value {
+    let envelope: serde_json::Value =
+        serde_json::from_slice(stdout).expect("one JSON envelope on stdout");
+    envelope["data"].clone()
+}
+
+#[given(expr = "a VM attached through MICROVM_BDD_ATTACH")]
+fn live_vm(world: &mut Cli) {
+    let raw = std::env::var(LIVE_ATTACH)
+        .unwrap_or_else(|_| panic!("{LIVE_ATTACH} is unset; the runner leaves @live out then"));
+    let attach: Vec<String> =
+        serde_json::from_str(&raw).expect("MICROVM_BDD_ATTACH is a JSON array of flags");
+    assert!(
+        attach.iter().any(|flag| flag == "--microvm-id"),
+        "MICROVM_BDD_ATTACH names no --microvm-id"
+    );
+    world.attach = Some(attach);
+}
+
+// CLI-9: the reader leaves after the first chunk, as `microvm exec … --stream | head -c N`.
+#[when("I stream a ticker exec and close stdout after the first chunk")]
+fn stream_and_close(world: &mut Cli) {
+    let attach = world.attach.clone().expect("the Given step attached a VM");
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.subsec_nanos())
+        .unwrap_or_default();
+    let exec_id = format!("bdd-closed-output-{}-{nanos:x}", std::process::id());
+    world.exec_id = Some(exec_id.clone());
+    let mut command = live_command(
+        &["--quiet", "exec", TICKER, "--stream", "--exec-id", &exec_id],
+        &attach,
+    );
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let started = Instant::now();
+    let mut child = command.spawn().expect("the microvm binary spawns");
+    let stderr = drain(child.stderr.take().expect("piped stderr"));
+    let mut stdout = child.stdout.take().expect("piped stdout");
+    let mut chunk = [0_u8; 4096];
+    let read = stdout
+        .read(&mut chunk)
+        .expect("the first chunk of the stream");
+    assert!(read > 0, "the stream ended before its first chunk");
+    // The reader leaves here, with the ticker still running in the VM.
+    drop(stdout);
+    let status = wait(&mut child);
+    world.elapsed = Some(started.elapsed());
+    world.record(status, Some(stderr.join().expect("stderr reader")));
+}
+
+// CLI-9: the stream stopped promptly rather than running out the ticker's ten minutes.
+#[then(expr = "the CLI exited with code {int} within {int} seconds")]
+fn exited_within(world: &mut Cli, expected: i32, seconds: u64) {
+    exited_with(world, expected);
+    let elapsed = world.elapsed.expect("a timed invocation");
+    assert!(
+        elapsed < Duration::from_secs(seconds),
+        "CLI-9: the stream took {elapsed:?} to stop after its reader left"
+    );
+}
+
+// CLI-9: the note on stderr names the exec and the command that reattaches to it.
+#[then("stderr names the exec id and how to reattach")]
+fn names_the_exec(world: &mut Cli) {
+    let exec_id = world.exec_id.as_deref().expect("a started exec");
+    let stderr = world.stderr.as_deref().unwrap_or_default();
+    assert!(
+        stderr.contains(exec_id) && stderr.contains(&format!("--exec-id {exec_id}")),
+        "CLI-9: stderr does not name {exec_id} with a reattach command: {stderr}"
+    );
+}
+
+// CLI-9: the CLI detached; it did not kill the exec it stopped streaming.
+#[then("the exec is still running on the daemon")]
+fn still_running(world: &mut Cli) {
+    let exec_id = world.exec_id.clone().expect("a started exec");
+    let attach = world.attach.clone().expect("an attached VM");
+    let output = live_command(&["--json", "--quiet", "exec", "--poll", &exec_id], &attach)
+        .output()
+        .expect("microvm exec --poll runs");
+    let data = envelope_data(&output.stdout);
+    assert_eq!(
+        data["phase"], "running",
+        "CLI-9: the exec should still be running after the stream stopped: {data}"
+    );
+}
+
+/// Kills a live scenario's exec whether or not its steps passed, so the VM is left as found.
+fn kill_exec(world: &Cli) {
+    if let (Some(exec_id), Some(attach)) = (&world.exec_id, &world.attach) {
+        let _ = live_command(&["--json", "--quiet", "kill", exec_id], attach).output();
+    }
+}
+
 /// Flags `cargo test` forwards to every test binary, which cucumber's own parser refuses.
 const LIBTEST_FLAGS: [&str; 6] = [
     "--exact",
@@ -228,19 +352,38 @@ async fn main() {
         || args
             .iter()
             .any(|arg| LIBTEST_FLAGS.iter().any(|flag| arg.starts_with(flag)));
+    // `@live` scenarios need a VM (see the module docs); without one they are left out, and
+    // the report says why rather than listing them as skipped forever.
+    let live = std::env::var_os(LIVE_ATTACH).is_some();
+    if !live {
+        eprintln!("bdd: @live scenarios left out; set {LIVE_ATTACH} to run them against a VM");
+    }
+    let keep = move |_: &cucumber::gherkin::Feature,
+                     _: Option<&cucumber::gherkin::Rule>,
+                     scenario: &cucumber::gherkin::Scenario| {
+        live || !scenario.tags.iter().any(|tag| tag == "live")
+    };
     macro_rules! run {
         ($cucumber:expr) => {
             if libtest {
                 $cucumber
                     .with_cli(cli::Opts::<_, _, _, cli::Empty>::default())
-                    .run_and_exit(features)
+                    .filter_run_and_exit(features, keep)
                     .await
             } else {
-                $cucumber.run_and_exit(features).await
+                $cucumber.filter_run_and_exit(features, keep).await
             }
         };
     }
-    let cucumber = Cli::cucumber().max_concurrent_scenarios(4);
+    let cucumber = Cli::cucumber()
+        .max_concurrent_scenarios(4)
+        .after(|_, _, _, _, world| {
+            Box::pin(async move {
+                if let Some(world) = world {
+                    kill_exec(world);
+                }
+            })
+        });
     match std::env::var_os("CUCUMBER_JUNIT") {
         Some(path) => {
             let report = std::fs::File::create(&path).expect("the JUnit report file");
