@@ -622,6 +622,9 @@ pub struct Sandbox {
     /// Built by [`Sandbox::adopt`] around a VM another process launched. That process owns
     /// the VM's teardown, so dropping this handle is not a leak and `Drop` stays quiet.
     adopted: bool,
+    /// Set by [`Sandbox::detach`]: the VM was handed to another process, which now owns its
+    /// lifecycle and teardown. Every transition is refused and `Drop` stays quiet.
+    detached: bool,
     /// The launch's tunnel identity, when [`RunRequest::identity`] asked for one.
     ///
     /// Holds the host secret and the VM's *public* pin — the VM's own secret was dropped
@@ -643,7 +646,46 @@ impl std::fmt::Debug for Sandbox {
             .field("was_terminated", &self.was_terminated)
             .field("suspended_window", &self.suspended_window)
             .field("adopted", &self.adopted)
+            .field("detached", &self.detached)
             .finish_non_exhaustive()
+    }
+}
+
+/// What another process needs to adopt a VM this sandbox handed off with
+/// [`Sandbox::detach`]: pass the fields to [`Sandbox::adopt`] (or [`Sandbox::adopt_in`]).
+///
+/// The agent token is a credential: readable through [`Detached::agent_token`] so it can be
+/// persisted, and absent from `Debug`, so a log line that formats the record cannot leak it.
+/// Store it the way [`crate::names::NameRecord`] asks: privately, encrypted.
+#[derive(Clone)]
+pub struct Detached {
+    /// The VM's identifier.
+    pub microvm_id: String,
+    /// The HTTPS endpoint its daemon answers on.
+    pub endpoint: String,
+    /// The region the VM runs in.
+    pub region: Region,
+    /// The daemon port the endpoint's proxy tokens are minted for.
+    pub port: u16,
+    agent_token: String,
+}
+
+impl Detached {
+    /// The bearer the VM's daemon accepts; required by [`Sandbox::adopt`].
+    pub fn agent_token(&self) -> &str {
+        &self.agent_token
+    }
+}
+
+impl std::fmt::Debug for Detached {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Detached")
+            .field("microvm_id", &self.microvm_id)
+            .field("endpoint", &self.endpoint)
+            .field("region", &self.region)
+            .field("port", &self.port)
+            .field("agent_token", &"<redacted>")
+            .finish()
     }
 }
 
@@ -687,6 +729,7 @@ impl Sandbox {
             suspended_at: None,
             torn_down: false,
             adopted: false,
+            detached: false,
             tunnel_identity: None,
         }
     }
@@ -897,6 +940,7 @@ impl Sandbox {
     /// the run hook returns 200, so a per-VM secret delivered at launch wins the
     /// first-writer race through the endpoint.
     pub async fn run(&mut self, request: RunRequest) -> Result<&mut Session, Error> {
+        self.refuse_detached("run")?;
         // STATE-3's local half. A sandbox that has already bootstrapped cannot bootstrap
         // again, and the refusal is here rather than in a comment because `run` twice is
         // the plausible mistake — a retry loop around a launch that timed out.
@@ -1040,6 +1084,7 @@ impl Sandbox {
     /// existing VM through its client token resumes it if it idle-suspended (#195); a fresh
     /// launch that reaches any terminal state first fails fast with `stateReason` (TRAP-8).
     pub async fn wait_until_running(&mut self, timeout: Duration) -> Result<&mut Session, Error> {
+        self.refuse_detached("wait until running")?;
         let id = self.require_microvm("wait_until_running")?;
         if self.lifecycle != Lifecycle::Pending {
             return Err(Error::invalid_arg(format!(
@@ -1252,6 +1297,84 @@ impl Sandbox {
         }
     }
 
+    /// Hands the VM off to another process and returns what that process needs to adopt it.
+    ///
+    /// For a workflow whose steps run in different processes (a durable function's launch
+    /// step, then later steps that [`Sandbox::adopt`]): the launching process calls this
+    /// instead of dropping the sandbox, which would warn that a live VM was abandoned. The
+    /// VM keeps running and nothing is sent to AWS. From here on this sandbox is inert — its
+    /// session is dropped and `run`, `wait_until_running`, `suspend`, `resume`, and
+    /// `terminate` are refused — because the adopter now owns the lifecycle, and a second
+    /// handle driving it would bypass the adopter's guards.
+    ///
+    /// Refused (`Precondition`) when there is no live VM to hand off: nothing launched yet,
+    /// already torn down or terminated, or already detached.
+    pub fn detach(&mut self) -> Result<Detached, Error> {
+        self.refuse_detached("detach")?;
+        let Some(vm) = self.microvm.as_ref() else {
+            return Err(Error::new(
+                ErrorKind::Precondition,
+                "nothing to detach: this sandbox has not launched a VM.",
+            ));
+        };
+        if self.torn_down || !self.lifecycle.is_live() {
+            return Err(Error::new(
+                ErrorKind::Precondition,
+                format!(
+                    "microvm {} is {} and there is no live VM to hand off; only a PENDING, \
+                     RUNNING, or SUSPENDED VM can be adopted.",
+                    vm.id, self.lifecycle,
+                ),
+            ));
+        }
+        let agent_token = self
+            .session
+            .as_ref()
+            .map(|session| session.agent_token().to_string())
+            .or_else(|| self.pending_agent_token.clone())
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Precondition,
+                    format!(
+                        "microvm {} has no agent token to hand off; an adopter could not \
+                         reach its daemon.",
+                        vm.id
+                    ),
+                )
+            })?;
+        let detached = Detached {
+            microvm_id: vm.id.clone(),
+            endpoint: vm.endpoint.clone(),
+            region: self.control.region().clone(),
+            port: self.control.port(),
+            agent_token,
+        };
+        self.detached = true;
+        self.session = None;
+        self.pending_agent_token = None;
+        Ok(detached)
+    }
+
+    /// Whether [`Sandbox::detach`] handed this sandbox's VM to another process.
+    pub fn detached(&self) -> bool {
+        self.detached
+    }
+
+    /// Refuses `what` on a sandbox whose VM was handed off.
+    fn refuse_detached(&self, what: &str) -> Result<(), Error> {
+        if !self.detached {
+            return Ok(());
+        }
+        let id = self.microvm.as_ref().map_or("?", |vm| vm.id.as_str());
+        Err(Error::new(
+            ErrorKind::Precondition,
+            format!(
+                "cannot {what}: microvm {id} was detached and belongs to whoever adopts it. \
+                 Adopt it with `Sandbox::adopt` and {what} through that handle."
+            ),
+        ))
+    }
+
     /// Whether this sandbox was built by [`Sandbox::adopt`] rather than by its own launch.
     pub fn adopted(&self) -> bool {
         self.adopted
@@ -1272,6 +1395,7 @@ impl Sandbox {
     /// calls. That is the observable difference between this and a client that lets AWS
     /// answer, and it is what the test asserts on.
     pub async fn suspend(&mut self) -> Result<(), Error> {
+        self.refuse_detached("suspend")?;
         let id = self.require_microvm("suspend")?;
 
         // STATE-5.
@@ -1355,6 +1479,7 @@ impl Sandbox {
     /// against the pre-suspend instance may no longer validate, and that rejection reads
     /// exactly like a dead daemon.
     pub async fn resume(&mut self) -> Result<&mut Session, Error> {
+        self.refuse_detached("resume")?;
         let id = self.require_microvm("resume")?;
 
         // STATE-11's local half: a terminated VM never returns to RUNNING, so the refusal
@@ -1459,6 +1584,13 @@ impl Sandbox {
     /// [`TeardownReport::undeleted`] for why this crate names it rather than deleting it.
     pub async fn terminate(&mut self, opts: TeardownOpts) -> TeardownReport {
         let mut report = TeardownReport::default();
+        if let Err(error) = self.refuse_detached("terminate") {
+            // Never erroring is `terminate`'s contract, so the refusal is reported rather
+            // than raised; the VM is untouched and still belongs to its adopter.
+            report.failures.push(error.to_string());
+            report.lifecycle = Some(self.lifecycle);
+            return report;
+        }
         self.torn_down = true;
 
         // The session first: it holds a cached proxy token whose only remaining use would be
@@ -1584,25 +1716,32 @@ impl Sandbox {
 /// dependency, and taking one on to warn about a leak would be a dependency for a diagnostic.
 /// Not `eprintln!`: it panics when stderr's reader has gone, and a panic in `drop` during an
 /// unwind aborts the process (CLI-7). The error is ignored; there is nowhere left to report it.
+impl Sandbox {
+    /// The warning `Drop` writes for a live VM nobody took responsibility for, or `None`
+    /// when dropping is not a leak: torn down, adopted (its launcher owns it), or detached
+    /// (its adopter owns it).
+    fn drop_warning(&self) -> Option<String> {
+        if self.torn_down || self.adopted || self.detached {
+            return None;
+        }
+        let vm = self.microvm.as_ref()?;
+        self.lifecycle.is_live().then(|| {
+            format!(
+                "warning: the Sandbox for microvm {} was dropped in {} without terminate() or \
+                 detach(). Nothing was torn down — Drop cannot await, so a teardown here would \
+                 deadlock inside a runtime. The VM bills until its maximumDurationInSeconds \
+                 ceiling: terminate it with `microvm terminate {}`.",
+                vm.id, self.lifecycle, vm.id,
+            )
+        })
+    }
+}
+
 impl Drop for Sandbox {
     fn drop(&mut self) {
         use std::io::Write as _;
-        if self.torn_down || self.adopted {
-            return;
-        }
-        if let Some(vm) = self.microvm.as_ref()
-            && self.lifecycle.is_live()
-        {
-            let _ = writeln!(
-                std::io::stderr(),
-                "warning: the Sandbox for microvm {} was dropped in {} without terminate(). \
-                 Nothing was torn down — Drop cannot await, so a teardown here would deadlock \
-                 inside a runtime. The VM bills until its maximumDurationInSeconds ceiling: \
-                 terminate it with `microvm terminate {}`.",
-                vm.id,
-                self.lifecycle,
-                vm.id,
-            );
+        if let Some(warning) = self.drop_warning() {
+            let _ = writeln!(std::io::stderr(), "{warning}");
         }
     }
 }
@@ -1684,6 +1823,99 @@ mod tests {
             .await
             .expect("the launch reaches RUNNING");
         (sandbox, recorder, clock)
+    }
+
+    /// **Detach hands off, and nothing warns or moves afterwards.** A launched sandbox
+    /// warns on drop; once detached it returns what an adopter needs (with the token kept
+    /// out of `Debug`), stops warning, makes no further control-plane call, and refuses every
+    /// transition — including `terminate`, which reports the refusal instead of raising.
+    ///
+    /// **Falsification** — 2026-09-24. Leave `detached` out of `drop_warning`'s early
+    /// return and the "no warning after detach" assertion goes red; drop the
+    /// `refuse_detached` guard from `suspend` and the zero-calls assertion goes red (the
+    /// suspend reaches `SuspendMicrovm`). Both restored.
+    #[tokio::test]
+    async fn a_detached_sandbox_hands_off_its_vm_and_stays_quiet() {
+        let (mut sandbox, recorder, _clock) = launched().await;
+        assert!(
+            sandbox.drop_warning().is_some(),
+            "a launched, live VM warns on drop"
+        );
+        let token = sandbox
+            .session()
+            .expect("launched")
+            .agent_token()
+            .to_string();
+        let vm = sandbox.microvm().expect("launched").clone();
+
+        let detached = sandbox.detach().expect("a RUNNING VM detaches");
+        assert_eq!(detached.microvm_id, vm.id);
+        assert_eq!(detached.endpoint, vm.endpoint);
+        assert_eq!(detached.agent_token(), token);
+        assert_eq!(detached.region, Region::UsEast1);
+        let printed = format!("{detached:?} {sandbox:?}");
+        assert!(!printed.contains(&token), "{printed}");
+        assert!(printed.contains("detached: true"), "{printed}");
+
+        assert!(sandbox.detached());
+        assert!(
+            sandbox.drop_warning().is_none(),
+            "detached is not abandoned"
+        );
+        assert!(
+            sandbox.session().is_none(),
+            "the session went to the adopter"
+        );
+
+        let before = recorder.calls().len();
+        for error in [
+            sandbox.suspend().await.expect_err("detached"),
+            sandbox.resume().await.map(|_| ()).expect_err("detached"),
+            sandbox
+                .run(RunRequest::new().with_image("arn:image"))
+                .await
+                .map(|_| ())
+                .expect_err("detached"),
+            sandbox
+                .wait_until_running(Duration::from_secs(1))
+                .await
+                .map(|_| ())
+                .expect_err("detached"),
+            sandbox.detach().map(|_| ()).expect_err("already detached"),
+        ] {
+            assert_eq!(error.kind(), ErrorKind::Precondition, "{error}");
+            assert!(error.to_string().contains("detached"), "{error}");
+            assert!(!error.to_string().contains(&token), "{error}");
+        }
+        let report = sandbox.terminate(TeardownOpts::default()).await;
+        assert!(!report.terminate_accepted);
+        assert!(report.failures[0].contains("detached"), "{report:?}");
+        assert_eq!(recorder.calls().len(), before, "detached makes no AWS call");
+        assert!(
+            sandbox.drop_warning().is_none(),
+            "a refused terminate is still quiet"
+        );
+    }
+
+    /// Detach needs a live VM: nothing launched, or already torn down, is refused.
+    #[tokio::test]
+    async fn detach_refuses_without_a_live_vm() {
+        let (mut unlaunched, _recorder, _clock) = planted();
+        let error = unlaunched.detach().expect_err("nothing launched");
+        assert_eq!(error.kind(), ErrorKind::Precondition);
+        assert!(!unlaunched.detached());
+
+        let (mut sandbox, recorder, _clock) = launched().await;
+        recorder
+            .answer("TerminateMicrovm", Answer::ok("{}"))
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("TERMINATED", None)),
+            );
+        sandbox.terminate(TeardownOpts::default()).await;
+        let error = sandbox.detach().expect_err("torn down");
+        assert_eq!(error.kind(), ErrorKind::Precondition, "{error}");
+        assert!(!sandbox.detached());
     }
 
     /// Drives a launched sandbox to SUSPENDED, which is where resume starts.

@@ -614,6 +614,14 @@ impl AgentVm {
         Ok(Image::wrap(image))
     }
 
+    /// Hands the VM off to another process; see `Sandbox.detach`. The adopter passes the
+    /// same agents to `AgentVm.adopt`.
+    #[napi]
+    pub async fn detach(&self) -> Result<crate::sandbox::Detached, AsyncError> {
+        let inner = self.sandbox.lock().await.detach().map_err(js_async)?;
+        Ok(crate::sandbox::Detached { inner })
+    }
+
     /// Launches with egress and waits for the daemon to answer.
     ///
     /// Egress is not optional: neither agent reaches Bedrock without it. The managed internet

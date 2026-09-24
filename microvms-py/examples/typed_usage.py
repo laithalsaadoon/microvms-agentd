@@ -183,6 +183,18 @@ def deferred_launch(region: Region, image: str) -> str:
     return session.endpoint
 
 
+def launch_step(region: Region, image: str) -> dict[str, object]:
+    """A durable launch step that hands its VM to later steps. Written for the checker."""
+    sandbox = Sandbox(region)
+    sandbox.run(image_identifier=image, client_token="job-1", wait=False)
+    detached = sandbox.detach()
+    handed_off: bool = sandbox.is_detached
+    port: int = detached.port
+    record: dict[str, object] = detached.to_dict()
+    record["handed_off"] = handed_off and port > 0
+    return record
+
+
 def adopted_step(region: Region, record: dict[str, str]) -> str:
     """A durable step that adopts the VM an earlier step launched. Written for the checker."""
     sandbox = Sandbox.adopt(
