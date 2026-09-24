@@ -1580,22 +1580,28 @@ impl Sandbox {
 /// inside a runtime or race the process exit. The warning names the id, because the only
 /// useful thing a drop can do is tell whoever reads stderr what to go delete.
 ///
-/// `eprintln!` rather than a log macro because this crate has no logging dependency, and
-/// taking one on to warn about a leak would be a dependency for a diagnostic.
+/// A plain write to stderr rather than a log macro, because this crate has no logging
+/// dependency, and taking one on to warn about a leak would be a dependency for a diagnostic.
+/// Not `eprintln!`: it panics when stderr's reader has gone, and a panic in `drop` during an
+/// unwind aborts the process (CLI-7). The error is ignored; there is nowhere left to report it.
 impl Drop for Sandbox {
     fn drop(&mut self) {
+        use std::io::Write as _;
         if self.torn_down || self.adopted {
             return;
         }
         if let Some(vm) = self.microvm.as_ref()
             && self.lifecycle.is_live()
         {
-            eprintln!(
+            let _ = writeln!(
+                std::io::stderr(),
                 "warning: the Sandbox for microvm {} was dropped in {} without terminate(). \
                  Nothing was torn down — Drop cannot await, so a teardown here would deadlock \
                  inside a runtime. The VM bills until its maximumDurationInSeconds ceiling: \
                  terminate it with `microvm terminate {}`.",
-                vm.id, self.lifecycle, vm.id,
+                vm.id,
+                self.lifecycle,
+                vm.id,
             );
         }
     }

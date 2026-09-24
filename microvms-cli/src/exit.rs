@@ -271,7 +271,7 @@ pub const EXIT_TABLE: [ExitRow; 17] = [
     ExitRow {
         exit: Exit::Interrupted,
         code: Some("ERR_INTERRUPTED"),
-        meaning: "interrupted after launch; teardown ran and any leak is named in the payload",
+        meaning: "interrupted before the command finished: after a launch, teardown ran and any leak is named in the payload; a streamed exec whose stdout reader left keeps running",
         finding: "The build log group survives Terraform",
     },
     ExitRow {

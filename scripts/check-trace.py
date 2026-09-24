@@ -1,0 +1,209 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+# SPDX-License-Identifier: Apache-2.0
+"""Check that each traced requirement appears in every verification layer.
+
+A requirement in `spec/core.symspec.json` is traced when it is listed in `TRACED`
+below. Each traced key must appear in six places, and this script reports where:
+
+  model    a Stateright property whose name starts with the key (`model/src/`)
+  gherkin  a tag `@KEY` on a scenario (`microvms-cli/tests/features/`)
+  fuzz     a mention in a fuzz harness (a file calling `bolero::check!` or
+           `fuzz_target!`)
+  test     a mention in a Rust test: `microvms-cli/src/guards.rs`, a file under a
+           crate's `tests/`, or a source file's test module
+  impl     a mention in production source (`microvms-cli/src/`, `microvms-core/src/`)
+  live     a live conformance check whose name starts with the key
+           (`conformance/run_rs.py`, run against AWS by `mise run live`)
+
+It also refuses a mention of an unknown key, so a typo such as `CLI-10` for `CLI-9`
+cannot pass as coverage. `docs/TRACEABILITY.md` is the rendered matrix:
+
+  ./scripts/check-trace.py           print the matrix; fail if a layer is missing
+  ./scripts/check-trace.py --write   also render docs/TRACEABILITY.md
+  ./scripts/check-trace.py --check   also fail if docs/TRACEABILITY.md is stale
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+SPEC = ROOT / "spec" / "core.symspec.json"
+DOC = ROOT / "docs" / "TRACEABILITY.md"
+
+# Requirements traced end to end, and the issue that introduced each set.
+TRACED = {
+    "CLI-7": "#216",
+    "CLI-8": "#216",
+    "CLI-9": "#216",
+}
+
+LAYERS = ("model", "gherkin", "fuzz", "test", "impl", "live")
+
+KEY = re.compile(r"\b(CLI-\d+)\b")
+PROPERTY = re.compile(
+    r'Property::(?:<\w+>::)?(?:always|sometimes|eventually)\(\s*"(CLI-\d+)\b'
+)
+TAG = re.compile(r"@(CLI-\d+)\b")
+# A live conformance check whose name starts with the requirement key.
+LIVE_CHECK = re.compile(r'results\.(?:check|eq)\(\s*f?"(CLI-\d+)\b')
+FUZZ_MARKER = re.compile(r"bolero::check!|fuzz_target!")
+TEST_MODULE = re.compile(r"^#\[cfg\(test\)\]\s*$", re.MULTILINE)
+
+
+def spec_keys() -> dict[str, str]:
+    """Every requirement key in the spec, with its EARS sentence."""
+    document = json.loads(SPEC.read_text())
+    return {
+        entry["key"]: entry["sentence"]
+        for entry in document["requirements"].values()
+        if entry.get("key")
+    }
+
+
+def rel(path: Path) -> str:
+    return path.relative_to(ROOT).as_posix()
+
+
+def rust_files(*directories: str) -> list[Path]:
+    files: list[Path] = []
+    for directory in directories:
+        files.extend(sorted((ROOT / directory).rglob("*.rs")))
+    return [path for path in files if "target" not in path.parts]
+
+
+def split_test_region(text: str) -> tuple[str, str]:
+    """A source file's production text and its trailing `#[cfg(test)]` module, if any."""
+    for match in TEST_MODULE.finditer(text):
+        following = text[match.end() :].lstrip()
+        if following.startswith("mod ") and not following.split("\n", 1)[
+            0
+        ].rstrip().endswith(";"):
+            return text[: match.start()], text[match.start() :]
+    return text, ""
+
+
+def collect() -> dict[str, dict[str, set[str]]]:
+    """For every key found anywhere, the files each layer found it in."""
+    found: dict[str, dict[str, set[str]]] = {}
+
+    def note(key: str, layer: str, path: Path) -> None:
+        found.setdefault(key, {layer: set() for layer in LAYERS})[layer].add(rel(path))
+
+    for path in rust_files("model/src"):
+        for key in PROPERTY.findall(path.read_text()):
+            note(key, "model", path)
+
+    for path in sorted(
+        (ROOT / "microvms-cli" / "tests" / "features").glob("*.feature")
+    ):
+        for key in TAG.findall(path.read_text()):
+            note(key, "gherkin", path)
+
+    cli_tests = rust_files("microvms-cli/tests", "microvms-core/tests")
+    for path in rust_files("microvms-cli/src", "microvms-core/src") + cli_tests:
+        text = path.read_text()
+        if FUZZ_MARKER.search(text):
+            for key in KEY.findall(text):
+                note(key, "fuzz", path)
+            continue
+        if path in cli_tests or path.name == "guards.rs":
+            for key in KEY.findall(text):
+                note(key, "test", path)
+            continue
+        production, tests = split_test_region(text)
+        for key in KEY.findall(production):
+            note(key, "impl", path)
+        for key in KEY.findall(tests):
+            note(key, "test", path)
+
+    for key in LIVE_CHECK.findall((ROOT / "conformance" / "run_rs.py").read_text()):
+        note(key, "live", ROOT / "conformance" / "run_rs.py")
+    return found
+
+
+def render(found: dict[str, dict[str, set[str]]], sentences: dict[str, str]) -> str:
+    lines = [
+        "# Requirement traceability",
+        "",
+        "Generated by `./scripts/check-trace.py --write`; `mise run trace:check` fails when",
+        "this file is stale or a traced requirement is missing a layer. Requirements are",
+        "defined in `spec/core.symspec.json`.",
+        "",
+        "| Requirement | " + " | ".join(LAYERS) + " |",
+        "|---|" + "---|" * len(LAYERS),
+    ]
+    for key in TRACED:
+        cells = [str(len(found.get(key, {}).get(layer, ()))) for layer in LAYERS]
+        lines.append(f"| {key} | " + " | ".join(cells) + " |")
+    for key in TRACED:
+        lines += ["", f"## {key}", "", sentences[key], ""]
+        for layer in LAYERS:
+            files = sorted(found.get(key, {}).get(layer, ()))
+            lines.append(
+                f"- **{layer}:** " + (", ".join(f"`{f}`" for f in files) or "none")
+            )
+    return "\n".join(lines) + "\n"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--write", action="store_true", help="render docs/TRACEABILITY.md"
+    )
+    mode.add_argument("--check", action="store_true", help="fail if the doc is stale")
+    args = parser.parse_args()
+
+    sentences = spec_keys()
+    found = collect()
+    problems: list[str] = []
+
+    for key in TRACED:
+        if key not in sentences:
+            problems.append(f"{key} is traced but not defined in {rel(SPEC)}")
+    for key, layers in sorted(found.items()):
+        if key not in sentences:
+            where = sorted({path for paths in layers.values() for path in paths})
+            problems.append(
+                f"{key} is mentioned but not defined in the spec: {', '.join(where)}"
+            )
+    for key in TRACED:
+        for layer in LAYERS:
+            if not found.get(key, {}).get(layer):
+                problems.append(f"{key} has no {layer} layer")
+
+    width = max(len(layer) for layer in LAYERS)
+    print("requirement  " + "  ".join(layer.ljust(width) for layer in LAYERS))
+    for key in TRACED:
+        counts = [
+            str(len(found.get(key, {}).get(layer, ()))).ljust(width) for layer in LAYERS
+        ]
+        print(f"{key:<11}  " + "  ".join(counts))
+
+    rendered = render(found, sentences) if not problems or args.write else ""
+    if args.write and rendered:
+        DOC.write_text(rendered)
+        print(f"wrote {rel(DOC)}")
+    if (
+        args.check
+        and not problems
+        and (not DOC.exists() or DOC.read_text() != rendered)
+    ):
+        problems.append(f"{rel(DOC)} is stale: run ./scripts/check-trace.py --write")
+
+    for problem in problems:
+        print(f"trace: {problem}", file=sys.stderr)
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

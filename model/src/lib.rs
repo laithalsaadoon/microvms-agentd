@@ -34,6 +34,7 @@
 //! instead of asserting that the invariant is fine.
 
 pub mod client;
+pub mod output;
 
 use stateright::{Model, Property};
 

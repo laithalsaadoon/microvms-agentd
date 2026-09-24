@@ -39,6 +39,13 @@ repository = "https://github.com/laithalsaadoon/microvms-agentd"
 # `microvms-js` because their registry is PyPI and npm.
 publish = false
 
+# `cargo bolero test` builds with this profile. Optimised for throughput, and `dev`'s debug
+# assertions stay on, because `Output`'s one-envelope `debug_assert!` is part of what the
+# closed-output harness checks (#216).
+[profile.fuzz]
+inherits = "dev"
+opt-level = 3
+
 # Tuned for the shipping artifact: one static binary, small enough to bake into
 # any task base image, with no interpreter or runtime dependency.
 [profile.release]

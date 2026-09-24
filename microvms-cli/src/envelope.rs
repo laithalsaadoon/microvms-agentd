@@ -53,10 +53,11 @@
 //! stderr would make `microvm exec --stream build.sh > log` write an empty log, and buffering the
 //! events to keep stdout a single document would remove the only reason to stream at all.
 
-use std::io::{IsTerminal, Write};
+use std::io::{self, IsTerminal, Write};
 
 use serde_json::{Map, Value, json};
 
+use crate::closed_output;
 use crate::exit::CliError;
 
 /// The envelope's own version.
@@ -109,6 +110,11 @@ pub struct Output<O: Write, E: Write> {
     /// thing written — and it forces that envelope **compact**, because "the last line is the
     /// envelope" is only a true sentence when the envelope occupies one line.
     streaming: bool,
+    /// Set when a write to stdout found its reader gone. Sticky: nothing is written to stdout
+    /// again, and a stream reads it to stop (CLI-7, CLI-9).
+    stdout_closed: bool,
+    /// The same for stderr (CLI-7, CLI-8).
+    stderr_closed: bool,
 }
 
 impl<O: Write, E: Write> Output<O, E> {
@@ -121,7 +127,55 @@ impl<O: Write, E: Write> Output<O, E> {
             stderr,
             emitted: false,
             streaming: false,
+            stdout_closed: false,
+            stderr_closed: false,
         }
+    }
+
+    /// Whether stdout's reader has gone. Once true it stays true, and stdout is not written
+    /// again (CLI-7, CLI-9).
+    pub fn stdout_closed(&self) -> bool {
+        self.stdout_closed
+    }
+
+    /// Whether stderr's reader has gone (CLI-7, CLI-8).
+    pub fn stderr_closed(&self) -> bool {
+        self.stderr_closed
+    }
+
+    /// One write and flush to stdout, unless its reader has already gone.
+    ///
+    /// CLI-7: a `BrokenPipe` is recorded rather than raised or panicked on. Any other error is
+    /// dropped as before: this layer has no failure to report it through, and the command's
+    /// own outcome is what the exit code carries (CLI-8).
+    fn write_stdout(&mut self, write: impl FnOnce(&mut O) -> io::Result<()>) {
+        if self.stdout_closed {
+            return;
+        }
+        if let Err(error) = write(&mut self.stdout).and_then(|()| self.stdout.flush())
+            && closed_output::is_closed_reader(&error)
+        {
+            self.stdout_closed = true;
+        }
+    }
+
+    /// One write and flush to stderr, unless its reader has already gone (CLI-7, CLI-8).
+    fn write_stderr(&mut self, write: impl FnOnce(&mut E) -> io::Result<()>) {
+        if self.stderr_closed {
+            return;
+        }
+        if let Err(error) = write(&mut self.stderr).and_then(|()| self.stderr.flush())
+            && closed_output::is_closed_reader(&error)
+        {
+            self.stderr_closed = true;
+        }
+    }
+
+    /// Text that is not an envelope, written to stdout as given: clap's help and version, and
+    /// `constants --emit-json`'s bare document. The one path for them, so no `print!` is needed
+    /// anywhere (CLI-7).
+    pub fn raw(&mut self, text: &str) {
+        self.write_stdout(|stdout| stdout.write_all(text.as_bytes()));
     }
 
     pub fn format(&self) -> Format {
@@ -143,15 +197,13 @@ impl<O: Write, E: Write> Output<O, E> {
     /// A human-facing progress line. Never stdout, whatever the format.
     pub fn progress(&mut self, message: &str) {
         if !self.quiet {
-            let _ = writeln!(self.stderr, "{message}");
-            let _ = self.stderr.flush();
+            self.write_stderr(|stderr| writeln!(stderr, "{message}"));
         }
     }
 
     /// A warning the operator sees even under `--quiet`. See the module docs.
     pub fn warn(&mut self, message: &str) {
-        let _ = writeln!(self.stderr, "warning: {message}");
-        let _ = self.stderr.flush();
+        self.write_stderr(|stderr| writeln!(stderr, "warning: {message}"));
     }
 
     /// The single write to stdout per invocation.
@@ -169,26 +221,21 @@ impl<O: Write, E: Write> Output<O, E> {
         // property `conformance/run_rs.py` asserts — "every line before the last parses as an
         // event, the last parses as the envelope" — would be false for a correct stream.
         if self.streaming && self.format.is_json() {
-            let _ = writeln!(self.stdout, "{envelope}");
-            let _ = self.stdout.flush();
+            self.write_stdout(|stdout| writeln!(stdout, "{envelope}"));
             return;
         }
-        match self.format {
+        let rendered = match self.format {
+            // Compact under `--dense`'s sibling flag combination is handled by `--dense
+            // --json`: dense JSON is `to_string`, otherwise pretty. An agent paying per token
+            // asked for the first.
             Format::Json => {
-                // Compact under `--dense`'s sibling flag combination is handled by
-                // `--dense --json`: dense JSON is `to_string`, otherwise pretty. An agent
-                // paying per token asked for the first.
-                let rendered =
-                    serde_json::to_string_pretty(envelope).unwrap_or_else(|_| envelope.to_string());
-                let _ = writeln!(self.stdout, "{rendered}");
+                serde_json::to_string_pretty(envelope).unwrap_or_else(|_| envelope.to_string())
             }
-            _ => {
-                // A dense *failure* still carries the code in `text` — `main.rs::report`
-                // renders it with `render_error_dense`, so field one is the code.
-                let _ = writeln!(self.stdout, "{text}");
-            }
-        }
-        let _ = self.stdout.flush();
+            // A dense *failure* still carries the code in `text` — `main.rs::report` renders it
+            // with `render_error_dense`, so field one is the code.
+            _ => text.to_string(),
+        };
+        self.write_stdout(|stdout| writeln!(stdout, "{rendered}"));
     }
 
     /// Emits the compact JSON form. Used when `--dense --json` are both given.
@@ -196,8 +243,7 @@ impl<O: Write, E: Write> Output<O, E> {
         if self.format.is_json() {
             debug_assert!(!self.emitted, "a second envelope reached stdout");
             self.emitted = true;
-            let _ = writeln!(self.stdout, "{envelope}");
-            let _ = self.stdout.flush();
+            self.write_stdout(|stdout| writeln!(stdout, "{envelope}"));
             return;
         }
         self.emit(envelope, text);
@@ -222,8 +268,7 @@ impl<O: Write, E: Write> Output<O, E> {
             return;
         }
         self.streaming = true;
-        let _ = writeln!(self.stdout, "{event}");
-        let _ = self.stdout.flush();
+        self.write_stdout(|stdout| writeln!(stdout, "{event}"));
     }
 
     /// Raw bytes of a streamed exec's output, for the human formats.
@@ -239,8 +284,7 @@ impl<O: Write, E: Write> Output<O, E> {
         if self.format.is_json() {
             return;
         }
-        let _ = self.stdout.write_all(bytes);
-        let _ = self.stdout.flush();
+        self.write_stdout(|stdout| stdout.write_all(bytes));
     }
 
     /// Whether an NDJSON stream has been started on stdout.

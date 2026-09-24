@@ -31,6 +31,10 @@ pre-commit:
       run: mise run background:check
       glob: "examples/background-coding-agent/**/*.{py,tf,toml,yml}"
 
+    - name: requirement traceability
+      run: mise run trace:check
+      glob: "{spec/*.json,model/src/*.rs,microvms-cli/src/**/*.rs,microvms-core/src/**/*.rs,microvms-cli/tests/**/*,microvms-core/tests/*.rs,docs/TRACEABILITY.md}"
+
     - name: license headers
       run: ./scripts/check-license-headers.py
       glob: "*.{rs,py,pyi,mjs,sh,tf}"
