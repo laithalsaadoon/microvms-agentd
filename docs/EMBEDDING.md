@@ -303,5 +303,4 @@ the stanza already sets the first two.
 | `AGENTD_MAX_STDIN_WRITE_BYTES` | 1 MiB | largest single decoded stdin write (`agentd/src/config.rs:54-57`) |
 | `AGENTD_DISK_RESERVE_BYTES` | 256 MiB | free bytes a write target must keep; a write that would cross it is refused with 507. Zero disables the guard (`agentd/src/config.rs:63-69`) |
 | `AGENTD_REPAIR_IDENTITY` | `true` | whether to replace image-derived identity at the first successful run hook, because N VMs restored from one snapshot share machine-id, hostname, and boot_id. `0`/`false`/`no`/`off` opt out (`agentd/src/config.rs:70-78`) |
-| `AGENTD_HOOKS_DIR` | `/etc/agentd/hooks.d` | where workload handlers live: an executable named `run`, `suspend`, `resume`, or `terminate` runs when that hook fires ([Protocol](PROTOCOL.md), "Workload hook handlers") (`agentd/src/config.rs:79-82`) |
-| `AGENTD_HOOK_HANDLER_TIMEOUT_SECS` | `20` | how long one handler may run before its process group is killed; clamped to 1–55 so it stays under the image's hook timeout (`agentd/src/config.rs:83-87`) |
+| `AGENTD_HOOK_HANDLER_TIMEOUT_SECS` | `20` | how long one handler may run before its process group is killed; clamped to 1–55 so it stays under the image's hook timeout (`agentd/src/config.rs:84-88`) |

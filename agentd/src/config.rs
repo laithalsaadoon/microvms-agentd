@@ -78,7 +78,8 @@ pub struct Config {
     pub repair_identity: bool,
     /// Where workload handlers for the lifecycle hooks live: `<dir>/run`,
     /// `<dir>/suspend`, `<dir>/resume`, `<dir>/terminate`. A missing file means no
-    /// handler. `AGENTD_HOOKS_DIR`.
+    /// handler. Fixed at `/etc/agentd/hooks.d` outside tests: the directory decides what
+    /// the daemon executes as root, so it is image-owned and never read from the environment.
     pub hooks_dir: std::path::PathBuf,
     /// How long one handler may run before it is killed. Kept below the image's hook
     /// timeout (the client configures 30 s; the platform allows 1–60 s) so the daemon
@@ -161,9 +162,6 @@ impl Config {
         }
         if let Some(flag) = env_flag("AGENTD_REPAIR_IDENTITY") {
             cfg.repair_identity = flag;
-        }
-        if let Ok(dir) = std::env::var("AGENTD_HOOKS_DIR") {
-            cfg.hooks_dir = std::path::PathBuf::from(dir);
         }
         if let Some(secs) = env_parse::<u64>("AGENTD_HOOK_HANDLER_TIMEOUT_SECS") {
             cfg.hook_handler_timeout = Duration::from_secs(secs.clamp(1, MAX_HOOK_HANDLER_SECS));

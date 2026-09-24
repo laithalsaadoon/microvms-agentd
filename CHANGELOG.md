@@ -22,7 +22,7 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
 ### Added
 
 - **Workload handlers for the lifecycle hooks (#198).** An executable at
-  `/etc/agentd/hooks.d/<hook>` (`AGENTD_HOOKS_DIR`) runs for `run`, `suspend`, `resume`
+  `/etc/agentd/hooks.d/<hook>` runs for `run`, `suspend`, `resume`
   and `terminate`, before the daemon answers the platform, within a budget
   (`AGENTD_HOOK_HANDLER_TIMEOUT_SECS`, default 20, at most 55) after which its process group
   is killed. The hook always answers 200; the outcome (exit code, signal, timeout,

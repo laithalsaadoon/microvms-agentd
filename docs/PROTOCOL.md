@@ -62,7 +62,8 @@ daemon omits them, and empty/zero is the honest reading.
 The platform always keeps a suspended VM's full memory and disk, and
 `SuspendMicrovm` takes no option to change what survives. What a workload can
 control is what runs at the boundary. When the image carries an executable at
-`<hooks dir>/<hook>` (`AGENTD_HOOKS_DIR`, default `/etc/agentd/hooks.d`), the
+`/etc/agentd/hooks.d/<hook>` (fixed; the directory is image-owned and not read from the
+environment, because it decides what the daemon executes as root), the
 daemon runs it for the `run`, `suspend`, `resume`, and `terminate` hooks:
 
 - **Before answering.** A `suspend` handler runs before the freeze; a `resume`

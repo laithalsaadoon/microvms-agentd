@@ -41,6 +41,9 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::state::AppState;
 
+/// The hooks a handler can exist for; each is also the handler's file name.
+pub const HOOK_NAMES: [&str; 4] = ["run", "suspend", "resume", "terminate"];
+
 /// How much of each output stream is logged.
 const LOGGED_OUTPUT_BYTES: u64 = 4 * 1024;
 
@@ -53,7 +56,11 @@ pub async fn run(state: &AppState, hook: &str, slot: Option<usize>) {
     let Some(slot) = slot else {
         return;
     };
-    let path = state.config().hooks_dir.join(hook);
+    // Only a known hook name selects a file, so no caller-supplied string becomes a path.
+    let Some(name) = HOOK_NAMES.iter().copied().find(|name| *name == hook) else {
+        return;
+    };
+    let path = state.config().hooks_dir.join(name);
     if !path.exists() {
         return;
     }
