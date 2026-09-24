@@ -28,6 +28,11 @@ defined in `spec/core.symspec.json` and `spec/agentd.symspec.json`.
 | BIND-18 | 1 | 1 | 1 | 2 | 1 | 1 |
 | BIND-19 | 1 | 1 | 1 | 2 | 1 | 1 |
 | BIND-20 | 1 | 1 | 1 | 4 | 3 | 1 |
+| BIND-6 | 1 | 1 | 1 | 5 | 6 | 1 |
+| BIND-7 | 1 | 1 | 1 | 4 | 3 | 1 |
+| BIND-8 | 1 | 1 | 1 | 4 | 1 | 1 |
+| BIND-9 | 1 | 1 | 1 | 4 | 2 | 1 |
+| BIND-10 | 1 | 1 | 1 | 5 | 4 | 1 |
 
 ## CLI-7
 
@@ -269,4 +274,59 @@ If a caller-supplied or fetched agentd binary is not an aarch64 ELF executable, 
 - **fuzz:** `microvms-core/src/provision_fuzz.rs`
 - **test:** `microvms-core/src/provision.rs`, `microvms-core/tests/bdd_provision.rs`, `microvms-js/__test__/provision.mjs`, `microvms-py/tests/test_provision.py`
 - **impl:** `microvms-core/src/provision.rs`, `microvms-js/src/provision.rs`, `microvms-py/src/provision.rs`
+- **live:** `conformance/run_rs.py`
+
+## BIND-6
+
+The microvms-core shall report a finished exec's POSIX exit code as 124 when a deadline ended the command, as 128 plus the signal number for any other signal death, and otherwise as the exit code.
+
+- **model:** `model/src/run.rs`
+- **gherkin:** `microvms-core/tests/features/run_to_completion.feature`
+- **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
+- **test:** `microvms-core/src/session/exec.rs`, `microvms-core/tests/bdd_run_to_completion.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
+- **impl:** `microvms-core/src/session/complete.rs`, `microvms-core/src/session/exec.rs`, `microvms-js/src/exec.rs`, `microvms-js/src/session.rs`, `microvms-py/src/exec.rs`, `microvms-py/src/session.rs`
+- **live:** `conformance/run_rs.py`
+
+## BIND-7
+
+The microvms-core shall annotate an exec result with one human-readable note for each of truncated output, an expired daemon deadline, writers left alive past the linger deadline, an expired client deadline, and a synthesized result.
+
+- **model:** `model/src/run.rs`
+- **gherkin:** `microvms-core/tests/features/run_to_completion.feature`
+- **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
+- **test:** `microvms-core/src/session/exec.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
+- **impl:** `microvms-core/src/session/exec.rs`, `microvms-js/src/exec.rs`, `microvms-py/src/exec.rs`
+- **live:** `conformance/run_rs.py`
+
+## BIND-8
+
+If the output stream of a run-to-completion call ends without the terminal exit event, then the microvms-core shall fall back to waiting for and acknowledging the exec and return exactly one result.
+
+- **model:** `model/src/run.rs`
+- **gherkin:** `microvms-core/tests/features/run_to_completion.feature`
+- **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
+- **test:** `microvms-core/src/session/complete.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
+- **impl:** `microvms-core/src/session/complete.rs`
+- **live:** `conformance/run_rs.py`
+
+## BIND-9
+
+If the client deadline of a run-to-completion call expires before the exec's result is acknowledged, then the microvms-core shall signal the exec's process group before acknowledging the exec within the client grace period.
+
+- **model:** `model/src/run.rs`
+- **gherkin:** `microvms-core/tests/features/run_to_completion.feature`
+- **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
+- **test:** `microvms-core/src/session/complete.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
+- **impl:** `microvms-core/src/session/complete.rs`, `microvms-core/src/session/exec.rs`
+- **live:** `conformance/run_rs.py`
+
+## BIND-10
+
+If the acknowledgement that follows a client-deadline kill fails, then the microvms-core shall return a synthesized result whose POSIX exit code is 124 and whose notes name the failure.
+
+- **model:** `model/src/run.rs`
+- **gherkin:** `microvms-core/tests/features/run_to_completion.feature`
+- **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
+- **test:** `microvms-core/src/session/complete.rs`, `microvms-core/tests/bdd_run_to_completion.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
+- **impl:** `microvms-core/src/session/complete.rs`, `microvms-core/src/session/exec.rs`, `microvms-js/src/exec.rs`, `microvms-py/src/exec.rs`
 - **live:** `conformance/run_rs.py`

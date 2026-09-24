@@ -40,12 +40,15 @@
 use std::sync::Arc;
 
 use microvms_core::sandbox::Sandbox;
-use microvms_core::session::{Session, mint_exec_id};
+use microvms_core::session::{
+    CompletionOptions, CompletionPlan, DEFAULT_CLIENT_GRACE, OutputFlow, OutputSink, Session,
+    mint_exec_id,
+};
 use microvms_core::{Error, ErrorKind};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 
-use crate::errors::PyCoreResult;
+use crate::errors::{CoreError, PyCoreResult};
 use crate::exec::{PyExecHandle, PyExecResult, seconds};
 use crate::region::PyRegion;
 use crate::runtime;
@@ -55,6 +58,9 @@ const DEFAULT_READY_TIMEOUT: f64 = 120.0;
 
 /// The default one-shot `run_sync` deadline, matching the Python client's 300s.
 const DEFAULT_RUN_SYNC_TIMEOUT: f64 = 300.0;
+
+/// `run_to_completion`'s default `client_grace_sec`, from the core so the two cannot drift.
+const DEFAULT_CLIENT_GRACE_SEC: f64 = DEFAULT_CLIENT_GRACE.as_secs_f64();
 
 /// The daemon's liveness answer. `bootstrapped` is the useful field.
 #[pyclass(frozen, name = "Health", module = "microvms")]
@@ -785,6 +791,113 @@ impl PySession {
         Ok(PyExecResult::wrap(self.detached(py, move |session| {
             runtime::block_on_detached(session.run_sync(request, timeout))
         })?))
+    }
+
+    /// Start, stream, and collect one command: exactly one `ExecResult` back (BIND-6..10).
+    ///
+    /// With `on_output`, each `OutputChunk` is handed to it as it arrives. The result then
+    /// comes from the ack that follows the terminal `exit` event, or, when the stream ends
+    /// without one, from a wait and ack. When `timeout_sec + client_grace_sec` passes first
+    /// (or, with no `timeout_sec`, the VM's maximum lifetime), the process group is killed
+    /// and the exec waited for and acked within `client_grace_sec` once more; if that fails
+    /// too the result is synthesized with `posix_exit_code` 124. `posix_exit_code` and
+    /// `notes` say what ended the command.
+    ///
+    /// An exception from `on_output` stops delivery; the exec is still waited for and acked
+    /// so nothing is left behind, and then the exception is re-raised. `shell`, `user`,
+    /// `group`, and `inherit_image_env` mean what they mean on `run()`: `shell="bash"` with a
+    /// script string runs it under bash, which dash-based images need for `pipefail`.
+    #[pyo3(signature = (
+        command,
+        *,
+        on_output=None,
+        shell=ShellArg::Flag(false),
+        cwd=None,
+        env=None,
+        user=None,
+        group=None,
+        timeout_sec=None,
+        exec_id=None,
+        inherit_image_env=false,
+        client_grace_sec=DEFAULT_CLIENT_GRACE_SEC,
+    ))]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the run() signature plus the callback and the client grace, one \
+         keyword-only parameter each"
+    )]
+    fn run_to_completion(
+        &self,
+        py: Python<'_>,
+        command: Command,
+        on_output: Option<Py<PyAny>>,
+        shell: ShellArg,
+        cwd: Option<String>,
+        env: Option<std::collections::HashMap<String, String>>,
+        user: Option<Principal>,
+        group: Option<Principal>,
+        timeout_sec: Option<f64>,
+        exec_id: Option<String>,
+        inherit_image_env: bool,
+        client_grace_sec: f64,
+    ) -> PyResult<PyExecResult> {
+        let request = protocol::exec::StartRequest {
+            exec_id: exec_id.unwrap_or_else(mint_exec_id),
+            command: command.into_argv(),
+            shell: shell.into(),
+            cwd,
+            env: env.unwrap_or_default(),
+            user: user.map(Into::into),
+            group: group.map(Into::into),
+            timeout_sec,
+            stdin: false,
+            reap_group_on_exit: false,
+            inherit_image_env,
+        };
+        let options = CompletionOptions {
+            client_grace: seconds(client_grace_sec).map_err(CoreError)?,
+            ..CompletionOptions::default()
+        };
+        // Planned before the start, so a bad `timeout_sec` is refused with nothing running.
+        let plan = CompletionPlan::new(&request, options).map_err(CoreError)?;
+        // Started under the sandbox lock and driven after it is released: the callback runs
+        // Python, and Python that reaches back into this sandbox must not find the lock held.
+        let handle = self
+            .detached(py, move |session| {
+                runtime::block_on_detached(session.run(request))
+            })
+            .map_err(CoreError)?;
+        let raised: Arc<std::sync::Mutex<Option<PyErr>>> = Arc::default();
+        let sink = on_output.map(|callback| {
+            let raised = Arc::clone(&raised);
+            Box::new(move |event| {
+                // The drive runs on this thread with the GIL released (`RUNTIME.block_on`),
+                // so the callback reattaches for the one call.
+                let delivered = Python::attach(|py| {
+                    let chunk = crate::exec::event_to_py(py, event)?;
+                    callback.call1(py, (chunk,)).map(drop)
+                });
+                let flow = match delivered {
+                    Ok(()) => std::ops::ControlFlow::Continue(()),
+                    Err(error) => {
+                        *raised
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error);
+                        std::ops::ControlFlow::Break(())
+                    }
+                };
+                Box::pin(std::future::ready(flow)) as OutputFlow
+            }) as OutputSink
+        });
+        let result = py.detach(|| runtime::block_on_detached(plan.drive(&handle, sink)));
+        if let Some(error) = raised
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        {
+            return Err(error);
+        }
+        Ok(PyExecResult::wrap(result.map_err(CoreError)?))
     }
 
     /// Signals an exec's whole process group. Returns whether anything was signalled.

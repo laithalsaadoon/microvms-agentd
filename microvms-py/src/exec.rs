@@ -73,6 +73,9 @@ pub struct PyExecResult {
     writers_may_be_alive: bool,
     done: bool,
     succeeded: bool,
+    posix_exit_code: Option<i32>,
+    notes: Vec<String>,
+    synthesized: bool,
 }
 
 impl PyExecResult {
@@ -97,6 +100,9 @@ impl PyExecResult {
                 .is_some_and(|outcome| outcome.writers_may_be_alive),
             done: result.done(),
             succeeded: result.succeeded(),
+            posix_exit_code: result.posix_exit_code(),
+            notes: result.notes(),
+            synthesized: result.synthesized(),
             exec_id: result.exec_id,
         }
     }
@@ -171,10 +177,34 @@ impl PyExecResult {
         self.succeeded
     }
 
+    /// The exit code a POSIX shell would report (BIND-6): 124 when a deadline ended the
+    /// command (the daemon's, or `run_to_completion`'s client deadline), 128 plus the signal
+    /// for any other signal death, otherwise `exit_code`. `None` only for a running exec.
+    #[getter]
+    fn posix_exit_code(&self) -> Option<i32> {
+        self.posix_exit_code
+    }
+
+    /// Human-readable annotations, one per condition that changes how the output reads
+    /// (BIND-7): truncation at the output cap, an expired deadline, writers left alive, a
+    /// synthesized result. Empty for a clean result; append them to stderr as they are.
+    #[getter]
+    fn notes(&self) -> Vec<String> {
+        self.notes.clone()
+    }
+
+    /// True when `run_to_completion` synthesized this result because nothing came back
+    /// after its client-deadline kill (BIND-10): `posix_exit_code` is 124 and the output is
+    /// unknown, not empty.
+    #[getter]
+    fn synthesized(&self) -> bool {
+        self.synthesized
+    }
+
     fn __repr__(&self) -> String {
         format!(
-            "ExecResult(exec_id={:?}, phase={:?}, exit_code={:?})",
-            self.exec_id, self.phase, self.exit_code
+            "ExecResult(exec_id={:?}, phase={:?}, exit_code={:?}, posix_exit_code={:?})",
+            self.exec_id, self.phase, self.exit_code, self.posix_exit_code
         )
     }
 }
@@ -372,7 +402,7 @@ impl PyExit {
 }
 
 /// One core event as the Python object for its shape.
-fn event_to_py(py: Python<'_>, event: ExecEvent) -> PyResult<Py<PyAny>> {
+pub(crate) fn event_to_py(py: Python<'_>, event: ExecEvent) -> PyResult<Py<PyAny>> {
     match event {
         ExecEvent::Output {
             stream,

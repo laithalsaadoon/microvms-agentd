@@ -69,6 +69,11 @@ pub struct ExecResult {
     pub phase: protocol::exec::Phase,
     /// `None` while running. Present once the child has exited.
     pub outcome: Option<protocol::exec::Outcome>,
+    /// What the client did when its own deadline expired, for a result
+    /// [`super::complete::CompletionPlan::drive`] returned after one (BIND-9, BIND-10).
+    /// `None` for every other result: a poll, a wait, an ack, and a run that finished in
+    /// time.
+    pub client_deadline: Option<super::complete::ClientDeadline>,
 }
 
 impl From<protocol::exec::PollResponse> for ExecResult {
@@ -77,6 +82,7 @@ impl From<protocol::exec::PollResponse> for ExecResult {
             exec_id: response.exec_id,
             phase: response.phase,
             outcome: response.result,
+            client_deadline: None,
         }
     }
 }
@@ -113,6 +119,113 @@ impl ExecResult {
         self.outcome
             .as_ref()
             .map_or("", |outcome| outcome.stderr.as_str())
+    }
+
+    /// The exit code a POSIX shell would report for this exec (BIND-6).
+    ///
+    /// * **124** when a deadline ended the command: the daemon's own (`timed_out`), the
+    ///   client's kill of a live process group after its deadline, or a result synthesized
+    ///   because nothing came back after that kill. 124 is GNU `timeout(1)`'s code, which is
+    ///   what harnesses built on `docker exec` and friends already report.
+    /// * **128 + signal** for any other signal death, the shell's convention: an
+    ///   out-of-memory kill (SIGKILL, 137) is not a timeout.
+    /// * **The exit code** otherwise.
+    ///
+    /// `timed_out` wins over an exit code on purpose. A child that traps SIGTERM and exits 0
+    /// after the deadline fired has an exit code, and reporting it would call a timed-out
+    /// command a success while [`Self::succeeded`] says it failed. `model/src/run.rs` checks
+    /// this rule and finds that case against the "exit code first" alternative.
+    ///
+    /// `None` only when there is nothing to report: a running exec with no client deadline.
+    pub fn posix_exit_code(&self) -> Option<i32> {
+        if let Some(deadline) = &self.client_deadline
+            && (deadline.ack_error.is_some()
+                || deadline.kill == super::complete::KillAnswer::Signalled)
+        {
+            return Some(TIMED_OUT_EXIT_CODE);
+        }
+        let outcome = self.outcome.as_ref()?;
+        if outcome.timed_out {
+            return Some(TIMED_OUT_EXIT_CODE);
+        }
+        match (outcome.exit_code, outcome.signal) {
+            (Some(code), _) => Some(code),
+            (None, Some(signal)) => Some(128 + signal),
+            (None, None) => None,
+        }
+    }
+
+    /// Human-readable annotations on how to read this result, one per condition (BIND-7).
+    ///
+    /// For a caller that appends them to stderr without knowing the field names: truncated
+    /// output, an expired daemon deadline, writers left alive past the linger deadline, and
+    /// the client deadline (a kill, or a synthesized result). Empty for a clean result.
+    pub fn notes(&self) -> Vec<String> {
+        let mut notes = Vec::new();
+        if let Some(outcome) = &self.outcome {
+            if outcome.truncated {
+                notes.push(
+                    "output truncated: a stream reached the daemon's output cap \
+                     (AGENTD_MAX_OUTPUT_BYTES, 8 MiB by default) and the rest was dropped"
+                        .to_string(),
+                );
+            }
+            if outcome.timed_out {
+                notes.push(
+                    "timed out: the daemon's execution deadline (timeout_sec) expired and the \
+                     process group was sent SIGTERM, then SIGKILL"
+                        .to_string(),
+                );
+            }
+            if outcome.writers_may_be_alive {
+                notes.push(
+                    "a process the command started kept its output pipes open past the \
+                     daemon's linger deadline; anything it wrote afterwards was not captured"
+                        .to_string(),
+                );
+            }
+        }
+        if let Some(deadline) = &self.client_deadline {
+            let after = seconds(deadline.after);
+            let kill = match &deadline.kill {
+                super::complete::KillAnswer::Signalled => "its process group was killed".into(),
+                super::complete::KillAnswer::AlreadyGone => {
+                    "its process group had already exited".into()
+                }
+                super::complete::KillAnswer::Failed(error) => format!("the kill failed ({error})"),
+            };
+            notes.push(match &deadline.ack_error {
+                None => format!(
+                    "the client deadline of {after} expired before the exec finished; {kill}, \
+                     and the result was collected afterwards"
+                ),
+                Some(error) => format!(
+                    "the client deadline of {after} expired; {kill}, and the final ack failed \
+                     ({error}), so this result is synthesized: exit code 124, output unknown"
+                ),
+            });
+        }
+        notes
+    }
+
+    /// Whether this result was synthesized after the client deadline (BIND-10).
+    pub fn synthesized(&self) -> bool {
+        self.client_deadline
+            .as_ref()
+            .is_some_and(|deadline| deadline.ack_error.is_some())
+    }
+}
+
+/// The exit code GNU `timeout(1)` reports for a command its deadline ended, and the one
+/// [`ExecResult::posix_exit_code`] reports for a deadline (BIND-6).
+pub const TIMED_OUT_EXIT_CODE: i32 = 124;
+
+/// A duration as a note spells it: whole seconds as `90s`, anything else to a tenth.
+fn seconds(duration: Duration) -> String {
+    if duration.subsec_nanos() == 0 {
+        format!("{}s", duration.as_secs())
+    } else {
+        format!("{:.1}s", duration.as_secs_f64())
     }
 }
 
@@ -1219,6 +1332,136 @@ mod tests {
         assert_eq!(result.stdout(), "");
         assert_eq!(result.exit_code(), None);
         assert!(!result.succeeded());
+    }
+
+    // ── BIND-6 and BIND-7: the POSIX exit code and the notes ─────────────────
+
+    fn finished(
+        exit_code: Option<i32>,
+        signal: Option<i32>,
+        timed_out: bool,
+        client_deadline: Option<super::super::complete::ClientDeadline>,
+    ) -> ExecResult {
+        ExecResult {
+            exec_id: "e1".into(),
+            phase: protocol::exec::Phase::Acked,
+            outcome: Some(protocol::exec::Outcome {
+                exit_code,
+                signal,
+                timed_out,
+                ..protocol::exec::Outcome::default()
+            }),
+            client_deadline,
+        }
+    }
+
+    fn client(
+        kill: super::super::complete::KillAnswer,
+        ack_error: Option<&str>,
+    ) -> Option<super::super::complete::ClientDeadline> {
+        Some(super::super::complete::ClientDeadline {
+            after: Duration::from_secs(90),
+            kill,
+            ack_error: ack_error.map(str::to_string),
+        })
+    }
+
+    /// **BIND-6: the table `model/src/run.rs` checks, row for row.**
+    ///
+    /// 124 when a deadline ended the command (the daemon's, the client's kill of a live group,
+    /// or a synthesized result), `128 + signal` for any other signal death, else the exit code.
+    /// The row the issue's literal wording gets wrong is the SIGTERM-trapping child that exits
+    /// 0 after the daemon deadline: it is a timeout, which is what `succeeded()` already says.
+    ///
+    /// **Falsification** — return `exit_code()` and the timed-out rows are red.
+    #[test]
+    fn the_posix_exit_code_follows_the_models_table() {
+        use super::super::complete::KillAnswer::{AlreadyGone, Failed, Signalled};
+        let rows = [
+            (finished(Some(0), None, false, None), Some(0)),
+            (finished(Some(3), None, false, None), Some(3)),
+            (finished(None, Some(9), false, None), Some(137)),
+            (finished(None, Some(11), false, None), Some(139)),
+            (finished(None, Some(15), true, None), Some(124)),
+            (finished(None, Some(9), true, None), Some(124)),
+            (finished(Some(0), None, true, None), Some(124)),
+            (
+                finished(None, Some(15), false, client(Signalled, None)),
+                Some(124),
+            ),
+            (
+                finished(Some(0), None, false, client(AlreadyGone, None)),
+                Some(0),
+            ),
+            (
+                finished(None, Some(11), false, client(Failed("reset".into()), None)),
+                Some(139),
+            ),
+            (
+                ExecResult {
+                    exec_id: "e1".into(),
+                    phase: protocol::exec::Phase::Running,
+                    outcome: None,
+                    client_deadline: client(Failed("reset".into()), Some("poll reset")),
+                },
+                Some(124),
+            ),
+            (
+                ExecResult {
+                    exec_id: "e1".into(),
+                    phase: protocol::exec::Phase::Running,
+                    outcome: None,
+                    client_deadline: None,
+                },
+                None,
+            ),
+        ];
+        for (result, expected) in rows {
+            assert_eq!(result.posix_exit_code(), expected, "{result:?}");
+        }
+    }
+
+    /// **BIND-7: one note per condition, and none for a clean result.**
+    #[test]
+    fn each_condition_carries_one_note_and_a_clean_result_none() {
+        assert!(finished(Some(0), None, false, None).notes().is_empty());
+
+        let mut truncated = finished(Some(0), None, false, None);
+        let outcome = truncated.outcome.as_mut().expect("an outcome");
+        outcome.truncated = true;
+        outcome.writers_may_be_alive = true;
+        let notes = truncated.notes();
+        assert_eq!(notes.len(), 2, "{notes:?}");
+        assert!(notes[0].contains("output cap"), "{notes:?}");
+        assert!(notes[1].contains("linger"), "{notes:?}");
+
+        let notes = finished(None, Some(15), true, None).notes();
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains("timeout_sec"), "{notes:?}");
+
+        let notes = finished(
+            None,
+            Some(15),
+            false,
+            client(super::super::complete::KillAnswer::Signalled, None),
+        )
+        .notes();
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains("client deadline of 90s"), "{notes:?}");
+
+        let synthesized = ExecResult {
+            exec_id: "e1".into(),
+            phase: protocol::exec::Phase::Running,
+            outcome: None,
+            client_deadline: client(
+                super::super::complete::KillAnswer::Signalled,
+                Some("poll reset"),
+            ),
+        };
+        let notes = synthesized.notes();
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains("synthesized"), "{notes:?}");
+        assert!(notes[0].contains("poll reset"), "{notes:?}");
     }
 
     // ── the callback driver (`for_each_event`) ───────────────────────────────

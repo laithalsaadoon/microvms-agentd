@@ -619,6 +619,13 @@ class ExecResult:
         `None` when the child died to a signal rather than exiting.
         """
     @property
+    def notes(self, /) -> list[str]:
+        """
+        Human-readable annotations, one per condition that changes how the output reads
+        (BIND-7): truncation at the output cap, an expired deadline, writers left alive, a
+        synthesized result. Empty for a clean result; append them to stderr as they are.
+        """
+    @property
     def ok(self, /) -> bool:
         """
         Whether the command exited zero. False for a signal death and for a still-running
@@ -630,6 +637,13 @@ class ExecResult:
         `"running"`, `"exited"`, or `"acked"`.
         """
     @property
+    def posix_exit_code(self, /) -> int |None:
+        """
+        The exit code a POSIX shell would report (BIND-6): 124 when a deadline ended the
+        command (the daemon's, or `run_to_completion`'s client deadline), 128 plus the signal
+        for any other signal death, otherwise `exit_code`. `None` only for a running exec.
+        """
+    @property
     def signal(self, /) -> int |None:
         """
         The signal that killed the child, when one did.
@@ -638,6 +652,13 @@ class ExecResult:
     def stderr(self, /) -> str: ...
     @property
     def stdout(self, /) -> str: ...
+    @property
+    def synthesized(self, /) -> bool:
+        """
+        True when `run_to_completion` synthesized this result because nothing came back
+        after its client-deadline kill (BIND-10): `posix_exit_code` is 124 and the output is
+        unknown, not empty.
+        """
     @property
     def timed_out(self, /) -> bool:
         """
@@ -1993,6 +2014,23 @@ class Session:
     def run_sync(self, /, command: Sequence[str] |str, *, timeout: float = ..., shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, inherit_image_env: bool = False) -> ExecResult:
         """
         Start, wait, ack. The one-shot shape, for when output is all you want.
+        """
+    def run_to_completion(self, /, command: Sequence[str] |str, *, on_output: Any |None = None, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, exec_id: str |None = None, inherit_image_env: bool = False, client_grace_sec: float = ...) -> ExecResult:
+        """
+        Start, stream, and collect one command: exactly one `ExecResult` back (BIND-6..10).
+        
+        With `on_output`, each `OutputChunk` is handed to it as it arrives. The result then
+        comes from the ack that follows the terminal `exit` event, or, when the stream ends
+        without one, from a wait and ack. When `timeout_sec + client_grace_sec` passes first
+        (or, with no `timeout_sec`, the VM's maximum lifetime), the process group is killed
+        and the exec waited for and acked within `client_grace_sec` once more; if that fails
+        too the result is synthesized with `posix_exit_code` 124. `posix_exit_code` and
+        `notes` say what ended the command.
+        
+        An exception from `on_output` stops delivery; the exec is still waited for and acked
+        so nothing is left behind, and then the exception is re-raised. `shell`, `user`,
+        `group`, and `inherit_image_env` mean what they mean on `run()`: `shell="bash"` with a
+        script string runs it under bash, which dash-based images need for `pipefail`.
         """
     def upload_file(self, /, path: str, data: bytes, *, mode: str |None = None) -> None:
         """

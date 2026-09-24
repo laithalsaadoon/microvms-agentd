@@ -790,6 +790,7 @@ pub async fn prompt<O: std::io::Write, E: std::io::Write>(
             exec_id: exec_id.clone(),
             phase: microvms_core::protocol::exec::Phase::Running,
             outcome: None,
+            client_deadline: None,
         }
     } else {
         let result = handle.wait_and_ack(timeout).await?;

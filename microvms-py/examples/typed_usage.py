@@ -40,12 +40,14 @@ from microvms import (
     CostReport,
     Duration,
     EstimatedUsd,
+    ExecResult,
     IdlePolicy,
     Microvm,
     MicrovmError,
     MicrovmSummary,
     NameRecord,
     NameRegistry,
+    OutputChunk,
     ProvisionedAgentd,
     Region,
     RunHookTimeout,
@@ -270,6 +272,35 @@ def named_step(region: Region, state_dir: str, stored: dict[str, object]) -> str
     report = vm.terminate(wait_for_terminated=True)
     released: list[str] = registry.release_by_vm(registered.microvm_id)
     return f"{found} {names} {len(restored)} {released} {report.lifecycle}"
+
+
+def harness_run_to_completion(
+    session: Session, script: str, timeout_sec: int | None
+) -> tuple[str, int]:
+    """A harness's `exec` as one call, streamed and collected (#222). Written for the checker.
+
+    `["bash", "-c", script]` because the daemon's `shell=True` is `/bin/sh -c`; the notes go
+    to stderr as they are, and `posix_exit_code` is already the harness's return code.
+    """
+    streamed: list[str] = []
+
+    def on_output(chunk: OutputChunk) -> None:
+        streamed.append(chunk.text())
+
+    result: ExecResult = session.run_to_completion(
+        ["bash", "-c", script],
+        on_output=on_output,
+        timeout_sec=float(timeout_sec) if timeout_sec is not None else None,
+        client_grace_sec=60.0,
+    )
+    notes: list[str] = result.notes
+    stderr = "\n".join([result.stderr, *notes]) if notes else result.stderr
+    code: int | None = result.posix_exit_code
+    synthesized: bool = result.synthesized
+    return (
+        stderr if not synthesized else "\n".join(notes),
+        code if code is not None else 1,
+    )
 
 
 def main() -> None:

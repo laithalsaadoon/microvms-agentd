@@ -2659,6 +2659,109 @@ def drive_closed_output_bdd(cli: Cli, launched: Envelope, results: Results) -> N
     )
 
 
+def run_to_completion_live(cli: Cli, launched: Envelope, name: str) -> tuple[bool, str]:
+    """One ignored test of `microvms-core/tests/live_run_to_completion.rs` on the kept VM.
+
+    The attach coordinates travel in `MICROVM_LIVE_ATTACH`, so the test attaches through core's
+    `Session::attach` (a fresh control plane and proxy-token minter) rather than launching.
+    Returns whether it passed and a detail line carrying the test's own `eprintln!` summary.
+    """
+    env = os.environ.copy()
+    env["AWS_REGION"] = cli.region
+    env["MICROVM_LIVE_ATTACH"] = json.dumps(
+        {
+            "microvmId": str(launched.data["microvmId"]),
+            "endpoint": str(launched.data["endpoint"]),
+            "agentToken": str(launched.data["agentToken"]),
+            "region": cli.region,
+        }
+    )
+    command = [
+        "cargo",
+        "test",
+        "-q",
+        "-p",
+        "microvms-core",
+        "--test",
+        "live_run_to_completion",
+        name,
+        "--",
+        "--ignored",
+        "--exact",
+        "--nocapture",
+    ]
+    cli.log.append(command_for_log(command) + "  # MICROVM_LIVE_ATTACH=<attach JSON>")
+    try:
+        run = subprocess.run(
+            command,
+            cwd=Path(__file__).resolve().parents[1],
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=15 * 60,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return False, "the Rust live test exceeded 15 minutes"
+    summary = [
+        line.strip()
+        for line in run.stderr.splitlines()
+        if line.startswith(("exec=", "collected"))
+    ]
+    return run.returncode == 0, f"exit={run.returncode} {' | '.join(summary)[:400]}"
+
+
+def drive_run_to_completion(cli: Cli, launched: Envelope, results: Results) -> None:
+    """`Session::run_to_completion` against the kept VM (#222, BIND-6..10).
+
+    Four Rust tests through core, the layer both bindings wrap: a streamed bash command with
+    `pipefail` returns its own exit code and output; the daemon's deadline reports 124 with a
+    note; a command that ignores SIGTERM outlives the daemon's deadline for its ten-second
+    `kill_grace`, so a client deadline inside that window kills a live group and collects the
+    result; and a client grace shorter than the output linger of a grandchild holding the pipes
+    synthesizes 124, after which the test collects the exec itself. The daemon answers a kill
+    only once the group is gone (measured 2026-09-24), so the linger, not the escalation, is
+    what a short grace can lose to. The cut-stream fallback is not induced here: nothing cuts
+    the platform proxy's stream on demand, so it is covered by the scripted tiers in core.
+    """
+    print("\n-- run_to_completion (#222: BIND-6..10) --")
+    passed, detail = run_to_completion_live(
+        cli, launched, "a_streamed_bash_command_returns_its_own_exit_code_and_output"
+    )
+    results.check(
+        "BIND-8 a streamed bash command is collected once with its own output and exit code",
+        passed,
+        detail,
+    )
+    passed, detail = run_to_completion_live(
+        cli, launched, "a_daemon_deadline_reports_124_with_a_note"
+    )
+    results.check(
+        "BIND-6 a daemon-enforced timeout reports POSIX exit code 124", passed, detail
+    )
+    results.check(
+        "BIND-7 a daemon-enforced timeout carries a note naming timeout_sec",
+        passed,
+        detail,
+    )
+    passed, detail = run_to_completion_live(
+        cli, launched, "a_client_deadline_kills_a_command_that_ignores_sigterm"
+    )
+    results.check(
+        "BIND-9 a client deadline kills a command that ignores SIGTERM and collects it",
+        passed,
+        detail,
+    )
+    passed, detail = run_to_completion_live(
+        cli, launched, "a_client_grace_shorter_than_the_pipe_linger_synthesizes_124"
+    )
+    results.check(
+        "BIND-10 a client grace shorter than the output linger synthesizes 124",
+        passed,
+        detail,
+    )
+
+
 def drive_stdin(cli: Cli, launched: Envelope, results: Results) -> None:
     """stdin: five checks. `cat` cannot exit until stdin closes, so this fails by hanging.
 
@@ -6710,6 +6813,14 @@ def main() -> int:
                 results,
             )
             run_section(results, "stdin", drive_stdin, cli, launched, results)
+            run_section(
+                results,
+                "run_to_completion",
+                drive_run_to_completion,
+                cli,
+                launched,
+                results,
+            )
             run_section(
                 results,
                 "file_transfer",

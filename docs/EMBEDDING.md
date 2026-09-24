@@ -184,6 +184,89 @@ under the disk reserve is refused with 507 naming the real free space
 state, disk pressure, and the identity-repair flags — the conditions that are
 reasons to drain a VM rather than schedule more work onto it.
 
+## Running one command to one result
+
+Most harness `exec` methods are one composition over the exec routes: start
+with a caller-minted id, stream output to a callback, fall back to polling when
+the stream is cut, kill the process group when the harness's own deadline
+passes, and turn what came back into a shell exit code. The bindings provide
+it as one call, `Session.run_to_completion` in Python and
+`Session.runToCompletion` in Node, over `Session::run_to_completion` in
+`microvms-core` (`microvms-core/src/session/complete.rs`). The behavior is
+specified as BIND-6 through BIND-10 in `spec/core.symspec.json` and checked by
+the Stateright model in `model/src/run.rs`.
+
+```python
+def exec(self, command: str, timeout_sec: int | None = None) -> tuple[str, str, int]:
+    result = session.run_to_completion(
+        ["bash", "-c", command],  # bash semantics; see below
+        on_output=lambda chunk: stream_to_log(chunk.stream, chunk.text()),
+        cwd=workdir,
+        env=env,
+        timeout_sec=float(timeout_sec) if timeout_sec is not None else None,
+        client_grace_sec=60.0,
+    )
+    stderr = "\n".join([result.stderr, *result.notes])
+    return result.stdout, stderr, result.posix_exit_code
+```
+
+What the call does, in order:
+
+1. **Start.** With `exec_id` omitted a fresh id is minted; pass your own to make
+   a retried call address the same exec.
+2. **Stream.** With `on_output`, each output chunk reaches the callback as it
+   arrives, reconnecting at the byte cursor through ordinary cuts. The
+   terminal `exit` event means the output is final, and one ack returns it.
+3. **Fall back to wait and ack.** Without a callback, or when the stream ends
+   without its `exit` event (the reconnect budget ran out, the stream failed,
+   or the callback raised), the call polls until the exec finishes and then
+   acks it. A callback that raises stops delivery; the exec is still collected,
+   and then the exception is raised.
+4. **Client deadline.** The client waits `timeout_sec + client_grace_sec`, or
+   the VM's maximum lifetime when there is no `timeout_sec`. If that passes
+   first, it kills the process group and then waits and acks for up to
+   `client_grace_sec` more. The daemon enforces `timeout_sec` itself, so this
+   path runs only when the daemon's escalation outlasts the grace: a command
+   that ignores SIGTERM for longer than the daemon's ten-second `kill_grace`,
+   a grandchild holding the pipes, or a stalled proxy. The daemon answers the
+   kill only once the group is gone, sending SIGKILL after `kill_grace` if it
+   has to (measured in us-east-1 on 2026-09-24), so the kill itself can take
+   up to ten seconds before the grace starts.
+5. **Synthesize.** If that wait and ack fails too, the result is synthesized:
+   `synthesized` is true, `posix_exit_code` is 124, `phase` is `running`, and
+   the output is unknown rather than empty. Because a killed group is gone by
+   the time the kill returns, this happens when something outside the group
+   holds the output pipes past the grace (the daemon waits a five-second
+   linger for them), when the kill could not be sent, or when the daemon is
+   unreachable.
+
+`posix_exit_code` is what `$?` would say. It is **124** when a deadline ended
+the command: the daemon's own (`timed_out`), the client's kill of a live
+process group, or a synthesized result. It is **128 plus the signal** for any
+other signal death, so an out-of-memory kill reads 137 rather than as a
+timeout, and otherwise it is the exit code. A child that traps SIGTERM and
+exits 0 after the daemon's deadline reports 124, not 0, which agrees with `ok`
+being false.
+
+`notes` has one human-readable line per condition that changes how the output
+reads: truncation at the daemon's output cap, an expired daemon deadline,
+writers left alive past the linger deadline, and the client deadline (a kill,
+or a synthesized result naming both failures). A clean result has none.
+Append them to stderr as they are.
+
+**The `["bash", "-c", command]` idiom.** The daemon's `shell=True` runs the
+string through `/bin/sh -c`, and on Debian-family images `/bin/sh` is dash,
+which rejects `set -o pipefail`, arrays, and `[[`. A harness whose contract is
+bash semantics passes the command as an argv with `shell=False` (the default),
+so bash parses it and no other shell is in between. The image must ship bash;
+the managed al2023 base does (`GNU bash, version 5.2.15` at `/usr/bin/bash`,
+measured in us-east-1 on 2026-09-24). The named shell replaces the idiom:
+`run_to_completion(command, shell="bash")` sends the script string with
+`shell: "bash"`, which the daemon resolves in the guest and refuses with
+`400 unknown_shell` when the image has no bash, instead of the exit 127 the
+argv form reports. It needs a daemon that knows named shells (`docs/PROTOCOL.md`,
+"shell"); the argv form works with every daemon.
+
 ## The proxy-token reality
 
 The daemon's endpoint sits behind the platform's proxy, and the proxy wants two

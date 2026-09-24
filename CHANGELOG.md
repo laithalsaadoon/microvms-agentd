@@ -59,6 +59,20 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
     `AGENTD_*` never in a child), the Gherkin scenarios in
     `agentd/tests/features/exec_start.feature`, a bolero harness over the union fields'
     deserialization and resolution, and live checks keyed AGENTD-*.
+- **`Session.run_to_completion` runs one command to exactly one result (#222, BIND-6..10).**
+  The composition every harness wrote for itself is one call in core
+  (`Session::run_to_completion`, `CompletionPlan`), Python
+  (`Session.run_to_completion(command, *, on_output=None, ..., timeout_sec=None,
+  exec_id=None, client_grace_sec=60.0)`), and Node (`session.runToCompletion(command,
+  options, onOutput)`): start with a minted or caller-supplied exec id, stream output to
+  the callback, ack on the `exit` event, fall back to wait and ack when the stream ends
+  without one, and when `timeout_sec + client_grace_sec` passes, kill the process group
+  and wait and ack within the grace again. Only when that fails too is a result
+  synthesized, with exit code 124. `ExecResult` gains `posix_exit_code` (124 when a
+  deadline ended the command, 128 plus the signal for any other signal death, otherwise
+  the exit code), `notes` (one line per truncation, deadline, lingering writer, or client
+  deadline), and `synthesized`. `docs/EMBEDDING.md` documents the call and the
+  `["bash", "-c", command]` idiom for bash semantics.
 
 - **Daemon provisioning moved into core and reached every surface (#219, BIND-17..BIND-20).**
   `microvms_core::provision::agentd(version, state_dir)` returns the `agentd` binary with its

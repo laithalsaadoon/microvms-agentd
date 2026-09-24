@@ -86,6 +86,16 @@ pub struct ExecResult {
     /// Whether the command exited zero. False for a signal death and for a still-running
     /// exec, since neither is a success.
     pub ok: bool,
+    /// The exit code a POSIX shell would report (BIND-6): 124 when a deadline ended the
+    /// command (the daemon's, or `runToCompletion`'s client deadline), 128 plus the signal
+    /// for any other signal death, otherwise `exitCode`. `null` only for a running exec.
+    pub posix_exit_code: Option<i32>,
+    /// Human-readable annotations, one per condition that changes how the output reads
+    /// (BIND-7). Empty for a clean result; append them to stderr as they are.
+    pub notes: Vec<String>,
+    /// True when `runToCompletion` synthesized this result because nothing came back after
+    /// its client-deadline kill (BIND-10): `posixExitCode` is 124 and the output is unknown.
+    pub synthesized: bool,
 }
 
 impl ExecResult {
@@ -110,6 +120,9 @@ impl ExecResult {
                 .is_some_and(|outcome| outcome.writers_may_be_alive),
             done: result.done(),
             ok: result.succeeded(),
+            posix_exit_code: result.posix_exit_code(),
+            notes: result.notes(),
+            synthesized: result.synthesized(),
             exec_id: result.exec_id,
         }
     }
@@ -176,7 +189,7 @@ impl StreamEvent {
         }
     }
 
-    fn wrap(event: ExecEvent) -> Self {
+    pub(crate) fn wrap(event: ExecEvent) -> Self {
         match event {
             ExecEvent::Output {
                 stream,
