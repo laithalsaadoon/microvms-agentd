@@ -11,18 +11,17 @@
 //! version cannot be dropped either (it is the last one). Two images were wedged that
 //! way for roughly fifteen hours.
 //!
-//! # Why there is no way to pass one
+//! # Fresh defaults and explicit launch recovery
 //!
 //! The previous Python shape defaulted correctly and *accepted* `client_token=<content
 //! digest>` — which is precisely the value that wedges an image, offered as the
-//! natural thing to pass. So the closure here is the absence of the parameter:
+//! natural thing to pass. Image creation still forbids caller tokens:
 //! [`create_token`] and [`run_token`] take a **scope label** and mint the token
 //! themselves. A label lands *next to* the nonce and can never replace it.
 //!
-//! That is the difference between a default a caller can override and a mistake a
-//! caller cannot write. `grep` for `client_token` across this module's public surface
-//! finds nothing, and the test at the bottom of this file asserts the label cannot
-//! reach the nonce's position no matter what is passed.
+//! Run requests additionally accept a persisted `client_token` for recovery after a lost
+//! launch response. That opt-in must identify exactly one launch with identical inputs.
+//! A new VM needs a new key, even when its image and other parameters are unchanged.
 //!
 //! # The shape, and which end gets truncated
 //!
@@ -108,6 +107,19 @@ pub fn create_token(scope: &str) -> String {
 /// the same guest.
 pub fn run_token(scope: &str) -> String {
     mint(Verb::Run, scope, &nonce_bytes())
+}
+
+/// Refuse malformed explicit launch keys locally, without echoing caller input.
+pub(crate) fn require_run_token(token: &str) -> Result<(), crate::Error> {
+    if token.is_empty()
+        || token.len() > MAX_CLIENT_TOKEN_LEN
+        || !token.bytes().all(|byte| byte.is_ascii_graphic())
+    {
+        return Err(crate::Error::invalid_arg(format!(
+            "client_token must contain 1..={MAX_CLIENT_TOKEN_LEN} printable ASCII characters without whitespace",
+        )));
+    }
+    Ok(())
 }
 
 /// A caller's log-stream prefix with a fresh per-build discriminator: `<prefix>/<16 hex>`.

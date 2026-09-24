@@ -909,9 +909,39 @@
             "type": "enum"
           },
           {
+            "choices": [
+              "agent-default",
+              "unrestricted"
+            ],
+            "default": "agent-default",
+            "help": "Guest agent permission policy. Unrestricted bypasses agent approvals, still as uid 1000",
+            "name": "permission-mode",
+            "positional": false,
+            "required": false,
+            "type": "enum"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Remote execution deadline in seconds; persists after detach. Must be positive and finite",
+            "name": "execution-timeout",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Terminate residual process-group children when the main agent exits",
+            "name": "reap-group-on-exit",
+            "positional": false,
+            "required": false,
+            "type": "boolean"
+          },
+          {
             "choices": null,
             "default": "900",
-            "help": "How long to wait for the agent, in seconds. Agent tasks run minutes, not seconds",
+            "help": "Caller wait limit in seconds. Does not stop the agent when the wait expires",
             "name": "timeout",
             "positional": false,
             "required": false,

@@ -1,5 +1,8 @@
 # Matches at any depth: the model crate has its own target/ directory.
 target/
+# Generated review and conformance run output stays local.
+/conformance/evidence/
+/evidence/background-coding-agent/
 Cargo.lock.orig
 .erpaval/sessions/
 # Terraform working state: the conformance stack is created and destroyed per

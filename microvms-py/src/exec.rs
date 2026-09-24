@@ -69,6 +69,7 @@ pub struct PyExecResult {
     stdout: String,
     stderr: String,
     truncated: bool,
+    timed_out: bool,
     writers_may_be_alive: bool,
     done: bool,
     succeeded: bool,
@@ -82,6 +83,10 @@ impl PyExecResult {
             signal: result.outcome.as_ref().and_then(|outcome| outcome.signal),
             stdout: result.stdout().to_string(),
             stderr: result.stderr().to_string(),
+            timed_out: result
+                .outcome
+                .as_ref()
+                .is_some_and(|outcome| outcome.timed_out),
             truncated: result
                 .outcome
                 .as_ref()
@@ -138,6 +143,12 @@ impl PyExecResult {
     #[getter]
     fn truncated(&self) -> bool {
         self.truncated
+    }
+
+    /// True when the daemon execution deadline expired, distinct from cancellation.
+    #[getter]
+    fn timed_out(&self) -> bool {
+        self.timed_out
     }
 
     /// Set when the post-exit linger deadline expired with the pipes still open: some
@@ -304,6 +315,7 @@ impl PyGap {
 /// finished command — the byte sequences are otherwise identical.
 #[pyclass(frozen, name = "Exit", module = "microvms")]
 pub struct PyExit {
+    timed_out: bool,
     exit_code: Option<i32>,
     signal: Option<i32>,
     truncated: bool,
@@ -313,6 +325,12 @@ pub struct PyExit {
 
 #[pymethods]
 impl PyExit {
+    /// True when the remote execution deadline expired.
+    #[getter]
+    fn timed_out(&self) -> bool {
+        self.timed_out
+    }
+
     #[getter]
     fn kind(&self) -> &'static str {
         "exit"
@@ -380,6 +398,7 @@ fn event_to_py(py: Python<'_>, event: ExecEvent) -> PyResult<Py<PyAny>> {
         ExecEvent::Exit(exit) => Ok(Py::new(
             py,
             PyExit {
+                timed_out: exit.timed_out,
                 exit_code: exit.exit_code,
                 signal: exit.signal,
                 truncated: exit.truncated,

@@ -316,3 +316,22 @@ The Python stub is regenerated from the compiled module (`mise run stubs`) and t
   agent flags would need their own precedence table.
 - Other model access paths (a vendor API key, an AgentCore gateway). `BedrockAccess`
   is a struct rather than an enum until a second variant exists to name.
+
+## Background prompt options (2026-09-17 implementation)
+
+`PromptOptions.permission_mode` defaults to `AgentPermissionMode::AgentDefault`.
+`Unrestricted` selects Claude's `--dangerously-skip-permissions` or Codex's
+`--dangerously-bypass-approvals-and-sandbox`, without combining conflicting sandbox
+flags. Both run as uid/gid 1000. This choice grants no new VM, IAM or network
+permissions. `reap_group_on_exit` defaults to false; enable it for reviews that
+must stop residual servers or fuzzers. `timeout` sets the daemon execution budget.
+The CLI exposes these as `--permission-mode`, `--reap-group-on-exit` and
+`--execution-timeout`; its existing `--timeout` remains only the caller wait limit.
+
+`RunRequest.client_token` and `RunMicrovmRequest.client_token` optionally carry a
+persisted launch idempotency key. The default still mints a fresh launch key.
+Persist a unique key and all parameters before sending the launch; reuse that key
+only to reconcile that same launch. A new VM always needs a new key, regardless
+of image name. The sandbox requires an explicit persisted `agent_token` and
+`identity=false` with a stable key, so replay cannot silently change the run-hook
+payload. Image-creation tokens remain always fresh.

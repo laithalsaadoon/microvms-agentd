@@ -184,6 +184,10 @@ pub struct RunRequest {
     pub execution_role_arn: Option<String>,
     /// The bearer token the daemon will accept, or `None` to mint one.
     pub agent_token: Option<String>,
+    /// Persist this unique launch key before sending a request; reuse only for that same
+    /// launch and identical parameters. None mints a fresh key. A stable key requires
+    /// an explicit agent_token and identity=false so retries carry identical payloads.
+    pub client_token: Option<String>,
     /// Base environment for every exec in the launched VM, delivered in the same
     /// `runHookPayload` as the token.
     ///
@@ -250,6 +254,7 @@ impl Default for RunRequest {
             image_version: None,
             execution_role_arn: None,
             agent_token: None,
+            client_token: None,
             launch_env: std::collections::HashMap::new(),
             identity: false,
             egress: false,
@@ -493,9 +498,9 @@ impl TeardownReport {
 /// The plane sits behind an `Arc` rather than a reference because the minter must outlive
 /// the call that built the session: minting happens inside the request path on every later
 /// request, which is what makes it happen at all (TRAP-9).
-struct ControlPlaneMinter {
-    control: Arc<ControlPlane>,
-    microvm_id: String,
+pub(crate) struct ControlPlaneMinter {
+    pub(crate) control: Arc<ControlPlane>,
+    pub(crate) microvm_id: String,
 }
 
 impl TokenMinter for ControlPlaneMinter {
@@ -853,6 +858,11 @@ impl Sandbox {
             ));
         };
 
+        if request.client_token.is_some() && (request.agent_token.is_none() || request.identity) {
+            return Err(Error::invalid_arg(
+                "a stable client_token requires an explicit agent_token and identity=false; persist identical launch parameters before retrying",
+            ));
+        }
         let agent_token = request.agent_token.clone().unwrap_or_else(mint_agent_token);
         // Generated before the payload because the payload carries its two public-facing
         // fields. The VM's secret half lives exactly as long as this binding: `keep()` below
@@ -883,6 +893,7 @@ impl Sandbox {
         wire.auto_resume = request.auto_resume;
         wire.max_duration_sec = request.max_duration_sec;
         wire.token_scope = request.token_scope.clone();
+        wire.client_token = request.client_token.clone();
         if request.egress {
             wire = wire.with_egress();
         }
@@ -2639,5 +2650,41 @@ mod tests {
             !sandbox.lifecycle().is_live(),
             "and the lifecycle must no longer read as live"
         );
+    }
+
+    #[tokio::test]
+    async fn stable_launch_key_and_payload_survive_a_fresh_supervisor() {
+        let mut bodies = Vec::new();
+        for _ in 0..2 {
+            let (mut sandbox, recorder, _) = planted();
+            answer_launch(&recorder);
+            let mut request = RunRequest::new().with_image("arn:image");
+            request.client_token = Some("one-unique-job-launch".into());
+            request.agent_token = Some("persisted-private-secret".into());
+            sandbox.run(request).await.expect("accepted");
+            bodies.push(recorder.first_body("RunMicrovm"));
+        }
+        assert_eq!(bodies[0]["clientToken"], "one-unique-job-launch");
+        assert_eq!(bodies[0], bodies[1]);
+    }
+
+    #[tokio::test]
+    async fn unsafe_or_malformed_stable_launch_is_refused_without_calls() {
+        for (token, secret, identity) in [
+            ("key".to_string(), None, false),
+            ("key".to_string(), Some("secret".into()), true),
+            ("".to_string(), Some("secret".into()), false),
+            ("x".repeat(129), Some("secret".into()), false),
+            ("line\nbreak".to_string(), Some("secret".into()), false),
+        ] {
+            let (mut sandbox, recorder, _) = planted();
+            let mut request = RunRequest::new().with_image("arn:image");
+            request.client_token = Some(token);
+            request.agent_token = secret;
+            request.identity = identity;
+            let error = sandbox.run(request).await.expect_err("invalid");
+            assert_eq!(error.kind(), ErrorKind::InvalidArg);
+            assert!(recorder.calls().is_empty());
+        }
     }
 }

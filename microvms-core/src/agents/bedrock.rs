@@ -71,8 +71,8 @@ impl std::fmt::Debug for BearerToken {
 #[derive(Clone, Debug)]
 pub struct Minted {
     pub token: BearerToken,
-    /// The presign's expiry. The service also caps validity at the signing credentials'
-    /// own expiry, which this crate cannot see, so this is an upper bound.
+    /// The earlier of the presign expiry and the known signing credential expiry.
+    /// With credentials lacking expiry metadata, this remains only an upper bound.
     pub expires_at: SystemTime,
 }
 
@@ -107,6 +107,32 @@ pub async fn mint(region: &Region, lifetime: Duration) -> Result<Minted, Error> 
     mint_with(&credentials, region, lifetime, SystemTime::now())
 }
 
+/// Mint with externally obtained credentials without mutating the process environment.
+/// The supplied credential expiry is authoritative (for example STS `Expiration`).
+/// Secret values are only passed to the SigV4 signer and never formatted into errors.
+pub fn mint_with_credentials(
+    region: &Region,
+    access_key_id: &str,
+    secret_access_key: &str,
+    session_token: Option<&str>,
+    credentials_expires_at: SystemTime,
+    lifetime: Duration,
+) -> Result<Minted, Error> {
+    if access_key_id.is_empty() || secret_access_key.is_empty() {
+        return Err(Error::invalid_arg(
+            "explicit AWS signing credentials must not be empty",
+        ));
+    }
+    let credentials = aws_credential_types::Credentials::new(
+        access_key_id,
+        secret_access_key,
+        session_token.map(str::to_string),
+        Some(credentials_expires_at),
+        "explicit-bedrock-signing-session",
+    );
+    mint_with(&credentials, region, lifetime, SystemTime::now())
+}
+
 /// The pure half: a token from explicit credentials at an explicit instant.
 ///
 /// Public so a caller holding credentials from elsewhere (a harness's own broker) can
@@ -134,6 +160,14 @@ pub fn mint_with(
         )));
     }
 
+    let expires_at = credentials
+        .expiry()
+        .map_or(now + lifetime, |expiry| expiry.min(now + lifetime));
+    if expires_at <= now {
+        return Err(Error::invalid_arg(
+            "AWS signing credentials have expired; obtain a fresh session",
+        ));
+    }
     let mut settings = SigningSettings::default();
     settings.signature_location = SignatureLocation::QueryParams;
     settings.expires_in = Some(lifetime);
@@ -210,7 +244,7 @@ pub fn mint_with(
     );
     Ok(Minted {
         token: BearerToken(token),
-        expires_at: now + lifetime,
+        expires_at,
     })
 }
 
@@ -310,6 +344,22 @@ mod tests {
         let c = mint_with(&credentials(), &Region::EuWest1, MAX_LIFETIME, now).expect("c");
         assert_eq!(a.token, b.token);
         assert_ne!(a.token, c.token);
+    }
+
+    #[test]
+    fn explicit_credential_expiry_caps_the_token_and_expired_sessions_are_refused() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_789_000_000);
+        let expiry = now + Duration::from_secs(600);
+        let credentials = aws_credential_types::Credentials::new(
+            "synthetic-id",
+            "synthetic-secret",
+            Some("synthetic-session".into()),
+            Some(expiry),
+            "test",
+        );
+        let minted = mint_with(&credentials, &Region::UsEast1, MAX_LIFETIME, now).expect("mint");
+        assert_eq!(minted.expires_at, expiry);
+        assert!(mint_with(&credentials, &Region::UsEast1, MAX_LIFETIME, expiry).is_err());
     }
 
     /// The credential never prints. A `Debug` that leaked it would put the token in every

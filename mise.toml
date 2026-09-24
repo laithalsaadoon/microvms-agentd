@@ -2,7 +2,7 @@
 #
 # Two tiers, split by cost rather than by kind:
 #
-#   mise run check   every local gate. No network, no AWS, no money. ~40s.
+#   mise run check   local gates; downloads tools/rules/providers. No AWS mutations.
 #   mise run live    the suites that talk to real AWS. Billable, ~15 min.
 #
 # `live` is never wired to a hook or to push. It creates real MicroVMs in the
@@ -27,6 +27,7 @@ grype = "latest"
 trivy = "latest"
 osv-scanner = "latest"
 terraform = "latest"
+tflint = "0.63.1"
 lefthook = "latest"
 node = "24"
 "cargo:cargo-deny" = "latest"
@@ -51,6 +52,7 @@ run = [
   "cargo fmt --all",
   "ruff format .",
   "terraform -chdir=conformance/infra fmt",
+  "terraform -chdir=examples/background-coding-agent/infra fmt -recursive",
 ]
 
 [tasks.lint]
@@ -91,6 +93,7 @@ run = [
   "ruff check .",
   "ruff format --check .",
   "terraform -chdir=conformance/infra fmt -check",
+  "terraform -chdir=examples/background-coding-agent/infra fmt -check -recursive",
 ]
 
 [tasks.security]
@@ -399,7 +402,23 @@ depends = [
   "publish:check",
   "live:check",
   "build",
+  "background:check",
 ]
+
+[tasks."background:check"]
+description = "Check the background coding example"
+run = [
+  "ruff check examples/background-coding-agent",
+  "ruff format --check examples/background-coding-agent",
+  "terraform -chdir=examples/background-coding-agent/infra fmt -check",
+  "terraform -chdir=examples/background-coding-agent/infra init -backend=false -input=false",
+  "terraform -chdir=examples/background-coding-agent/infra validate",
+  "uv run --project examples/background-coding-agent --frozen pytest examples/background-coding-agent/tests",
+]
+
+[tasks."background:fmt"]
+description = "Format the background example's Terraform and Python"
+run = ["ruff check --fix examples/background-coding-agent", "ruff format examples/background-coding-agent", "terraform -chdir=examples/background-coding-agent/infra fmt"]
 
 # ── live AWS suites (billable, manual) ──────────────────────────────────────
 

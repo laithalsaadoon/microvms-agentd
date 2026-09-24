@@ -1,0 +1,11 @@
+.agent/
+.venv/
+results/
+evidence/
+__pycache__/
+.pytest_cache/
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log

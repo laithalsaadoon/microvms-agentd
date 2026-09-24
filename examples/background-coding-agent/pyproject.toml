@@ -1,0 +1,27 @@
+[project]
+name = "microvms-background-coding-agent"
+version = "0.2.0"
+requires-python = ">=3.13"
+dependencies = [
+    "aws-durable-execution-sdk-python==2.0.1",
+    "boto3==1.43.101",
+    "cyclopts==4.25.3",
+    "microvms==0.8.0",
+    "pygithub==2.10.0",
+    "pynamodb==6.1.0",
+    "requests==2.34.2",
+]
+
+[dependency-groups]
+dev = [
+    "aws-durable-execution-sdk-python-testing==1.2.1",
+    "moto[dynamodb,s3]==5.2.3",
+    "pytest==9.1.1",
+]
+
+[tool.uv.sources]
+microvms = { path = "../../microvms-py" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

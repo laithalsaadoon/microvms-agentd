@@ -622,6 +622,7 @@ impl PySandbox {
         image_version=None,
         execution_role_arn=None,
         agent_token=None,
+        client_token=None,
         launch_env=None,
         egress=false,
         egress_network_connectors=None,
@@ -652,6 +653,7 @@ impl PySandbox {
         image_version: Option<String>,
         execution_role_arn: Option<String>,
         agent_token: Option<String>,
+        client_token: Option<String>,
         // `launch_env` is the base environment for every exec in the launched VM,
         // delivered in the same `runHookPayload` as the token and applied *under* each
         // exec's own `env`. It shares the token's 4096-byte payload budget, checked
@@ -684,6 +686,7 @@ impl PySandbox {
             image_version,
             execution_role_arn,
             agent_token,
+            client_token,
             launch_env: launch_env.unwrap_or(defaults.launch_env),
             // The tunnel identity is a CLI/daemon surface (`microvm tunnel
             // --verify-identity`); the bindings keep the default (off) until a

@@ -50,7 +50,7 @@ target-version = "py39"
 # imposes. ruff does not read the PEP 723 block itself (measured: a `py39` config still
 # passes `Optional[int]` in a script whose block says 3.11), so this restates it. Keep the two
 # in step if a script's block ever moves.
-per-file-target-version = { "scripts/*" = "py311", "conformance/*" = "py311" }
+per-file-target-version = { "scripts/*" = "py311", "conformance/*" = "py311", "examples/background-coding-agent/**" = "py313" }
 
 [format]
 # `microvms-py/microvms.pyi` is generated: `./scripts/generate-py-stubs.py` renders it from

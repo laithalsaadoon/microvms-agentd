@@ -315,6 +315,8 @@ pub struct RunOptions {
     /// attempt's — passes it. It rides in `runHookPayload`, which is what keeps it out of the
     /// shared image snapshot.
     pub agent_token: Option<String>,
+    /// Persist once per intended launch and reuse with the identical request.
+    pub client_token: Option<String>,
     /// Base environment for every exec in the launched VM, delivered in the same
     /// `runHookPayload` as the token.
     ///
@@ -578,6 +580,7 @@ impl Sandbox {
             image_version: options.image_version,
             execution_role_arn: options.execution_role_arn,
             agent_token: options.agent_token,
+            client_token: options.client_token,
             launch_env: options.launch_env.unwrap_or(defaults.launch_env),
             // The tunnel identity is a CLI/daemon surface (`microvm tunnel
             // --verify-identity`); the bindings keep the default (off) until a

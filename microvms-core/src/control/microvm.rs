@@ -403,6 +403,9 @@ impl ControlPlane {
     /// here, and the connectors are derived from intents (TRAP-4). The `clientToken` is
     /// minted from a label (TRAP-1).
     pub async fn run_microvm(&self, request: RunMicrovmRequest) -> Result<Microvm, Error> {
+        if let Some(token) = request.client_token.as_deref() {
+            super::token::require_run_token(token)?;
+        }
         super::require_valid_identifier("imageIdentifier", &request.image_identifier)?;
         super::require_duration_in_range(request.max_duration_sec)?;
         // `min: 60` on `IdlePolicyMaxIdleDurationSecondsInteger`. There used to be no guard for
@@ -531,12 +534,14 @@ impl ControlPlane {
             },
             maximum_duration_in_seconds: request.max_duration_sec,
             run_hook_payload: request.run_hook_payload.as_str().to_string(),
-            client_token: token::run_token(
-                request
-                    .token_scope
-                    .as_deref()
-                    .unwrap_or(&request.image_identifier),
-            ),
+            client_token: request.client_token.unwrap_or_else(|| {
+                token::run_token(
+                    request
+                        .token_scope
+                        .as_deref()
+                        .unwrap_or(&request.image_identifier),
+                )
+            }),
         };
 
         let call = Call::post_json("RunMicrovm", paths::microvms(), &wire)?;

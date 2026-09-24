@@ -117,7 +117,7 @@ class AgentVm:
         Returns the token used, so `expires_at` says when to call this again. Re-runnable
         on a running VM: that call is the credential refresh.
         """
-    def launch(self, /, *, image_identifier: str, execution_role_arn: str |None = None, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None) -> Session:
+    def launch(self, /, *, image_identifier: str, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None) -> Session:
         """
         Launches with egress and waits for the daemon to answer.
         
@@ -126,11 +126,11 @@ class AgentVm:
         ceiling); a multi-hour session raises `max_duration_sec` and polls `health` from
         outside to stay awake.
         """
-    def prompt(self, /, agent: str, task: str, *, timeout_sec: float |None = None, exec_id: str |None = None) -> ExecHandle:
+    def prompt(self, /, agent: str, task: str, *, timeout_sec: float |None = None, exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecHandle:
         """
         Starts one task for `agent` and returns its handle. Does not wait.
         """
-    def prompt_sync(self, /, agent: str, task: str, *, timeout: float = ..., exec_id: str |None = None) -> ExecResult:
+    def prompt_sync(self, /, agent: str, task: str, *, timeout: float = ..., exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecResult:
         """
         Start, wait, ack: one task's whole result. `timeout` defaults to 900 seconds,
         because agent tasks run minutes, and is also the daemon-side budget.
@@ -236,8 +236,8 @@ class BearerToken:
     @property
     def expires_at(self, /) -> float:
         """
-        The presign's expiry, seconds since the epoch. An upper bound: the service also
-        caps validity at the signing credentials' own expiry.
+        Effective expiry in Unix seconds, capped at known signing credential expiry.
+        With missing credential expiry metadata this is only an upper bound.
         """
     def expose(self, /) -> str:
         """
@@ -526,6 +526,11 @@ class ExecResult:
     @property
     def stdout(self, /) -> str: ...
     @property
+    def timed_out(self, /) -> bool:
+        """
+        True when the daemon execution deadline expired, distinct from cancellation.
+        """
+    @property
     def truncated(self, /) -> bool:
         """
         Set when either stream hit the output cap and was cut. A flag rather than a
@@ -577,6 +582,11 @@ class Exit:
         """
     @property
     def signal(self, /) -> int |None: ...
+    @property
+    def timed_out(self, /) -> bool:
+        """
+        True when the remote execution deadline expired.
+        """
     @property
     def truncated(self, /) -> bool: ...
     @property
@@ -1168,7 +1178,7 @@ class Sandbox:
         token survived the freeze, and re-delivering it would hit the daemon's one-shot
         bootstrap and be refused — a 409 that reads like a broken VM.
         """
-    def run(self, /, *, image_identifier: str |None = None, image_version: str |None = None, execution_role_arn: str |None = None, agent_token: str |None = None, launch_env: dict[str, str] |None = None, egress: bool = False, egress_network_connectors: Sequence[str] |None = None, deny_egress: bool = False, shell: bool = False, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None, ready_timeout: float |None = None, token_scope: str |None = None) -> Session:
+    def run(self, /, *, image_identifier: str |None = None, image_version: str |None = None, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, launch_env: dict[str, str] |None = None, egress: bool = False, egress_network_connectors: Sequence[str] |None = None, deny_egress: bool = False, shell: bool = False, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None, ready_timeout: float |None = None, token_scope: str |None = None) -> Session:
         """
         Launches a MicroVM, waits for RUNNING, and returns its session.
         
@@ -1266,6 +1276,20 @@ class Session:
     One running MicroVM's control API, with the proxy auth handled for you.
     """
     def __repr__(self, /) -> str: ...
+    @property
+    def agent_token(self, /) -> str:
+        """
+        The guest bearer credential. Store only in a private encrypted control record.
+        It is never included in repr or ordinary status output.
+        """
+    @staticmethod
+    def attach(region: Region, microvm_id: str, endpoint: str, agent_token: str, *, port: int |None = None, request_timeout: float |None = None) -> Session:
+        """
+        Reattach using a private control record, without bootstrapping again.
+        AWS credentials mint fresh proxy tokens. This session owns its transport and
+        shares no sandbox lock; supervisors should attach separately for keepalives,
+        with a short `request_timeout`. Never publish or log `agent_token`.
+        """
     def connect_headers(self, /, port: int) -> dict[str, str]:
         """
         Both proxy headers for `port`, so a caller can open its **own** connection.
@@ -1645,13 +1669,21 @@ def mint_bedrock_token(region: Region, *, ttl_seconds: float |None = None) -> Be
     `ttl_seconds` defaults to the ceiling, twelve hours; more is refused by the core.
     """
 
-def prompt_agent(session: Session, agent: AgentSpec, task: str, *, timeout_sec: float |None = None, exec_id: str |None = None) -> ExecHandle:
+def mint_bedrock_token_with_credentials(region: Region, *, access_key_id: str, secret_access_key: str, session_token: str |None = None, credentials_expires_at: float, ttl_seconds: float |None = None) -> BearerToken:
+    """
+    Mint with explicit STS credentials and their expiry without changing process env.
+    `credentials_expires_at` is Unix seconds from STS Expiration. Secrets never enter repr.
+    """
+
+def prompt_agent(session: Session, agent: AgentSpec, task: str, *, timeout_sec: float |None = None, exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecHandle:
     """
     Starts one task for `agent` over `session` and returns its handle. Does not wait.
     
     Runs the agent's headless command as uid 1000 in `/workspace`, sourcing the installed
     environment file. `timeout_sec` is the daemon-side budget for the agent process;
     `exec_id` is the idempotency key for a retry that must not spawn twice.
+    `permission_mode` is agent-default or unrestricted. `reap_group_on_exit` stops
+    residual children after the main agent exits. Neither option grants guest root.
     """
 
 def run_report(size: SizeClass, *, running: Duration |None = None, suspended: Duration |None = None, image_build: Duration |None = None, image_gb: float |None = None, image_retained: Duration |None = None, suspend_resume_cycles: int = 0, snapshot_gb: float |None = None, launched: bool = True, label: str = "run", rates: RateTable |None = None) -> CostReport:

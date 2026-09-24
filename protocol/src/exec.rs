@@ -60,6 +60,10 @@ pub struct Outcome {
     pub exit_code: Option<i32>,
     /// Signal number that killed the child, when one did.
     pub signal: Option<i32>,
+    /// The daemon execution deadline fired. Absent on older daemons, which cannot
+    /// distinguish deadline expiry from other signal deaths.
+    #[serde(default)]
+    pub timed_out: bool,
     pub stdout: String,
     pub stderr: String,
     /// Set when either stream hit `max_output_bytes` and was cut. An explicit
@@ -212,6 +216,10 @@ pub struct GapEvent {
 pub struct ExitEvent {
     pub exit_code: Option<i32>,
     pub signal: Option<i32>,
+    /// The daemon execution deadline fired. Absent on older daemons, which cannot
+    /// distinguish deadline expiry from other signal deaths.
+    #[serde(default)]
+    pub timed_out: bool,
     pub truncated: bool,
     pub writers_may_be_alive: bool,
     /// Total bytes published, so a client can assert it saw all of them.

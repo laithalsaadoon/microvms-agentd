@@ -12,7 +12,8 @@
 //!
 //! # What is closed here, and how strongly
 //!
-//! * **TRAP-1** — [`token`]: no `clientToken` parameter exists on any request type. S1.
+//! * **TRAP-1** — [`token`]: image tokens are always fresh. Run tokens are fresh unless
+//!   explicitly persisted for recovery of one launch. Never reuse them for a new VM.
 //! * **TRAP-2** — [`image`]: a build stuck in `CREATING` past the stall grace with every
 //!   build `PENDING` is rejected naming the replay signature. S2.
 //! * **TRAP-3** — [`CreateImageRequest::repair_guest_identity`] is a `bool`, and the
@@ -492,6 +493,10 @@ pub struct RunMicrovmRequest {
     pub auto_resume: bool,
     /// A label for the run token, defaulting to the image identifier (TRAP-1).
     pub token_scope: Option<String>,
+    /// Optional durable launch idempotency key. Reuse only for retries of one launch,
+    /// with identical parameters and run-hook payload. None preserves fresh defaults.
+    /// Never derive this from an image name or reuse it for a different VM.
+    pub client_token: Option<String>,
 }
 
 impl RunMicrovmRequest {
@@ -510,6 +515,7 @@ impl RunMicrovmRequest {
             suspended_sec: 600,
             auto_resume: false,
             token_scope: None,
+            client_token: None,
         }
     }
 
@@ -1300,14 +1306,14 @@ mod tests {
         );
     }
 
-    /// **TRAP-1, the compile surface.** No public request type has a field that could carry
+    /// **TRAP-1, the compile surface.** Image requests cannot carry
     /// a caller-supplied token.
     ///
     /// Asserted by destructuring rather than by grep: a struct pattern must name every
-    /// field, so a `client_token` field added later fails to compile this test. That is the
+    /// field, so an image `client_token` added later fails to compile this test. That is the
     /// closest a test can get to asserting an absence.
     #[test]
-    fn no_request_type_carries_a_caller_supplied_client_token() {
+    fn image_requests_forbid_tokens_and_run_requests_require_explicit_opt_in() {
         let CreateImageRequest {
             name: _,
             base_image: _,
@@ -1347,10 +1353,12 @@ mod tests {
             suspended_sec: _,
             auto_resume: _,
             token_scope: _,
+            client_token,
         } = RunMicrovmRequest::new(
             "arn:image",
             RunHookPayload::for_agent_token("t").expect("fits"),
         );
+        assert!(client_token.is_none());
     }
 
     /// **TRAP-1's last mile.** The wire types' `client_token` fields are `pub(crate)`, so a

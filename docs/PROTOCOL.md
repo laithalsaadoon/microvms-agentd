@@ -393,3 +393,21 @@ before bootstrap breaks it. `model/` includes that configuration and reports the
 counterexample path, so the consequence of breaking the invariant is a checked
 result rather than a prediction. Enforcing the invariant is the responsibility
 of whoever builds the image, not of this daemon.
+
+## Execution deadlines and cancellation (2026-09-17 implementation)
+
+An exec's daemon deadline runs independently of the attached client. Polled
+outcomes and streamed exit events include `timed_out: true` when that deadline
+fires, preserving the raw exit code and signal. A process that handles SIGTERM
+and exits zero after its deadline still did not complete within budget; clients
+must not report it as successful. Older daemons omit this additive field and
+cannot distinguish a deadline from other signal deaths.
+
+The deadline, explicit kill route, and opt-in `reap_group_on_exit` all inspect
+live process-group members while escalating SIGTERM to SIGKILL. The default kill
+grace is 10 seconds. Completion of the leader or closure of its pipes does not
+prove its descendants stopped. Cancellation after a leader's exit still kills
+SIGTERM-ignoring survivors. Processes that change process group or session may
+escape this mechanism; external platform VM termination supplies the final cap.
+These changes have local Linux regression coverage; AWS evidence must be recorded
+separately for the image and deployment being used.

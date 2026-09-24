@@ -97,3 +97,52 @@ def test_every_agent_function_is_exported() -> None:
         "prompt_agent",
     ):
         assert hasattr(microvms, name), name
+
+
+@pytest.mark.parametrize("mode", ["bad", "UNRESTRICTED", ""])
+def test_permission_modes_are_closed_before_any_request(mode: str) -> None:
+    session = microvms.Session.direct("http://127.0.0.1:9", "token")
+    with pytest.raises(microvms.InvalidArgError):
+        microvms.prompt_agent(
+            session, microvms.AgentSpec.codex(), "hello", permission_mode=mode
+        )
+
+
+@pytest.mark.parametrize("timeout", [0.0, -1.0, float("nan"), float("inf")])
+def test_prompt_remote_deadline_is_positive_before_any_request(timeout: float) -> None:
+    session = microvms.Session.direct("http://127.0.0.1:9", "token")
+    with pytest.raises(microvms.InvalidArgError):
+        microvms.prompt_agent(
+            session, microvms.AgentSpec.codex(), "hello", timeout_sec=timeout
+        )
+
+
+def test_explicit_signing_credentials_cap_token_expiry_without_environment_changes() -> (
+    None
+):
+    import os
+    import time
+
+    before = dict(os.environ)
+    expiry = int(time.time()) + 600
+    token = microvms.mint_bedrock_token_with_credentials(
+        microvms.Region.us_east_1(),
+        access_key_id="synthetic-access-id",
+        secret_access_key="synthetic-secret",
+        session_token="synthetic-session",
+        credentials_expires_at=expiry,
+        ttl_seconds=1200,
+    )
+    assert token.expires_at == expiry
+    assert token.expose().startswith("bedrock-api-key-")
+    assert "synthetic" not in repr(token) and token.expose() not in repr(token)
+    assert len(os.environ) == len(before) and all(
+        os.environ.get(key) == value for key, value in before.items()
+    ), "minting must not change the process environment"
+    with pytest.raises(microvms.InvalidArgError):
+        microvms.mint_bedrock_token_with_credentials(
+            microvms.Region.us_east_1(),
+            access_key_id="synthetic-access-id",
+            secret_access_key="synthetic-secret",
+            credentials_expires_at=1,
+        )

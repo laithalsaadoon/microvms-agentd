@@ -52,7 +52,7 @@ use crate::session::{ExecHandle, Session, mint_exec_id};
 use crate::sizing::SizeClass;
 
 pub use bedrock::{BearerToken, Minted};
-pub use profile::{Agent, CODEX_CONFIG_FILE, ENV_FILE, MARKER_FILE, Profile};
+pub use profile::{Agent, AgentPermissionMode, CODEX_CONFIG_FILE, ENV_FILE, MARKER_FILE, Profile};
 
 /// The uid every agent runs as, and the owner of `/workspace`. Created by the image.
 pub const AGENT_UID: u32 = 1000;
@@ -524,6 +524,48 @@ pub async fn installed_agents(session: &Session) -> Result<Vec<AgentSpec>, Error
     Ok(specs)
 }
 
+/// Probe the installed executable as the guest agent UID, without sourcing credentials.
+/// Only a numeric version is returned; arbitrary guest stdout/stderr never enters reports.
+pub async fn installed_version(session: &Session, agent: Agent) -> Result<String, Error> {
+    let request = crate::protocol::exec::StartRequest {
+        exec_id: mint_exec_id(),
+        command: profile::version_command(agent),
+        shell: false,
+        cwd: Some(WORKDIR.to_string()),
+        env: std::collections::HashMap::from([(
+            "PATH".into(),
+            "/usr/local/bin:/usr/bin:/bin".into(),
+        )]),
+        user: Some(AGENT_UID),
+        group: Some(AGENT_GID),
+        timeout_sec: Some(10.0),
+        stdin: false,
+        reap_group_on_exit: true,
+    };
+    let result = session.run_sync(request, Duration::from_secs(25)).await?;
+    if result.succeeded()
+        && let Some(version) = reported_version(result.stdout())
+    {
+        return Ok(version.to_string());
+    }
+    Err(Error::new(
+        ErrorKind::Precondition,
+        format!(
+            "could not read {agent}'s installed version; verify the pinned agent executable in the image",
+        ),
+    ))
+}
+
+fn reported_version(output: &str) -> Option<&str> {
+    output.split_ascii_whitespace().find(|word| {
+        word.len() <= 32
+            && word.split('.').count() == 3
+            && word
+                .split('.')
+                .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+    })
+}
+
 /// The knobs on one prompt.
 #[derive(Clone, Debug, Default)]
 pub struct PromptOptions {
@@ -532,6 +574,10 @@ pub struct PromptOptions {
     /// A daemon-side wall-clock budget for the agent process. `None` leaves the exec
     /// unbounded on the daemon's side; the caller's wait still has its own deadline.
     pub timeout: Option<Duration>,
+    /// Guest agent permissions, independent of VM privileges. Defaults to agent-default.
+    pub permission_mode: AgentPermissionMode,
+    /// Terminate residual test servers/fuzzers when the main agent exits. Opt-in.
+    pub reap_group_on_exit: bool,
 }
 
 /// The start request for one task (AGENT-7). Pure; the test reads every field.
@@ -546,9 +592,12 @@ pub fn prompt_request(
              price of a model call.",
         ));
     }
+    if options.timeout.is_some_and(|timeout| timeout.is_zero()) {
+        return Err(Error::invalid_arg("execution timeout must be positive"));
+    }
     let command = format!(
         ". {ENV_FILE} && {}",
-        profile::headless_command(spec.agent, &sh_single_quote(task))
+        profile::headless_command(spec.agent, &sh_single_quote(task), options.permission_mode)
     );
     Ok(crate::protocol::exec::StartRequest {
         exec_id: options.exec_id.clone().unwrap_or_else(mint_exec_id),
@@ -562,7 +611,7 @@ pub fn prompt_request(
         group: Some(AGENT_GID),
         timeout_sec: options.timeout.map(|timeout| timeout.as_secs_f64()),
         stdin: false,
-        reap_group_on_exit: false,
+        reap_group_on_exit: options.reap_group_on_exit,
     })
 }
 
@@ -571,7 +620,7 @@ pub fn prompt_request(
 pub fn headless_command_template(agent: Agent) -> String {
     format!(
         ". {ENV_FILE} && {}",
-        profile::headless_command(agent, "'<TASK>'")
+        profile::headless_command(agent, "'<TASK>'", AgentPermissionMode::AgentDefault)
     )
 }
 
@@ -1046,6 +1095,7 @@ mod tests {
             &PromptOptions {
                 exec_id: Some("p1".into()),
                 timeout: Some(Duration::from_secs(120)),
+                ..PromptOptions::default()
             },
         )
         .expect("builds");
@@ -1178,5 +1228,125 @@ mod tests {
             .await
             .expect_err("no session");
         assert_eq!(unlaunched.kind(), ErrorKind::Precondition);
+    }
+
+    #[test]
+    fn unrestricted_permissions_deadline_and_reaping_are_explicit_and_demoted() {
+        for (agent, expected, forbidden) in [
+            (
+                Agent::ClaudeCode,
+                "--dangerously-skip-permissions",
+                "--allowedTools",
+            ),
+            (
+                Agent::Codex,
+                "--dangerously-bypass-approvals-and-sandbox",
+                "workspace-write",
+            ),
+        ] {
+            let task = "a quote ' and $(touch /tmp/must-not-run); \"hello\"";
+            let request = prompt_request(
+                &AgentSpec::new(agent),
+                task,
+                &PromptOptions {
+                    exec_id: Some("same-task".into()),
+                    timeout: Some(Duration::from_secs(1200)),
+                    permission_mode: AgentPermissionMode::Unrestricted,
+                    reap_group_on_exit: true,
+                },
+            )
+            .expect("valid");
+            assert!(request.command[0].contains(expected));
+            assert!(!request.command[0].contains(forbidden));
+            assert!(request.command[0].contains(&sh_single_quote(task)));
+            assert_eq!((request.user, request.group), (Some(1000), Some(1000)));
+            assert_eq!(request.timeout_sec, Some(1200.0));
+            assert!(request.reap_group_on_exit);
+            assert_eq!(request.exec_id, "same-task");
+            let default =
+                prompt_request(&AgentSpec::new(agent), task, &PromptOptions::default()).unwrap();
+            assert!(default.command[0].contains(forbidden));
+            assert!(!default.command[0].contains(expected));
+            assert!(!default.reap_group_on_exit);
+            assert_eq!(default.timeout_sec, None);
+        }
+        assert!("auto".parse::<AgentPermissionMode>().is_err());
+        assert!(
+            prompt_request(
+                &AgentSpec::new(Agent::Codex),
+                "task",
+                &PromptOptions {
+                    timeout: Some(Duration::ZERO),
+                    ..PromptOptions::default()
+                }
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn version_reporting_only_accepts_numeric_version_words() {
+        assert_eq!(reported_version("2.1.7 (Claude Code)\n"), Some("2.1.7"));
+        assert_eq!(reported_version("codex-cli 0.154.0\n"), Some("0.154.0"));
+        assert_eq!(reported_version("SECRET=credential\n"), None);
+        assert_eq!(reported_version("1.2.3-secret"), None);
+    }
+
+    // Runs the rendered command through a real POSIX shell.
+    #[cfg(unix)]
+    #[test]
+    fn unrestricted_task_text_is_one_literal_shell_argument() {
+        let task = "task ' with $(printf INJECTED) and `printf ALSO` ; $HOME";
+        for agent in Agent::ALL {
+            let command = profile::headless_command(
+                agent,
+                &sh_single_quote(task),
+                AgentPermissionMode::Unrestricted,
+            );
+            let script = format!(
+                "claude() {{ printf '%s\\n' \"$@\"; }}; codex() {{ printf '%s\\n' \"$@\"; }}; {command}"
+            );
+            let output = std::process::Command::new("/bin/sh")
+                .args(["-c", &script])
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            assert_eq!(
+                stdout.lines().filter(|line| *line == task).count(),
+                1,
+                "{stdout}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn installed_version_probe_is_demoted_and_never_sources_agent_credentials() {
+        let recorder = Recorder::with([
+            Reply::ok(serde_json::json!({"exec_id":"version","phase":"running"})),
+            Reply::ok(serde_json::json!({"exec_id":"version","phase":"exited"})),
+            Reply::ok(serde_json::json!({
+                "exec_id":"version","phase":"exited","exit_code":0,"signal":null,
+                "stdout":"codex-cli 0.154.0\nSECRET=credential","stderr":"private diagnostic",
+                "truncated":false,"writers_may_be_alive":false
+            })),
+        ]);
+        let (session, _, _) = session_with(Arc::clone(&recorder));
+        assert_eq!(
+            installed_version(&session, Agent::Codex).await.unwrap(),
+            "0.154.0"
+        );
+        let requests = recorder.requests();
+        let start: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(start["command"], serde_json::json!(["codex", "--version"]));
+        assert_eq!(start["shell"], false);
+        assert_eq!(start["user"], 1000);
+        assert_eq!(start["group"], 1000);
+        assert_eq!(
+            start["env"],
+            serde_json::json!({"PATH":"/usr/local/bin:/usr/bin:/bin"})
+        );
+        assert_eq!(start["timeout_sec"], 10.0);
+        assert_eq!(start["reap_group_on_exit"], true);
     }
 }

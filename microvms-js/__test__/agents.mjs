@@ -14,8 +14,10 @@ import {
   installAgentAccess,
   installedAgents,
   mintBedrockToken,
+  mintBedrockTokenWithCredentials,
   promptAgent,
   Session,
+  Region,
 } from '../index.js';
 
 test('the constants name the guest contract and both profiles', () => {
@@ -69,4 +71,77 @@ test('the exported surface is complete', () => {
   for (const item of [AgentVm, installedAgents, installAgentAccess, promptAgent, mintBedrockToken]) {
     assert.equal(typeof item, 'function');
   }
+});
+
+
+test('permission modes and remote deadlines are refused before any request', async () => {
+  const session = Session.direct('http://127.0.0.1:9', 'token');
+  for (const options of [
+    { permissionMode: 'bad' }, { permissionMode: 'UNRESTRICTED' },
+    { timeoutSec: 0 }, { timeoutSec: -1 }, { timeoutSec: NaN }, { timeoutSec: Infinity },
+  ]) {
+    await assert.rejects(
+      promptAgent(session, { agent: 'codex' }, 'hello', options),
+      (err) => err.cause.message === 'ERR_INVALID_ARG',
+    );
+  }
+});
+
+test('both agents and permission modes reach the wire with the remote deadline', async () => {
+  const { createServer } = await import('node:http');
+  const requests = [];
+  const server = createServer(async (req, res) => {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    const request = JSON.parse(body);
+    requests.push(request);
+    res.end(JSON.stringify({ exec_id: request.exec_id, phase: 'running' }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const session = Session.direct(`http://127.0.0.1:${server.address().port}`, 'token');
+    for (const agent of ['claude-code', 'codex']) {
+      for (const permissionMode of ['agent-default', 'unrestricted']) {
+        const handle = await promptAgent(session, { agent }, "it's 'quoted'; $(false)", {
+          permissionMode, timeoutSec: 17, execId: `${agent}-${permissionMode}`,
+          reapGroupOnExit: true,
+        });
+        const request = requests.at(-1);
+        assert.equal(handle.execId, request.exec_id);
+        assert.equal(request.timeout_sec, 17);
+        assert.equal(request.user, 1000);
+        assert.equal(request.group, 1000);
+        assert.equal(request.reap_group_on_exit, true);
+        const command = request.command[0];
+        assert.ok(command.includes("'it'\\''s "));
+        if (permissionMode === 'unrestricted') {
+          assert.match(command, /--dangerously-/);
+          assert.doesNotMatch(command, /workspace-write|--allowedTools/);
+        } else if (agent === 'codex') {
+          assert.match(command, /-s workspace-write/);
+        } else {
+          assert.match(command, /--allowedTools Bash,Read,Edit,Write,Grep,Glob/);
+        }
+      }
+    }
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+
+test('explicit STS credentials cap token expiry without mutating environment', () => {
+  const env = { ...process.env };
+  const expiry = Math.floor(Date.now() / 1000) + 600;
+  const token = mintBedrockTokenWithCredentials(Region.usEast1(), 'synthetic-access-id',
+    'synthetic-secret', 'synthetic-session', expiry, 1200);
+  assert.equal(token.expiresAt, expiry);
+  assert.match(token.expose(), /^bedrock-api-key-/);
+  assert.doesNotMatch(token.toString(), /synthetic/);
+  assert.ok(Object.keys(process.env).length === Object.keys(env).length
+    && Object.entries(env).every(([key, value]) => process.env[key] === value),
+  "minting must not change the process environment");
+  assert.throws(() => mintBedrockTokenWithCredentials(Region.usEast1(), 'id', 'secret',
+    undefined, 1, 1200));
 });

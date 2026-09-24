@@ -154,6 +154,8 @@ pub struct ProcessExit {
     /// The signal that killed the child, when one did. Not part of the harness shape; here
     /// because it is the only thing that makes a `null` exit code actionable.
     pub signal: Option<i32>,
+    /// True when the remote execution deadline expired.
+    pub timed_out: bool,
 }
 
 /// One recorded gap, before it becomes an [`OutputGap`].
@@ -526,6 +528,10 @@ impl ExecProcess {
         Ok(ProcessExit {
             exit_code: result.exit_code(),
             signal: result.outcome.as_ref().and_then(|outcome| outcome.signal),
+            timed_out: result
+                .outcome
+                .as_ref()
+                .is_some_and(|outcome| outcome.timed_out),
         })
     }
 

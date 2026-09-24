@@ -15,6 +15,15 @@ misconfigurations:
       encrypts at rest; a customer-managed KMS key would add key policy,
       rotation, and per-request cost to protect a public repository's build
       artifact. Revisit if the bucket ever carries anything secret.
+  - id: AVD-AWS-0132
+    paths:
+      - examples/background-coding-agent/infra/main.tf
+    statement: >-
+      The example's job bucket uses SSE-S3 (AES256) at rest, blocks public
+      access, and expires objects after 30 days. A customer-managed KMS key
+      would add key policy and decrypt grants for both the Lambda role and
+      every CLI user to a copy-and-adapt example. Its README tells production
+      deployments holding private source to add one.
   - id: AVD-DS-0002
     paths:
       - examples/coding-agents-on-bedrock/Dockerfile

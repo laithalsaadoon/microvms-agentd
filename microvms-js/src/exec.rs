@@ -76,6 +76,8 @@ pub struct ExecResult {
     /// Set when either stream hit the output cap and was cut. A flag rather than a sentinel
     /// inside the bytes, which would be indistinguishable from output containing it.
     pub truncated: bool,
+    /// True when the daemon execution deadline expired, distinct from cancellation.
+    pub timed_out: bool,
     /// Set when the post-exit linger deadline expired with the pipes still open: some
     /// grandchild is alive and may write more that nobody will see.
     pub writers_may_be_alive: bool,
@@ -94,6 +96,10 @@ impl ExecResult {
             signal: result.outcome.as_ref().and_then(|outcome| outcome.signal),
             stdout: result.stdout().to_string(),
             stderr: result.stderr().to_string(),
+            timed_out: result
+                .outcome
+                .as_ref()
+                .is_some_and(|outcome| outcome.timed_out),
             truncated: result
                 .outcome
                 .as_ref()
@@ -147,6 +153,8 @@ pub struct StreamEvent {
     pub exit_code: Option<i32>,
     pub signal: Option<i32>,
     pub truncated: Option<bool>,
+    /// Present on exit: whether the remote execution deadline expired.
+    pub timed_out: Option<bool>,
     pub writers_may_be_alive: Option<bool>,
 }
 
@@ -163,6 +171,7 @@ impl StreamEvent {
             exit_code: None,
             signal: None,
             truncated: None,
+            timed_out: None,
             writers_may_be_alive: None,
         }
     }
@@ -195,6 +204,7 @@ impl StreamEvent {
                 exit_code: exit.exit_code,
                 signal: exit.signal,
                 truncated: Some(exit.truncated),
+                timed_out: Some(exit.timed_out),
                 writers_may_be_alive: Some(exit.writers_may_be_alive),
                 ..Self::empty("exit")
             },
