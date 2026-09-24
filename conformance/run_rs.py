@@ -3897,30 +3897,43 @@ def drive_background_agents(
             )
             nonce = secrets.token_hex(12)
             path = f"/workspace/background-{agent}-{nonce}.txt"
-            prompt = cli.call(
-                "agent-prompt",
-                f"Use your shell tool to run `printf %s {nonce} > {path}`. "
-                "Then read the file and finish. Do not ask for approval.",
-                "--agent",
-                agent,
-                "--permission-mode",
-                "unrestricted",
-                "--execution-timeout",
-                "120",
-                "--timeout",
-                "150",
-                "--reap-group-on-exit",
-                *attach,
-                timeout=180,
-            )
-            kept = cli.call("exec", f"cat {path}", *attach, timeout=30)
+            # A model can decline outright and still exit 0 (measured for Codex, see the
+            # AGENT-7 hello.py check). One re-prompt keeps that coin flip from failing the
+            # suite; a second decline fails it, and the detail names how many prompts ran.
+            attempts = 0
+            while True:
+                attempts += 1
+                prompt = cli.call(
+                    "agent-prompt",
+                    f"Use your shell tool to run `printf %s {nonce} > {path}`. "
+                    "Then read the file and finish. Do not ask for approval.",
+                    "--agent",
+                    agent,
+                    "--permission-mode",
+                    "unrestricted",
+                    "--execution-timeout",
+                    "120",
+                    "--timeout",
+                    "150",
+                    "--reap-group-on-exit",
+                    *attach,
+                    timeout=180,
+                )
+                kept = cli.call("exec", f"cat {path}", *attach, timeout=30)
+                declined = (
+                    prompt.data.get("exitCode") == 0
+                    and kept.data.get("stdout") != nonce
+                )
+                if not declined or attempts == 2:
+                    break
             results.check(
                 names[1],
                 prompt.data.get("exitCode") == 0
                 and prompt.data.get("timedOut") is False
                 and kept.data.get("exitCode") == 0
                 and kept.data.get("stdout") == nonce,
-                f"exit={prompt.data.get('exitCode')} artifact matches={kept.data.get('stdout') == nonce}",
+                f"exit={prompt.data.get('exitCode')} prompts={attempts} "
+                f"artifact matches={kept.data.get('stdout') == nonce}",
             )
             results.check(
                 names[2],
