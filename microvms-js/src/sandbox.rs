@@ -456,6 +456,51 @@ impl BuildImageOptions {
     }
 }
 
+/// Everything `ensureImage` needs besides the size class.
+///
+/// `baseImage` defaults to `baseImageFromDockerfile(dockerfile)`; `waitTimeoutSeconds` is
+/// the build wait, 45 minutes by default. `contextDir` is read as `docker build` reads a
+/// context: `Dockerfile.dockerignore`, else `.dockerignore`, is honoured, and symlinks are
+/// skipped with a line in the result's `warnings`.
+#[napi(object)]
+pub struct EnsureImageOptions {
+    /// The image name's stem; the name is `<namePrefix>-<hash12>`.
+    pub name_prefix: String,
+    /// The daemon binary's bytes.
+    pub binary: napi::bindgen_prelude::Uint8Array,
+    /// The Dockerfile, usually `wrapDockerfile(task)`.
+    pub dockerfile: String,
+    /// The directory the Dockerfile's `COPY` lines read, or omitted for none.
+    pub context_dir: Option<String>,
+    /// The artifact bucket, in the sandbox's region.
+    pub s3_bucket: String,
+    /// A key prefix inside the bucket, or omitted for the bucket root.
+    pub s3_key_prefix: Option<String>,
+    /// The build role.
+    pub build_role_arn: String,
+    pub base_image: Option<BaseImageInput>,
+    /// Delete what exists under the name and build afresh.
+    pub force: Option<bool>,
+    pub tags: Option<std::collections::HashMap<String, String>>,
+    pub wait_timeout_seconds: Option<f64>,
+}
+
+/// What `ensureImage` returns: the ready image and how this call got it.
+#[napi(object)]
+pub struct EnsuredImage {
+    /// The ready image; pass `image.identifier` to `run`.
+    pub image: Image,
+    /// True when this call's own create did not build the image: it was ready, a build
+    /// already running was waited out, or a concurrent caller won the create race.
+    pub reused: bool,
+    /// `s3://<bucket>/<prefix>/<name>/artifact.zip`, whether or not this call uploaded it.
+    pub artifact_uri: String,
+    /// Whether this call uploaded the artifact.
+    pub uploaded: bool,
+    /// What reading the build context skipped, one line each.
+    pub warnings: Vec<String>,
+}
+
 /// Everything a launch needs.
 #[derive(Default)]
 #[napi(object)]
@@ -786,6 +831,58 @@ impl Sandbox {
         let mut guard = self.inner.lock().await;
         let image = guard.build_image(request).await.map_err(js_async)?;
         Ok(Image::wrap(image))
+    }
+
+    /// Builds or reuses the content-addressed image for a task: one call from build inputs
+    /// to a ready image.
+    ///
+    /// The name is `<namePrefix>-<hash12>` over the daemon, the Dockerfile, the build
+    /// context, the base image and the size class. A ready image is returned with
+    /// `reused: true` and no upload; a running build is waited out; a failed image — or any
+    /// image under `force` — is deleted and rebuilt; an absent one is uploaded to
+    /// `s3://<s3Bucket>/<s3KeyPrefix>/<name>/artifact.zip`, created, and waited for. When a
+    /// concurrent caller creates the name first, this call waits for that build and returns
+    /// it with `reused: true`. Every local check runs before the first AWS call.
+    #[napi]
+    pub async fn ensure_image(
+        &self,
+        options: EnsureImageOptions,
+        size: Option<&SizeClass>,
+    ) -> Result<EnsuredImage, AsyncError> {
+        // IMAGE-12: a pass-through; the name, the context, the decisions and the race are
+        // core's.
+        let mut request = microvms_core::control::EnsureImageRequest::new(
+            options.name_prefix,
+            options.binary.to_vec(),
+            options.dockerfile,
+            options.s3_bucket,
+            options.build_role_arn,
+        );
+        request.s3_key_prefix = options.s3_key_prefix;
+        if let Some(size) = size {
+            request.size = size.inner;
+        }
+        request.base_image = options.base_image.map(BaseImageInput::into_core);
+        request.force = options.force.unwrap_or(false);
+        if let Some(tags) = options.tags {
+            request.tags = tags.into_iter().collect::<BTreeMap<_, _>>();
+        }
+        if let Some(timeout) = options.wait_timeout_seconds {
+            request.wait_timeout = Some(seconds_async(timeout)?);
+        }
+        if let Some(dir) = options.context_dir {
+            request.context =
+                Some(microvms_core::control::BuildContext::from_dir(dir).map_err(js_async)?);
+        }
+        let mut guard = self.inner.lock().await;
+        let ensured = guard.ensure_image(request).await.map_err(js_async)?;
+        Ok(EnsuredImage {
+            image: Image::wrap(&ensured.image),
+            reused: ensured.reused,
+            artifact_uri: ensured.artifact_uri,
+            uploaded: ensured.uploaded,
+            warnings: ensured.warnings,
+        })
     }
 
     /// The artifact bytes to upload to `codeArtifactUri`.

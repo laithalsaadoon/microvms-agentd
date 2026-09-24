@@ -39,6 +39,7 @@ from microvms import (
     ControlPlane,
     CostReport,
     Duration,
+    EnsuredImage,
     EstimatedUsd,
     ExecResult,
     IdlePolicy,
@@ -151,6 +152,32 @@ def daemon_for_image(state_dir: str) -> bytes:
     same: bytes = provision_agentd(version=report.version, state_dir=state_dir)
     assert proof is None or report.source != "caller-supplied"
     return same if same == report.data else report.data
+
+
+def task_image(region: Region, binary: bytes, context_dir: str) -> str:
+    """One call from a task's build inputs to a ready image, written for the checker.
+
+    Never called by this repo's gates: it resolves credentials and would build an image.
+    `EnsuredImage.reused` is a bool and `image` an `Image`, so a checker accepts the two
+    uses below and would refuse `ensured.image + 1`.
+    """
+    dockerfile, base = task_image_inputs("FROM python:3.12-slim\nWORKDIR /app\n")
+    with Sandbox(region) as sandbox:
+        ensured: EnsuredImage = sandbox.ensure_image(
+            name_prefix="task",
+            binary=binary,
+            dockerfile=dockerfile,
+            context_dir=context_dir,
+            s3_bucket="example-bucket",
+            s3_key_prefix="harbor/images",
+            build_role_arn="arn:aws:iam::123456789012:role/example",
+            base_image=base,
+            wait_timeout=1800.0,
+        )
+        path = "reused" if ensured.reused else "built"
+        for warning in ensured.warnings:
+            print(warning)
+        return f"{ensured.image.identifier} ({path})"
 
 
 def launch(region: Region, size: SizeClass) -> str:

@@ -151,15 +151,60 @@ pub fn build_artifact(
     dockerfile: &str,
     project: Option<&ProjectFiles>,
 ) -> Result<Vec<u8>, Error> {
+    build_artifact_with_context(binary, dockerfile, project, None)
+}
+
+/// The mode every non-executable artifact entry carries.
+const FILE_MODE: u32 = 0o644;
+
+/// [`build_artifact`] plus a build context: the context's files at their relative paths
+/// beside the Dockerfile, which is the build context root, so the Dockerfile's `COPY` lines
+/// find them (IMAGE-7).
+///
+/// # One set of inputs, one object
+///
+/// Every entry carries the DOS epoch (1980-01-01) as its date and a fixed mode — `0o755` for
+/// the daemon and for context files with an execute bit, `0o644` for everything else — and
+/// the entries are written in a fixed order: `Dockerfile`, `agentd`, the project pair, then
+/// the context sorted by name. So equal inputs produce byte-identical archives on any host
+/// at any time, and a content-addressed S3 key holds one object rather than whichever
+/// upload landed last. (Byte identity across `zip` crate versions is not promised; the image
+/// name hashes the inputs, not these bytes, for exactly that reason — see
+/// [`artifact_content_hash`].)
+///
+/// Refuses a context entry that repeats a project file's name, since one archive cannot
+/// hold two entries of one name.
+pub fn build_artifact_with_context(
+    binary: &[u8],
+    dockerfile: &str,
+    project: Option<&ProjectFiles>,
+    context: Option<&super::context::BuildContext>,
+) -> Result<Vec<u8>, Error> {
     use zip::write::{SimpleFileOptions, ZipWriter};
 
-    let mut writer = ZipWriter::new(std::io::Cursor::new(Vec::new()));
-    let deflated =
-        SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    if let (Some(project), Some(context)) = (project, context)
+        && let Some(entry) = context.entries().iter().find(|entry| {
+            entry.name == project.ecosystem.manifest_name()
+                || entry.name == project.ecosystem.lockfile_name()
+        })
+    {
+        return Err(Error::invalid_arg(format!(
+            "the build context has {:?} at its root, which the project files already carry;              drop one of the two.",
+            entry.name
+        )));
+    }
 
-    let mut write_entry = |name: &str, bytes: &[u8], options: SimpleFileOptions| {
+    let mut writer = ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let options = |mode: u32| {
+        SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated)
+            .last_modified_time(zip::DateTime::default())
+            .unix_permissions(mode)
+    };
+
+    let mut write_entry = |name: &str, bytes: &[u8], mode: u32| {
         writer
-            .start_file(name, options)
+            .start_file(name, options(mode))
             .and_then(|()| writer.write_all(bytes).map_err(Into::into))
             .map_err(|error| {
                 Error::new(
@@ -169,19 +214,24 @@ pub fn build_artifact(
             })
     };
 
-    write_entry(DOCKERFILE_ENTRY, dockerfile.as_bytes(), deflated)?;
-    write_entry(AGENTD_ENTRY, binary, deflated.unix_permissions(AGENTD_MODE))?;
+    write_entry(DOCKERFILE_ENTRY, dockerfile.as_bytes(), FILE_MODE)?;
+    write_entry(AGENTD_ENTRY, binary, AGENTD_MODE)?;
     if let Some(project) = project {
         write_entry(
             project.ecosystem.manifest_name(),
             &project.manifest,
-            deflated,
+            FILE_MODE,
         )?;
         write_entry(
             project.ecosystem.lockfile_name(),
             &project.lockfile,
-            deflated,
+            FILE_MODE,
         )?;
+    }
+    if let Some(context) = context {
+        for entry in context.entries() {
+            write_entry(&entry.name, &entry.bytes, entry.mode)?;
+        }
     }
 
     let bytes = writer
@@ -227,6 +277,30 @@ pub fn artifact_content_hash(
     dockerfile: &str,
     project: Option<&ProjectFiles>,
 ) -> String {
+    artifact_content_hash_with_context(binary, dockerfile, project, None)
+}
+
+/// The tag that opens the build context's part of the digest stream.
+///
+/// A project file contributes a fixed file name, so no project entry can begin with this
+/// tag's length and bytes: the two sections cannot be confused for each other.
+const CONTEXT_TAG: &[u8] = b"microvms-build-context/1";
+
+/// [`artifact_content_hash`] extended with a build context (IMAGE-6).
+///
+/// With no context, or an empty one, the stream is byte-for-byte the one
+/// `artifact_content_hash` hashed before #221 — an empty context adds no entry, so it is the
+/// same artifact — and the pinned vector in the tests holds that fixed, so no `build --reuse`
+/// or `AgentVm` image name moves. A non-empty context appends [`CONTEXT_TAG`], the entry
+/// count, and each entry's name, mode, and bytes, the name and bytes length-prefixed. The
+/// entries are sorted by name ([`super::context::BuildContext`]), so the order a filesystem
+/// listed them in is not part of the identity; the mode is, because `COPY` keeps it.
+pub fn artifact_content_hash_with_context(
+    binary: &[u8],
+    dockerfile: &str,
+    project: Option<&ProjectFiles>,
+    context: Option<&super::context::BuildContext>,
+) -> String {
     use sha2::{Digest as _, Sha256};
 
     let mut hasher = Sha256::new();
@@ -245,27 +319,19 @@ pub fn artifact_content_hash(
             hasher.update(bytes);
         }
     }
+    if let Some(context) = context.filter(|context| !context.entries().is_empty()) {
+        hasher.update((CONTEXT_TAG.len() as u64).to_be_bytes());
+        hasher.update(CONTEXT_TAG);
+        hasher.update((context.entries().len() as u64).to_be_bytes());
+        for entry in context.entries() {
+            hasher.update((entry.name.len() as u64).to_be_bytes());
+            hasher.update(entry.name.as_bytes());
+            hasher.update(entry.mode.to_be_bytes());
+            hasher.update((entry.bytes.len() as u64).to_be_bytes());
+            hasher.update(&entry.bytes);
+        }
+    }
     const_hex::encode(hasher.finalize())
-}
-
-/// The content hash with a build context. Not yet implemented (#221).
-pub fn artifact_content_hash_with_context(
-    binary: &[u8],
-    dockerfile: &str,
-    project: Option<&ProjectFiles>,
-    _context: Option<&super::context::BuildContext>,
-) -> String {
-    artifact_content_hash(binary, dockerfile, project)
-}
-
-/// The artifact with a build context. Not yet implemented (#221).
-pub fn build_artifact_with_context(
-    binary: &[u8],
-    dockerfile: &str,
-    project: Option<&ProjectFiles>,
-    _context: Option<&super::context::BuildContext>,
-) -> Result<Vec<u8>, Error> {
-    build_artifact(binary, dockerfile, project)
 }
 
 /// A base image: the platform ARN, the Dockerfile `FROM` that pairs with it, and whether

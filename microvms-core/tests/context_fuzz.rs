@@ -331,7 +331,7 @@ fn the_context_hash_extends_the_legacy_one_and_follows_every_entry() {
                     .take(6)
                     .map(|b| (b'a' + b % 26) as char)
                     .collect();
-                let name = format!("ctx/{name}");
+                let name = format!("ctx/{name}e");
                 if entries.iter().any(|entry| entry.name == name) {
                     continue;
                 }

@@ -117,6 +117,59 @@ impl PyDetached {
     }
 }
 
+/// What `Sandbox.ensure_image` returns: the ready image and how this call got it.
+#[pyclass(frozen, name = "EnsuredImage", module = "microvms")]
+pub struct PyEnsuredImage {
+    image: microvms_core::control::Image,
+    reused: bool,
+    artifact_uri: String,
+    uploaded: bool,
+    warnings: Vec<String>,
+}
+
+#[pymethods]
+impl PyEnsuredImage {
+    /// The ready image; pass `image.identifier` to `run`.
+    #[getter]
+    fn image(&self) -> PyImage {
+        PyImage::wrap(&self.image)
+    }
+
+    /// True when this call's own create did not build the image: it was ready, a build
+    /// already running was waited out, or a concurrent caller won the create race.
+    #[getter]
+    fn reused(&self) -> bool {
+        self.reused
+    }
+
+    /// `s3://<bucket>/<prefix>/<name>/artifact.zip`, whether or not this call uploaded it.
+    #[getter]
+    fn artifact_uri(&self) -> &str {
+        &self.artifact_uri
+    }
+
+    /// Whether this call uploaded the artifact.
+    #[getter]
+    fn uploaded(&self) -> bool {
+        self.uploaded
+    }
+
+    /// What reading the build context skipped (symlinks, special files), one line each.
+    #[getter]
+    fn warnings(&self) -> Vec<String> {
+        self.warnings.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "EnsuredImage(name={:?}, reused={}, uploaded={})",
+            self.image.name,
+            if self.reused { "True" } else { "False" },
+            if self.uploaded { "True" } else { "False" },
+        )
+    }
+}
+
 /// A built image, and the log group the service created alongside it.
 #[pyclass(frozen, name = "Image", module = "microvms")]
 pub struct PyImage {
@@ -753,6 +806,100 @@ impl PySandbox {
             })
         })?;
         Ok(built)
+    }
+
+    /// Builds or reuses the content-addressed image for a task: one call from build inputs
+    /// to a ready image.
+    ///
+    /// The name is `<name_prefix>-<hash12>`, the hash over the daemon, the Dockerfile, the
+    /// build context, the base image and the size class, so equal inputs name one image.
+    /// The ARN is built from the caller's account (looked up once per sandbox). The image
+    /// is described, then:
+    ///
+    /// - ready: returned, with `reused=True` and no upload;
+    /// - building: waited out and returned, `reused=True`;
+    /// - failed, or any state under `force=True`: deleted, the name awaited free, rebuilt;
+    /// - absent: the artifact is uploaded to `s3://<s3_bucket>/<s3_key_prefix>/<name>/
+    ///   artifact.zip` and the image created and waited for, `reused=False`.
+    ///
+    /// When a concurrent caller creates the name first, this call's create is refused; it
+    /// describes again and waits for that build, returning it with `reused=True`.
+    ///
+    /// `dockerfile` is usually `wrap_dockerfile(task)`. `context_dir` is the directory the
+    /// Dockerfile's `COPY` lines read, taken as `docker build` takes it:
+    /// `Dockerfile.dockerignore`, else `.dockerignore`, is honoured, and symlinks are skipped
+    /// with a line in `warnings`. `base_image` defaults to
+    /// `BaseImage.from_dockerfile(dockerfile)`. `wait_timeout` is the build wait in seconds
+    /// (45 minutes by default). Every local check runs before the first AWS call.
+    #[pyo3(signature = (
+        *,
+        name_prefix,
+        binary,
+        dockerfile,
+        s3_bucket,
+        build_role_arn,
+        context_dir=None,
+        s3_key_prefix=None,
+        size=None,
+        base_image=None,
+        force=false,
+        tags=None,
+        wait_timeout=None,
+    ))]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "one keyword-only parameter per EnsureImageRequest field"
+    )]
+    fn ensure_image(
+        &self,
+        py: Python<'_>,
+        name_prefix: String,
+        binary: Vec<u8>,
+        dockerfile: String,
+        s3_bucket: String,
+        build_role_arn: String,
+        context_dir: Option<std::path::PathBuf>,
+        s3_key_prefix: Option<String>,
+        size: Option<PySizeClass>,
+        base_image: Option<PyBaseImage>,
+        force: bool,
+        tags: Option<std::collections::BTreeMap<String, String>>,
+        wait_timeout: Option<f64>,
+    ) -> PyCoreResult<PyEnsuredImage> {
+        // IMAGE-12: a pass-through; the name, the context, the decisions and the race are
+        // core's.
+        let mut request = microvms_core::control::EnsureImageRequest::new(
+            name_prefix,
+            binary,
+            dockerfile,
+            s3_bucket,
+            build_role_arn,
+        );
+        request.s3_key_prefix = s3_key_prefix;
+        if let Some(size) = size {
+            request.size = size.inner;
+        }
+        request.base_image = base_image.map(|base| base.inner);
+        request.force = force;
+        if let Some(tags) = tags {
+            request.tags = tags;
+        }
+        if let Some(timeout) = wait_timeout {
+            request.wait_timeout = Some(seconds(timeout)?);
+        }
+        let ensured = self.detached(py, move |sandbox| {
+            if let Some(dir) = context_dir {
+                request.context = Some(microvms_core::control::BuildContext::from_dir(dir)?);
+            }
+            runtime::block_on_detached(sandbox.ensure_image(request))
+        })?;
+        Ok(PyEnsuredImage {
+            image: ensured.image,
+            reused: ensured.reused,
+            artifact_uri: ensured.artifact_uri,
+            uploaded: ensured.uploaded,
+            warnings: ensured.warnings,
+        })
     }
 
     /// The artifact bytes to upload to `code_artifact_uri`.
