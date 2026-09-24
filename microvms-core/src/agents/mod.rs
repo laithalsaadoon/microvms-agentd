@@ -1292,6 +1292,8 @@ mod tests {
         assert_eq!(reported_version("1.2.3-secret"), None);
     }
 
+    // Runs the rendered command through a real POSIX shell.
+    #[cfg(unix)]
     #[test]
     fn unrestricted_task_text_is_one_literal_shell_argument() {
         let task = "task ' with $(printf INJECTED) and `printf ALSO` ; $HOME";

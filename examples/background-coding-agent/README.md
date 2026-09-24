@@ -123,7 +123,8 @@ stops the workflow and terminates the VM; a job cancelled in the seconds before
 its VM ID is recorded relies on the VM's maximum lifetime instead. Terminate a
 stray VM with `microvm terminate <id>`.
 
-Job records, inputs, and outputs expire after 30 days. `terraform -chdir=infra
+Job records, inputs, and outputs expire after 30 days. The bucket uses SSE-S3;
+if your jobs carry private source, add a customer-managed KMS key. `terraform -chdir=infra
 destroy` deletes the stack, including the job bucket, table, and token secret.
 Images are managed separately.
 
