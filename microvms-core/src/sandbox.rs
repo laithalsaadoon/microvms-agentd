@@ -1183,6 +1183,63 @@ impl Sandbox {
         .await
     }
 
+    /// A [`crate::names::NameRecord`] for this VM, to register under `name`.
+    ///
+    /// The egress posture is left unknown: the sandbox does not keep its launch request, and
+    /// a record must not claim a network it cannot vouch for.
+    pub fn name_record(&self, name: &str) -> Result<crate::names::NameRecord, Error> {
+        let Some(vm) = self.microvm() else {
+            return Err(Error::new(
+                ErrorKind::Precondition,
+                "there is no VM to name yet: launch or adopt one first",
+            ));
+        };
+        let Some(session) = self.session() else {
+            return Err(Error::new(
+                ErrorKind::Precondition,
+                format!(
+                    "microvm {} has no session to take its agent token from",
+                    vm.id
+                ),
+            ));
+        };
+        crate::names::NameRecord::new(
+            name,
+            vm.id.as_str(),
+            vm.endpoint.as_str(),
+            session.agent_token(),
+            self.control.region().as_str(),
+        )
+    }
+
+    /// Adopts the VM registered as `name` in `store`: [`Sandbox::adopt`] from a record.
+    ///
+    /// `region`, when given, must match the record's; see [`crate::names::resolve`].
+    pub async fn from_name(
+        store: &dyn crate::names::NameStore,
+        name: &str,
+        region: Option<Region>,
+        port: Option<u16>,
+    ) -> Result<Self, Error> {
+        let record = crate::names::resolve(store, name, region.as_ref())?;
+        let control = Self::plane_for(record.region(), port).await?;
+        Self::adopt_record(control, record).await
+    }
+
+    /// [`Sandbox::adopt`] from a [`crate::names::NameRecord`] kept in any store.
+    pub async fn adopt_record(
+        control: ControlPlane,
+        record: crate::names::NameRecord,
+    ) -> Result<Self, Error> {
+        Self::adopt(
+            control,
+            record.microvm_id,
+            record.endpoint,
+            record.agent_token,
+        )
+        .await
+    }
+
     /// A control plane for `region`, on `port` when one is given.
     pub(crate) async fn plane_for(
         region: Region,
@@ -1759,6 +1816,83 @@ mod tests {
         assert!(error.to_string().contains("STATE-3"), "{error}");
         assert_eq!(recorder.call_count("RunMicrovm"), 0);
         assert_eq!(recorder.operations(), vec!["GetMicrovm"]);
+    }
+
+    /// A name resolves to the record's VM and adopts it; a missing name or a record from
+    /// another region is refused before any AWS call.
+    #[tokio::test]
+    async fn a_name_adopts_its_records_vm_and_foreign_names_are_refused_locally() {
+        struct One(crate::names::NameRecord);
+        impl crate::names::NameStore for One {
+            fn get(&self, name: &str) -> Result<Option<crate::names::NameRecord>, Error> {
+                Ok((name == self.0.name).then(|| self.0.clone()))
+            }
+            fn put(&self, _: &crate::names::NameRecord) -> Result<(), Error> {
+                unreachable!()
+            }
+            fn delete(&self, _: &str) -> Result<bool, Error> {
+                unreachable!()
+            }
+            fn list(&self) -> Result<Vec<crate::names::NameRecord>, Error> {
+                Ok(vec![self.0.clone()])
+            }
+        }
+        let record = crate::names::NameRecord::new(
+            "ci",
+            "mvm-abc123",
+            ADOPT_ENDPOINT,
+            ADOPT_TOKEN,
+            "us-west-2",
+        )
+        .expect("record");
+        let store = One(record.clone());
+        let foreign = Sandbox::from_name(&store, "ci", Some(Region::UsEast1), None)
+            .await
+            .expect_err("registered in another region");
+        assert_eq!(foreign.kind(), ErrorKind::InvalidArg);
+        let missing = Sandbox::from_name(&store, "nope", None, None)
+            .await
+            .expect_err("no such name");
+        assert_eq!(missing.kind(), ErrorKind::Precondition);
+        assert!(!format!("{foreign} {missing}").contains(ADOPT_TOKEN));
+
+        let (plane, recorder, _) = adopt_plane();
+        recorder.answer(
+            "GetMicrovm",
+            Answer::ok(fake::microvm_response("RUNNING", None)),
+        );
+        let resolved = crate::names::resolve(&store, "ci", Some(&Region::UsWest2)).expect("ok");
+        let sandbox = Sandbox::adopt_record(plane, resolved)
+            .await
+            .expect("adopts");
+        assert!(sandbox.adopted());
+        assert_eq!(
+            sandbox.microvm().map(|vm| vm.id.as_str()),
+            Some("mvm-abc123")
+        );
+        assert_eq!(
+            sandbox.session().expect("session").agent_token(),
+            ADOPT_TOKEN
+        );
+        let named = sandbox
+            .name_record("again")
+            .expect("an adopted VM can be named");
+        assert_eq!(
+            (
+                named.microvm_id.as_str(),
+                named.agent_token.as_str(),
+                named.region.as_str()
+            ),
+            ("mvm-abc123", ADOPT_TOKEN, "us-east-1")
+        );
+        let unlaunched = Sandbox::with_control_plane(adopt_plane().0);
+        assert_eq!(
+            unlaunched
+                .name_record("x")
+                .expect_err("nothing to name")
+                .kind(),
+            ErrorKind::Precondition
+        );
     }
 
     /// Suspend, resume, and terminate all work through an adopted handle with the usual

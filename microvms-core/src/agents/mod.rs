@@ -677,6 +677,19 @@ impl AgentVm {
         Ok(Self { sandbox, specs })
     }
 
+    /// Adopts the VM registered as `name` in `store`; see [`Sandbox::from_name`].
+    pub async fn from_name(
+        store: &dyn crate::names::NameStore,
+        specs: Vec<AgentSpec>,
+        name: &str,
+        region: Option<Region>,
+        port: Option<u16>,
+    ) -> Result<Self, Error> {
+        require_specs(&specs)?;
+        let sandbox = Sandbox::from_name(store, name, region, port).await?;
+        Ok(Self { sandbox, specs })
+    }
+
     /// [`AgentVm::adopt`] over a plane resolved for `region`; the bindings' entry point.
     pub async fn adopt_in(
         region: Region,

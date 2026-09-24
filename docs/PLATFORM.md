@@ -456,6 +456,16 @@ MicroVM by ARN or bare ID failed. `RunMicrovm` has no tags field in the
 2025-09-09 model, still true in the 2026-09-16 SDK refresh. Do not assume
 image tags provide per-instance compute attribution.
 
+Re-measured 2026-09-24, us-east-1, API 2025-09-09, live request against a
+RUNNING MicroVM. `TagResource` and `ListTags` both refused
+`arn:aws:lambda:<region>:<account>:microvm:<id>` and the bare id with
+`ValidationException` before any authorization: the `resource` pattern the
+service enforces admits `function`, `layer`, `code-signing-config`,
+`event-source-mapping`, `capacity-provider`, and `network-connector` ARNs and
+no MicroVM form. So tag-based lookup of VMs is blocked by the platform, and
+finding a VM by name needs the caller's own record; `microvms_core::names`
+is that record, shared by the CLI and both bindings.
+
 ## Build introspection returns snapshot sizes and a chipset generation, not logs
 
 Measured 2026-08-15. `ListMicrovmImageBuilds` requires an image identifier

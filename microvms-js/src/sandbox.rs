@@ -405,7 +405,7 @@ impl TeardownOptions {
 /// every state guard lives in the core — see the module docs.
 #[napi]
 pub struct Sandbox {
-    inner: Arc<Mutex<CoreSandbox>>,
+    pub(crate) inner: Arc<Mutex<CoreSandbox>>,
 }
 
 impl Sandbox {
@@ -493,6 +493,25 @@ impl Sandbox {
         )
         .await
         .map_err(js_async)?;
+        Ok(Sandbox {
+            inner: Arc::new(Mutex::new(sandbox)),
+        })
+    }
+
+    /// Adopts the VM registered as `name` in `registry`; see `Sandbox.adopt`.
+    ///
+    /// `region` must match the record's: an id from another region addresses nothing here.
+    #[napi(factory)]
+    pub async fn from_name(
+        region: &Region,
+        name: String,
+        registry: &crate::names::NameRegistry,
+        port: Option<u16>,
+    ) -> Result<Sandbox, AsyncError> {
+        let sandbox =
+            CoreSandbox::from_name(&registry.store, &name, Some(region.inner.clone()), port)
+                .await
+                .map_err(js_async)?;
         Ok(Sandbox {
             inner: Arc::new(Mutex::new(sandbox)),
         })

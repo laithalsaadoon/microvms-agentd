@@ -457,6 +457,36 @@ impl AgentVm {
         })
     }
 
+    /// Adopts the agent VM registered as `name` in `registry`; see `Sandbox.fromName`.
+    #[napi(factory)]
+    pub async fn from_name(
+        region: &Region,
+        name: String,
+        registry: &crate::names::NameRegistry,
+        agents_: Option<Vec<AgentSpecInput>>,
+        port: Option<u16>,
+    ) -> Result<AgentVm, AsyncError> {
+        let specs = match agents_ {
+            Some(inputs) => specs_from(inputs).map_err(js_async)?,
+            None => vec![CoreSpec::new(Agent::ClaudeCode)],
+        };
+        let vm = agents::AgentVm::from_name(
+            &registry.store,
+            specs,
+            &name,
+            Some(region.inner.clone()),
+            port,
+        )
+        .await
+        .map_err(js_async)?;
+        let (sandbox, specs) = vm.into_parts();
+        Ok(AgentVm {
+            sandbox: Arc::new(Mutex::new(sandbox)),
+            specs,
+            region: region.inner.clone(),
+        })
+    }
+
     /// An agent VM for a VM another process launched; see `Sandbox.adopt`.
     ///
     /// `agents` states what the VM carries and defaults to Claude Code alone; read

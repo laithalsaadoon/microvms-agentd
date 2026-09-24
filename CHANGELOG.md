@@ -110,6 +110,18 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
   `wait_for_state`, returning `Microvm` with `state_reason`, `idle_policy`, `started_at`,
   `terminated_at`, and `maximum_duration_seconds`. It holds no lifecycle state and checks
   no STATE guard: it is for a process that has only an identifier.
+- **Find a VM by name from any process (#202).** The CLI's name registry moved into core
+  as `microvms_core::names`: a `NameRecord` (id, endpoint, agent token, region), a
+  `NameStore` trait, and `FileNameStore`, which reads and writes the CLI's existing
+  `<state dir>/names/<name>.json` files unchanged. Python and JS gain `NameRegistry` (the
+  CLI's registry by default), `NameRecord` with `to_dict`/`from_dict` (JS `toObject`/
+  `fromObject`) for keeping records in your own store, and `Sandbox.from_name` /
+  `AgentVm.from_name`, which adopt through #196. A missing name or a record from another
+  region is refused before any AWS call. Record files are now created owner-only rather
+  than narrowed after the write, and a record's agent token and identity seed appear in no
+  `Debug`, `repr`, `toString`, `JSON.stringify`, or error. Tag-based lookup stays out:
+  tagging a MicroVM still fails (`docs/PLATFORM.md`). `drive_find_by_name` is the live
+  check.
 - **Adopt a VM by ID (#196).** `Sandbox.adopt(region, microvm_id, endpoint, agent_token)`
   and `AgentVm.adopt(..., agents)` in core and both bindings rebuild a full handle for a VM
   another process launched. The lifecycle comes from `GetMicrovm`, so every STATE guard

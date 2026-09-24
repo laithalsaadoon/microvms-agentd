@@ -71,6 +71,7 @@ pub mod cost;
 pub mod error;
 pub mod hooks;
 pub mod identity;
+pub mod names;
 pub mod region;
 pub mod sandbox;
 pub mod session;

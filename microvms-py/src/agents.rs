@@ -425,6 +425,33 @@ impl PyAgentVm {
         })
     }
 
+    /// Adopts the agent VM registered as `name` in `registry`; see `Sandbox.from_name`.
+    #[staticmethod]
+    #[pyo3(signature = (region, name, registry, agents=None, *, port=None))]
+    fn from_name(
+        py: Python<'_>,
+        region: PyRegion,
+        name: String,
+        registry: &crate::names::PyNameRegistry,
+        agents: Option<Vec<PyAgentSpec>>,
+        port: Option<u16>,
+    ) -> PyCoreResult<PyAgentVm> {
+        let specs: Vec<AgentSpec> = agents
+            .map(|agents| agents.into_iter().map(|spec| spec.inner).collect())
+            .unwrap_or_else(|| vec![AgentSpec::new(Agent::ClaudeCode)]);
+        let store = registry.store.clone();
+        let wanted = region.inner.clone();
+        let vm = runtime::block_on(py, async move {
+            agents::AgentVm::from_name(&store, specs, &name, Some(wanted), port).await
+        })?;
+        let (sandbox, specs) = vm.into_parts();
+        Ok(PyAgentVm {
+            sandbox: Arc::new(Mutex::new(sandbox)),
+            specs,
+            region: region.inner,
+        })
+    }
+
     /// An agent VM for a VM another process launched; see `Sandbox.adopt`.
     ///
     /// `agents` states what the VM carries and defaults to Claude Code alone; read

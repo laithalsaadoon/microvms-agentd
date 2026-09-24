@@ -2458,6 +2458,7 @@ dependencies = [
  "microvms-core",
  "microvms-protocol",
  "pyo3",
+ "serde_json",
  "tokio",
 ]
 

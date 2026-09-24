@@ -337,7 +337,7 @@ impl PySandbox {
     }
 
     /// Reads something off the sandbox under the lock.
-    fn read<T>(&self, body: impl FnOnce(&Sandbox) -> T) -> T {
+    pub(crate) fn read<T>(&self, body: impl FnOnce(&Sandbox) -> T) -> T {
         let guard = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         body(&guard)
     }
@@ -415,6 +415,27 @@ impl PySandbox {
             py,
             Sandbox::adopt_in(region.inner, microvm_id, endpoint, agent_token, port),
         )?;
+        Ok(PySandbox {
+            inner: Arc::new(Mutex::new(sandbox)),
+        })
+    }
+
+    /// Adopts the VM registered as `name` in `registry`; see `Sandbox.adopt`.
+    ///
+    /// `region` must match the record's: an id from another region addresses nothing here.
+    #[staticmethod]
+    #[pyo3(signature = (region, name, registry, *, port=None))]
+    fn from_name(
+        py: Python<'_>,
+        region: PyRegion,
+        name: String,
+        registry: &crate::names::PyNameRegistry,
+        port: Option<u16>,
+    ) -> PyCoreResult<PySandbox> {
+        let store = registry.store.clone();
+        let sandbox = runtime::block_on(py, async move {
+            Sandbox::from_name(&store, &name, Some(region.inner), port).await
+        })?;
         Ok(PySandbox {
             inner: Arc::new(Mutex::new(sandbox)),
         })
