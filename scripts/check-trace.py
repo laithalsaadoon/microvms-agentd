@@ -7,7 +7,7 @@
 """Check that each traced requirement appears in every verification layer.
 
 A requirement in `spec/core.symspec.json` is traced when it is listed in `TRACED`
-below. Each traced key must appear in five places, and this script reports where:
+below. Each traced key must appear in six places, and this script reports where:
 
   model    a Stateright property whose name starts with the key (`model/src/`)
   gherkin  a tag `@KEY` on a scenario (`microvms-cli/tests/features/`)
@@ -16,6 +16,8 @@ below. Each traced key must appear in five places, and this script reports where
   test     a mention in a Rust test: `microvms-cli/src/guards.rs`, a file under a
            crate's `tests/`, or a source file's test module
   impl     a mention in production source (`microvms-cli/src/`, `microvms-core/src/`)
+  live     a live conformance check whose name starts with the key
+           (`conformance/run_rs.py`, run against AWS by `mise run live`)
 
 It also refuses a mention of an unknown key, so a typo such as `CLI-10` for `CLI-9`
 cannot pass as coverage. `docs/TRACEABILITY.md` is the rendered matrix:
@@ -44,13 +46,15 @@ TRACED = {
     "CLI-9": "#216",
 }
 
-LAYERS = ("model", "gherkin", "fuzz", "test", "impl")
+LAYERS = ("model", "gherkin", "fuzz", "test", "impl", "live")
 
 KEY = re.compile(r"\b(CLI-\d+)\b")
 PROPERTY = re.compile(
     r'Property::(?:<\w+>::)?(?:always|sometimes|eventually)\(\s*"(CLI-\d+)\b'
 )
 TAG = re.compile(r"@(CLI-\d+)\b")
+# A live conformance check whose name starts with the requirement key.
+LIVE_CHECK = re.compile(r'results\.(?:check|eq)\(\s*f?"(CLI-\d+)\b')
 FUZZ_MARKER = re.compile(r"bolero::check!|fuzz_target!")
 TEST_MODULE = re.compile(r"^#\[cfg\(test\)\]\s*$", re.MULTILINE)
 
@@ -120,6 +124,9 @@ def collect() -> dict[str, dict[str, set[str]]]:
             note(key, "impl", path)
         for key in KEY.findall(tests):
             note(key, "test", path)
+
+    for key in LIVE_CHECK.findall((ROOT / "conformance" / "run_rs.py").read_text()):
+        note(key, "live", ROOT / "conformance" / "run_rs.py")
     return found
 
 
