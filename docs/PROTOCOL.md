@@ -16,7 +16,7 @@ never gets bootstrapped.
 | `POST HOOKS/validate` | none (platform hook) | image-build validation probe |
 | `POST HOOKS/run` | none (platform hook) | one-shot token bootstrap from `runHookPayload`, plus the optional launch environment |
 | `POST HOOKS/suspend` | none (platform hook) | acknowledged and logged |
-| `POST HOOKS/resume` | none (platform hook) | acknowledged; signals in-memory state loss |
+| `POST HOOKS/resume` | none (platform hook) | acknowledged and recorded; memory, processes, and the token survive a suspend ([Suspend and resume](SUSPEND-RESUME.md)) |
 | `POST HOOKS/terminate` | none (platform hook) | acknowledged; begins graceful shutdown |
 | `POST /v1/exec/start` | bearer | start a command under a caller-minted `exec_id` |
 | `GET /v1/exec/{id}` | bearer | poll status and output; never mutates |

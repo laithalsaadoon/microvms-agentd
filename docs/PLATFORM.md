@@ -593,3 +593,29 @@ worked. This limits the earlier August capability observation.
 Use least privilege on the execution role. VPC internet isolation does not
 remove metadata credentials. The conformance role permits CloudWatch logging
 and its policy is checked by `drive_platform_posture`.
+
+## Suspend/resume across a two-minute hold: clocks, sockets, and auto-resume
+
+Measured 2026-09-23, us-east-1, API `2025-09-09`, `al2023-1`, two VMs from one
+image, one sample per observation. Live requests; the summary is in
+[Suspend and resume](SUSPEND-RESUME.md).
+
+| Observation | Result |
+|---|---|
+| Explicit suspend to `SUSPENDED` | about 1–2 s; `stateReason` null |
+| Resume call to `RUNNING` / first health | about 1.5 s / 1.9 s |
+| Process, PID, in-memory nonce, `boot_id` | unchanged; ticker sequence had no gap |
+| `/tmp`, `/dev/shm`, `/workspace` files; endpoint; original agent token | unchanged and accepted |
+| `time.time()`, `CLOCK_MONOTONIC`, `CLOCK_BOOTTIME` across a 124 s hold | each jumped +124 s, equal within microseconds |
+| Four held outbound TLS sockets | all aborted on resume (`ECONNABORTED`); three of the same peers kept an idle socket 210 s without a suspend |
+| New outbound request after resume | succeeded |
+| CPU-busy exec, no inbound traffic, 60 s idle window | `SUSPENDED` between 60 and 70 s after the last request |
+| First request to a suspended VM with auto-resume | succeeded in about 1.2 s; `GetMicrovm` showed `PENDING`, then `RUNNING` |
+| Held-open exec output stream with steady output, no other requests | stayed `RUNNING` for 150 s |
+| Two VMs from one image | identical `boot_id` and `machine-id`; kernel random UUID differed |
+
+**Correction candidate, 2026-09-23:** with `suspendedDurationSeconds=60`, a VM
+explicitly suspended was still `SUSPENDED` 240 s later, and `ResumeMicrovm`
+was accepted. The service model documents termination after the window. One
+sample does not overturn that; repeat with a longer hold before relying on
+either behavior.
