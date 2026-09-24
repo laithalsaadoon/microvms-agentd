@@ -186,7 +186,7 @@ sequenceDiagram
 Participants:
 
 - `Sandbox` — the client lifecycle object outside the VM
-  (`microvms-core/src/sandbox.rs:856`).
+  (`microvms-core/src/sandbox.rs:946`).
 - `ControlPlane` — the signed AWS client (`microvms-core/src/control/microvm.rs:356`).
 - `AWS lambda-microvms` — the service, which calls the hook over loopback inside the VM
   (`agentd/src/routes.rs:168`).
@@ -195,18 +195,18 @@ Participants:
 - `AppState` — the one-shot token slot and the launch-environment map
   (`agentd/src/state.rs:202`).
 - `Session` — the client bound to the reported endpoint with the same token
-  (`microvms-core/src/sandbox.rs:934`).
+  (`microvms-core/src/sandbox.rs:1027`).
 - `agentd auth guard` — `require_token`, applied as a `route_layer` over every control route
   (`agentd/src/auth.rs:62`, `agentd/src/routes.rs:66`).
 
 Edges in order:
 
 1. `mint 32 bytes` — 32 bytes of `/dev/urandom` rendered as 64 hex characters, unless the caller
-   supplied a token (`microvms-core/src/sandbox.rs:856`,
-   `microvms-core/src/sandbox.rs:1289`).
+   supplied a token (`microvms-core/src/sandbox.rs:946`,
+   `microvms-core/src/sandbox.rs:1611`).
 2. `run_microvm()` — the payload is validated before the launch, so an over-ceiling one fails with
    a byte count rather than as a service `ValidationException`
-   (`microvms-core/src/sandbox.rs:871`, `microvms-core/src/sandbox.rs:893`).
+   (`microvms-core/src/sandbox.rs:961`, `microvms-core/src/sandbox.rs:985`).
 3. `RunMicrovm` — `microvms-core/src/control/microvm.rs:423`.
 4. `POST run hook` — unauthenticated by necessity: the platform has no credential to present, and
    its request arrives over loopback indistinguishably from an in-VM process
@@ -218,14 +218,14 @@ Edges in order:
    first caller (`agentd/src/state.rs:210`).
 6. `200 installed` — an identical replay is also 200, because the platform may retry its own hook;
    a different token is 409 (`agentd/src/routes.rs:224`, `agentd/src/routes.rs:230`).
-7. `wait RUNNING` — `microvms-core/src/sandbox.rs:910`.
+7. `wait RUNNING` — `microvms-core/src/sandbox.rs:1055`.
 8. `GetMicrovm` — polled until RUNNING, failing fast on a terminal state
    (`microvms-core/src/control/microvm.rs:459`, `microvms-core/src/control/microvm.rs:465`,
    `microvms-core/src/control/microvm.rs:510`).
 9. `RUNNING + url` — RUNNING is what reports the hook succeeded, so this is where
-   `token_installed` and `bootstrap_count` move (`microvms-core/src/sandbox.rs:924`).
+   `token_installed` and `bootstrap_count` move (`microvms-core/src/sandbox.rs:1063`).
 10. `builder(token)` — the same minted token becomes the session bearer
-    (`microvms-core/src/sandbox.rs:934`).
+    (`microvms-core/src/sandbox.rs:1027`).
 11. `Bearer request` — the guard runs before the body is polled, and drains a bounded prefix on
     rejection (`agentd/src/auth.rs:62`, `agentd/src/auth.rs:87`).
 12. `token_matches()` — constant-time comparison against the installed slot

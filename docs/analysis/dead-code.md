@@ -101,7 +101,7 @@ Two files are compiled only under `cfg(test)` and are live test code, not dead s
 
 | Path | Symbol | Imported from |
 | --- | --- | --- |
-| `microvms-cli/src/commands/lifecycle.rs:2377` | `_DocsOnly` (alias of `ControlPlane`) | `microvms_core::control::ControlPlane`, re-bound from `microvms-cli/src/commands/lifecycle.rs:70` |
+| `microvms-cli/src/commands/lifecycle.rs:2412` | `_DocsOnly` (alias of `ControlPlane`) | `microvms_core::control::ControlPlane`, re-bound from `microvms-cli/src/commands/lifecycle.rs:69` |
 | `microvms-cli/src/commands/attached.rs:932` | `_DocsOnly` (alias of `ErrorKind`) | `microvms_core::ErrorKind`, re-bound from `microvms-cli/src/commands/attached.rs:40` |
 
 **Confidence: high that nothing names `_DocsOnly`; do not delete either line on its own.**
@@ -113,12 +113,12 @@ three-line construct (doc comment, attribute, `use`), and rebuilding:
 - `cargo clippy -p microvms-cli --all-targets` emits two new warnings —
   `unused import: ControlPlane` and `unused import: ErrorKind` — because the `_DocsOnly`
   re-export is what consumes the code-level import at
-  `microvms-cli/src/commands/lifecycle.rs:70` and
+  `microvms-cli/src/commands/lifecycle.rs:69` and
   `microvms-cli/src/commands/attached.rs:40`. Under `-D warnings` that is a build failure.
 - `cargo doc --no-deps -p microvms-cli` emits the same eight warnings with or without the
   constructs, and neither `ControlPlane` nor `ErrorKind` appears among them. The stated
   reason — "Re-exported so `[ControlPlane]` is nameable in this module's docs"
-  (`microvms-cli/src/commands/lifecycle.rs:2375`) — is not the mechanism. The intra-doc link
+  (`microvms-cli/src/commands/lifecycle.rs:2410`) — is not the mechanism. The intra-doc link
   at `microvms-cli/src/commands/lifecycle.rs:10` resolves from the `:70` import directly.
 
 The two differ in whether the whole construct earns its place:

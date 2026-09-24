@@ -22,19 +22,19 @@ needs only one, because the missing half is what a client would otherwise hand-w
 `docs/schema.json` is generated from those same attributes under both contracts and byte-compared
 in CI (`protocol/src/lib.rs:23-27`).
 
-- `protocol/src/exec.rs` (496 LOC)
+- `protocol/src/exec.rs` (504 LOC)
 - `protocol/src/lib.rs` (68 LOC)
 - `protocol/src/hook.rs` (380 LOC)
-- `protocol/src/health.rs` (259 LOC)
+- `protocol/src/health.rs` (368 LOC)
 - `protocol/src/fs.rs` (92 LOC)
 
 ## agentd
 
 `agentd` is the in-VM daemon supplying the exec and file-transfer APIs AWS Lambda MicroVMs does
-not have (`agentd/src/lib.rs:4-7`). Its twelve modules divide by defect class rather than by HTTP
+not have (`agentd/src/lib.rs:4-7`). Its thirteen modules divide by defect class rather than by HTTP
 surface: `state` owns the one-shot bootstrap, `auth` decides authorization before a body byte is
 read, `exec` owns idempotent start with ack-gated release, and `fs` owns streaming tar
-(`agentd/src/lib.rs:31-42`). The trust boundary is the crate's organizing fact — the platform's
+(`agentd/src/lib.rs:31-43`). The trust boundary is the crate's organizing fact — the platform's
 own `/run` hook arrives from `127.0.0.1`, indistinguishable at the socket level from a request
 sent by a process inside the VM, so source-address filtering would reject a legitimate bootstrap
 and the one-shot property is the only defense left (`agentd/src/lib.rs:11-16`). `routes.rs`
@@ -43,14 +43,14 @@ publishes, so a documented route with no handler panics at startup, and each end
 auth mode decides which of the two routers it joins (`agentd/src/routes.rs:31-35`,
 `agentd/src/routes.rs:48-58`, `agentd/src/routes.rs:371`, `docs/schema.json:497-1154`).
 
-- `agentd/src/exec.rs` (3798 LOC)
-- `agentd/src/fs.rs` (2654 LOC)
+- `agentd/src/exec.rs` (3843 LOC)
+- `agentd/src/fs.rs` (2648 LOC)
 - `agentd/src/schema.rs` (929 LOC)
-- `agentd/src/routes.rs` (993 LOC)
-- `agentd/src/identity.rs` (724 LOC)
-- `agentd/src/state.rs` (592 LOC)
+- `agentd/src/routes.rs` (1139 LOC)
+- `agentd/src/identity.rs` (756 LOC)
+- `agentd/src/state.rs` (627 LOC)
 - `agentd/src/disk.rs` (435 LOC)
-- `agentd/src/config.rs` (196 LOC)
+- `agentd/src/config.rs` (214 LOC)
 
 ## microvms-core
 
@@ -75,13 +75,13 @@ the bindings drive, because their sandbox sits behind a lock one `AgentVm` canno
 
 - `microvms-core/src/cost.rs` (4156 LOC)
 - `microvms-core/src/control/image.rs` (3812 LOC)
-- `microvms-core/src/session/exec.rs` (1712 LOC)
-- `microvms-core/src/control/microvm.rs` (2467 LOC)
-- `microvms-core/src/sandbox.rs` (2643 LOC)
-- `microvms-core/src/agents/mod.rs` (1182 LOC)
-- `microvms-core/src/control/ops.rs` (2491 LOC)
-- `microvms-core/src/control/mod.rs` (1737 LOC)
-- `microvms-core/src/session/mod.rs` (1293 LOC)
+- `microvms-core/src/session/exec.rs` (1714 LOC)
+- `microvms-core/src/control/microvm.rs` (2727 LOC)
+- `microvms-core/src/sandbox.rs` (3508 LOC)
+- `microvms-core/src/agents/mod.rs` (1438 LOC)
+- `microvms-core/src/control/ops.rs` (2525 LOC)
+- `microvms-core/src/control/mod.rs` (1752 LOC)
+- `microvms-core/src/session/mod.rs` (1447 LOC)
 
 ## microvms-cli
 
@@ -99,13 +99,13 @@ in `main.rs`, and `guards.rs` — the crate's largest file — holds the three g
 inject a refusing seam from inside the crate and so compiles only under `cfg(test)`
 (`microvms-cli/src/main.rs:23-28`, `microvms-cli/src/guards.rs:12-20`).
 
-- `microvms-cli/src/guards.rs` (7192 LOC)
-- `microvms-cli/src/cli.rs` (3024 LOC)
+- `microvms-cli/src/guards.rs` (7508 LOC)
+- `microvms-cli/src/cli.rs` (3177 LOC)
 - `microvms-cli/src/exit.rs` (682 LOC)
-- `microvms-cli/src/commands/attached.rs` (3037 LOC)
-- `microvms-cli/src/commands/lifecycle.rs` (2620 LOC)
+- `microvms-cli/src/commands/attached.rs` (3231 LOC)
+- `microvms-cli/src/commands/lifecycle.rs` (2655 LOC)
 - `microvms-cli/src/render.rs` (1018 LOC)
-- `microvms-cli/src/seam.rs` (620 LOC)
+- `microvms-cli/src/seam.rs` (617 LOC)
 - `microvms-cli/src/envelope.rs` (593 LOC)
 
 ## microvms-py
@@ -128,12 +128,12 @@ shares, driving the core's free functions with the specs kept beside the lock
 (`microvms-py/src/agents.rs`).
 
 - `microvms-py/src/cost.rs` (1124 LOC)
-- `microvms-py/src/sandbox.rs` (854 LOC)
-- `microvms-py/src/agents.rs` (674 LOC)
-- `microvms-py/src/exec.rs` (631 LOC)
-- `microvms-py/src/session.rs` (707 LOC)
+- `microvms-py/src/sandbox.rs` (951 LOC)
+- `microvms-py/src/agents.rs` (819 LOC)
+- `microvms-py/src/exec.rs` (650 LOC)
+- `microvms-py/src/session.rs` (964 LOC)
 - `microvms-py/src/errors.rs` (226 LOC)
-- `microvms-py/src/lib.rs` (145 LOC)
+- `microvms-py/src/lib.rs` (157 LOC)
 - `microvms-py/src/hooks.rs` (117 LOC)
 - `microvms-py/src/runtime.rs` (92 LOC)
 
@@ -159,13 +159,13 @@ secret, so `JSON.stringify` gives `{}` and a look-alike object is rejected by na
 (`microvms-js/src/agents.rs`).
 
 - `microvms-js/src/cost.rs` (1034 LOC)
-- `microvms-js/src/session.rs` (675 LOC)
-- `microvms-js/src/exec.rs` (458 LOC)
-- `microvms-js/src/sandbox.rs` (680 LOC)
-- `microvms-js/src/agents.rs` (609 LOC)
-- `microvms-js/src/process.rs` (544 LOC)
+- `microvms-js/src/session.rs` (829 LOC)
+- `microvms-js/src/exec.rs` (468 LOC)
+- `microvms-js/src/sandbox.rs` (770 LOC)
+- `microvms-js/src/agents.rs` (745 LOC)
+- `microvms-js/src/process.rs` (550 LOC)
 - `microvms-js/src/region.rs` (139 LOC)
-- `microvms-js/src/lib.rs` (98 LOC)
+- `microvms-js/src/lib.rs` (101 LOC)
 - `microvms-js/src/errors.rs` (158 LOC)
 
 ## model

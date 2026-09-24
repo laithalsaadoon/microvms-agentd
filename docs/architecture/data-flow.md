@@ -23,19 +23,19 @@ control plane together with its endpoint proxy.
 
 1. `commands::lifecycle::run` resolves region, size class, and image name, then requires every
    infra role before anything is created, so a missing role surfaces immediately rather than
-   after a build (`microvms-cli/src/commands/lifecycle.rs:463`, guard at
-   `microvms-cli/src/commands/lifecycle.rs:566-616`).
+   after a build (`microvms-cli/src/commands/lifecycle.rs:489`, guard at
+   `microvms-cli/src/commands/lifecycle.rs:593-643`).
 2. It opens a `Sandbox` through the library seam and races `launch_and_exec` against ctrl-c in a
    `tokio::select!`, with the sandbox owned outside the select so a cancelled launch still holds
-   the identifiers teardown needs (`microvms-cli/src/commands/lifecycle.rs:623-675`,
-   recovery at `microvms-cli/src/commands/lifecycle.rs:690-697`).
+   the identifiers teardown needs (`microvms-cli/src/commands/lifecycle.rs:650-702`,
+   recovery at `microvms-cli/src/commands/lifecycle.rs:717-724`).
 3. `launch_and_exec` preflights the build request, uploads the artifact, then `Sandbox::build_image`
    issues `CreateMicrovmImage` and waits for the image to become usable
-   (`microvms-cli/src/commands/lifecycle.rs:1014-1019`, `microvms-core/src/sandbox.rs:710`).
+   (`microvms-cli/src/commands/lifecycle.rs:1041-1046`, `microvms-core/src/sandbox.rs:795`).
 4. `Sandbox::run` refuses a second bootstrap on the same sandbox, mints the agent token, and
    wraps it with the launch env in a typed `RunHookPayload` that checks its 4096-byte budget
-   before any call (`microvms-core/src/sandbox.rs:814`, refusal at
-   `microvms-core/src/sandbox.rs:818`, payload at `microvms-core/src/sandbox.rs:871`).
+   before any call (`microvms-core/src/sandbox.rs:899`, refusal at
+   `microvms-core/src/sandbox.rs:903`, payload at `microvms-core/src/sandbox.rs:961`).
 5. `ControlPlane::run_microvm` validates the identifier, the duration range, and the role ARN,
    splits ingress and egress connectors by intent, and puts the payload on the wire
    (`microvms-core/src/control/microvm.rs:356`).
@@ -47,11 +47,11 @@ control plane together with its endpoint proxy.
    client then polls unauthenticated `/v1/health` until `bootstrapped`
    (`microvms-core/src/control/microvm.rs:435`, `microvms-core/src/session/mod.rs:342`). The
    sandbox marks the token installed only after RUNNING is observed
-   (`microvms-core/src/sandbox.rs:924-926`).
+   (`microvms-core/src/sandbox.rs:1063-1065`).
 8. The optional workload runs through `Session::run_sync` — start, wait, ack — and `tear_down`
    plus `attach_cost` then run however the select ended
-   (`microvms-core/src/session/mod.rs:408`, `microvms-cli/src/commands/lifecycle.rs:1194`,
-   `microvms-cli/src/commands/lifecycle.rs:1244`).
+   (`microvms-core/src/session/mod.rs:408`, `microvms-cli/src/commands/lifecycle.rs:1230`,
+   `microvms-cli/src/commands/lifecycle.rs:1280`).
 
 ```mermaid
 sequenceDiagram

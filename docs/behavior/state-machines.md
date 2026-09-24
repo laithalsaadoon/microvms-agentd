@@ -161,7 +161,7 @@ of the enum: a lifecycle held as a `String` would let `"RUNNING "` and `"Running
 and every guard would have to decide which it meant (`microvms-core/src/sandbox.rs:115-119`). The
 state is a private field, and the five `Sandbox` methods are the only writers.
 
-Entry is `Lifecycle::Pending` (`microvms-core/src/sandbox.rs:617`), matching the symspec's
+Entry is `Lifecycle::Pending` (`microvms-core/src/sandbox.rs:677`), matching the symspec's
 `initial` (`spec/core.symspec.json:996`) and the model's sole init state
 (`model/src/client.rs:287`).
 
@@ -171,45 +171,45 @@ one vocabulary all three declarations share. Each row gives the symspec key, the
 
 - `LaunchAccepted` · `Pending --> Pending` · STATE-1 (`spec/core.symspec.json:690`),
   `when vm_state = PENDING: image_exists := true` (`:698`) · `model/src/client.rs:374-384` ·
-  `microvms-core/src/sandbox.rs:893-908`. The lifecycle is set after the wire call returns,
+  `microvms-core/src/sandbox.rs:985-1000`. The lifecycle is set after the wire call returns,
   because acceptance *is* the call succeeding.
 - `HookSucceeded` · `Pending --> Running` · STATE-2 (`:371`),
   `... vm_state := RUNNING, token_installed := true, bootstrap_count := bootstrap_count + 1`
-  (`:379`) · `model/src/client.rs:388-409` · `microvms-core/src/sandbox.rs:910-928`. This is the
+  (`:379`) · `model/src/client.rs:388-409` · `microvms-core/src/sandbox.rs:1050-1066`. This is the
   one place `bootstrap_count` increments (STATE-3, `:881`).
 - `SuspendRequested` · `Running --> Suspending` · STATE-4 (`:103`),
   `when vm_state = RUNNING: vm_state := SUSPENDING` (`:112`) · `model/src/client.rs:427-443` ·
-  `microvms-core/src/sandbox.rs:972-981`. The assignment follows the call for the same reason:
+  `microvms-core/src/sandbox.rs:1288-1297`. The assignment follows the call for the same reason:
   moving first would leave a throttled call stuck in a state neither suspend nor resume accepts,
   bricking the handle over one bad request.
 - `SuspendComplete` · `Suspending --> Suspended` · STATE-6 (`:550`),
   `when vm_state = SUSPENDING: vm_state := SUSPENDED` (`:558`) · `model/src/client.rs:446-453` ·
-  `microvms-core/src/sandbox.rs:997-998`.
+  `microvms-core/src/sandbox.rs:1313-1314`.
 - `ResumeRequested` + `ResumeComplete` · `Suspended --> Running` · STATE-7 (`:668`),
   `when vm_state = SUSPENDED: vm_state := RUNNING` (`:677`) · `model/src/client.rs:456-501` ·
-  `microvms-core/src/sandbox.rs:1062-1086`. Nothing is re-delivered: no payload, no token, no
+  `microvms-core/src/sandbox.rs:1379-1403`. Nothing is re-delivered: no payload, no token, no
   bootstrap, because the in-memory token survived the freeze and re-delivering it would hit the
-  daemon's one-shot bootstrap and be refused (`microvms-core/src/sandbox.rs:1021-1025`). The
+  daemon's one-shot bootstrap and be refused (`microvms-core/src/sandbox.rs:1338-1342`). The
   session rebinds to the endpoint the service just reported, which drops the cached proxy token
   (STATE-8, `:199`).
 - `TerminateRequested` · `Pending`/`Running`/`Suspended` `--> Terminating` · STATE-9 (`:571`),
   `when vm_state = PENDING or vm_state = RUNNING or vm_state = SUSPENDED: vm_state :=
   TERMINATING, was_terminated := true` (`:579`) · `model/src/client.rs:504-511` ·
-  `microvms-core/src/sandbox.rs:1147-1152`. Recorded before the call, so a terminate whose call
+  `microvms-core/src/sandbox.rs:1469-1474`. Recorded before the call, so a terminate whose call
   fails still marks the VM as one this client asked to destroy.
 - `TerminateComplete` · `Terminating --> Terminated` · STATE-10 (`:803`),
   `when vm_state = TERMINATING: vm_state := TERMINATED` (`:811`) ·
-  `model/src/client.rs:514-521` · `microvms-core/src/sandbox.rs:1170-1179`. Reached only when the
+  `model/src/client.rs:514-521` · `microvms-core/src/sandbox.rs:1492-1501`. Reached only when the
   optional `wait_for_state(&["TERMINATED"])` succeeds; when the wait fails the lifecycle stays at
   `Terminating` honestly, because the platform accepted the terminate and the VM is on its way
-  out (`microvms-core/src/sandbox.rs:1180-1185`).
+  out (`microvms-core/src/sandbox.rs:1502-1507`).
 
 One edge exists in the client with no matching `stateEffect`: the suspend wait settles on
 `SUSPENDED` **or** `TERMINATED`, and both are states this client asked for. A VM the launch-time
 `idlePolicy` killed mid-suspension lands directly in `Terminated` and also sets `was_terminated`,
-which is what then stops a resume from being offered — `microvms-core/src/sandbox.rs:993-1012`.
+which is what then stops a resume from being offered — `microvms-core/src/sandbox.rs:1309-1329`.
 The symspec omits `SUSPENDING` as a terminate source, and that omission is correct rather than a
-gap: `suspend(&mut self)` (`microvms-core/src/sandbox.rs:958`) holds the exclusive borrow across
+gap: `suspend(&mut self)` (`microvms-core/src/sandbox.rs:1274`) holds the exclusive borrow across
 its own wait, so no caller can invoke `terminate(&mut self)` (`:1138`) while the lifecycle sits in
 `Suspending`. `Suspending` is transient within one call, never a resting state a caller can act
 from.
@@ -218,28 +218,29 @@ Every guard refuses before any control-plane call is made, and the zero-call ref
 assertion rather than the resulting state:
 
 - `run` twice is refused on `bootstrap_count > 0 || microvm.is_some()` (STATE-3) —
-  `microvms-core/src/sandbox.rs:815-827`.
+  `microvms-core/src/sandbox.rs:900-912`.
 - `suspend` is refused unless the lifecycle is `Running` (STATE-5, `spec/core.symspec.json:294`,
-  constraint at `:302`) — `microvms-core/src/sandbox.rs:961-970`.
+  constraint at `:302`) — `microvms-core/src/sandbox.rs:1277-1286`.
 - `resume` is refused when `was_terminated` or the lifecycle is `Terminated` (STATE-11, `:448`,
-  constraint at `:456`) — `microvms-core/src/sandbox.rs:1043-1051` — and unless the lifecycle is
+  constraint at `:456`) — `microvms-core/src/sandbox.rs:1360-1368` — and unless the lifecycle is
   `Suspended` (STATE-7) — `:1052-1057`.
 - `resume` past the launch-time `suspendedDurationSeconds` window is refused with
-  `ErrorKind::WindowClosed` (STATE-12, `:487`) — `microvms-core/src/sandbox.rs:1060`,
-  `:1105-1129`. An absent window is *not* a closed one: with either the window or the stamp
-  missing the check passes, because that is the attach path where this sandbox did not send the
-  launch, and guessing a default would refuse a resume the service would honour
-  (`microvms-core/src/sandbox.rs:1106-1110`; see
+  `ErrorKind::WindowClosed` (STATE-12, `:487`) — `microvms-core/src/sandbox.rs:1377`,
+  `:1105-1129`. An absent window is *not* a closed one: the window is our own `RunMicrovm` request's,
+  falling back to the `idlePolicy` that `GetMicrovm` reported, and with no window from either
+  source, or with the suspend stamp missing, the check passes, because this sandbox cannot know
+  how long the VM has been suspended and guessing would refuse a resume the service would honour
+  (`microvms-core/src/sandbox.rs:1423-1433`; see
   `.erpaval/solutions/architecture-patterns/an-absent-value-is-not-a-neutral-one.md`).
 - `suspended_at` is cleared on a successful resume, so the next cycle's window is measured from
   the next suspend rather than accumulating every suspension into one total —
-  `microvms-core/src/sandbox.rs:1087-1090`.
+  `microvms-core/src/sandbox.rs:1404-1407`.
 
 `Lifecycle::as_str` maps each state to the uppercase name the service uses, which is also what an
 error message prints — `microvms-core/src/sandbox.rs:136-147`. `Lifecycle::is_live` is true for
 `Pending`, `Running`, `Suspending`, `Suspended`, and is read only by the `Drop` warning about a
-VM still billing — `microvms-core/src/sandbox.rs:149-155`,
-`microvms-core/src/sandbox.rs:1263-1280`.
+VM still billing — `microvms-core/src/sandbox.rs:163-169`,
+`microvms-core/src/sandbox.rs:1585-1602`.
 
 Mirrors:
 
