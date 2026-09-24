@@ -37,12 +37,19 @@ a retried or replayed invocation reuses finished steps. A stable client token,
 exec ID, branch name, and review marker make retrying launch, agent start, and
 publishing safe.
 
+Each step runs in a fresh process, so the VM is managed through the `microvms`
+SDK by its record: the launch step calls `Sandbox.run(client_token=…,
+agent_token=…, wait=False)`, every later step calls `Sandbox.adopt(region,
+microvm_id, endpoint, agent_token)`, and polling and cleanup use `ControlPlane`
+(`get`, `terminate`, `wait_for_state`). No step calls the MicroVM API directly.
+
 ## Deploy once
 
 You need the repository's normal AWS and MicroVM prerequisites, Bedrock model
-access, Python 3.13, uv, Cargo, and Terraform. Package on Linux x86_64 because
-the Python binding is built from this repository. Build the agent image from the
-neighboring example (from the repository root):
+access, Python 3.13, uv, and Terraform. The Lambda is arm64 and every dependency,
+the `microvms` binding included, installs from published wheels, so `deploy.sh`
+packages it on any OS. Building the agent image needs Cargo for the daemon. Build
+it from the neighboring example (from the repository root):
 
 ```bash
 microvm build target/aarch64-unknown-linux-musl/release/agentd \
