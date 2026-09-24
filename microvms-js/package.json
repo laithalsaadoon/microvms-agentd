@@ -1,6 +1,6 @@
 {
   "name": "@theagenticguy/microvms",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Node.js and TypeScript client for AWS Lambda MicroVMs",
   "license": "Apache-2.0",
   "author": "Laith Al-Saadoon",
