@@ -116,6 +116,26 @@ requested. Do not treat the earlier success or `["ALL"]` as a portable
 privilege guarantee. Inspect `identity_degraded` on health and the current
 capability mask. The metadata section below records the later measurements.
 
+## Identity repair at daemon start is captured by the image snapshot
+
+Measured 2026-09-23, us-east-1, API `2025-09-09`, live request (one sample, an
+image whose daemon repaired identity at startup). Two VMs launched from one
+image had the same `/proc/sys/kernel/random/boot_id`, `/etc/machine-id`, and
+hostname (`localhost`), while `/proc/sys/kernel/random/uuid` and a fresh
+`random.random()` differed. Both reported `identity_repaired: true` and
+`identity_degraded: true`. The daemon starts in the image-build VM, so what it
+wrote at startup was in the snapshot every VM restores.
+
+**Correction, 2026-09-24,** us-east-1, API `2025-09-09`, live request (the
+conformance suite's `--repair-identity` build): with repair moved to the first
+successful run hook, two VMs from one image had distinct machine-ids, and
+`identity_steps` reported `machine-id`, `hostname`, and `boot-id` repaired on
+both. The same run installed `suspend` and `resume` handlers under
+`/etc/agentd/hooks.d`; across a 40-second suspend both ran in order, exited 0,
+and were reported on their hook entries (2 ms and 111 ms). Without
+`--repair-identity`, expect the hostname and `boot-id` steps to fail with
+`EPERM` as recorded above.
+
 ## `minimumMemoryInMiB` selects a *baseline*, and the guest reports the *peak*
 
 Measured 2026-08-07 with `al2023-1`. A 512 MiB baseline produced

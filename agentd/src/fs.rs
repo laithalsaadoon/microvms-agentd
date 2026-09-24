@@ -2186,11 +2186,8 @@ mod tests {
         // The four routes share one query helper; this pins the wire shape it must
         // preserve — 400 with this exact body, not the extractor's default
         // "Failed to deserialize query string" rejection.
-        let state = AppState::with_probe(
-            Config::default(),
-            roomy_probe,
-            crate::identity::Report::skipped(),
-        );
+        let state =
+            AppState::with_probe(Config::default(), roomy_probe, crate::identity::no_repair());
         let request = |method: &str, uri: &str| {
             axum::http::Request::builder()
                 .method(method)
@@ -2528,7 +2525,7 @@ mod tests {
                 ..Config::default()
             },
             full_probe,
-            crate::identity::Report::skipped(),
+            crate::identity::no_repair(),
         );
 
         let request = axum::http::Request::builder()
@@ -2567,7 +2564,7 @@ mod tests {
                 ..Config::default()
             },
             three_bytes_free,
-            crate::identity::Report::skipped(),
+            crate::identity::no_repair(),
         );
         let request = axum::http::Request::builder()
             .method("PUT")
@@ -2594,11 +2591,8 @@ mod tests {
         let dir = TempDir::new().expect("tempdir");
         let target = dir.path().join("ok.bin");
 
-        let state = AppState::with_probe(
-            Config::default(),
-            roomy_probe,
-            crate::identity::Report::skipped(),
-        );
+        let state =
+            AppState::with_probe(Config::default(), roomy_probe, crate::identity::no_repair());
         let request = axum::http::Request::builder()
             .method("PUT")
             .uri(format!("/v1/fs/file?path={}", target.display()))

@@ -81,7 +81,20 @@ The artifact `microvm build` uploads carries exactly the Dockerfile and the `age
 
 Every `AGENTD_*` variable is read at startup, and an unset or unparseable value keeps the default rather than refusing to boot, because a daemon that will not start strands the VM with no way in. Set them as `ENV` lines. The stanza already sets `AGENTD_PORT` and `AGENTD_LOG`; the others bound request bodies, captured output, stream replay, stdin writes, the disk reserve, and the identity repair that gives each VM restored from one snapshot its own machine-id, hostname, and boot_id. The table with defaults is in [Embedding](/internals/embedding/).
 
-## 8. Working examples
+## 8. Run code on suspend and resume
+
+A suspend keeps the VM's memory and disk, but outbound connections are aborted on resume and the clock jumps by the time spent suspended. To react, put an executable at `/etc/agentd/hooks.d/<hook>` for `run`, `suspend`, `resume`, or `terminate`. The daemon runs it before answering that hook, kills it after `AGENTD_HOOK_HANDLER_TIMEOUT_SECS` (default 20), and reports the outcome on `microvm health`:
+
+```dockerfile
+RUN mkdir -p /etc/agentd/hooks.d \
+ && printf '#!/bin/sh\nsystemctl restart my-worker 2>/dev/null || pkill -HUP -f my-worker\n' \
+      > /etc/agentd/hooks.d/resume \
+ && chmod 0755 /etc/agentd/hooks.d/resume
+```
+
+Handlers run as root, and any process in the VM can trigger one by posting a hook path, so make them idempotent. The hook answers 200 even when the handler fails. The contract is in [Protocol](/internals/protocol/) and the trust notes in [Trust](/internals/trust/).
+
+## 9. Working examples
 
 Three Dockerfiles in the repository respect all of the above: [coding-agents-on-bedrock](https://github.com/laithalsaadoon/microvms-agentd/tree/main/examples/coding-agents-on-bedrock) adds Node, Python, and two agent CLIs; [code-server-remote-dev](https://github.com/laithalsaadoon/microvms-agentd/tree/main/examples/code-server-remote-dev) installs an IDE from a release RPM; [s3-prefetch-at-build](https://github.com/laithalsaadoon/microvms-agentd/tree/main/examples/s3-prefetch-at-build) replaces `CMD` with a wrapper that fetches before it hands off to the daemon.
 

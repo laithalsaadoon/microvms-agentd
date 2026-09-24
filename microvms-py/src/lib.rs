@@ -139,7 +139,10 @@ mod microvms {
     #[pymodule_export]
     use super::sandbox::{PyBaseImage, PyImage, PySandbox, PyTeardownReport};
     #[pymodule_export]
-    use super::session::{PyHealth, PyProcGroup, PySession, session_constants};
+    use super::session::{
+        PyHandlerOutcome, PyHealth, PyHookObservation, PyIdentityStep, PyProcGroup, PySession,
+        session_constants,
+    };
 
     #[pymodule_init]
     fn init(module: &pyo3::Bound<'_, pyo3::types::PyModule>) -> pyo3::PyResult<()> {

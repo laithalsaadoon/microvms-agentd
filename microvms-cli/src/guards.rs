@@ -6031,6 +6031,51 @@ async fn a_resume_polls_the_thawed_daemon_and_lands_its_hook_observations() {
     assert_eq!(read[0]["event"], "resumed");
 }
 
+/// **`microvm health` carries each hook handler's outcome and the identity steps.**
+/// (#198, #205) A hook without a handler keeps its two-key shape; one with a handler
+/// gains a camelCase `handler`; `identitySteps` names the failed step.
+#[tokio::test]
+async fn health_reports_handler_outcomes_and_identity_steps() {
+    let dir = TempDir::new("health-handlers");
+    let script = DaemonScript::new();
+    script.reply(
+        200,
+        r#"{"version": "0.1.0", "bootstrapped": true, "disk": null,
+             "identity_degraded": true, "identity_repaired": true,
+             "hooks": [{"hook": "run", "fired_at": 1},
+                       {"hook": "suspend", "fired_at": 2,
+                        "handler": {"exit_code": 1, "signal": null, "timed_out": false,
+                                    "duration_ms": 40}}],
+             "hooks_dropped": 0,
+             "identity_steps": [{"name": "boot-id", "outcome": "failed", "error": "EPERM"}]}"#,
+    );
+    let (result, _, _) = against_daemon(
+        &script,
+        &Command::Health(HealthArgs {
+            attach: AttachFlags {
+                state_dir: Some(dir.0.clone()),
+                ..attach_flags()
+            },
+            region: region_flags(),
+        }),
+    )
+    .await;
+    let rendered = result.expect("health answers");
+    assert_eq!(
+        rendered.data["hooks"],
+        serde_json::json!([
+            {"hook": "run", "firedAt": 1},
+            {"hook": "suspend", "firedAt": 2, "handler": {
+                "exitCode": 1, "signal": null, "timedOut": false, "durationMs": 40,
+                "error": null, "succeeded": false}},
+        ])
+    );
+    assert_eq!(
+        rendered.data["identitySteps"],
+        serde_json::json!([{"name": "boot-id", "outcome": "failed", "error": "EPERM"}])
+    );
+}
+
 /// **`microvm health` lands the daemon's hook observations in the VM's history,
 /// deduplicated on the (hook, firedAt) pair.** (issue #80)
 ///

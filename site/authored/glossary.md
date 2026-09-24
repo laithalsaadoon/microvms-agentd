@@ -158,10 +158,11 @@ create call (`--port`, default 9000). See [Platform](/internals/platform/).
 
 ### Identity repair
 
-What the daemon does at startup to the files that are supposed to be unique per machine. One image is
-snapshotted once and restored many times, so every VM shares the snapshot's machine-id, hostname,
-boot_id, and random seed; the daemon replaces them unless `AGENTD_REPAIR_IDENTITY` opts out, and
-`microvm health` reports what it did. See [Trust](/internals/trust/).
+What the daemon does at the first run hook to the files that are supposed to be unique per machine.
+One image is snapshotted once and restored many times, so every VM shares the snapshot's machine-id,
+hostname, boot_id, and random seed; the daemon replaces them unless `AGENTD_REPAIR_IDENTITY` opts out,
+and `microvm health` reports each step. It runs at the run hook rather than at daemon start because
+the daemon starts in the image-build VM, whose state the snapshot captures. See [Trust](/internals/trust/).
 
 ### `idlePolicy`
 

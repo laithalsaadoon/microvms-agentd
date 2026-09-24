@@ -552,10 +552,12 @@ mod tests {
             HookObservation {
                 hook: "validate".to_string(),
                 fired_at: 100,
+                handler: None,
             },
             HookObservation {
                 hook: "run".to_string(),
                 fired_at: 200,
+                handler: None,
             },
         ];
         append_unseen_hooks(&dir.0, "mvm-1", &first_poll);
@@ -573,14 +575,17 @@ mod tests {
             HookObservation {
                 hook: "validate".to_string(),
                 fired_at: 100,
+                handler: None,
             },
             HookObservation {
                 hook: "run".to_string(),
                 fired_at: 200,
+                handler: None,
             },
             HookObservation {
                 hook: "run".to_string(),
                 fired_at: 250,
+                handler: None,
             },
         ];
         append_unseen_hooks(&dir.0, "mvm-1", &second_poll);

@@ -144,6 +144,53 @@
       ],
       "type": "object"
     },
+    "HandlerOutcome": {
+      "description": "What a workload's handler for a lifecycle hook did.\n\nThe daemon runs `<hooks dir>/<hook>` when the image carries one. Output is not\nhere: `/v1/health` is readable without the agent token, so a handler's output\ngoes to the daemon's log instead.",
+      "properties": {
+        "duration_ms": {
+          "description": "Wall-clock milliseconds from spawn to exit or kill.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "error": {
+          "description": "Why the handler could not run at all: not executable, or spawn failed.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exit_code": {
+          "description": "The handler's exit code, or `None` when it was killed or never started.",
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "signal": {
+          "default": null,
+          "description": "The signal that ended it, if one did.",
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "timed_out": {
+          "default": false,
+          "description": "Whether the daemon killed it for exceeding its time budget.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "exit_code",
+        "signal",
+        "timed_out",
+        "duration_ms"
+      ],
+      "type": "object"
+    },
     "Health": {
       "description": "`GET /v1/health` response.",
       "properties": {
@@ -196,6 +243,14 @@
           "description": "False when identity repair was switched off by config. Distinguished from a\nrepair that ran and found nothing so a monitor can tell \"opted out\" from\n\"nothing to do\".",
           "type": "boolean"
         },
+        "identity_steps": {
+          "default": [],
+          "description": "Each identity-repair step and its outcome, in the order they ran.\n\nEmpty until repair runs, which is at the first successful run hook: repair at\ndaemon start would run in the image-build VM and be captured by the snapshot,\ngiving every VM the same \"repaired\" identity. `identity_degraded` says whether\nany step failed; this says which one and why.\n\nDefaulted for `busy`'s reason: an older daemon omits it.",
+          "items": {
+            "$ref": "#/$defs/IdentityStep"
+          },
+          "type": "array"
+        },
         "version": {
           "type": "string"
         }
@@ -209,7 +264,8 @@
         "busy",
         "execs",
         "hooks",
-        "hooks_dropped"
+        "hooks_dropped",
+        "identity_steps"
       ],
       "type": "object"
     },
@@ -222,6 +278,17 @@
           "minimum": 0,
           "type": "integer"
         },
+        "handler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HandlerOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The workload handler's outcome, when the image carries a handler for this\nhook. Absent on the wire otherwise, so an entry without one reads exactly as\nit did before handlers existed."
+        },
         "hook": {
           "description": "Which hook, spelled the way the platform's routes spell it: `ready`,\n`validate`, `run`, `suspend`, `resume`, or `terminate`.",
           "type": "string"
@@ -230,6 +297,31 @@
       "required": [
         "hook",
         "fired_at"
+      ],
+      "type": "object"
+    },
+    "IdentityStep": {
+      "description": "One identity-repair step, as the daemon ran it.",
+      "properties": {
+        "error": {
+          "description": "The OS error for a failed step. Names a path or an errno, never a value.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "`machine-id`, `hostname`, `boot-id`, `random-seed`, or `cached-credential`.",
+          "type": "string"
+        },
+        "outcome": {
+          "description": "`repaired`, `not_applicable`, or `failed`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "outcome"
       ],
       "type": "object"
     },

@@ -32,26 +32,24 @@ fn main() -> std::io::Result<()> {
 async fn run(config: Config) -> std::io::Result<()> {
     let port = config.port;
 
-    // Identity repair runs before the listener is bound, so no request can observe
-    // the image's shared machine-id even briefly. It is safe to do here and nowhere
-    // later precisely because the daemon is the container `CMD`: nothing in the VM
-    // has read these values yet. A workload started first would already hold its own
-    // copy, and no amount of rewriting would recall it.
-    //
-    // Every failure inside is logged and swallowed. Refusing to serve because a bind
-    // mount was denied would strand a VM with no way in — see `identity`.
-    let identity = if config.repair_identity {
-        identity::repair(&identity::Layout::default(), &identity::Host)
+    // Identity repair runs at the first successful run hook, not here. The daemon
+    // starts in the image-build VM, so anything written now is captured by the
+    // snapshot and shared by every VM launched from it (measured 2026-09-23: two VMs
+    // from one image had the same machine-id). The run hook is the first per-VM
+    // moment, and nothing has read these values by then: the platform forwards no
+    // traffic and the bootstrap invariant starts no workload before it answers.
+    let repairer = if config.repair_identity {
+        identity::host_repairer()
     } else {
         tracing::info!(
             "identity repair disabled by configuration; this VM keeps the image's \
              machine-id, hostname, and boot_id, which are shared with every other VM \
              derived from the same snapshot"
         );
-        identity::Report::skipped()
+        identity::no_repair()
     };
 
-    let state = AppState::with_probe(config, disk::available_bytes, identity);
+    let state = AppState::with_probe(config, disk::available_bytes, repairer);
 
     // Collection of acked exec entries runs on its own interval rather than
     // inside a request handler, so a slow collection cannot delay a response and

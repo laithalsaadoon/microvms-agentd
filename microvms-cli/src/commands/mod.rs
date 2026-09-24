@@ -274,6 +274,9 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 29] = [
             // old daemon. Issue #80: the validate hook's only trace anywhere.
             "hooks",
             "hooksDropped",
+            // Each identity-repair step, [{name, outcome, error}], run at this VM's
+            // run hook. Empty before bootstrap and against an old daemon (#205).
+            "identitySteps",
         ],
     ),
     (

@@ -33,6 +33,7 @@ pub mod config;
 pub mod disk;
 pub mod exec;
 pub mod fs;
+pub mod hook_handlers;
 pub mod identity;
 pub mod routes;
 pub mod schema;
