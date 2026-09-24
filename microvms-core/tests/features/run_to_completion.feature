@@ -45,6 +45,16 @@ Feature: run_to_completion drives one exec to exactly one result
       And the daemon saw a poll
       And the exec was acked exactly once
 
+    @BIND-8
+    Scenario: a failed ack during the fallback wait is retried rather than raised
+      Given a command that prints "hello" and exits with code 0 after 1 seconds
+      And the stream is cut after its output on every attach
+      And the first ack fails
+      When I run it to completion with an output callback
+      Then the result's stdout is "hello"
+      And the result is not synthesized
+      And the exec was acked exactly once
+
   Rule: BIND-9 — the client deadline kills the process group before it acks
 
     @BIND-9 @BIND-6 @BIND-7
@@ -93,6 +103,14 @@ Feature: run_to_completion drives one exec to exactly one result
       Then the result's POSIX exit code is 124
       And the result has a note containing "timeout_sec"
       And the daemon saw no kill
+
+    @BIND-6
+    Scenario: a child that traps SIGTERM and exits 0 after the daemon deadline still reports 124
+      Given a command that traps SIGTERM and exits with code 0 after the daemon's deadline at 2 seconds
+      And a timeout of 2 seconds and a client grace of 60 seconds
+      When I run it to completion
+      Then the result's POSIX exit code is 124
+      And the result has a note containing "timeout_sec"
 
     @BIND-6
     Scenario: a signal death with no deadline reports 128 plus the signal

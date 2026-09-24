@@ -122,13 +122,90 @@ impl ExecResult {
     }
 
     /// The exit code a POSIX shell would report for this exec (BIND-6).
+    ///
+    /// * **124** when a deadline ended the command: the daemon's own (`timed_out`), the
+    ///   client's kill of a live process group after its deadline, or a result synthesized
+    ///   because nothing came back after that kill. 124 is GNU `timeout(1)`'s code, which is
+    ///   what harnesses built on `docker exec` and friends already report.
+    /// * **128 + signal** for any other signal death, the shell's convention: an
+    ///   out-of-memory kill (SIGKILL, 137) is not a timeout.
+    /// * **The exit code** otherwise.
+    ///
+    /// `timed_out` wins over an exit code on purpose. A child that traps SIGTERM and exits 0
+    /// after the deadline fired has an exit code, and reporting it would call a timed-out
+    /// command a success while [`Self::succeeded`] says it failed. `model/src/run.rs` checks
+    /// this rule and finds that case against the "exit code first" alternative.
+    ///
+    /// `None` only when there is nothing to report: a running exec with no client deadline.
     pub fn posix_exit_code(&self) -> Option<i32> {
-        self.exit_code()
+        if let Some(deadline) = &self.client_deadline
+            && (deadline.ack_error.is_some()
+                || deadline.kill == super::complete::KillAnswer::Signalled)
+        {
+            return Some(TIMED_OUT_EXIT_CODE);
+        }
+        let outcome = self.outcome.as_ref()?;
+        if outcome.timed_out {
+            return Some(TIMED_OUT_EXIT_CODE);
+        }
+        match (outcome.exit_code, outcome.signal) {
+            (Some(code), _) => Some(code),
+            (None, Some(signal)) => Some(128 + signal),
+            (None, None) => None,
+        }
     }
 
-    /// Human-readable annotations on how to read this result (BIND-7).
+    /// Human-readable annotations on how to read this result, one per condition (BIND-7).
+    ///
+    /// For a caller that appends them to stderr without knowing the field names: truncated
+    /// output, an expired daemon deadline, writers left alive past the linger deadline, and
+    /// the client deadline (a kill, or a synthesized result). Empty for a clean result.
     pub fn notes(&self) -> Vec<String> {
-        Vec::new()
+        let mut notes = Vec::new();
+        if let Some(outcome) = &self.outcome {
+            if outcome.truncated {
+                notes.push(
+                    "output truncated: a stream reached the daemon's output cap \
+                     (AGENTD_MAX_OUTPUT_BYTES, 8 MiB by default) and the rest was dropped"
+                        .to_string(),
+                );
+            }
+            if outcome.timed_out {
+                notes.push(
+                    "timed out: the daemon's execution deadline (timeout_sec) expired and the \
+                     process group was sent SIGTERM, then SIGKILL"
+                        .to_string(),
+                );
+            }
+            if outcome.writers_may_be_alive {
+                notes.push(
+                    "a process the command started kept its output pipes open past the \
+                     daemon's linger deadline; anything it wrote afterwards was not captured"
+                        .to_string(),
+                );
+            }
+        }
+        if let Some(deadline) = &self.client_deadline {
+            let after = seconds(deadline.after);
+            let kill = match &deadline.kill {
+                super::complete::KillAnswer::Signalled => "its process group was killed".into(),
+                super::complete::KillAnswer::AlreadyGone => {
+                    "its process group had already exited".into()
+                }
+                super::complete::KillAnswer::Failed(error) => format!("the kill failed ({error})"),
+            };
+            notes.push(match &deadline.ack_error {
+                None => format!(
+                    "the client deadline of {after} expired before the exec finished; {kill}, \
+                     and the result was collected afterwards"
+                ),
+                Some(error) => format!(
+                    "the client deadline of {after} expired; {kill}, and the final ack failed \
+                     ({error}), so this result is synthesized: exit code 124, output unknown"
+                ),
+            });
+        }
+        notes
     }
 
     /// Whether this result was synthesized after the client deadline (BIND-10).
@@ -136,6 +213,19 @@ impl ExecResult {
         self.client_deadline
             .as_ref()
             .is_some_and(|deadline| deadline.ack_error.is_some())
+    }
+}
+
+/// The exit code GNU `timeout(1)` reports for a command its deadline ended, and the one
+/// [`ExecResult::posix_exit_code`] reports for a deadline (BIND-6).
+pub const TIMED_OUT_EXIT_CODE: i32 = 124;
+
+/// A duration as a note spells it: whole seconds as `90s`, anything else to a tenth.
+fn seconds(duration: Duration) -> String {
+    if duration.subsec_nanos() == 0 {
+        format!("{}s", duration.as_secs())
+    } else {
+        format!("{:.1}s", duration.as_secs_f64())
     }
 }
 

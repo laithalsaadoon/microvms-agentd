@@ -47,7 +47,9 @@ pub use complete::{
     ClientDeadline, CompletionOptions, CompletionPlan, DEFAULT_CLIENT_GRACE, KillAnswer,
     NO_TIMEOUT_CEILING, OutputSink,
 };
-pub use exec::{EndReason, ExecHandle, ExecResult, StreamEnd, StreamOptions, mint_exec_id};
+pub use exec::{
+    EndReason, ExecHandle, ExecResult, StreamEnd, StreamOptions, TIMED_OUT_EXIT_CODE, mint_exec_id,
+};
 pub use forward::{
     DEFAULT_EXCHANGE_TIMEOUT, ForwardClient, ForwardEvent, ForwardSpec, forwards_request_header,
     refusal_explanation, upstream_url,

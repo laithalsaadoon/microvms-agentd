@@ -13,9 +13,9 @@ use std::time::Duration;
 use futures_util::future::BoxFuture;
 
 use super::Session;
-use super::exec::{ExecHandle, ExecResult, StreamOptions};
+use super::exec::{EndReason, ExecHandle, ExecResult, StreamEnd, StreamOptions};
 use super::sse::ExecEvent;
-use crate::error::Error;
+use crate::error::{Error, WireKind};
 
 /// The default [`CompletionOptions::client_grace`]: how long past the daemon's own deadline
 /// the client waits before it kills, and how long it then waits for the killed exec's result.
@@ -110,13 +110,145 @@ impl CompletionPlan {
     }
 
     /// Drives a started exec to exactly one result.
+    ///
+    /// The steps, each the specified behavior in `model/src/run.rs`:
+    ///
+    /// 1. With a callback, stream to it under the client deadline. The terminal `exit` event
+    ///    means the output is final, so one ack returns it (BIND-8).
+    /// 2. Without a callback, or when the stream ended without its `exit` event (a cut past its
+    ///    reconnect budget, a fatal stream error, the callback answering `Break`), or when the
+    ///    ack after the exit event failed: wait and ack under what is left of the deadline
+    ///    (BIND-8). Polling is read-only, so this is safe whatever the stream saw.
+    /// 3. When the client deadline expires in either step: kill the process group, then wait
+    ///    and ack within the client grace (BIND-9). The kill is sent whatever its outcome turns
+    ///    out to be, and a failed kill still gets the ack: the command may have finished by
+    ///    itself, and its real result beats a synthesized one.
+    /// 4. When that ack fails too: a synthesized result, exit code 124, naming both failures
+    ///    (BIND-10). Nothing else synthesizes.
+    ///
+    /// An error is returned only for a failure that says nothing about a deadline: a fatal
+    /// wait (the exec was collected, the token was refused). A retryable poll failure is
+    /// retried inside the wait, as `ExecHandle::wait` always has.
     pub async fn drive(
         &self,
         handle: &ExecHandle,
         on_output: Option<OutputSink>,
     ) -> Result<ExecResult, Error> {
-        let _ = (on_output, &self.options);
-        handle.wait_and_ack(self.deadline).await
+        let deadline = tokio::time::Instant::now() + self.deadline;
+        if let Some(sink) = on_output {
+            match tokio::time::timeout_at(deadline, self.stream(handle, sink)).await {
+                Err(_elapsed) => return self.after_deadline(handle).await,
+                Ok(true) => match handle.ack().await {
+                    Ok(result) if result.done() && result.outcome.is_some() => return Ok(result),
+                    // A failed or empty ack falls through to the wait, which re-reads the
+                    // phase before acking again.
+                    Ok(_) | Err(_) => {}
+                },
+                Ok(false) => {}
+            }
+        }
+        match wait_and_ack_until(handle, deadline).await {
+            Ok(result) => Ok(result),
+            Err(error) if error.wire_kind() == Some(WireKind::ExecTimeout) => {
+                self.after_deadline(handle).await
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Streams output to `sink`, answering whether the terminal `exit` event arrived.
+    ///
+    /// Everything else — a cut past the reconnect budget, a fatal stream error, the sink
+    /// stopping — answers `false`, and the caller falls back to wait and ack. The error itself
+    /// is dropped deliberately: the wait that follows re-reads the exec, and raises whatever
+    /// is fatal about it there.
+    async fn stream(&self, handle: &ExecHandle, mut sink: OutputSink) -> bool {
+        let end = handle
+            .for_each_event_async(self.options.stream.clone(), |event| match event {
+                ExecEvent::Output { .. } => sink(event),
+                ExecEvent::Gap { .. } | ExecEvent::Exit(_) => {
+                    Box::pin(std::future::ready(std::ops::ControlFlow::Continue(())))
+                }
+            })
+            .await;
+        matches!(
+            end,
+            Ok(StreamEnd {
+                reason: EndReason::Exited,
+                ..
+            })
+        )
+    }
+
+    /// Steps 3 and 4 of [`Self::drive`]: kill, then wait and ack within the grace.
+    async fn after_deadline(&self, handle: &ExecHandle) -> Result<ExecResult, Error> {
+        let kill = match handle.kill().await {
+            Ok(true) => KillAnswer::Signalled,
+            Ok(false) => KillAnswer::AlreadyGone,
+            Err(error) => KillAnswer::Failed(error.to_string()),
+        };
+        let grace = tokio::time::Instant::now() + self.options.client_grace;
+        match wait_and_ack_until(handle, grace).await {
+            Ok(mut result) => {
+                result.client_deadline = Some(ClientDeadline {
+                    after: self.deadline,
+                    kill,
+                    ack_error: None,
+                });
+                Ok(result)
+            }
+            // Any failure, fatal or not: the caller's deadline has passed, and the contract
+            // every harness reports for that is 124. The note names what failed, so a fatal
+            // error is visible rather than swallowed.
+            Err(error) => Ok(ExecResult {
+                exec_id: handle.exec_id().to_string(),
+                phase: protocol::exec::Phase::Running,
+                outcome: None,
+                client_deadline: Some(ClientDeadline {
+                    after: self.deadline,
+                    kill,
+                    ack_error: Some(error.to_string()),
+                }),
+            }),
+        }
+    }
+}
+
+/// How long to wait before retrying an ack that failed with a retryable error.
+const ACK_RETRY_INTERVAL: Duration = Duration::from_secs(1);
+
+/// [`ExecHandle::wait_and_ack`] until `deadline`, retrying an ack that failed retryably.
+///
+/// `wait_and_ack` retries a dropped poll but not a dropped ack: its ack is one request, and
+/// a transport failure there ends the call although the result is sitting in the daemon. The
+/// fuzz harness found that (a cut stream, then one failed ack, raised instead of returning),
+/// so here the pair is repeated until the deadline. Repeating is safe because the wait
+/// re-reads the phase first: an ack whose response was lost reads as `acked` and is not sent
+/// twice. Running out of time is the wait's own `ExecTimeout`, so the caller's deadline path
+/// is the same whichever request was in flight.
+async fn wait_and_ack_until(
+    handle: &ExecHandle,
+    deadline: tokio::time::Instant,
+) -> Result<ExecResult, Error> {
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        match handle.wait_and_ack(remaining).await {
+            Err(error) if error.retryable() && error.wire_kind() != Some(WireKind::ExecTimeout) => {
+                let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+                if left.is_zero() {
+                    return Err(Error::wire(
+                        WireKind::ExecTimeout,
+                        format!(
+                            "exec {} was not acknowledged before the deadline; the last \
+                             attempt failed: {error}",
+                            handle.exec_id()
+                        ),
+                    ));
+                }
+                tokio::time::sleep(ACK_RETRY_INTERVAL.min(left)).await;
+            }
+            other => return other,
+        }
     }
 }
 
@@ -405,6 +537,34 @@ mod tests {
             .expect("completes");
         assert_eq!(result.posix_exit_code(), Some(128 + 11));
         assert!(!route(&recorder).iter().any(|r| r.contains("stream")));
+    }
+
+    /// **BIND-8: a dropped ack in the wait is retried, not raised.**
+    ///
+    /// `wait_and_ack` retries a dropped poll but not a dropped ack, so a transient failure on
+    /// the one request that releases the output ended the call with an error while the result
+    /// sat in the daemon. The fuzz harness found it (a cut stream, then one failed ack).
+    ///
+    /// **Falsification** — remove the retry arm in `wait_and_ack_until` and this raises
+    /// `connection reset`. Verified.
+    #[tokio::test(start_paused = true)]
+    async fn a_dropped_ack_in_the_wait_is_retried() {
+        let recorder = Recorder::with([
+            started(),
+            finished("exited", Some(0), None, "out"),
+            Reply::Cut("connection reset"),
+            finished("exited", Some(0), None, "out"),
+            finished("acked", Some(0), None, "out"),
+        ]);
+        let (session, _, _) = session_with(Arc::clone(&recorder));
+
+        let result = session
+            .run_to_completion(request(Some(30.0)), options(60), None)
+            .await
+            .expect("the retried ack returns the result");
+        assert_eq!(result.stdout(), "out");
+        assert!(result.client_deadline.is_none());
+        assert_eq!(route(&recorder).len(), 5, "{:?}", route(&recorder));
     }
 
     // ── BIND-9: the client deadline kills before it acks ─────────────────────

@@ -92,6 +92,19 @@ fn daemon_deadline(run: &mut Run, signal: i32, after: u64) {
     };
 }
 
+#[given(
+    regex = r"^a command that traps SIGTERM and exits with code (\d+) after the daemon's deadline at (\d+) seconds$"
+)]
+fn traps_term(run: &mut Run, code: i32, after: u64) {
+    run.script.stdout = "trapped".into();
+    run.script.finishes_after = Some(Duration::from_secs(after));
+    run.script.ending = Ending {
+        exit_code: Some(code),
+        signal: None,
+        timed_out: true,
+    };
+}
+
 #[given("the stream is cut after its output on every attach")]
 fn cut(run: &mut Run) {
     run.script.stream = StreamMode::Cut;
