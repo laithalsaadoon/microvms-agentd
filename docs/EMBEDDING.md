@@ -87,15 +87,10 @@ microvm build --dockerfile Dockerfile --name my-task-image
 
 With no binary, `build` provisions the daemon itself: the release asset for
 the CLI's own version, verified and cached under the state directory. The
-`agentd_bytes` above come from the bindings, with the same chain behind them
-(`microvms-core/src/provision.rs`):
-
-```python
-import microvms
-
-agentd = microvms.provision_agentd()  # bytes, for this client's version
-report = microvms.provision_agentd_report()  # .source, .verification, .path, .sha256
-```
+`agentd_bytes` above come from the same chain through the bindings
+(`microvms-core/src/provision.rs`). `provision_agentd_report()` returns the
+bytes together with `.source`, `.verification`, `.path`, and `.sha256`, and
+Node has the same pair:
 
 ```js
 import { provisionAgentd, provisionAgentdReport } from '@theagenticguy/microvms';
