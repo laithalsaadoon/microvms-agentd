@@ -235,36 +235,31 @@ description = "Fail if the committed Python stub no longer matches the pyo3 surf
 run = "./scripts/generate-py-stubs.py --check"
 
 [tasks.spec]
-description = "agentd.symspec.json consistency via symspec 0.1.0 + Z3"
-# Covers `spec/agentd.symspec.json` ONLY — six draft requirements about the daemon's
-# bootstrap and control-token rules. It is not the whole spec surface: `spec/core.symspec.json`
-# is 51 requirements in the v5 `docVersion: 3` format, and the 0.1.0 `symspec` on PATH
-# cannot read it at all — no state model, no effects/constraints, no reachability tier.
-# That one is `spec:core`.
+description = "agentd.symspec.json: the daemon's six bootstrap and control-token requirements"
+# Covers `spec/agentd.symspec.json` only (AGENTD-1..6); `spec:core` covers the core document.
+# Migrated from the v2 format to `docVersion: 3` on 2026-09-24, because symspec 1.x reads only
+# v3. `--strict` is not passed: in 1.x it is the full-verification gate (`data.verified`),
+# which fails on any requirement the decide tier could not compare, and neither document
+# passes it yet. The gate here is zero error-severity findings.
 #
-# Not in `check`'s dependency list: symspec is a global npm install plus a
-# downloaded embedding model, so a fresh clone should not fail on its absence.
-run = "symspec check spec/agentd.symspec.json --strict"
+# Not in `check`'s dependency list: symspec is a global npm install plus a downloaded
+# embedding model, so a fresh clone should not fail on its absence.
+run = "./scripts/check-spec.sh spec/agentd.symspec.json"
 
 [tasks."spec:core"]
-description = "microvms-core's 51 requirements: contradictions, coverage, and reachability"
-# The v5 CLI by absolute path, not the `symspec` on PATH. That one is 0.1.0 and predates
-# everything this document depends on: `core.symspec.json` carries a state model (5
-# variables), 7 effects, and 3 constraints, and the tier that proves the constraints hold
-# over *unbounded* runs is the reachability tier 0.1.0 does not have. Pointed at the wrong
-# binary this does not fail loudly — it parses less and reports on less.
+description = "microvms-core's requirements: contradictions, coverage, and reachability"
+# The `symspec` on PATH, which must be 1.0 or later (the script refuses anything older by
+# name): `core.symspec.json` carries a state model, effects, and constraints, and the tier
+# that proves the constraints over *unbounded* runs is the reachability tier 0.x lacks. This
+# used to name a node path in one home directory, which broke when that checkout moved.
 #
 # `--reachability-timeout-ms 5000` rather than leaving it to inherit `--timeout-ms`, and the
 # flag's own help says why: Z3's cancellation is cooperative, so an unbounded reachability
-# query is an *uncancellable* one. This bound IS the cancellability mechanism, and 5s is
-# comfortably above the 794ms the three constraints actually take.
+# query is an *uncancellable* one. This bound IS the cancellability mechanism.
 #
-# Out of `check`'s depends for the same reason `spec` is out: this needs a node path in
-# someone's home directory. A gate that fails on a fresh clone is a gate people learn to
-# skip, and `check` is the one command that must never be skipped. Verified 2026-08-08:
-# 0 error findings, 202 warn / 56 info, 3 constraints proved under hypotheses, 0 violated,
-# 0 unknown.
-run = "node ~/workplace/symspec/packages/symspec/dist/cli.mjs check spec/core.symspec.json --reachability-timeout-ms 5000"
+# Out of `check`'s depends for the same reason `spec` is out. Verified 2026-09-24 with
+# symspec 1.2.1: 0 error findings (228 warn, 73 info) over 54 requirements.
+run = "./scripts/check-spec.sh spec/core.symspec.json --reachability-timeout-ms 5000"
 
 [tasks."model:check"]
 description = "Fail if a hardcoded API constraint no longer matches botocore's service model"

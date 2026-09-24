@@ -12,7 +12,7 @@ message here: name what was measured, and admit what is unverified. -->
 - [ ] `cargo test --all`
 - [ ] `cargo run -p agentd --bin schema -- --check` (regenerated if the protocol changed)
 - [ ] `cargo build --release -p agentd --target aarch64-unknown-linux-musl`
-- [ ] `symspec check spec/agentd.symspec.json --strict` (if `spec/` changed)
+- [ ] `mise run spec` and `mise run spec:core` (if `spec/` changed)
 - [ ] `./scripts/check-lint-coverage.py && uvx ruff check . && uvx ruff format --check .` (if any Python changed)
 - [ ] `mise exec -- cargo deny check` (if a `Cargo.toml`, `Cargo.lock`, or `deny.toml` changed)
 - [ ] `mise exec -- actionlint` (if a workflow changed)
