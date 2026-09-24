@@ -151,6 +151,20 @@ cargo_metadata = "0.23.1"
 # benefit, which is the same trade `envelope.rs` refuses with `into_streams` being
 # `cfg(test)`.
 tokio = { version = "1.53", features = ["test-util"] }
+# The behavior spec for CLI-7..9 (#216): Gherkin scenarios in `tests/features/`, run by
+# `tests/bdd.rs` against the real binary, tagged with the requirement each one verifies.
+# Rust rather than Python's behave so it runs under `cargo test` on all three CI systems.
+# `output-junit` writes a report when `CUCUMBER_JUNIT` names a file.
+cucumber = { version = "0.23", features = ["output-junit"] }
+# The fuzz harness for the output layer (#216). `bolero::check!` runs as an ordinary
+# `#[test]` on stable and as a coverage-guided target under `cargo bolero test`, which is
+# what this crate needs: it has no lib target (ARCH-5), so a separate fuzz crate could not
+# link the `Output` type it exercises.
+bolero = "0.13"
+
+[[test]]
+name = "bdd"
+harness = false
 
 [lints.rust]
 # No hand-written `unsafe` in this crate; a future one is a build error, not a scan finding.
