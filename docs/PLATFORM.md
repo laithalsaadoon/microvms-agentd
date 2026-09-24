@@ -382,6 +382,20 @@ External polling keeps a busy VM alive; guest work alone does not. Poll health
 at an interval below the idle timeout when preserving an active exec is the
 caller's intention. A local ledger watcher does not have this effect.
 
+Measured again 2026-09-24 in us-east-1 (API `2025-09-09`, live requests) with a
+CPU-busy exec instead of `sleep`, through the supported keepalive
+(`conformance/run_rs.py`, `drive_keepalive_helper`, and a Python binding run).
+With a 60-second idle timeout, `microvm keepalive --for 170` polled every 20
+seconds (9 polls) and the VM was `RUNNING` at 170 seconds. Once the keepalive
+stopped, the same VM, its exec still busy, was `SUSPENDED` within 150 seconds.
+`Session.keep_awake` held a second such VM `RUNNING` for 170 seconds at a
+15-second interval (12 polls). On that VM, launched with `autoResumeEnabled`, a
+`Sandbox.suspend()` issued while a keepalive ran ended the keepalive as
+`not-running`, and the VM was still `SUSPENDED` 20 seconds later: the keepalive
+did not wake it. The JavaScript binding's `session.keepAwake` held a third busy VM
+`RUNNING` for 170 seconds at a 15-second interval (12 polls); after `stop()` the
+same VM, still busy, was `SUSPENDED` within 150 seconds.
+
 ## The 4096-byte `runHookPayload` ceiling is on the whole string, env map included
 
 Measured 2026-08-15 using a payload containing both `agent_token` and an
