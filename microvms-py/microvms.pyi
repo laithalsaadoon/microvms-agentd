@@ -103,6 +103,11 @@ class AgentVm:
         Builds the image and waits for it to become usable. `code_artifact_uri` is where
         you uploaded `build_artifact`'s bytes. Several minutes, server-side.
         """
+    def detach(self, /) -> Detached:
+        """
+        Hands the VM off to another process; see `Sandbox.detach`. The adopter passes the
+        same agents to `AgentVm.adopt`.
+        """
     def dockerfile(self, /) -> str:
         """
         The Dockerfile `build_image` will send: the client's agentd stanza plus the agent
@@ -387,6 +392,46 @@ class CostReport:
     def unpriced(self, /) -> list[LineItem]:
         """
         The line items with no published rate.
+        """
+
+@final
+class Detached:
+    """
+    What another process needs to adopt a VM handed off by `Sandbox.detach()`.
+    
+    Pass the fields to `Sandbox.adopt(region, microvm_id, endpoint, agent_token, port=port)`.
+    `agent_token` is a credential: keep it (or `to_dict()`) in private encrypted storage. It
+    never appears in repr.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def agent_token(self, /) -> str:
+        """
+        The bearer the VM's daemon accepts. Store only in a private encrypted record.
+        """
+    @property
+    def endpoint(self, /) -> str:
+        """
+        The HTTPS endpoint its daemon answers on.
+        """
+    @property
+    def microvm_id(self, /) -> str:
+        """
+        The VM's identifier.
+        """
+    @property
+    def port(self, /) -> int:
+        """
+        The daemon port the endpoint's proxy tokens are minted for.
+        """
+    @property
+    def region(self, /) -> Region:
+        """
+        The region the VM runs in.
+        """
+    def to_dict(self, /) -> dict:
+        """
+        Every field, token included, as a JSON-safe dict for a private store.
         """
 
 @final
@@ -1551,6 +1596,17 @@ class Sandbox:
         of fresh randomness per build attempt, and the resolved exact name comes back on
         `Image.log_stream`. `log_stream` requires `log_group`.
         """
+    def detach(self, /) -> Detached:
+        """
+        Hands the VM off to another process and returns what that process adopts it with.
+        
+        For a workflow whose steps run in different processes: the launching step calls this
+        instead of dropping the sandbox (which warns that a live VM was abandoned), persists
+        the returned record privately, and a later step calls `Sandbox.adopt` with it. The VM
+        keeps running and no AWS call is made. Afterwards this sandbox is inert: its session
+        is gone and `run`, `wait_until_running`, `suspend`, `resume`, and `terminate` are
+        refused. Raises `PreconditionError` without a live VM or when already detached.
+        """
     @property
     def endpoint(self, /) -> str |None:
         """
@@ -1572,6 +1628,11 @@ class Sandbox:
     def image_exists(self, /) -> bool:
         """
         Whether an image is recorded as existing (STATE-1).
+        """
+    @property
+    def is_detached(self, /) -> bool:
+        """
+        Whether `detach()` handed this sandbox's VM to another process.
         """
     @property
     def lifecycle(self, /) -> str:

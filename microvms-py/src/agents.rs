@@ -665,6 +665,13 @@ impl PyAgentVm {
         Ok(PySession::in_sandbox(Arc::clone(&self.sandbox)))
     }
 
+    /// Hands the VM off to another process; see `Sandbox.detach`. The adopter passes the
+    /// same agents to `AgentVm.adopt`.
+    fn detach(&self, py: Python<'_>) -> PyCoreResult<crate::sandbox::PyDetached> {
+        let inner = self.detached(py, |sandbox| sandbox.detach())?;
+        Ok(crate::sandbox::PyDetached { inner })
+    }
+
     /// Mints a token (or takes yours) and installs Bedrock access for this VM's agents.
     ///
     /// Returns the token used, so `expires_at` says when to call this again. Re-runnable

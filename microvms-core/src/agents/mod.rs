@@ -731,6 +731,12 @@ impl AgentVm {
         Ok(Self { sandbox, specs })
     }
 
+    /// Hands the VM off to another process; see [`Sandbox::detach`]. The adopter passes
+    /// the same specs to [`AgentVm::adopt`].
+    pub fn detach(&mut self) -> Result<crate::sandbox::Detached, Error> {
+        self.sandbox.detach()
+    }
+
     /// The sandbox and specs, for a binding that holds them separately.
     pub fn into_parts(self) -> (Sandbox, Vec<AgentSpec>) {
         (self.sandbox, self.specs)

@@ -238,6 +238,22 @@ for item in plane.list(image_identifier=vm.image_arn):
 
 Pair `vm.endpoint` with the agent token in `Session.attach` for exec and files.
 
+The process that launches a VM for later steps hands it off with `detach()` rather than
+dropping the sandbox, which would warn that a live VM was abandoned:
+
+```python
+sandbox = microvms.Sandbox(region)
+sandbox.run(image_identifier=image, wait=False)
+record = sandbox.detach().to_dict()  # microvm_id, endpoint, region, port, agent_token
+save_privately(record)  # encrypted: agent_token is a credential
+```
+
+`detach()` (JS `sandbox.detach()`, `AgentVm.detach()` in both) makes no AWS call and leaves
+the VM running. It returns a `Detached` record whose token is absent from repr and
+`toString()`, and it leaves the sandbox inert: its session is gone, and `run`,
+`wait_until_running`, `suspend`, `resume`, and `terminate` are refused (`terminate` reports
+the refusal in its report rather than raising). It is refused without a live VM.
+
 To drive the VM with a `Sandbox`'s guards instead, adopt it from its private record:
 
 ```python

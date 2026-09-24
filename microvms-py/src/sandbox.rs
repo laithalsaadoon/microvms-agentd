@@ -39,17 +39,83 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use microvms_core::SizeClass;
 use microvms_core::control::{BaseImage, CreateImageRequest};
-use microvms_core::sandbox::{RunRequest, Sandbox, TeardownOpts, TeardownReport};
+use microvms_core::sandbox::{Detached, RunRequest, Sandbox, TeardownOpts, TeardownReport};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 
 use crate::cost::PySizeClass;
-use crate::errors::PyCoreResult;
+use crate::errors::{CoreError, PyCoreResult};
 use crate::exec::seconds;
 use crate::hooks::{PyBuildHookTimeout, PyRunHookTimeout};
 use crate::region::PyRegion;
 use crate::runtime;
 use crate::session::PySession;
+
+/// What another process needs to adopt a VM handed off by `Sandbox.detach()`.
+///
+/// Pass the fields to `Sandbox.adopt(region, microvm_id, endpoint, agent_token, port=port)`.
+/// `agent_token` is a credential: keep it (or `to_dict()`) in private encrypted storage. It
+/// never appears in repr.
+#[pyclass(frozen, name = "Detached", module = "microvms")]
+pub struct PyDetached {
+    pub(crate) inner: Detached,
+}
+
+#[pymethods]
+impl PyDetached {
+    /// The VM's identifier.
+    #[getter]
+    fn microvm_id(&self) -> String {
+        self.inner.microvm_id.clone()
+    }
+
+    /// The HTTPS endpoint its daemon answers on.
+    #[getter]
+    fn endpoint(&self) -> String {
+        self.inner.endpoint.clone()
+    }
+
+    /// The region the VM runs in.
+    #[getter]
+    fn region(&self) -> PyRegion {
+        PyRegion {
+            inner: self.inner.region.clone(),
+        }
+    }
+
+    /// The daemon port the endpoint's proxy tokens are minted for.
+    #[getter]
+    fn port(&self) -> u16 {
+        self.inner.port
+    }
+
+    /// The bearer the VM's daemon accepts. Store only in a private encrypted record.
+    #[getter]
+    fn agent_token(&self) -> String {
+        self.inner.agent_token().to_string()
+    }
+
+    /// Every field, token included, as a JSON-safe dict for a private store.
+    fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let dict = PyDict::new(py);
+        dict.set_item("microvm_id", &self.inner.microvm_id)?;
+        dict.set_item("endpoint", &self.inner.endpoint)?;
+        dict.set_item("region", self.inner.region.as_str())?;
+        dict.set_item("port", self.inner.port)?;
+        dict.set_item("agent_token", self.inner.agent_token())?;
+        Ok(dict)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Detached(microvm_id={:?}, endpoint={:?}, region={:?}, port={}, agent_token=<redacted>)",
+            self.inner.microvm_id,
+            self.inner.endpoint,
+            self.inner.region.as_str(),
+            self.inner.port
+        )
+    }
+}
 
 /// A built image, and the log group the service created alongside it.
 #[pyclass(frozen, name = "Image", module = "microvms")]
@@ -445,6 +511,27 @@ impl PySandbox {
     #[getter]
     fn adopted(&self) -> bool {
         self.read(Sandbox::adopted)
+    }
+
+    /// Hands the VM off to another process and returns what that process adopts it with.
+    ///
+    /// For a workflow whose steps run in different processes: the launching step calls this
+    /// instead of dropping the sandbox (which warns that a live VM was abandoned), persists
+    /// the returned record privately, and a later step calls `Sandbox.adopt` with it. The VM
+    /// keeps running and no AWS call is made. Afterwards this sandbox is inert: its session
+    /// is gone and `run`, `wait_until_running`, `suspend`, `resume`, and `terminate` are
+    /// refused. Raises `PreconditionError` without a live VM or when already detached.
+    fn detach(&self, py: Python<'_>) -> PyCoreResult<PyDetached> {
+        let inner = self
+            .detached(py, |sandbox| sandbox.detach())
+            .map_err(CoreError)?;
+        Ok(PyDetached { inner })
+    }
+
+    /// Whether `detach()` handed this sandbox's VM to another process.
+    #[getter]
+    fn is_detached(&self) -> bool {
+        self.read(Sandbox::detached)
     }
 
     /// The VM id, once launched.

@@ -47,7 +47,8 @@ use std::sync::Arc;
 
 use microvms_core::control::{BaseImage as CoreBaseImage, CreateImageRequest};
 use microvms_core::sandbox::{
-    RunRequest, Sandbox as CoreSandbox, TeardownOpts, TeardownReport as CoreTeardownReport,
+    Detached as CoreDetached, RunRequest, Sandbox as CoreSandbox, TeardownOpts,
+    TeardownReport as CoreTeardownReport,
 };
 use napi_derive::napi;
 use tokio::sync::Mutex;
@@ -58,6 +59,83 @@ use crate::exec::seconds_async;
 use crate::hooks::{BuildHookTimeout, RunHookTimeout};
 use crate::region::Region;
 use crate::session::Session;
+
+/// `Detached` as a plain object, token included, for a private store.
+#[napi(object)]
+pub struct DetachedObject {
+    pub microvm_id: String,
+    pub endpoint: String,
+    pub region: String,
+    pub port: u16,
+    pub agent_token: String,
+}
+
+/// What another process needs to adopt a VM handed off by `sandbox.detach()`.
+///
+/// Pass the fields to `Sandbox.adopt(region, microvmId, endpoint, agentToken, port)`. The
+/// token is a method rather than a getter so it is never read by accident, and it is absent
+/// from `toString()`; `JSON.stringify` of the instance carries nothing.
+#[napi]
+pub struct Detached {
+    pub(crate) inner: CoreDetached,
+}
+
+#[napi]
+impl Detached {
+    #[napi(getter)]
+    pub fn microvm_id(&self) -> String {
+        self.inner.microvm_id.clone()
+    }
+
+    #[napi(getter)]
+    pub fn endpoint(&self) -> String {
+        self.inner.endpoint.clone()
+    }
+
+    /// The region the VM runs in, ready to pass to `Sandbox.adopt`.
+    #[napi(getter)]
+    pub fn region(&self) -> Region {
+        Region {
+            inner: self.inner.region.clone(),
+        }
+    }
+
+    /// The daemon port the endpoint's proxy tokens are minted for.
+    #[napi(getter)]
+    pub fn port(&self) -> u16 {
+        self.inner.port
+    }
+
+    /// The VM's bearer credential; store it only privately.
+    #[napi]
+    pub fn agent_token(&self) -> String {
+        self.inner.agent_token().to_string()
+    }
+
+    /// Every field, token included, for a private encrypted store.
+    #[napi]
+    pub fn to_object(&self) -> DetachedObject {
+        DetachedObject {
+            microvm_id: self.inner.microvm_id.clone(),
+            endpoint: self.inner.endpoint.clone(),
+            region: self.inner.region.as_str().to_string(),
+            port: self.inner.port,
+            agent_token: self.inner.agent_token().to_string(),
+        }
+    }
+
+    /// The record without its secret.
+    #[napi(js_name = "toString")]
+    pub fn describe(&self) -> String {
+        format!(
+            "Detached(microvmId={:?}, endpoint={:?}, region={:?}, port={}, agentToken=<redacted>)",
+            self.inner.microvm_id,
+            self.inner.endpoint,
+            self.inner.region.as_str(),
+            self.inner.port
+        )
+    }
+}
 
 /// A built image, and the log group the service created alongside it.
 #[napi(object)]
@@ -521,6 +599,27 @@ impl Sandbox {
     #[napi]
     pub async fn adopted(&self) -> bool {
         self.inner.lock().await.adopted()
+    }
+
+    /// Hands the VM off to another process and resolves with what that process adopts it
+    /// with.
+    ///
+    /// For a workflow whose steps run in different processes: the launching step calls this
+    /// instead of dropping the sandbox (which warns that a live VM was abandoned), persists
+    /// the record privately, and a later step calls `Sandbox.adopt` with it. The VM keeps
+    /// running and no AWS call is made. Afterwards this sandbox is inert: `run`,
+    /// `waitUntilRunning`, `suspend`, `resume`, and `terminate` are refused. Rejects with
+    /// `ERR_PRECONDITION` without a live VM or when already detached.
+    #[napi]
+    pub async fn detach(&self) -> Result<Detached, AsyncError> {
+        let inner = self.inner.lock().await.detach().map_err(js_async)?;
+        Ok(Detached { inner })
+    }
+
+    /// Whether `detach()` handed this sandbox's VM to another process.
+    #[napi]
+    pub async fn is_detached(&self) -> bool {
+        self.inner.lock().await.detached()
     }
 
     /// The VM id, once launched.

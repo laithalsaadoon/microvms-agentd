@@ -6,6 +6,17 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
 
 ## Unreleased
 
+### Added
+
+- **`Sandbox.detach()` hands a launched VM to another process without a leak warning.** A
+  durable workflow's launch step used to end by dropping its `Sandbox`, which printed the
+  "dropped without terminate()" billing warning for a VM a later step was about to adopt.
+  `detach()` (core `Sandbox::detach`, Python `Sandbox.detach()` / `AgentVm.detach()`, JS
+  `sandbox.detach()` / `agentVm.detach()`) returns the `Detached` record `Sandbox.adopt`
+  takes (id, endpoint, region, port, and the agent token, kept out of repr and
+  `toString()`), makes no AWS call, and leaves the sandbox inert: every later transition is
+  refused and dropping it is quiet. Refused without a live VM.
+
 ### Fixed
 
 - **`agent-prompt --agent codex` no longer fails as a precondition on a healthy fresh VM.**
