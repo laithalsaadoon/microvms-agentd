@@ -362,6 +362,17 @@ pub struct AgentLaunchOptions {
     pub suspended_sec: Option<f64>,
     pub auto_resume: Option<bool>,
     pub max_duration_sec: Option<f64>,
+    /// Pins the launch to one image version rather than the latest active one.
+    pub image_version: Option<String>,
+    /// Customer-managed VPC egress connector ARNs. When given they replace the managed
+    /// internet connector, and the VPC must route to Bedrock.
+    pub egress_network_connectors: Option<Vec<String>>,
+    /// Per-VM CloudWatch log group. Omitted keeps the service's default destination.
+    pub log_group: Option<String>,
+    /// An exact log stream inside `logGroup`.
+    pub log_stream: Option<String>,
+    /// Turns per-VM logging off. Cannot be combined with `logGroup` or `logStream`.
+    pub disable_logging: Option<bool>,
 }
 
 /// One VM with coding agents in it: the sandbox plus the specs it is built for.
@@ -540,15 +551,25 @@ impl AgentVm {
 
     /// Launches with egress and waits for the daemon to answer.
     ///
-    /// Egress is not optional: neither agent reaches Bedrock without it. The idle knobs default
-    /// to the core's figures (ten-minute idle and suspended windows, a one-hour ceiling).
+    /// Egress is not optional: neither agent reaches Bedrock without it. The managed internet
+    /// connector is the default; `egressNetworkConnectors` replaces it with customer-managed
+    /// VPC connectors, whose VPC must route to Bedrock. The idle knobs default to the core's
+    /// figures (ten-minute idle and suspended windows, a one-hour ceiling).
     #[napi]
     pub async fn launch(&self, options: AgentLaunchOptions) -> Result<Session, AsyncError> {
         let mut request = agents::launch_request_for(
             &self.specs,
             options.image_identifier,
             options.execution_role_arn,
-        );
+        )
+        .with_vpc_egress(options.egress_network_connectors.unwrap_or_default());
+        request.image_version = options.image_version;
+        request.logging = microvms_core::control::ops::Logging::from_parts(
+            options.log_group,
+            options.log_stream,
+            options.disable_logging.unwrap_or(false),
+        )
+        .map_err(js_async)?;
         request.agent_token = options.agent_token;
         request.client_token = options.client_token;
         if let Some(idle) = options.max_idle_sec {

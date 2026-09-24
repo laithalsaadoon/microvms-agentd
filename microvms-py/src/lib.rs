@@ -53,6 +53,7 @@
 //! is the L3 layer over it, one VM with coding agents in it.
 
 mod agents;
+mod control;
 mod cost;
 mod errors;
 mod exec;
@@ -94,8 +95,8 @@ fn core_version() -> &'static str {
 // `{"incomplete":true,"members":[]}`, and `maturin generate-stubs` over that blob emits six
 // lines whose entire content is `def __getattr__(name: str) -> Incomplete` — a stub that types
 // every name as `Any`, shipped beside a `py.typed` marker promising a checker the opposite.
-// The declarative form lists its members in the attribute, so the macro knows all 42 of them
-// (30 classes and 12 functions) and the generated stub is the real surface.
+// The declarative form lists its members in the attribute, so the macro knows all 46 of them
+// (34 classes and 12 functions) and the generated stub is the real surface.
 //
 // The cost is that membership is declared in one place instead of in seven `register`
 // functions, which is why those are gone rather than merely unused. The benefit is that
@@ -114,6 +115,8 @@ mod microvms {
         PyAgentSpec, PyAgentVm, PyBearerToken, agent_constants, install_agent_access,
         installed_agents, mint_bedrock_token, mint_bedrock_token_with_credentials, prompt_agent,
     };
+    #[pymodule_export]
+    use super::control::{PyControlPlane, PyIdlePolicy, PyMicrovm, PyMicrovmSummary};
     #[pymodule_export]
     use super::core_version;
     #[pymodule_export]

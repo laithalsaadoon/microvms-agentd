@@ -63,6 +63,43 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
   platform seals a connector-less VM; that red is the signal to re-measure, append to
   `docs/PLATFORM.md`, and flip the constant.
 
+### Fixed
+
+- **A launch retried with its client token no longer reports a suspended VM as dead
+  (#195).** A repeated `clientToken` makes `RunMicrovm` answer with the VM the first
+  attempt launched, which may have idle-suspended since; the RUNNING wait treated that
+  SUSPENDED as a startup death (TRAP-8). A launch carrying a caller token now waits through
+  SUSPENDING, resumes a SUSPENDED VM once, and fails fast only on TERMINATING/TERMINATED
+  (`ControlPlane::wait_for_launch`). A launch with a minted token keeps the fail-fast.
+- **STATE-12 falls back to the window `GetMicrovm` reports.** A sandbox without a window of
+  its own reads `idlePolicy.suspendedDurationSeconds` from the service; the comments that
+  said the member exists only in the request are corrected.
+
+### Added
+
+- **Lifecycle by ID in both bindings (#197).** `ControlPlane` (Python constructor, JS
+  `ControlPlane.create`) wraps core's `get`, `list` (every page, with the service's
+  `imageIdentifier`/`imageVersion` filters), `suspend`, `resume`, `terminate`, and
+  `wait_for_state`, returning `Microvm` with `state_reason`, `idle_policy`, `started_at`,
+  `terminated_at`, and `maximum_duration_seconds`. It holds no lifecycle state and checks
+  no STATE guard: it is for a process that has only an identifier.
+- **`Sandbox.run(wait=False)` and `Sandbox.wait_until_running()`**, in core and both
+  bindings: the launch returns once accepted, with the lifecycle PENDING, and the wait
+  finishes it later.
+- **Per-VM logging (#201).** `RunMicrovm`'s `logging` member reaches the wire:
+  `log_group`/`log_stream`/`disable_logging` on `Sandbox.run` and `AgentVm.launch` in both
+  bindings, and `--vm-log-group`/`--vm-log-stream`/`--no-vm-logs` on `run` and
+  `agent-up`. The CLI ledger records the group as `vmLogGroup`, and
+  `scripts/verify-clean.py` reports ledger-named groups as standing and removes groups
+  passed with `--vm-log-group`.
+- **Launch parity (#203).** `AgentVm.launch` takes `image_version` and
+  `egress_network_connectors` (which replace the managed internet connector), and `run` and
+  `agent-up` take `--client-token`, with the agent token read from `$MICROVM_AGENT_TOKEN`
+  so a retry is the identical launch. Image builds still mint a fresh token (TRAP-1).
+- **Live checks.** `drive_lifecycle_by_id` adds six named checks: the #195 adoption, lifecycle
+  by ID through the control plane, `run --client-token` twice returning one VM, and a per-VM
+  log group receiving the VM's streams.
+
 ## [0.8.0] — 2026-09-12
 
 ### Fixed

@@ -46,6 +46,11 @@ pub struct Record {
     /// Identifiers teardown tried and failed to remove. The operator's to-do list.
     #[serde(default)]
     pub leaked: Vec<String>,
+    /// The caller-chosen log group for the VM's own logs (`--vm-log-group`). Outside the
+    /// service's namespace, so a namespace sweep cannot find it; `verify-clean.py` reads it
+    /// here. Never deleted by teardown: it is the caller's destination, not our garbage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vm_log_group: Option<String>,
 }
 
 /// A record plus where it is written.
@@ -145,6 +150,12 @@ impl Ledger {
     pub fn record_image(&mut self, identifier: &str, name: &str) {
         self.record.image_identifier = Some(identifier.to_string());
         self.record.image_name = Some(name.to_string());
+        self.flush();
+    }
+
+    /// Records the caller-chosen per-VM log group, and flushes.
+    pub fn record_vm_log_group(&mut self, group: &str) {
+        self.record.vm_log_group = Some(group.to_string());
         self.flush();
     }
 
@@ -512,6 +523,7 @@ mod tests {
             image_name: Some("img-new".into()),
             microvm_id: Some("mvm-1".into()),
             leaked: vec!["mvm-1".into(), "arn:image-new".into()],
+            vm_log_group: None,
         };
         std::fs::write(
             dir.0.join("9999999999-1.json"),
@@ -806,6 +818,7 @@ mod tests {
             image_name: Some("img".to_string()),
             microvm_id: Some("mvm-1".to_string()),
             leaked: vec!["mvm-1".to_string()],
+            vm_log_group: None,
         };
         let value = serde_json::to_value(&record).expect("serializes");
         let mut keys: Vec<&String> = value.as_object().expect("object").keys().collect();

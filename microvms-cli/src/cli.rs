@@ -20,8 +20,10 @@
 //!
 //! # What is deliberately *not* an option
 //!
-//! No `--client-token` (TRAP-1: core has no such parameter, so there is nothing to forward).
-//! No `--capabilities` (TRAP-3: the intent is `--repair-identity`, and core injects
+//! No `--client-token` on an image build (TRAP-1: a replayed create wedges the image in
+//! `CREATING`, so every create mints a fresh token). The launch commands, `run` and
+//! `agent-up`, do take one: core validates a run token, and retrying a launch with it adopts
+//! the VM the first attempt made. No `--capabilities` (TRAP-3: the intent is `--repair-identity`, and core injects
 //! `["ALL"]` itself). No `--connector` (TRAP-4: the intent is `--egress`). No
 //! `--architecture` (the model's enum has one value, so a flag could only express a rejected
 //! request). Their absence is asserted by
@@ -607,6 +609,76 @@ pub struct InfraFlags {
     pub execution_role_arn: Option<String>,
 }
 
+/// Where the agent token comes from when `--client-token` makes a launch retry-safe.
+///
+/// Never a flag: a token on the command line lands in shell history and process lists.
+pub const AGENT_TOKEN_ENV: &str = "MICROVM_AGENT_TOKEN";
+
+/// The per-VM launch options `run` and `agent-up` share: idempotency and the VM's own logs.
+#[derive(Args, Clone, Debug, Default)]
+pub struct VmLaunchFlags {
+    /// Idempotency key for this launch: 1-128 printable ASCII characters.
+    ///
+    /// Retrying with the same key and identical flags adopts the VM the first attempt
+    /// launched, resuming it if it idle-suspended, instead of launching a second one.
+    /// Persist the key before the first attempt and never reuse it for a different VM. The
+    /// agent token must be the same on every attempt, so it is read from
+    /// $MICROVM_AGENT_TOKEN rather than minted. Refused with --identity, and on `run`
+    /// without --image: a retried build would launch a different image.
+    #[arg(long, value_name = "KEY")]
+    pub client_token: Option<String>,
+
+    /// CloudWatch log group for the VM's own logs (not the image build's).
+    ///
+    /// Omitted keeps the service's default destination. The execution role must allow
+    /// writing to this group.
+    #[arg(long, value_name = "GROUP", conflicts_with = "no_vm_logs")]
+    pub vm_log_group: Option<String>,
+
+    /// Exact log stream inside --vm-log-group.
+    #[arg(long, value_name = "STREAM", requires = "vm_log_group")]
+    pub vm_log_stream: Option<String>,
+
+    /// Turn the VM's own logging off.
+    #[arg(long)]
+    pub no_vm_logs: bool,
+}
+
+impl VmLaunchFlags {
+    /// The per-VM `logging` these flags ask for.
+    pub fn logging(
+        &self,
+    ) -> Result<Option<microvms_core::control::ops::Logging>, microvms_core::Error> {
+        microvms_core::control::ops::Logging::from_parts(
+            self.vm_log_group.clone(),
+            self.vm_log_stream.clone(),
+            self.no_vm_logs,
+        )
+    }
+
+    /// The `(client_token, agent_token)` pair for a retry-safe launch, or `None` without
+    /// `--client-token`.
+    pub fn stable_launch(
+        &self,
+        env: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<Option<(String, String)>, microvms_core::Error> {
+        let Some(client_token) = self.client_token.clone() else {
+            return Ok(None);
+        };
+        match env(AGENT_TOKEN_ENV).filter(|token| !token.is_empty()) {
+            Some(agent_token) => Ok(Some((client_token, agent_token))),
+            None => Err(microvms_core::Error::new(
+                microvms_core::ErrorKind::Precondition,
+                format!(
+                    "--client-token needs the agent token in ${AGENT_TOKEN_ENV}: a retry adopts \
+                     the first attempt's VM only with an identical launch, token included. \
+                     Generate one, persist it with the key, and export it for every attempt."
+                ),
+            )),
+        }
+    }
+}
+
 // ── per-command arguments ───────────────────────────────────────────────────
 
 #[derive(Args, Clone, Debug)]
@@ -831,6 +903,9 @@ pub struct RunArgs {
     /// VM torn down on the way out has nothing to address later.
     #[arg(long, value_name = "NAME", requires = "keep")]
     pub vm_name: Option<String>,
+
+    #[command(flatten)]
+    pub launch: VmLaunchFlags,
 
     /// How long to wait for the exec, in seconds.
     #[arg(long, default_value_t = 300.0)]
@@ -1959,6 +2034,9 @@ pub struct AgentUpArgs {
     pub state_dir: Option<PathBuf>,
 
     #[command(flatten)]
+    pub launch: VmLaunchFlags,
+
+    #[command(flatten)]
     pub region: RegionFlags,
 
     #[command(flatten)]
@@ -2930,17 +3008,28 @@ mod tests {
         Cli::try_parse_from(&mode_only).expect("a single file takes a mode");
     }
 
-    /// **The absence half of CLI-5.** No option anywhere carries a client token, a
-    /// capability list, a connector name, or an architecture.
+    /// **The absence half of CLI-5.** No option carries a capability list, a connector
+    /// name, or an architecture, and only the two launch commands carry a client token.
     ///
     /// Asserted over every argument of every subcommand rather than by reading this file,
-    /// because the failure this catches is a *later* edit adding one — and the four names
-    /// are the four traps core closed by having no such parameter at all. A flag here would
-    /// be a way to reach a value core refuses, which is exactly what CLI-5 forbids.
+    /// because the failure this catches is a *later* edit adding one. A client token on an
+    /// image build replays the create and wedges it (TRAP-1); on a launch, core validates it
+    /// and a retry adopts the first attempt's VM.
     #[test]
     fn no_option_carries_a_token_a_capability_a_connector_or_an_architecture() {
+        let launches = ["run", "agent-up"];
+        for sub in Cli::command().get_subcommands() {
+            let has_token = sub
+                .get_arguments()
+                .any(|arg| arg.get_long() == Some("client-token"));
+            assert_eq!(
+                has_token,
+                launches.contains(&sub.get_name()),
+                "{} and --client-token: only a launch may carry one (TRAP-1)",
+                sub.get_name(),
+            );
+        }
         let forbidden = [
-            "client-token",
             "clienttoken",
             "capabilities",
             "capability",

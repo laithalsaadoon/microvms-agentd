@@ -865,6 +865,28 @@ pub mod paths {
         with_next_token(microvms(), next_token)
     }
 
+    /// [`microvms_list`] with the model's `imageIdentifier` and `imageVersion` query filters.
+    ///
+    /// Keys are emitted in sorted order, which is also SigV4's canonical order.
+    pub fn microvms_list_matching(
+        image_identifier: Option<&str>,
+        image_version: Option<&str>,
+        next_token: Option<&str>,
+    ) -> String {
+        let query: Vec<String> = [
+            ("imageIdentifier", image_identifier),
+            ("imageVersion", image_version),
+            ("nextToken", next_token),
+        ]
+        .into_iter()
+        .filter_map(|(key, value)| value.map(|value| format!("{key}={}", encode_segment(value))))
+        .collect();
+        if query.is_empty() {
+            return microvms();
+        }
+        format!("{}?{}", microvms(), query.join("&"))
+    }
+
     /// `GET|DELETE /2025-09-09/microvms/{microvmIdentifier}`
     pub fn microvm(id: &str) -> String {
         format!("/{API_PATH_VERSION}/microvms/{}", encode_segment(id))

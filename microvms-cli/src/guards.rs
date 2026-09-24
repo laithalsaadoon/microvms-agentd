@@ -186,6 +186,29 @@ async fn dispatch_with(
     dispatch_with_fetch(seam, command, infra, &crate::provision::PanickingFetch).await
 }
 
+/// [`dispatch_with`], with one environment variable set — for the flags that read one.
+async fn dispatch_with_env(
+    seam: &dyn CoreSeam,
+    command: &Command,
+    infra: Infra,
+    var: (&'static str, &'static str),
+) -> (Result<Rendered, CliError>, String) {
+    let mut out = Output::new(Format::Json, false, Vec::new(), Vec::new());
+    let env = move |name: &str| (name == var.0).then(|| var.1.to_string());
+    let result = {
+        let mut ctx = Ctx {
+            seam,
+            out: &mut out,
+            infra,
+            env: &env,
+            fetch: &crate::provision::PanickingFetch,
+        };
+        crate::handle(&mut ctx, command, crate::commands::lifecycle::never()).await
+    };
+    let stderr = String::from_utf8(out.into_streams().1).expect("utf8");
+    (result, stderr)
+}
+
 /// [`dispatch_with`], with the provisioning seam scripted — for the guards whose subject
 /// *is* the provisioning chain.
 async fn dispatch_with_fetch(
@@ -274,6 +297,7 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 explicit: Explicit::default(),
                 region: region_flags(),
                 infra: InfraFlags::default(),
+                launch: Default::default(),
             }),
             Door::OpenSandbox,
         ),
@@ -325,6 +349,7 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 ))),
                 region: region_flags(),
                 infra: InfraFlags::default(),
+                launch: Default::default(),
             }),
             Door::OpenSandbox,
         ),
@@ -1387,6 +1412,7 @@ fn run_args_for_image(identifier: &str, state_dir: std::path::PathBuf) -> RunArg
         explicit: Explicit::default(),
         region: region_flags(),
         infra: InfraFlags::default(),
+        launch: Default::default(),
     }
 }
 
@@ -5674,6 +5700,7 @@ async fn every_record_naming_the_vm_is_narrowed_not_only_the_newest() {
             image_name: None,
             microvm_id: Some("mvm-1".into()),
             leaked: vec!["mvm-1".into()],
+            vm_log_group: None,
         })
         .expect("serializes"),
     )
@@ -7192,4 +7219,142 @@ fn vpc_connectors_from_config_are_replaced_by_explicit_flags() {
     args.egress_network_connectors.clear();
     args.egress = true;
     assert!(crate::commands::lifecycle::merge_config(&args, &|_| None).is_err());
+}
+
+/// A launch that fails fast after `RunMicrovm`: the body is on the wire, no session is built.
+fn fast_failing_launch() -> Arc<ScriptedTransport> {
+    let transport = Arc::new(ScriptedTransport::new());
+    transport
+        .answer("RunMicrovm", 200, &microvm_body("PENDING"))
+        .answer("GetMicrovm", 200, &microvm_body("TERMINATED"))
+        .answer("TerminateMicrovm", 200, "{}");
+    transport
+}
+
+/// **`run --client-token` (#203).** The key and the `$MICROVM_AGENT_TOKEN` agent token reach
+/// `RunMicrovm` verbatim, so a retry is the identical launch; without the variable, or
+/// without `--image`, the launch is refused before any call.
+///
+/// **Guard proof.** Drop the `request.client_token = Some(client_token)` line and the first
+/// assertion goes red with a minted `run-…` token on the wire.
+#[tokio::test]
+async fn a_client_token_run_sends_the_key_and_the_environments_agent_token() {
+    let dir = TempDir::new("client-token");
+    let transport = fast_failing_launch();
+    let seam = ScriptedSeam {
+        transport: Arc::clone(&transport),
+        clock: Arc::new(YieldingClock::default()),
+    };
+    let mut args = interrupt_run_args(dir.0.clone());
+    args.launch.client_token = Some("job-203".into());
+    let command = Command::Run(args.clone());
+    let (result, _) = dispatch_with_env(
+        &seam,
+        &command,
+        full_infra(),
+        (crate::cli::AGENT_TOKEN_ENV, "agent-token-from-env"),
+    )
+    .await;
+    assert!(result.is_err(), "the fake VM terminates during startup");
+    let body = transport.first_body("RunMicrovm");
+    assert_eq!(body["clientToken"], "job-203", "{body}");
+    assert!(
+        body["runHookPayload"]
+            .as_str()
+            .is_some_and(|payload| payload.contains("agent-token-from-env")),
+        "the retry needs the same agent token: {body}"
+    );
+
+    // No token in the environment: refused before any call.
+    let transport = fast_failing_launch();
+    let seam = ScriptedSeam {
+        transport: Arc::clone(&transport),
+        clock: Arc::new(YieldingClock::default()),
+    };
+    let (result, _) = dispatch_with(&seam, &command, full_infra()).await;
+    let error = result.expect_err("no agent token");
+    assert!(
+        error.message.contains("MICROVM_AGENT_TOKEN"),
+        "{}",
+        error.message
+    );
+    assert_eq!(transport.called("RunMicrovm"), 0);
+
+    // A build would not be an identical retry: refused before any call.
+    let mut build = args;
+    build.image = None;
+    build.binary = Some(dir.0.join("agentd"));
+    std::fs::write(dir.0.join("agentd"), b"binary").expect("fixture");
+    let transport = fast_failing_launch();
+    let seam = ScriptedSeam {
+        transport: Arc::clone(&transport),
+        clock: Arc::new(YieldingClock::default()),
+    };
+    let (result, _) = dispatch_with_env(
+        &seam,
+        &Command::Run(build),
+        full_infra(),
+        (crate::cli::AGENT_TOKEN_ENV, "agent-token-from-env"),
+    )
+    .await;
+    assert!(result.is_err(), "a build with a client token is refused");
+    assert_eq!(transport.called("RunMicrovm"), 0);
+}
+
+/// **Per-VM logging (#201).** `--vm-log-group` and `--no-vm-logs` reach the `RunMicrovm`
+/// body; neither flag leaves the member absent, which is the byte-for-byte old request.
+#[tokio::test]
+async fn per_vm_logging_flags_reach_the_run_body() {
+    for (group, disabled, expected) in [
+        (
+            Some("/team/agents"),
+            false,
+            serde_json::json!({"cloudWatch": {"logGroup": "/team/agents"}}),
+        ),
+        (None, true, serde_json::json!({"disabled": {}})),
+        (None, false, serde_json::Value::Null),
+    ] {
+        let dir = TempDir::new("vm-logging");
+        let transport = fast_failing_launch();
+        let seam = ScriptedSeam {
+            transport: Arc::clone(&transport),
+            clock: Arc::new(YieldingClock::default()),
+        };
+        let mut args = interrupt_run_args(dir.0.clone());
+        args.launch.vm_log_group = group.map(str::to_string);
+        args.launch.no_vm_logs = disabled;
+        let (result, _) = dispatch_with(&seam, &Command::Run(args), full_infra()).await;
+        assert!(result.is_err(), "the fake VM terminates during startup");
+        let body = transport.first_body("RunMicrovm");
+        assert_eq!(
+            body.get("logging").cloned().unwrap_or_default(),
+            expected,
+            "{body}"
+        );
+    }
+}
+
+/// The logging flags' own exclusions are parser properties.
+#[test]
+fn the_vm_logging_flags_refuse_contradictions_at_parse_time() {
+    use clap::Parser as _;
+    let base = ["microvm", "run", "--image", "arn:image"];
+    for extra in [
+        vec!["--vm-log-stream", "s"],
+        vec!["--vm-log-group", "/g", "--no-vm-logs"],
+    ] {
+        let argv: Vec<&str> = base.iter().copied().chain(extra.iter().copied()).collect();
+        assert!(crate::cli::Cli::try_parse_from(&argv).is_err(), "{argv:?}");
+    }
+    let argv = [
+        "microvm",
+        "agent-up",
+        "--vm-name",
+        "a",
+        "--client-token",
+        "k",
+        "--vm-log-group",
+        "/g",
+    ];
+    crate::cli::Cli::try_parse_from(argv).expect("agent-up takes the launch flags");
 }

@@ -113,8 +113,8 @@ pub struct CodeArtifact {
 /// serde's default `{"Disabled": ...}` spelling off the wire.
 ///
 /// Both `CreateMicrovmImageRequest` and `RunMicrovmRequest` carry a `logging` member of
-/// this shape in the model; this client binds only the image-build side (issue #98 — build
-/// logs are where the three-VM/three-stream topology and the exact-name collision live).
+/// this shape in the model, and this client binds both: the image-build side for issue #98
+/// (three build VMs, three streams, the exact-name collision) and the per-VM side for #201.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Logging {
@@ -147,6 +147,28 @@ impl Logging {
                 log_group: Some(log_group.into()),
                 log_stream,
             },
+        }
+    }
+
+    /// A per-VM configuration from a launch surface's three arguments: a group, an exact
+    /// stream inside it, or `disabled`. `None` when none was given.
+    ///
+    /// One place for the refusal, so the CLI and both bindings word it identically.
+    pub fn from_parts(
+        log_group: Option<String>,
+        log_stream: Option<String>,
+        disabled: bool,
+    ) -> Result<Option<Self>, crate::Error> {
+        match (log_group, log_stream, disabled) {
+            (None, None, false) => Ok(None),
+            (None, None, true) => Ok(Some(Self::disabled())),
+            (Some(group), stream, false) => Ok(Some(Self::cloud_watch(group, stream))),
+            (None, Some(_), false) => Err(crate::Error::invalid_arg(
+                "log_stream names a stream inside log_group; pass log_group too",
+            )),
+            (_, _, true) => Err(crate::Error::invalid_arg(
+                "disabling logging cannot be combined with log_group or log_stream",
+            )),
         }
     }
 
@@ -323,6 +345,10 @@ pub struct RunMicrovmWire {
     pub idle_policy: IdlePolicy,
     pub maximum_duration_in_seconds: u32,
     pub run_hook_payload: String,
+    /// Per-VM `logging`, absent unless the caller configured it (#201). Absent leaves the
+    /// service's default destination in place.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logging: Option<Logging>,
     /// The minted idempotency token. `pub(crate)` for the reason
     /// [`CreateMicrovmImageWire::client_token`] gives.
     pub(crate) client_token: String,
@@ -938,6 +964,12 @@ pub struct MicrovmResponseWire {
     /// rather than printing an empty string.
     pub state_reason: Option<String>,
     pub idle_policy: Option<IdlePolicy>,
+    /// `maximumDurationInSeconds`. Not required by the model, so absence parses.
+    pub maximum_duration_in_seconds: Option<u32>,
+    /// `startedAt`, epoch seconds: when the VM first started. Absent on a launch reply.
+    pub started_at: Option<f64>,
+    /// `terminatedAt`, epoch seconds. Present once the VM has terminated.
+    pub terminated_at: Option<f64>,
 }
 
 /// `CreateMicrovmAuthTokenResponse`.
@@ -1629,6 +1661,7 @@ mod tests {
             },
             maximum_duration_in_seconds: 3600,
             run_hook_payload: r#"{"agent_token":"t"}"#.to_string(),
+            logging: None,
             client_token: "run-arn-0011223344556677".to_string(),
         };
 
@@ -2351,6 +2384,7 @@ mod tests {
             },
             maximum_duration_in_seconds: 3_600,
             run_hook_payload: String::new(),
+            logging: None,
             client_token: "run-arn-0011223344556677".to_string(),
         }
     }

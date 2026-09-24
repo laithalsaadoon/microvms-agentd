@@ -619,3 +619,29 @@ explicitly suspended was still `SUSPENDED` 240 s later, and `ResumeMicrovm`
 was accepted. The service model documents termination after the window. One
 sample does not overturn that; repeat with a longer hold before relying on
 either behavior.
+
+## A client-token retry after a suspend returns the same VM, and it resumes
+
+Measured 2026-09-24, us-east-1, API 2025-09-09, live (`microvms-core/tests/
+live_lifecycle.rs`, run by `drive_lifecycle_by_id`). A `RunMicrovm` retried with the
+same `clientToken` and identical parameters after the VM had been suspended answered with
+the original VM, and the client's retry reached RUNNING on it. A client that reads
+SUSPENDED before RUNNING as a startup death reports that healthy VM as dead. Two `run
+--client-token` calls with the same key from the CLI returned one VM.
+
+## `GetMicrovm` reports `terminatedAt`, and `ListMicrovms` filters by image
+
+Measured 2026-09-24, us-east-1, API 2025-09-09, live. A RUNNING VM carried `startedAt`
+and `maximumDurationInSeconds`; the same VM carried `terminatedAt` once TERMINATED.
+`ListMicrovms` with `imageIdentifier` set to the image ARN listed the VM. An explicit
+suspend reached SUSPENDED in about 1.2 s and a resume reached RUNNING in about 1.2 to
+1.3 s (two samples each, one-second polling).
+
+## Per-VM `logging` delivers a VM's logs to the caller's group
+
+Measured 2026-09-24, us-east-1, API 2025-09-09, live. `RunMicrovm` with
+`logging.cloudWatch.logGroup` naming a new group under `/aws/lambda-microvms/` produced a
+log stream in that group within 120 s for a VM that ran one command. The execution role
+permitted log writes under that prefix; whether a group outside a granted prefix fails
+the launch or drops the logs was not measured. The group is the caller's: teardown does
+not delete it.

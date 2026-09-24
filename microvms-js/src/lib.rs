@@ -75,6 +75,7 @@
 // what lets `-D warnings` stay on without a blanket allow — and it exports nothing extra,
 // because this crate is a `cdylib` with no Rust consumers.
 pub mod agents;
+pub mod control;
 pub mod cost;
 pub mod errors;
 pub mod exec;

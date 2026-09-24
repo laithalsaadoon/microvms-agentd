@@ -175,6 +175,36 @@ request, and it carries `busy` and `execs` so the poll is informed rather than
 unconditional — an orchestrator can stop keeping a drained VM alive instead of
 billing it to the duration ceiling.
 
+## Lifecycle from a process that did not launch the VM
+
+A durable workflow step, a reaper, or another machine often holds only an identifier.
+`ControlPlane` is lifecycle by ID in both bindings, one core call per method, with no
+lifecycle state of its own and therefore none of a `Sandbox`'s STATE guards:
+
+```python
+plane = microvms.ControlPlane(microvms.Region.us_east_1())
+vm = plane.get(microvm_id)          # state, state_reason, endpoint, idle_policy, started_at
+plane.suspend(microvm_id)
+plane.wait_for_state(microvm_id, ["SUSPENDED"])
+for item in plane.list(image_identifier=vm.image_arn):
+    print(item.id, item.state)
+```
+
+Pair `vm.endpoint` with the agent token in `Session.attach` for exec and files.
+
+Two launch options make a launch step safe to retry. `Sandbox.run(wait=False)` returns
+once `RunMicrovm` is accepted and `wait_until_running()` finishes the wait later. A
+persisted `client_token` with an explicit `agent_token` makes a retried launch adopt the
+VM the first attempt made; if that VM idle-suspended in between, the launch resumes it
+rather than reporting a startup death (`docs/PLATFORM.md`, "A client-token retry after a
+suspend returns the same VM"). The CLI's `run --client-token` reads the agent token from
+`$MICROVM_AGENT_TOKEN`.
+
+`log_group` (with an optional exact `log_stream`) sends a VM's own logs to a group you
+choose, and `disable_logging` turns them off; the execution role must be allowed to write
+there. The CLI spells these `--vm-log-group`, `--vm-log-stream`, and `--no-vm-logs`, since
+`--log-group` already names the image build's logs.
+
 ## What the hand-rolled daemons needed, and where agentd covers it
 
 The two daemon shapes this supersedes are described in

@@ -205,6 +205,42 @@
           },
           {
             "choices": null,
+            "default": null,
+            "help": "Idempotency key for this launch: 1-128 printable ASCII characters",
+            "name": "client-token",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "CloudWatch log group for the VM's own logs (not the image build's)",
+            "name": "vm-log-group",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Exact log stream inside --vm-log-group",
+            "name": "vm-log-stream",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Turn the VM's own logging off",
+            "name": "no-vm-logs",
+            "positional": false,
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "choices": null,
             "default": "300",
             "help": "How long to wait for the exec, in seconds",
             "name": "timeout",
@@ -810,6 +846,42 @@
             "positional": false,
             "required": false,
             "type": "path"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Idempotency key for this launch: 1-128 printable ASCII characters",
+            "name": "client-token",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "CloudWatch log group for the VM's own logs (not the image build's)",
+            "name": "vm-log-group",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Exact log stream inside --vm-log-group",
+            "name": "vm-log-stream",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Turn the VM's own logging off",
+            "name": "no-vm-logs",
+            "positional": false,
+            "required": false,
+            "type": "boolean"
           },
           {
             "choices": [

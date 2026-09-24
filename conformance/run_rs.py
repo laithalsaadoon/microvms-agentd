@@ -3682,6 +3682,188 @@ def drive_stable_launch(cli: Cli, launched: Envelope, results: Results) -> None:
         )
 
 
+def run_rust_live(
+    cli: Cli, launched: Envelope, results: Results, test: str, name: str, check: str
+) -> None:
+    """One ignored Rust live test against the suite's image, recorded as one named check."""
+    env = os.environ.copy()
+    env["MICROVM_BACKGROUND_TEST_IMAGE"] = str(launched.data["imageIdentifier"])
+    env["AWS_REGION"] = cli.region
+    command = [
+        "cargo",
+        "test",
+        "-p",
+        "microvms-core",
+        "--test",
+        test,
+        name,
+        "--",
+        "--ignored",
+        "--exact",
+        "--nocapture",
+    ]
+    cli.log.append(command_for_log(command))
+    try:
+        run = subprocess.run(
+            command,
+            cwd=Path(__file__).resolve().parents[1],
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=20 * 60,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        results.check(
+            check, False, "Rust live check exceeded 20 minutes; VM lifetime 600s"
+        )
+        return
+    results.check(
+        check,
+        run.returncode == 0,
+        f"exit={run.returncode} stdoutChars={len(run.stdout)} stderrChars={len(run.stderr)}",
+    )
+
+
+def drive_lifecycle_by_id(
+    cli: Cli, launched: Envelope, aws: Any, results: Results
+) -> None:
+    """Lifecycle by ID, retry-safe launches, and per-VM logging (#195, #197, #201, #203).
+
+    Each half launches its own bounded VM from the suite's image and verifies its own
+    cleanup. The two Rust halves drive core directly, the layer both bindings wrap; the CLI
+    halves drive `run --client-token` and `run --vm-log-group`.
+    """
+    print("\n-- lifecycle by id, client tokens, per-VM logging --")
+    run_rust_live(
+        cli,
+        launched,
+        results,
+        "live_lifecycle",
+        "an_adopted_suspended_launch_resumes_to_running",
+        "a client-token launch that adopts its suspended VM resumes it to RUNNING",
+    )
+    run_rust_live(
+        cli,
+        launched,
+        results,
+        "live_lifecycle",
+        "a_vm_is_managed_by_id_through_the_control_plane",
+        "a VM is managed by id through the control plane alone",
+    )
+
+    # `run --client-token`, twice: the second is the retry and must adopt the first VM.
+    key = f"conformance-{secrets.token_hex(8)}"
+    previous = os.environ.get("MICROVM_AGENT_TOKEN")
+    os.environ["MICROVM_AGENT_TOKEN"] = secrets.token_hex(32)
+    ids: list[str] = []
+    try:
+        for _ in range(2):
+            try:
+                reply = cli.call(
+                    "run",
+                    "--image",
+                    str(launched.data["imageIdentifier"]),
+                    "--name",
+                    f"microvm-cli-conformance-token-{key[-8:]}",
+                    "--memory",
+                    str(BASELINE_MEMORY_MIB),
+                    "--keep",
+                    "--client-token",
+                    key,
+                    "--region",
+                    cli.region,
+                    "--max-duration-sec",
+                    "600",
+                    timeout=15 * 60,
+                )
+                ids.append(str(reply.data["microvmId"]))
+            except KindError as exc:
+                print(f"    run --client-token: {exc!r}")
+        results.check(
+            "run --client-token twice returns the same VM",
+            len(ids) == 2 and ids[0] == ids[1],
+            f"{len(ids)} replies, {len(set(ids))} distinct",
+        )
+    finally:
+        if previous is None:
+            os.environ.pop("MICROVM_AGENT_TOKEN", None)
+        else:
+            os.environ["MICROVM_AGENT_TOKEN"] = previous
+        for microvm_id in sorted(set(ids)):
+            try:
+                torn = cli.call(
+                    "terminate",
+                    microvm_id,
+                    "--wait",
+                    "--region",
+                    cli.region,
+                    timeout=300.0,
+                )
+                results.check(
+                    "the client-token VM was terminated",
+                    not torn.data.get("leaked"),
+                    f"leaked={torn.data.get('leaked')!r}",
+                )
+            except Exception as exc:  # noqa: BLE001 - a teardown failure is a finding
+                results.check("the client-token VM was terminated", False, repr(exc))
+
+    # `run --vm-log-group`: the VM's own logs land in the caller's group. Under the
+    # service namespace and a conformance prefix, so the execution role may write to it
+    # and verify-clean attributes it if this section dies before deleting it.
+    logs = aws.client("logs")
+    group = (
+        f"/aws/lambda-microvms/microvm-cli-conformance-vmlogs-{secrets.token_hex(4)}"
+    )
+    try:
+        cli.call(
+            "run",
+            "--image",
+            str(launched.data["imageIdentifier"]),
+            "--name",
+            f"microvm-cli-conformance-vmlogs-{secrets.token_hex(4)}",
+            "--memory",
+            str(BASELINE_MEMORY_MIB),
+            "--exec",
+            "echo vm-log-probe",
+            "--vm-log-group",
+            group,
+            "--region",
+            cli.region,
+            timeout=15 * 60,
+        )
+        streams: list[dict[str, Any]] = []
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline and not streams:
+            try:
+                streams = logs.describe_log_streams(logGroupName=group).get(
+                    "logStreams", []
+                )
+            except logs.exceptions.ResourceNotFoundException:
+                streams = []
+            if not streams:
+                time.sleep(10)
+        results.check(
+            "a per-VM log group receives the VM's own log streams",
+            bool(streams),
+            f"{len(streams)} stream(s) in the configured group",
+        )
+    except KindError as exc:
+        results.check(
+            "a per-VM log group receives the VM's own log streams", False, repr(exc)
+        )
+    finally:
+        try:
+            logs.delete_log_group(logGroupName=group)
+            deleted = True
+        except logs.exceptions.ResourceNotFoundException:
+            deleted = True
+        except Exception as exc:  # noqa: BLE001 - reported as the check's detail
+            print(f"    delete {group}: {type(exc).__name__}")
+            deleted = False
+        results.check("the per-VM log group was deleted", deleted, group)
+
+
 def drive_agent_vm(
     cli: Cli, binary: Path, state_dir: Path, logs: Any, results: Results
 ) -> None:
@@ -5564,6 +5746,9 @@ def main() -> int:
             # every stop through `kill`, against the same shared VM.
             drive_kill_and_procs(cli, launched, results)
             drive_stable_launch(cli, launched, results)
+            # Lifecycle by id (#195, #197, #201, #203) on its own bounded VMs, from the
+            # suite's image.
+            drive_lifecycle_by_id(cli, launched, aws, results)
             # After the identity section because it leans on the same detach/poll/ack
             # surface that section just proved, so a rotation failure here points at the
             # rotation rather than at a broken poll.

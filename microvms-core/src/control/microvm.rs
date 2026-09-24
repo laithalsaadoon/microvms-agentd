@@ -274,6 +274,27 @@ pub struct Microvm {
     /// `Option` because the model does not mark the member required on either response
     /// shape, so an absent one must parse rather than fail.
     pub idle_policy: Option<ops::IdlePolicy>,
+    /// `maximumDurationInSeconds` as the service reports it.
+    pub maximum_duration_seconds: Option<u32>,
+    /// When the VM first started (`startedAt`). Absent on a launch reply.
+    pub started_at: Option<std::time::SystemTime>,
+    /// When the VM terminated (`terminatedAt`), once it has.
+    pub terminated_at: Option<std::time::SystemTime>,
+}
+
+/// Epoch seconds from a `Timestamp` member, or `None` for an absent or unrepresentable one.
+fn epoch(seconds: Option<f64>) -> Option<std::time::SystemTime> {
+    let seconds = seconds.filter(|value| value.is_finite() && *value >= 0.0)?;
+    std::time::UNIX_EPOCH.checked_add(std::time::Duration::from_secs_f64(seconds))
+}
+
+/// The optional filters `ListMicrovms` accepts.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct MicrovmFilter {
+    /// Only VMs running this image (ARN or ID).
+    pub image_identifier: Option<String>,
+    /// Only VMs running this image version.
+    pub image_version: Option<String>,
 }
 
 impl Microvm {
@@ -297,6 +318,9 @@ impl From<ops::MicrovmResponseWire> for Microvm {
             image_version: wire.image_version,
             state_reason: wire.state_reason,
             idle_policy: wire.idle_policy,
+            maximum_duration_seconds: wire.maximum_duration_in_seconds,
+            started_at: epoch(wire.started_at),
+            terminated_at: epoch(wire.terminated_at),
         }
     }
 }
@@ -424,6 +448,17 @@ impl ControlPlane {
         if let Some(role) = request.execution_role_arn.as_deref() {
             super::require_valid_role_arn("executionRoleArn", role)?;
         }
+        if let Some(ops::Logging::CloudWatch { cloud_watch }) = &request.logging {
+            let Some(group) = cloud_watch.log_group.as_deref() else {
+                return Err(Error::invalid_arg(
+                    "per-VM CloudWatch logging needs a logGroup; pass a group name or disable logging",
+                ));
+            };
+            super::require_valid_log_group(group)?;
+            if let Some(stream) = cloud_watch.log_stream.as_deref() {
+                super::require_valid_log_stream(stream)?;
+            }
+        }
 
         // `ALL_INGRESS` cannot be combined with any other ingress connector, and the
         // platform says so only at token-mint time: `RunMicrovm` accepts the invalid
@@ -534,6 +569,7 @@ impl ControlPlane {
             },
             maximum_duration_in_seconds: request.max_duration_sec,
             run_hook_payload: request.run_hook_payload.as_str().to_string(),
+            logging: request.logging.clone(),
             client_token: request.client_token.unwrap_or_else(|| {
                 token::run_token(
                     request
@@ -559,6 +595,48 @@ impl ControlPlane {
     pub async fn wait_for_running(&self, id: &str, opts: WaitOpts) -> Result<Microvm, Error> {
         self.wait_for_state(id, &["RUNNING"], &crate::constants::TERMINAL_STATES, opts)
             .await
+    }
+
+    /// Polls a launch that may have **adopted** an existing VM through its client token.
+    ///
+    /// A repeated `clientToken` makes `RunMicrovm` answer with the VM the first attempt
+    /// launched, and that VM may have idle-suspended since (#195). [`Self::wait_for_running`]
+    /// would read that SUSPENDED as a death during startup (TRAP-8) and report LaunchDied
+    /// for a healthy VM. Here SUSPENDING is waited through, SUSPENDED is resumed once, and
+    /// only the dead states fail fast. A genuine startup death still ends in a dead state,
+    /// so it still fails with `stateReason`.
+    pub async fn wait_for_launch(&self, id: &str, opts: WaitOpts) -> Result<Microvm, Error> {
+        let started = self.clock().elapsed();
+        let mut resumed = false;
+        loop {
+            let got = self.get_microvm(id).await?;
+            match got.state.as_str() {
+                "RUNNING" => return Ok(got),
+                state if crate::constants::DEAD_STATES.contains(&state) => {
+                    return Err(self.reached_terminal_state(&got, &["RUNNING"]));
+                }
+                // `GetMicrovm` is eventually consistent, so SUSPENDED can still be read
+                // just after the resume was accepted; one resume is enough.
+                "SUSPENDED" if !resumed => {
+                    self.resume(id).await?;
+                    resumed = true;
+                    continue;
+                }
+                _ => {}
+            }
+
+            let elapsed = self.clock().elapsed().saturating_sub(started);
+            if elapsed >= opts.timeout {
+                return Err(timed_out(
+                    &format!(
+                        "microvm {id} never reached [\"RUNNING\"] (last state {})",
+                        got.state
+                    ),
+                    elapsed,
+                ));
+            }
+            self.clock().sleep(opts.poll_interval).await;
+        }
     }
 
     /// Polls until the VM reaches one of `wanted`, failing fast on any of `fail_on`.
@@ -647,10 +725,31 @@ impl ControlPlane {
     /// the same argument [`ops::ListImagesResponseWire`] makes for the image listing, and a
     /// fleet listing is the one a teardown reads.
     pub async fn list_microvms(&self) -> Result<Vec<ops::MicrovmItemWire>, Error> {
+        self.list_microvms_matching(&MicrovmFilter::default()).await
+    }
+
+    /// [`Self::list_microvms`], narrowed by the service's image and version filters.
+    pub async fn list_microvms_matching(
+        &self,
+        filter: &MicrovmFilter,
+    ) -> Result<Vec<ops::MicrovmItemWire>, Error> {
+        if let Some(image) = filter.image_identifier.as_deref() {
+            super::require_valid_identifier("imageIdentifier", image)?;
+        }
+        if let Some(version) = filter.image_version.as_deref() {
+            super::require_valid_version("imageVersion", version)?;
+        }
         let mut items = Vec::new();
         let mut next_token: Option<String> = None;
         loop {
-            let call = Call::get("ListMicrovms", paths::microvms_list(next_token.as_deref()));
+            let call = Call::get(
+                "ListMicrovms",
+                paths::microvms_list_matching(
+                    filter.image_identifier.as_deref(),
+                    filter.image_version.as_deref(),
+                    next_token.as_deref(),
+                ),
+            );
             let reply = send_with_retry(self.transport(), call).await?;
             let page: ops::ListMicrovmsResponseWire = reply.json("ListMicrovms")?;
             items.extend(page.items);
@@ -2468,5 +2567,161 @@ mod tests {
                 .expect("a legal port specification mints");
             assert_eq!(fake.call_count("CreateMicrovmAuthToken"), 1);
         }
+    }
+
+    /// **#195.** A launch whose client token adopted a VM that idle-suspended since the
+    /// first attempt resumes it and returns RUNNING, rather than reporting LaunchDied.
+    ///
+    /// **Falsification** — route `wait_for_launch` through `TERMINAL_STATES` (the fresh
+    /// launch's fail set) and this reports LaunchDied on the first SUSPENDED poll.
+    #[tokio::test]
+    async fn an_adopted_launch_that_finds_its_vm_suspended_resumes_it() {
+        for first in ["SUSPENDING", "SUSPENDED"] {
+            let (plane, fake, _) = planted();
+            fake.answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response(first, None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("SUSPENDED", None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("SUSPENDED", None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("RUNNING", None)),
+            )
+            .answer("ResumeMicrovm", Answer::ok(fake::empty_response()));
+            let running = plane
+                .wait_for_launch("mvm-abc123", WaitOpts::for_launch())
+                .await
+                .unwrap_or_else(|error| panic!("{first}: {error}"));
+            assert_eq!(running.state, "RUNNING", "{first}");
+            assert_eq!(
+                fake.call_count("ResumeMicrovm"),
+                1,
+                "{first}: one resume, even though GetMicrovm still read SUSPENDED after it"
+            );
+        }
+    }
+
+    /// The adopted-launch wait still fails fast, with `stateReason`, on a dead state.
+    #[tokio::test]
+    async fn an_adopted_launch_still_fails_fast_on_a_dead_state() {
+        for state in crate::constants::DEAD_STATES {
+            let (plane, fake, _) = planted();
+            fake.answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response(state, Some("hook timeout"))),
+            );
+            let error = plane
+                .wait_for_launch("mvm-abc123", WaitOpts::for_launch())
+                .await
+                .expect_err(&format!("{state} is a death"));
+            assert_eq!(error.kind(), ErrorKind::LaunchDied, "{state}");
+            assert!(
+                error.to_string().contains("hook timeout"),
+                "{state}: {error}"
+            );
+            assert_eq!(fake.call_count("GetMicrovm"), 1, "{state}");
+            assert_eq!(fake.call_count("ResumeMicrovm"), 0, "{state}");
+        }
+    }
+
+    /// `startedAt`, `terminatedAt`, and `maximumDurationInSeconds` reach [`Microvm`].
+    #[tokio::test]
+    async fn get_microvm_carries_the_lifetime_members() {
+        let (plane, fake, _) = planted();
+        fake.answer(
+            "GetMicrovm",
+            Answer::ok(fake::microvm_response("RUNNING", None)),
+        );
+        let vm = plane.get_microvm("mvm-abc123").await.expect("parses");
+        assert_eq!(vm.maximum_duration_seconds, Some(3600));
+        assert_eq!(
+            vm.started_at,
+            Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_754_524_800))
+        );
+        assert_eq!(vm.terminated_at, None);
+    }
+
+    /// The list filters reach the query string in SigV4's sorted order, ARN colons escaped.
+    #[tokio::test]
+    async fn list_filters_reach_the_query_string() {
+        let (plane, fake, _) = planted();
+        fake.answer(
+            "ListMicrovms",
+            Answer::ok(fake::list_microvms_page(&["mvm-1"], None)),
+        );
+        let filter = MicrovmFilter {
+            image_identifier: Some(
+                "arn:aws:lambda:us-east-1:123456789012:microvm-image:img".into(),
+            ),
+            image_version: Some("1.0".into()),
+        };
+        let items = plane.list_microvms_matching(&filter).await.expect("lists");
+        assert_eq!(items.len(), 1);
+        let path = fake.paths().pop().expect("one call");
+        assert!(
+            path.ends_with(
+                "/microvms?imageIdentifier=arn%3Aaws%3Alambda%3Aus-east-1%3A123456789012%3Amicrovm-image%3Aimg&imageVersion=1.0"
+            ),
+            "{path}"
+        );
+        plane.list_microvms().await.expect("unfiltered");
+        assert!(fake.paths().pop().expect("second").ends_with("/microvms"));
+    }
+
+    /// Per-VM logging reaches the wire, and a malformed group is refused before any call.
+    #[tokio::test]
+    async fn per_vm_logging_is_sent_and_checked_locally() {
+        let (plane, fake, _) = planted();
+        fake.answer(
+            "RunMicrovm",
+            Answer::ok(fake::microvm_response("PENDING", None)),
+        );
+        let payload = || RunHookPayload::for_agent_token("t").expect("fits");
+        let mut request = RunMicrovmRequest::new("arn:image", payload());
+        request.logging = Some(ops::Logging::cloud_watch("/team/agents", None));
+        plane.run_microvm(request).await.expect("launches");
+        assert_eq!(
+            fake.first_body("RunMicrovm")["logging"],
+            serde_json::json!({"cloudWatch": {"logGroup": "/team/agents"}})
+        );
+
+        let mut disabled = RunMicrovmRequest::new("arn:image", payload());
+        disabled.logging = Some(ops::Logging::disabled());
+        plane.run_microvm(disabled).await.expect("launches");
+        assert_eq!(
+            fake.body_of("RunMicrovm", 1)["logging"],
+            serde_json::json!({"disabled": {}})
+        );
+
+        let plain = RunMicrovmRequest::new("arn:image", payload());
+        plane.run_microvm(plain).await.expect("launches");
+        assert!(fake.body_of("RunMicrovm", 2).get("logging").is_none());
+
+        for bad in [
+            ops::Logging::cloud_watch("bad group!", None),
+            ops::Logging::CloudWatch {
+                cloud_watch: ops::CloudWatchLogging {
+                    log_group: None,
+                    log_stream: Some("s".into()),
+                },
+            },
+        ] {
+            let mut request = RunMicrovmRequest::new("arn:image", payload());
+            request.logging = Some(bad);
+            let error = plane.run_microvm(request).await.expect_err("refused");
+            assert_eq!(error.kind(), ErrorKind::InvalidArg, "{error}");
+        }
+        assert_eq!(
+            fake.call_count("RunMicrovm"),
+            3,
+            "the refusals cost no call"
+        );
     }
 }

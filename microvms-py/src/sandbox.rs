@@ -287,6 +287,15 @@ impl PyBaseImage {
     }
 }
 
+/// The per-VM `logging` a binding's three keyword arguments ask for.
+pub(crate) fn logging_for(
+    log_group: Option<String>,
+    log_stream: Option<String>,
+    disable_logging: bool,
+) -> Result<Option<microvms_core::control::ops::Logging>, microvms_core::Error> {
+    microvms_core::control::ops::Logging::from_parts(log_group, log_stream, disable_logging)
+}
+
 /// One MicroVM's whole life.
 ///
 /// The five transitions are `build_image`, `run`, `suspend`, `resume`, and `terminate`, and
@@ -634,6 +643,10 @@ impl PySandbox {
         max_duration_sec=None,
         ready_timeout=None,
         token_scope=None,
+        wait=true,
+        log_group=None,
+        log_stream=None,
+        disable_logging=false,
     ))]
     #[allow(
         clippy::too_many_arguments,
@@ -675,7 +688,17 @@ impl PySandbox {
         max_duration_sec: Option<u32>,
         ready_timeout: Option<f64>,
         token_scope: Option<String>,
+        // `wait=False` returns once `RunMicrovm` is accepted, with the lifecycle PENDING;
+        // `wait_until_running` finishes it. Not a doc comment: a doc comment on a function
+        // parameter is a compile error.
+        wait: bool,
+        // Per-VM CloudWatch logging: a group, optionally an exact stream inside it, or
+        // `disable_logging` for none. Omitted keeps the service's default destination.
+        log_group: Option<String>,
+        log_stream: Option<String>,
+        disable_logging: bool,
     ) -> PyCoreResult<PySession> {
+        let logging = logging_for(log_group, log_stream, disable_logging)?;
         // Every unset window falls back to the core's own default rather than to a number
         // written here: ten-minute idle and suspended windows, a one-hour ceiling, and the
         // five-minute ready wait are measured figures, and a second copy of them in a
@@ -705,6 +728,8 @@ impl PySandbox {
                 None => defaults.ready_timeout,
             },
             token_scope,
+            logging,
+            wait,
         };
         // `run` answers `&mut Session`, which cannot cross back into Python — so the
         // return value is discarded and the session is reached through the sandbox. That
@@ -712,6 +737,23 @@ impl PySandbox {
         // lifecycle instead of addressing a VM that is gone.
         self.detached(py, move |sandbox| {
             runtime::block_on_detached(sandbox.run(request)).map(|_| ())
+        })?;
+        Ok(PySession::in_sandbox(Arc::clone(&self.inner)))
+    }
+
+    /// Finishes a `run(wait=False)`: waits for RUNNING and returns the session.
+    ///
+    /// A launch whose `client_token` adopted an existing, idle-suspended VM resumes it;
+    /// a fresh launch that reaches a terminal state first raises `LaunchDiedError` with
+    /// the service's `stateReason`. Refused unless the launch is still PENDING.
+    #[pyo3(signature = (*, timeout=None))]
+    fn wait_until_running(&self, py: Python<'_>, timeout: Option<f64>) -> PyCoreResult<PySession> {
+        let timeout = match timeout {
+            Some(timeout) => seconds(timeout)?,
+            None => RunRequest::new().ready_timeout,
+        };
+        self.detached(py, move |sandbox| {
+            runtime::block_on_detached(sandbox.wait_until_running(timeout)).map(|_| ())
         })?;
         Ok(PySession::in_sandbox(Arc::clone(&self.inner)))
     }

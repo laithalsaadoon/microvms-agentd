@@ -98,7 +98,7 @@ pub use artifact::{
 };
 pub use connector::{ConnectorIntent, EgressPosture, PLATFORM_HONOURS_OMITTED_EGRESS};
 pub use image::{Image, WaitOpts};
-pub use microvm::{Microvm, ProxyToken, RunHookPayload};
+pub use microvm::{Microvm, MicrovmFilter, ProxyToken, RunHookPayload};
 
 use crate::error::{Error, ErrorKind};
 use crate::hooks::{BuildHookTimeout, RunHookTimeout};
@@ -497,6 +497,9 @@ pub struct RunMicrovmRequest {
     /// with identical parameters and run-hook payload. None preserves fresh defaults.
     /// Never derive this from an image name or reuse it for a different VM.
     pub client_token: Option<String>,
+    /// Per-VM `logging`: a CloudWatch group (and optional exact stream) or disabled.
+    /// `None` leaves the service's default destination in place (#201).
+    pub logging: Option<ops::Logging>,
 }
 
 impl RunMicrovmRequest {
@@ -516,6 +519,7 @@ impl RunMicrovmRequest {
             auto_resume: false,
             token_scope: None,
             client_token: None,
+            logging: None,
         }
     }
 
@@ -1353,6 +1357,8 @@ mod tests {
             suspended_sec: _,
             auto_resume: _,
             token_scope: _,
+            // A per-VM log destination: a group name and an exact stream, never a token.
+            logging: _,
             client_token,
         } = RunMicrovmRequest::new(
             "arn:image",
@@ -1390,6 +1396,7 @@ mod tests {
             },
             maximum_duration_in_seconds: 3_600,
             run_hook_payload: String::new(),
+            logging: None,
             // Reachable from inside the crate, and only ever populated this way.
             client_token: token::run_token("arn:image"),
         };
