@@ -146,6 +146,20 @@ impl Lifecycle {
         }
     }
 
+    /// The lifecycle the service's `state` names, or `None` for a spelling this client does
+    /// not know. `constants::MICROVM_STATES` is the closed set, and a test ties the two.
+    pub fn from_service(state: &str) -> Option<Self> {
+        Some(match state {
+            "PENDING" => Lifecycle::Pending,
+            "RUNNING" => Lifecycle::Running,
+            "SUSPENDING" => Lifecycle::Suspending,
+            "SUSPENDED" => Lifecycle::Suspended,
+            "TERMINATING" => Lifecycle::Terminating,
+            "TERMINATED" => Lifecycle::Terminated,
+            _ => return None,
+        })
+    }
+
     /// Whether a VM in this state is still billing, which is what a `Drop` warning is for.
     pub fn is_live(self) -> bool {
         matches!(
@@ -605,6 +619,9 @@ pub struct Sandbox {
     /// Set by [`Sandbox::terminate`], so `Drop` can tell an abandoned VM from a torn-down
     /// one.
     torn_down: bool,
+    /// Built by [`Sandbox::adopt`] around a VM another process launched. That process owns
+    /// the VM's teardown, so dropping this handle is not a leak and `Drop` stays quiet.
+    adopted: bool,
     /// The launch's tunnel identity, when [`RunRequest::identity`] asked for one.
     ///
     /// Holds the host secret and the VM's *public* pin — the VM's own secret was dropped
@@ -625,6 +642,7 @@ impl std::fmt::Debug for Sandbox {
             .field("bootstrap_count", &self.bootstrap_count)
             .field("was_terminated", &self.was_terminated)
             .field("suspended_window", &self.suspended_window)
+            .field("adopted", &self.adopted)
             .finish_non_exhaustive()
     }
 }
@@ -668,6 +686,7 @@ impl Sandbox {
             idle_window: None,
             suspended_at: None,
             torn_down: false,
+            adopted: false,
             tunnel_identity: None,
         }
     }
@@ -1051,6 +1070,136 @@ impl Sandbox {
         Ok(self.session.as_mut().expect("just assigned"))
     }
 
+    // ── adopt (STATE-3, with the lifecycle read from the service) ────────────
+
+    /// A sandbox for a VM another process launched, rebuilt from its private record.
+    ///
+    /// The durable-workflow shape: every step runs in a fresh process, and each one needs
+    /// suspend, resume, and terminate, not just the exec and file surface
+    /// [`Session::attach`] gives. The lifecycle is read from `GetMicrovm` rather than
+    /// assumed, so every guard below starts from what the service reports.
+    ///
+    /// # Bootstrap is counted, never repeated (STATE-3)
+    ///
+    /// The VM was bootstrapped by the launch that created it, so an adopted sandbox refuses
+    /// [`Sandbox::run`] and never sends a run-hook payload. A VM adopted while still PENDING
+    /// finishes through [`Sandbox::wait_until_running`], which counts the bootstrap once
+    /// when the service reports RUNNING, the same as a launch this sandbox made itself.
+    ///
+    /// # The suspended window (STATE-12)
+    ///
+    /// The window comes from the `idlePolicy` `GetMicrovm` reports. A VM adopted while
+    /// already SUSPENDED has no suspend time this client observed, so the local check has
+    /// nothing to measure and the service answers the resume instead.
+    ///
+    /// `endpoint` must agree with the service's when the service reports one: a mismatch
+    /// means the identifiers came from two different records. `agent_token` is the bearer
+    /// credential the VM was launched with; it never appears in `Debug` or an error.
+    pub async fn adopt(
+        control: ControlPlane,
+        microvm_id: impl Into<String>,
+        endpoint: impl Into<String>,
+        agent_token: impl Into<String>,
+    ) -> Result<Self, Error> {
+        let microvm_id = microvm_id.into();
+        let endpoint = endpoint.into();
+        let agent_token = agent_token.into();
+        if agent_token.is_empty() {
+            return Err(Error::invalid_arg(
+                "adopt needs the agent token the VM was launched with: its daemon accepts only \
+                 that bearer, and adopting without it would build a handle every exec refuses.",
+            ));
+        }
+        let mut vm = control.get_microvm(&microvm_id).await?;
+        if !endpoint.is_empty() && !vm.endpoint.is_empty() && vm.endpoint != endpoint {
+            return Err(Error::invalid_arg(format!(
+                "microvm {microvm_id} reports endpoint {}, not {endpoint}: the id and endpoint \
+                 came from different records, and a session built from them would address one \
+                 VM while its lifecycle calls reached another.",
+                vm.endpoint,
+            )));
+        }
+        if vm.endpoint.is_empty() {
+            vm.endpoint = endpoint;
+        }
+        let Some(lifecycle) = Lifecycle::from_service(&vm.state) else {
+            return Err(Error::new(
+                ErrorKind::Platform,
+                format!(
+                    "microvm {microvm_id} reports state {}, which this client does not know; \
+                     refusing to guess which lifecycle guards apply.",
+                    vm.state,
+                ),
+            ));
+        };
+
+        let mut sandbox = Self::with_control_plane(control);
+        sandbox.adopted = true;
+        sandbox.set_lifecycle(lifecycle);
+        // The window the VM was launched with, so a keepalive on the adopted session paces
+        // itself against the real idle policy rather than the platform minimum.
+        sandbox.idle_window = vm
+            .idle_policy
+            .as_ref()
+            .map(|policy| Duration::from_secs(u64::from(policy.max_idle_duration_seconds)));
+        // A VM exists, so the image it was launched from did (STATE-1).
+        sandbox.image_exists = true;
+        // PENDING may still idle-suspend before this handle sees RUNNING (#195).
+        sandbox.launch_adoptable = true;
+        sandbox.pending_agent_token = Some(agent_token);
+        match lifecycle {
+            Lifecycle::Pending => {}
+            Lifecycle::Running | Lifecycle::Suspending | Lifecycle::Suspended => {
+                sandbox.token_installed = true;
+                sandbox.bootstrap_count = 1;
+            }
+            Lifecycle::Terminating | Lifecycle::Terminated => {
+                sandbox.bootstrap_count = 1;
+                sandbox.was_terminated = true;
+            }
+        }
+        sandbox.microvm = Some(vm);
+        if lifecycle.is_live() {
+            sandbox.build_session()?;
+        }
+        Ok(sandbox)
+    }
+
+    /// [`Sandbox::adopt`] over a plane resolved for `region`, on `port` when the image's
+    /// daemon listens somewhere other than the default. The bindings' entry point.
+    pub async fn adopt_in(
+        region: Region,
+        microvm_id: impl Into<String>,
+        endpoint: impl Into<String>,
+        agent_token: impl Into<String>,
+        port: Option<u16>,
+    ) -> Result<Self, Error> {
+        Self::adopt(
+            Self::plane_for(region, port).await?,
+            microvm_id,
+            endpoint,
+            agent_token,
+        )
+        .await
+    }
+
+    /// A control plane for `region`, on `port` when one is given.
+    pub(crate) async fn plane_for(
+        region: Region,
+        port: Option<u16>,
+    ) -> Result<ControlPlane, Error> {
+        let control = ControlPlane::new(region).await?;
+        match port {
+            Some(port) => control.with_port(port),
+            None => Ok(control),
+        }
+    }
+
+    /// Whether this sandbox was built by [`Sandbox::adopt`] rather than by its own launch.
+    pub fn adopted(&self) -> bool {
+        self.adopted
+    }
+
     // ── suspend (STATE-4, STATE-5, STATE-6) ──────────────────────────────────
 
     /// Freezes the VM and waits for the platform to report it.
@@ -1378,7 +1527,7 @@ impl Sandbox {
 /// taking one on to warn about a leak would be a dependency for a diagnostic.
 impl Drop for Sandbox {
     fn drop(&mut self) {
-        if self.torn_down {
+        if self.torn_down || self.adopted {
             return;
         }
         if let Some(vm) = self.microvm.as_ref()
@@ -1528,6 +1677,292 @@ mod tests {
     /// A suspended sandbox at the default ten-minute window.
     async fn suspended() -> (Sandbox, Arc<FakeControlPlane>, Arc<TestClock>) {
         suspended_with_window(600).await
+    }
+
+    // ── adopt (#196) ─────────────────────────────────────────────────────────
+
+    /// A canary agent token, so a test can assert it appears in no `Debug` or error.
+    const ADOPT_TOKEN: &str = "adopt-canary-token-9f1c";
+    const ADOPT_ENDPOINT: &str = "https://mvm-abc123.microvm.us-east-1.amazonaws.com";
+
+    /// A plane over the recorder, whose `GetMicrovm` answers the caller queues.
+    fn adopt_plane() -> (ControlPlane, Arc<FakeControlPlane>, Arc<TestClock>) {
+        let recorder = Arc::new(FakeControlPlane::new());
+        let clock = Arc::new(TestClock::new());
+        let plane = ControlPlane::with_transport(
+            Arc::clone(&recorder) as Arc<dyn crate::control::transport::Transport>,
+            Region::UsEast1,
+            Arc::clone(&clock) as Arc<dyn crate::control::Clock>,
+        );
+        (plane, recorder, clock)
+    }
+
+    async fn adopted_in(state: &str) -> (Sandbox, Arc<FakeControlPlane>, Arc<TestClock>) {
+        let (plane, recorder, clock) = adopt_plane();
+        recorder.answer(
+            "GetMicrovm",
+            Answer::ok(fake::microvm_response(state, None)),
+        );
+        let sandbox = Sandbox::adopt(plane, "mvm-abc123", ADOPT_ENDPOINT, ADOPT_TOKEN)
+            .await
+            .expect("adopts");
+        (sandbox, recorder, clock)
+    }
+
+    /// **An adopted sandbox feeds its keepalive.** The idle window is the one `GetMicrovm`
+    /// reports, and the lifecycle watch starts at the adopted state, so a keepalive on an
+    /// adopted session paces against the real policy and ends when that sandbox suspends.
+    ///
+    /// **Falsification** — 2026-09-24. Assign `sandbox.lifecycle` directly instead of
+    /// through `set_lifecycle`, or drop the `idle_window` line, and this goes red; restored.
+    #[tokio::test]
+    async fn an_adopted_sandbox_reports_the_services_idle_window_and_watches_its_lifecycle() {
+        let (sandbox, _recorder, _clock) = adopted_in("RUNNING").await;
+        assert_eq!(sandbox.idle_window(), Some(Duration::from_secs(1800)));
+        assert_eq!(*sandbox.watch_lifecycle().borrow(), Lifecycle::Running);
+    }
+
+    /// Every service state has a lifecycle, and nothing else parses.
+    #[test]
+    fn every_service_state_maps_onto_one_lifecycle() {
+        for state in crate::constants::MICROVM_STATES {
+            let lifecycle = Lifecycle::from_service(state).expect("a known state");
+            assert_eq!(lifecycle.as_str(), state);
+        }
+        assert_eq!(Lifecycle::from_service("Running"), None);
+    }
+
+    /// **STATE-3 for an adopted VM.** The lifecycle is the service's, the bootstrap is
+    /// counted once, and `run` is refused before any wire call, so no run-hook payload is
+    /// ever sent.
+    ///
+    /// **Falsification** — 2026-09-24. Leave the adopted lifecycle at PENDING instead of
+    /// reading it from `GetMicrovm` and the lifecycle and `token_installed` assertions here
+    /// go red, as does the suspend in the next test; restored after.
+    #[tokio::test]
+    async fn an_adopted_vm_takes_its_lifecycle_from_the_service_and_refuses_run() {
+        let (mut sandbox, recorder, _) = adopted_in("RUNNING").await;
+        assert!(sandbox.adopted());
+        assert_eq!(sandbox.lifecycle(), Lifecycle::Running);
+        assert!(sandbox.token_installed());
+        assert_eq!(sandbox.bootstrap_count(), 1);
+        assert!(sandbox.image_exists());
+        let session = sandbox.session().expect("a live VM gets a session");
+        assert_eq!(session.endpoint(), ADOPT_ENDPOINT);
+        assert_eq!(session.agent_token(), ADOPT_TOKEN);
+
+        let error = sandbox
+            .run(RunRequest::new().with_image("arn:image"))
+            .await
+            .expect_err("an adopted VM was bootstrapped by its own launch");
+        assert_eq!(error.kind(), ErrorKind::InvalidArg);
+        assert!(error.to_string().contains("STATE-3"), "{error}");
+        assert_eq!(recorder.call_count("RunMicrovm"), 0);
+        assert_eq!(recorder.operations(), vec!["GetMicrovm"]);
+    }
+
+    /// Suspend, resume, and terminate all work through an adopted handle with the usual
+    /// guards, and nothing about the launch is re-delivered (STATE-7).
+    #[tokio::test]
+    async fn an_adopted_vm_suspends_resumes_and_terminates_through_its_handle() {
+        let (plane, recorder, _) = adopt_plane();
+        recorder
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("RUNNING", None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("SUSPENDED", None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("RUNNING", None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("TERMINATED", None)),
+            )
+            .answer("SuspendMicrovm", Answer::ok(fake::empty_response()))
+            .answer("ResumeMicrovm", Answer::ok(fake::empty_response()))
+            .answer("TerminateMicrovm", Answer::ok(fake::empty_response()));
+        let mut sandbox = Sandbox::adopt(plane, "mvm-abc123", ADOPT_ENDPOINT, ADOPT_TOKEN)
+            .await
+            .expect("adopts");
+
+        sandbox.suspend().await.expect("suspends from RUNNING");
+        assert_eq!(sandbox.lifecycle(), Lifecycle::Suspended);
+        sandbox.resume().await.expect("resumes from SUSPENDED");
+        assert_eq!(sandbox.lifecycle(), Lifecycle::Running);
+        let report = sandbox
+            .terminate(TeardownOpts::default().waiting_for_terminated())
+            .await;
+        assert!(report.terminate_accepted, "{report:?}");
+        assert_eq!(sandbox.lifecycle(), Lifecycle::Terminated);
+        assert!(sandbox.was_terminated());
+
+        assert_eq!(recorder.call_count("RunMicrovm"), 0);
+        assert!(
+            recorder
+                .bodies_as_text()
+                .iter()
+                .all(|body| !body.contains("runHookPayload") && !body.contains(ADOPT_TOKEN)),
+            "no launch payload or agent token may reach the control plane"
+        );
+        assert_eq!(sandbox.bootstrap_count(), 1, "STATE-3: never above one");
+    }
+
+    /// **STATE-12 for an adopted VM.** With no window from a request of its own, the
+    /// sandbox refuses a late resume using the `idlePolicy` window `GetMicrovm` reported.
+    ///
+    /// **Falsification** — 2026-09-24. Drop the reported-window fallback in
+    /// `require_open_suspended_window` and this resume reaches `ResumeMicrovm`; restored
+    /// after.
+    #[tokio::test]
+    async fn an_adopted_vm_refuses_a_resume_past_the_reported_window() {
+        let (plane, recorder, clock) = adopt_plane();
+        recorder
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("RUNNING", None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("SUSPENDED", None)),
+            )
+            .answer("SuspendMicrovm", Answer::ok(fake::empty_response()));
+        let mut sandbox = Sandbox::adopt(plane, "mvm-abc123", ADOPT_ENDPOINT, ADOPT_TOKEN)
+            .await
+            .expect("adopts");
+        assert_eq!(sandbox.suspended_window(), None, "no request of its own");
+        sandbox.suspend().await.expect("suspends");
+
+        clock.advance(Duration::from_secs(601));
+        let error = sandbox
+            .resume()
+            .await
+            .expect_err("past the 600 s window the service reported");
+        assert_eq!(error.kind(), ErrorKind::WindowClosed);
+        assert_eq!(recorder.call_count("ResumeMicrovm"), 0);
+    }
+
+    /// A VM adopted while already SUSPENDED has no locally observed suspend time, so the
+    /// resume goes to the service rather than being refused on a guess.
+    #[tokio::test]
+    async fn an_adopted_suspended_vm_resumes_through_the_service() {
+        let (plane, recorder, _) = adopt_plane();
+        recorder
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("SUSPENDED", None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("RUNNING", None)),
+            )
+            .answer("ResumeMicrovm", Answer::ok(fake::empty_response()));
+        let mut sandbox = Sandbox::adopt(plane, "mvm-abc123", ADOPT_ENDPOINT, ADOPT_TOKEN)
+            .await
+            .expect("adopts");
+        assert_eq!(sandbox.lifecycle(), Lifecycle::Suspended);
+        let session = sandbox
+            .resume()
+            .await
+            .expect("the service answers the resume");
+        assert_eq!(session.endpoint(), ADOPT_ENDPOINT);
+        assert_eq!(recorder.call_count("ResumeMicrovm"), 1);
+    }
+
+    /// **STATE-11 for an adopted VM.** A terminated VM is offered neither a resume nor a
+    /// suspend, and gets no session.
+    #[tokio::test]
+    async fn an_adopted_terminated_vm_refuses_every_transition_locally() {
+        let (mut sandbox, recorder, _) = adopted_in("TERMINATED").await;
+        assert!(sandbox.was_terminated());
+        assert!(sandbox.session().is_none());
+        let resume = sandbox.resume().await.expect_err("STATE-11");
+        assert!(resume.to_string().contains("STATE-11"), "{resume}");
+        let suspend = sandbox.suspend().await.expect_err("STATE-5");
+        assert!(suspend.to_string().contains("STATE-5"), "{suspend}");
+        assert_eq!(recorder.operations(), vec!["GetMicrovm"]);
+    }
+
+    /// A VM adopted while PENDING finishes through `wait_until_running`, which counts the
+    /// bootstrap exactly once.
+    #[tokio::test]
+    async fn an_adopted_pending_vm_counts_its_bootstrap_once_on_running() {
+        let (plane, recorder, _) = adopt_plane();
+        recorder
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("PENDING", None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("RUNNING", None)),
+            );
+        let mut sandbox = Sandbox::adopt(plane, "mvm-abc123", ADOPT_ENDPOINT, ADOPT_TOKEN)
+            .await
+            .expect("adopts");
+        assert_eq!(sandbox.lifecycle(), Lifecycle::Pending);
+        assert_eq!(sandbox.bootstrap_count(), 0);
+        sandbox
+            .wait_until_running(Duration::from_secs(60))
+            .await
+            .expect("reaches RUNNING");
+        assert_eq!(sandbox.bootstrap_count(), 1);
+        assert!(sandbox.token_installed());
+        assert!(
+            sandbox
+                .run(RunRequest::new().with_image("arn:image"))
+                .await
+                .is_err(),
+            "still one bootstrap per VM"
+        );
+        assert_eq!(recorder.call_count("RunMicrovm"), 0);
+    }
+
+    /// The refusals: an empty token before any call, a mismatched endpoint, and a state
+    /// this client does not know. None of them, and no `Debug`, prints the token.
+    ///
+    /// **Falsification** — 2026-09-24. Remove the endpoint comparison and the mismatch case
+    /// adopts; remove the empty-token check and that case reaches `GetMicrovm`; print the
+    /// held token in `Debug` and the canary assertion fails. Each restored after.
+    #[tokio::test]
+    async fn adopt_refuses_bad_records_and_never_prints_the_token() {
+        let (plane, recorder, _) = adopt_plane();
+        let empty = Sandbox::adopt(plane, "mvm-abc123", ADOPT_ENDPOINT, "")
+            .await
+            .expect_err("no token");
+        assert_eq!(empty.kind(), ErrorKind::InvalidArg);
+        assert_eq!(recorder.calls().len(), 0, "refused before any call");
+
+        let (plane, recorder, _) = adopt_plane();
+        recorder.answer(
+            "GetMicrovm",
+            Answer::ok(fake::microvm_response("RUNNING", None)),
+        );
+        let mismatch = Sandbox::adopt(plane, "mvm-abc123", "https://other.example", ADOPT_TOKEN)
+            .await
+            .expect_err("the endpoint belongs to another record");
+        assert_eq!(mismatch.kind(), ErrorKind::InvalidArg);
+        assert!(!mismatch.to_string().contains(ADOPT_TOKEN));
+
+        let (plane, recorder, _) = adopt_plane();
+        recorder.answer(
+            "GetMicrovm",
+            Answer::ok(fake::microvm_response("REBOOTING", None)),
+        );
+        let unknown = Sandbox::adopt(plane, "mvm-abc123", ADOPT_ENDPOINT, ADOPT_TOKEN)
+            .await
+            .expect_err("an unknown state");
+        assert_eq!(unknown.kind(), ErrorKind::Platform);
+        assert!(!unknown.to_string().contains(ADOPT_TOKEN));
+
+        let (sandbox, _, _) = adopted_in("RUNNING").await;
+        let printed = format!("{sandbox:?}");
+        assert!(!printed.contains(ADOPT_TOKEN), "{printed}");
+        assert!(printed.contains("adopted: true"), "{printed}");
     }
 
     /// **STATE-1 and STATE-2.** A launch accepted is PENDING with the image recorded as

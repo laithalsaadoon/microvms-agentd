@@ -425,6 +425,43 @@ impl PyAgentVm {
         })
     }
 
+    /// An agent VM for a VM another process launched; see `Sandbox.adopt`.
+    ///
+    /// `agents` states what the VM carries and defaults to Claude Code alone; read
+    /// `installed_agents(session)` first when the adopting process does not know.
+    #[staticmethod]
+    #[pyo3(signature = (region, microvm_id, endpoint, agent_token, agents=None, *, port=None))]
+    fn adopt(
+        py: Python<'_>,
+        region: PyRegion,
+        microvm_id: String,
+        endpoint: String,
+        agent_token: String,
+        agents: Option<Vec<PyAgentSpec>>,
+        port: Option<u16>,
+    ) -> PyCoreResult<PyAgentVm> {
+        let specs: Vec<AgentSpec> = agents
+            .map(|agents| agents.into_iter().map(|spec| spec.inner).collect())
+            .unwrap_or_else(|| vec![AgentSpec::new(Agent::ClaudeCode)]);
+        let vm = runtime::block_on(
+            py,
+            agents::AgentVm::adopt_in(
+                region.inner.clone(),
+                specs,
+                microvm_id,
+                endpoint,
+                agent_token,
+                port,
+            ),
+        )?;
+        let (sandbox, specs) = vm.into_parts();
+        Ok(PyAgentVm {
+            sandbox: Arc::new(Mutex::new(sandbox)),
+            specs,
+            region: region.inner,
+        })
+    }
+
     /// The specs this VM carries, in profile order.
     #[getter]
     fn agents(&self) -> Vec<PyAgentSpec> {

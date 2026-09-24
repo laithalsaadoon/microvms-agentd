@@ -3835,6 +3835,24 @@ def run_rust_live(
     )
 
 
+def drive_adopt_by_id(cli: Cli, launched: Envelope, results: Results) -> None:
+    """A VM launched by one handle is adopted by fresh ones and driven by id (#196).
+
+    The Rust half drives core, the layer both bindings wrap: adopt while RUNNING, a refused
+    `run`, suspend through the adopted handle, a second adoption while SUSPENDED, resume,
+    and terminate, with cleanup observed through GetMicrovm.
+    """
+    print("\n-- adopt by id --")
+    run_rust_live(
+        cli,
+        launched,
+        results,
+        "live_adopt",
+        "a_vm_launched_elsewhere_is_adopted_and_driven_by_id",
+        "a VM launched elsewhere is adopted and driven by id",
+    )
+
+
 def drive_lifecycle_by_id(
     cli: Cli, launched: Envelope, aws: Any, results: Results
 ) -> None:
@@ -5968,6 +5986,8 @@ def main() -> int:
             # Lifecycle by id (#195, #197, #201, #203) on its own bounded VMs, from the
             # suite's image.
             drive_lifecycle_by_id(cli, launched, aws, results)
+            # Adoption (#196) on its own bounded VM, from the suite's image.
+            drive_adopt_by_id(cli, launched, results)
             # After the identity section because it leans on the same detach/poll/ack
             # surface that section just proved, so a rotation failure here points at the
             # rotation rather than at a broken poll.

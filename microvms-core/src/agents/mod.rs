@@ -660,6 +660,42 @@ impl AgentVm {
         Ok(Self { sandbox, specs })
     }
 
+    /// An agent VM for a VM another process launched; see [`Sandbox::adopt`].
+    ///
+    /// The specs are the caller's statement of what the VM carries, checked like
+    /// [`AgentVm::new`] checks them. Read [`installed_agents`] first when the adopting
+    /// process does not know.
+    pub async fn adopt(
+        control: crate::control::ControlPlane,
+        specs: Vec<AgentSpec>,
+        microvm_id: impl Into<String>,
+        endpoint: impl Into<String>,
+        agent_token: impl Into<String>,
+    ) -> Result<Self, Error> {
+        require_specs(&specs)?;
+        let sandbox = Sandbox::adopt(control, microvm_id, endpoint, agent_token).await?;
+        Ok(Self { sandbox, specs })
+    }
+
+    /// [`AgentVm::adopt`] over a plane resolved for `region`; the bindings' entry point.
+    pub async fn adopt_in(
+        region: Region,
+        specs: Vec<AgentSpec>,
+        microvm_id: impl Into<String>,
+        endpoint: impl Into<String>,
+        agent_token: impl Into<String>,
+        port: Option<u16>,
+    ) -> Result<Self, Error> {
+        require_specs(&specs)?;
+        let sandbox = Sandbox::adopt_in(region, microvm_id, endpoint, agent_token, port).await?;
+        Ok(Self { sandbox, specs })
+    }
+
+    /// The sandbox and specs, for a binding that holds them separately.
+    pub fn into_parts(self) -> (Sandbox, Vec<AgentSpec>) {
+        (self.sandbox, self.specs)
+    }
+
     /// A VM for Claude Code with the profile's defaults.
     pub fn claude_code(sandbox: Sandbox) -> Self {
         Self {
@@ -1151,6 +1187,43 @@ mod tests {
             Region::UsEast1,
             Arc::new(crate::control::fake::TestClock::new()),
         ))
+    }
+
+    /// `AgentVm::adopt` checks the specs before any call, and adopts with the lifecycle the
+    /// service reports.
+    #[tokio::test]
+    async fn an_agent_vm_adopts_with_checked_specs_and_the_service_lifecycle() {
+        use crate::control::fake::{Answer, FakeControlPlane, TestClock, microvm_response};
+        let plane = |recorder: &Arc<FakeControlPlane>| {
+            crate::control::ControlPlane::with_transport(
+                Arc::clone(recorder) as Arc<dyn crate::control::transport::Transport>,
+                Region::UsEast1,
+                Arc::new(TestClock::new()),
+            )
+        };
+        let endpoint = "https://mvm-abc123.microvm.us-east-1.amazonaws.com";
+
+        let recorder = Arc::new(FakeControlPlane::new());
+        let error = AgentVm::adopt(plane(&recorder), vec![], "mvm-abc123", endpoint, "t")
+            .await
+            .expect_err("an empty spec set");
+        assert_eq!(error.kind(), ErrorKind::InvalidArg);
+        assert_eq!(recorder.calls().len(), 0);
+
+        let recorder = Arc::new(FakeControlPlane::new());
+        recorder.answer(
+            "GetMicrovm",
+            Answer::ok(microvm_response("SUSPENDED", None)),
+        );
+        let vm = AgentVm::adopt(plane(&recorder), both(), "mvm-abc123", endpoint, "t")
+            .await
+            .expect("adopts");
+        assert!(vm.sandbox().adopted());
+        assert_eq!(
+            vm.sandbox().lifecycle(),
+            crate::sandbox::Lifecycle::Suspended
+        );
+        assert_eq!(vm.specs().len(), 2);
     }
 
     /// **The image request is named by content and the URI is left to the caller.**

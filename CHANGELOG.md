@@ -110,6 +110,14 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
   `wait_for_state`, returning `Microvm` with `state_reason`, `idle_policy`, `started_at`,
   `terminated_at`, and `maximum_duration_seconds`. It holds no lifecycle state and checks
   no STATE guard: it is for a process that has only an identifier.
+- **Adopt a VM by ID (#196).** `Sandbox.adopt(region, microvm_id, endpoint, agent_token)`
+  and `AgentVm.adopt(..., agents)` in core and both bindings rebuild a full handle for a VM
+  another process launched. The lifecycle comes from `GetMicrovm`, so every STATE guard
+  applies (the suspended window from the reported `idlePolicy`); `run` is refused and no
+  run-hook payload is re-sent (STATE-3); the session re-mints proxy tokens as usual
+  (STATE-8); an endpoint that disagrees with the service's, an empty token, or an unknown
+  state is refused, and the token appears in no `Debug` or error. `drive_adopt_by_id` is
+  the live check.
 - **`Sandbox.run(wait=False)` and `Sandbox.wait_until_running()`**, in core and both
   bindings: the launch returns once accepted, with the lifecycle PENDING, and the wait
   finishes it later.

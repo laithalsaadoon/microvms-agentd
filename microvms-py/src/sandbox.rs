@@ -395,6 +395,37 @@ impl PySandbox {
         self.read(Sandbox::bootstrap_count)
     }
 
+    /// A sandbox for a VM another process launched, from its private record.
+    ///
+    /// The lifecycle is read from `GetMicrovm`, so suspend, resume, and terminate start
+    /// from the service's state and keep every guard. The VM was bootstrapped by its own
+    /// launch, so `run` is refused and no run-hook payload is ever sent. Keep `agent_token`
+    /// in private encrypted storage; it never appears in repr or an error.
+    #[staticmethod]
+    #[pyo3(signature = (region, microvm_id, endpoint, agent_token, *, port=None))]
+    fn adopt(
+        py: Python<'_>,
+        region: PyRegion,
+        microvm_id: String,
+        endpoint: String,
+        agent_token: String,
+        port: Option<u16>,
+    ) -> PyCoreResult<PySandbox> {
+        let sandbox = runtime::block_on(
+            py,
+            Sandbox::adopt_in(region.inner, microvm_id, endpoint, agent_token, port),
+        )?;
+        Ok(PySandbox {
+            inner: Arc::new(Mutex::new(sandbox)),
+        })
+    }
+
+    /// Whether this sandbox was built by `adopt` rather than by its own launch.
+    #[getter]
+    fn adopted(&self) -> bool {
+        self.read(Sandbox::adopted)
+    }
+
     /// The VM id, once launched.
     #[getter]
     fn microvm_id(&self) -> Option<String> {
