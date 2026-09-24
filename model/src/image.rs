@@ -2,7 +2,7 @@
 //! A checked model of `Sandbox::ensure_image`: two concurrent callers building or reusing one
 //! content-addressed image name, against a platform that moves the image through its states.
 //!
-//! It specifies IMAGE-9 through IMAGE-11 in `spec/core.symspec.json`, which issue #221 asked
+//! It specifies IMAGE-8 through IMAGE-11 in `spec/core.symspec.json`, which issue #221 asked
 //! for. A Harbor provider runs many trials of one task at once, every trial derives the same
 //! image name from the same inputs, and each one has to come back with a usable image: the
 //! one already built, the one a sibling is building, or the one it builds itself.
@@ -18,7 +18,8 @@
 //!
 //! Each caller runs [`plan`], the decision table `microvms-core` implements as
 //! `control::ensure::plan`: what to do with what a describe found, and whether the caller
-//! asked to force a rebuild. The Rust tests mirror the table (`the_plan_table`).
+//! asked to force a rebuild. The Rust tests mirror the table (`the_plan_table`). Each caller
+//! also resolves its account once, for the image ARN every describe needs (IMAGE-8).
 //!
 //! # The specification and the policies it rejects
 //!

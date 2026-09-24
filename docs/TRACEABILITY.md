@@ -10,10 +10,17 @@ defined in `spec/core.symspec.json` and `spec/agentd.symspec.json`.
 | CLI-8 | 1 | 1 | 1 | 2 | 3 | 1 |
 | CLI-9 | 1 | 1 | 1 | 2 | 3 | 1 |
 | IMAGE-1 | 1 | 1 | 1 | 4 | 1 | waived |
-| IMAGE-2 | 1 | 1 | 1 | 1 | 1 | waived |
+| IMAGE-2 | 1 | 1 | 1 | 2 | 1 | 1 |
 | IMAGE-3 | 1 | 1 | 1 | 1 | 1 | waived |
-| IMAGE-4 | 1 | 1 | 1 | 4 | 1 | waived |
+| IMAGE-4 | 1 | 1 | 1 | 4 | 1 | 1 |
 | IMAGE-5 | waived | waived | waived | 2 | 2 | waived |
+| IMAGE-6 | waived | 1 | 1 | 5 | 2 | 1 |
+| IMAGE-7 | waived | 1 | 1 | 4 | 3 | 1 |
+| IMAGE-8 | 1 | 1 | 1 | 4 | 3 | 1 |
+| IMAGE-9 | 1 | 1 | waived | 3 | 1 | 1 |
+| IMAGE-10 | 1 | 1 | waived | 3 | 1 | 1 |
+| IMAGE-11 | 1 | 1 | waived | 5 | 1 | 1 |
+| IMAGE-12 | waived | waived | waived | 2 | 2 | waived |
 | AGENTD-7 | 1 | 1 | 1 | 6 | 4 | 1 |
 | AGENTD-8 | 1 | 1 | 1 | 4 | 2 | 1 |
 | AGENTD-9 | 1 | 1 | 1 | 2 | 1 | 1 |
@@ -91,9 +98,9 @@ When a caller wraps a task Dockerfile, the microvms-core shall end the result wi
 - **model:** `model/src/wrap.rs`
 - **gherkin:** `microvms-core/tests/features/wrap_dockerfile.feature`
 - **fuzz:** `microvms-core/tests/wrap_fuzz.rs`
-- **test:** `microvms-core/src/control/artifact.rs`
+- **test:** `microvms-core/src/control/artifact.rs`, `microvms-core/tests/live_ensure_image.rs`
 - **impl:** `microvms-core/src/control/artifact.rs`
-- **live:** waived: a pure function of Dockerfile text; it makes no AWS call
+- **live:** `conformance/run_rs.py`
 
 ## IMAGE-3
 
@@ -115,7 +122,7 @@ When a caller derives a base image from a Dockerfile, the microvms-core shall ta
 - **fuzz:** `microvms-core/tests/wrap_fuzz.rs`
 - **test:** `microvms-core/src/control/artifact.rs`, `microvms-core/tests/bdd_wrap.rs`, `microvms-js/__test__/wrap.mjs`, `microvms-py/tests/test_wrap_dockerfile.py`
 - **impl:** `microvms-core/src/control/artifact.rs`
-- **live:** waived: a pure function of Dockerfile text; it makes no AWS call
+- **live:** `conformance/run_rs.py`
 
 ## IMAGE-5
 
@@ -127,6 +134,83 @@ The language bindings layer shall expose wrap_dockerfile and the from-Dockerfile
 - **test:** `microvms-js/__test__/wrap.mjs`, `microvms-py/tests/test_wrap_dockerfile.py`
 - **impl:** `microvms-js/src/sandbox.rs`, `microvms-py/src/sandbox.rs`
 - **live:** waived: a pure function of Dockerfile text; it makes no AWS call
+
+## IMAGE-6
+
+The microvms-core shall name an ensured image by its prefix and twelve hex characters of a hash over the daemon bytes, the Dockerfile, the build context entries, the base image, and the size class, keeping the artifact content hash of a request without a build context unchanged.
+
+- **model:** waived: a pure function of the build inputs; the name has no states to explore
+- **gherkin:** `microvms-core/tests/features/ensure_image.feature`
+- **fuzz:** `microvms-core/tests/context_fuzz.rs`
+- **test:** `microvms-core/src/control/artifact.rs`, `microvms-core/src/control/ensure.rs`, `microvms-core/tests/bdd_ensure.rs`, `microvms-js/__test__/ensure.mjs`, `microvms-py/tests/test_ensure_image.py`
+- **impl:** `microvms-core/src/control/artifact.rs`, `microvms-core/src/control/ensure.rs`
+- **live:** `conformance/run_rs.py`
+
+## IMAGE-7
+
+When a caller supplies a build context directory, the microvms-core shall add each regular file that Dockerfile.dockerignore, or else .dockerignore, does not exclude to an artifact zip with fixed entry dates and modes, skipping each symlink with a warning.
+
+- **model:** waived: reading a directory has no states; the ignore rules are fuzzed against moby's own regex translation instead
+- **gherkin:** `microvms-core/tests/features/ensure_image.feature`
+- **fuzz:** `microvms-core/tests/context_fuzz.rs`
+- **test:** `microvms-core/src/control/artifact.rs`, `microvms-core/src/control/context.rs`, `microvms-core/tests/bdd_ensure.rs`, `microvms-core/tests/live_ensure_image.rs`
+- **impl:** `microvms-core/src/control/artifact.rs`, `microvms-core/src/control/context.rs`, `microvms-core/src/control/ensure.rs`
+- **live:** `conformance/run_rs.py`
+
+## IMAGE-8
+
+When the microvms-core ensures an image, the microvms-core shall resolve the image ARN from one caller-identity call per sandbox and upload the artifact to the content-addressed key under the caller's bucket and key prefix.
+
+- **model:** `model/src/image.rs`
+- **gherkin:** `microvms-core/tests/features/ensure_image.feature`
+- **fuzz:** `microvms-core/tests/context_fuzz.rs`
+- **test:** `microvms-core/src/control/ensure.rs`, `microvms-core/src/control/services.rs`, `microvms-core/tests/bdd_ensure.rs`, `microvms-core/tests/live_ensure_image.rs`
+- **impl:** `microvms-core/src/control/ensure.rs`, `microvms-core/src/control/services.rs`, `microvms-core/src/sandbox.rs`
+- **live:** `conformance/run_rs.py`
+
+## IMAGE-9
+
+When a describe finds the ensured image ready or building and the caller has not forced a rebuild, the microvms-core shall return the image once it is ready, marked reused, with no upload and no create.
+
+- **model:** `model/src/image.rs`
+- **gherkin:** `microvms-core/tests/features/ensure_image.feature`
+- **fuzz:** waived: the input space is two callers interleaved against the platform, which model/src/image.rs checks exhaustively; the decision table is ten rows, all pinned by the_plan_table
+- **test:** `microvms-core/src/control/ensure.rs`, `microvms-core/tests/bdd_ensure.rs`, `microvms-core/tests/live_ensure_image.rs`
+- **impl:** `microvms-core/src/control/ensure.rs`
+- **live:** `conformance/run_rs.py`
+
+## IMAGE-10
+
+If the ensured image has failed or the caller forces a rebuild, then the microvms-core shall delete the image and wait for the name to be free before building, deleting a ready image only under a forced rebuild.
+
+- **model:** `model/src/image.rs`
+- **gherkin:** `microvms-core/tests/features/ensure_image.feature`
+- **fuzz:** waived: the input space is two callers interleaved against the platform, which model/src/image.rs checks exhaustively; the decision table is ten rows, all pinned by the_plan_table
+- **test:** `microvms-core/src/control/ensure.rs`, `microvms-core/tests/bdd_ensure.rs`, `microvms-core/tests/live_ensure_image.rs`
+- **impl:** `microvms-core/src/control/ensure.rs`
+- **live:** `conformance/run_rs.py`
+
+## IMAGE-11
+
+If the create of an ensured image is refused because another caller created the name, then the microvms-core shall describe the image again and wait for that build, returning only a ready image, marked reused.
+
+- **model:** `model/src/image.rs`
+- **gherkin:** `microvms-core/tests/features/ensure_image.feature`
+- **fuzz:** waived: the input space is two callers interleaved against the platform, which model/src/image.rs checks exhaustively; the decision table is ten rows, all pinned by the_plan_table
+- **test:** `microvms-core/src/control/ensure.rs`, `microvms-core/tests/bdd_ensure.rs`, `microvms-core/tests/live_ensure_image.rs`, `microvms-js/__test__/ensure.mjs`, `microvms-py/tests/test_ensure_image.py`
+- **impl:** `microvms-core/src/control/ensure.rs`
+- **live:** `conformance/run_rs.py`
+
+## IMAGE-12
+
+The language bindings layer shall expose ensure_image as a thin wrapper that returns the image with the reused flag and the context warnings of microvms-core.
+
+- **model:** waived: a binding pass-through has no states; core's are modeled as IMAGE-8..11
+- **gherkin:** waived: the scenarios are core's (IMAGE-6..11); each binding's tests check the pass-through
+- **fuzz:** waived: the binding hands its arguments unchanged to core's fuzzed functions
+- **test:** `microvms-js/__test__/ensure.mjs`, `microvms-py/tests/test_ensure_image.py`
+- **impl:** `microvms-js/src/sandbox.rs`, `microvms-py/src/sandbox.rs`
+- **live:** waived: the conformance section drives core's ensure_image, which each binding forwards unchanged
 
 ## AGENTD-7
 

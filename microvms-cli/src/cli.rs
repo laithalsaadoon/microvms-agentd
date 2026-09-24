@@ -746,9 +746,9 @@ pub struct RunArgs {
 
     /// Where the build artifact already is, as an s3:// URI.
     ///
-    /// microvms-core builds the artifact bytes and takes the URI, but does not upload — S3
-    /// is not in its dependency set. Pass this when you have uploaded already; pass --bucket
-    /// to have the artifact uploaded with the `aws` CLI.
+    /// microvms-core builds the artifact bytes and takes the URI; this command's create path
+    /// does not upload. Pass this when you have uploaded already; pass --bucket to have the
+    /// artifact uploaded with the `aws` CLI.
     #[arg(long, value_name = "S3_URI")]
     pub artifact_uri: Option<String>,
 

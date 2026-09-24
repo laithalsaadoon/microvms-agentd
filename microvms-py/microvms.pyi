@@ -1741,7 +1741,7 @@ class Sandbox:
         """
         The artifact bytes to upload to `code_artifact_uri`.
         
-        The upload is the caller's: S3 is not in the core's dependency set. Same parameters
+        The upload is the caller's on this path (`ensure_image` uploads for itself). Same parameters
         as [`Self::build_image`] so the bytes a caller puts in the bucket are the bytes the
         build will receive.
         """

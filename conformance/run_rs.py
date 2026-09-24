@@ -286,6 +286,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import itertools
 import json
@@ -6382,6 +6383,295 @@ def check_preflight_lines(results: "Results") -> None:
     )
 
 
+#: What `drive_ensure_image` names the image it ensures: a fresh nonce per run, so the
+#: first call of the run builds rather than reusing an image an earlier run left behind.
+ENSURE_PREFIX = "conformance-ensure"
+
+#: The ready spellings `Image.is_ready` accepts.
+READY_IMAGE_STATES = ("CREATED", "UPDATED", "ACTIVE", "AVAILABLE")
+
+
+def ensure_image_checks(
+    report: dict[str, Any], prefix: str, bucket: str, key_prefix: str, results: Results
+) -> None:
+    """The named IMAGE checks, read off the live test's report.
+
+    Separate from `drive_ensure_image` so the self-test can feed it a report and prove each
+    check fails when its evidence is missing, rather than trusting that it would.
+    """
+    name = str(report.get("name") or "")
+    race = report.get("race") or {}
+    reuse = report.get("reuse") or {}
+    guest = report.get("guest") or {}
+    forced = report.get("forced") or {}
+    arn = report.get("arn")
+    error = report.get("error")
+    results.check(
+        "IMAGE-6 the ensured image is named by its prefix and twelve hex characters",
+        re.fullmatch(rf"{re.escape(prefix)}-[0-9a-f]{{12}}", name) is not None,
+        f"name={name!r} error={error!r}",
+    )
+    identifiers = race.get("identifiers") or []
+    states = race.get("states") or []
+    results.check(
+        "IMAGE-11 two concurrent ensures return one ready image, one built and one joined",
+        len(identifiers) == 2
+        and identifiers[0] == identifiers[1] == arn
+        and len(set(race.get("versions") or [])) == 1
+        and all(state in READY_IMAGE_STATES for state in states)
+        and sorted(race.get("reused") or []) == [False, True],
+        f"reused={race.get('reused')!r} states={states!r} "
+        f"versions={race.get('versions')!r} seconds={race.get('seconds')!r} "
+        f"error={error!r}",
+    )
+    results.check(
+        "IMAGE-4 a task image on a non-managed FROM built under the derived base",
+        bool(states) and all(state in READY_IMAGE_STATES for state in states),
+        f"states={states!r} error={error!r}",
+    )
+    results.check(
+        "IMAGE-9 a later ensure reuses the image with no upload and no create",
+        reuse.get("reused") is True
+        and reuse.get("uploaded") is False
+        and reuse.get("identifier") == arn,
+        f"reuse={reuse!r}",
+    )
+    uri = f"s3://{bucket}/{key_prefix}/{name}/artifact.zip"
+    puts = report.get("puts") or []
+    results.check(
+        "IMAGE-8 each sandbox resolved its account once and the artifact is at its "
+        "content-addressed key",
+        report.get("accountCalls") == [1, 1]
+        and report.get("artifactUri") == uri
+        and bool(puts)
+        and all(put == uri for put in puts),
+        f"accountCalls={report.get('accountCalls')!r} artifactUri="
+        f"{report.get('artifactUri')!r} puts={puts!r}",
+    )
+    results.check(
+        "IMAGE-7 the guest has the context's script and neither the ignored file nor the "
+        "symlink",
+        guest.get("context") == "context-ok" and guest.get("excluded") == "excluded",
+        f"guest={guest!r}",
+    )
+    results.check(
+        "IMAGE-7 the skipped symlink is named in the warnings",
+        any("link.sh" in str(warning) for warning in report.get("warnings") or []),
+        f"warnings={report.get('warnings')!r}",
+    )
+    results.check(
+        "IMAGE-2 the wrapped image runs the daemon as root after the task's USER",
+        guest.get("uid") == "0",
+        f"uid={guest.get('uid')!r}",
+    )
+    results.check(
+        "IMAGE-10 a forced ensure deletes the ready image and rebuilds it under its name",
+        forced.get("reused") is False
+        and forced.get("uploaded") is True
+        and forced.get("identifier") == arn
+        and forced.get("state") in READY_IMAGE_STATES,
+        f"forced={forced!r}",
+    )
+
+
+def drive_ensure_image(binary: Path, aws: Any, results: Results) -> None:
+    """`Sandbox::ensure_image` against AWS (#221), through the ignored Rust live test.
+
+    The test (`microvms-core/tests/live_ensure_image.rs`) builds a task image from a task
+    directory of its own — a Dockerfile on a non-managed `FROM` ending on `USER nobody`,
+    wrapped by `wrap_dockerfile`, with a `.dockerignore`, an ignored file, and a symlink —
+    by two sandboxes at once, reuses it from a third call, launches a VM from it, and then
+    forces a rebuild under the same name. Its report becomes the named IMAGE checks in
+    `ensure_image_checks`.
+
+    Cleanup is this function's and is verified independently of the test's own: the image
+    is absent, the VM is TERMINATED, the S3 objects under the run's key prefix are deleted,
+    and the service-created log group is deleted, each read back through boto3.
+    """
+    nonce = secrets.token_hex(4)
+    prefix = f"{ENSURE_PREFIX}-{nonce}"
+    key_prefix = f"{ENSURE_PREFIX}/{nonce}"
+    bucket = os.environ["MICROVM_BUCKET"]
+    with tempfile.TemporaryDirectory() as tmp:
+        report_path = Path(tmp) / "report.json"
+        env = os.environ.copy()
+        env.update(
+            {
+                "MICROVM_AGENTD_BINARY": str(binary),
+                "MICROVM_ENSURE_PREFIX": prefix,
+                "MICROVM_ENSURE_KEY_PREFIX": key_prefix,
+                "MICROVM_ENSURE_REPORT": str(report_path),
+                "AWS_REGION": aws.region_name,
+            }
+        )
+        command = [
+            "cargo",
+            "test",
+            "-p",
+            "microvms-core",
+            "--test",
+            "live_ensure_image",
+            "ensure_image_builds_once_reuses_and_rebuilds_under_force",
+            "--",
+            "--ignored",
+            "--exact",
+            "--nocapture",
+        ]
+        started = time.monotonic()
+        try:
+            run = subprocess.run(
+                command,
+                cwd=Path(__file__).resolve().parents[1],
+                env=env,
+                text=True,
+                capture_output=True,
+                timeout=75 * 60,
+                check=False,
+            )
+            exit_code: int | str = run.returncode
+            tail = (run.stderr or "")[-2000:]
+        except subprocess.TimeoutExpired:
+            exit_code, tail = "timeout after 75 minutes", ""
+        seconds = time.monotonic() - started
+        try:
+            report = json.loads(report_path.read_text())
+        except (OSError, ValueError) as exc:
+            report = {
+                "error": f"no report ({exc}); exit={exit_code} stderr tail: {tail}"
+            }
+        print(f"ensure_image live test: exit={exit_code} in {seconds:.0f}s", flush=True)
+        if exit_code != 0:
+            print(tail, file=sys.stderr)
+        ensure_image_checks(report, prefix, bucket, key_prefix, results)
+        ensure_image_cleanup(report, prefix, bucket, key_prefix, aws, results)
+
+
+def ensure_image_cleanup(
+    report: dict[str, Any],
+    prefix: str,
+    bucket: str,
+    key_prefix: str,
+    aws: Any,
+    results: Results,
+) -> None:
+    """Deletes what the ensure-image run created and reads each deletion back."""
+    plane = aws.client(SERVICE)
+    s3 = aws.client("s3")
+    logs = aws.client("logs")
+    name = str(report.get("name") or "")
+    arn = report.get("arn")
+
+    image_gone = True
+    detail = "no image was created"
+    if arn:
+        try:
+            state = plane.get_microvm_image(imageIdentifier=arn).get("state")
+            image_gone = False
+            detail = f"still present as {state}"
+            with contextlib.suppress(Exception):
+                plane.delete_microvm_image(imageIdentifier=arn)
+        except Exception as exc:  # noqa: BLE001 - the error class is the finding
+            image_gone = type(exc).__name__ == "ResourceNotFoundException"
+            detail = type(exc).__name__
+    results.check("the ensured image is deleted", image_gone, detail)
+
+    vm_id = (report.get("vm") or {}).get("id")
+    vm_state = "no VM was launched"
+    vm_ok = True
+    if vm_id:
+        try:
+            vm_state = str(plane.get_microvm(microvmIdentifier=vm_id).get("state"))
+            vm_ok = vm_state == "TERMINATED"
+        except Exception as exc:  # noqa: BLE001
+            vm_state, vm_ok = type(exc).__name__, False
+    results.check("the ensure-image VM is terminated", vm_ok, f"{vm_id}: {vm_state}")
+
+    listed = s3.list_objects_v2(Bucket=bucket, Prefix=f"{key_prefix}/")
+    keys = [item["Key"] for item in listed.get("Contents") or []]
+    if keys:
+        s3.delete_objects(
+            Bucket=bucket, Delete={"Objects": [{"Key": key} for key in keys]}
+        )
+    remaining = s3.list_objects_v2(Bucket=bucket, Prefix=f"{key_prefix}/").get(
+        "KeyCount", 0
+    )
+    results.check(
+        "the ensure-image artifacts are deleted from S3",
+        remaining == 0,
+        f"deleted={keys!r} remaining={remaining}",
+    )
+
+    group = f"/aws/lambda-microvms/{name or prefix}"
+    with contextlib.suppress(Exception):
+        logs.delete_log_group(logGroupName=group)
+    left = logs.describe_log_groups(logGroupNamePrefix=group).get("logGroups") or []
+    results.check(
+        "the ensure-image build log group is deleted",
+        not [g for g in left if g.get("logGroupName") == group],
+        f"group={group!r} remaining={[g.get('logGroupName') for g in left]!r}",
+    )
+
+
+def check_ensure_image_section(results: "Results") -> None:
+    """The ensure-image checks pass on a complete report and each fails on its gap."""
+    prefix, bucket, key_prefix = "conformance-ensure-abcd1234", "bucket", "p/abcd1234"
+    name = f"{prefix}-0123456789ab"
+    arn = f"arn:aws:lambda:us-east-1:123456789012:microvm-image:{name}"
+    uri = f"s3://{bucket}/{key_prefix}/{name}/artifact.zip"
+    complete: dict[str, Any] = {
+        "name": name,
+        "arn": arn,
+        "artifactUri": uri,
+        "warnings": ["skipped link.sh: it is a symlink"],
+        "race": {
+            "reused": [False, True],
+            "uploaded": [True, True],
+            "identifiers": [arn, arn],
+            "versions": ["1", "1"],
+            "states": ["CREATED", "CREATED"],
+        },
+        "reuse": {"reused": True, "uploaded": False, "identifier": arn},
+        "accountCalls": [1, 1],
+        "puts": [uri, uri],
+        "guest": {"uid": "0", "context": "context-ok", "excluded": "excluded"},
+        "forced": {
+            "reused": False,
+            "uploaded": True,
+            "identifier": arn,
+            "state": "CREATED",
+        },
+    }
+    probe = Results(probe=True)
+    ensure_image_checks(complete, prefix, bucket, key_prefix, probe)
+    results.check(
+        "the ensure-image checks all pass on a complete report",
+        len(probe.passed) == 9 and not probe.failed,
+        f"passed={len(probe.passed)} failed={probe.failed!r}",
+    )
+    gaps = {
+        "IMAGE-11": {
+            **complete,
+            "race": {**complete["race"], "reused": [False, False]},
+        },
+        "IMAGE-9": {**complete, "reuse": {**complete["reuse"], "uploaded": True}},
+        "IMAGE-8": {**complete, "accountCalls": [2, 1]},
+        "IMAGE-2": {**complete, "guest": {**complete["guest"], "uid": "65534"}},
+        "IMAGE-10": {**complete, "forced": {"error": "refused"}},
+    }
+    missed = []
+    for key, report in gaps.items():
+        probe = Results(probe=True)
+        ensure_image_checks(report, prefix, bucket, key_prefix, probe)
+        failed = [name for name, _ in probe.failed]
+        if len(failed) != 1 or not failed[0].startswith(key):
+            missed.append(f"{key}: {failed!r}")
+    results.check(
+        "each ensure-image check fails on the one gap it is about",
+        not missed,
+        "; ".join(missed),
+    )
+
+
 def check_bdd_outcome(results: "Results") -> None:
     """The JUnit reader tells a passed scenario from a failed, skipped, or absent one."""
     name = BDD_LIVE_SCENARIO
@@ -6427,6 +6717,7 @@ def self_test() -> int:
         check_bdd_outcome(results)
         check_posture_lines(results)
         check_preflight_lines(results)
+        check_ensure_image_section(results)
 
         # -- the success side -------------------------------------------------
         ok = cli.call("ok")
@@ -6906,6 +7197,16 @@ def main() -> int:
     parser.add_argument(
         "--keep", action="store_true", help="skip teardown (leaks resources)"
     )
+    parser.add_argument(
+        "--infra-dir",
+        type=Path,
+        help="the Terraform directory whose outputs name the stack (default: conformance/infra)",
+    )
+    parser.add_argument(
+        "--only",
+        choices=["ensure_image"],
+        help="run one self-contained section instead of the suite: it builds its own image",
+    )
     args = parser.parse_args()
 
     if args.self_test:
@@ -6916,7 +7217,7 @@ def main() -> int:
         return 2
 
     repo = Path(__file__).resolve().parent.parent
-    infra = repo / "conformance" / "infra"
+    infra = args.infra_dir or repo / "conformance" / "infra"
     binary = (
         (repo / args.binary).resolve() if not args.binary.is_absolute() else args.binary
     )
@@ -6941,6 +7242,22 @@ def main() -> int:
 
     cli = Cli(binary=microvm)
     results = Results()
+    if args.only == "ensure_image":
+        # A targeted run of the one section that owns everything it creates: no suite VM,
+        # no suite build, the same named checks and the same independent cleanup.
+        run_section(
+            results,
+            "ensure_image",
+            drive_ensure_image,
+            binary,
+            boto3.Session(region_name=cli.region),
+            results,
+        )
+        print(f"\n  passed: {len(results.passed)}")
+        print(f"  failed: {len(results.failed)}")
+        for failed, detail in results.failed:
+            print(f"  FAIL {failed}: {detail}")
+        return 1 if results.failed else 0
     launched: Envelope | None = None
     daemon: Daemon | None = None
     # Built here rather than inside the `try`, because the teardown in the `finally` needs a
@@ -7180,6 +7497,17 @@ def main() -> int:
                 binary,
                 Path(tmp) / "project",
                 aws.client("logs"),
+                results,
+            )
+            # `Sandbox::ensure_image` (#221) on its own two builds and its own VM, through
+            # the ignored Rust live test: the content-addressed image, the create race, the
+            # reuse, and the forced rebuild all need an image nothing else built.
+            run_section(
+                results,
+                "ensure_image",
+                drive_ensure_image,
+                binary,
+                aws,
                 results,
             )
             # Agent VMs on their own build and their own VM (`docs/AGENT-VMS.md`): the

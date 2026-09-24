@@ -130,6 +130,70 @@ snapshot, so every VM launched from it sees the same bytes; per-VM credentials
 travel through `runHookPayload` at launch instead (the module docs of
 `microvms-core/src/control/artifact.rs`).
 
+### From build inputs to an image ARN: `ensure_image`
+
+A harness with many trials of one task needs one image for all of them. `ensure_image`
+is that one call: it names the image by its content, builds it only when nothing usable
+exists under the name, and joins a sibling trial's build instead of racing it.
+
+```python
+ensured = sandbox.ensure_image(
+    name_prefix=f"harbor-{task_name}",
+    binary=agentd_bytes,
+    dockerfile=microvms.wrap_dockerfile(task_dockerfile),
+    context_dir=environment_dir,  # what the Dockerfile's COPY lines read
+    s3_bucket=bucket,
+    s3_key_prefix="harbor/images",
+    build_role_arn=build_role_arn,
+    size=microvms.SizeClass.from_baseline_mib(4096),
+)
+session = sandbox.run(image_identifier=ensured.image.identifier)
+print("reused" if ensured.reused else "built", ensured.image.name, ensured.warnings)
+```
+
+Node: `sandbox.ensureImage({ namePrefix, binary, dockerfile, contextDir, s3Bucket,
+s3KeyPrefix, buildRoleArn }, size)`, answering `{ image, reused, artifactUri, uploaded,
+warnings }`.
+
+- **The name** is `<name_prefix>-<hash12>`. The hash covers the daemon bytes, the
+  Dockerfile, every build-context file's path, mode and bytes, the base image, and the
+  size class, because an image is created on one base at one size. Equal inputs name one
+  image and any changed input names a fresh one, so a stale snapshot is never served
+  under a reused name. The prefix is reduced to the characters the service's image
+  names admit. The artifact hash without a context is unchanged, so `microvm build
+  --reuse` names do not move.
+- **The context** is read the way `docker build` reads one. `Dockerfile.dockerignore`
+  wins over `.dockerignore`, with Docker's glob rules (`**`, `!` exceptions, parent
+  directories). The root `Dockerfile` and ignore files are left out. A symlink is
+  skipped and named in `warnings`, and a root file named `agentd` is refused. Each file
+  carries mode `0755` if it has an execute bit and `0644` otherwise, so two hosts
+  produce one artifact.
+- **The ARN** is built from the caller's account, looked up once per sandbox with
+  `GetCallerIdentity`. The service takes image ARNs, not bare names.
+- **The upload** goes to `s3://<s3_bucket>/<s3_key_prefix>/<name>/artifact.zip`, and only
+  when a build is needed. The zip carries fixed dates and modes, so equal inputs are
+  one object.
+- **The decision** after each describe:
+
+  | The image is | What happens | `reused` |
+  |---|---|---|
+  | Ready | Returned as is | true |
+  | Building | Waited out | true |
+  | Failed (or any state with `force=True`) | Deleted, the name awaited free, rebuilt | false |
+  | Absent | Uploaded, created, waited for | false |
+
+  A forced caller waits for a running build to settle first, because the service
+  refuses to delete an image that is `CREATING`.
+- **The race.** Two trials that both find the name free both create, and the service
+  accepts one. The loser describes again and waits for the winner's build. It returns
+  that image only once it is ready, with `reused=True`.
+
+Every local check runs before the first AWS call: the bucket name, the prefix, the
+Dockerfile guards of `build_image`, and the context. A request refused locally costs no
+lookup and no upload. The build wait is 45 minutes unless `wait_timeout` says otherwise.
+The build role must be able to read the bucket. The artifact bucket must be in the
+sandbox's region.
+
 ## The wire contract a harness client implements
 
 The full route table, request shapes, and the defect-driven rules are in

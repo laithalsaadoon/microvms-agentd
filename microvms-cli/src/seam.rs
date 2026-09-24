@@ -155,9 +155,10 @@ pub trait CoreSeam: Send + Sync {
     ///
     /// # The one capability core does not have, and why this is not a workaround
     ///
-    /// `CreateMicrovmImage` names an artifact that must already be in S3, and
-    /// `microvms-core` cannot put it there: `control/mod.rs:230` says so in as many words —
-    /// "This client does not upload — S3 is not in this crate's dependency set". An
+    /// `CreateMicrovmImage` names an artifact that must already be in S3, and the create
+    /// path of `microvms-core` this CLI's `build` uses does not put it there: it takes the
+    /// URI of an artifact already uploaded (`CreateImageRequest::code_artifact_uri`). Core's
+    /// one uploading path is `Sandbox::ensure_image`, which `build` does not route through. An
     /// `aws-sdk-s3` in *this* crate's manifest would be a second path to AWS inside the CLI,
     /// which is the thing CLI-2 forbids and the thinness guard would fail on.
     ///
@@ -291,9 +292,8 @@ async fn put_via_aws_cli(uri: &str, bytes: Vec<u8>) -> Result<(), Error> {
                 ErrorKind::Precondition,
                 format!(
                     "could not run `aws s3 cp - {uri}`: {error}. microvms-core builds the \
-                     artifact bytes but cannot upload them — S3 is deliberately absent from its \
-                     dependency set, and adding an S3 client to this CLI would give it a second \
-                     path to AWS. Either install the AWS CLI, or upload the artifact yourself \
+                     artifact bytes and its create path does not upload them, and adding an S3 \
+                     client to this CLI would give it a second path to AWS. Either install the AWS CLI, or upload the artifact yourself \
                      and pass --artifact-uri."
                 ),
             )

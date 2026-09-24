@@ -367,8 +367,8 @@ pub struct BuildImageOptions {
     pub name: String,
     /// The daemon binary's bytes, zipped into the artifact.
     pub binary: napi::bindgen_prelude::Uint8Array,
-    /// Where the artifact is uploaded to. This client does not upload — S3 is not in the
-    /// core's dependency set — so the caller puts the bytes there and passes the URI.
+    /// Where the artifact is uploaded to. `buildImage` does not upload: the caller puts the
+    /// bytes there and passes the URI. `ensureImage` is the path that uploads for itself.
     pub code_artifact_uri: String,
     /// The build role, which must grant logs on `/aws/lambda-microvms/*`.
     pub build_role_arn: String,
@@ -887,7 +887,7 @@ impl Sandbox {
 
     /// The artifact bytes to upload to `codeArtifactUri`.
     ///
-    /// The upload is the caller's: S3 is not in the core's dependency set. Takes the same
+    /// The upload is the caller's on this path (`ensureImage` uploads for itself). Takes the same
     /// options as [`Self::build_image`] so the bytes a caller puts in the bucket are the bytes
     /// the build will receive.
     #[napi]

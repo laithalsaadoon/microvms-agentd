@@ -194,7 +194,7 @@ pub mod agents {
 ```
 
 The artifact upload stays the caller's, exactly as it is for `Sandbox::build_image`:
-S3 is not in core's dependency set, and `AgentVm::image_request` returns the request
+this path does not upload, and `AgentVm::image_request` returns the request
 whose `code_artifact_uri` the caller fills before calling `build`. The free functions
 exist beside the struct because the CLI's refresh and prompt paths hold an attached
 `Session` and no `Sandbox`; `AgentVm`'s methods delegate to them.
@@ -265,7 +265,7 @@ part of the suite that does; it reports the model ids it used.
 `installed_agents`, `install_agent_access`, `prompt_agent`, and `mint_bedrock_token`
 (`installedAgents`, `installAgentAccess`, `promptAgent`, `mintBedrockToken`). The
 sequence is the CLI's, one method per step, and the upload stays the caller's because
-S3 is not in the core's dependency set:
+this path does not upload:
 
 ```python
 vm = microvms.AgentVm(

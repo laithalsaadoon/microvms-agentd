@@ -392,8 +392,8 @@ async fn fresh<O: std::io::Write, E: std::io::Write>(
         return Err(CliError::new(
             Exit::Precondition,
             "no --bucket and no $MICROVM_BUCKET. The agent image's artifact is uploaded to a \
-             derived key in that bucket (`aws s3 cp`); microvms-core does not upload, and an \
-             S3 client in this CLI would be a second path to AWS.",
+             derived key in that bucket (`aws s3 cp`); the agent image path does not upload, \
+             and an S3 client in this CLI would be a second path to AWS.",
         ));
     };
     let region = args.region.resolve(ctx.env)?;

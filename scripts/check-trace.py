@@ -50,6 +50,13 @@ SPECS = (
 )
 DOC = ROOT / "docs" / "TRACEABILITY.md"
 
+# The fuzz waiver the ensure_image decisions share: their input space is interleavings.
+INTERLEAVINGS = (
+    "the input space is two callers interleaved against the platform, which "
+    "model/src/image.rs checks exhaustively; the decision table is ten rows, all pinned "
+    "by the_plan_table"
+)
+
 # Requirements traced end to end. The value is the issue that introduced the key, or
 # `(issue, {layer: reason})` for a key that waives a layer; see the module docs.
 TRACED: dict[str, str | tuple[str, dict[str, str]]] = {
@@ -60,18 +67,12 @@ TRACED: dict[str, str | tuple[str, dict[str, str]]] = {
         "#220",
         {"live": "a pure function of Dockerfile text; it makes no AWS call"},
     ),
-    "IMAGE-2": (
-        "#220",
-        {"live": "a pure function of Dockerfile text; it makes no AWS call"},
-    ),
+    "IMAGE-2": "#220",
     "IMAGE-3": (
         "#220",
         {"live": "a pure function of Dockerfile text; it makes no AWS call"},
     ),
-    "IMAGE-4": (
-        "#220",
-        {"live": "a pure function of Dockerfile text; it makes no AWS call"},
-    ),
+    "IMAGE-4": "#220",
     "IMAGE-5": (
         "#220",
         {
@@ -79,6 +80,34 @@ TRACED: dict[str, str | tuple[str, dict[str, str]]] = {
             "gherkin": "the scenarios are core's (IMAGE-1..4); each binding's tests check the pass-through",
             "fuzz": "the binding hands the text unchanged to core's fuzzed function",
             "live": "a pure function of Dockerfile text; it makes no AWS call",
+        },
+    ),
+    "IMAGE-6": (
+        "#221",
+        {
+            "model": "a pure function of the build inputs; the name has no states to explore"
+        },
+    ),
+    "IMAGE-7": (
+        "#221",
+        {
+            "model": "reading a directory has no states; the ignore rules are fuzzed "
+            "against moby's own regex translation instead"
+        },
+    ),
+    "IMAGE-8": "#221",
+    "IMAGE-9": ("#221", {"fuzz": INTERLEAVINGS}),
+    "IMAGE-10": ("#221", {"fuzz": INTERLEAVINGS}),
+    "IMAGE-11": ("#221", {"fuzz": INTERLEAVINGS}),
+    "IMAGE-12": (
+        "#221",
+        {
+            "model": "a binding pass-through has no states; core's are modeled as IMAGE-8..11",
+            "gherkin": "the scenarios are core's (IMAGE-6..11); each binding's tests check the "
+            "pass-through",
+            "fuzz": "the binding hands its arguments unchanged to core's fuzzed functions",
+            "live": "the conformance section drives core's ensure_image, which each binding "
+            "forwards unchanged",
         },
     ),
     "AGENTD-7": "#224",

@@ -335,8 +335,9 @@ pub struct CreateImageRequest {
     /// file into the shared snapshot through this field, which is the TRAP-5 property
     /// restated as a type.
     pub project_files: Option<ProjectFiles>,
-    /// Where the artifact is uploaded to. This client does not upload — S3 is not in the
-    /// crate's dependency set — so the caller puts the bytes there and passes the URI.
+    /// Where the artifact is uploaded to. `create_image` does not upload: the caller puts
+    /// the bytes there and passes the URI. [`crate::sandbox::Sandbox::ensure_image`] is the
+    /// path that uploads for itself ([`services`]).
     pub code_artifact_uri: String,
     /// The build role, which must grant logs on `/aws/lambda-microvms/*`.
     pub build_role_arn: String,

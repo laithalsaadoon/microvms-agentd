@@ -925,7 +925,8 @@ impl Sandbox {
 
     /// The artifact bytes to upload to the request's `code_artifact_uri`.
     ///
-    /// The upload is the caller's: S3 is not in this crate's dependency set.
+    /// The upload is the caller's on this path; [`Sandbox::ensure_image`] uploads for
+    /// itself.
     pub fn build_artifact_for(&self, request: &CreateImageRequest) -> Result<Vec<u8>, Error> {
         self.control.build_artifact_for(request)
     }

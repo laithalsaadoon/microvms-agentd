@@ -204,6 +204,37 @@ fn oracle_matches_or_parent(re: &regex::Regex, path: &str) -> bool {
 struct GlobCase {
     rules: Vec<(bool, Vec<Tok>)>,
     path: Vec<Vec<u8>>,
+    /// Put the path under a directory the first pattern names, so a pattern matching a
+    /// parent directory — `node_modules` excluding `node_modules/x` — is exercised often
+    /// rather than by luck.
+    nest: bool,
+}
+
+/// A path the pattern's literal reading names: every wildcard and class read as `a`.
+fn literalize(pattern: &str) -> String {
+    let mut out = String::new();
+    let mut chars = pattern.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '*' | '?' => out.push('a'),
+            '\\' => out.extend(chars.next()),
+            '[' => {
+                for inner in chars.by_ref() {
+                    if inner == ']' {
+                        break;
+                    }
+                }
+                out.push('a');
+            }
+            other => out.push(other),
+        }
+    }
+    let cleaned = clean(&out);
+    if cleaned == "." || cleaned == "/" {
+        "a".to_string()
+    } else {
+        cleaned
+    }
 }
 
 #[test]
@@ -211,7 +242,15 @@ fn ignore_rules_agree_with_mobys_regex_translation() {
     bolero::check!()
         .with_type::<GlobCase>()
         .for_each(|case: &GlobCase| {
-            let path = render_path(&case.path);
+            let mut path = render_path(&case.path);
+            if case.nest
+                && let Some((_, tokens)) = case.rules.first()
+            {
+                let parent = literalize(&render_pattern(tokens));
+                if !parent.split('/').any(|segment| segment == "..") {
+                    path = format!("{parent}/{path}");
+                }
+            }
             let mut text = String::new();
             let mut compiled = Vec::new();
             for (exception, tokens) in case.rules.iter().take(4) {
@@ -288,6 +327,8 @@ struct HashCase {
     project: Option<(u8, Vec<u8>, Vec<u8>)>,
     entries: Vec<(Vec<u8>, bool, Vec<u8>)>,
     flip: (u8, u8),
+    /// Change the entry's mode instead of a byte of it.
+    flip_mode: bool,
     rotate: u8,
 }
 
@@ -384,14 +425,20 @@ fn the_context_hash_extends_the_legacy_one_and_follows_every_entry() {
             let mut changed = entries.clone();
             let target = usize::from(case.flip.0) % changed.len();
             let entry = &mut changed[target];
-            if entry.bytes.is_empty() {
+            if case.flip_mode {
+                entry.mode = if entry.mode == 0o755 { 0o644 } else { 0o755 };
+            } else if entry.bytes.is_empty() {
                 entry.bytes.push(case.flip.1);
             } else {
                 let at = usize::from(case.flip.1) % entry.bytes.len();
                 entry.bytes[at] ^= 0x01;
             }
             let changed = BuildContext::from_entries(changed).expect("valid names");
-            assert_ne!(hash(&context), hash(&changed), "IMAGE-6: every byte counts");
+            assert_ne!(
+                hash(&context),
+                hash(&changed),
+                "IMAGE-6: every byte and the mode count"
+            );
         });
 }
 
