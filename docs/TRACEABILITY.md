@@ -232,6 +232,50 @@ When a start request carries its user and group as integers and its shell as a b
 - **impl:** `agentd/src/exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-js/src/session.rs`, `microvms-py/src/session.rs`
 - **live:** `conformance/run_rs.py`
 
+## BIND-17
+
+When a caller requests the agentd daemon binary, the language bindings layer shall return the agentd binary that microvms-core resolves from a caller-supplied path, then the cache entry for the requested version, then the release asset for that version, with the version defaulting to the core version.
+
+- **model:** `model/src/provision.rs`
+- **gherkin:** `microvms-core/tests/features/provision.feature`
+- **fuzz:** `microvms-core/src/provision_fuzz.rs`
+- **test:** `microvms-core/src/provision.rs`, `microvms-core/tests/bdd_provision.rs`, `microvms-js/__test__/provision.mjs`, `microvms-py/tests/test_provision.py`
+- **impl:** `microvms-core/src/provision.rs`, `microvms-js/src/provision.rs`, `microvms-py/src/provision.rs`
+- **live:** `conformance/run_rs.py`
+
+## BIND-18
+
+If a fetched agentd release asset fails its attestation or SHA256SUMS verification, or neither verification can run, then the microvms-core shall fail with ERR_PRECONDITION without returning or caching the bytes.
+
+- **model:** `model/src/provision.rs`
+- **gherkin:** `microvms-core/tests/features/provision.feature`
+- **fuzz:** `microvms-core/src/provision_fuzz.rs`
+- **test:** `microvms-core/src/provision.rs`, `microvms-js/__test__/provision.mjs`
+- **impl:** `microvms-core/src/provision.rs`
+- **live:** `conformance/run_rs.py`
+
+## BIND-19
+
+If a cached agentd binary does not match the digest recorded when its release asset was verified, then the microvms-core shall discard the entry and fetch the release asset again.
+
+- **model:** `model/src/provision.rs`
+- **gherkin:** `microvms-core/tests/features/provision.feature`
+- **fuzz:** `microvms-core/src/provision_fuzz.rs`
+- **test:** `microvms-core/src/provision.rs`, `microvms-js/__test__/provision.mjs`
+- **impl:** `microvms-core/src/provision.rs`
+- **live:** `conformance/run_rs.py`
+
+## BIND-20
+
+If a caller-supplied or fetched agentd binary is not an aarch64 ELF executable, then the microvms-core shall refuse it with ERR_PRECONDITION.
+
+- **model:** `model/src/provision.rs`
+- **gherkin:** `microvms-core/tests/features/provision.feature`
+- **fuzz:** `microvms-core/src/provision_fuzz.rs`
+- **test:** `microvms-core/src/provision.rs`, `microvms-core/tests/bdd_provision.rs`, `microvms-js/__test__/provision.mjs`, `microvms-py/tests/test_provision.py`
+- **impl:** `microvms-core/src/provision.rs`, `microvms-js/src/provision.rs`, `microvms-py/src/provision.rs`
+- **live:** `conformance/run_rs.py`
+
 ## BIND-6
 
 The microvms-core shall report a finished exec's POSIX exit code as 124 when a deadline ended the command, as 128 plus the signal number for any other signal death, and otherwise as the exit code.
@@ -285,48 +329,4 @@ If the acknowledgement that follows a client-deadline kill fails, then the micro
 - **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
 - **test:** `microvms-core/src/session/complete.rs`, `microvms-core/tests/bdd_run_to_completion.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
 - **impl:** `microvms-core/src/session/complete.rs`, `microvms-core/src/session/exec.rs`, `microvms-js/src/exec.rs`, `microvms-py/src/exec.rs`
-- **live:** `conformance/run_rs.py`
-
-## BIND-17
-
-When a caller requests the agentd daemon binary, the language bindings layer shall return the agentd binary that microvms-core resolves from a caller-supplied path, then the cache entry for the requested version, then the release asset for that version, with the version defaulting to the core version.
-
-- **model:** `model/src/provision.rs`
-- **gherkin:** `microvms-core/tests/features/provision.feature`
-- **fuzz:** `microvms-core/src/provision_fuzz.rs`
-- **test:** `microvms-core/src/provision.rs`, `microvms-core/tests/bdd_provision.rs`, `microvms-js/__test__/provision.mjs`, `microvms-py/tests/test_provision.py`
-- **impl:** `microvms-core/src/provision.rs`, `microvms-js/src/provision.rs`, `microvms-py/src/provision.rs`
-- **live:** `conformance/run_rs.py`
-
-## BIND-18
-
-If a fetched agentd release asset fails its attestation or SHA256SUMS verification, or neither verification can run, then the microvms-core shall fail with ERR_PRECONDITION without returning or caching the bytes.
-
-- **model:** `model/src/provision.rs`
-- **gherkin:** `microvms-core/tests/features/provision.feature`
-- **fuzz:** `microvms-core/src/provision_fuzz.rs`
-- **test:** `microvms-core/src/provision.rs`, `microvms-js/__test__/provision.mjs`
-- **impl:** `microvms-core/src/provision.rs`
-- **live:** `conformance/run_rs.py`
-
-## BIND-19
-
-If a cached agentd binary does not match the digest recorded when its release asset was verified, then the microvms-core shall discard the entry and fetch the release asset again.
-
-- **model:** `model/src/provision.rs`
-- **gherkin:** `microvms-core/tests/features/provision.feature`
-- **fuzz:** `microvms-core/src/provision_fuzz.rs`
-- **test:** `microvms-core/src/provision.rs`, `microvms-js/__test__/provision.mjs`
-- **impl:** `microvms-core/src/provision.rs`
-- **live:** `conformance/run_rs.py`
-
-## BIND-20
-
-If a caller-supplied or fetched agentd binary is not an aarch64 ELF executable, then the microvms-core shall refuse it with ERR_PRECONDITION.
-
-- **model:** `model/src/provision.rs`
-- **gherkin:** `microvms-core/tests/features/provision.feature`
-- **fuzz:** `microvms-core/src/provision_fuzz.rs`
-- **test:** `microvms-core/src/provision.rs`, `microvms-core/tests/bdd_provision.rs`, `microvms-js/__test__/provision.mjs`, `microvms-py/tests/test_provision.py`
-- **impl:** `microvms-core/src/provision.rs`, `microvms-js/src/provision.rs`, `microvms-py/src/provision.rs`
 - **live:** `conformance/run_rs.py`
