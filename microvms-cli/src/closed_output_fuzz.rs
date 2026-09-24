@@ -3,7 +3,9 @@
 //! reader leaves at an arbitrary byte.
 //!
 //! `bolero::check!` runs this as an ordinary `#[test]` under stable `cargo test`, and as a
-//! coverage-guided target under `cargo bolero test output_plan`. The CLI has no lib target
+//! coverage-guided target under
+//! `cargo +nightly bolero test closed_output_fuzz::output_plan -p microvms-cli -T 120s`
+//! (the `fuzz` job in `.github/workflows/fuzz.yml`). The CLI has no lib target
 //! (ARCH-5), so a separate fuzz crate could not link [`Output`]; an in-crate test can.
 //!
 //! # What a plan is

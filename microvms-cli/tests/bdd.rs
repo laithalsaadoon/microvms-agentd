@@ -25,7 +25,7 @@ use std::io::{self, Read};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
-use cucumber::{World, WriterExt, then, when, writer};
+use cucumber::{World, WriterExt, cli, then, when, writer};
 
 /// How long one invocation may take before the step fails. A command blocked writing into a
 /// pipe nobody reads is the hang this bounds.
@@ -195,23 +195,64 @@ fn did_not_panic(world: &mut Cli) {
     }
 }
 
+/// Flags `cargo test` forwards to every test binary, which cucumber's own parser refuses.
+const LIBTEST_FLAGS: [&str; 6] = [
+    "--exact",
+    "--nocapture",
+    "--quiet",
+    "--test-threads",
+    "--color",
+    "--ignored",
+];
+
 #[tokio::main]
 async fn main() {
     let features = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/features");
+    // `cargo test <filter>` and `cargo bolero test <name>` pass a libtest filter to every test
+    // target. A filter naming something else selects nothing here, as libtest would; one that
+    // selects these scenarios, or a libtest-only flag, runs them with cucumber's defaults.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let filters: Vec<&str> = args
+        .iter()
+        .map(String::as_str)
+        .filter(|arg| !arg.starts_with('-'))
+        .collect();
+    if !filters.is_empty()
+        && !filters
+            .iter()
+            .any(|filter| "bdd closed_output".contains(filter))
+    {
+        return;
+    }
+    let libtest = !filters.is_empty()
+        || args
+            .iter()
+            .any(|arg| LIBTEST_FLAGS.iter().any(|flag| arg.starts_with(flag)));
+    macro_rules! run {
+        ($cucumber:expr) => {
+            if libtest {
+                $cucumber
+                    .with_cli(cli::Opts::<_, _, _, cli::Empty>::default())
+                    .run_and_exit(features)
+                    .await
+            } else {
+                $cucumber.run_and_exit(features).await
+            }
+        };
+    }
     let cucumber = Cli::cucumber().max_concurrent_scenarios(4);
     match std::env::var_os("CUCUMBER_JUNIT") {
         Some(path) => {
             let report = std::fs::File::create(&path).expect("the JUnit report file");
-            cucumber
-                .with_writer(
+            run!(
+                cucumber.with_writer(
                     writer::Basic::raw(io::stdout(), writer::Coloring::Never, 0)
                         .summarized()
                         .tee::<Cli, _>(writer::JUnit::for_tee(report, 0))
                         .normalized(),
                 )
-                .run_and_exit(features)
-                .await;
+            )
         }
-        None => cucumber.run_and_exit(features).await,
+        None => run!(cucumber),
     }
 }

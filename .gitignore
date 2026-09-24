@@ -59,3 +59,5 @@ site/src/content/docs/
 site/public/schema.json
 # The typecheck-gate probe build, produced by `mise run docs:gate`.
 site/dist-typecheck-probe/
+# bolero's corpus and crash reproducers from `cargo bolero test` (#216); CI uploads crashes.
+__fuzz__/
