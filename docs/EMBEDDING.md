@@ -183,7 +183,7 @@ lifecycle state of its own and therefore none of a `Sandbox`'s STATE guards:
 
 ```python
 plane = microvms.ControlPlane(microvms.Region.us_east_1())
-vm = plane.get(microvm_id)          # state, state_reason, endpoint, idle_policy, started_at
+vm = plane.get(microvm_id)  # state, state_reason, endpoint, idle_policy, started_at
 plane.suspend(microvm_id)
 plane.wait_for_state(microvm_id, ["SUSPENDED"])
 for item in plane.list(image_identifier=vm.image_arn):
