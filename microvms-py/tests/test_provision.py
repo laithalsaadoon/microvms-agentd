@@ -50,6 +50,7 @@ def test_bind17_a_caller_supplied_binary_is_returned_without_a_fetch(
     assert report.version == microvms.core_version()
     assert report.sha256 == hashlib.sha256(data).hexdigest()
     assert "size=26" in repr(report)
+    assert "verification=None" in repr(report)
     assert "ELF" not in repr(report), "the bytes stay out of repr"
 
 

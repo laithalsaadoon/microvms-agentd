@@ -62,7 +62,8 @@
 //! every other module builds on. [`cost`], [`control`], [`session`], and [`sandbox`]
 //! are the product surface. [`agents`] is the one layer above them: the coding-agent
 //! helpers `docs/AGENT-VMS.md` specifies, which compose the surface and which nothing
-//! below depends on.
+//! below depends on. [`provision`] stands beside the surface rather than on it: it obtains
+//! the verified `agentd` binary an image is built from, and makes no AWS call.
 
 // CLI-7: a print macro panics when its stream's reader has gone (#216). Every write goes
 // through a checked writer instead.

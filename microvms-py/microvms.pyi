@@ -1322,7 +1322,10 @@ class ProvisionedAgentd:
     """
     A provisioned `agentd` binary and how it got here: `provision_agentd_report()`'s answer.
     """
-    def __repr__(self, /) -> str: ...
+    def __repr__(self, /) -> str:
+        """
+        Everything but the bytes, which stay out so a printed report is one line.
+        """
     @property
     def data(self, /) -> bytes:
         """

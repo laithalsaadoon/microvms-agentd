@@ -199,6 +199,13 @@ VM this CLI launched is no longer there, and the fixtures' idea of a listing is 
 the check's own premise, not the CLI's: a `run --image` records no image, so the kept run's
 record named only the terminated VM and was `gone` as well.
 
+Two more in `drive_provisioned_quickstart` for issue #219, which moved provisioning into
+`microvms-core` (BIND-17..BIND-20): the fetched daemon's cache directory is the tag of the
+CLI's own version, and the digest record written beside it after verification names the
+bytes' SHA-256, the proof the envelope reported, and that version. The section's two
+existing checks now carry the BIND-18 and BIND-20 keys. Live because the only verified
+fetch is from the real release, through the real `gh` or `curl` on this machine.
+
 A hybrid driver, and both lanes are deliberate
 ----------------------------------------------
 
@@ -269,6 +276,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import itertools
 import json
 import os
@@ -555,6 +563,11 @@ class Cli:
 
     def argv(self, *args: str) -> list[str]:
         return [str(self.binary), "--json", "--quiet", *args]
+
+    def version(self) -> str:
+        """The version `microvm --version` prints (`microvm 0.9.0` reads as `0.9.0`)."""
+        out = self.run_process([str(self.binary), "--version"], timeout=30)
+        return out.stdout.split()[-1] if out.stdout.split() else ""
 
     @staticmethod
     def run_process(
@@ -3728,25 +3741,48 @@ def drive_provisioned_quickstart(
 
     agentd = envelope.data.get("agentd") or {}
     results.check(
-        "a run with no binary provisioned the daemon from the release",
+        "BIND-18 a run with no binary provisioned a verified daemon from the release",
         agentd.get("source") == "fetched"
         and agentd.get("verified") in ("attestation", "checksum"),
         f"source={agentd.get('source')!r} verified={agentd.get('verified')!r}",
     )
 
     # The cached install, read off this machine rather than trusted from the envelope:
-    # twenty bytes of header is the same gate the CLI ran, asserted independently.
+    # twenty bytes of header is the same gate core ran, asserted independently.
     cached = Path(str(agentd.get("path") or state / "missing"))
     machine = None
-    if cached.exists():
-        header = cached.read_bytes()[:20]
-        if header[:4] == b"\x7fELF" and len(header) >= 20:
-            order = "little" if header[5] == 1 else "big"
-            machine = int.from_bytes(header[18:20], order)
+    body = cached.read_bytes() if cached.exists() else b""
+    header = body[:20]
+    if header[:4] == b"\x7fELF" and len(header) >= 20:
+        order = "little" if header[5] == 1 else "big"
+        machine = int.from_bytes(header[18:20], order)
     results.check(
-        "the provisioned daemon is cached as an aarch64 ELF",
+        "BIND-20 the provisioned daemon is cached as an aarch64 ELF",
         machine == 0xB7,
         f"{cached} e_machine={machine!r}",
+    )
+    # The release the CLI asked for is its own version's: the cache directory is the tag,
+    # and the tag is `v` plus the version `microvm --version` prints.
+    version = cli.version()
+    results.check(
+        "BIND-17 the provisioned daemon is the release for the CLI's own version",
+        cached.parent.name == f"v{version}",
+        f"{cached} for CLI {version}",
+    )
+    # The digest record core writes after verification, read back and recomputed here:
+    # the record is what lets the next run trust the cache, so it must name exactly the
+    # bytes that were verified and the proof the envelope reported.
+    record_path = cached.parent / "agentd.verified.json"
+    try:
+        record = json.loads(record_path.read_text())
+    except (OSError, ValueError) as exc:
+        record = {"error": str(exc)}
+    results.check(
+        "BIND-19 the cached daemon's digest record matches its bytes and proof",
+        record.get("sha256") == hashlib.sha256(body).hexdigest()
+        and record.get("verification") == agentd.get("verified")
+        and record.get("version") == version,
+        f"{record_path}: {record!r}",
     )
 
     stdout = envelope.data.get("stdout") or ""

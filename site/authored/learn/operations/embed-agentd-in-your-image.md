@@ -35,9 +35,25 @@ The full route table and request shapes are in [Protocol](/internals/protocol/),
 - **The proxy.** Every request crosses the platform's endpoint proxy, which wants two headers, and the token it wants is capped at sixty minutes, so mint inside the request path and refresh well under the ceiling. A detached exec is polled and acked under the next token without loss.
 - **The keepalive is yours.** Idleness is measured by inbound traffic through the proxy, which terminates outside the VM, so an outside poll of `/v1/health` resets the timer and a guest-side request cannot.
 
-## 4. Get the daemon binary yourself
+## 4. Get the daemon binary from the bindings
 
-The CLI provisions its own version's release asset. For a build you manage, fetch and verify it the same way:
+The CLI provisions its own version's release asset. A harness that assembles its own build context gets the same bytes with one call:
+
+```python
+import microvms
+
+agentd = microvms.provision_agentd()  # bytes, for this client's version
+```
+
+```js
+import { provisionAgentd } from '@theagenticguy/microvms';
+
+const agentd = await provisionAgentd(); // Buffer, for this client's version
+```
+
+The call uses a `binary` you pass or `$MICROVM_AGENTD` first, then the cached asset for the version, then a fetch of the GitHub release. `gh attestation verify` or the release's `SHA256SUMS` verifies the fetch, and a fetch that cannot be verified raises `PreconditionError`. Any binary that is not an ARM64 ELF is refused, including one you supply. `provision_agentd_report()` (`provisionAgentdReport()` in Node) also returns the source, verification, path, and SHA-256.
+
+To manage the binary yourself, download and verify it by hand:
 
 ```bash
 gh release download --repo laithalsaadoon/microvms-agentd --pattern agentd

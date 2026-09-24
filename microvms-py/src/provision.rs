@@ -76,13 +76,17 @@ impl PyProvisionedAgentd {
         &self.inner.sha256
     }
 
+    /// Everything but the bytes, which stay out so a printed report is one line.
     fn __repr__(&self) -> String {
+        let verification = match self.inner.verification() {
+            Some(verification) => format!("{:?}", verification.as_str()),
+            None => "None".to_string(),
+        };
         format!(
-            "ProvisionedAgentd(source={:?}, version={:?}, verification={:?}, path={:?}, \
-             size={})",
+            "ProvisionedAgentd(source={:?}, version={:?}, verification={verification}, \
+             path={:?}, size={})",
             self.inner.source.as_str(),
             self.inner.version,
-            self.inner.verification().map(|v| v.as_str()),
             self.inner.path.display().to_string(),
             self.inner.bytes.len(),
         )
