@@ -214,3 +214,44 @@ def test_restrip_and_pack():
         assert archive.getnames() == ["src/app.py"]
     with tarfile.open(fileobj=io.BytesIO(github_ops.pack({"a.md": b"hi"}))) as archive:
         assert archive.extractfile("a.md").read() == b"hi"
+
+
+class Comments:
+    """Iterates like PyGithub's PaginatedList and, like it on an empty list, fails to slice."""
+
+    def __init__(self, items):
+        self.items = items
+
+    def __iter__(self):
+        return iter(self.items)
+
+    def __getitem__(self, index):
+        raise IndexError("list index out of range")
+
+
+@pytest.mark.parametrize("count", [0, 2, 40])
+def test_an_issue_stages_with_any_number_of_comments(monkeypatch, count):
+    comments = [NS(user=NS(login=f"u{i}"), body=f"note {i}") for i in range(count)]
+    issue = NS(
+        pull_request=None,
+        title="Add multiply",
+        body="Please add it.",
+        html_url="https://github.com/octo/app/issues/1",
+        get_comments=lambda: Comments(comments),
+    )
+    repo = NS(
+        get_issue=lambda n: issue,
+        default_branch="main",
+        get_branch=lambda name: NS(commit=NS(sha="abc")),
+        get_archive_link=lambda kind, ref: "https://example.invalid/tarball",
+    )
+    monkeypatch.setattr(github_ops, "client", lambda: NS(get_repo=lambda _: repo))
+    source = io.BytesIO()
+    with tarfile.open(fileobj=source, mode="w:gz") as archive:
+        archive.addfile(tarfile.TarInfo("octo-app-abc/calc.py"), io.BytesIO(b""))
+    monkeypatch.setattr(github_ops, "download", lambda *a, **k: source.getvalue())
+    meta, _, task = github_ops.stage("octo/app", 1, None)
+    assert meta["kind"] == "implement" and meta["base_sha"] == "abc"
+    with tarfile.open(fileobj=io.BytesIO(task)) as archive:
+        request = archive.extractfile("request.md").read().decode()
+    assert request.count("### Comment by") == min(count, 30)

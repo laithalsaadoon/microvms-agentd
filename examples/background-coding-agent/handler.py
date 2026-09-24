@@ -6,7 +6,6 @@ stage GitHub input → launch VM → prepare → start agent → poll (durable w
 """
 
 import io
-import json
 import os
 import secrets
 import tarfile
@@ -23,11 +22,11 @@ from aws_durable_execution_sdk_python.waits import (
     WaitForConditionConfig,
     WaitForConditionDecision,
 )
-from botocore.exceptions import ClientError
 
 import microvms
 
 REGION = os.environ.get("AWS_REGION", "us-east-1")
+GONE = ("TERMINATING", "TERMINATED")
 TASK_SECONDS = int(os.environ.get("TASK_SECONDS", "1800"))
 POLL_SECONDS = 30
 BUNDLE = {"REPORT.md", "comments.json", "changes.raw", "changes.tar"}
@@ -89,14 +88,24 @@ def s3_get(job_id, name):
         return body.read()
 
 
+def region():
+    return microvms.Region.parse(REGION)
+
+
+def plane():
+    return microvms.ControlPlane(region())
+
+
+def adopt(vm, token):
+    """Every step runs in a fresh process, so each one adopts the VM by its record."""
+    return microvms.Sandbox.adopt(region(), vm["microvmId"], vm["endpoint"], token)
+
+
 def connect(vm, token):
-    return microvms.Session.attach(
-        microvms.Region.parse(REGION),
-        vm["microvmId"],
-        vm["endpoint"],
-        token,
-        request_timeout=30,
-    )
+    sandbox = adopt(vm, token)
+    if sandbox.session is None:
+        raise RuntimeError(f"microvm {vm['microvmId']} is {sandbox.lifecycle}")
+    return sandbox.session
 
 
 def load(job_id):
@@ -119,32 +128,36 @@ def stage(job_id, spec):
 
 
 def launch(job_id, token):
-    connector = f"arn:aws:lambda:{REGION}:aws:network-connector:aws-network-connector:"
-    response = boto3.client("lambda-microvms").run_microvm(
-        imageIdentifier=os.environ["IMAGE_ARN"],
-        imageVersion=os.environ["IMAGE_VERSION"],
-        executionRoleArn=os.environ["GUEST_ROLE_ARN"],
-        ingressNetworkConnectors=[connector + "ALL_INGRESS"],
-        egressNetworkConnectors=[connector + "INTERNET_EGRESS"],
-        idlePolicy={
-            "maxIdleDurationSeconds": 300,
-            "suspendedDurationSeconds": 600,
-            "autoResumeEnabled": True,
-        },
-        maximumDurationInSeconds=TASK_SECONDS + 900,
-        clientToken=job_id,  # A retried step adopts the same VM.
-        runHookPayload=json.dumps({"agent_token": token}),
+    sandbox = microvms.Sandbox(region())
+    # A retried step sends the same client token and agent token, so it gets the VM the
+    # first attempt launched (resumed if it idle-suspended) rather than a second one.
+    # wait=False: the next step adopts the VM and finishes the wait in its own process.
+    sandbox.run(
+        image_identifier=os.environ["IMAGE_ARN"],
+        image_version=os.environ["IMAGE_VERSION"],
+        execution_role_arn=os.environ["GUEST_ROLE_ARN"],
+        agent_token=token,
+        client_token=job_id,
+        egress=True,
+        max_idle_sec=300,
+        suspended_sec=600,
+        auto_resume=True,
+        max_duration_sec=TASK_SECONDS + 900,
+        wait=False,
     )
-    jobs.mark(job_id, microvm_id=response["microvmId"], phase="preparing")
+    jobs.mark(job_id, microvm_id=sandbox.microvm_id, phase="preparing")
     return {
-        "microvmId": response["microvmId"],
-        "endpoint": response["endpoint"],
+        "microvmId": sandbox.microvm_id,
+        "endpoint": sandbox.endpoint,
         "launched_at": time.time(),
     }
 
 
 def prepare(job_id, agent, vm, token):
-    session = connect(vm, token)
+    sandbox = adopt(vm, token)
+    if sandbox.lifecycle == "PENDING":
+        sandbox.wait_until_running(timeout=300)
+    session = sandbox.session
     session.wait_until_ready(timeout=120)
     session.upload_tar("/workspace/project", s3_get(job_id, "source.tar"))
     session.upload_tar("/workspace/task", s3_get(job_id, "task.tar"))
@@ -192,10 +205,7 @@ def agent_done(job_id, vm, token):
 
 
 def vm_gone(vm):
-    state = boto3.client("lambda-microvms").get_microvm(
-        microvmIdentifier=vm["microvmId"]
-    )
-    return state["state"] in ("TERMINATING", "TERMINATED")
+    return plane().get(vm["microvmId"]).state in GONE
 
 
 def poll(_state, _context, *, job_id, vm, token, deadline):
@@ -243,13 +253,12 @@ def collect(job_id, kind, vm, token):
 
 
 def terminate(vm):
-    try:
-        boto3.client("lambda-microvms").terminate_microvm(
-            microvmIdentifier=vm["microvmId"]
-        )
-    except ClientError as error:
-        if error.response["Error"]["Code"] != "ResourceNotFoundException":
-            raise
+    # Idempotent: a retried cleanup step, or one after the VM hit its maximum
+    # duration, finds it already gone.
+    control = plane()
+    if control.get(vm["microvmId"]).state not in GONE:
+        control.terminate(vm["microvmId"])
+    control.wait_for_state(vm["microvmId"], ["TERMINATED"], timeout=300)
     return time.time()
 
 

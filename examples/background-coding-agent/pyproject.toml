@@ -19,9 +19,6 @@ dev = [
     "pytest==9.1.1",
 ]
 
-[tool.uv.sources]
-microvms = { path = "../../microvms-py" }
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

@@ -106,7 +106,7 @@ resource "aws_iam_role_policy" "worker" {
   role = aws_iam_role.worker.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [
     { Effect = "Allow", Action = ["lambda:RunMicrovm", "lambda:GetMicrovm", "lambda:TerminateMicrovm",
-    "lambda:CreateMicrovmAuthToken", "lambda:GetMicrovmImage", "lambda:GetMicrovmImageVersion"], Resource = "*" },
+    "lambda:CreateMicrovmAuthToken"], Resource = "*" },
     { Effect = "Allow", Action = "iam:PassRole", Resource = aws_iam_role.guest.arn },
     { Effect = "Allow", Action = "lambda:PassNetworkConnector",
     Resource = "arn:aws:lambda:${var.region}:aws:network-connector:aws-network-connector:*" },
@@ -142,7 +142,7 @@ resource "aws_lambda_function" "worker" {
   role             = aws_iam_role.worker.arn
   handler          = "handler.handler"
   runtime          = "python3.13"
-  architectures    = ["x86_64"]
+  architectures    = ["arm64"]
   filename         = "${path.module}/../.agent/function.zip"
   source_code_hash = try(filebase64sha256("${path.module}/../.agent/function.zip"), null)
   timeout          = 900

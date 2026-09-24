@@ -3,26 +3,27 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# The binding is built from this repository, so package on Linux x86_64 to match
-# the Lambda runtime. The guest image is ARM64 and is built separately.
-[[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] || {
-  echo 'Run deployment packaging on Linux x86_64.' >&2; exit 1;
-}
+# Every dependency, the microvms binding included, installs from published wheels, so
+# this packages the arm64 Lambda from any OS. The guest image is built separately.
 : "${TF_VAR_image_arn:?Set TF_VAR_image_arn to a coding-agent image ARN}"
-mkdir -p .agent/wheels
-rm -f .agent/wheels/microvms-*.whl
-uvx maturin@1.14.1 build --release --locked --manifest-path ../../microvms-py/Cargo.toml \
-  --compatibility manylinux_2_34 --out .agent/wheels
-uv export --frozen --no-dev --no-emit-package microvms --format requirements-txt \
-  --output-file .agent/requirements.txt
+mkdir -p .agent
+uv export --frozen --no-dev --format requirements-txt --output-file .agent/requirements.txt
 bundle=$(mktemp -d)
 trap 'rm -rf "$bundle"' EXIT
 uv pip install --target "$bundle" --python-version 3.13 \
-  --python-platform x86_64-manylinux_2_34 --only-binary :all: \
-  -r .agent/requirements.txt .agent/wheels/microvms-*.whl
+  --python-platform aarch64-manylinux_2_17 --only-binary :all: \
+  -r .agent/requirements.txt
 cp handler.py jobs.py github_ops.py "$bundle/"
-uv run --frozen python -I -S -c \
-  'import sys; sys.path.insert(0, sys.argv[1]); import handler' "$bundle"
+# The bundle's native modules are arm64, so import the handler with the host's own
+# environment and check that the binding in the bundle is the arm64 build.
+uv run --frozen python -c 'import handler'
+uv run --frozen python -c '
+import glob, struct, sys
+[so] = glob.glob(sys.argv[1] + "/microvms/*.so")
+with open(so, "rb") as f:
+    head = f.read(20)
+sys.exit(0 if head[:4] == b"\x7fELF" and struct.unpack("<H", head[18:20])[0] == 183
+         else "the bundled microvms extension is not an aarch64 ELF")' "$bundle"
 uv run --frozen python -c \
   'import shutil,sys; shutil.make_archive(".agent/function", "zip", sys.argv[1])' "$bundle"
 
