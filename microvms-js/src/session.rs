@@ -552,6 +552,24 @@ impl Session {
         Ok(live.session().map_err(js_async)?.endpoint().to_string())
     }
 
+    /// The launch's egress posture: `"open"`, `"unsealed"`, `"best-effort"`, or `"sealed"`.
+    ///
+    /// The value the CLI envelope's `egressPosture` reports for the same launch options, and
+    /// what `egressPostureFor` answers before the launch. A session that does not hold its
+    /// launch options (`Session.direct`, `Session.attach`, an adopted sandbox) reports
+    /// `"unsealed"`. Advertise network isolation only for `"sealed"`. Async like `endpoint()`,
+    /// because a sandbox-held session is read under the sandbox's lock.
+    #[napi]
+    pub async fn egress_posture(&self) -> Result<String, AsyncError> {
+        let live = self.live().await;
+        Ok(live
+            .session()
+            .map_err(js_async)?
+            .egress_posture()
+            .as_str()
+            .to_string())
+    }
+
     /// The port the proxy token is scoped to.
     #[napi]
     pub async fn port(&self) -> Result<u16, AsyncError> {

@@ -220,6 +220,7 @@ pub struct Session {
     transport: Arc<Transport>,
     endpoint: String,
     port: u16,
+    egress_posture: crate::control::EgressPosture,
 }
 
 impl Session {
@@ -306,12 +307,24 @@ impl Session {
             port: DEFAULT_AGENT_PORT,
             timeout: DEFAULT_REQUEST_TIMEOUT,
             proxy: None,
+            egress_posture: crate::control::EgressPosture::default(),
         }
     }
 
     /// The endpoint this session addresses.
     pub fn endpoint(&self) -> &str {
         &self.endpoint
+    }
+
+    /// The egress posture of the launch this session addresses (BIND-12).
+    ///
+    /// The value the CLI envelope's `egressPosture` reports for the same launch options, set
+    /// by [`crate::sandbox::Sandbox::run`] from [`crate::control::egress_posture_for`]. A
+    /// session that does not hold its launch options (attached, direct, or adopted) reports
+    /// `unsealed`, the weakest true claim. Never `sealed`: see
+    /// [`crate::control::egress_posture_for`] for the evidence that needs.
+    pub fn egress_posture(&self) -> crate::control::EgressPosture {
+        self.egress_posture
     }
 
     /// The port the proxy token is scoped to.
@@ -586,9 +599,17 @@ pub struct SessionBuilder {
     port: u16,
     timeout: Duration,
     proxy: Option<Arc<ProxyAuth>>,
+    egress_posture: crate::control::EgressPosture,
 }
 
 impl SessionBuilder {
+    /// The egress posture of the launch this session addresses; `unsealed` when unset.
+    #[must_use]
+    pub fn with_egress_posture(mut self, posture: crate::control::EgressPosture) -> Self {
+        self.egress_posture = posture;
+        self
+    }
+
     /// Mints proxy tokens through `minter`, with the default refresh schedule.
     #[must_use]
     pub fn with_minter(mut self, minter: Arc<dyn TokenMinter>) -> Self {
@@ -645,6 +666,7 @@ impl SessionBuilder {
             }),
             endpoint: self.endpoint,
             port: self.port,
+            egress_posture: self.egress_posture,
         })
     }
 }

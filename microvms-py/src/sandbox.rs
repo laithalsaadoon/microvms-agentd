@@ -1086,3 +1086,31 @@ impl PySandbox {
         })
     }
 }
+
+/// The egress posture `Sandbox.run` with these options would report, without launching.
+///
+/// One of `"open"`, `"unsealed"`, `"best-effort"`, or `"sealed"`: the value the launched
+/// session's `egress_posture` and the CLI envelope's `egressPosture` carry. Raises the
+/// launch's own `InvalidArgError` for options it would refuse. No AWS call and no credentials,
+/// so a harness can decide before a build whether a no-network task is satisfiable.
+///
+/// Only `"sealed"` is network isolation, and no option answers it: isolation needs a VPC
+/// egress connector and separately verified VPC routing without an internet gateway or NAT
+/// gateway. Omitting `egress` is `"unsealed"`; `deny_egress` is `"best-effort"`. Without a
+/// `region`, each connector ARN is checked against the region it names.
+#[pyfunction]
+#[pyo3(signature = (egress=false, connectors=None, deny_egress=false, *, region=None))]
+pub(crate) fn egress_posture_for(
+    egress: bool,
+    connectors: Option<Vec<String>>,
+    deny_egress: bool,
+    region: Option<PyRegion>,
+) -> PyCoreResult<&'static str> {
+    Ok(microvms_core::control::egress_posture_for(
+        egress,
+        &connectors.unwrap_or_default(),
+        deny_egress,
+        region.as_ref().map(|region| &region.inner),
+    )?
+    .as_str())
+}

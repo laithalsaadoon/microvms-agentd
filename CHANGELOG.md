@@ -92,6 +92,25 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
   Stateright model in `model/src/provision.rs`, and driven through a fake release by
   `microvms-core/tests/features/provision.feature`.
 
+- **The bindings expose the egress posture, before and after a launch (#227, BIND-11..13).**
+  `microvms.egress_posture_for(egress, connectors, deny_egress, *, region=None)` (JS
+  `egressPostureFor(egress, connectors, denyEgress, region)`, core
+  `control::egress_posture_for`) answers `open`, `unsealed`, `best-effort`, or `sealed` for a
+  set of launch options with no AWS call, and raises the launch's own `InvalidArgError` for
+  options it would refuse: managed egress with the deny or with a VPC connector, a connector
+  that is not a connector ARN in the region, or more than 10 connectors. `Session.egress_posture`
+  (JS `await session.egressPosture()`, core `Session::egress_posture`) carries the launch's
+  value, and it is the same derivation the CLI envelope's `egressPosture` uses, so a harness
+  reads what the CLI would report. A session that does not hold its launch options (direct,
+  attached, adopted) reports `unsealed`. Nothing answers `sealed`: isolation needs a VPC
+  connector and separately verified routing without an internet gateway or NAT gateway, which
+  no launch option carries. `docs/EMBEDDING.md` tells harness authors to advertise network
+  isolation only for `sealed`. `microvm run` now refuses a malformed or over-ceiling
+  connector list before the image build rather than at the launch after it. Specified in
+  `spec/core.symspec.json`, checked by the Stateright model in `model/src/posture.rs`, the
+  Gherkin scenarios in `microvms-core/tests/features/egress_posture.feature`, a bolero harness,
+  a CLI-envelope parity guard, and a live section (`drive_posture_parity`, six checks).
+
 - **`Sandbox.detach()` hands a launched VM to another process without a leak warning.** A
   durable workflow's launch step used to end by dropping its `Sandbox`, which printed the
   "dropped without terminate()" billing warning for a VM a later step was about to adopt.

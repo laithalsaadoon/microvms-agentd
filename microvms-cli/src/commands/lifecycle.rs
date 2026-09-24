@@ -582,6 +582,19 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
         }
     }
 
+    // The launch's egress posture, derived from the merged knobs rather than from the launch,
+    // so a run that fails before the launch still reports what it was going to be. Derived by
+    // the core function a binding's `egress_posture_for` and every launched session use
+    // (BIND-12, BIND-13), so the CLI cannot hold a different opinion than the library about
+    // the same request; a malformed or over-ceiling connector list is refused here, before
+    // the build and before any AWS call.
+    let egress_posture = microvms_core::control::egress_posture_for(
+        args.egress,
+        &args.egress_network_connectors,
+        args.deny_egress,
+        Some(&region),
+    )?;
+
     // What was resolved, before anything is attempted. Not decoration: the next thing that
     // happens is a credential resolution that can hang or fail, and an operator watching a stalled
     // command needs to know which region and which image name it stalled on. It goes *before* the
@@ -650,13 +663,7 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
     let mut sandbox = ctx.seam.open_sandbox(region, args.port).await?;
     let mut outcome = RunOutcome {
         image_name: Some(name.clone()),
-        // Derived from the merged knobs rather than from the launch, so a run that fails
-        // before the launch still reports what it was going to be — and derived in core, so
-        // the CLI cannot hold a different opinion than the library about the same request.
-        egress_posture: microvms_core::control::EgressPosture::for_launch(
-            args.egress,
-            args.deny_egress,
-        ),
+        egress_posture,
         ..RunOutcome::default()
     };
     let mut exec_report: Option<ExecReport> = None;

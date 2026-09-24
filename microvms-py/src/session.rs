@@ -592,6 +592,17 @@ impl PySession {
         Ok(self.with(|session| Ok(session.port()))?)
     }
 
+    /// The launch's egress posture: `"open"`, `"unsealed"`, `"best-effort"`, or `"sealed"`.
+    ///
+    /// The value the CLI envelope's `egressPosture` reports for the same launch options, and
+    /// what `egress_posture_for` answers before the launch. A session that does not hold its
+    /// launch options (`Session.direct`, `Session.attach`, an adopted sandbox) reports
+    /// `"unsealed"`. Advertise network isolation only for `"sealed"`.
+    #[getter]
+    fn egress_posture(&self) -> PyCoreResult<&'static str> {
+        Ok(self.with(|session| Ok(session.egress_posture().as_str()))?)
+    }
+
     /// Unauthenticated liveness.
     fn health(&self, py: Python<'_>) -> PyCoreResult<PyHealth> {
         Ok(PyHealth::wrap(self.detached(py, |session| {

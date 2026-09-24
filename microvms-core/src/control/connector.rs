@@ -40,13 +40,30 @@ use crate::region::Region;
 
 /// Validates a customer-managed connector ARN before launching a billable VM.
 pub(super) fn require_egress_connector_arn(arn: &str, region: &Region) -> Result<(), crate::Error> {
+    if !is_connector_arn_in(arn, region.as_str()) {
+        return Err(connector_arn_error(region.as_str()));
+    }
+    Ok(())
+}
+
+/// The refusal for a string that is not a customer-managed connector ARN in `region`.
+fn connector_arn_error(region: &str) -> crate::Error {
+    crate::Error::invalid_arg(format!(
+        "egressNetworkConnectors requires a customer-managed Lambda network connector ARN \
+         in {region} (arn:aws:lambda:{region}:<12-digit-account>:network-connector:<id>[:<version>]); \
+         create the VPC egress connector through lambda-core first",
+    ))
+}
+
+/// Whether `arn` is a customer-managed connector ARN in the region spelled `region`.
+fn is_connector_arn_in(arn: &str, region: &str) -> bool {
     let parts: Vec<&str> = arn.splitn(6, ':').collect();
-    let valid = parts.len() == 6
+    parts.len() == 6
         && (1..=crate::constants::MAX_NETWORK_CONNECTOR_LEN).contains(&arn.len())
         && parts[0] == "arn"
         && parts[1] == "aws"
         && parts[2] == "lambda"
-        && parts[3] == region.as_str()
+        && parts[3] == region
         && parts[4].len() == 12
         && parts[4].bytes().all(|byte| byte.is_ascii_digit())
         && parts[5]
@@ -65,17 +82,94 @@ pub(super) fn require_egress_connector_arn(arn: &str, region: &Region) -> Result
                             && version.bytes().all(|byte| byte.is_ascii_digit())
                     })
                     && parts.next().is_none()
-            });
-    if !valid {
-        return Err(crate::Error::invalid_arg(format!(
-            "egressNetworkConnectors requires a customer-managed Lambda network connector ARN \
-             in {} (arn:aws:lambda:{}:<12-digit-account>:network-connector:<id>[:<version>]); \
-             create the VPC egress connector through lambda-core first",
-            region.as_str(),
-            region.as_str(),
-        )));
+            })
+}
+
+/// The refusal for managed internet egress beside customer-managed connectors.
+pub(crate) fn egress_with_connectors() -> crate::Error {
+    crate::Error::invalid_arg(
+        "INTERNET_EGRESS cannot be combined with customer-managed egress connectors: \
+         choose managed internet egress or VPC routing",
+    )
+}
+
+/// The refusal for managed internet egress beside the advisory deny.
+pub(crate) fn egress_with_deny() -> crate::Error {
+    crate::Error::invalid_arg(
+        "egress and deny_egress ask for opposite things: egress puts the \
+         INTERNET_EGRESS connector on the launch, and deny_egress sets the guest's \
+         proxy variables to a black hole so a well-behaved client refuses to leave \
+         the VM. Pick one. Neither seals the VM — omitting the connector is measured \
+         not to (docs/PLATFORM.md), and the deny is advisory.",
+    )
+}
+
+/// The refusal for a `NetworkConnectorList` member over its ceiling, or `None` within it.
+pub(crate) fn over_connector_ceiling(member: &str, count: usize) -> Option<crate::Error> {
+    (count > crate::constants::MAX_NETWORK_CONNECTORS).then(|| {
+        crate::Error::invalid_arg(format!(
+            "{member} has {count} network connectors, over the NetworkConnectorList \
+             ceiling of {} (service model {}).",
+            crate::constants::MAX_NETWORK_CONNECTORS,
+            crate::constants::MODEL_API_VERSION,
+        ))
+    })
+}
+
+/// The egress posture a launch with these options reports, or the refusal it raises
+/// (BIND-11, BIND-13). Pure: no AWS call, no credentials.
+///
+/// A harness decides with this, before it pays for a build, whether a task that must not
+/// reach the network can run: only [`EgressPosture::Sealed`] is internet isolation, and this
+/// never answers it, because no launch option carries the evidence `sealed` needs (a VPC
+/// egress connector **and** separately verified VPC routing without an internet gateway or
+/// NAT gateway, `docs/NETWORKING.md`). [`crate::sandbox::Sandbox::run`] refuses and derives
+/// through this same function, and the session it builds carries the answer
+/// ([`crate::session::Session::egress_posture`]), which is also what the CLI envelope's
+/// `egressPosture` reports.
+///
+/// The refusals, in the order a launch raises them: `egress` with `deny_egress`, `egress`
+/// with any connector, a connector that is not a customer-managed connector ARN in `region`,
+/// and more connectors than `NetworkConnectorList` allows. Without a `region`, each ARN is
+/// checked against the region it names; a launch also requires that region to be its own.
+pub fn egress_posture_for(
+    egress: bool,
+    egress_network_connectors: &[String],
+    deny_egress: bool,
+    region: Option<&Region>,
+) -> Result<EgressPosture, crate::Error> {
+    if egress && deny_egress {
+        return Err(egress_with_deny());
     }
-    Ok(())
+    if egress && !egress_network_connectors.is_empty() {
+        return Err(egress_with_connectors());
+    }
+    for arn in egress_network_connectors {
+        match region {
+            Some(region) => require_egress_connector_arn(arn, region)?,
+            None => {
+                // The region the ARN names, when it names a plausible one.
+                let named = arn.split(':').nth(3).unwrap_or_default();
+                let plausible = !named.is_empty()
+                    && named.bytes().all(|byte| {
+                        byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'
+                    });
+                if !(plausible && is_connector_arn_in(arn, named)) {
+                    return Err(connector_arn_error(if plausible {
+                        named
+                    } else {
+                        "<region>"
+                    }));
+                }
+            }
+        }
+    }
+    if let Some(refusal) =
+        over_connector_ceiling("egressNetworkConnectors", egress_network_connectors.len())
+    {
+        return Err(refusal);
+    }
+    Ok(EgressPosture::for_launch(egress, deny_egress))
 }
 
 /// Compatibility constant: omitting an egress connector does not block internet access.
@@ -387,6 +481,106 @@ mod tests {
             None,
             "the labels are the wire spelling, and case is part of it"
         );
+    }
+
+    /// A connector ARN in `region`.
+    fn vpc(region: &str, index: usize) -> String {
+        format!("arn:aws:lambda:{region}:123456789012:network-connector:vpc-{index}")
+    }
+
+    /// **BIND-11 and BIND-13: the decision table.** The rows of `TABLE` in
+    /// `model/src/posture.rs`, at the wire ceiling of 10 connectors, each with the refusal's
+    /// words. A refusal is the launch's own message (the bdd scenarios and the fuzz harness
+    /// compare them against `Sandbox::run`).
+    ///
+    /// **Falsification** — 2026-09-24. Make `egress_posture_for` answer `Sealed` for a
+    /// connector-bearing request and the `(false, 1, ..)` rows go red; drop the ARN check and
+    /// the malformed rows answer `unsealed`. Both run and restored.
+    #[test]
+    fn the_posture_of_launch_options_is_the_models_table() {
+        use EgressPosture::{BestEffort, Open, Unsealed};
+        /// `(egress, connectors, malformed, deny, answer or the refusal's words)`.
+        type Row = (bool, usize, bool, bool, Result<EgressPosture, &'static str>);
+        let region = Region::UsEast1;
+        let malformed = "network-connector:vpc-0".to_string();
+        let table: [Row; 14] = [
+            (false, 0, false, false, Ok(Unsealed)),
+            (false, 0, false, true, Ok(BestEffort)),
+            (false, 1, false, false, Ok(Unsealed)),
+            (false, 1, false, true, Ok(BestEffort)),
+            (false, 10, false, false, Ok(Unsealed)),
+            (false, 1, true, false, Err("network connector ARN")),
+            (false, 11, false, false, Err("NetworkConnectorList ceiling")),
+            (false, 11, false, true, Err("NetworkConnectorList ceiling")),
+            (false, 11, true, false, Err("network connector ARN")),
+            (true, 0, false, false, Ok(Open)),
+            (true, 0, false, true, Err("opposite things")),
+            (
+                true,
+                1,
+                false,
+                false,
+                Err("INTERNET_EGRESS cannot be combined"),
+            ),
+            (true, 1, false, true, Err("opposite things")),
+            (
+                true,
+                1,
+                true,
+                false,
+                Err("INTERNET_EGRESS cannot be combined"),
+            ),
+        ];
+        for (egress, count, bad, deny, expected) in table {
+            let mut connectors: Vec<String> = (0..count).map(|i| vpc("us-east-1", i)).collect();
+            if bad {
+                connectors[0] = malformed.clone();
+            }
+            let answer = egress_posture_for(egress, &connectors, deny, Some(&region));
+            let row = format!("egress={egress} connectors={count} malformed={bad} deny={deny}");
+            match (answer, expected) {
+                (Ok(posture), Ok(want)) => assert_eq!(posture, want, "{row}"),
+                (Err(error), Err(needle)) => {
+                    assert_eq!(error.kind(), crate::ErrorKind::InvalidArg, "{row}: {error}");
+                    assert!(error.to_string().contains(needle), "{row}: {error}");
+                }
+                (answer, expected) => panic!("{row}: {answer:?}, expected {expected:?}"),
+            }
+        }
+    }
+
+    /// **BIND-11: no launch option is a seal.** The whole option space at and past the ceiling.
+    #[test]
+    fn no_launch_options_answer_sealed() {
+        for egress in [false, true] {
+            for deny in [false, true] {
+                for count in 0..=crate::constants::MAX_NETWORK_CONNECTORS + 1 {
+                    let connectors: Vec<String> = (0..count).map(|i| vpc("us-east-1", i)).collect();
+                    if let Ok(posture) =
+                        egress_posture_for(egress, &connectors, deny, Some(&Region::UsEast1))
+                    {
+                        assert!(!posture.is_sealed(), "{egress} {count} {deny}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// **BIND-13: without a region, each ARN is checked against the region it names**; with
+    /// one, an ARN in another region is the launch's own refusal.
+    #[test]
+    fn a_connector_is_checked_against_the_launch_region_when_there_is_one() {
+        let elsewhere = [vpc("eu-west-1", 0)];
+        assert_eq!(
+            egress_posture_for(false, &elsewhere, false, None).expect("a well-formed ARN"),
+            EgressPosture::Unsealed
+        );
+        let error = egress_posture_for(false, &elsewhere, false, Some(&Region::UsEast1))
+            .expect_err("an ARN from another region cannot attach to a us-east-1 launch");
+        assert!(error.to_string().contains("in us-east-1"), "{error}");
+        let error = egress_posture_for(false, &["not-an-arn".into()], false, None)
+            .expect_err("a string that is no ARN names no region either");
+        assert_eq!(error.kind(), crate::ErrorKind::InvalidArg);
     }
 
     /// The exact ARN, as a literal, for the region the measurements were taken in. The

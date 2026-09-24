@@ -526,11 +526,10 @@ impl ControlPlane {
             .map(|intent| intent.arn(&self.region))
             .collect();
 
+        // The same refusals, in the same order and words, as `egress_posture_for`, which
+        // `Sandbox::run` asks first; these stand for a caller of `run_microvm` directly.
         if !egress.is_empty() && !request.egress_network_connectors.is_empty() {
-            return Err(Error::invalid_arg(
-                "INTERNET_EGRESS cannot be combined with customer-managed egress connectors: \
-                 choose managed internet egress or VPC routing",
-            ));
+            return Err(super::connector::egress_with_connectors());
         }
         for arn in request.egress_network_connectors {
             super::connector::require_egress_connector_arn(&arn, &self.region)?;
@@ -542,13 +541,8 @@ impl ControlPlane {
             ("ingressNetworkConnectors", ingress.len()),
             ("egressNetworkConnectors", egress.len()),
         ] {
-            if count > crate::constants::MAX_NETWORK_CONNECTORS {
-                return Err(Error::invalid_arg(format!(
-                    "{member} has {count} network connectors, over the NetworkConnectorList \
-                     ceiling of {} (service model {}).",
-                    crate::constants::MAX_NETWORK_CONNECTORS,
-                    crate::constants::MODEL_API_VERSION,
-                )));
+            if let Some(refusal) = super::connector::over_connector_ceiling(member, count) {
+                return Err(refusal);
             }
         }
 

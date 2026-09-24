@@ -608,6 +608,9 @@ pub struct Sandbox {
     /// Whether the accepted launch carried a caller client token, and so may have adopted
     /// a VM an earlier attempt launched (#195).
     launch_adoptable: bool,
+    /// The egress posture of this sandbox's own accepted launch, or `None` for a sandbox
+    /// that launched nothing (an adopted one never saw the launch options).
+    launch_posture: Option<crate::control::EgressPosture>,
     /// The launch's agent token, held until the session that carries it is built. Kept out
     /// of `Debug` like every other credential here.
     pending_agent_token: Option<String>,
@@ -724,6 +727,7 @@ impl Sandbox {
             bootstrap_count: 0,
             suspended_window: None,
             launch_adoptable: false,
+            launch_posture: None,
             pending_agent_token: None,
             idle_window: None,
             suspended_at: None,
@@ -818,6 +822,17 @@ impl Sandbox {
     /// identity request with close code 4401 rather than downgrading.
     pub fn tunnel_identity(&self) -> Option<&crate::identity::TunnelIdentity> {
         self.tunnel_identity.as_ref()
+    }
+
+    /// The egress posture of this sandbox's launch (BIND-12), which its session carries.
+    ///
+    /// The launch's own [`RunRequest::egress_posture`] once [`Sandbox::run`] was accepted.
+    /// Otherwise [`EgressPosture::default`], `unsealed`: an adopted sandbox never saw the
+    /// launch options, and the weakest true claim is the only one it can make.
+    ///
+    /// [`EgressPosture::default`]: crate::control::EgressPosture::default
+    pub fn egress_posture(&self) -> crate::control::EgressPosture {
+        self.launch_posture.unwrap_or_default()
     }
 
     /// The agent port the control plane was built with: the hooks port on every image
@@ -955,20 +970,18 @@ impl Sandbox {
             )));
         }
 
-        // Opposite intents, refused before the call rather than resolved by a precedence
-        // rule nobody would find: `--egress` asks the platform for outbound network and
-        // `--deny-egress` asks the guest's own clients to refuse it, so a launch carrying
-        // both would report `open` while its workload's tools failed closed.
-        if request.egress && request.deny_egress {
-            return Err(Error::invalid_arg(
-                "egress and deny_egress ask for opposite things: egress puts the \
-                 INTERNET_EGRESS connector on the launch, and deny_egress sets the guest's \
-                 proxy variables to a black hole so a well-behaved client refuses to leave \
-                 the VM. Pick one. Neither seals the VM — omitting the connector is measured \
-                 not to (docs/PLATFORM.md), and the deny is advisory."
-                    .to_string(),
-            ));
-        }
+        // The network options, refused and classified by the one function a harness asks
+        // before a launch (BIND-13), so its answer and this launch cannot disagree. Opposite
+        // intents are refused rather than resolved by a precedence rule nobody would find:
+        // `--egress` asks the platform for outbound network and `--deny-egress` asks the
+        // guest's own clients to refuse it, so a launch carrying both would report `open`
+        // while its workload's tools failed closed.
+        let posture = crate::control::egress_posture_for(
+            request.egress,
+            &request.egress_network_connectors,
+            request.deny_egress,
+            Some(self.control.region()),
+        )?;
 
         let Some(identifier) = request
             .image_identifier
@@ -1045,6 +1058,7 @@ impl Sandbox {
         // A caller-supplied client token can adopt the VM an earlier attempt launched, which
         // may have idle-suspended since (#195); a minted token always launches afresh.
         self.launch_adoptable = request.client_token.is_some();
+        self.launch_posture = Some(posture);
         self.pending_agent_token = Some(agent_token);
 
         if request.wait {
@@ -1070,7 +1084,8 @@ impl Sandbox {
         });
         let mut builder = Session::builder(vm.endpoint.clone(), agent_token.clone())
             .with_minter(minter)
-            .with_port(self.control.port());
+            .with_port(self.control.port())
+            .with_egress_posture(self.egress_posture());
         if let Some(backend) = &self.session_backend {
             builder = builder.with_backend(Arc::clone(backend));
         }
@@ -1812,6 +1827,65 @@ mod tests {
         sandbox.run(request).await.expect("launch");
         let body = recorder.first_body("RunMicrovm");
         assert_eq!(body["egressNetworkConnectors"], serde_json::json!([arn]));
+    }
+
+    /// **BIND-12: the launched session carries its request's posture**, the value
+    /// `egress_posture_for` answers for the same options and the CLI envelope reports
+    /// (`guards.rs` holds that half). Each of the four launchable shapes.
+    ///
+    /// **Falsification** — 2026-09-24. Build the session without `with_egress_posture` and
+    /// the `open` and `best-effort` rows read `unsealed`; restored.
+    #[tokio::test]
+    async fn a_launched_session_reports_its_requests_posture() {
+        use crate::control::EgressPosture;
+        let arn = "arn:aws:lambda:us-east-1:123456789012:network-connector:isolated-vpc";
+        let rows = [
+            (RunRequest::new(), EgressPosture::Unsealed),
+            (RunRequest::new().with_egress(), EgressPosture::Open),
+            (
+                RunRequest::new().with_deny_egress(),
+                EgressPosture::BestEffort,
+            ),
+            (
+                RunRequest::new().with_egress_network_connector(arn),
+                EgressPosture::Unsealed,
+            ),
+        ];
+        for (request, expected) in rows {
+            let answered = crate::control::egress_posture_for(
+                request.egress,
+                &request.egress_network_connectors,
+                request.deny_egress,
+                Some(&Region::UsEast1),
+            )
+            .expect("a launchable request");
+            assert_eq!(answered, expected);
+            let (mut sandbox, recorder, _) = planted();
+            answer_launch(&recorder);
+            let session = sandbox
+                .run(request.with_image("arn:image"))
+                .await
+                .expect("the launch reaches RUNNING");
+            assert_eq!(session.egress_posture(), expected, "BIND-12");
+            assert_eq!(sandbox.egress_posture(), expected);
+            sandbox.detach().expect("hand the scripted VM off quietly");
+        }
+    }
+
+    /// **BIND-12: a session that does not hold its launch options reports `unsealed`**, the
+    /// weakest true claim, whatever the VM was launched with: an adopted VM and a session
+    /// attached directly both lack the request.
+    #[tokio::test]
+    async fn a_session_without_its_launch_options_reports_unsealed() {
+        use crate::control::EgressPosture;
+        let (sandbox, _recorder, _clock) = adopted_in("RUNNING").await;
+        assert_eq!(
+            sandbox.session().expect("RUNNING").egress_posture(),
+            EgressPosture::Unsealed
+        );
+        assert_eq!(sandbox.egress_posture(), EgressPosture::Unsealed);
+        let direct = Session::direct(ADOPT_ENDPOINT, ADOPT_TOKEN).expect("a direct session");
+        assert_eq!(direct.egress_posture(), EgressPosture::Unsealed);
     }
 
     /// A launched sandbox in RUNNING, which is where four of the twelve keys start.

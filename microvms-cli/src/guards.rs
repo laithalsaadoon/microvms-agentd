@@ -7851,3 +7851,81 @@ async fn a_stream_whose_reader_leaves_stops_detaches_and_exits_interrupted() {
         assert_eq!(stdout.after_close, 1, "{format:?}");
     }
 }
+
+/// **BIND-12: the run envelope and the session a binding holds report the same posture.**
+///
+/// The CLI and the bindings are two consumers of one core derivation: the envelope's
+/// `egressPosture` comes from `egress_posture_for` in `lifecycle::run`, and a binding's
+/// `Session.egress_posture` / `session.egressPosture()` is the core session's own value. So the
+/// parity is asserted where both meet: the same launch options, once through the CLI's shipped
+/// dispatcher and once through `Sandbox::run` on the same scripted seam, for each of the four
+/// launchable shapes.
+///
+/// **Falsification** — 2026-09-24. Derive the envelope's posture from `args.egress` alone in
+/// `lifecycle::run` and the `--deny-egress` row reads `unsealed` against the session's
+/// `best-effort`; restored.
+#[tokio::test]
+async fn the_run_envelope_and_the_launched_session_report_the_same_posture() {
+    const HEALTH: &str = r#"{"version": "0.1.0", "bootstrapped": true, "disk": null,
+                             "identity_degraded": false, "identity_repaired": true}"#;
+    let image = "arn:aws:lambda:us-east-1:123456789012:microvm-image/img";
+    let arn = "arn:aws:lambda:us-east-1:123456789012:network-connector:isolated-vpc";
+    let rows: [(bool, Vec<String>, bool, &str); 4] = [
+        (false, Vec::new(), false, "unsealed"),
+        (true, Vec::new(), false, "open"),
+        (false, Vec::new(), true, "best-effort"),
+        (false, vec![arn.to_string()], false, "unsealed"),
+    ];
+    for (egress, connectors, deny, expected) in rows {
+        let dir = TempDir::new("posture-parity");
+        let daemon = DaemonScript::new();
+        for _ in 0..4 {
+            daemon.reply(200, HEALTH);
+        }
+        let seam = SyncSeam {
+            transport: sync_launch_script(),
+            clock: Arc::new(YieldingClock::default()),
+            daemon,
+        };
+        let mut args = run_args_for_image(image, dir.0.clone());
+        args.egress = egress;
+        args.egress_network_connectors = connectors.clone();
+        args.deny_egress = deny;
+        let (result, _) = dispatch_with(&seam, &Command::Run(args), full_infra()).await;
+        let rendered = result.expect("the scripted run succeeds");
+        let envelope = rendered.data["egressPosture"].clone();
+
+        let mut sandbox = seam
+            .open_sandbox(Region::UsEast1, None)
+            .await
+            .expect("a scripted sandbox");
+        let mut request = microvms_core::sandbox::RunRequest::new().with_image(image);
+        request.egress = egress;
+        request.egress_network_connectors = connectors.clone();
+        request.deny_egress = deny;
+        let session = sandbox.run(request).await.expect("the same launch");
+        let row = format!(
+            "egress={egress} connectors={} deny={deny}",
+            connectors.len()
+        );
+        assert_eq!(envelope, expected, "{row}: the envelope");
+        assert_eq!(
+            session.egress_posture().as_str(),
+            expected,
+            "{row}: the session"
+        );
+        assert_eq!(
+            microvms_core::control::egress_posture_for(
+                egress,
+                &connectors,
+                deny,
+                Some(&Region::UsEast1)
+            )
+            .expect("launchable")
+            .as_str(),
+            expected,
+            "{row}: the request-side answer"
+        );
+        sandbox.detach().expect("hand the scripted VM off quietly");
+    }
+}

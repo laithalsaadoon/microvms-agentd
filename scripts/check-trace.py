@@ -91,6 +91,16 @@ TRACED: dict[str, str | tuple[str, dict[str, str]]] = {
     "AGENTD-14": "#226",
     "AGENTD-15": "#226",
     "AGENTD-16": "#224",
+    "BIND-11": "#227",
+    "BIND-12": "#227",
+    "BIND-13": (
+        "#227",
+        {
+            "live": "a pure function that makes no AWS call; its refusals precede any call, "
+            "so the service never sees them (zero calls asserted by the Gherkin scenarios "
+            "and the fuzz harness)"
+        },
+    ),
     "BIND-17": "#219",
     "BIND-18": "#219",
     "BIND-19": "#219",

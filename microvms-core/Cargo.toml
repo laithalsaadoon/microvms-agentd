@@ -205,6 +205,11 @@ harness = false
 name = "bdd_run_to_completion"
 harness = false
 
+# The behavior spec for BIND-11..13 (#227), against the core the bindings wrap.
+[[test]]
+name = "bdd_posture"
+harness = false
+
 [lints.rust]
 # No hand-written `unsafe` in this crate; a future one is a build error, not a scan finding.
 unsafe_code = "forbid"

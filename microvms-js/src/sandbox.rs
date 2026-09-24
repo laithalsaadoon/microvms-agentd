@@ -319,6 +319,34 @@ pub fn wrap_dockerfile(
     microvms_core::control::wrap_dockerfile(&task_dockerfile, &opts).map_err(js)
 }
 
+/// The egress posture `sandbox.run` with these options would report, without launching.
+///
+/// One of `"open"`, `"unsealed"`, `"best-effort"`, or `"sealed"`: the value the launched
+/// session's `egressPosture()` and the CLI envelope's `egressPosture` carry. Throws the launch's
+/// own `ERR_INVALID_ARG` for options it would refuse. No AWS call and no credentials, so a
+/// harness can decide before a build whether a no-network task is satisfiable.
+///
+/// Only `"sealed"` is network isolation, and no option answers it: isolation needs a VPC
+/// egress connector and separately verified VPC routing without an internet gateway or NAT
+/// gateway. Omitting `egress` is `"unsealed"`; `denyEgress` is `"best-effort"`. Without a
+/// `region`, each connector ARN is checked against the region it names.
+#[napi]
+pub fn egress_posture_for(
+    egress: Option<bool>,
+    connectors: Option<Vec<String>>,
+    deny_egress: Option<bool>,
+    region: Option<&Region>,
+) -> napi::Result<String, String> {
+    microvms_core::control::egress_posture_for(
+        egress.unwrap_or(false),
+        &connectors.unwrap_or_default(),
+        deny_egress.unwrap_or(false),
+        region.map(|region| &region.inner),
+    )
+    .map(|posture| posture.as_str().to_string())
+    .map_err(js)
+}
+
 /// Everything `CreateMicrovmImage` needs.
 ///
 /// # What is deliberately not a field

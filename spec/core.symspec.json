@@ -1051,6 +1051,25 @@
       "verificationMethod": "test",
       "verifies": []
     },
+    "bb1f8d17-64d2-415a-ae69-dfa172d33cb4": {
+      "createdAt": "2026-09-24T18:00:00.000Z",
+      "derives": [],
+      "id": "bb1f8d17-64d2-415a-ae69-dfa172d33cb4",
+      "key": "BIND-11",
+      "negated": false,
+      "patternType": "ubiquitous",
+      "priority": "critical",
+      "refines": [],
+      "satisfies": [],
+      "sentence": "The microvms-core shall derive a launch's egress posture from its launch options alone, as open when managed internet egress is requested, best-effort when the advisory deny is requested, and unsealed otherwise, and never as sealed.",
+      "status": "approved",
+      "systemName": "microvms-core",
+      "systemResponse": "derive a launch's egress posture from its launch options alone, as open when managed internet egress is requested, best-effort when the advisory deny is requested, and unsealed otherwise, and never as sealed",
+      "updatedAt": "2026-09-24T18:00:00.000Z",
+      "verificationMethod": "test",
+      "verificationNote": "sealed needs a VPC egress connector and separately verified VPC routing without an internet gateway or NAT gateway (docs/NETWORKING.md); no launch option carries the routing audit, so a posture derived from options never claims isolation (model/src/posture.rs)",
+      "verifies": []
+    },
     "bdfad1d9-41e7-4149-9dec-43d7a4b1e15c": {
       "createdAt": "2026-08-08T01:56:49.925Z",
       "derives": [],
@@ -1222,6 +1241,27 @@
       "verificationMethod": "test",
       "verifies": []
     },
+    "db9bb744-500f-40b9-9c1a-964ea5df1c61": {
+      "createdAt": "2026-09-24T18:00:00.000Z",
+      "derives": [],
+      "id": "db9bb744-500f-40b9-9c1a-964ea5df1c61",
+      "key": "BIND-13",
+      "negated": false,
+      "patternType": "event-driven",
+      "priority": "high",
+      "refines": [
+        "bb1f8d17-64d2-415a-ae69-dfa172d33cb4"
+      ],
+      "satisfies": [],
+      "sentence": "When a caller asks for the egress posture of a set of launch options, the microvms-core shall answer with the posture a launch with those options would report, or with the invalid-argument refusal the launch would raise, without any AWS call.",
+      "status": "approved",
+      "systemName": "microvms-core",
+      "systemResponse": "answer with the posture a launch with those options would report, or with the invalid-argument refusal the launch would raise, without any AWS call",
+      "trigger": "a caller asks for the egress posture of a set of launch options",
+      "updatedAt": "2026-09-24T18:00:00.000Z",
+      "verificationMethod": "test",
+      "verifies": []
+    },
     "e41253c7-0ff9-4098-8988-9e06d880086b": {
       "createdAt": "2026-08-08T01:55:36.915Z",
       "derives": [],
@@ -1260,6 +1300,26 @@
       "updatedAt": "2026-08-08T02:10:17.186Z",
       "verificationMethod": "test",
       "verificationNote": "PLATFORM.md: root in the guest is not enough; sethostname and bind mounts need additionalOsCapabilities",
+      "verifies": []
+    },
+    "e8fbf627-155f-4b33-94bd-d36f4e31692a": {
+      "createdAt": "2026-09-24T18:00:00.000Z",
+      "derives": [],
+      "id": "e8fbf627-155f-4b33-94bd-d36f4e31692a",
+      "key": "BIND-12",
+      "negated": false,
+      "patternType": "ubiquitous",
+      "priority": "high",
+      "refines": [
+        "bb1f8d17-64d2-415a-ae69-dfa172d33cb4"
+      ],
+      "satisfies": [],
+      "sentence": "The language bindings layer shall expose on each session the egress posture the CLI envelope reports for the same launch options, and unsealed for a session whose launch options the session does not hold.",
+      "status": "approved",
+      "systemName": "language bindings layer",
+      "systemResponse": "expose on each session the egress posture the CLI envelope reports for the same launch options, and unsealed for a session whose launch options the session does not hold",
+      "updatedAt": "2026-09-24T18:00:00.000Z",
+      "verificationMethod": "test",
       "verifies": []
     },
     "ecf8065e-c627-4084-b306-942dc7ce4cae": {

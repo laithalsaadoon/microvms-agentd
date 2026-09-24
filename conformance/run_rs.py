@@ -6,7 +6,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Live conformance run driving the **Rust** client stack through the `microvm` CLI.
 
-This is the only live suite, and it now expresses **every named check** — 217 of them, with
+This is the only live suite, and it now expresses **every named check** — 223 of them, with
 none recorded SKIP. `conformance/run.py` was the oracle — 56 checks through the Python
 client — and it went away with that client once both suites ran green against real AWS on
 the same commit (Python 56/56, this one 38/38 with 34 recorded SKIP). Those 34 were the
@@ -170,6 +170,11 @@ threat model. And `--deny-egress`'s advisory proxy stopping a well-behaved clien
 same VM (through `exec --env`, so no second billable launch), while the platform still
 routes without it — which is exactly why that posture is `best-effort` and never `sealed`.
 Live because all three are claims about someone else's network.
+
+223 rather than 217: `drive_posture_parity` (#227) adds six. The core session the bindings
+wrap reports the CLI envelope's `egressPosture` for a connector-less and an `--egress` launch
+of the suite's image, an adopter holding no launch options reports `unsealed`, and nothing in
+the section reports `sealed` (BIND-11, BIND-12).
 
 217 rather than 201: `drive_exec_start_protocol` adds sixteen for issues #224, #225 and
 #226, each named by its requirement key (AGENTD-7..16): a user and a group by name, an
@@ -1761,6 +1766,116 @@ def drive_platform_posture(
         f"{role_arn.rsplit('/', 1)[-1]}: {len(actions)} allowed actions, "
         f"off-prefix {off_prefix!r}, attached managed policies {attached!r}",
     )
+
+
+def drive_posture_parity(cli: Cli, launched: Envelope, results: Results) -> None:
+    """BIND-11 and BIND-12 (#227): the bindings' session posture against the CLI envelope's.
+
+    The bindings' `Sandbox.run` wraps core `Sandbox::run`, and their `Session.egress_posture` /
+    `session.egressPosture()` read the core session's value, so the core live test
+    `live_posture` launches through that call, once with no network options and once with
+    managed egress, and prints each session's posture. The CLI side is the suite's own
+    connector-less launch and one `run --egress` launched and torn down here. An adopter of the
+    egress VM, holding no launch options, must report `unsealed`. Three VMs, each bounded at
+    600 seconds; the Rust test observes TERMINATED for both of its own.
+
+    The posture is computed from the options, not read from AWS, so this proves the launch path
+    carries it end to end; what the guest can reach is `drive_platform_posture`'s question.
+    """
+    print("\n-- egress posture parity (core session behind the bindings vs the CLI) --")
+    image = str(launched.data["imageIdentifier"])
+    egress = cli.call(
+        "run",
+        "--image",
+        image,
+        "--name",
+        f"microvm-cli-conformance-posture-{secrets.token_hex(4)}",
+        "--memory",
+        str(BASELINE_MEMORY_MIB),
+        "--egress",
+        "--region",
+        cli.region,
+        "--max-duration-sec",
+        "600",
+    )
+    results.check(
+        "BIND-12 an --egress run's envelope reports open and tears down clean",
+        egress.data.get("egressPosture") == "open" and not egress.data.get("leaked"),
+        f"egressPosture={egress.data.get('egressPosture')!r} "
+        f"leaked={egress.data.get('leaked')!r}",
+    )
+
+    env = os.environ.copy()
+    env["MICROVM_BACKGROUND_TEST_IMAGE"] = image
+    env["AWS_REGION"] = cli.region
+    command = [
+        "cargo",
+        "test",
+        "-p",
+        "microvms-core",
+        "--test",
+        "live_posture",
+        "a_launched_sessions_posture_is_its_requests",
+        "--",
+        "--ignored",
+        "--exact",
+        "--nocapture",
+    ]
+    cli.log.append(command_for_log(command))
+    try:
+        run = subprocess.run(
+            command,
+            cwd=Path(__file__).resolve().parents[1],
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=20 * 60,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        results.check(
+            "BIND-12 the core posture launches ran",
+            False,
+            "exceeded 20 minutes; VM lifetime 600s",
+        )
+        return
+    sessions = posture_lines(run.stderr)
+    results.check(
+        "BIND-12 the core posture launches ran and tore down to TERMINATED",
+        run.returncode == 0 and run.stderr.count("state=TERMINATED") == 2,
+        f"exit={run.returncode} postures={sessions!r} "
+        f"terminated={run.stderr.count('state=TERMINATED')}",
+    )
+    results.eq(
+        "BIND-12 a connector-less session reports what its CLI envelope reports",
+        sessions.get("default"),
+        launched.data.get("egressPosture"),
+    )
+    results.eq(
+        "BIND-12 an --egress session reports what its CLI envelope reports",
+        sessions.get("egress"),
+        egress.data.get("egressPosture"),
+    )
+    results.eq(
+        "BIND-12 a VM adopted without its launch options reports unsealed",
+        sessions.get("egress-adopted"),
+        "unsealed",
+    )
+    results.check(
+        "BIND-11 no launch in this section reported sealed",
+        "sealed" not in {*sessions.values(), egress.data.get("egressPosture")},
+        f"postures={sessions!r} envelope={egress.data.get('egressPosture')!r}",
+    )
+
+
+def posture_lines(stderr: str) -> dict[str, str]:
+    """`POSTURE <launch>=<label>` lines from `live_posture`, as {launch: label}."""
+    postures: dict[str, str] = {}
+    for line in stderr.splitlines():
+        if line.startswith("POSTURE "):
+            launch, _, rest = line.removeprefix("POSTURE ").partition("=")
+            postures[launch] = rest.split(" ", 1)[0]
+    return postures
 
 
 def drive_exec_identity(cli: Cli, launched: Envelope, results: Results) -> None:
@@ -6110,6 +6225,22 @@ def check_run_section(results: "Results") -> None:
     )
 
 
+def check_posture_lines(results: "Results") -> None:
+    """The `live_posture` reader keeps each launch's label and ignores every other line."""
+    stderr = (
+        "running 1 test\n"
+        "POSTURE default=unsealed microvmId=mvm-1\n"
+        "POSTURE egress=open microvmId=mvm-2\n"
+        "POSTURE egress-adopted=unsealed microvmId=mvm-2\n"
+        "cleanup microvmId=mvm-1 state=TERMINATED\n"
+    )
+    results.eq(
+        "the posture-line reader maps each launch to its label",
+        posture_lines(stderr),
+        {"default": "unsealed", "egress": "open", "egress-adopted": "unsealed"},
+    )
+
+
 def check_bdd_outcome(results: "Results") -> None:
     """The JUnit reader tells a passed scenario from a failed, skipped, or absent one."""
     name = BDD_LIVE_SCENARIO
@@ -6153,6 +6284,7 @@ def self_test() -> int:
         check_closing_reader_helper(results)
         check_run_section(results)
         check_bdd_outcome(results)
+        check_posture_lines(results)
 
         # -- the success side -------------------------------------------------
         ok = cli.call("ok")
@@ -6742,6 +6874,11 @@ def main() -> int:
                 launched,
                 aws,
                 results,
+            )
+            # Egress posture parity (#227): the core session the bindings wrap against the
+            # CLI envelope, on two bounded VMs from the suite's image plus one CLI launch.
+            run_section(
+                results, "posture_parity", drive_posture_parity, cli, launched, results
             )
             run_section(
                 results, "exec_identity", drive_exec_identity, cli, launched, results
