@@ -34,6 +34,7 @@ from __future__ import annotations
 from microvms import (
     AgentSpec,
     AgentVm,
+    BaseImage,
     BuildHookTimeout,
     ControlPlane,
     CostReport,
@@ -54,6 +55,7 @@ from microvms import (
     core_version,
     estimate_run,
     run_report,
+    wrap_dockerfile,
 )
 
 
@@ -117,6 +119,16 @@ def hook_timeouts() -> tuple[RunHookTimeout, BuildHookTimeout]:
 def describe_client() -> str:
     """The core's version, which is what a `doctor` command should report."""
     return core_version()
+
+
+def task_image_inputs(task_dockerfile: str) -> tuple[str, BaseImage]:
+    """A task's own Dockerfile made buildable: the wrap, then the base that pairs with it.
+
+    Both are pure and make no AWS call. `from_dockerfile` answers a `BaseImage`, so a
+    checker accepts the pair as `build_image(dockerfile=..., base_image=...)` arguments.
+    """
+    wrapped: str = wrap_dockerfile(task_dockerfile, workdir="/srv/task")
+    return wrapped, BaseImage.from_dockerfile(wrapped)
 
 
 def launch(region: Region, size: SizeClass) -> str:
@@ -236,6 +248,8 @@ def main() -> None:
     print(f"client {describe_client()} in {region.name} at {size.describe()}")
     print(f"planned: {render_total(plan_cost(size, 300.0))}")
     print(f"measured: {render_total(measured_cost(size, 287.4))}")
+    wrapped, base = task_image_inputs("FROM python:3.12-slim\n")
+    print(f"task base {base.docker_ref}: {len(wrapped.splitlines())} lines")
 
 
 if __name__ == "__main__":

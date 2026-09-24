@@ -84,8 +84,8 @@ const USERS: [&str; 6] = ["root", "0", "app", "root:root", "1000:1000", "${USER}
 /// What the generator knows about the text it produced, independent of the function.
 struct Rendered {
     text: String,
-    /// Some line starts with a `FROM` piece that names an image, and no raw bytes could
-    /// have hidden or added one.
+    /// The first `FROM` line names an image, when no raw bytes could have hidden or added
+    /// one.
     known_from: Option<bool>,
     /// The text ends inside a continuation or an open heredoc, when the structured pieces
     /// alone determine that.
@@ -101,7 +101,8 @@ fn render(case: &Case) -> Rendered {
         lines.push("# escape=`".to_string());
     }
     let mut raw = false;
-    let mut named_from = false;
+    let mut first_from: Option<bool> = None;
+    let mut ambiguous = false;
     let mut continued = false;
     let mut heredoc_open = false;
     let mut has_user_line = false;
@@ -109,11 +110,9 @@ fn render(case: &Case) -> Rendered {
         let line = match piece {
             Piece::From(pick) => {
                 let from = FROMS[usize::from(*pick) % FROMS.len()];
-                // Inside a heredoc or after a continuation, a FROM line is not an instruction;
-                // the generator only counts one it can be sure of.
-                if from != "FROM" && !heredoc_open && !continued {
-                    named_from = true;
-                }
+                // The first line whose first word is FROM is the one `dockerfile_from_ref`
+                // reads, wherever it sits; a bare `FROM` names nothing.
+                first_from.get_or_insert(from != "FROM");
                 from.to_string()
             }
             Piece::Run => "RUN echo hello".to_string(),
@@ -161,7 +160,10 @@ fn render(case: &Case) -> Rendered {
         // and comment lines, a heredoc runs until its terminator.
         match piece {
             Piece::Continued if !heredoc_open => continued = true,
-            Piece::HeredocOpen if !heredoc_open && !continued => heredoc_open = true,
+            // A heredoc marker joined onto a continued line opens a heredoc of the joined
+            // instruction; the generator does not follow that far.
+            Piece::HeredocOpen if continued => ambiguous = true,
+            Piece::HeredocOpen if !heredoc_open => heredoc_open = true,
             Piece::HeredocClose if heredoc_open => heredoc_open = false,
             Piece::Blank | Piece::Comment => {}
             _ if heredoc_open => {}
@@ -175,9 +177,9 @@ fn render(case: &Case) -> Rendered {
     }
     Rendered {
         text,
-        known_from: (!raw).then_some(named_from),
-        known_unfinished: (!raw).then_some(continued || heredoc_open),
-        has_user_line,
+        known_from: (!raw).then_some(first_from.unwrap_or(false)),
+        known_unfinished: (!raw && !ambiguous).then_some(continued || heredoc_open),
+        has_user_line: has_user_line || raw,
     }
 }
 

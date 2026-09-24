@@ -238,6 +238,16 @@ class BaseImage:
         """
         Goes into the Dockerfile `FROM` — the registry ref measured alongside `name`.
         """
+    @staticmethod
+    def from_dockerfile(dockerfile: str) -> BaseImage:
+        """
+        The base a task Dockerfile pairs with: the managed base's `name`, so `baseImageArn` is
+        unchanged, and the Dockerfile's first `FROM` as `docker_ref`, digest pin included.
+        
+        `build_image` refuses a Dockerfile whose first `FROM` is not the base's `docker_ref`;
+        a base derived from that Dockerfile passes by construction. Raises `InvalidArgError`
+        for a Dockerfile with no `FROM`.
+        """
     @property
     def name(self, /) -> str:
         """
@@ -2214,6 +2224,25 @@ def run_report(size: SizeClass, *, running: Duration |None = None, suspended: Du
 def session_constants() -> dict:
     """
     The daemon's protocol constants, for a caller asserting against the wire contract.
+    """
+
+def wrap_dockerfile(task_dockerfile: str, *, port: int |None = None, workdir: str |None = None, inherit_workdir: bool = False) -> str:
+    """
+    A task Dockerfile with the agentd stanza appended, ready for `build_image`.
+    
+    The result is the task text, a newline if it lacked one, `USER root` when the task's last
+    `USER` is anyone else, then the stanza the default Dockerfile uses: `COPY agentd /agentd`,
+    the chmod, `ENV AGENTD_PORT`, `EXPOSE`, `ENTRYPOINT []` and `CMD ["/agentd"]`. Pass the
+    result to `build_image` with `base_image=BaseImage.from_dockerfile(result)`.
+    
+    `port` is the agent port (9000 by default) and must match the sandbox's. `workdir`
+    creates and sets a working directory, as the default Dockerfile does. `inherit_workdir`
+    refuses a result with no `WORKDIR` anywhere.
+    
+    Raises `InvalidArgError` for a task with no `FROM`, one that ends inside a line
+    continuation or an unterminated heredoc (either would swallow the stanza), a keepalive
+    the client cannot tolerate, a port of 0, a workdir that is not one absolute path, or
+    `inherit_workdir` with nothing to inherit.
     """
 
 # `microvms_core::VERSION`, added by the module's `#[pymodule_init]`. The **core's**

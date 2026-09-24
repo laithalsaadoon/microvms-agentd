@@ -328,6 +328,20 @@ impl PyBaseImage {
         }
     }
 
+    /// The base a task Dockerfile pairs with: the managed base's `name`, so `baseImageArn` is
+    /// unchanged, and the Dockerfile's first `FROM` as `docker_ref`, digest pin included.
+    ///
+    /// `build_image` refuses a Dockerfile whose first `FROM` is not the base's `docker_ref`;
+    /// a base derived from that Dockerfile passes by construction. Raises `InvalidArgError`
+    /// for a Dockerfile with no `FROM`.
+    #[staticmethod]
+    fn from_dockerfile(dockerfile: &str) -> PyCoreResult<PyBaseImage> {
+        // IMAGE-5: a pass-through; the derivation and its refusal are core's.
+        Ok(PyBaseImage {
+            inner: BaseImage::from_dockerfile(dockerfile)?,
+        })
+    }
+
     /// Goes into `baseImageArn` — the platform's managed base, not a registry ref.
     #[getter]
     fn name(&self) -> &str {
@@ -351,6 +365,42 @@ impl PyBaseImage {
             self.inner.name, self.inner.docker_ref
         )
     }
+}
+
+/// A task Dockerfile with the agentd stanza appended, ready for `build_image`.
+///
+/// The result is the task text, a newline if it lacked one, `USER root` when the task's last
+/// `USER` is anyone else, then the stanza the default Dockerfile uses: `COPY agentd /agentd`,
+/// the chmod, `ENV AGENTD_PORT`, `EXPOSE`, `ENTRYPOINT []` and `CMD ["/agentd"]`. Pass the
+/// result to `build_image` with `base_image=BaseImage.from_dockerfile(result)`.
+///
+/// `port` is the agent port (9000 by default) and must match the sandbox's. `workdir`
+/// creates and sets a working directory, as the default Dockerfile does. `inherit_workdir`
+/// refuses a result with no `WORKDIR` anywhere.
+///
+/// Raises `InvalidArgError` for a task with no `FROM`, one that ends inside a line
+/// continuation or an unterminated heredoc (either would swallow the stanza), a keepalive
+/// the client cannot tolerate, a port of 0, a workdir that is not one absolute path, or
+/// `inherit_workdir` with nothing to inherit.
+#[pyfunction]
+#[pyo3(signature = (task_dockerfile, *, port=None, workdir=None, inherit_workdir=false))]
+pub(crate) fn wrap_dockerfile(
+    task_dockerfile: &str,
+    port: Option<u16>,
+    workdir: Option<String>,
+    inherit_workdir: bool,
+) -> PyCoreResult<String> {
+    // IMAGE-5: a pass-through; the stanza, the guards and their messages are core's.
+    let defaults = microvms_core::control::WrapOptions::default();
+    let opts = microvms_core::control::WrapOptions {
+        port: port.unwrap_or(defaults.port),
+        workdir,
+        inherit_workdir,
+    };
+    Ok(microvms_core::control::wrap_dockerfile(
+        task_dockerfile,
+        &opts,
+    )?)
 }
 
 /// The per-VM `logging` a binding's three keyword arguments ask for.

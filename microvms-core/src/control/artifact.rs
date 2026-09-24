@@ -286,12 +286,39 @@ impl BaseImage {
         }
     }
 
-    /// The base a task Dockerfile pairs with. Not yet implemented (#220).
-    pub fn from_dockerfile(_dockerfile: &str) -> Result<Self, Error> {
-        Err(Error::new(
-            ErrorKind::Unexpected,
-            "BaseImage::from_dockerfile is not implemented yet (#220)",
-        ))
+    /// The base image a task Dockerfile pairs with: the managed base's `name` (so
+    /// `baseImageArn` is unchanged) and the Dockerfile's own first `FROM` as `docker_ref`
+    /// (IMAGE-4).
+    ///
+    /// # The pairing the other way round
+    ///
+    /// [`require_matching_from`] refuses a Dockerfile whose first `FROM` is not the base's
+    /// `docker_ref`. That is the right guard where this client derives the Dockerfile from
+    /// the base; a task Dockerfile chooses its own `FROM`, so the pairing has to run from the
+    /// Dockerfile to the base, and every harness wrote the same inversion by hand (#220).
+    /// Here the ref is taken whole — `--platform` and `AS` decoration dropped by
+    /// [`dockerfile_from_ref`], a digest pin kept — so the guard's comparison is the ref
+    /// against itself and it passes by construction.
+    ///
+    /// `working_dir` is empty: this cannot read the `FROM` image's `WorkingDir` without
+    /// pulling its manifest, and empty is what every measured public base declares (see
+    /// [`BaseImage::al2023`]). A task that relies on one sets `WORKDIR`, which
+    /// [`require_workdir`] reads from the Dockerfile.
+    ///
+    /// Refuses a Dockerfile with no `FROM`: there is no ref to take.
+    pub fn from_dockerfile(dockerfile: &str) -> Result<Self, Error> {
+        match dockerfile_from_ref(dockerfile) {
+            Some(docker_ref) => Ok(Self {
+                docker_ref: docker_ref.to_string(),
+                ..Self::al2023()
+            }),
+            None => Err(Error::invalid_arg(
+                "the Dockerfile has no FROM, so there is no image reference to pair the \
+                 managed base with. Derive the base from the Dockerfile the task builds \
+                 from."
+                    .to_string(),
+            )),
+        }
     }
 
     /// The `baseImageArn` for this base in `region`.
@@ -360,8 +387,30 @@ pub fn default_dockerfile(
     base: &BaseImage,
     project: Option<Ecosystem>,
 ) -> String {
+    format!(
+        "FROM {}\n{}",
+        base.docker_ref,
+        agentd_stanza(port, workdir, project)
+    )
+}
+
+/// The agentd stanza: every line [`default_dockerfile`] writes after its `FROM`, and every
+/// line [`wrap_dockerfile`] appends to a task Dockerfile (IMAGE-1).
+///
+/// # One source, and why it is this function rather than a constant
+///
+/// Two copies of these lines drift: a harness that carried the stanza as a string literal
+/// of its own (#220) had to track every change here by hand, and the day one side gained a
+/// line the other did not, the image a task built and the image the default build produced
+/// stopped agreeing about how the daemon starts. So both callers render this one function,
+/// and `wrapping_a_bare_from_is_the_default_dockerfile_minus_nothing` holds them equal:
+/// `wrap_dockerfile("FROM x\n")` is the default Dockerfile for a base whose ref is `x`.
+///
+/// The text is byte-for-byte what `default_dockerfile` emitted before the split, which is
+/// what keeps every content-addressed image name (`build --reuse`, `AgentVm::image_name`)
+/// derived from the default Dockerfile valid: the name hashes the Dockerfile text.
+fn agentd_stanza(port: u16, workdir: Option<&str>, project: Option<Ecosystem>) -> String {
     let mut lines = vec![
-        format!("FROM {}", base.docker_ref),
         "COPY agentd /agentd".to_string(),
         "RUN chmod 0755 /agentd".to_string(),
     ];
@@ -399,11 +448,18 @@ pub fn default_dockerfile(
 /// What [`wrap_dockerfile`] needs besides the task text.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WrapOptions {
-    /// The agent port the stanza's `ENV AGENTD_PORT` names.
+    /// The agent port the stanza's `ENV AGENTD_PORT` and `EXPOSE` name. It must be the port
+    /// the create call sends as `hooks.port` — [`ControlPlane::port`](super::ControlPlane::port)
+    /// — which [`require_matching_agentd_port`] checks at the create call.
     pub port: u16,
-    /// A working directory for the stanza to create and set, as the default generator does.
+    /// A working directory for the stanza to create and set, exactly as
+    /// [`default_dockerfile`] writes one. One absolute path; `Some("")` reads as `None`, the
+    /// same way the default generator reads it.
     pub workdir: Option<String>,
-    /// The caller relies on the image `WORKDIR`, so one must be declared somewhere.
+    /// The caller relies on the image `WORKDIR` — an exec with no `cwd` runs there — so one
+    /// must be declared: by the task Dockerfile or by [`WrapOptions::workdir`]. Off by
+    /// default, because a task with no `WORKDIR` runs its commands in `/` under Docker too,
+    /// and a harness reproducing that has nothing to refuse.
     pub inherit_workdir: bool,
 }
 
@@ -417,12 +473,262 @@ impl Default for WrapOptions {
     }
 }
 
-/// Appends the agentd stanza to a task Dockerfile. Not yet implemented (#220).
-pub fn wrap_dockerfile(_task: &str, _opts: &WrapOptions) -> Result<String, Error> {
-    Err(Error::new(
-        ErrorKind::Unexpected,
-        "wrap_dockerfile is not implemented yet (#220)",
-    ))
+/// A task Dockerfile with the agentd stanza appended: the one call a harness needs to go
+/// from the Dockerfile a task brings to one this client can build (#220).
+///
+/// The result is the task text verbatim, a newline if it lacked one, `USER root` when the
+/// task's last `USER` is anyone else, and then [`default_dockerfile`]'s stanza for
+/// `opts.port` and `opts.workdir` — the same function, so the two cannot drift (IMAGE-1).
+/// The stanza's `ENTRYPOINT []` and `CMD ["/agentd"]` are the result's last instructions,
+/// so whatever entrypoint, command, or port the task set, the daemon is the container's
+/// process and listens where the hooks are called (IMAGE-2). Pair it with
+/// [`BaseImage::from_dockerfile`] for the create call's `FROM` guard (IMAGE-4).
+///
+/// # `USER root`, only when the task changed user
+///
+/// The daemon demotes each exec to the user it names, which takes root; a task that ends on
+/// `USER app` would otherwise start the daemon as `app`. The line is written only when the
+/// last `USER` is not root, so a task that never changes user wraps to exactly the default
+/// stanza — writing it unconditionally would make the default Dockerfile and the wrap of a
+/// bare `FROM` two different texts (`model/src/wrap.rs`, `AlwaysUserRoot`).
+///
+/// # What is refused, and why each is a refusal (IMAGE-3)
+///
+/// Each is a Dockerfile the build would accept and the guest would then fail on, one build
+/// cycle later and naming none of the cause:
+///
+/// * **No `FROM`.** Nothing to append to, and no base to derive.
+/// * **An unfinished last instruction.** A trailing line continuation — in the escape
+///   character the `# escape=` directive selects, across the blank and comment lines Docker
+///   skips inside one — joins the stanza's `COPY agentd /agentd` into the task's last
+///   instruction; an unterminated heredoc swallows the whole stanza as its body. Either way
+///   the image has no daemon and the build fails as a run-hook timeout.
+/// * **A keepalive at or over the client's stream idle timeout**, for the reason
+///   [`require_keepalive_under_idle_timeout`] gives.
+/// * **A port of 0, or a workdir that is not one absolute path.** A relative `WORKDIR`
+///   resolves against whatever the task left, whitespace splits `RUN mkdir -p` into several
+///   directories, and a line break writes an instruction the caller never saw.
+/// * **`inherit_workdir` with no `WORKDIR` anywhere**, for the reason [`require_workdir`]
+///   gives.
+///
+/// The scan reads instructions the way the Dockerfile parser does for these questions —
+/// escape directive, continuations, comments, heredoc bodies — and no further: it finds a
+/// Dockerfile that cannot take the stanza, it does not validate one.
+pub fn wrap_dockerfile(task: &str, opts: &WrapOptions) -> Result<String, Error> {
+    if dockerfile_from_ref(task).is_none() {
+        return Err(Error::invalid_arg(
+            "the task Dockerfile has no FROM, so there is no image to append the agentd \
+             stanza to and no base image to pair with it. Wrap the Dockerfile the task \
+             builds from, or pass `FROM <image>` for a task that names only an image."
+                .to_string(),
+        ));
+    }
+    let scan = Instructions::scan(task);
+    if let Some(terminator) = scan.open_heredoc {
+        return Err(Error::invalid_arg(format!(
+            "the task Dockerfile ends inside a heredoc that is never terminated (no line \
+             {terminator:?} closes it), so every line appended after it — the whole agentd \
+             stanza — would become the heredoc's body. The image would build with no daemon \
+             in it and fail as a run-hook timeout. Terminate the heredoc."
+        )));
+    }
+    if scan.continued {
+        return Err(Error::invalid_arg(format!(
+            "the task Dockerfile's last instruction ends with a line continuation ({:?}), so \
+             the first line appended after it — the agentd stanza's `COPY agentd /agentd` — \
+             would be joined into that instruction instead of running. The image would build \
+             with no daemon in it and fail as a run-hook timeout. Finish the instruction, or \
+             drop the trailing {:?}.",
+            scan.escape, scan.escape,
+        )));
+    }
+    require_keepalive_under_idle_timeout(crate::session::exec::DEFAULT_STREAM_IDLE_TIMEOUT, task)?;
+    super::require_valid_port("port", opts.port)?;
+    let workdir = opts.workdir.as_deref().filter(|dir| !dir.is_empty());
+    if let Some(dir) = workdir
+        && (!dir.starts_with('/') || dir.chars().any(|c| c.is_whitespace() || c.is_control()))
+    {
+        return Err(Error::invalid_arg(format!(
+            "the workdir {dir:?} is not one absolute path. The stanza writes it as \
+             `RUN mkdir -p {dir}` and `WORKDIR {dir}`: a relative path resolves against \
+             whatever WORKDIR the task left, whitespace splits the mkdir into several \
+             directories, and a line break writes an instruction nobody reviewed. Pass an \
+             absolute path such as /workspace."
+        )));
+    }
+    if opts.inherit_workdir && workdir.is_none() && !dockerfile_declares_workdir(task) {
+        return Err(Error::invalid_arg(
+            "inherit_workdir was requested but the task Dockerfile sets no WORKDIR and no \
+             workdir option was given, so there is nothing to inherit: every exec with no cwd \
+             would run in `/`, and every relative path in it would resolve there. Pass a \
+             workdir, or set WORKDIR in the task Dockerfile."
+                .to_string(),
+        ));
+    }
+
+    let stanza = agentd_stanza(opts.port, workdir, None);
+    let mut wrapped = String::with_capacity(task.len() + stanza.len() + 16);
+    wrapped.push_str(task);
+    if !task.ends_with('\n') {
+        wrapped.push('\n');
+    }
+    if scan
+        .last_user
+        .as_deref()
+        .is_some_and(|user| !is_root_user(user))
+    {
+        wrapped.push_str("USER root\n");
+    }
+    wrapped.push_str(&stanza);
+    Ok(wrapped)
+}
+
+/// Whether a `USER` value names root: `root` or `0`, with no group or a root group.
+///
+/// Anything else is not root, including a value built from a variable — the scan cannot
+/// expand `${TASK_USER}`, and restoring root for a value that turns out to be root costs one
+/// redundant line.
+fn is_root_user(value: &str) -> bool {
+    let is_root = |part: &str| part == "root" || part == "0";
+    match value.split_once(':') {
+        Some((user, group)) => is_root(user) && is_root(group),
+        None => is_root(value),
+    }
+}
+
+/// Whether any line of `dockerfile` is a `WORKDIR` with an argument.
+fn dockerfile_declares_workdir(dockerfile: &str) -> bool {
+    dockerfile.lines().any(|line| {
+        let mut words = line.split_whitespace();
+        words
+            .next()
+            .is_some_and(|first| first.eq_ignore_ascii_case("WORKDIR"))
+            && words.next().is_some()
+    })
+}
+
+/// What [`wrap_dockerfile`] needs to know about how a Dockerfile's instructions end.
+struct Instructions {
+    /// The escape character: `\` unless an `# escape=` directive chose a backtick.
+    escape: char,
+    /// The text ends inside a line continuation.
+    continued: bool,
+    /// The terminator of a heredoc the text never closes.
+    open_heredoc: Option<String>,
+    /// The value of the last `USER` instruction.
+    last_user: Option<String>,
+}
+
+impl Instructions {
+    /// Reads the parser directives, then every logical instruction: continuation lines
+    /// joined, blank and comment lines skipped (inside a continuation too, as the parser
+    /// does), heredoc bodies consumed up to their terminators.
+    fn scan(dockerfile: &str) -> Self {
+        let escape = escape_directive(dockerfile);
+        let mut heredocs: std::collections::VecDeque<(String, bool)> = Default::default();
+        let mut pending = String::new();
+        let mut continued = false;
+        let mut last_user = None;
+        for line in dockerfile.lines() {
+            if let Some((terminator, strip_tabs)) = heredocs.front() {
+                let candidate = if *strip_tabs {
+                    line.trim_start_matches('\t')
+                } else {
+                    line
+                };
+                if candidate.trim_end_matches('\r') == terminator {
+                    heredocs.pop_front();
+                }
+                continue;
+            }
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            let body = line.trim_end();
+            if let Some(joined) = body.strip_suffix(escape) {
+                pending.push_str(joined);
+                pending.push(' ');
+                continued = true;
+                continue;
+            }
+            continued = false;
+            pending.push_str(body);
+            let instruction = std::mem::take(&mut pending);
+            let mut words = instruction.split_whitespace();
+            let Some(keyword) = words.next() else {
+                continue;
+            };
+            if keyword.eq_ignore_ascii_case("USER") {
+                last_user = words.next().map(str::to_string);
+            } else if ["RUN", "COPY", "ADD"]
+                .iter()
+                .any(|name| keyword.eq_ignore_ascii_case(name))
+            {
+                heredocs.extend(words.filter_map(heredoc_marker));
+            }
+        }
+        Self {
+            escape,
+            continued,
+            open_heredoc: heredocs.pop_front().map(|(terminator, _)| terminator),
+            last_user,
+        }
+    }
+}
+
+/// The escape character a Dockerfile's `# escape=` parser directive selects, or `\`.
+///
+/// Directives are only read at the very top: the first line that is not one — an
+/// instruction, a blank line, or an ordinary comment — ends them.
+fn escape_directive(dockerfile: &str) -> char {
+    for line in dockerfile.lines() {
+        let Some(directive) = line.trim().strip_prefix('#') else {
+            break;
+        };
+        let Some((key, value)) = directive.split_once('=') else {
+            break;
+        };
+        let key = key.trim().to_ascii_lowercase();
+        if key == "escape" {
+            return match value.trim() {
+                "`" => '`',
+                _ => '\\',
+            };
+        }
+        if !["syntax", "check"].contains(&key.as_str()) {
+            break;
+        }
+    }
+    '\\'
+}
+
+/// The terminator a heredoc marker word opens, and whether it strips leading tabs (`<<-`).
+///
+/// `<<EOF`, `<<-EOF`, `<<"EOF"`, `<<'EOF'`; not the here-string `<<<`, and not a bare `<<`.
+fn heredoc_marker(word: &str) -> Option<(String, bool)> {
+    let rest = word.strip_prefix("<<")?;
+    if rest.starts_with('<') {
+        return None;
+    }
+    let (rest, strip_tabs) = match rest.strip_prefix('-') {
+        Some(rest) => (rest, true),
+        None => (rest, false),
+    };
+    let name = rest
+        .strip_prefix('"')
+        .and_then(|name| name.strip_suffix('"'))
+        .or_else(|| {
+            rest.strip_prefix('\'')
+                .and_then(|name| name.strip_suffix('\''))
+        })
+        .unwrap_or(rest);
+    let valid = name
+        .chars()
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    valid.then(|| (name.to_string(), strip_tabs))
 }
 
 /// The image ref in a Dockerfile's first `FROM`, or `None` when it has none.
@@ -1634,9 +1940,10 @@ mod tests {
         }
 
         // Only the last USER counts, as at build time.
-        let added = wrap_dockerfile("FROM x\nUSER app\nUSER root\n", &WrapOptions::default())
-            .expect("wraps");
-        assert!(!added.contains("USER root\nCOPY"), "{added}");
+        let task = "FROM x\nUSER app\nUSER root\n";
+        let wrapped = wrap_dockerfile(task, &WrapOptions::default()).expect("wraps");
+        let added = wrapped.strip_prefix(task).expect("verbatim");
+        assert!(added.starts_with("COPY agentd /agentd\n"), "{added}");
     }
 
     /// **IMAGE-2, the newline.** A task file without a trailing newline gets one before the
