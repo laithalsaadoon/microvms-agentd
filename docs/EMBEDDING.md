@@ -228,10 +228,17 @@ What the call does, in order:
    `client_grace_sec` more. The daemon enforces `timeout_sec` itself, so this
    path runs only when the daemon's escalation outlasts the grace: a command
    that ignores SIGTERM for longer than the daemon's ten-second `kill_grace`,
-   a grandchild holding the pipes, or a stalled proxy.
+   a grandchild holding the pipes, or a stalled proxy. The daemon answers the
+   kill only once the group is gone, sending SIGKILL after `kill_grace` if it
+   has to (measured in us-east-1 on 2026-09-24), so the kill itself can take
+   up to ten seconds before the grace starts.
 5. **Synthesize.** If that wait and ack fails too, the result is synthesized:
    `synthesized` is true, `posix_exit_code` is 124, `phase` is `running`, and
-   the output is unknown rather than empty.
+   the output is unknown rather than empty. Because a killed group is gone by
+   the time the kill returns, this happens when something outside the group
+   holds the output pipes past the grace (the daemon waits a five-second
+   linger for them), when the kill could not be sent, or when the daemon is
+   unreachable.
 
 `posix_exit_code` is what `$?` would say. It is **124** when a deadline ended
 the command: the daemon's own (`timed_out`), the client's kill of a live

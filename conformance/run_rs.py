@@ -2706,7 +2706,7 @@ def run_to_completion_live(cli: Cli, launched: Envelope, name: str) -> tuple[boo
     summary = [
         line.strip()
         for line in run.stderr.splitlines()
-        if line.startswith(("exec=", "collected afterwards"))
+        if line.startswith(("exec=", "collected"))
     ]
     return run.returncode == 0, f"exit={run.returncode} {' | '.join(summary)[:400]}"
 
@@ -2718,9 +2718,11 @@ def drive_run_to_completion(cli: Cli, launched: Envelope, results: Results) -> N
     `pipefail` returns its own exit code and output; the daemon's deadline reports 124 with a
     note; a command that ignores SIGTERM outlives the daemon's deadline for its ten-second
     `kill_grace`, so a client deadline inside that window kills a live group and collects the
-    result; and a client grace too short for the escalation synthesizes 124, after which the
-    test collects the exec itself. The cut-stream fallback is not induced here: nothing cuts the
-    platform proxy's stream on demand, so it is covered by the scripted tiers in core.
+    result; and a client grace shorter than the output linger of a grandchild holding the pipes
+    synthesizes 124, after which the test collects the exec itself. The daemon answers a kill
+    only once the group is gone (measured 2026-09-24), so the linger, not the escalation, is
+    what a short grace can lose to. The cut-stream fallback is not induced here: nothing cuts
+    the platform proxy's stream on demand, so it is covered by the scripted tiers in core.
     """
     print("\n-- run_to_completion (#222: BIND-6..10) --")
     passed, detail = run_to_completion_live(
@@ -2751,10 +2753,10 @@ def drive_run_to_completion(cli: Cli, launched: Envelope, results: Results) -> N
         detail,
     )
     passed, detail = run_to_completion_live(
-        cli, launched, "a_client_grace_too_short_for_the_escalation_synthesizes_124"
+        cli, launched, "a_client_grace_shorter_than_the_pipe_linger_synthesizes_124"
     )
     results.check(
-        "BIND-10 a client grace shorter than the daemon's escalation synthesizes 124",
+        "BIND-10 a client grace shorter than the output linger synthesizes 124",
         passed,
         detail,
     )

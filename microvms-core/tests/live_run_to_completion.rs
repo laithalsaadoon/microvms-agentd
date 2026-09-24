@@ -188,22 +188,41 @@ async fn a_client_deadline_kills_a_command_that_ignores_sigterm() {
     );
 }
 
-/// **BIND-10.** The same command with a two-second client grace: the client deadline (3 s)
-/// kills, and the post-kill wait (to 5 s) ends before the daemon's SIGKILL (about 11 s), so
-/// the result is synthesized. The exec is then collected here so nothing is left un-acked.
+/// **BIND-10.** Nothing comes back within the grace after a successful kill, so the result is
+/// synthesized.
+///
+/// Measured 2026-09-24 (us-east-1): the daemon answers `POST /kill` only once the group is
+/// gone, SIGKILLing it after its ten-second `kill_grace`. So a group the kill ends is always
+/// collectable right after, and the first version of this test, which expected a short grace
+/// to lose the race with the escalation, got the real result instead. What outlives the kill
+/// is a process in its own session holding the output pipes: the daemon then waits its
+/// five-second output linger before the exec reads `exited`. Here the group ignores SIGTERM,
+/// the client deadline (3 s) sends the kill, the kill returns when the deadline's SIGKILL lands
+/// (about 11 s), and the two-second grace ends inside the linger (to about 16 s). The exec is
+/// then collected here so nothing is left un-acked.
 #[tokio::test]
 #[ignore = "needs the conformance suite's kept VM in MICROVM_LIVE_ATTACH"]
-async fn a_client_grace_too_short_for_the_escalation_synthesizes_124() {
+async fn a_client_grace_shorter_than_the_pipe_linger_synthesizes_124() {
     let session = attached().await;
-    let request = bash("trap '' TERM; sleep 60", Some(1.0));
+    // `set -m` rather than `setsid`: bash's job control puts the background job in its own
+    // process group, outside the one the daemon signals, and al2023-minimal ships no
+    // util-linux. The echo is the evidence that the two groups differ.
+    let request = bash(
+        "trap '' TERM; set -m; sleep 30 & set +m; \
+         echo \"grandchild pgrp $(cut -d' ' -f5 /proc/$!/stat) shell pgrp $(cut -d' ' -f5 /proc/$$/stat)\"; \
+         sleep 60",
+        Some(1.0),
+    );
     let exec_id = request.exec_id.clone();
+    let started = Instant::now();
     let result = session
         .run_to_completion(request, grace(2), None)
         .await
         .expect("a result");
     eprintln!(
-        "exec={} client={:?} notes={:?}",
+        "exec={} after={:?} client={:?} notes={:?}",
         result.exec_id,
+        started.elapsed(),
         result.client_deadline,
         result.notes()
     );
@@ -213,6 +232,11 @@ async fn a_client_grace_too_short_for_the_escalation_synthesizes_124() {
         .await;
     eprintln!("collected afterwards: {collected:?}");
     assert!(result.synthesized(), "{result:?}");
+    assert_eq!(
+        result.client_deadline.as_ref().map(|d| &d.kill),
+        Some(&KillAnswer::Signalled),
+        "the kill reached a live group: {result:?}"
+    );
     assert_eq!(result.posix_exit_code(), Some(124));
     assert!(result.outcome.is_none());
     assert!(
@@ -223,12 +247,13 @@ async fn a_client_grace_too_short_for_the_escalation_synthesizes_124() {
         "{:?}",
         result.notes()
     );
-    let collected = collected.expect("the exec ends by the daemon's SIGKILL and is acked");
+    let collected = collected.expect("the exec exits after the linger and is acked");
+    eprintln!("collected stdout: {:?}", collected.stdout());
     assert!(
         collected
             .outcome
             .as_ref()
-            .is_some_and(|o| o.signal == Some(9)),
-        "the daemon's escalation ended it: {collected:?}"
+            .is_some_and(|o| o.writers_may_be_alive),
+        "the setsid grandchild held the pipes past the linger: {collected:?}"
     );
 }

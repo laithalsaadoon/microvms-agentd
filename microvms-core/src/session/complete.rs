@@ -125,7 +125,10 @@ impl CompletionPlan {
     /// 3. When the client deadline expires in either step: kill the process group, then wait
     ///    and ack within the client grace (BIND-9). The kill is sent whatever its outcome turns
     ///    out to be, and a failed kill still gets the ack: the command may have finished by
-    ///    itself, and its real result beats a synthesized one.
+    ///    itself, and its real result beats a synthesized one. The daemon answers the kill
+    ///    only once the group is gone, SIGKILLing it after its ten-second `kill_grace` if it
+    ///    must (measured 2026-09-24, us-east-1), so the kill can take that long before the
+    ///    grace starts.
     /// 4. When that ack fails too: a synthesized result, exit code 124, naming both failures
     ///    (BIND-10). Nothing else synthesizes.
     ///
