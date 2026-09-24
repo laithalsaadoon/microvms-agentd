@@ -73,6 +73,22 @@ async fn upper_server() -> SocketAddr {
     addr
 }
 
+/// A loopback port that is provably closed for as long as the returned socket lives.
+///
+/// Bound but never listening, and without `SO_REUSEADDR`: a dial to it is refused, and no
+/// other socket in this process can be given the port meanwhile, the daemon under test
+/// included. Binding a listener and dropping it frees the port instead, and a parallel test's
+/// bind can take it between the drop and the dial: measured 2026-09-24, 7 failures in 480
+/// loaded runs of this binary, each a relay that connected and closed 1000.
+fn reserved_dead_port() -> (tokio::net::TcpSocket, u16) {
+    let socket = tokio::net::TcpSocket::new_v4().expect("a socket");
+    socket
+        .bind("127.0.0.1:0".parse().expect("a loopback address"))
+        .expect("a free port");
+    let port = socket.local_addr().expect("bound").port();
+    (socket, port)
+}
+
 /// Opens a tunnel WebSocket to `port`, with a bearer token unless `token` is `None`.
 ///
 /// The error is boxed for clippy 1.98's `result_large_err`: `tungstenite::Error` is 136
@@ -239,13 +255,11 @@ async fn a_payload_larger_than_one_chunk_arrives_whole_and_in_order() {
 
 /// **A dead guest port closes with 4502, not silence.**
 ///
-/// The one diagnostic a tunnel user gets. Bound-then-dropped rather than a guessed port, so
-/// the port is provably closed rather than probably closed.
+/// The one diagnostic a tunnel user gets. A reserved port that never listens, rather than a
+/// guessed or bound-then-dropped one, so the port is provably closed for the whole test.
 #[tokio::test]
 async fn a_dead_guest_port_closes_with_no_listener_and_names_the_port() {
-    let held = TcpListener::bind("127.0.0.1:0").await.expect("a free port");
-    let dead = held.local_addr().expect("bound").port();
-    drop(held);
+    let (_reserved, dead) = reserved_dead_port();
 
     let daemon = daemon().await;
     let mut socket = open_tunnel(daemon, dead, Some(TOKEN))
