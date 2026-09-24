@@ -475,15 +475,31 @@ async fn a_dead_guest_port_surfaces_as_the_relays_close_code() {
     }
 }
 
+/// A loopback port that is provably closed for as long as the returned socket lives.
+///
+/// Bound but never listening, and without `SO_REUSEADDR`: a dial to it is refused, and no
+/// other socket in this process can be given the port meanwhile, the endpoint under
+/// test included. Binding a listener and dropping it frees the port instead, and a parallel test's
+/// bind can take it between the drop and the dial: measured 2026-09-24, 7 failures in 480
+/// loaded runs of the daemon's twin test, each
+/// a dial that connected.
+fn reserved_dead_port() -> (tokio::net::TcpSocket, u16) {
+    let socket = tokio::net::TcpSocket::new_v4().expect("a socket");
+    socket
+        .bind("127.0.0.1:0".parse().expect("a loopback address"))
+        .expect("a free port");
+    let port = socket.local_addr().expect("bound").port();
+    (socket, port)
+}
+
 /// **A refused handshake names the ambiguity rather than guessing a cause.**
 ///
 /// Nothing listening at the endpoint at all. The error must not claim to know whether this
 /// was a scope mistake or a dead server, because on the real endpoint both are 1006.
 #[tokio::test]
 async fn an_unreachable_endpoint_fails_with_the_1006_ambiguity_named() {
-    let held = TcpListener::bind("127.0.0.1:0").await.expect("a free port");
-    let dead = held.local_addr().expect("bound");
-    drop(held);
+    let (_reserved, port) = reserved_dead_port();
+    let dead = std::net::SocketAddr::from(([127, 0, 0, 1], port));
 
     let (auth, _minter) = auth();
     let (_client, local) = tokio::io::duplex(4096);
