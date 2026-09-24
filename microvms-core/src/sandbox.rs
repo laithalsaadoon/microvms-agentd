@@ -1135,7 +1135,13 @@ impl Sandbox {
 
         let mut sandbox = Self::with_control_plane(control);
         sandbox.adopted = true;
-        sandbox.lifecycle = lifecycle;
+        sandbox.set_lifecycle(lifecycle);
+        // The window the VM was launched with, so a keepalive on the adopted session paces
+        // itself against the real idle policy rather than the platform minimum.
+        sandbox.idle_window = vm
+            .idle_policy
+            .as_ref()
+            .map(|policy| Duration::from_secs(u64::from(policy.max_idle_duration_seconds)));
         // A VM exists, so the image it was launched from did (STATE-1).
         sandbox.image_exists = true;
         // PENDING may still idle-suspend before this handle sees RUNNING (#195).
@@ -1701,6 +1707,19 @@ mod tests {
             .await
             .expect("adopts");
         (sandbox, recorder, clock)
+    }
+
+    /// **An adopted sandbox feeds its keepalive.** The idle window is the one `GetMicrovm`
+    /// reports, and the lifecycle watch starts at the adopted state, so a keepalive on an
+    /// adopted session paces against the real policy and ends when that sandbox suspends.
+    ///
+    /// **Falsification** — 2026-09-24. Assign `sandbox.lifecycle` directly instead of
+    /// through `set_lifecycle`, or drop the `idle_window` line, and this goes red; restored.
+    #[tokio::test]
+    async fn an_adopted_sandbox_reports_the_services_idle_window_and_watches_its_lifecycle() {
+        let (sandbox, _recorder, _clock) = adopted_in("RUNNING").await;
+        assert_eq!(sandbox.idle_window(), Some(Duration::from_secs(1800)));
+        assert_eq!(*sandbox.watch_lifecycle().borrow(), Lifecycle::Running);
     }
 
     /// Every service state has a lifecycle, and nothing else parses.
