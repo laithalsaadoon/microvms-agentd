@@ -32,8 +32,11 @@ pub const NO_TIMEOUT_CEILING: Duration =
 /// A callback for output. Only [`ExecEvent::Output`] is delivered; the result carries the
 /// exit status. Answering [`std::ops::ControlFlow::Break`] stops delivery, and the call
 /// still waits for and acks the exec, so nothing is left running unobserved (BIND-8).
-pub type OutputSink =
-    Box<dyn FnMut(ExecEvent) -> BoxFuture<'static, std::ops::ControlFlow<()>> + Send>;
+pub type OutputSink = Box<dyn FnMut(ExecEvent) -> OutputFlow + Send>;
+
+/// What an [`OutputSink`] answers: a boxed future of continue-or-stop, named so a caller
+/// needs no `futures` crate to spell it.
+pub type OutputFlow = BoxFuture<'static, std::ops::ControlFlow<()>>;
 
 /// The knobs of a run-to-completion call.
 #[derive(Clone, Debug)]

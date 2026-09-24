@@ -29,14 +29,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use microvms_core::sandbox::Sandbox as CoreSandbox;
-use microvms_core::session::{Session as CoreSession, StreamOptions, mint_exec_id};
+use microvms_core::session::{
+    CompletionOptions, CompletionPlan, DEFAULT_CLIENT_GRACE, OutputFlow, OutputSink,
+    Session as CoreSession, StreamOptions, mint_exec_id,
+};
 use microvms_core::{Error, ErrorKind};
 use napi::bindgen_prelude::Either;
 use napi_derive::napi;
 use tokio::sync::{Mutex, MutexGuard};
 
 use crate::errors::{AsyncError, js, js_async};
-use crate::exec::{ExecHandle, ExecResult, seconds_async};
+use crate::exec::{ExecHandle, ExecResult, StreamEvent, seconds_async};
 use crate::process::{ExecProcess, GapPolicy};
 use crate::region::Region;
 
@@ -313,6 +316,60 @@ fn principal(
         Some(Either::B(name)) => Some(name.into()),
     })
 }
+
+/// How `runToCompletion` should start and collect a command.
+///
+/// The `ExecOptions` a completed run can use (no `stdin`, which nothing would write, and no
+/// `timeout`, which `clientGraceSec` replaces), plus the client grace.
+#[napi(object)]
+#[derive(Default)]
+pub struct CompletionRequest {
+    /// `true` runs a single script string under `/bin/sh -c`; a string such as `"bash"` runs
+    /// it under that shell, resolved by the daemon in the guest. See `ExecOptions.shell`.
+    pub shell: Option<Either<bool, String>>,
+    pub cwd: Option<String>,
+    pub env: Option<HashMap<String, String>>,
+    /// A numeric uid, or a name the daemon resolves in the guest. See `ExecOptions.user`.
+    pub user: Option<Either<f64, String>>,
+    /// A numeric gid, or a name the daemon resolves in the guest.
+    pub group: Option<Either<f64, String>>,
+    /// The daemon's own kill deadline for the child. The client deadline is this plus
+    /// `clientGraceSec`.
+    pub timeout_sec: Option<f64>,
+    /// The idempotency key. Omitted, one is minted.
+    pub exec_id: Option<String>,
+    /// Start the child's environment from the image's `ENV`. See `ExecOptions.inheritImageEnv`.
+    pub inherit_image_env: Option<bool>,
+    /// How long past `timeoutSec` the client waits before it kills, and how long it then
+    /// waits for the killed exec's result. Defaults to the core's 60 seconds.
+    pub client_grace_sec: Option<f64>,
+}
+
+impl CompletionRequest {
+    fn into_exec_options(self) -> ExecOptions {
+        ExecOptions {
+            shell: self.shell,
+            cwd: self.cwd,
+            env: self.env,
+            user: self.user,
+            group: self.group,
+            timeout_sec: self.timeout_sec,
+            exec_id: self.exec_id,
+            inherit_image_env: self.inherit_image_env,
+            ..ExecOptions::empty()
+        }
+    }
+}
+
+/// The `onOutput` callback: called with each chunk, its return value ignored, and its throw
+/// caught rather than routed to `napi_fatal_exception`.
+type OutputCallback = napi::threadsafe_function::ThreadsafeFunction<
+    StreamEvent,
+    napi::threadsafe_function::UnknownReturnValue,
+    StreamEvent,
+    napi::Status,
+    false,
+>;
 
 /// How a `spawn` should behave: the exec's own options, plus the stream's.
 ///
@@ -650,6 +707,91 @@ impl Session {
         Ok(ExecResult::wrap(
             session.run_sync(request, timeout).await.map_err(js_async)?,
         ))
+    }
+
+    /// Start, stream, and collect one command: exactly one `ExecResult` back (BIND-6..10).
+    ///
+    /// With `onOutput`, each output chunk (a `StreamEvent` of kind `"output"`) is handed to it
+    /// as it arrives. The result then comes from the ack that follows the terminal `exit`
+    /// event, or, when the stream ends without one, from a wait and ack. When `timeoutSec +
+    /// clientGraceSec` passes first (or, with no `timeoutSec`, the VM's maximum lifetime), the
+    /// process group is killed and the exec waited for and acked within `clientGraceSec` once
+    /// more; if that fails too the result is synthesized with `posixExitCode` 124.
+    ///
+    /// A throwing `onOutput` stops delivery; the exec is still waited for and acked so nothing
+    /// is left behind, and then the promise rejects with the callback's message. `shell: true`
+    /// runs `/bin/sh -c`; for bash semantics pass `["bash", "-c", script]`.
+    #[napi(
+        ts_args_type = "command: string | string[], options?: CompletionRequest | undefined | null, onOutput?: ((chunk: StreamEvent) => unknown) | undefined | null"
+    )]
+    pub async fn run_to_completion(
+        &self,
+        command: Either<String, Vec<String>>,
+        options: Option<CompletionRequest>,
+        on_output: Option<OutputCallback>,
+    ) -> Result<ExecResult, AsyncError> {
+        let options = options.unwrap_or_default();
+        let grace = seconds_async(
+            options
+                .client_grace_sec
+                .unwrap_or(DEFAULT_CLIENT_GRACE.as_secs_f64()),
+        )?;
+        let request = options.into_exec_options().into_request(command)?;
+        let plan = CompletionPlan::new(
+            &request,
+            CompletionOptions {
+                client_grace: grace,
+                ..CompletionOptions::default()
+            },
+        )
+        .map_err(js_async)?;
+        // Started under the sandbox lock and driven after it is released, so a callback that
+        // calls back into this session does not wait on the call that is invoking it.
+        let handle = {
+            let live = self.live().await;
+            let session = live.session().map_err(js_async)?;
+            session.run(request).await.map_err(js_async)?
+        };
+        let thrown: Arc<std::sync::Mutex<Option<String>>> = Arc::default();
+        let sink = on_output.map(|callback| {
+            let callback = Arc::new(callback);
+            let thrown = Arc::clone(&thrown);
+            Box::new(move |event| {
+                let callback = Arc::clone(&callback);
+                let thrown = Arc::clone(&thrown);
+                Box::pin(async move {
+                    // `call_async_catch`, not `call_async`: a throw in the callback comes back
+                    // as an error here instead of reaching `napi_fatal_exception`, which would
+                    // end the Node process.
+                    match callback.call_async_catch(StreamEvent::wrap(event)).await {
+                        Ok(_) => std::ops::ControlFlow::Continue(()),
+                        Err(error) => {
+                            *thrown
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                                Some(error.reason.clone());
+                            std::ops::ControlFlow::Break(())
+                        }
+                    }
+                }) as OutputFlow
+            }) as OutputSink
+        });
+        let result = plan.drive(&handle, sink).await;
+        if let Some(reason) = thrown
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        {
+            return Err(js_async(Error::new(
+                ErrorKind::Unexpected,
+                format!(
+                    "onOutput threw, so delivery stopped; exec {} was still waited for and \
+                     acked: {reason}",
+                    handle.exec_id()
+                ),
+            )));
+        }
+        Ok(ExecResult::wrap(result.map_err(js_async)?))
     }
 
     /// Signals an exec's whole process group. Returns whether anything was signalled.

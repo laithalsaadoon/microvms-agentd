@@ -160,7 +160,7 @@ fn drive(plan: &Plan) -> (ExecResult, Vec<String>, bool) {
         let sink: Option<OutputSink> = plan.streaming.then(|| {
             Box::new(|_| {
                 Box::pin(std::future::ready(std::ops::ControlFlow::Continue(())))
-                    as futures_util::future::BoxFuture<'static, _>
+                    as microvms_core::session::OutputFlow
             }) as OutputSink
         });
         let result = session

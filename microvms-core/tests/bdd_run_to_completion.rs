@@ -165,7 +165,7 @@ async fn complete(run: &mut Run, with_callback: bool) {
                     .extend_from_slice(&data);
             }
             Box::pin(std::future::ready(std::ops::ControlFlow::Continue(())))
-                as futures_util::future::BoxFuture<'static, _>
+                as microvms_core::session::OutputFlow
         }) as OutputSink
     });
     let result = session

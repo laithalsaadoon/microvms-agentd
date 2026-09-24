@@ -45,7 +45,7 @@ use std::time::Duration;
 
 pub use complete::{
     ClientDeadline, CompletionOptions, CompletionPlan, DEFAULT_CLIENT_GRACE, KillAnswer,
-    NO_TIMEOUT_CEILING, OutputSink,
+    NO_TIMEOUT_CEILING, OutputFlow, OutputSink,
 };
 pub use exec::{
     EndReason, ExecHandle, ExecResult, StreamEnd, StreamOptions, TIMED_OUT_EXIT_CODE, mint_exec_id,
