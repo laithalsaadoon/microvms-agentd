@@ -86,7 +86,7 @@ classDiagram
 | Node or edge | Citations |
 | --- | --- |
 | `CoreSeam` | trait `microvms-cli/src/seam.rs:136`; methods `microvms-cli/src/seam.rs:138`, `:141`, `:148`, `:172`; `AwsSeam` impl `:179`, `:183`, `:201`, `:225` |
-| `Sandbox` | struct `microvms-core/src/sandbox.rs:539`; methods `:710`, `:814`, `:958`, `:1040`, `:1138` |
+| `Sandbox` | struct `microvms-core/src/sandbox.rs:582`; methods `:710`, `:814`, `:958`, `:1040`, `:1138` |
 | `ControlPlane` | struct `microvms-core/src/control/mod.rs:160`; methods `microvms-core/src/control/image.rs:157`, `microvms-core/src/control/microvm.rs:356`, `:435`, `:563`, `:581` |
 | `Session` | struct `microvms-core/src/session/mod.rs:184`; methods `:329`, `:342`, `:380`, `:408`, `:444` |
 | `ExecHandle` | struct `microvms-core/src/session/exec.rs:213`; methods `:228`, `:248`, `:285`, `:624`, `:654` |

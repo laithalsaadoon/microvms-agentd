@@ -96,7 +96,7 @@ deletes, over the cost of building it here.
 
 **1. Expose per-exec env (and user) through the CLI.** The daemon applies
 `env` per request and the bindings expose it; the CLI hardcodes
-`env: HashMap::new()` (`microvms-cli/src/commands/lifecycle.rs:1838-1849`).
+`env: HashMap::new()` (`microvms-cli/src/commands/lifecycle.rs:1874-1885`).
 Every harness passes env per exec (Harbor merges three layers of it on
 every call), and the PATH failure the coding-agents example documents is
 this gap biting a real workload. `exec --env KEY=VALUE` (repeatable) plus
