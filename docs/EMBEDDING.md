@@ -360,11 +360,38 @@ so the rows are the generic needs.
 | Start/poll/ack exec that outlives an auth-token ceiling | evaluation harnesses | caller-minted `exec_id`, idempotent start, read-only poll, explicit ack, TTL only after ack (`agentd/src/exec.rs`) |
 | Idempotent start under retry | evaluation harnesses | a known id returns success without spawning a second child (`agentd/src/exec.rs:364-367`) |
 | Per-exec env, cwd, user/group, timeout | evaluation harnesses | in the wire protocol and applied by the daemon; the child's environment starts empty, so the token never leaks into it |
+| A user by name, with its `HOME` | evaluation harnesses | `user`/`group` take a name the daemon resolves against the guest's `/etc/passwd` and `/etc/group`, and a user with a row gets `HOME`, `USER`, `LOGNAME` beneath the caller's env; an unknown name is `400 unknown_user` before anything spawns (`agentd/src/exec_start.rs`) |
+| The image's `ENV` (a venv `PATH`, a `JAVA_HOME`) in the child | evaluation harnesses | opt-in `inherit_image_env`: the daemon's startup snapshot of its own environment, minus `AGENTD_*`, as the lowest layer; `Health.image_env_keys` says whether the daemon honours it |
+| Bash semantics without guessing the image | evaluation harnesses | `shell: "bash"`, resolved in the guest; a missing shell is `400 unknown_shell` rather than exit 127 |
 | File and directory-tree transfer with tar fidelity | evaluation harnesses | streamed file routes plus confined tar extraction (`agentd/src/fs.rs`) |
 | Per-instance credential bootstrap, no secret in the shared image | both | one-shot `runHookPayload` bootstrap with replay semantics (`agentd/src/routes.rs:166-216`) |
 | Lifecycle hooks answered so the platform can manage the VM | session servers | ready/validate/run/suspend/resume/terminate all served (`agentd/src/routes.rs:112-118`) |
 | A liveness probe cheaper than an exec | session servers | unauthenticated `GET /v1/health` |
 | Live output streaming with resume | neither had it | SSE with byte-cursor resume and explicit gap events (`agentd/src/exec.rs:436-524`) |
+
+### A harness exec in one call
+
+A harness whose contract is bash semantics, a task user by name, and the image's own
+`ENV` sends all three on the start request and resolves nothing itself:
+
+```python
+result = session.run_sync(
+    command,
+    shell="bash",  # resolved in the guest; unknown_shell if absent
+    user=task.agent_user,  # int or str; unknown_user if the guest has no such row
+    inherit_image_env=True,  # the image's ENV beneath the launch env and `env`
+    env=task.env,
+    timeout=timeout,
+)
+```
+
+The Node binding takes the same fields in `ExecOptions` (`shell: "bash"`, `user: "agent"`,
+`inheritImageEnv: true`), and the CLI as `exec --shell bash --user agent
+--inherit-image-env`. Precedence, lowest first, is image env, the passwd row's `HOME`,
+`USER` and `LOGNAME`, the launch env, the request's `env`. A daemon built before these
+fields refuses a string `user` or `shell` as `malformed_request` and ignores
+`inherit_image_env`; check `Health.image_env_keys` (not `None`) before relying on the
+last one.
 
 ## Coding agents over the daemon
 

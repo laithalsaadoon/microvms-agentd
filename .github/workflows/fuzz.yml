@@ -1,7 +1,8 @@
 name: fuzz
 
-# Runs the cargo-fuzz targets in `agentd/fuzz`, the CLI's closed-output bolero harness, and
-# core's task-Dockerfile wrap harness, for a bounded slice of time.
+# Runs the cargo-fuzz targets in `agentd/fuzz`, the CLI's closed-output bolero harness,
+# core's task-Dockerfile wrap harness, and the daemon's exec-start harness, for a bounded
+# slice of time.
 # Two minutes per target on a weekly schedule is not a fuzzing campaign — it is
 # a regression harness: the targets stay buildable, the doorway feature stays
 # wired, and an input class the engine newly mishandles has a chance to surface
@@ -23,6 +24,8 @@ on:
       - 'microvms-cli/src/closed_output*.rs'
       - 'microvms-core/src/control/artifact.rs'
       - 'microvms-core/tests/wrap_fuzz.rs'
+      - 'agentd/src/exec_start*.rs'
+      - 'protocol/src/exec.rs'
       - '.github/workflows/fuzz.yml'
 
 permissions:
@@ -106,4 +109,29 @@ jobs:
         with:
           name: wrap-dockerfile-fuzz-crashes
           path: microvms-core/tests/__fuzz__/
+          if-no-files-found: ignore
+
+  # The daemon's exec-start harness (AGENTD-7..16; #224, #225, #226), coverage-guided: start
+  # bodies whose union fields take every JSON spelling, resolved against a fuzzed guest. An
+  # in-crate bolero test like the CLI's, so stable `cargo test` runs it on every PR too.
+  exec-start:
+    name: fuzz (exec_start_fuzz::start_resolution, bounded)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - name: install cargo-bolero
+        run: cargo install cargo-bolero --version 0.13.4 --locked
+      # `+nightly`, because `rust-toolchain.toml` pins stable and libFuzzer needs `-Z`.
+      - name: fuzz the exec-start harness for two minutes
+        run: cargo +nightly bolero test exec_start_fuzz::start_resolution -p agentd -T 120s
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: failure()
+        with:
+          name: exec-start-fuzz-crashes
+          path: agentd/src/__fuzz__/
           if-no-files-found: ignore

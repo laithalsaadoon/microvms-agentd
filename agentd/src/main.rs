@@ -8,7 +8,7 @@
 use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
-use agentd::{AppState, Config, disk, exec, identity, routes, serve};
+use agentd::{AppState, Config, disk, exec, exec_start, identity, routes, serve};
 use tokio::net::TcpListener;
 
 fn main() -> std::io::Result<()> {
@@ -49,7 +49,15 @@ async fn run(config: Config) -> std::io::Result<()> {
         identity::no_repair()
     };
 
-    let state = AppState::with_probe(config, disk::available_bytes, repairer);
+    // The image environment, snapshotted before anything is served: the daemon inherited it
+    // as the container `CMD`, and a start request with `inherit_image_env` layers it under
+    // everything else. Taken here, before any run hook can deliver a token, and filtered of
+    // `AGENTD_*` besides (AGENTD-12). Build-time env, not per-VM: the daemon starts in the
+    // image-build VM and the snapshot rides the memory image into every VM, which is also
+    // what `/proc/1/environ` shows there.
+    let image_env = exec_start::snapshot_image_env(std::env::vars_os());
+    tracing::info!(keys = image_env.len(), "image environment snapshot taken");
+    let state = AppState::with_parts(config, disk::available_bytes, repairer, Some(image_env));
 
     // Collection of acked exec entries runs on its own interval rather than
     // inside a request handler, so a slow collection cannot delay a response and

@@ -79,4 +79,5 @@ test('an older daemon reports empty lists', async () => {
   assert.deepEqual(health.hooks, []);
   assert.deepEqual(health.identitySteps, []);
   assert.equal(health.hooksDropped, 0);
+  assert.equal(health.imageEnvKeys ?? null, null);
 });

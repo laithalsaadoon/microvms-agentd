@@ -6,7 +6,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Live conformance run driving the **Rust** client stack through the `microvm` CLI.
 
-This is the only live suite, and it now expresses **every named check** — 201 of them, with
+This is the only live suite, and it now expresses **every named check** — 217 of them, with
 none recorded SKIP. `conformance/run.py` was the oracle — 56 checks through the Python
 client — and it went away with that client once both suites ran green against real AWS on
 the same commit (Python 56/56, this one 38/38 with 34 recorded SKIP). Those 34 were the
@@ -171,6 +171,16 @@ same VM (through `exec --env`, so no second billable launch), while the platform
 routes without it — which is exactly why that posture is `best-effort` and never `sealed`.
 Live because all three are claims about someone else's network.
 
+217 rather than 201: `drive_exec_start_protocol` adds sixteen for issues #224, #225 and
+#226, each named by its requirement key (AGENTD-7..16): a user and a group by name, an
+unknown user refused `unknown_user` with its command never run, the passwd row's `HOME`,
+`USER` and `LOGNAME` beneath `--env`, the image `ENV` absent without `--inherit-image-env`
+and present with it under `--env`, neither the token nor `AGENTD_*` in an inheriting
+child, health's `imageEnvKeys`, `--shell bash` running a pipefail pipeline as bash, an
+unknown shell refused `unknown_shell` with nothing run, and a numeric uid keeping its old
+meaning. Live because every fact is the guest's: its passwd rows, its shells, and the
+environment the platform hands the daemon as the container `CMD`.
+
 201 rather than 188: twelve background prompt checks exercise both installed agents'
 default and unrestricted policies, independently read a shell-created artifact, record
 version/uid/model/deadline metadata, and observe timeout plus an empty process group
@@ -287,6 +297,14 @@ BASELINE_MEMORY_MIB = 1024
 # node:20-slim, 2026-08-05) leaves WorkingDir empty, so a baked WORKDIR is the only
 # way to test cwd inheritance at all. The deleted oracle used the same value.
 BAKED_WORKDIR = "/opt/baked-workdir"
+# A named user and one image ENV line, baked so `drive_exec_start_protocol` (#224, #225,
+# #226) has a passwd row to resolve and an image variable to inherit. Written into
+# /etc/passwd and /etc/group directly: al2023-minimal ships no `useradd`.
+CONFORMANCE_USER = "conformance"
+CONFORMANCE_UID = 4242
+CONFORMANCE_HOME = "/home/conformance"
+IMAGE_ENV_KEY = "MICROVMS_CONFORMANCE_IMAGE_ENV"
+IMAGE_ENV_VALUE = "from-image"
 # Long enough for a frozen guest and a running one to be distinguishable: a live
 # ticker adds roughly forty entries across this window. The oracle used the same 40s.
 SUSPEND_WINDOW_SEC = 40
@@ -1031,6 +1049,14 @@ def conformance_dockerfile(base_ref: str) -> str:
             "RUN chmod 0755 /agentd",
             f"RUN mkdir -p {BAKED_WORKDIR}",
             f"WORKDIR {BAKED_WORKDIR}",
+            (
+                f"RUN echo '{CONFORMANCE_USER}:x:{CONFORMANCE_UID}:{CONFORMANCE_UID}:"
+                f"Conformance:{CONFORMANCE_HOME}:/bin/sh' >> /etc/passwd"
+                f" && echo '{CONFORMANCE_USER}:x:{CONFORMANCE_UID}:' >> /etc/group"
+                f" && mkdir -p {CONFORMANCE_HOME}"
+                f" && chown {CONFORMANCE_UID}:{CONFORMANCE_UID} {CONFORMANCE_HOME}"
+            ),
+            f"ENV {IMAGE_ENV_KEY}={IMAGE_ENV_VALUE}",
             f"ENV AGENTD_PORT={AGENT_PORT}",
             "ENV AGENTD_LOG=info",
             f"EXPOSE {AGENT_PORT}",
@@ -1808,6 +1834,157 @@ def drive_exec_identity(cli: Cli, launched: Envelope, results: Results) -> None:
         "unknown exec id is 404",
         "NotFound",
         lambda: cli.call("exec", "--poll", "never-existed", *attach),
+    )
+
+
+def drive_exec_start_protocol(cli: Cli, launched: Envelope, results: Results) -> None:
+    """Named users, groups and shells, and `--inherit-image-env` (#224, #225, #226). Sixteen checks.
+
+    Against the suite's own VM, whose image (`conformance_dockerfile`) carries a
+    `conformance` passwd row at uid 4242 with home `/home/conformance`, and one image `ENV`
+    line, `MICROVMS_CONFORMANCE_IMAGE_ENV=from-image`. Every check name starts with its
+    requirement key (AGENTD-7..16 in `spec/agentd.symspec.json`).
+
+    Live because the facts are the guest's: which rows the image's `/etc/passwd` holds, which
+    shells the base image ships, and what environment the platform hands the daemon as the
+    container `CMD`. The last is recorded by key name only in the AGENTD-13 detail, so a run's
+    log says what the snapshot holds without printing a value.
+    """
+    print("\n-- exec start: named user, group, shell; the image env --")
+    attach = attach_args(cli, launched)
+    token = str(launched.data.get("agentToken") or "")
+
+    def stdout(*args: str) -> str:
+        return str(cli.call("exec", *args, *attach).data.get("stdout") or "")
+
+    def refusal(*args: str) -> KindError | None:
+        try:
+            cli.call("exec", *args, *attach)
+        except KindError as refused:
+            return refused
+        return None
+
+    def marker_absent(path: str) -> bool:
+        return (
+            stdout(f"test -e {path} && echo present || echo absent").strip() == "absent"
+        )
+
+    results.eq(
+        "AGENTD-7 exec --user by name runs as the passwd row's uid",
+        stdout("id -u", "--user", CONFORMANCE_USER).strip(),
+        str(CONFORMANCE_UID),
+    )
+    results.eq(
+        "AGENTD-7 exec --group by name runs as the group row's gid",
+        stdout("id -g", "--user", CONFORMANCE_USER, "--group", "root").strip(),
+        "0",
+    )
+
+    marker = "/tmp/agentd-8-marker"
+    refused = refusal(f"touch {marker}", "--user", "no-such-user-agentd8")
+    results.check(
+        "AGENTD-8 an unknown --user is refused unknown_user naming it",
+        refused is not None
+        and refused.kind == "ProtocolError"
+        and "unknown_user" in refused.envelope.error
+        and "no-such-user-agentd8" in refused.envelope.error,
+        repr(refused.envelope.error if refused else "nothing raised"),
+    )
+    results.check(
+        "AGENTD-8 the refused command never ran",
+        marker_absent(marker),
+        marker,
+    )
+
+    results.eq(
+        "AGENTD-9 a named user gets HOME, USER and LOGNAME from its row",
+        stdout('echo "$HOME $USER $LOGNAME"', "--user", CONFORMANCE_USER).strip(),
+        f"{CONFORMANCE_HOME} {CONFORMANCE_USER} {CONFORMANCE_USER}",
+    )
+    results.eq(
+        "AGENTD-9 --env HOME overrides the passwd HOME",
+        stdout(
+            'echo "$HOME $USER"', "--user", CONFORMANCE_USER, "--env", "HOME=/work"
+        ).strip(),
+        f"/work {CONFORMANCE_USER}",
+    )
+
+    results.eq(
+        "AGENTD-10 without --inherit-image-env the image ENV does not reach the child",
+        stdout(f'echo "[${IMAGE_ENV_KEY}]"').strip(),
+        "[]",
+    )
+    results.eq(
+        "AGENTD-11 --inherit-image-env puts the image ENV in the child",
+        stdout(f'echo "[${IMAGE_ENV_KEY}]"', "--inherit-image-env").strip(),
+        f"[{IMAGE_ENV_VALUE}]",
+    )
+    results.eq(
+        "AGENTD-11 --env overrides the image ENV beneath it",
+        stdout(
+            f'echo "[${IMAGE_ENV_KEY}]"',
+            "--inherit-image-env",
+            "--env",
+            f"{IMAGE_ENV_KEY}=override",
+        ).strip(),
+        "[override]",
+    )
+
+    inherited = stdout("env", "--inherit-image-env")
+    keys = sorted(
+        line.split("=", 1)[0] for line in inherited.splitlines() if "=" in line
+    )
+    results.check(
+        "AGENTD-12 an inheriting child holds neither the token nor AGENTD_ configuration",
+        bool(token) and token not in inherited and "AGENTD_" not in inherited,
+        f"{len(keys)} keys: {', '.join(keys)}",
+    )
+
+    health = cli.call("health", *attach)
+    count = health.data.get("imageEnvKeys")
+    results.check(
+        "AGENTD-13 health reports the image env key count and no value",
+        isinstance(count, int)
+        and count > 0
+        and IMAGE_ENV_VALUE not in json.dumps(health.data),
+        f"imageEnvKeys={count!r}",
+    )
+
+    pipefail = cli.call(
+        "exec", "set -o pipefail; false | true", "--shell", "bash", *attach
+    )
+    results.eq(
+        "AGENTD-14 --shell bash runs a pipefail pipeline",
+        pipefail.data.get("exitCode"),
+        1,
+    )
+    dollar0 = stdout("echo $0", "--shell", "bash").strip()
+    results.check(
+        "AGENTD-14 the named shell is the program that runs",
+        dollar0.endswith("/bash"),
+        repr(dollar0),
+    )
+
+    marker = "/tmp/agentd-15-marker"
+    refused = refusal(f"touch {marker}", "--shell", "no-such-shell-agentd15")
+    results.check(
+        "AGENTD-15 an unknown --shell is refused unknown_shell naming it",
+        refused is not None
+        and refused.kind == "ProtocolError"
+        and "unknown_shell" in refused.envelope.error
+        and "no-such-shell-agentd15" in refused.envelope.error,
+        repr(refused.envelope.error if refused else "nothing raised"),
+    )
+    results.check(
+        "AGENTD-15 the refused command never ran",
+        marker_absent(marker),
+        marker,
+    )
+
+    results.eq(
+        "AGENTD-16 a numeric --user still runs as that uid under /bin/sh",
+        stdout("id -u; echo $0", "--user", str(CONFORMANCE_UID)).strip().splitlines(),
+        [str(CONFORMANCE_UID), "/bin/sh"],
     )
 
 
@@ -6429,6 +6606,16 @@ def main() -> int:
             )
             run_section(
                 results, "exec_identity", drive_exec_identity, cli, launched, results
+            )
+            # Named users, groups and shells, and the image env (#224, #225, #226), on the
+            # suite's own VM: its image carries the passwd row and the ENV line.
+            run_section(
+                results,
+                "exec_start_protocol",
+                drive_exec_start_protocol,
+                cli,
+                launched,
+                results,
             )
             # Machine-id per VM (#205): a second VM from the suite's image, compared
             # against the suite's own.

@@ -365,9 +365,15 @@ pub async fn start(
         Err(detail) => return fail(StatusCode::BAD_REQUEST, ERROR_MALFORMED_REQUEST, detail),
     };
 
-    let command = match build_command(&req, &state.launch_env()) {
+    // Resolution of the user, group and shell happens here too, and a name the guest does
+    // not have answers 400 with its own slug (AGENTD-8, AGENTD-15). Before the idempotency
+    // check as well as before the spawn: the answer to a request is a function of the
+    // request, so a retry that could never have started is refused the same way.
+    let command = match build_command(&req, &state) {
         Ok(command) => command,
-        Err(detail) => return fail(StatusCode::BAD_REQUEST, ERROR_MALFORMED_REQUEST, detail),
+        Err(rejection) => {
+            return fail(StatusCode::BAD_REQUEST, rejection.error, rejection.detail);
+        }
     };
 
     // Idempotency: decided under the registry lock, before the spawn, so two
@@ -1170,53 +1176,78 @@ fn validate_timeout(raw: Option<f64>) -> Result<Option<Duration>, String> {
     Ok(Some(Duration::from_secs_f64(secs)))
 }
 
-/// Assembles the child command, including the shell decision and demotion.
+/// Assembles the child command: resolution first (`exec_start::plan`), then the spawn
+/// settings, so a request the guest cannot satisfy is refused before a child exists.
 ///
-/// `launch_env` is the map delivered in the run-hook payload, and it is the *base*
-/// of the child's environment: the per-request `env` is overlaid on top of it, so a
-/// request that names a key the launch set wins. That direction is the useful one —
-/// a launch env is a default for the whole VM and a request is the specific thing
-/// happening now — and it is also the only direction that leaves the per-request
-/// contract unchanged for callers who never send a launch env at all.
+/// The environment is the plan's four layers, lowest first: the image snapshot (only with
+/// `inherit_image_env`), the passwd identity, the launch environment, the request's `env`.
+/// A launch env is a default for the whole VM and a request is the specific thing happening
+/// now, so the request wins; the identity sits under both so a caller who sets `HOME` keeps
+/// it, and over the image so a demoted user does not keep the image's root `HOME`.
 ///
-/// The agent token is not in either map and cannot be: `launch_env` comes from a
-/// parameter [`crate::state::AppState::bootstrap`] never writes the token into, and
-/// `env_clear` below still runs, so the daemon's own environment reaches nothing.
+/// The agent token is in no layer and cannot be: the launch env comes from a parameter
+/// [`crate::state::AppState::bootstrap`] never writes the token into, the snapshot was taken
+/// before any token existed and drops `AGENTD_*` besides, and `env_clear` below still runs,
+/// so the daemon's own live environment reaches nothing.
 fn build_command(
     req: &StartRequest,
-    launch_env: &std::collections::HashMap<String, String>,
-) -> Result<Command, String> {
-    let mut command = if req.shell.is_shell() {
-        // A single argument to `sh -c`, not a constructed wrapper. The
-        // predecessor built `"cd %s && {\n%s\n}"`, which made an empty command
-        // and a comment-terminated command into syntax errors and let an
-        // unbalanced `}` in the script escape the group it was supposed to be
-        // confined by. `sh -c ''` exits 0, which is the correct answer.
-        let script = req.command.join("\n");
-        let mut command = Command::new("/bin/sh");
-        command.arg("-c").arg(script);
-        command
-    } else {
-        let Some((program, args)) = req.command.split_first() else {
-            return Err("command must not be empty when shell is false".to_string());
-        };
-        let mut command = Command::new(program);
-        command.args(args);
-        command
+    state: &AppState,
+) -> Result<Command, crate::exec_start::Rejection> {
+    use crate::exec_start::{Guest, Program, is_executable_file, plan, read_database};
+
+    let launch_env = state.launch_env();
+    let config = state.config();
+    // Read per request rather than cached: a workload that runs `useradd` before its next
+    // exec is asking for exactly that user, and the files are a few kilobytes.
+    let passwd = match req.user {
+        Some(_) => read_database(&config.passwd_path),
+        None => String::new(),
+    };
+    let group = match req.group {
+        Some(protocol::exec::NameOrId::Name(_)) => read_database(&config.group_path),
+        _ => String::new(),
+    };
+    let plan = plan(
+        req,
+        &Guest {
+            launch_env: &launch_env,
+            image_env: state.image_env(),
+            passwd: &passwd,
+            group: &group,
+            is_executable: &is_executable_file,
+        },
+    )?;
+
+    let mut command = match &plan.program {
+        Program::Argv { program, args } => {
+            let mut command = Command::new(program);
+            command.args(args);
+            command
+        }
+        // A single argument to `<shell> -c`, not a constructed wrapper. The predecessor
+        // built `"cd %s && {\n%s\n}"`, which made an empty command and a comment-terminated
+        // command into syntax errors and let an unbalanced `}` in the script escape the
+        // group it was supposed to be confined by. `sh -c ''` exits 0, which is the correct
+        // answer.
+        Program::Script { shell, script } => {
+            let mut command = Command::new(shell);
+            command.arg("-c").arg(script);
+            command
+        }
     };
 
-    // Only what the launch and the request asked for. Inheriting the daemon's
-    // environment would carry the agent token into the child, and that is one of the
-    // three security properties the model pins — so the environment starts empty and
-    // nothing here reads from `std::env`.
+    // Only the plan's layers. Inheriting the daemon's live environment would carry anything
+    // it holds into the child, and that is one of the three security properties the model
+    // pins — so the environment starts empty and nothing here reads from `std::env`.
     //
-    // Two `envs` calls in this order, not a merged map: `Command::envs` applies each
-    // pair in turn, so the request's copy of a key overwrites the launch's. Written
-    // as a pre-merged `HashMap` it would be one more place the precedence could be
-    // silently inverted by an `extend` in the wrong direction.
+    // One `envs` call per layer in order, not a merged map: `Command::envs` applies each
+    // pair in turn, so a higher layer's copy of a key overwrites a lower one's. Written as a
+    // pre-merged `HashMap` it would be one more place the precedence could be silently
+    // inverted by an `extend` in the wrong direction.
     command.env_clear();
-    command.envs(launch_env);
-    command.envs(&req.env);
+    for layer in &plan.layers {
+        command.envs(layer);
+    }
 
     // Omitted cwd means inherit. Not `/`.
     if let Some(cwd) = &req.cwd {
@@ -1226,15 +1257,10 @@ fn build_command(
     // Demotion between fork and exec, in C. Never through `pre_exec`: a closure
     // there runs interpreted-equivalent code in a forked child of a threaded
     // process, where a lock held by another thread at fork time is held forever.
-    let numeric = |value: &Option<protocol::exec::NameOrId>| match value {
-        None => Ok(None),
-        Some(protocol::exec::NameOrId::Id(id)) => Ok(Some(*id)),
-        Some(protocol::exec::NameOrId::Name(name)) => Err(format!("{name:?} is not numeric")),
-    };
-    if let Some(gid) = numeric(&req.group)? {
+    if let Some(gid) = plan.gid {
         command.gid(gid);
     }
-    if let Some(uid) = numeric(&req.user)? {
+    if let Some(uid) = plan.uid {
         command.uid(uid);
     }
 
@@ -1699,7 +1725,7 @@ mod tests {
     async fn run(state: &AppState, req: StartRequest) -> Outcome {
         let id = req.exec_id.clone();
         let timeout = validate_timeout(req.timeout_sec).expect("valid timeout");
-        let command = build_command(&req, &state.launch_env()).expect("buildable command");
+        let command = build_command(&req, state).expect("buildable command");
         spawn(state, &id, command, timeout, req.reap_group_on_exit).expect("spawn");
         await_result(state, &id).await
     }
@@ -1878,7 +1904,7 @@ mod tests {
     fn launch(state: &AppState, request: StartRequest) {
         let id = request.exec_id.clone();
         let timeout = validate_timeout(request.timeout_sec).expect("valid timeout");
-        let command = build_command(&request, &state.launch_env()).expect("buildable command");
+        let command = build_command(&request, state).expect("buildable command");
         spawn(state, &id, command, timeout, request.reap_group_on_exit).expect("spawn");
     }
 
@@ -2278,7 +2304,7 @@ mod tests {
         let state = state();
         let request = req("live", &["/bin/sh", "-c", "sleep 30"]);
         let timeout = validate_timeout(request.timeout_sec).expect("valid");
-        let command = build_command(&request, &state.launch_env()).expect("buildable");
+        let command = build_command(&request, &state).expect("buildable");
         spawn(&state, "live", command, timeout, false).expect("spawn");
 
         let response = ack(State(state.clone()), Path("live".to_string())).await;
@@ -2301,7 +2327,7 @@ mod tests {
             cfg.output_linger = Duration::from_millis(200);
         });
         let request = req("group", &["/bin/sh", "-c", "sleep 30 & echo started; wait"]);
-        let command = build_command(&request, &state.launch_env()).expect("buildable");
+        let command = build_command(&request, &state).expect("buildable");
         spawn(&state, "group", command, None, false).expect("spawn");
 
         let pgid = state
@@ -2847,7 +2873,7 @@ mod tests {
         let mut request = req("demote", &["/bin/true"]);
         request.user = Some(65534.into());
         request.group = Some(65534.into());
-        let command = build_command(&request, &HashMap::new()).expect("buildable");
+        let command = build_command(&request, &state()).expect("buildable");
         assert_eq!(
             command.as_std().get_program(),
             std::ffi::OsStr::new("/bin/true")

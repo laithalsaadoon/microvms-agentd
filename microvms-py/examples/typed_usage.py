@@ -49,6 +49,7 @@ from microvms import (
     Region,
     RunHookTimeout,
     Sandbox,
+    Session,
     SizeClass,
     Total,
     WindowClosedError,
@@ -185,6 +186,20 @@ def lifecycle_by_id(region: Region, microvm_id: str) -> float | None:
         )
     plane.terminate(microvm_id)
     return vm.started_at
+
+
+def harness_exec(session: Session, user: int | str) -> int | None:
+    """A harness exec: bash, a task user by name or uid, the image's ENV. For the checker."""
+    health = session.health()
+    inherit: bool = health.image_env_keys is not None
+    result = session.run_sync(
+        "set -o pipefail; pytest -q | tee log",
+        shell="bash",
+        user=user,
+        group="staff",
+        inherit_image_env=inherit,
+    )
+    return result.exit_code
 
 
 def deferred_launch(region: Region, image: str) -> str:

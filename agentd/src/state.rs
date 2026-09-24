@@ -232,15 +232,21 @@ impl AppState {
         Self::with_parts(config, space_probe, repairer, None)
     }
 
-    /// A state holding an image-environment snapshot, with the default seams. For tests
-    /// of `inherit_image_env`, which hand in the environment the daemon would have
-    /// inherited rather than the test process's own.
-    pub fn with_image_env(config: Config, image_env: HashMap<String, String>) -> Self {
+    /// A state holding a snapshot of `inherited`, with the default seams. For tests of
+    /// `inherit_image_env`, which hand in the environment the daemon would have inherited
+    /// rather than the test process's own; it is filtered exactly as `main` filters the
+    /// real one, `AGENTD_*` dropped.
+    pub fn with_image_env(config: Config, inherited: HashMap<String, String>) -> Self {
+        let snapshot = crate::exec_start::snapshot_image_env(
+            inherited
+                .into_iter()
+                .map(|(key, value)| (key.into(), value.into())),
+        );
         Self::with_parts(
             config,
             disk::available_bytes,
             identity::no_repair(),
-            Some(image_env),
+            Some(snapshot),
         )
     }
 

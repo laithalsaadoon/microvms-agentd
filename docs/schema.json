@@ -251,6 +251,16 @@
           },
           "type": "array"
         },
+        "image_env_keys": {
+          "default": null,
+          "description": "How many variables the daemon's image-environment snapshot holds, or `None` when\nit holds no snapshot.\n\nThe snapshot is the environment the daemon inherited as the container `CMD`, minus\nevery `AGENTD_*` variable, taken once at startup; a start request with\n`inherit_image_env` starts its child from it. A count and never the values: this\nroute answers without the agent token, and an image's `ENV` can hold anything its\nauthor put there.\n\nDefaulted for `busy`'s reason, and `None` is also what a daemon that predates\n`inherit_image_env` reads as, which is how a caller tells whether the flag will be\nhonoured: such a daemon ignores the flag rather than refusing it.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "version": {
           "type": "string"
         }
@@ -265,7 +275,8 @@
         "execs",
         "hooks",
         "hooks_dropped",
-        "identity_steps"
+        "identity_steps",
+        "image_env_keys"
       ],
       "type": "object"
     },
@@ -341,6 +352,21 @@
         "killed"
       ],
       "type": "object"
+    },
+    "NameOrId": {
+      "anyOf": [
+        {
+          "description": "A numeric uid or gid, applied as given.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "description": "A user or group name, resolved in the guest before anything is spawned.",
+          "type": "string"
+        }
+      ],
+      "description": "A user or group as a start request names it: a numeric id, or a name the daemon\nresolves against the guest's `/etc/passwd` or `/etc/group`.\n\nUntagged, so the wire carries a bare JSON integer or a bare JSON string and nothing\nelse. An integer serializes exactly as the `u32` this field used to be, which is what\nkeeps a client that only ever sends ids byte-compatible with a daemon that predates\nnames. A string sent to such a daemon is refused as `malformed_request` rather than\nmisread.\n\nA string that names no row and is all ASCII digits is read as that id, the way\n`docker exec -u 1000` reads it: a harness that carries a uid as a string reaches the\nsame account an integer would."
     },
     "OutputEvent": {
       "description": "One `output` SSE event.",
@@ -512,11 +538,24 @@
       },
       "type": "object"
     },
+    "Shell": {
+      "anyOf": [
+        {
+          "description": "`false` execs `command` as an argv; `true` runs it under `/bin/sh -c`.",
+          "type": "boolean"
+        },
+        {
+          "description": "A shell name such as `\"bash\"` (resolved on the child's `PATH`, the image's `PATH`,\n`/bin` and `/usr/bin`) or an absolute path to one.",
+          "type": "string"
+        }
+      ],
+      "description": "How a start request's `command` is run: `false` (an argv), `true` (`/bin/sh -c`), or\nthe name of a shell the daemon resolves and runs as `<shell> -c`.\n\nUntagged for [`NameOrId`]'s reason: a boolean serializes exactly as the field always\ndid, so an old daemon keeps accepting it, and a string sent to an old daemon is refused\nrather than misread."
+    },
     "StartRequest": {
-      "description": "A start request. `command` is either an argv array or, with `shell: true`, a\nsingle script string.",
+      "description": "A start request. `command` is either an argv array or, with `shell` set, a single\nscript string.",
       "properties": {
         "command": {
-          "description": "argv when `shell` is false, or the script when it is true.",
+          "description": "argv when `shell` is false, or the script when it is set.",
           "items": {
             "type": "string"
           },
@@ -542,13 +581,21 @@
           "type": "string"
         },
         "group": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NameOrId"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": null,
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "description": "The group to demote to: a numeric gid, or a name resolved against `/etc/group`. A\nname the guest does not have answers 400 `unknown_group`."
+        },
+        "inherit_image_env": {
+          "default": false,
+          "description": "Whether the child's environment starts from the image's `ENV`.\n\nOff by default, which keeps the property the daemon has always had: nothing from\nits own environment reaches a child. Set, the environment the daemon inherited as\nthe container `CMD`, minus every `AGENTD_*` variable, is the lowest layer, under\nthe passwd identity, the launch environment and `env`. The agent token is never in\nthat snapshot: it arrives in the run hook, after the snapshot is taken.\n\nA daemon that predates this field ignores it, as serde ignores any unknown key; a\ncaller that depends on it can read `image_env_keys` on `GET /v1/health`, which such\na daemon does not report.",
+          "type": "boolean"
         },
         "reap_group_on_exit": {
           "default": false,
@@ -556,8 +603,9 @@
           "type": "boolean"
         },
         "shell": {
+          "$ref": "#/$defs/Shell",
           "default": false,
-          "type": "boolean"
+          "description": "`false`, `true` (`/bin/sh -c`), or a shell name such as `\"bash\"`. A name the guest\ncannot resolve answers 400 `unknown_shell` before anything is spawned."
         },
         "stdin": {
           "default": false,
@@ -574,14 +622,16 @@
           ]
         },
         "user": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NameOrId"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": null,
-          "description": "Numeric uid to demote to. Optional; omitted means run as the daemon's own\nuser.",
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "description": "The user to demote to: a numeric uid, or a name resolved against the guest's\n`/etc/passwd`. Optional; omitted means run as the daemon's own user. A name the\nguest does not have answers 400 `unknown_user` before anything is spawned.\n\nA user with a passwd row, however it was given, gets `HOME`, `USER` and `LOGNAME`\nfrom the row, beneath the launch environment and `env`. A user given by name also\ngets the row's primary gid when `group` is omitted; a numeric uid keeps the\ndaemon's group, as it always did."
         }
       },
       "required": [
@@ -856,7 +906,22 @@
         {
           "code": 400,
           "error": "malformed_request",
-          "meaning": "the body is not a valid start request, exec_id is empty, timeout_sec is not a positive finite number, or command is empty with shell false"
+          "meaning": "the body is not a valid start request, exec_id is empty, timeout_sec is not a positive finite number, command is empty with shell false, or shell is an empty string"
+        },
+        {
+          "code": 400,
+          "error": "unknown_user",
+          "meaning": "user names no row of the guest's /etc/passwd and is not all digits. Nothing was spawned; detail names the user."
+        },
+        {
+          "code": 400,
+          "error": "unknown_group",
+          "meaning": "group names no row of the guest's /etc/group and is not all digits. Nothing was spawned; detail names the group."
+        },
+        {
+          "code": 400,
+          "error": "unknown_shell",
+          "meaning": "shell names no executable file on the child's PATH, the image's PATH, /bin or /usr/bin, or is an absolute path to none. Nothing was spawned; detail names the shell."
         },
         {
           "code": 401,

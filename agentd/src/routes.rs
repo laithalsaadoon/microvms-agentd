@@ -395,7 +395,8 @@ async fn health(State(state): State<AppState>) -> Json<Health> {
         identity_degraded: identity.degraded(),
         identity_repaired: identity.attempted,
         identity_steps: identity.steps.iter().map(|step| step.to_wire()).collect(),
-        image_env_keys: None,
+        // A count, never the values: this route answers without the token (AGENTD-13).
+        image_env_keys: state.image_env().map(|image_env| image_env.len()),
         busy,
         execs,
         // The daemon's own observations of the platform's lifecycle hooks —

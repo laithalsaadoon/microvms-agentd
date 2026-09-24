@@ -21,19 +21,20 @@ Feature: A start request names its user, group and shell, and may inherit the im
       | JAVA_HOME   | /opt/java                |
       | AGENTD_PORT | 9000                     |
     And the run hook installed the token "tok-bdd-7f3a9c" with the launch environment:
-      | FROM_LAUNCH | launch |
+      | FROM_LAUNCH | launch          |
+      | LOGNAME     | launch-logname  |
 
   Rule: AGENTD-7 — a name is resolved in the guest before the child is spawned
 
     @AGENTD-7 @AGENTD-9
-    Scenario: a user named by string runs as its passwd row
+    Scenario: a user named by string runs as its passwd row, beneath the launch environment
       Given a start of "id -u; id -g; echo $HOME $USER $LOGNAME" under shell "true"
       And the user named "tester"
       When the daemon answers the start
       Then the start was accepted and the child exited 0
       And output line 1 is this process's uid
       And output line 2 is this process's gid
-      And output line 3 is "/home/tester tester tester"
+      And output line 3 is "/home/tester tester launch-logname"
 
     @AGENTD-7
     Scenario: a group named by string runs as its group row
@@ -81,7 +82,8 @@ Feature: A start request names its user, group and shell, and may inherit the im
       When the daemon answers the start
       Then the start was accepted and the child exited 0
       And the child's environment is exactly:
-        | FROM_LAUNCH | launch |
+        | FROM_LAUNCH | launch         |
+        | LOGNAME     | launch-logname |
 
   Rule: AGENTD-11 — with inherit_image_env the image ENV is the lowest layer
 
@@ -96,6 +98,7 @@ Feature: A start request names its user, group and shell, and may inherit the im
         | HOME        | /root                    |
         | JAVA_HOME   | /opt/java                |
         | FROM_LAUNCH | launch                   |
+        | LOGNAME     | launch-logname           |
 
     @AGENTD-11 @AGENTD-9
     Scenario: a demoted user's passwd HOME overrides the image HOME, and the request's PATH the image PATH
@@ -108,10 +111,10 @@ Feature: A start request names its user, group and shell, and may inherit the im
       And the child's environment is exactly:
         | PATH        | /request/bin |
         | HOME        | /home/tester |
-        | USER        | tester       |
-        | LOGNAME     | tester       |
-        | JAVA_HOME   | /opt/java    |
-        | FROM_LAUNCH | launch       |
+        | USER        | tester         |
+        | LOGNAME     | launch-logname |
+        | JAVA_HOME   | /opt/java      |
+        | FROM_LAUNCH | launch         |
 
   Rule: AGENTD-12 — the token and the daemon's configuration never reach a child
 
@@ -192,4 +195,5 @@ Feature: A start request names its user, group and shell, and may inherit the im
       When the daemon answers the start
       Then the start was accepted and the child exited 0
       And the child's environment is exactly:
-        | FROM_LAUNCH | launch |
+        | FROM_LAUNCH | launch         |
+        | LOGNAME     | launch-logname |

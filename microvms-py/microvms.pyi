@@ -832,6 +832,13 @@ class Health:
         VM's identity.
         """
     @property
+    def image_env_keys(self, /) -> int |None:
+        """
+        How many variables the daemon's image-environment snapshot holds, or `None` when it
+        holds none. `None` is also what a daemon built before `inherit_image_env` reports,
+        and such a daemon ignores that flag; the values are never reported.
+        """
+    @property
     def reserve_bytes(self, /) -> int |None:
         """
         Bytes that must stay free before a write is refused. Zero means the guard is off.
@@ -1913,17 +1920,29 @@ class Session:
         and no `Deref`, so "treat `authToken` as a string" is as inexpressible here as it
         is there (TRAP-7).
         """
-    def run(self, /, command: Sequence[str] |str, *, shell: bool = False, cwd: str |None = None, env: dict[str, str] |None = None, user: int |None = None, group: int |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False) -> ExecHandle:
+    def run(self, /, command: Sequence[str] |str, *, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, inherit_image_env: bool = False) -> ExecHandle:
         """
         Starts a command and returns its handle. Does not wait.
         
         `command` is a list, or a string that becomes a one-element argv — never
-        whitespace-split. `shell=True` wants a single script string. `reap_group_on_exit`
-        asks the daemon to signal the whole process group once the command's own child
-        exits, so nothing it backgrounded outlives it; off by default, which keeps the
-        backgrounded-grandchild-output guarantee for callers who rely on it.
+        whitespace-split. `shell=True` wants a single script string for `/bin/sh -c`;
+        `shell="bash"` runs it under a shell the daemon resolves in the guest, and a shell
+        the guest does not have is refused (`unknown_shell`) before anything starts.
+        
+        `user` and `group` are a numeric id or a name the daemon resolves against the
+        guest's `/etc/passwd` and `/etc/group`; an unknown name is refused (`unknown_user`,
+        `unknown_group`) before anything starts. A user with a passwd row gets `HOME`,
+        `USER` and `LOGNAME` from it, beneath the launch environment and `env`.
+        
+        `inherit_image_env` starts the child's environment from the image's `ENV` (minus
+        `AGENTD_*`, never the token), beneath everything else; off by default, which keeps
+        the child's environment exactly the launch environment plus `env`.
+        
+        `reap_group_on_exit` asks the daemon to signal the whole process group once the
+        command's own child exits, so nothing it backgrounded outlives it; off by default,
+        which keeps the backgrounded-grandchild-output guarantee for callers who rely on it.
         """
-    def run_sync(self, /, command: Sequence[str] |str, *, timeout: float = ..., shell: bool = False, cwd: str |None = None, env: dict[str, str] |None = None, user: int |None = None, group: int |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False) -> ExecResult:
+    def run_sync(self, /, command: Sequence[str] |str, *, timeout: float = ..., shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, inherit_image_env: bool = False) -> ExecResult:
         """
         Start, wait, ack. The one-shot shape, for when output is all you want.
         """

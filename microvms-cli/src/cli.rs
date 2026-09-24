@@ -1117,11 +1117,12 @@ pub struct ExecArgs {
 
     /// Set one environment variable for the command, as KEY=VALUE. Repeatable.
     ///
-    /// These flags are the child's *whole* environment: the daemon starts every exec from an
-    /// empty one (`env_clear()`, so the agent token never leaks into a child,
-    /// `agentd/src/exec.rs:1003`) and applies exactly this map. There is no inherited PATH to
-    /// append to — a command that needs one must be handed one, which is the failure the
-    /// coding-agents example documents.
+    /// These flags, over the launch environment, are the child's *whole* environment: the
+    /// daemon starts every exec from an empty one (`env_clear()`, so the agent token never
+    /// leaks into a child) and applies exactly these maps, plus `HOME`/`USER`/`LOGNAME` for a
+    /// --user with a passwd row. There is no inherited PATH to append to unless
+    /// --inherit-image-env asks for the image's; otherwise a command that needs one must be
+    /// handed one, which is the failure the coding-agents example documents.
     ///
     /// Split at the **first** `=`, so a value may itself contain `=` (`--env A=b=c` sets `A`
     /// to `b=c`). An empty value is legal and explicit (`--env EMPTY=` sets the variable to

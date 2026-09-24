@@ -30,7 +30,7 @@ The explicit `--endpoint`, `--agent-token`, and `--microvm-id` flags still work 
 microvm exec --name dev "python3 -V"
 ```
 
-`exec` runs one command in a MicroVM that is already running. `--cwd` sets the working directory, `--env KEY=VALUE` sets one variable for the command and is repeatable, `--user` and `--group` run it as a numeric uid and gid, and `--timeout` (default 300 seconds) bounds the wait. The daemon spawns execs with a minimal environment, so a command that needs `PATH` or `HOME` gets them from `--env`, or for every exec in the VM from `run --launch-env KEY=VALUE`.
+`exec` runs one command in a MicroVM that is already running. `--cwd` sets the working directory, `--env KEY=VALUE` sets one variable for the command and is repeatable, `--user` and `--group` run it as a user and group named or numbered (a name is resolved against the guest's `/etc/passwd`, and a user with a row gets its `HOME`), `--shell bash` runs it under bash instead of `/bin/sh`, and `--timeout` (default 300 seconds) bounds the wait. The daemon spawns execs with a minimal environment, so a command that needs `PATH` gets it from `--env`, for every exec in the VM from `run --launch-env KEY=VALUE`, or from the image's own `ENV` with `--inherit-image-env`.
 
 `--stream` streams output as it arrives rather than waiting for the whole thing. Under `--json` this is the one invocation that writes more than one object to stdout: NDJSON events, then the envelope last, with type `microvm.exec.stream`. `--from-offset` resumes a stream at a byte offset.
 

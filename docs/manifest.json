@@ -161,7 +161,7 @@
           {
             "choices": null,
             "default": null,
-            "help": "Numeric uid to run --exec's command as. Omitted runs as the daemon's own user",
+            "help": "User to run --exec's command as: a name or a numeric uid. Omitted runs as the daemon's own user",
             "name": "user",
             "positional": false,
             "required": false,
@@ -170,7 +170,7 @@
           {
             "choices": null,
             "default": null,
-            "help": "Numeric gid to run --exec's command as. Omitted keeps the daemon's own group",
+            "help": "Group to run --exec's command as: a name or a numeric gid. Omitted keeps the daemon's own group, or a named user's primary group",
             "name": "group",
             "positional": false,
             "required": false,
@@ -1186,7 +1186,7 @@
           {
             "choices": null,
             "default": null,
-            "help": "Numeric uid to run the command as. Omitted runs as the daemon's own user",
+            "help": "User to run the command as: a name or a numeric uid. Omitted runs as the daemon's own user",
             "name": "user",
             "positional": false,
             "required": false,
@@ -1195,11 +1195,29 @@
           {
             "choices": null,
             "default": null,
-            "help": "Numeric gid to run the command as. Omitted keeps the daemon's own group",
+            "help": "Group to run the command as: a name (resolved against the guest's `/etc/group`) or a numeric gid. Omitted keeps the daemon's own group, or a named user's primary group",
             "name": "group",
             "positional": false,
             "required": false,
             "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Run the command under this shell instead of `/bin/sh`, for example `bash`",
+            "name": "shell",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Start the command's environment from the image's `ENV` rather than from nothing",
+            "name": "inherit-image-env",
+            "positional": false,
+            "required": false,
+            "type": "boolean"
           },
           {
             "choices": null,
