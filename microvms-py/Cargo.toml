@@ -30,6 +30,8 @@ microvms-core = { version = "0.8.0", path = "../microvms-core" }
 # the crate would have to re-declare their fields — which is exactly the drift
 # `protocol` was extracted to make impossible (ARCH-2).
 protocol = { package = "microvms-protocol", version = "0.8.0", path = "../protocol" }
+# Name records cross the binding as JSON (`NameRecord.to_dict`/`from_dict`).
+serde_json = "1"
 # No `extension-module` feature. It is deprecated, and enabling it disables
 # libpython linking for *every* target in the workspace, which breaks
 # `cargo test` and `cargo build -p microvms-py` with undefined `_PyExc_*`

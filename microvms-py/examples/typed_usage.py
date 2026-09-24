@@ -43,6 +43,8 @@ from microvms import (
     Microvm,
     MicrovmError,
     MicrovmSummary,
+    NameRecord,
+    NameRegistry,
     Region,
     RunHookTimeout,
     Sandbox,
@@ -198,6 +200,21 @@ def adopted_step(region: Region, record: dict[str, str]) -> str:
     )
     report = vm.terminate(wait_for_terminated=True)
     return report.lifecycle or "unknown"
+
+
+def named_step(region: Region, state_dir: str, stored: dict[str, object]) -> str:
+    """Find a VM by name, or from a record kept in another store. Written for the checker."""
+    registry = NameRegistry(state_dir)
+    found: NameRecord | None = registry.get("ci")
+    names: list[str] = [record.name for record in registry.list()]
+    record = NameRecord.from_dict(stored)
+    restored: dict[str, object] = record.to_dict()
+    sandbox = Sandbox.from_name(region, "ci", registry)
+    registered: NameRecord = registry.register("ci-copy", sandbox)
+    vm = AgentVm.from_name(region, "ci", registry, [AgentSpec.claude_code()])
+    report = vm.terminate(wait_for_terminated=True)
+    released: list[str] = registry.release_by_vm(registered.microvm_id)
+    return f"{found} {names} {len(restored)} {released} {report.lifecycle}"
 
 
 def main() -> None:

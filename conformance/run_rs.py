@@ -3793,12 +3793,19 @@ def drive_stable_launch(cli: Cli, launched: Envelope, results: Results) -> None:
 
 
 def run_rust_live(
-    cli: Cli, launched: Envelope, results: Results, test: str, name: str, check: str
+    cli: Cli,
+    launched: Envelope,
+    results: Results,
+    test: str,
+    name: str,
+    check: str,
+    extra_env: dict[str, str] | None = None,
 ) -> None:
     """One ignored Rust live test against the suite's image, recorded as one named check."""
     env = os.environ.copy()
     env["MICROVM_BACKGROUND_TEST_IMAGE"] = str(launched.data["imageIdentifier"])
     env["AWS_REGION"] = cli.region
+    env.update(extra_env or {})
     command = [
         "cargo",
         "test",
@@ -3851,6 +3858,59 @@ def drive_adopt_by_id(cli: Cli, launched: Envelope, results: Results) -> None:
         "a_vm_launched_elsewhere_is_adopted_and_driven_by_id",
         "a VM launched elsewhere is adopted and driven by id",
     )
+
+
+def drive_find_by_name(cli: Cli, launched: Envelope, results: Results) -> None:
+    """A name the CLI registered is found and adopted by name through core (#202).
+
+    `run --keep --vm-name` writes the record with the CLI; core's registry reads it, adopts
+    the VM by name from a fresh handle, names it again, terminates it, and releases both
+    names; the CLI then refuses the released name locally. One registry, three readers. The
+    state directory is this section's own, so a developer's `~/.microvm/runs` is untouched.
+    """
+    print("\n-- find by name (CLI registry read and released by core) --")
+    vm_name = f"conformance-byname-{secrets.token_hex(4)}"
+    with tempfile.TemporaryDirectory(prefix="microvm-names-") as state_dir:
+        try:
+            cli.call(
+                "run",
+                "--image",
+                str(launched.data["imageIdentifier"]),
+                "--name",
+                f"microvm-cli-conformance-byname-{secrets.token_hex(4)}",
+                "--memory",
+                str(BASELINE_MEMORY_MIB),
+                "--keep",
+                "--vm-name",
+                vm_name,
+                "--state-dir",
+                state_dir,
+                "--region",
+                cli.region,
+                "--max-duration-sec",
+                "600",
+                timeout=15 * 60,
+            )
+        except KindError as exc:
+            results.check("run --keep --vm-name for find-by-name", False, repr(exc))
+            return
+        run_rust_live(
+            cli,
+            launched,
+            results,
+            "live_names",
+            "a_name_the_cli_registered_is_adopted_by_name_and_released",
+            "a CLI-registered name is adopted by name through core and released",
+            {"MICROVM_NAMES_STATE_DIR": state_dir, "MICROVM_NAMES_NAME": vm_name},
+        )
+        try:
+            cli.call("health", "--name", vm_name, "--state-dir", state_dir, timeout=60)
+            released = False
+        except KindError as exc:
+            released = exc.code == "ERR_PRECONDITION"
+        results.check(
+            "the CLI refuses a name core released, locally", released, vm_name
+        )
 
 
 def drive_lifecycle_by_id(
@@ -5988,6 +6048,8 @@ def main() -> int:
             drive_lifecycle_by_id(cli, launched, aws, results)
             # Adoption (#196) on its own bounded VM, from the suite's image.
             drive_adopt_by_id(cli, launched, results)
+            # Names (#202): a CLI-registered VM found and released through core.
+            drive_find_by_name(cli, launched, results)
             # After the identity section because it leans on the same detach/poll/ack
             # surface that section just proved, so a rotation failure here points at the
             # rotation rather than at a broken poll.

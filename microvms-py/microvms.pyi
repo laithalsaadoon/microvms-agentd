@@ -11,6 +11,7 @@ The MicroVMs client, as Python sees it.
 """
 
 from collections.abc import Sequence
+from os import PathLike
 from typing import Any, Final, final
 
 @final
@@ -110,6 +111,11 @@ class AgentVm:
     def find_image(self, /, *, binary: Sequence[int], build_role_arn: str, size: SizeClass |None = None) -> str |None:
         """
         The ARN of an existing image named per `image_name`, or `None` when there is none.
+        """
+    @staticmethod
+    def from_name(region: Region, name: str, registry: NameRegistry, agents: Sequence[AgentSpec] |None = None, *, port: int |None = None) -> AgentVm:
+        """
+        Adopts the agent VM registered as `name` in `registry`; see `Sandbox.from_name`.
         """
     def image_name(self, /, *, binary: Sequence[int], build_role_arn: str, size: SizeClass |None = None) -> str:
         """
@@ -1068,6 +1074,108 @@ class MicrovmSummary:
     def state(self, /) -> str: ...
 
 @final
+class NameRecord:
+    """
+    One named VM: everything `Sandbox.adopt` needs, under a name.
+    
+    Holds a secret. `agent_token` is readable so the VM can be adopted, but it stays out of
+    `repr`; keep records (and `to_dict()` output) in private storage.
+    """
+    def __eq__(self, other: object, /) -> bool: ...
+    def __new__(cls, /, name: str, microvm_id: str, endpoint: str, agent_token: str, region: Region) -> NameRecord:
+        """
+        A record for a VM this process can already address. Refuses an illegal name or an
+        empty id, endpoint, or token.
+        """
+    def __repr__(self, /) -> str: ...
+    @property
+    def agent_token(self, /) -> str:
+        """
+        The VM's bearer credential. Store only privately; never in repr.
+        """
+    @property
+    def at(self, /) -> int:
+        """
+        Seconds since the epoch when the name was registered.
+        """
+    @property
+    def egress_posture(self, /) -> str |None:
+        """
+        The launch's egress posture label, or `None` when the registering process did not
+        know it.
+        """
+    @property
+    def endpoint(self, /) -> str: ...
+    @staticmethod
+    def for_sandbox(name: str, sandbox: Sandbox) -> NameRecord:
+        """
+        A record naming the VM `sandbox` addresses — launched or adopted.
+        """
+    @staticmethod
+    def from_dict(record: dict) -> NameRecord:
+        """
+        A record from `to_dict()` output (or a CLI registry file's JSON), checked.
+        """
+    @property
+    def microvm_id(self, /) -> str: ...
+    @property
+    def name(self, /) -> str: ...
+    @property
+    def region(self, /) -> str:
+        """
+        The region the VM runs in, as the record spells it.
+        """
+    def to_dict(self, /) -> Any:
+        """
+        The record as a JSON-safe dict with the CLI registry's camelCase keys, **agent token
+        included** — the form to store privately and read back with `from_dict`.
+        """
+
+@final
+class NameRegistry:
+    """
+    The CLI's name registry: one owner-only JSON file per name under `<state_dir>/names/`.
+    
+    `state_dir` defaults to the CLI's — `$MICROVM_STATE_DIR`, else `~/.microvm/runs` — so a
+    name registered here resolves in `microvm exec --name` and the reverse. To keep names in
+    your own database instead, store `NameRecord.to_dict()` there and adopt with
+    `Sandbox.adopt` from the record's fields.
+    """
+    def __new__(cls, /, state_dir: str |PathLike[str] |None = None) -> NameRegistry: ...
+    def __repr__(self, /) -> str: ...
+    def delete(self, /, name: str) -> bool:
+        """
+        Removes `name`, answering whether a record was there.
+        """
+    @property
+    def directory(self, /) -> str:
+        """
+        The directory holding the name files.
+        """
+    def get(self, /, name: str) -> NameRecord |None:
+        """
+        The record registered as `name`, or `None`. A file that exists but does not parse
+        raises rather than reading as free: its name stays taken until someone inspects it.
+        """
+    def list(self, /) -> list[NameRecord]:
+        """
+        Every readable record, sorted by name.
+        """
+    def put(self, /, record: NameRecord) -> None:
+        """
+        Writes `record` under its name, replacing any earlier record, owner-only on Unix.
+        """
+    def register(self, /, name: str, sandbox: Sandbox) -> NameRecord:
+        """
+        Names the VM `sandbox` addresses and writes the record; returns it.
+        """
+    def release_by_vm(self, /, microvm_id: str) -> list[str]:
+        """
+        Removes every name registered to `microvm_id` and returns them — the step after a
+        terminate, so no name outlives its VM.
+        """
+
+@final
 class OutputChunk:
     """
     Output bytes, with the offset they start at.
@@ -1447,6 +1555,13 @@ class Sandbox:
     def endpoint(self, /) -> str |None:
         """
         The proxy endpoint, once launched.
+        """
+    @staticmethod
+    def from_name(region: Region, name: str, registry: NameRegistry, *, port: int |None = None) -> Sandbox:
+        """
+        Adopts the VM registered as `name` in `registry`; see `Sandbox.adopt`.
+        
+        `region` must match the record's: an id from another region addresses nothing here.
         """
     @property
     def image(self, /) -> Image |None:

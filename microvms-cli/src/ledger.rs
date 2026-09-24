@@ -228,118 +228,34 @@ pub fn remove(root: &Path, run_id: &str) -> std::io::Result<()> {
 
 // ── the name registry ────────────────────────────────────────────────────────
 
-/// A VM name's shape: ASCII letters, digits, `-`, `_`, at most 128 bytes, and never the
-/// service's own `mvm-` prefix.
-///
-/// The charset is the image-name pattern (`[a-zA-Z0-9-_]+`), reused deliberately: it is what
-/// makes the prefix discrimination in [`resolve`] total — an identifier starting with `mvm-`
-/// can only be a MicroVM id, because a legal name is refused that prefix here, and an ARN
-/// cannot match because `:` is outside the set. It also makes every name a safe file name,
-/// which is what the registry stores it as.
-pub fn validate_name(name: &str) -> Result<(), String> {
-    if name.is_empty() {
-        return Err("a VM name cannot be empty".to_string());
-    }
-    if name.len() > 128 {
-        return Err(format!(
-            "a VM name is at most 128 bytes; this one is {}",
-            name.len()
-        ));
-    }
-    // Both spellings: `microvm-` is the id prefix the real service answers (measured
-    // 2026-08-28, first live run of this feature — the fakes' `mvm-` fixture shape let a
-    // passthrough keyed on `mvm-` alone pass every scripted test and fail against AWS),
-    // and `mvm-` stays refused because it is the fixture shape every scripted body uses.
-    if name.starts_with("microvm-") || name.starts_with("mvm-") {
-        return Err(format!(
-            "{name:?} starts with a MicroVM id prefix — a name shaped like an id would make \
-             `microvm suspend <identifier>` ambiguous about which VM it addresses"
-        ));
-    }
-    if let Some(bad) = name
-        .chars()
-        .find(|c| !c.is_ascii_alphanumeric() && *c != '-' && *c != '_')
-    {
-        return Err(format!(
-            "{bad:?} is not a legal VM-name character: names take ASCII letters, digits, `-` \
-             and `_`, the image-name pattern"
-        ));
-    }
-    Ok(())
-}
+use microvms_core::names::{FileNameStore, NameStore as _};
+/// The record type, name rules, and file store live in core, so the bindings read and write
+/// the same registry the CLI does. See `microvms_core::names`.
+pub use microvms_core::names::{NameRecord, validate_name};
 
-/// One kept VM's local name, and everything an attach needs to address it.
+/// The name→VM registry the CLI keeps: one JSON file per live name, under `<root>/names/`.
 ///
-/// The endpoint, token, and region ride along with the id because a name that resolved to an
-/// id alone would still make the caller paste the rest of the triple — and the triple is the
-/// thing the name exists to replace. `camelCase` on the wire, the ledger's own convention.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NameRecord {
-    pub name: String,
-    pub microvm_id: String,
-    pub endpoint: String,
-    /// The launch's agent token. On disk so `exec --name` can attach without the caller
-    /// re-pasting it; the file is written owner-only on Unix for exactly that reason.
-    pub agent_token: String,
-    pub region: String,
-    /// Seconds since the epoch, the ledger's own clock.
-    pub at: u64,
-    /// The launching host's identity secret, base64, when `run --identity` generated one.
-    ///
-    /// In this file for the reason the agent token is: `tunnel --name --verify-identity`
-    /// runs in a later process, and a secret that did not persist would make the flag work
-    /// only in the launching shell. The file is already 0600 and already a credential store
-    /// — this raises what a stolen record can do from "call the VM" to "call the VM and
-    /// impersonate the launching host to it", which is the same trust domain.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub identity_host_seed: Option<String>,
-    /// The VM's public key, base64 — the pin `--verify-identity` checks the far end against.
-    ///
-    /// Deliberately the *public* half: the VM's secret was dropped at launch
-    /// (`LaunchIdentity::keep`), so no record anywhere lets anyone impersonate the VM.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub identity_vm_public_key: Option<String>,
-    /// The egress posture label of the launch this name was registered for, when the
-    /// registering command is the one that launched the VM.
-    ///
-    /// `None` is a real answer and not a gap: `microvm attach` registers a VM it did not
-    /// launch, and a record written before this field existed knows nothing either. A later
-    /// command reading `None` must say the weakest true thing about the VM's network rather
-    /// than inherit a claim — `agent-up`'s refresh path is the caller, and reporting the
-    /// `open` its own fresh path uses would mislabel a connector-less VM someone attached.
-    ///
-    /// The label rather than the enum, because this file is a wire format read by later
-    /// versions: `EgressPosture::from_label` answers `None` for a spelling it does not know.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub egress_posture: Option<String>,
-}
-
-/// The name→VM registry: one JSON file per live name, under `<root>/names/`.
-///
-/// A subdirectory rather than the state root, for history's reason: `read_all`'s `*.json`
-/// glob must never read a name record as a run ledger. Separate from [`Ledger`] itself
-/// because the two have opposite lifecycles — a ledger file is cleared the moment nothing is
-/// outstanding, and a name must live exactly as long as its VM: registered when `run --keep`
-/// succeeds, removed when a terminate is accepted, and *refused* for reuse in between. That
-/// refusal is the registry's whole job, and it costs zero AWS calls by construction: the
-/// collision check is a local file read.
+/// A thin adapter over core's [`FileNameStore`] with the CLI's semantics. A name lives
+/// exactly as long as its VM: registered when `run --keep` succeeds, removed when a
+/// terminate is accepted, and *refused* for reuse in between. That refusal is the
+/// registry's whole job, and it costs zero AWS calls: the collision check is a local file
+/// read.
 #[derive(Clone, Debug)]
 pub struct Names {
-    root: PathBuf,
+    store: FileNameStore,
 }
 
 impl Names {
     /// The registry under `state_root/names`.
     pub fn new(state_root: &Path) -> Self {
         Self {
-            root: state_root.join("names"),
+            store: FileNameStore::in_state_root(state_root),
         }
     }
 
     /// Where `name`'s record lives, whether or not one is registered.
     pub fn path_of(&self, name: &str) -> PathBuf {
-        self.root.join(format!("{name}.json"))
+        self.store.path_of(name)
     }
 
     /// The record registered under `name`, or `None`.
@@ -347,10 +263,13 @@ impl Names {
     /// An unreadable file reads as registered — its name is taken by *something*, and
     /// treating a torn record as free would let a second VM claim a name whose first holder
     /// may still be billing. The caller sees the collision refusal and can inspect the file.
+    /// An illegal name is never registered, and never becomes a path.
     pub fn lookup(&self, name: &str) -> Option<NameRecord> {
-        let text = std::fs::read_to_string(self.path_of(name)).ok()?;
-        match serde_json::from_str::<NameRecord>(&text) {
-            Ok(record) => Some(record),
+        if validate_name(name).is_err() {
+            return None;
+        }
+        match self.store.get(name) {
+            Ok(record) => record,
             Err(_) => Some(NameRecord {
                 name: name.to_string(),
                 microvm_id: String::new(),
@@ -365,58 +284,24 @@ impl Names {
         }
     }
 
-    /// Writes `record` under its name. The one registry write that reports failure,
-    /// because it runs on the success path: a name that silently failed to register would
-    /// make every later `exec --name` fail with "no VM named" while the VM bills on.
+    /// Writes `record` under its name, owner-only from creation on Unix. The one registry
+    /// write that reports failure, because it runs on the success path: a name that
+    /// silently failed to register would make every later `exec --name` fail with "no VM
+    /// named" while the VM bills on.
     pub fn register(&self, record: &NameRecord) -> std::io::Result<()> {
-        std::fs::create_dir_all(&self.root)?;
-        let path = self.path_of(&record.name);
-        let text = serde_json::to_string_pretty(record)
-            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-        std::fs::write(&path, text)?;
-        // Owner-only, because the record carries the agent token — a bearer credential for
-        // the VM. Unix-only mechanics; the state dir under other platforms keeps the
-        // profile's own ACLs.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-        }
-        Ok(())
+        self.store
+            .put(record)
+            .map_err(|error| std::io::Error::other(error.to_string()))
     }
 
     /// Releases every name registered to `microvm_id`, returning them.
     ///
     /// By VM id rather than by name, because the terminate path resolves its identifier
-    /// before this runs — the id is the one spelling it always holds, whichever the caller
-    /// typed. Every match rather than the first: `attach` can register one VM under two
-    /// names in one registry (measured live 2026-09-02: a terminate through one alias left
-    /// the other as a stale record pointing at a VM that no longer exists). Failures are
-    /// swallowed (a registry error must not displace the teardown's real outcome); a record
-    /// that survives costs one stale collision refusal, whose message names the file.
+    /// before this runs. Failures are swallowed (a registry error must not displace the
+    /// teardown's real outcome); a record that survives costs one stale collision refusal,
+    /// whose message names the file.
     pub fn release_by_vm(&self, microvm_id: &str) -> Vec<String> {
-        let Ok(entries) = std::fs::read_dir(&self.root) else {
-            return Vec::new();
-        };
-        let mut released = Vec::new();
-        for entry in entries.filter_map(Result::ok) {
-            let path = entry.path();
-            if path.extension().is_none_or(|ext| ext != "json") {
-                continue;
-            }
-            let Some(record) = std::fs::read_to_string(&path)
-                .ok()
-                .and_then(|text| serde_json::from_str::<NameRecord>(&text).ok())
-            else {
-                continue;
-            };
-            if record.microvm_id == microvm_id {
-                let _ = std::fs::remove_file(&path);
-                released.push(record.name);
-            }
-        }
-        released.sort();
-        released
+        self.store.release_by_vm(microvm_id).unwrap_or_default()
     }
 }
 

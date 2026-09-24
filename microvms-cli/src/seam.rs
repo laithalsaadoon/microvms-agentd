@@ -452,11 +452,8 @@ pub fn state_dir(flag: Option<PathBuf>, env: &dyn Fn(&str) -> Option<String>) ->
     if let Some(path) = flag {
         return path;
     }
-    if let Some(dir) = env("MICROVM_STATE_DIR") {
-        return PathBuf::from(dir);
-    }
-    let home = env("HOME").unwrap_or_else(|| ".".to_string());
-    PathBuf::from(home).join(".microvm").join("runs")
+    // Core's resolution, so the bindings' default registry is the CLI's.
+    microvms_core::names::default_state_root(env)
 }
 
 #[cfg(test)]

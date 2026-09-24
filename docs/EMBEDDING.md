@@ -264,6 +264,27 @@ rather than reporting a startup death (`docs/PLATFORM.md`, "A client-token retry
 suspend returns the same VM"). The CLI's `run --client-token` reads the agent token from
 `$MICROVM_AGENT_TOKEN`.
 
+To find a VM by name instead of carrying the triple, register it and adopt it by name
+later, from any process:
+
+```python
+registry = microvms.NameRegistry()  # the CLI's registry: $MICROVM_STATE_DIR/names
+registry.register("ci-runner", sandbox)
+# ...in another process, or `microvm exec --name ci-runner` from a shell
+vm = microvms.Sandbox.from_name(region, "ci-runner", registry)
+vm.terminate(wait_for_terminated=True)
+registry.release_by_vm(vm.microvm_id)
+```
+
+`NameRegistry(state_dir)` is the CLI's file registry, so names cross freely between the
+CLI and both bindings. A record holds the agent token, a bearer credential: files are
+owner-only, and `NameRecord` keeps the token out of `repr` (JS: out of `toString` and
+`JSON.stringify`). To keep names in your own database, store `record.to_dict()` (JS
+`toObject()`) privately and rebuild it with `NameRecord.from_dict`, then call
+`Sandbox.adopt` with its fields. `from_name` refuses a missing name, and a record from
+another region, before any AWS call. The platform itself offers no lookup: `RunMicrovm`
+takes no tags and tagging a MicroVM fails (`docs/PLATFORM.md`).
+
 `log_group` (with an optional exact `log_stream`) sends a VM's own logs to a group you
 choose, and `disable_logging` turns them off; the execution role must be allowed to write
 there. The CLI spells these `--vm-log-group`, `--vm-log-stream`, and `--no-vm-logs`, since
