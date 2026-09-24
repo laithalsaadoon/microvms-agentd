@@ -54,7 +54,7 @@ use napi_derive::napi;
 use tokio::sync::Mutex;
 
 use crate::cost::SizeClass;
-use crate::errors::{AsyncError, js_async};
+use crate::errors::{AsyncError, js, js_async};
 use crate::exec::seconds_async;
 use crate::hooks::{BuildHookTimeout, RunHookTimeout};
 use crate::region::Region;
@@ -260,6 +260,63 @@ pub fn default_base_image() -> BaseImageInput {
         docker_ref: base.docker_ref,
         working_dir: Some(base.working_dir),
     }
+}
+
+/// The base a task Dockerfile pairs with: the managed base's `name`, so `baseImageArn` is
+/// unchanged, and the Dockerfile's first `FROM` as `dockerRef`, digest pin included.
+///
+/// `buildImage` refuses a Dockerfile whose first `FROM` is not the base's `dockerRef`; a base
+/// derived from that Dockerfile passes by construction. Throws `ERR_INVALID_ARG` for a
+/// Dockerfile with no `FROM`.
+#[napi]
+pub fn base_image_from_dockerfile(dockerfile: String) -> napi::Result<BaseImageInput, String> {
+    // IMAGE-5: a pass-through; the derivation and its refusal are core's.
+    let base = CoreBaseImage::from_dockerfile(&dockerfile).map_err(js)?;
+    Ok(BaseImageInput {
+        name: base.name,
+        docker_ref: base.docker_ref,
+        working_dir: Some(base.working_dir),
+    })
+}
+
+/// What `wrapDockerfile` takes besides the task text. Every field is optional.
+#[napi(object)]
+pub struct WrapDockerfileOptions {
+    /// The agent port the stanza names, 9000 by default. It must match the sandbox's.
+    pub port: Option<u16>,
+    /// A working directory for the stanza to create and set, as the default Dockerfile does.
+    pub workdir: Option<String>,
+    /// Refuse a result with no `WORKDIR` anywhere, because the exec would inherit `/`.
+    pub inherit_workdir: Option<bool>,
+}
+
+/// A task Dockerfile with the agentd stanza appended, ready for `buildImage`.
+///
+/// The result is the task text, a newline if it lacked one, `USER root` when the task's last
+/// `USER` is anyone else, then the stanza the default Dockerfile uses: `COPY agentd /agentd`,
+/// the chmod, `ENV AGENTD_PORT`, `EXPOSE`, `ENTRYPOINT []` and `CMD ["/agentd"]`. Pass the
+/// result to `buildImage` with `baseImage: baseImageFromDockerfile(result)`.
+///
+/// Throws `ERR_INVALID_ARG` for a task with no `FROM`, one that ends inside a line
+/// continuation or an unterminated heredoc (either would swallow the stanza), a keepalive the
+/// client cannot tolerate, a port of 0, a workdir that is not one absolute path, or
+/// `inheritWorkdir` with nothing to inherit.
+#[napi]
+pub fn wrap_dockerfile(
+    task_dockerfile: String,
+    options: Option<WrapDockerfileOptions>,
+) -> napi::Result<String, String> {
+    // IMAGE-5: a pass-through; the stanza, the guards and their messages are core's.
+    let defaults = microvms_core::control::WrapOptions::default();
+    let opts = match options {
+        Some(options) => microvms_core::control::WrapOptions {
+            port: options.port.unwrap_or(defaults.port),
+            workdir: options.workdir,
+            inherit_workdir: options.inherit_workdir.unwrap_or(false),
+        },
+        None => defaults,
+    };
+    microvms_core::control::wrap_dockerfile(&task_dockerfile, &opts).map_err(js)
 }
 
 /// Everything `CreateMicrovmImage` needs.

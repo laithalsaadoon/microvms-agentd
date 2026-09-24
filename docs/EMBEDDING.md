@@ -13,10 +13,69 @@ at `GET /v1/schema` on any running daemon; nothing here duplicates either.
 
 ## The recipe
 
-`microvm dockerfile` prints the stanza that wraps a base image with agentd —
-the same Dockerfile the default `microvm build` bakes, emitted by the same
-generator (`microvms-core/src/control/artifact.rs:145`), so appending your own
-layers to it *is* the default build plus your layers.
+A task that brings its own Dockerfile needs two calls to become buildable, and
+no string literal of the harness's own:
+
+```python
+import microvms
+
+task = open("environment/Dockerfile").read()
+# The task text, then the agentd stanza.
+dockerfile = microvms.wrap_dockerfile(task)
+# The managed base, paired with the Dockerfile's own FROM.
+base = microvms.BaseImage.from_dockerfile(dockerfile)
+
+image = sandbox.build_image(
+    name="my-task-image",
+    binary=agentd_bytes,
+    code_artifact_uri=uploaded_uri,
+    build_role_arn=build_role_arn,
+    base_image=base,
+    dockerfile=dockerfile,
+)
+```
+
+The Node binding is the same pair: `wrapDockerfile(task, { workdir })` and
+`baseImageFromDockerfile(dockerfile)`, passed as `buildImage({ dockerfile,
+baseImage, … })`. Both are pure functions in
+`microvms-core/src/control/artifact.rs` and make no AWS call.
+
+`wrap_dockerfile` keeps the task text verbatim and appends the stanza the
+default `microvm build` bakes, rendered by the same function, so the two cannot
+drift: `wrap_dockerfile("FROM x\n")` *is* the default Dockerfile for a base
+whose ref is `x`. The stanza is `COPY agentd /agentd`, its chmod, `ENV
+AGENTD_PORT`, `EXPOSE`, `ENTRYPOINT []` and `CMD ["/agentd"]`, preceded by
+`USER root` when the task's last `USER` is anyone else (the daemon demotes each
+exec itself, which takes root). `port=` must match the sandbox's port, and
+`workdir=` creates and sets a working directory the way `microvm dockerfile
+--workdir` does.
+
+It refuses, with `InvalidArgError` naming the cause, the task Dockerfiles the
+build would accept and the guest would then fail on:
+
+- no `FROM`;
+- a last instruction that is unfinished: a trailing line continuation (in the
+  escape character an `# escape=` directive selects) would join the stanza's
+  `COPY agentd /agentd` into it, and an unterminated heredoc would swallow the
+  whole stanza, so the image would build with no daemon in it;
+- an `AGENTD_SSE_KEEPALIVE_SECS` at or over the client's stream idle timeout;
+- a port of 0, or a `workdir` that is not one absolute path;
+- `inherit_workdir=True` when neither the task nor `workdir` declares a
+  `WORKDIR`. A task with no `WORKDIR` runs its commands in `/`, as it would
+  under Docker, so this guard is opt-in: set it when your harness relies on the
+  image `WORKDIR` being meaningful.
+
+`BaseImage.from_dockerfile` answers the pairing the other way round.
+`build_image` refuses a Dockerfile whose first `FROM` differs from the base's
+`docker_ref`, which is the right guard where the client derives the Dockerfile
+from the base (the build runs the Dockerfile on top of the base `baseImageArn`
+names). A task Dockerfile chooses its own `FROM`, so the derived base keeps the
+managed base's `name` — `baseImageArn` is unchanged — and takes the first
+`FROM`'s ref whole, digest pin included; the guard then compares the ref with
+itself. It raises `InvalidArgError` for a Dockerfile with no `FROM`.
+
+From a shell, `microvm dockerfile` prints the same stanza for a base of your
+choice, and `microvm build --dockerfile` takes the result:
 
 ```
 microvm dockerfile --workdir /workspace > Dockerfile
@@ -24,40 +83,24 @@ microvm dockerfile --workdir /workspace > Dockerfile
 microvm build ./agentd --dockerfile Dockerfile --name my-task-image
 ```
 
-The stanza's comments name the two platform constraints a hand-written wrapper
-hits, both enforced by microvms-core before any AWS call:
-
-1. **The `FROM` must match the managed base's `docker_ref`.** The build runs
-   the Dockerfile on top of the base that `baseImageArn` names, and a mismatch
-   builds against a base none of the measured platform behaviour applies to —
-   so `require_matching_from` refuses it
-   (`microvms-core/src/control/artifact.rs:228-244`).
-2. **A `WORKDIR` is required when the base declares none.** The managed al2023
-   base, like most public ARM64 bases, leaves `WorkingDir` empty, so "inherit
-   the image WORKDIR" inherits `/` and every relative path in your commands
-   resolves somewhere you did not mean
-   (`microvms-core/src/control/artifact.rs:196-220`).
-
 The worked example is
 [`examples/coding-agents-on-bedrock/Dockerfile`](../examples/coding-agents-on-bedrock/Dockerfile):
 the stanza's lines, plus `dnf install` and `npm install -g` layers that put two
-coding-agent CLIs in the image, plus a `/workspace` WORKDIR. Any task image is
-the same shape — take the stanza, add the layers your workload needs, keep the
-daemon lines intact.
+coding-agent CLIs in the image, plus a `/workspace` WORKDIR.
 
-Two lines in the stanza are load-bearing and must survive your edits.
+Two lines in the stanza are load-bearing and must survive any edit.
 `ENTRYPOINT []` plus `CMD ["/agentd"]` is the deployment invariant the trust
 boundary rests on: it guarantees no task workload runs before the platform's
 run hook lands, and it is what makes an omitted `cwd` inherit the image
-`WORKDIR` (`microvms-core/src/control/artifact.rs:132-144`,
-`docs/PROTOCOL.md`, "Trust boundary"). A base image that starts its own
-background process before bootstrap breaks the invariant, and enforcing it
-belongs to whoever builds the image — the daemon cannot.
+`WORKDIR` (`docs/PROTOCOL.md`, "Trust boundary"). `wrap_dockerfile` writes them
+last, so a task's own `ENTRYPOINT` or `CMD` cannot displace them. A base image
+that starts its own background process before bootstrap breaks the invariant,
+and enforcing it belongs to whoever builds the image — the daemon cannot.
 
 One thing never goes in the image: a secret. The image becomes a shared
 snapshot, so every VM launched from it sees the same bytes; per-VM credentials
-travel through `runHookPayload` at launch instead
-(`microvms-core/src/control/artifact.rs:15-23`).
+travel through `runHookPayload` at launch instead (the module docs of
+`microvms-core/src/control/artifact.rs`).
 
 ## The wire contract a harness client implements
 

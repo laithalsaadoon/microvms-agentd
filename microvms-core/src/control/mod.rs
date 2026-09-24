@@ -94,7 +94,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub use artifact::{
-    BaseImage, Ecosystem, ProjectFiles, artifact_content_hash, build_artifact, default_dockerfile,
+    BaseImage, Ecosystem, ProjectFiles, WrapOptions, artifact_content_hash, build_artifact,
+    default_dockerfile, wrap_dockerfile,
 };
 pub use connector::{ConnectorIntent, EgressPosture, PLATFORM_HONOURS_OMITTED_EGRESS};
 pub use image::{Image, WaitOpts};

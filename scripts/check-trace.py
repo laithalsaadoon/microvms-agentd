@@ -56,6 +56,31 @@ TRACED: dict[str, str | tuple[str, dict[str, str]]] = {
     "CLI-7": "#216",
     "CLI-8": "#216",
     "CLI-9": "#216",
+    "IMAGE-1": (
+        "#220",
+        {"live": "a pure function of Dockerfile text; it makes no AWS call"},
+    ),
+    "IMAGE-2": (
+        "#220",
+        {"live": "a pure function of Dockerfile text; it makes no AWS call"},
+    ),
+    "IMAGE-3": (
+        "#220",
+        {"live": "a pure function of Dockerfile text; it makes no AWS call"},
+    ),
+    "IMAGE-4": (
+        "#220",
+        {"live": "a pure function of Dockerfile text; it makes no AWS call"},
+    ),
+    "IMAGE-5": (
+        "#220",
+        {
+            "model": "a binding pass-through has no states; core's are modeled as IMAGE-1..4",
+            "gherkin": "the scenarios are core's (IMAGE-1..4); each binding's tests check the pass-through",
+            "fuzz": "the binding hands the text unchanged to core's fuzzed function",
+            "live": "a pure function of Dockerfile text; it makes no AWS call",
+        },
+    ),
 }
 
 LAYERS = ("model", "gherkin", "fuzz", "test", "impl", "live")

@@ -9,6 +9,11 @@ defined in `spec/core.symspec.json` and `spec/agentd.symspec.json`.
 | CLI-7 | 1 | 1 | 1 | 4 | 5 | 1 |
 | CLI-8 | 1 | 1 | 1 | 2 | 3 | 1 |
 | CLI-9 | 1 | 1 | 1 | 2 | 3 | 1 |
+| IMAGE-1 | 1 | 1 | 1 | 4 | 1 | waived |
+| IMAGE-2 | 1 | 1 | 1 | 1 | 1 | waived |
+| IMAGE-3 | 1 | 1 | 1 | 1 | 1 | waived |
+| IMAGE-4 | 1 | 1 | 1 | 4 | 1 | waived |
+| IMAGE-5 | waived | waived | waived | 2 | 2 | waived |
 
 ## CLI-7
 
@@ -42,3 +47,58 @@ If the stdout reader of a streaming command closes, then the CLI crate shall sto
 - **test:** `microvms-cli/src/guards.rs`, `microvms-cli/tests/bdd.rs`
 - **impl:** `microvms-cli/src/closed_output.rs`, `microvms-cli/src/commands/attached.rs`, `microvms-cli/src/envelope.rs`
 - **live:** `conformance/run_rs.py`
+
+## IMAGE-1
+
+The microvms-core shall emit the agentd stanza of a wrapped task Dockerfile and of the default Dockerfile from one source.
+
+- **model:** `model/src/wrap.rs`
+- **gherkin:** `microvms-core/tests/features/wrap_dockerfile.feature`
+- **fuzz:** `microvms-core/tests/wrap_fuzz.rs`
+- **test:** `microvms-core/src/control/artifact.rs`, `microvms-core/tests/bdd_wrap.rs`, `microvms-js/__test__/wrap.mjs`, `microvms-py/tests/test_wrap_dockerfile.py`
+- **impl:** `microvms-core/src/control/artifact.rs`
+- **live:** waived: a pure function of Dockerfile text; it makes no AWS call
+
+## IMAGE-2
+
+When a caller wraps a task Dockerfile, the microvms-core shall end the result with the agentd stanza carrying the client's AGENTD_PORT, preceded by USER root when the task sets another user.
+
+- **model:** `model/src/wrap.rs`
+- **gherkin:** `microvms-core/tests/features/wrap_dockerfile.feature`
+- **fuzz:** `microvms-core/tests/wrap_fuzz.rs`
+- **test:** `microvms-core/src/control/artifact.rs`
+- **impl:** `microvms-core/src/control/artifact.rs`
+- **live:** waived: a pure function of Dockerfile text; it makes no AWS call
+
+## IMAGE-3
+
+If a task Dockerfile has no FROM, ends inside an unfinished instruction, or sets a keepalive not under the stream idle timeout, or the wrap options name an invalid port or workdir or ask to inherit a workdir that nothing declares, then the microvms-core shall refuse to wrap the task Dockerfile with an invalid-argument error naming the cause.
+
+- **model:** `model/src/wrap.rs`
+- **gherkin:** `microvms-core/tests/features/wrap_dockerfile.feature`
+- **fuzz:** `microvms-core/tests/wrap_fuzz.rs`
+- **test:** `microvms-core/src/control/artifact.rs`
+- **impl:** `microvms-core/src/control/artifact.rs`
+- **live:** waived: a pure function of Dockerfile text; it makes no AWS call
+
+## IMAGE-4
+
+When a caller derives a base image from a Dockerfile, the microvms-core shall take the docker_ref from the first FROM, keep the managed base image name, and refuse a Dockerfile with no FROM.
+
+- **model:** `model/src/wrap.rs`
+- **gherkin:** `microvms-core/tests/features/wrap_dockerfile.feature`
+- **fuzz:** `microvms-core/tests/wrap_fuzz.rs`
+- **test:** `microvms-core/src/control/artifact.rs`, `microvms-core/tests/bdd_wrap.rs`, `microvms-js/__test__/wrap.mjs`, `microvms-py/tests/test_wrap_dockerfile.py`
+- **impl:** `microvms-core/src/control/artifact.rs`
+- **live:** waived: a pure function of Dockerfile text; it makes no AWS call
+
+## IMAGE-5
+
+The language bindings layer shall expose wrap_dockerfile and the from-Dockerfile base image as thin wrappers that raise the refusals of microvms-core as invalid-argument errors.
+
+- **model:** waived: a binding pass-through has no states; core's are modeled as IMAGE-1..4
+- **gherkin:** waived: the scenarios are core's (IMAGE-1..4); each binding's tests check the pass-through
+- **fuzz:** waived: the binding hands the text unchanged to core's fuzzed function
+- **test:** `microvms-js/__test__/wrap.mjs`, `microvms-py/tests/test_wrap_dockerfile.py`
+- **impl:** `microvms-js/src/sandbox.rs`, `microvms-py/src/sandbox.rs`
+- **live:** waived: a pure function of Dockerfile text; it makes no AWS call

@@ -286,6 +286,41 @@ impl BaseImage {
         }
     }
 
+    /// The base image a task Dockerfile pairs with: the managed base's `name` (so
+    /// `baseImageArn` is unchanged) and the Dockerfile's own first `FROM` as `docker_ref`
+    /// (IMAGE-4).
+    ///
+    /// # The pairing the other way round
+    ///
+    /// [`require_matching_from`] refuses a Dockerfile whose first `FROM` is not the base's
+    /// `docker_ref`. That is the right guard where this client derives the Dockerfile from
+    /// the base; a task Dockerfile chooses its own `FROM`, so the pairing has to run from the
+    /// Dockerfile to the base, and every harness wrote the same inversion by hand (#220).
+    /// Here the ref is taken whole — `--platform` and `AS` decoration dropped by
+    /// [`dockerfile_from_ref`], a digest pin kept — so the guard's comparison is the ref
+    /// against itself and it passes by construction.
+    ///
+    /// `working_dir` is empty: this cannot read the `FROM` image's `WorkingDir` without
+    /// pulling its manifest, and empty is what every measured public base declares (see
+    /// [`BaseImage::al2023`]). A task that relies on one sets `WORKDIR`, which
+    /// [`require_workdir`] reads from the Dockerfile.
+    ///
+    /// Refuses a Dockerfile with no `FROM`: there is no ref to take.
+    pub fn from_dockerfile(dockerfile: &str) -> Result<Self, Error> {
+        match dockerfile_from_ref(dockerfile) {
+            Some(docker_ref) => Ok(Self {
+                docker_ref: docker_ref.to_string(),
+                ..Self::al2023()
+            }),
+            None => Err(Error::invalid_arg(
+                "the Dockerfile has no FROM, so there is no image reference to pair the \
+                 managed base with. Derive the base from the Dockerfile the task builds \
+                 from."
+                    .to_string(),
+            )),
+        }
+    }
+
     /// The `baseImageArn` for this base in `region`.
     ///
     /// # `microvm-image:<name>`, with a colon, and it is not just the managed base
@@ -352,8 +387,30 @@ pub fn default_dockerfile(
     base: &BaseImage,
     project: Option<Ecosystem>,
 ) -> String {
+    format!(
+        "FROM {}\n{}",
+        base.docker_ref,
+        agentd_stanza(port, workdir, project)
+    )
+}
+
+/// The agentd stanza: every line [`default_dockerfile`] writes after its `FROM`, and every
+/// line [`wrap_dockerfile`] appends to a task Dockerfile (IMAGE-1).
+///
+/// # One source, and why it is this function rather than a constant
+///
+/// Two copies of these lines drift: a harness that carried the stanza as a string literal
+/// of its own (#220) had to track every change here by hand, and the day one side gained a
+/// line the other did not, the image a task built and the image the default build produced
+/// stopped agreeing about how the daemon starts. So both callers render this one function,
+/// and `wrapping_a_bare_from_is_the_default_dockerfile_minus_nothing` holds them equal:
+/// `wrap_dockerfile("FROM x\n")` is the default Dockerfile for a base whose ref is `x`.
+///
+/// The text is byte-for-byte what `default_dockerfile` emitted before the split, which is
+/// what keeps every content-addressed image name (`build --reuse`, `AgentVm::image_name`)
+/// derived from the default Dockerfile valid: the name hashes the Dockerfile text.
+fn agentd_stanza(port: u16, workdir: Option<&str>, project: Option<Ecosystem>) -> String {
     let mut lines = vec![
-        format!("FROM {}", base.docker_ref),
         "COPY agentd /agentd".to_string(),
         "RUN chmod 0755 /agentd".to_string(),
     ];
@@ -386,6 +443,292 @@ pub fn default_dockerfile(
         String::new(),
     ]);
     lines.join("\n")
+}
+
+/// What [`wrap_dockerfile`] needs besides the task text.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WrapOptions {
+    /// The agent port the stanza's `ENV AGENTD_PORT` and `EXPOSE` name. It must be the port
+    /// the create call sends as `hooks.port` — [`ControlPlane::port`](super::ControlPlane::port)
+    /// — which [`require_matching_agentd_port`] checks at the create call.
+    pub port: u16,
+    /// A working directory for the stanza to create and set, exactly as
+    /// [`default_dockerfile`] writes one. One absolute path; `Some("")` reads as `None`, the
+    /// same way the default generator reads it.
+    pub workdir: Option<String>,
+    /// The caller relies on the image `WORKDIR` — an exec with no `cwd` runs there — so one
+    /// must be declared: by the task Dockerfile or by [`WrapOptions::workdir`]. Off by
+    /// default, because a task with no `WORKDIR` runs its commands in `/` under Docker too,
+    /// and a harness reproducing that has nothing to refuse.
+    pub inherit_workdir: bool,
+}
+
+impl Default for WrapOptions {
+    fn default() -> Self {
+        Self {
+            port: super::DEFAULT_AGENT_PORT,
+            workdir: None,
+            inherit_workdir: false,
+        }
+    }
+}
+
+/// A task Dockerfile with the agentd stanza appended: the one call a harness needs to go
+/// from the Dockerfile a task brings to one this client can build (#220).
+///
+/// The result is the task text verbatim, a newline if it lacked one, `USER root` when the
+/// task's last `USER` is anyone else, and then [`default_dockerfile`]'s stanza for
+/// `opts.port` and `opts.workdir` — the same function, so the two cannot drift (IMAGE-1).
+/// The stanza's `ENTRYPOINT []` and `CMD ["/agentd"]` are the result's last instructions,
+/// so whatever entrypoint, command, or port the task set, the daemon is the container's
+/// process and listens where the hooks are called (IMAGE-2). Pair it with
+/// [`BaseImage::from_dockerfile`] for the create call's `FROM` guard (IMAGE-4).
+///
+/// # `USER root`, only when the task changed user
+///
+/// The daemon demotes each exec to the user it names, which takes root; a task that ends on
+/// `USER app` would otherwise start the daemon as `app`. The line is written only when the
+/// last `USER` is not root, so a task that never changes user wraps to exactly the default
+/// stanza — writing it unconditionally would make the default Dockerfile and the wrap of a
+/// bare `FROM` two different texts (`model/src/wrap.rs`, `AlwaysUserRoot`).
+///
+/// # What is refused, and why each is a refusal (IMAGE-3)
+///
+/// Each is a Dockerfile the build would accept and the guest would then fail on, one build
+/// cycle later and naming none of the cause:
+///
+/// * **No `FROM`.** Nothing to append to, and no base to derive.
+/// * **An unfinished last instruction.** A trailing line continuation — in the escape
+///   character the `# escape=` directive selects, across the blank and comment lines Docker
+///   skips inside one — joins the stanza's `COPY agentd /agentd` into the task's last
+///   instruction; an unterminated heredoc swallows the whole stanza as its body. Either way
+///   the image has no daemon and the build fails as a run-hook timeout.
+/// * **A keepalive at or over the client's stream idle timeout**, for the reason
+///   [`require_keepalive_under_idle_timeout`] gives.
+/// * **A port of 0, or a workdir that is not one absolute path.** A relative `WORKDIR`
+///   resolves against whatever the task left, whitespace splits `RUN mkdir -p` into several
+///   directories, and a line break writes an instruction the caller never saw.
+/// * **`inherit_workdir` with no `WORKDIR` anywhere**, for the reason [`require_workdir`]
+///   gives.
+///
+/// The scan reads instructions the way the Dockerfile parser does for these questions —
+/// escape directive, continuations, comments, heredoc bodies — and no further: it finds a
+/// Dockerfile that cannot take the stanza, it does not validate one.
+pub fn wrap_dockerfile(task: &str, opts: &WrapOptions) -> Result<String, Error> {
+    if dockerfile_from_ref(task).is_none() {
+        return Err(Error::invalid_arg(
+            "the task Dockerfile has no FROM, so there is no image to append the agentd \
+             stanza to and no base image to pair with it. Wrap the Dockerfile the task \
+             builds from, or pass `FROM <image>` for a task that names only an image."
+                .to_string(),
+        ));
+    }
+    let scan = Instructions::scan(task);
+    if let Some(terminator) = scan.open_heredoc {
+        return Err(Error::invalid_arg(format!(
+            "the task Dockerfile ends inside a heredoc that is never terminated (no line \
+             {terminator:?} closes it), so every line appended after it — the whole agentd \
+             stanza — would become the heredoc's body. The image would build with no daemon \
+             in it and fail as a run-hook timeout. Terminate the heredoc."
+        )));
+    }
+    if scan.continued {
+        return Err(Error::invalid_arg(format!(
+            "the task Dockerfile's last instruction ends with a line continuation ({:?}), so \
+             the first line appended after it — the agentd stanza's `COPY agentd /agentd` — \
+             would be joined into that instruction instead of running. The image would build \
+             with no daemon in it and fail as a run-hook timeout. Finish the instruction, or \
+             drop the trailing {:?}.",
+            scan.escape, scan.escape,
+        )));
+    }
+    require_keepalive_under_idle_timeout(crate::session::exec::DEFAULT_STREAM_IDLE_TIMEOUT, task)?;
+    super::require_valid_port("port", opts.port)?;
+    let workdir = opts.workdir.as_deref().filter(|dir| !dir.is_empty());
+    if let Some(dir) = workdir
+        && (!dir.starts_with('/') || dir.chars().any(|c| c.is_whitespace() || c.is_control()))
+    {
+        return Err(Error::invalid_arg(format!(
+            "the workdir {dir:?} is not one absolute path. The stanza writes it as \
+             `RUN mkdir -p {dir}` and `WORKDIR {dir}`: a relative path resolves against \
+             whatever WORKDIR the task left, whitespace splits the mkdir into several \
+             directories, and a line break writes an instruction nobody reviewed. Pass an \
+             absolute path such as /workspace."
+        )));
+    }
+    if opts.inherit_workdir && workdir.is_none() && !dockerfile_declares_workdir(task) {
+        return Err(Error::invalid_arg(
+            "inherit_workdir was requested but the task Dockerfile sets no WORKDIR and no \
+             workdir option was given, so there is nothing to inherit: every exec with no cwd \
+             would run in `/`, and every relative path in it would resolve there. Pass a \
+             workdir, or set WORKDIR in the task Dockerfile."
+                .to_string(),
+        ));
+    }
+
+    let stanza = agentd_stanza(opts.port, workdir, None);
+    let mut wrapped = String::with_capacity(task.len() + stanza.len() + 16);
+    wrapped.push_str(task);
+    if !task.ends_with('\n') {
+        wrapped.push('\n');
+    }
+    if scan
+        .last_user
+        .as_deref()
+        .is_some_and(|user| !is_root_user(user))
+    {
+        wrapped.push_str("USER root\n");
+    }
+    wrapped.push_str(&stanza);
+    Ok(wrapped)
+}
+
+/// Whether a `USER` value names root: `root` or `0`, with no group or a root group.
+///
+/// Anything else is not root, including a value built from a variable — the scan cannot
+/// expand `${TASK_USER}`, and restoring root for a value that turns out to be root costs one
+/// redundant line.
+fn is_root_user(value: &str) -> bool {
+    let is_root = |part: &str| part == "root" || part == "0";
+    match value.split_once(':') {
+        Some((user, group)) => is_root(user) && is_root(group),
+        None => is_root(value),
+    }
+}
+
+/// Whether any line of `dockerfile` is a `WORKDIR` with an argument.
+fn dockerfile_declares_workdir(dockerfile: &str) -> bool {
+    dockerfile.lines().any(|line| {
+        let mut words = line.split_whitespace();
+        words
+            .next()
+            .is_some_and(|first| first.eq_ignore_ascii_case("WORKDIR"))
+            && words.next().is_some()
+    })
+}
+
+/// What [`wrap_dockerfile`] needs to know about how a Dockerfile's instructions end.
+struct Instructions {
+    /// The escape character: `\` unless an `# escape=` directive chose a backtick.
+    escape: char,
+    /// The text ends inside a line continuation.
+    continued: bool,
+    /// The terminator of a heredoc the text never closes.
+    open_heredoc: Option<String>,
+    /// The value of the last `USER` instruction.
+    last_user: Option<String>,
+}
+
+impl Instructions {
+    /// Reads the parser directives, then every logical instruction: continuation lines
+    /// joined, blank and comment lines skipped (inside a continuation too, as the parser
+    /// does), heredoc bodies consumed up to their terminators.
+    fn scan(dockerfile: &str) -> Self {
+        let escape = escape_directive(dockerfile);
+        let mut heredocs: std::collections::VecDeque<(String, bool)> = Default::default();
+        let mut pending = String::new();
+        let mut continued = false;
+        let mut last_user = None;
+        for line in dockerfile.lines() {
+            if let Some((terminator, strip_tabs)) = heredocs.front() {
+                let candidate = if *strip_tabs {
+                    line.trim_start_matches('\t')
+                } else {
+                    line
+                };
+                if candidate.trim_end_matches('\r') == terminator {
+                    heredocs.pop_front();
+                }
+                continue;
+            }
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            let body = line.trim_end();
+            if let Some(joined) = body.strip_suffix(escape) {
+                pending.push_str(joined);
+                pending.push(' ');
+                continued = true;
+                continue;
+            }
+            continued = false;
+            pending.push_str(body);
+            let instruction = std::mem::take(&mut pending);
+            let mut words = instruction.split_whitespace();
+            let Some(keyword) = words.next() else {
+                continue;
+            };
+            if keyword.eq_ignore_ascii_case("USER") {
+                last_user = words.next().map(str::to_string);
+            } else if ["RUN", "COPY", "ADD"]
+                .iter()
+                .any(|name| keyword.eq_ignore_ascii_case(name))
+            {
+                heredocs.extend(words.filter_map(heredoc_marker));
+            }
+        }
+        Self {
+            escape,
+            continued,
+            open_heredoc: heredocs.pop_front().map(|(terminator, _)| terminator),
+            last_user,
+        }
+    }
+}
+
+/// The escape character a Dockerfile's `# escape=` parser directive selects, or `\`.
+///
+/// Directives are only read at the very top: the first line that is not one — an
+/// instruction, a blank line, or an ordinary comment — ends them.
+fn escape_directive(dockerfile: &str) -> char {
+    for line in dockerfile.lines() {
+        let Some(directive) = line.trim().strip_prefix('#') else {
+            break;
+        };
+        let Some((key, value)) = directive.split_once('=') else {
+            break;
+        };
+        let key = key.trim().to_ascii_lowercase();
+        if key == "escape" {
+            return match value.trim() {
+                "`" => '`',
+                _ => '\\',
+            };
+        }
+        if !["syntax", "check"].contains(&key.as_str()) {
+            break;
+        }
+    }
+    '\\'
+}
+
+/// The terminator a heredoc marker word opens, and whether it strips leading tabs (`<<-`).
+///
+/// `<<EOF`, `<<-EOF`, `<<"EOF"`, `<<'EOF'`; not the here-string `<<<`, and not a bare `<<`.
+fn heredoc_marker(word: &str) -> Option<(String, bool)> {
+    let rest = word.strip_prefix("<<")?;
+    if rest.starts_with('<') {
+        return None;
+    }
+    let (rest, strip_tabs) = match rest.strip_prefix('-') {
+        Some(rest) => (rest, true),
+        None => (rest, false),
+    };
+    let name = rest
+        .strip_prefix('"')
+        .and_then(|name| name.strip_suffix('"'))
+        .or_else(|| {
+            rest.strip_prefix('\'')
+                .and_then(|name| name.strip_suffix('\''))
+        })
+        .unwrap_or(rest);
+    let valid = name
+        .chars()
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    valid.then(|| (name.to_string(), strip_tabs))
 }
 
 /// The image ref in a Dockerfile's first `FROM`, or `None` when it has none.
@@ -771,6 +1114,8 @@ pub fn require_matching_from(base: &BaseImage, dockerfile: &str) -> Result<(), E
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const DEFAULT_AGENT_PORT_FOR_TESTS: u16 = crate::control::DEFAULT_AGENT_PORT;
 
     /// The archive holds exactly the two entries the build expects, named as the build
     /// looks for them.
@@ -1515,6 +1860,367 @@ mod tests {
         let error = require_workdir(&BaseImage::al2023(), Some("FROM x\nWORKDIR\n"))
             .expect_err("WORKDIR with no path declares nothing");
         assert_eq!(error.kind(), ErrorKind::InvalidArg);
+    }
+
+    /// **IMAGE-1, the acceptance test #220 names.** Wrapping a bare `FROM` produces exactly the
+    /// default Dockerfile for that base, so the stanza has one source: the default generator's
+    /// output minus its `FROM` line is what a wrap appends. Checked with and without a workdir,
+    /// and on a non-default port, because each of those is a branch of the one stanza.
+    #[test]
+    fn wrapping_a_bare_from_is_the_default_dockerfile_minus_nothing() {
+        for (port, workdir) in [
+            (DEFAULT_AGENT_PORT_FOR_TESTS, None),
+            (DEFAULT_AGENT_PORT_FOR_TESTS, Some("/srv/task")),
+            (8080, None),
+        ] {
+            let base = BaseImage {
+                docker_ref: "x".to_string(),
+                ..BaseImage::al2023()
+            };
+            let default = default_dockerfile(port, workdir, &base, None);
+            let opts = WrapOptions {
+                port,
+                workdir: workdir.map(str::to_string),
+                ..WrapOptions::default()
+            };
+            assert_eq!(
+                wrap_dockerfile("FROM x\n", &opts).expect("a bare FROM wraps"),
+                default,
+                "IMAGE-1: port {port} workdir {workdir:?}"
+            );
+            let (from, stanza) = default.split_once('\n').expect("lines");
+            assert_eq!(from, "FROM x");
+            assert!(stanza.ends_with("CMD [\"/agentd\"]\n"), "{stanza}");
+        }
+    }
+
+    /// **IMAGE-2.** Whatever the task set — its own entrypoint, command, port, user — the
+    /// wrapped result ends on the bootstrap invariant with the client's port, and a task that
+    /// ends on another user has `USER root` restored ahead of the stanza. A task that ends on
+    /// root, or never changes user, gets no extra line, which is what keeps IMAGE-1's equality.
+    #[test]
+    fn a_wrapped_task_ends_on_the_invariant_with_root_restored_when_needed() {
+        let task = "FROM python:3.12-slim\nWORKDIR /app\nENV AGENTD_PORT=8080\n\
+                    ENTRYPOINT [\"/bin/sh\", \"-c\"]\nCMD [\"python\", \"serve.py\"]\nUSER app\n";
+        let wrapped = wrap_dockerfile(task, &WrapOptions::default()).expect("wraps");
+        let added = wrapped
+            .strip_prefix(task)
+            .expect("the task text is kept verbatim");
+        assert!(
+            added.starts_with("USER root\nCOPY agentd /agentd\n"),
+            "{added}"
+        );
+        assert_eq!(dockerfile_entrypoint(&wrapped), Some("[]"));
+        assert_eq!(dockerfile_cmd(&wrapped), Some(r#"["/agentd"]"#));
+        assert_eq!(dockerfile_agentd_port(&wrapped), Some(9000));
+        require_daemon_cmd(&wrapped).expect("the daemon is the CMD");
+        require_matching_agentd_port(9000, &wrapped).expect("the stanza's port wins");
+
+        for (last_user, restored) in [
+            ("USER root", false),
+            ("USER 0", false),
+            ("USER root:root", false),
+            ("USER 0:0", false),
+            ("user app", true),
+            ("USER 1000:1000", true),
+            ("USER root:staff", true),
+            ("USER ${TASK_USER}", true),
+        ] {
+            let task = format!("FROM x\n{last_user}\n");
+            let added = wrap_dockerfile(&task, &WrapOptions::default())
+                .expect("wraps")
+                .strip_prefix(task.as_str())
+                .expect("verbatim")
+                .to_string();
+            assert_eq!(
+                added.starts_with("USER root\n"),
+                restored,
+                "IMAGE-2: {last_user:?}: {added}"
+            );
+        }
+
+        // Only the last USER counts, as at build time.
+        let task = "FROM x\nUSER app\nUSER root\n";
+        let wrapped = wrap_dockerfile(task, &WrapOptions::default()).expect("wraps");
+        let added = wrapped.strip_prefix(task).expect("verbatim");
+        assert!(added.starts_with("COPY agentd /agentd\n"), "{added}");
+    }
+
+    /// **IMAGE-2, the newline.** A task file without a trailing newline gets one before the
+    /// stanza, in either line ending, so the stanza's first line is its own instruction.
+    #[test]
+    fn a_task_without_a_trailing_newline_is_normalized() {
+        let wrapped = wrap_dockerfile("FROM x", &WrapOptions::default()).expect("wraps");
+        assert!(
+            wrapped.starts_with("FROM x\nCOPY agentd /agentd\n"),
+            "{wrapped}"
+        );
+        let wrapped =
+            wrap_dockerfile("FROM x\r\nRUN true", &WrapOptions::default()).expect("wraps");
+        assert!(
+            wrapped.starts_with("FROM x\r\nRUN true\nCOPY agentd /agentd\n"),
+            "{wrapped}"
+        );
+        let wrapped = wrap_dockerfile("FROM x\r\n", &WrapOptions::default()).expect("wraps");
+        assert!(wrapped.starts_with("FROM x\r\nCOPY agentd"), "{wrapped}");
+    }
+
+    /// **IMAGE-3.** Each refusal on its own, against an otherwise wrappable task, names its
+    /// cause: no `FROM`, a trailing continuation (in the default and a custom escape
+    /// character, across blank and comment lines, in either line ending), an open heredoc, a
+    /// keepalive the client cannot tolerate, a bad workdir or port, and inheriting a workdir
+    /// nothing declares.
+    #[test]
+    fn a_task_the_stanza_cannot_follow_is_refused_naming_the_cause() {
+        let refused = |task: &str, opts: WrapOptions, cause: &str| {
+            let error = wrap_dockerfile(task, &opts).expect_err(cause);
+            assert_eq!(error.kind(), ErrorKind::InvalidArg, "{error}");
+            let message = error.to_string();
+            assert!(message.contains(cause), "IMAGE-3 {cause:?}: {message}");
+        };
+        let none = WrapOptions::default;
+        refused("RUN echo hello\n", none(), "no FROM");
+        refused("", none(), "no FROM");
+        refused("FROM\n", none(), "no FROM");
+        refused(
+            "FROM x\nRUN apt-get update && \\\n",
+            none(),
+            "line continuation",
+        );
+        refused("FROM x\nRUN a \\   \n", none(), "line continuation");
+        refused("FROM x\nRUN a \\\r\n", none(), "line continuation");
+        refused(
+            "FROM x\nRUN a \\\n\n# comment\n",
+            none(),
+            "line continuation",
+        );
+        refused("# escape=`\nFROM x\nRUN a `\n", none(), "line continuation");
+        refused("FROM x\nRUN <<EOF\necho never closed\n", none(), "heredoc");
+        refused("FROM x\nRUN <<-\"END\"\necho x\n", none(), "heredoc");
+        refused("FROM x\nCOPY <<A <<B /dst/\na\nA\nb\n", none(), "heredoc");
+        refused(
+            "FROM x\nENV AGENTD_SSE_KEEPALIVE_SECS=90\n",
+            none(),
+            "AGENTD_SSE_KEEPALIVE_SECS=90",
+        );
+        for workdir in ["relative/dir", "/srv\nRUN evil", "/my dir", "/tab\there"] {
+            refused(
+                "FROM x\n",
+                WrapOptions {
+                    workdir: Some(workdir.to_string()),
+                    ..none()
+                },
+                "absolute path",
+            );
+        }
+        refused("FROM x\n", WrapOptions { port: 0, ..none() }, "port");
+        refused(
+            "FROM x\n",
+            WrapOptions {
+                inherit_workdir: true,
+                ..none()
+            },
+            "nothing to inherit",
+        );
+    }
+
+    /// **IMAGE-3, the other side.** What looks like a refusal but is not: a backslash under a
+    /// backtick escape, a continuation that was finished, a closed heredoc (including a `<<-`
+    /// terminator indented with tabs), a here-string, an escaped keepalive under the timeout,
+    /// and inheriting a workdir the task or the options declare.
+    #[test]
+    fn a_finished_task_is_wrapped_even_when_it_looks_unfinished() {
+        let none = WrapOptions::default;
+        for task in [
+            "# escape=`\nFROM x\nRUN a \\\n",
+            "FROM x\nRUN a \\\n  && b\n",
+            "FROM x\nRUN <<EOF\necho closed\nEOF\n",
+            "FROM x\nRUN <<-EOF\n\techo closed\n\tEOF\n",
+            "FROM x\nCOPY <<A <<B /dst/\na\nA\nb\nB\n",
+            "FROM x\nRUN cat <<< word\n",
+            "FROM x\n# a trailing comment \\\n",
+            "FROM x\nENV AGENTD_SSE_KEEPALIVE_SECS=30\n",
+        ] {
+            wrap_dockerfile(task, &none())
+                .unwrap_or_else(|error| panic!("{task:?} was refused: {error}"));
+        }
+        wrap_dockerfile(
+            "FROM x\nWORKDIR /app\n",
+            &WrapOptions {
+                inherit_workdir: true,
+                ..none()
+            },
+        )
+        .expect("the task declares one");
+        wrap_dockerfile(
+            "FROM x\n",
+            &WrapOptions {
+                inherit_workdir: true,
+                workdir: Some("/srv".to_string()),
+                ..none()
+            },
+        )
+        .expect("the options declare one");
+        wrap_dockerfile(
+            "FROM x\n",
+            &WrapOptions {
+                workdir: Some(String::new()),
+                ..none()
+            },
+        )
+        .expect("an empty workdir is none, as default_dockerfile reads it");
+    }
+
+    /// **IMAGE-4.** A derived base takes its ref from the first `FROM`, keeps the managed
+    /// base's name (so `baseImageArn` is unchanged) and an empty working dir, and pairs with
+    /// the Dockerfile it came from under the `FROM` guard — digest pins included, since the
+    /// ref is taken whole. A Dockerfile with no `FROM` has nothing to derive.
+    #[test]
+    fn a_base_derived_from_a_dockerfile_pairs_with_it_by_construction() {
+        let digest = "c439fb4994ea7ca529233d6256446d3f8b7b4efb58956073e015303a170011de";
+        for (task, docker_ref) in [
+            ("FROM python:3.12-slim\n", "python:3.12-slim".to_string()),
+            (
+                "FROM --platform=linux/arm64 golang:1.23 AS build\nFROM python:3.12-slim\n",
+                "golang:1.23".to_string(),
+            ),
+            (
+                &*format!("FROM ubuntu:24.04@sha256:{digest}\n"),
+                format!("ubuntu:24.04@sha256:{digest}"),
+            ),
+        ] {
+            let base = BaseImage::from_dockerfile(task).expect("a FROM");
+            assert_eq!(base.docker_ref, docker_ref);
+            assert_eq!(
+                base.name,
+                BaseImage::al2023().name,
+                "IMAGE-4 keeps the managed base"
+            );
+            assert_eq!(base.working_dir, "");
+            let wrapped = wrap_dockerfile(task, &WrapOptions::default()).expect("wraps");
+            require_matching_from(&base, &wrapped).expect("IMAGE-4: the pair agrees");
+            assert_eq!(BaseImage::from_dockerfile(&wrapped).expect("a FROM"), base);
+        }
+        // The inversion #220 removes: under the managed base, a task on another base is
+        // refused.
+        require_matching_from(
+            &BaseImage::al2023(),
+            &wrap_dockerfile("FROM python:3.12-slim\n", &WrapOptions::default()).expect("wraps"),
+        )
+        .expect_err("the managed base does not pair with python:3.12-slim");
+
+        let error = BaseImage::from_dockerfile("RUN echo hello\n").expect_err("no FROM");
+        assert_eq!(error.kind(), ErrorKind::InvalidArg);
+        assert!(error.to_string().contains("no FROM"), "{error}");
+    }
+
+    /// **The table `model/src/wrap.rs` specifies**, rendered as real Dockerfile text: every
+    /// task and option combination the model enumerates, and the refusal (or the `USER root`
+    /// verdict) the model's `specified` gives it. The model crate cannot be a dependency here
+    /// (a path dependency without a version is a wildcard `deny.toml` refuses), so the table
+    /// is restated as `expected` below and the two are kept equal by review.
+    #[test]
+    fn wrap_agrees_with_the_model_table() {
+        #[derive(Debug)]
+        enum Expect {
+            Refused(&'static str),
+            Wrapped { user_root: bool },
+        }
+        let digest = "c439fb4994ea7ca529233d6256446d3f8b7b4efb58956073e015303a170011de";
+        let managed = BaseImage::al2023().docker_ref;
+        let froms = [
+            None,
+            Some(managed.clone()),
+            Some(format!("{managed}@sha256:{digest}")),
+            Some("python:3.12-slim".to_string()),
+        ];
+        let mut checked = 0;
+        for from in &froms {
+            for tail in 0..3 {
+                for user in 0..3 {
+                    for declares_workdir in [false, true] {
+                        for keepalive_too_long in [false, true] {
+                            for workdir in 0..3 {
+                                for inherit_workdir in [false, true] {
+                                    let mut text = String::new();
+                                    match from {
+                                        Some(from) => text.push_str(&format!("FROM {from}\n")),
+                                        None => text.push_str("RUN echo no base\n"),
+                                    }
+                                    if declares_workdir {
+                                        text.push_str("WORKDIR /app\n");
+                                    }
+                                    if keepalive_too_long {
+                                        text.push_str("ENV AGENTD_SSE_KEEPALIVE_SECS=60\n");
+                                    }
+                                    match user {
+                                        1 => text.push_str("USER root\n"),
+                                        2 => text.push_str("USER app\n"),
+                                        _ => {}
+                                    }
+                                    match tail {
+                                        1 => text.push_str("RUN make \\\n"),
+                                        2 => text.push_str("RUN <<EOF\necho open\n"),
+                                        _ => {}
+                                    }
+                                    let opts = WrapOptions {
+                                        workdir: match workdir {
+                                            1 => Some("/srv".to_string()),
+                                            2 => Some("srv".to_string()),
+                                            _ => None,
+                                        },
+                                        inherit_workdir,
+                                        ..WrapOptions::default()
+                                    };
+                                    let expected = if from.is_none() {
+                                        Expect::Refused("no FROM")
+                                    } else if tail != 0 {
+                                        Expect::Refused(if tail == 1 {
+                                            "line continuation"
+                                        } else {
+                                            "heredoc"
+                                        })
+                                    } else if keepalive_too_long {
+                                        Expect::Refused("AGENTD_SSE_KEEPALIVE_SECS")
+                                    } else if workdir == 2 {
+                                        Expect::Refused("absolute path")
+                                    } else if inherit_workdir && !declares_workdir && workdir == 0 {
+                                        Expect::Refused("nothing to inherit")
+                                    } else {
+                                        Expect::Wrapped {
+                                            user_root: user == 2,
+                                        }
+                                    };
+                                    let got = wrap_dockerfile(&text, &opts);
+                                    match (&expected, &got) {
+                                        (Expect::Refused(cause), Err(error)) => assert!(
+                                            error.to_string().contains(cause),
+                                            "{expected:?} for {text:?} {opts:?}: {error}"
+                                        ),
+                                        (Expect::Wrapped { user_root }, Ok(out)) => assert_eq!(
+                                            out.strip_prefix(text.as_str())
+                                                .expect("verbatim")
+                                                .starts_with("USER root\n"),
+                                            *user_root,
+                                            "{text:?} {opts:?}"
+                                        ),
+                                        _ => panic!(
+                                            "{expected:?} for {text:?} {opts:?}, got {got:?}"
+                                        ),
+                                    }
+                                    checked += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            checked,
+            4 * 3 * 3 * 2 * 2 * 3 * 2,
+            "every combination the model has"
+        );
     }
 
     /// The base image ARN, for the region it is requested in.

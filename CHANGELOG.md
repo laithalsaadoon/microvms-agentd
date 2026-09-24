@@ -8,6 +8,24 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
 
 ### Added
 
+- **`wrap_dockerfile` and `BaseImage.from_dockerfile` make a task's own Dockerfile
+  buildable in two calls (#220, IMAGE-1..IMAGE-5).** A harness whose tasks bring a
+  Dockerfile used to carry the agentd stanza as a string literal and build a `BaseImage`
+  whose `docker_ref` matched the task's `FROM` by hand to get past the `FROM` guard.
+  `wrap_dockerfile(task, WrapOptions)` (Python `microvms.wrap_dockerfile(task, *, port,
+  workdir, inherit_workdir)`, JS `wrapDockerfile(task, options)`) appends the stanza the
+  default Dockerfile uses, rendered by the same function, with `USER root` ahead of it when
+  the task ends on another user. It refuses a task with no `FROM`, one ending inside a line
+  continuation or an unterminated heredoc (either would swallow the stanza and build an
+  image with no daemon), a keepalive the client cannot tolerate, a bad port or workdir, and
+  `inherit_workdir` with nothing to inherit. `BaseImage::from_dockerfile` (Python
+  `BaseImage.from_dockerfile`, JS `baseImageFromDockerfile`) keeps the managed base's name
+  and takes the first `FROM` whole, digest pin included, so the guard passes by
+  construction. The default Dockerfile's bytes are unchanged, so no content-addressed image
+  name moves. Specified in `spec/core.symspec.json`, checked by the Stateright model in
+  `model/src/wrap.rs`, the Gherkin scenarios in `microvms-core/tests/features/`, and a
+  bolero harness over Dockerfile text.
+
 - **`Sandbox.detach()` hands a launched VM to another process without a leak warning.** A
   durable workflow's launch step used to end by dropping its `Sandbox`, which printed the
   "dropped without terminate()" billing warning for a VM a later step was about to adopt.
