@@ -359,63 +359,24 @@ impl RunOutcome {
 
 // ── doctor ──────────────────────────────────────────────────────────────────
 
-/// One prerequisite, its verdict, and what to do about it.
-///
-/// `ok: false` with `fatal: false` is a warning — a region we have not seen listed, a
-/// Terraform stack that may live elsewhere. The distinction matters because the exit code is
-/// derived from the fatal ones only, and a CLI that failed `doctor` over an advisory would
-/// train people to ignore it.
-#[derive(Clone, Debug)]
-pub struct Check {
-    pub name: &'static str,
-    pub ok: bool,
-    pub detail: String,
-    pub fatal: bool,
-    pub remedy: String,
-}
+// One prerequisite, its verdict, and what to do about it: core's preflight line, so `doctor`
+// and the bindings' `preflight` render the same checks the same way.
+//
+// `ok: false` with `fatal: false` is a warning — a region we have not seen listed, a
+// Terraform stack that may live elsewhere. The distinction matters because the exit code is
+// derived from the fatal ones only, and a CLI that failed `doctor` over an advisory would
+// train people to ignore it.
+pub use microvms_core::preflight::{Check, healthy};
 
-impl Check {
-    pub fn pass(name: &'static str, detail: impl Into<String>) -> Self {
-        Self {
-            name,
-            ok: true,
-            detail: detail.into(),
-            fatal: true,
-            remedy: String::new(),
-        }
-    }
-
-    pub fn fail(name: &'static str, detail: impl Into<String>, remedy: impl Into<String>) -> Self {
-        Self {
-            name,
-            ok: false,
-            detail: detail.into(),
-            fatal: true,
-            remedy: remedy.into(),
-        }
-    }
-
-    /// A non-fatal finding: reported, but does not decide the exit code.
-    #[must_use]
-    pub fn advisory(mut self) -> Self {
-        self.fatal = false;
-        self
-    }
-
-    pub fn to_json(&self) -> Value {
-        json!({
-            "name": self.name,
-            "ok": self.ok,
-            "detail": self.detail,
-            "fatal": self.fatal,
-            "remedy": self.remedy,
-        })
-    }
-}
-
-/// Whether every fatal check passed.
-pub fn healthy(checks: &[Check]) -> bool {
-    checks.iter().filter(|check| check.fatal).all(|c| c.ok)
+/// One check as the `doctor` envelope carries it.
+pub fn check_json(check: &Check) -> Value {
+    json!({
+        "name": check.name,
+        "ok": check.ok,
+        "detail": check.detail,
+        "fatal": check.fatal,
+        "remedy": check.remedy,
+    })
 }
 
 /// The human rendering of a doctor run.

@@ -19,7 +19,7 @@ use microvms_core::Region;
 use crate::cli::DoctorArgs;
 use crate::commands::{Ctx, Rendered, response_type};
 use crate::exit::{CliError, Exit};
-use crate::render::{Check, healthy, render_doctor};
+use crate::render::{Check, check_json, healthy, render_doctor};
 use crate::seam::resolve_region;
 
 /// `EM_AARCH64`, from the ELF specification: core's constant, the same one provisioning
@@ -70,7 +70,7 @@ pub async fn doctor<O: std::io::Write, E: std::io::Write>(
     let mut data = serde_json::Map::new();
     data.insert(
         "checks".into(),
-        serde_json::json!(checks.iter().map(Check::to_json).collect::<Vec<_>>()),
+        serde_json::json!(checks.iter().map(check_json).collect::<Vec<_>>()),
     );
     data.insert("ok".into(), serde_json::json!(ok));
 
@@ -145,70 +145,36 @@ fn check_config(flags: &crate::cli::ConfigFlags) -> Check {
     }
 }
 
-/// Whether the region is one this client has seen carry MicroVMs.
+/// Whether the region is one this client has seen carry MicroVMs: core's preflight line.
 ///
-/// **Advisory**, not fatal: AWS adds regions faster than a constant is re-read, and a hard
-/// failure here would block a caller who is right while we are stale. The remedy names the
-/// five, so the reader can tell "typo" from "genuinely new".
+/// **Advisory** here in every failing case, including a region the environment holds that the
+/// parser refuses: `doctor` must run with a broken environment and report everything else,
+/// and AWS adds regions faster than a constant is re-read. The bindings' `preflight` keeps the
+/// unresolved case fatal, because a harness cannot launch without a region. The remedy names
+/// the five, so the reader can tell "typo" from "genuinely new".
 fn check_region(
     flag: Option<Region>,
     unlisted: Option<&str>,
     env: &dyn Fn(&str) -> Option<String>,
 ) -> Check {
-    match resolve_region(flag, unlisted, env) {
-        Ok(region) if region.is_supported() => {
-            Check::pass("region", format!("{region} is a known MicroVMs region"))
-        }
-        Ok(region) => Check::fail(
-            "region",
-            format!("{region} is not in this client's list of MicroVMs regions"),
-            format!("known: {}", known_regions()),
-        )
-        .advisory(),
-        // A region that will not even resolve is the environment holding a name the parser
-        // refuses — reported here rather than raised, because `doctor` must run with a broken
-        // environment. That is the whole point of the command.
-        Err(error) => Check::fail(
-            "region",
-            error.to_string(),
-            format!("known: {}", known_regions()),
-        )
-        .advisory(),
-    }
+    microvms_core::preflight::region_check(&resolve_region(flag, unlisted, env)).advisory()
 }
 
-fn known_regions() -> String {
-    microvms_core::region::MICROVM_REGIONS
-        .iter()
-        .map(Region::as_str)
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-/// Whether the SDK can resolve an identity for the resolved region.
+/// Whether the credential chain resolves credentials for the resolved region: core's preflight
+/// line, through the seam.
 ///
-/// Constructing a [`microvms_core::control::ControlPlane`] is the cheapest question that proves
-/// the credential chain resolves — `ControlPlane::new` fails with `ErrorKind::Credentials` and
-/// names every source the chain looked at when it cannot. It spends no API call, unlike the
-/// Python's `get_caller_identity`, which is a straight improvement: `doctor` should not be able
-/// to fail on a throttle.
+/// It resolves them (`ControlPlane::resolve_credentials`) rather than only building a client:
+/// the default chain always has a provider, so a built client proves nothing about whether
+/// the chain holds an identity. It spends no API call, unlike the Python's
+/// `get_caller_identity`, so `doctor` cannot fail on a throttle.
 async fn check_credentials<O: std::io::Write, E: std::io::Write>(ctx: &mut Ctx<'_, O, E>) -> Check {
     let region = match resolve_region(None, None, ctx.env) {
         Ok(region) => region,
         // Already reported by the region check; there is nothing to resolve credentials for.
         Err(_) => Region::UsEast1,
     };
-    match ctx.seam.control_plane(region.clone()).await {
-        Ok(_) => Check::pass(
-            "credentials",
-            format!("the default chain resolved a provider for {region}"),
-        ),
-        Err(error) => Check::fail(
-            "credentials",
-            error.to_string(),
-            "`aws sso login`, or set AWS_PROFILE / AWS_ACCESS_KEY_ID",
-        ),
-    }
+    let plane = ctx.seam.control_plane(region.clone()).await;
+    microvms_core::preflight::credentials_check(&plane, &region).await
 }
 
 /// The managed base images AWS publishes, and the versions of the one this client builds on.

@@ -502,6 +502,21 @@ impl PySizeClass {
         })
     }
 
+    /// The smallest class whose baseline covers a resource request (BIND-14).
+    ///
+    /// `cpus` in vCPUs and `memory_mib` in MiB, each a request; `None` or zero is no
+    /// requirement on that axis, and with none on either the answer is `default_class()`.
+    /// Chosen by baseline, the billed and always-present figure. Raises `InvalidArgError`
+    /// naming the largest class when no class covers the request, or for a CPU figure that is
+    /// not a finite non-negative number.
+    #[staticmethod]
+    #[pyo3(signature = (cpus=None, memory_mib=None))]
+    fn from_request(cpus: Option<f64>, memory_mib: Option<u32>) -> PyCoreResult<PySizeClass> {
+        Ok(PySizeClass {
+            inner: SizeClass::from_request(cpus, memory_mib)?,
+        })
+    }
+
     /// The platform's default, 2048 MiB. Not the smallest — a 0.5 GB baseline fixes the
     /// guest's always-present ceiling at 2 GB, which OOM-kills a real test suite, and the
     /// guest has no swap.

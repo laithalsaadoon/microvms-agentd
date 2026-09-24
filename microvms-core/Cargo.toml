@@ -210,6 +210,11 @@ harness = false
 name = "bdd_posture"
 harness = false
 
+# The behavior spec for BIND-14..16 (#223): size-class selection and preflight.
+[[test]]
+name = "bdd_preflight"
+harness = false
+
 [lints.rust]
 # No hand-written `unsafe` in this crate; a future one is a build error, not a scan finding.
 unsafe_code = "forbid"

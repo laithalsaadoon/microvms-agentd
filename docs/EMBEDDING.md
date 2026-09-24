@@ -490,6 +490,37 @@ no-network task otherwise. No launch option answers `sealed` today: the client c
 see a VPC's routes, so a VPC connector alone reports `unsealed`. A session that did not
 launch its VM (`Session.direct`, `Session.attach`, an adopted sandbox) holds no launch
 options and reports `unsealed`.
+## Before queueing work: size class and preflight
+
+A harness that takes CPU and memory requests picks a class with
+`SizeClass.from_request(cpus, memory_mib)` (JS `SizeClass.fromRequest(cpus, memoryMib)`).
+It returns the smallest class whose **baseline** covers both values. The baseline is what is
+billed and always present, and the fixed ceiling above it is four times larger. `None` or
+zero on an axis means no requirement on that axis. With neither set, the result is
+`default_class()`. A request that no class covers raises `InvalidArgError` naming the largest
+class, so the harness can reject the task.
+
+`microvms.preflight(region=None)` (JS `await preflight(region)`) says whether a launch could
+proceed, before any build. It checks three things in order, and each check is in
+`report.checks` with `ok`, `fatal`, `ran`, `detail`, and `remedy`:
+
+1. **region**: the region resolves, from the argument or `$AWS_REGION` / `$AWS_DEFAULT_REGION`.
+   The check fails when the environment names a region the client refuses. An explicit
+   `Region.unlisted` region is only advisory, and the service check decides.
+2. **credentials**: the default credential chain resolves credentials. This makes no AWS API
+   call.
+3. **service**: the service answers one `ListManagedMicrovmImages` page in that region. This
+   is the only AWS operation, and it is free and read-only. A region without MicroVMs answers
+   `AccessDeniedException`.
+
+`report.ok` is true only when every fatal check passed. A check after a failure has
+`ran=False` and makes no call. `preflight` never raises, and nothing it does bills or changes
+the account. It does not check the execution or build role, the artifact bucket, quotas, or
+VPC connectors; `microvm doctor` reports what it can see of those. There is no boto3
+service-model check either, because the bindings are Rust and speak the API version they were
+built against. The listing is the evidence that the endpoint accepts that version. A harness
+that also calls the service through boto3 must check its own boto3. `doctor` shares the
+region and credentials checks.
 
 ## What the hand-rolled daemons needed, and where agentd covers it
 

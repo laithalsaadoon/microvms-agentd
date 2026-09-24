@@ -253,6 +253,18 @@ pub trait Transport: Send + Sync {
         &self,
         call: Call,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Reply, Error>> + Send + '_>>;
+
+    /// Resolves the credentials the next [`Transport::send`] would sign with, sending nothing
+    /// to the service (BIND-15's credentials check).
+    ///
+    /// Resolving may reach an SSO, credential-process, or instance-metadata source, none of
+    /// which bills. The default answers `Ok`: a transport that does not sign (every scripted
+    /// one) has nothing to resolve.
+    fn resolve_credentials(
+        &self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Error>> + Send + '_>> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 /// Sends `call` through `transport`, retrying the retryable statuses, and turns a failure
@@ -481,6 +493,31 @@ pub fn endpoint_for(region: &Region) -> String {
 }
 
 impl Transport for SignedTransport {
+    fn resolve_credentials(
+        &self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Error>> + Send + '_>> {
+        Box::pin(async move {
+            use aws_credential_types::provider::ProvideCredentials as _;
+            self.credentials
+                .provide_credentials()
+                .await
+                .map(|_| ())
+                .map_err(|error| {
+                    Error::new(
+                        ErrorKind::Credentials,
+                        format!(
+                            "the default credential chain resolved no credentials for {}: \
+                             {error}. It looks at environment variables, the shared config \
+                             files, SSO, a credential process, then the instance metadata \
+                             service.",
+                            self.region
+                        ),
+                    )
+                    .with_source(error)
+                })
+        })
+    }
+
     fn send(
         &self,
         call: Call,

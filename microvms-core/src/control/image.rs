@@ -937,6 +937,30 @@ impl ControlPlane {
         }
     }
 
+    /// One page of `ListManagedMicrovmImages`: whether the service answers a signed,
+    /// free, read-only request in this region (BIND-15's service check), and how many managed
+    /// bases the page carried.
+    ///
+    /// One operation, never the whole listing, so a preflight makes one AWS operation at most
+    /// (BIND-16); `send_with_retry` may repeat it on a throttle. An unsupported region answers
+    /// `AccessDeniedException` with a null message (TRAP-6), which this surfaces as the error
+    /// it is.
+    pub async fn answers_listing(&self) -> Result<usize, Error> {
+        let call = Call::get(
+            "ListManagedMicrovmImages",
+            paths::managed_microvm_images(None),
+        );
+        let reply = send_with_retry(self.transport(), call).await?;
+        let page: ops::ListManagedImagesResponseWire = reply.json("ListManagedMicrovmImages")?;
+        Ok(page.items.len())
+    }
+
+    /// Resolves the credentials this client signs with, sending nothing to the service
+    /// (BIND-15's credentials check). See [`super::transport::Transport::resolve_credentials`].
+    pub async fn resolve_credentials(&self) -> Result<(), Error> {
+        self.transport().resolve_credentials().await
+    }
+
     /// `ListMicrovmImages`, read to its last page.
     ///
     /// # Why this is public where the private walkers are not

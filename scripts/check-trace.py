@@ -110,6 +110,29 @@ TRACED: dict[str, str | tuple[str, dict[str, str]]] = {
     "BIND-8": "#222",
     "BIND-9": "#222",
     "BIND-10": "#222",
+    "BIND-14": (
+        "#223",
+        {
+            "model": "a stateless selection over the five-row size table; the bolero "
+            "harness checks minimality and coverage over arbitrary requests instead",
+            "live": "a pure function of the request and the documented table; it makes no "
+            "AWS call",
+        },
+    ),
+    "BIND-15": (
+        "#223",
+        {
+            "fuzz": "the outcome space (3 region x 2 credential x 3 service worlds) is "
+            "enumerated exhaustively by the Stateright model; there is no input stream to fuzz",
+        },
+    ),
+    "BIND-16": (
+        "#223",
+        {
+            "fuzz": "the outcome space (3 region x 2 credential x 3 service worlds) is "
+            "enumerated exhaustively by the Stateright model; there is no input stream to fuzz",
+        },
+    ),
 }
 
 LAYERS = ("model", "gherkin", "fuzz", "test", "impl", "live")

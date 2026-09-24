@@ -351,19 +351,9 @@ pub fn resolve_region(
         // `--unlisted-region us-east-1` is not a second spelling of a listed region.
         return Ok(Region::unlisted(name));
     }
-    match env("AWS_REGION").or_else(|| env("AWS_DEFAULT_REGION")) {
-        // Parsed rather than accepted: an environment variable is a string, and this is the
-        // boundary where the enum cannot help. A region the client has not seen carry
-        // MicroVMs is refused with the null-message finding attached, and the remedy named
-        // in the message is the flag that opts in.
-        Some(name) => name.parse::<Region>().map_err(|error| {
-            Error::invalid_arg(format!(
-                "{error} It arrived from $AWS_REGION or $AWS_DEFAULT_REGION rather than from a \
-                 flag; pass --unlisted-region {name:?} to opt in explicitly."
-            ))
-        }),
-        None => Ok(Region::UsEast1),
-    }
+    // The environment, parsed in core so the bindings' `preflight` reads it the same way; a
+    // region the client has not seen carry MicroVMs is refused with the remedy named.
+    Region::from_env(env)
 }
 
 /// The three account-specific values, resolved before any call.

@@ -877,6 +877,26 @@
       "verificationMethod": "analysis",
       "verifies": []
     },
+    "a05b0330-b1cc-4e25-a9ba-a500b15dc29d": {
+      "createdAt": "2026-09-24T18:00:00.000Z",
+      "derives": [],
+      "id": "a05b0330-b1cc-4e25-a9ba-a500b15dc29d",
+      "key": "BIND-16",
+      "negated": true,
+      "patternType": "ubiquitous",
+      "priority": "critical",
+      "refines": [
+        "ff727014-e8c1-4e9c-b7bb-8dc08882506d"
+      ],
+      "satisfies": [],
+      "sentence": "The microvms-core shall not make a billable or mutating AWS call during a preflight, nor any AWS call after the region or the credentials failed to resolve.",
+      "status": "approved",
+      "systemName": "microvms-core",
+      "systemResponse": "make a billable or mutating AWS call during a preflight, nor any AWS call after the region or the credentials failed to resolve",
+      "updatedAt": "2026-09-24T18:00:00.000Z",
+      "verificationMethod": "test",
+      "verifies": []
+    },
     "a17fdfa5-73a1-490b-b548-2afc37025055": {
       "createdAt": "2026-08-08T01:56:28.011Z",
       "derives": [],
@@ -1049,6 +1069,25 @@
       "trigger": "the platform reports termination complete",
       "updatedAt": "2026-08-08T02:10:17.186Z",
       "verificationMethod": "test",
+      "verifies": []
+    },
+    "b7c4c4ba-1dc6-4869-8c3f-d023a62ec8c4": {
+      "createdAt": "2026-09-24T18:00:00.000Z",
+      "derives": [],
+      "id": "b7c4c4ba-1dc6-4869-8c3f-d023a62ec8c4",
+      "key": "BIND-14",
+      "negated": false,
+      "patternType": "ubiquitous",
+      "priority": "high",
+      "refines": [],
+      "satisfies": [],
+      "sentence": "The sizing model shall select for a resource request the smallest size class whose baseline memory and baseline vCPU both cover the request, the default class when the request names neither, and an invalid-argument refusal naming the largest class when no class covers the request.",
+      "status": "approved",
+      "systemName": "sizing model",
+      "systemResponse": "select for a resource request the smallest size class whose baseline memory and baseline vCPU both cover the request, the default class when the request names neither, and an invalid-argument refusal naming the largest class when no class covers the request",
+      "updatedAt": "2026-09-24T18:00:00.000Z",
+      "verificationMethod": "test",
+      "verificationNote": "baseline, not peak: the baseline is what is billed and always present; the harvester's size_class used the same rule (#223)",
       "verifies": []
     },
     "bb1f8d17-64d2-415a-ae69-dfa172d33cb4": {
@@ -1381,6 +1420,25 @@
       "verificationMethod": "analysis",
       "verificationNote": "Rust: no Into<f64>/Deref; reading .amount is the one visible step",
       "verifies": []
+    },
+    "ff727014-e8c1-4e9c-b7bb-8dc08882506d": {
+      "createdAt": "2026-09-24T18:00:00.000Z",
+      "derives": [],
+      "id": "ff727014-e8c1-4e9c-b7bb-8dc08882506d",
+      "key": "BIND-15",
+      "negated": false,
+      "patternType": "event-driven",
+      "priority": "high",
+      "refines": [],
+      "satisfies": [],
+      "sentence": "When a caller asks for a preflight, the microvms-core shall report whether the region resolves to a supported region, whether the credential chain resolves credentials, and whether the MicroVMs service answers a free read-only listing in that region, as one report whose ok is true only when every fatal check passed.",
+      "status": "approved",
+      "systemName": "microvms-core",
+      "systemResponse": "report whether the region resolves to a supported region, whether the credential chain resolves credentials, and whether the MicroVMs service answers a free read-only listing in that region, as one report whose ok is true only when every fatal check passed",
+      "trigger": "a caller asks for a preflight",
+      "updatedAt": "2026-09-24T18:00:00.000Z",
+      "verificationMethod": "test",
+      "verifies": []
     }
   },
   "stateModel": {
@@ -1435,6 +1493,16 @@
       "code": "GTWR_R6_MISSING_UNITS",
       "reason": "4096 carries its unit: the trigger reads 'ceiling of 4096 bytes'; the linter's unit list does not include bytes",
       "requirementId": "834e04ac-4606-4779-811a-068e3a1d65ee"
+    },
+    {
+      "code": "GTWR_R6_MISSING_UNITS",
+      "reason": "124 and 128 are POSIX exit statuses (timeout(1)'s 124, 128 plus a signal number), which carry no unit",
+      "requirementId": "5eecef52-466d-49f7-a1c4-3c254bf901ce"
+    },
+    {
+      "code": "GTWR_R6_MISSING_UNITS",
+      "reason": "124 and 128 are POSIX exit statuses (timeout(1)'s 124, 128 plus a signal number), which carry no unit",
+      "requirementId": "234d70e2-caec-4d60-987a-4c5dca2fdecf"
     }
   ]
 }

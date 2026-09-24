@@ -6,7 +6,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Live conformance run driving the **Rust** client stack through the `microvm` CLI.
 
-This is the only live suite, and it now expresses **every named check** — 223 of them, with
+This is the only live suite, and it now expresses **every named check** — 227 of them, with
 none recorded SKIP. `conformance/run.py` was the oracle — 56 checks through the Python
 client — and it went away with that client once both suites ran green against real AWS on
 the same commit (Python 56/56, this one 38/38 with 34 recorded SKIP). Those 34 were the
@@ -170,6 +170,11 @@ threat model. And `--deny-egress`'s advisory proxy stopping a well-behaved clien
 same VM (through `exec --env`, so no second billable launch), while the platform still
 routes without it — which is exactly why that posture is `best-effort` and never `sealed`.
 Live because all three are claims about someone else's network.
+
+227 rather than 223: `drive_preflight` (#223) adds four. Core's `preflight`, which both
+bindings call, passes in the suite's region and leaves the account's VMs and images as they
+were; in ca-central-1, a region without MicroVMs, its service check fails; and with every
+credential source removed it stops before any AWS call (BIND-15, BIND-16).
 
 223 rather than 217: `drive_posture_parity` (#227) adds six. The core session the bindings
 wrap reports the CLI envelope's `egressPosture` for a connector-less and an `--egress` launch
@@ -1876,6 +1881,126 @@ def posture_lines(stderr: str) -> dict[str, str]:
             launch, _, rest = line.removeprefix("POSTURE ").partition("=")
             postures[launch] = rest.split(" ", 1)[0]
     return postures
+
+
+def preflight_test(
+    cli: Cli, name: str, env: dict[str, str]
+) -> subprocess.CompletedProcess[str] | None:
+    """One `live_preflight` test, or `None` when it did not finish."""
+    command = [
+        "cargo",
+        "test",
+        "-p",
+        "microvms-core",
+        "--test",
+        "live_preflight",
+        name,
+        "--",
+        "--ignored",
+        "--exact",
+        "--nocapture",
+    ]
+    cli.log.append(command_for_log(command))
+    try:
+        return subprocess.run(
+            command,
+            cwd=Path(__file__).resolve().parents[1],
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=10 * 60,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+
+
+def preflight_lines(stderr: str) -> dict[str, str]:
+    """`PREFLIGHT <run> <check>=<ok|fail> ...` lines, as {"<run> <check>": "ok"|"fail"}."""
+    lines: dict[str, str] = {}
+    for line in stderr.splitlines():
+        if line.startswith("PREFLIGHT "):
+            run, _, rest = line.removeprefix("PREFLIGHT ").partition(" ")
+            key, _, value = rest.partition("=")
+            if key and " " not in key:
+                lines[f"{run} {key}"] = value.split(" ", 1)[0]
+    return lines
+
+
+def drive_preflight(cli: Cli, results: Results) -> None:
+    """BIND-15 and BIND-16 (#223): `preflight`, what both bindings call, against AWS.
+
+    Three runs of core's `preflight`, none of which launches or builds anything. In the suite's
+    region every check passes and the account's VM and image listings are the same after as
+    before. In ca-central-1, a region without MicroVMs, the region line is advisory and the
+    service check fails. With every credential source removed from the environment, the
+    report stops at the credentials line and never sends the listing.
+    """
+    print("\n-- preflight (region, credentials, one free listing) --")
+    env = os.environ.copy()
+    env["AWS_REGION"] = cli.region
+    suite = preflight_test(
+        cli, "preflight_passes_in_the_suites_region_and_changes_nothing", env
+    )
+    seen = preflight_lines(suite.stderr if suite else "")
+    results.check(
+        "BIND-15 preflight passes in the suite's region",
+        bool(suite) and suite.returncode == 0 and seen.get("suite ok") == "true",
+        f"exit={suite.returncode if suite else 'timeout'} lines={seen!r}",
+    )
+    results.check(
+        "BIND-16 preflight left the account's VMs and images as they were",
+        bool(suite) and "before=" in suite.stderr and suite.returncode == 0,
+        next(
+            (
+                line
+                for line in (suite.stderr if suite else "").splitlines()
+                if "before=" in line
+            ),
+            "no count line",
+        ),
+    )
+
+    elsewhere = preflight_test(
+        cli, "preflight_in_a_region_without_microvms_fails_its_service_check", env
+    )
+    seen = preflight_lines(elsewhere.stderr if elsewhere else "")
+    results.check(
+        "BIND-15 preflight in a region without MicroVMs fails its service check",
+        bool(elsewhere)
+        and elsewhere.returncode == 0
+        and seen.get("elsewhere service") == "fail"
+        and seen.get("elsewhere ok") == "false",
+        f"exit={elsewhere.returncode if elsewhere else 'timeout'} lines={seen!r}",
+    )
+
+    with tempfile.TemporaryDirectory() as empty_home:
+        bare = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("AWS_") and key != "HOME"
+        }
+        bare["HOME"] = empty_home
+        bare["AWS_EC2_METADATA_DISABLED"] = "true"
+        bare["AWS_CONFIG_FILE"] = str(Path(empty_home) / "config")
+        bare["AWS_SHARED_CREDENTIALS_FILE"] = str(Path(empty_home) / "credentials")
+        # Cargo and rustup live under the real home; point them there explicitly.
+        for key in ("CARGO_HOME", "RUSTUP_HOME"):
+            bare[key] = os.environ.get(
+                key, str(Path.home() / (".cargo" if key == "CARGO_HOME" else ".rustup"))
+            )
+        nocreds = preflight_test(
+            cli, "preflight_without_credentials_makes_no_call", bare
+        )
+    seen = preflight_lines(nocreds.stderr if nocreds else "")
+    results.check(
+        "BIND-16 preflight without credentials stops before any AWS call",
+        bool(nocreds)
+        and nocreds.returncode == 0
+        and seen.get("nocreds credentials") == "fail"
+        and seen.get("nocreds ok") == "false",
+        f"exit={nocreds.returncode if nocreds else 'timeout'} lines={seen!r}",
+    )
 
 
 def drive_exec_identity(cli: Cli, launched: Envelope, results: Results) -> None:
@@ -6241,6 +6366,22 @@ def check_posture_lines(results: "Results") -> None:
     )
 
 
+def check_preflight_lines(results: "Results") -> None:
+    """The `live_preflight` reader keys each run's check and skips the count line."""
+    stderr = (
+        "PREFLIGHT suite region=ok ran=true fatal=true detail=us-east-1 is known\n"
+        "PREFLIGHT suite service=fail ran=true fatal=true detail=denied\n"
+        "PREFLIGHT suite ok=false\n"
+        "PREFLIGHT suite vms+images before=(1, 2) after=(1, 2)\n"
+        "test result: ok\n"
+    )
+    results.eq(
+        "the preflight-line reader keys each run's check",
+        preflight_lines(stderr),
+        {"suite region": "ok", "suite service": "fail", "suite ok": "false"},
+    )
+
+
 def check_bdd_outcome(results: "Results") -> None:
     """The JUnit reader tells a passed scenario from a failed, skipped, or absent one."""
     name = BDD_LIVE_SCENARIO
@@ -6285,6 +6426,7 @@ def self_test() -> int:
         check_run_section(results)
         check_bdd_outcome(results)
         check_posture_lines(results)
+        check_preflight_lines(results)
 
         # -- the success side -------------------------------------------------
         ok = cli.call("ok")
@@ -6830,6 +6972,8 @@ def main() -> int:
             # left to announce. The summary still prints a skip count, which should read
             # zero — see `Results.skip`.
             run_section(results, "local_commands", drive_local_commands, cli, results)
+            # Preflight (#223) before anything is launched: it launches nothing itself.
+            run_section(results, "preflight", drive_preflight, cli, results)
             launched = drive_lifecycle(
                 cli,
                 binary,

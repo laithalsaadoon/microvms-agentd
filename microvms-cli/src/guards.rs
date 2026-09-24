@@ -7929,3 +7929,92 @@ async fn the_run_envelope_and_the_launched_session_report_the_same_posture() {
         sandbox.detach().expect("hand the scripted VM off quietly");
     }
 }
+/// A control plane whose credential chain resolves nothing, and which answers no call.
+struct NoCredentialsSeam;
+
+struct NoCredentialsTransport;
+
+impl Transport for NoCredentialsTransport {
+    fn send(&self, call: Call) -> BoxFuture<'_, Result<Reply, Error>> {
+        Box::pin(async move {
+            Err(Error::new(
+                ErrorKind::Platform,
+                format!("{} was sent after the credentials failed", call.operation),
+            ))
+        })
+    }
+
+    fn resolve_credentials(&self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async {
+            Err(Error::new(
+                ErrorKind::Credentials,
+                "the default credential chain resolved no credentials",
+            ))
+        })
+    }
+}
+
+impl CoreSeam for NoCredentialsSeam {
+    fn control_plane(&self, region: Region) -> BoxFuture<'_, Result<ControlPlane, Error>> {
+        let plane = ControlPlane::with_transport(
+            Arc::new(NoCredentialsTransport) as Arc<dyn Transport>,
+            region,
+            Arc::new(YieldingClock::default()) as Arc<dyn Clock>,
+        );
+        Box::pin(async move { Ok(plane) })
+    }
+
+    fn open_sandbox(
+        &self,
+        _region: Region,
+        _port: Option<u16>,
+    ) -> BoxFuture<'_, Result<Sandbox, Error>> {
+        Box::pin(async { Err(Error::new(ErrorKind::Platform, "doctor opens no sandbox")) })
+    }
+
+    fn attach_session(
+        &self,
+        _region: Region,
+        _attach: Attach,
+    ) -> BoxFuture<'_, Result<Session, Error>> {
+        Box::pin(async { Err(Error::new(ErrorKind::Platform, "doctor attaches nothing")) })
+    }
+
+    fn put_artifact(&self, _uri: &str, _bytes: Vec<u8>) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async { Err(Error::new(ErrorKind::Platform, "doctor uploads nothing")) })
+    }
+}
+
+/// **BIND-15, shared with `doctor`: the credentials line resolves the chain.** A control plane
+/// is always constructible, because the default chain always has a provider; before this
+/// line was core's preflight check, `doctor` reported "resolved a provider" for a machine with
+/// no identity at all. Now the line fails, fatally, naming the chain.
+///
+/// **Falsification** — 2026-09-24. Make `credentials_check` pass for any built plane (the old
+/// behavior) and the `credentials` assertion reads `ok: true`; restored.
+#[tokio::test]
+async fn doctor_reports_a_credential_chain_that_resolves_nothing() {
+    let command = Command::Doctor(DoctorArgs {
+        binary: None,
+        infra_dir: Some(std::path::PathBuf::from("/definitely/not/a/stack")),
+        config: no_config(),
+        region: region_flags(),
+        infra: InfraFlags::default(),
+    });
+    let (result, _) = dispatch_with(&NoCredentialsSeam, &command, full_infra()).await;
+    let rendered = result.expect("doctor reports rather than raises");
+    let checks = rendered.data["checks"].as_array().expect("a check list");
+    let credentials = checks
+        .iter()
+        .find(|check| check["name"] == "credentials")
+        .expect("a credentials line");
+    assert_eq!(credentials["ok"], false, "{credentials}");
+    assert_eq!(credentials["fatal"], true, "{credentials}");
+    assert!(
+        credentials["detail"]
+            .as_str()
+            .is_some_and(|detail| detail.contains("resolved no credentials")),
+        "{credentials}"
+    );
+    assert_eq!(rendered.data["ok"], false);
+}

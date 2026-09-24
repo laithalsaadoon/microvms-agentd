@@ -126,6 +126,28 @@ impl Region {
     pub fn is_supported(&self) -> bool {
         !matches!(self, Region::Unlisted(_))
     }
+
+    /// The region the environment names: `$AWS_REGION`, then `$AWS_DEFAULT_REGION`, then
+    /// `us-east-1`.
+    ///
+    /// Parsed rather than accepted: an environment variable is a string, and this is the
+    /// boundary where the enum cannot help. A region the client has not seen carry MicroVMs is
+    /// refused with the null-message finding attached; opting in is explicit at a call site
+    /// (`--unlisted-region` in the CLI, `Region.unlisted` in the bindings). `env` is a lookup
+    /// rather than `std::env::var` so a caller (and a test) decides where the variables come
+    /// from. The CLI's region resolution and [`crate::preflight::preflight`] both read it here.
+    pub fn from_env(env: &dyn Fn(&str) -> Option<String>) -> Result<Region, Error> {
+        match env("AWS_REGION").or_else(|| env("AWS_DEFAULT_REGION")) {
+            Some(name) => name.parse::<Region>().map_err(|error| {
+                Error::invalid_arg(format!(
+                    "{error} It arrived from $AWS_REGION or $AWS_DEFAULT_REGION rather than from \
+                     a flag; pass --unlisted-region {name:?} (CLI) or Region.unlisted({name:?}) \
+                     (bindings) to opt in explicitly."
+                ))
+            }),
+            None => Ok(Region::UsEast1),
+        }
+    }
 }
 
 impl fmt::Display for Region {
