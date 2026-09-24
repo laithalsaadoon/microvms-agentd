@@ -248,6 +248,26 @@ pub fn artifact_content_hash(
     const_hex::encode(hasher.finalize())
 }
 
+/// The content hash with a build context. Not yet implemented (#221).
+pub fn artifact_content_hash_with_context(
+    binary: &[u8],
+    dockerfile: &str,
+    project: Option<&ProjectFiles>,
+    _context: Option<&super::context::BuildContext>,
+) -> String {
+    artifact_content_hash(binary, dockerfile, project)
+}
+
+/// The artifact with a build context. Not yet implemented (#221).
+pub fn build_artifact_with_context(
+    binary: &[u8],
+    dockerfile: &str,
+    project: Option<&ProjectFiles>,
+    _context: Option<&super::context::BuildContext>,
+) -> Result<Vec<u8>, Error> {
+    build_artifact(binary, dockerfile, project)
+}
+
 /// A base image: the platform ARN, the Dockerfile `FROM` that pairs with it, and whether
 /// it declares a `WORKDIR`.
 ///
@@ -2220,6 +2240,159 @@ mod tests {
             checked,
             4 * 3 * 3 * 2 * 2 * 3 * 2,
             "every combination the model has"
+        );
+    }
+
+    fn context_of(entries: &[(&str, u32, &[u8])]) -> crate::control::context::BuildContext {
+        crate::control::context::BuildContext::from_entries(
+            entries
+                .iter()
+                .map(
+                    |(name, mode, bytes)| crate::control::context::ContextEntry {
+                        name: (*name).to_string(),
+                        mode: *mode,
+                        bytes: bytes.to_vec(),
+                    },
+                )
+                .collect(),
+        )
+        .expect("valid entries")
+    }
+
+    /// **IMAGE-6, the pin.** A request with no build context — `None`, or an empty one — hashes
+    /// to exactly what `artifact_content_hash` produced before #221, so no `build --reuse` or
+    /// `AgentVm` image name moves. The vector is the one pinned for #74, recomputed
+    /// independently with Python's hashlib then.
+    #[test]
+    fn a_request_without_a_context_keeps_its_digest() {
+        let pinned = "90a0ef925a4696b0c0f142241b2c714e63f40071d0d02951e26cb2a1d8bb24fc";
+        assert_eq!(
+            artifact_content_hash_with_context(b"binary-bytes", "FROM scratch\n", None, None),
+            pinned,
+            "IMAGE-6: the no-context digest is the pre-#221 digest"
+        );
+        let empty = crate::control::context::BuildContext::default();
+        assert_eq!(
+            artifact_content_hash_with_context(
+                b"binary-bytes",
+                "FROM scratch\n",
+                None,
+                Some(&empty)
+            ),
+            pinned,
+            "an empty context carries no extra entries, so it is the same artifact"
+        );
+        assert_eq!(
+            artifact_content_hash(b"binary-bytes", "FROM scratch\n", None),
+            pinned
+        );
+    }
+
+    /// **IMAGE-6, the extension.** Each entry's name, mode, and bytes are part of the
+    /// identity; the order entries were read in is not, because a context is sorted by name.
+    #[test]
+    fn the_context_hash_follows_every_entry_and_not_their_order() {
+        let hash = |context: &crate::control::context::BuildContext| {
+            artifact_content_hash_with_context(b"bin", "FROM x\n", None, Some(context))
+        };
+        let base = hash(&context_of(&[
+            ("a.txt", 0o644, b"a"),
+            ("b.txt", 0o644, b"b"),
+        ]));
+        assert_ne!(
+            base,
+            artifact_content_hash_with_context(b"bin", "FROM x\n", None, None),
+            "IMAGE-6: a context is part of the identity"
+        );
+        assert_eq!(
+            base,
+            hash(&context_of(&[
+                ("b.txt", 0o644, b"b"),
+                ("a.txt", 0o644, b"a")
+            ])),
+            "the read order is not"
+        );
+        for (changed, what) in [
+            (
+                context_of(&[("a.txt", 0o644, b"A"), ("b.txt", 0o644, b"b")]),
+                "bytes",
+            ),
+            (
+                context_of(&[("a.txt", 0o755, b"a"), ("b.txt", 0o644, b"b")]),
+                "mode",
+            ),
+            (
+                context_of(&[("c.txt", 0o644, b"a"), ("b.txt", 0o644, b"b")]),
+                "name",
+            ),
+            (context_of(&[("a.txt", 0o644, b"ab")]), "boundary"),
+        ] {
+            assert_ne!(base, hash(&changed), "IMAGE-6: the entry {what} counts");
+        }
+    }
+
+    /// **IMAGE-7, the zip.** Equal inputs make byte-identical artifacts, so equal inputs are
+    /// one S3 object: every entry carries the DOS epoch as its date and a fixed mode, the
+    /// context entries sit beside the Dockerfile at the root, and the Dockerfile entry is the
+    /// one passed in.
+    #[test]
+    fn the_artifact_is_deterministic_with_fixed_dates_and_modes() {
+        use std::io::Read as _;
+
+        let context = context_of(&[("app/run.sh", 0o755, b"#!/bin/sh\n"), ("data", 0o644, b"d")]);
+        let build = || {
+            build_artifact_with_context(b"daemon", "FROM x\n", None, Some(&context)).expect("zips")
+        };
+        let first = build();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        assert_eq!(first, build(), "IMAGE-7: equal inputs, identical bytes");
+
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(first)).expect("a zip");
+        let mut names = Vec::new();
+        for index in 0..archive.len() {
+            let entry = archive.by_index(index).expect("entry");
+            names.push(entry.name().to_string());
+            let modified = entry.last_modified().expect("a date");
+            assert_eq!(
+                (modified.year(), modified.month(), modified.day()),
+                (1980, 1, 1),
+                "IMAGE-7: {} carries a fixed date",
+                entry.name()
+            );
+            let mode = entry.unix_mode().expect("a mode") & 0o777;
+            let expected = match entry.name() {
+                "agentd" | "app/run.sh" => 0o755,
+                _ => 0o644,
+            };
+            assert_eq!(mode, expected, "IMAGE-7: {} mode {mode:o}", entry.name());
+        }
+        assert_eq!(names, ["Dockerfile", "agentd", "app/run.sh", "data"]);
+        let mut dockerfile = String::new();
+        archive
+            .by_name("Dockerfile")
+            .expect("entry")
+            .read_to_string(&mut dockerfile)
+            .expect("reads");
+        assert_eq!(dockerfile, "FROM x\n");
+    }
+
+    /// **IMAGE-7, the byte scan extended.** The agent token has no path into a context either:
+    /// the artifact built from a context is scanned the way AC-2-3 scans the plain one.
+    #[test]
+    fn a_context_artifact_never_carries_the_agent_token() {
+        let token = "s3cr3t-agent-token-do-not-bake-me";
+        let context = context_of(&[("app/main.py", 0o644, b"print('hi')\n")]);
+        let bytes = build_artifact_with_context(
+            b"binary",
+            &wrap_dockerfile("FROM x\n", &WrapOptions::default()).expect("wraps"),
+            None,
+            Some(&context),
+        )
+        .expect("zips");
+        assert!(
+            !bytes
+                .windows(token.len())
+                .any(|window| window == token.as_bytes())
         );
     }
 

@@ -634,6 +634,11 @@ pub struct Sandbox {
     /// the moment the payload was built ([`crate::identity::LaunchIdentity::keep`]), so
     /// nothing on the host side can impersonate the VM it launched.
     tunnel_identity: Option<crate::identity::TunnelIdentity>,
+    /// The STS and S3 calls [`Sandbox::ensure_image`] makes, or `None` until the first
+    /// call builds the real ones. The seam a test replaces them at.
+    build_services: Option<Arc<dyn crate::control::BuildServices>>,
+    /// The caller's account, resolved once per sandbox for image ARNs (IMAGE-8).
+    account: Option<String>,
 }
 
 impl std::fmt::Debug for Sandbox {
@@ -735,7 +740,19 @@ impl Sandbox {
             adopted: false,
             detached: false,
             tunnel_identity: None,
+            build_services: None,
+            account: None,
         }
+    }
+
+    /// Routes [`Sandbox::ensure_image`]'s STS and S3 calls through `services`.
+    ///
+    /// The seam beside `with_control_plane`'s transport: a test that scripts the control
+    /// plane replaces the two calls outside it here, and production builds
+    /// [`crate::control::SignedBuildServices`] on the first `ensure_image`.
+    pub fn with_build_services(mut self, services: Arc<dyn crate::control::BuildServices>) -> Self {
+        self.build_services = Some(services);
+        self
     }
 
     /// Routes the session [`Sandbox::run`] builds through `backend` instead of real HTTP.
@@ -869,6 +886,41 @@ impl Sandbox {
         self.image_exists = true;
         self.image = Some(built);
         Ok(self.image.as_ref().expect("just assigned"))
+    }
+
+    /// Builds or reuses the content-addressed image for `request` (#221). Not yet
+    /// implemented.
+    pub async fn ensure_image(
+        &mut self,
+        request: crate::control::EnsureImageRequest,
+    ) -> Result<crate::control::EnsuredImage, Error> {
+        // Everything local first: a request this client refuses costs no call at all, the
+        // caller-identity lookup included.
+        let prepared = crate::control::ensure::prepare(&self.control, request)?;
+        let services = match &self.build_services {
+            Some(services) => Arc::clone(services),
+            None => {
+                let built: Arc<dyn crate::control::BuildServices> = Arc::new(
+                    crate::control::SignedBuildServices::new(self.control.region().clone()).await?,
+                );
+                self.build_services = Some(Arc::clone(&built));
+                built
+            }
+        };
+        let account = match &self.account {
+            Some(account) => account.clone(),
+            None => {
+                let account = services.caller_account().await?;
+                self.account = Some(account.clone());
+                account
+            }
+        };
+        let ensured =
+            crate::control::ensure::ensure(&self.control, services.as_ref(), &account, prepared)
+                .await?;
+        self.image_exists = true;
+        self.image = Some(ensured.image.clone());
+        Ok(ensured)
     }
 
     /// The artifact bytes to upload to the request's `code_artifact_uri`.

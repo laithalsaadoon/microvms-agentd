@@ -84,9 +84,12 @@
 
 pub mod artifact;
 pub mod connector;
+pub mod context;
+pub mod ensure;
 pub mod image;
 pub mod microvm;
 pub mod ops;
+pub mod services;
 pub mod token;
 pub mod transport;
 
@@ -100,8 +103,11 @@ pub use artifact::{
 pub use connector::{
     ConnectorIntent, EgressPosture, PLATFORM_HONOURS_OMITTED_EGRESS, egress_posture_for,
 };
+pub use context::{BuildContext, ContextEntry};
+pub use ensure::{EnsureImageRequest, EnsuredImage};
 pub use image::{Image, WaitOpts};
 pub use microvm::{Microvm, MicrovmFilter, ProxyToken, RunHookPayload};
+pub use services::{BuildServices, SignedBuildServices};
 
 use crate::error::{Error, ErrorKind};
 use crate::hooks::{BuildHookTimeout, RunHookTimeout};
