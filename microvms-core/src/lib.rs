@@ -76,6 +76,9 @@ pub mod error;
 pub mod hooks;
 pub mod identity;
 pub mod names;
+pub mod provision;
+#[cfg(test)]
+mod provision_fuzz;
 pub mod region;
 pub mod sandbox;
 pub mod session;

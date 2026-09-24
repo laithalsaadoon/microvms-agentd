@@ -22,11 +22,12 @@ use crate::exit::{CliError, Exit};
 use crate::render::{Check, healthy, render_doctor};
 use crate::seam::resolve_region;
 
-/// `EM_AARCH64`, from the ELF specification.
+/// `EM_AARCH64`, from the ELF specification: core's constant, the same one provisioning
+/// refuses every other binary against.
 ///
 /// The single most common first-attempt failure is a host-architecture binary, and this
 /// constant is what turns it from a 45-minute mystery into a line of `doctor` output.
-pub const REQUIRED_ELF_MACHINE: u16 = 0xB7;
+pub use microvms_core::provision::REQUIRED_ELF_MACHINE;
 
 /// Runs every check and reports which one is wrong.
 pub async fn doctor<O: std::io::Write, E: std::io::Write>(
@@ -503,27 +504,17 @@ fn check_binary(binary: Option<&std::path::Path>) -> Check {
     }
 }
 
-/// The `e_machine` field of an ELF header, or `None` if this is not an ELF file.
+/// The `e_machine` field of the ELF header at `path`, or `None` if it is not an ELF file.
 ///
-/// Twenty bytes: the four-byte magic, then `EI_DATA` at offset 5 deciding the byte order, then
-/// the two-byte `e_machine` at 18. Reading the endianness rather than assuming little is not
-/// pedantry — a big-endian cross-compiled binary would otherwise report machine `0xB700` and be
-/// rejected with a number nobody can look up.
+/// Reads the twenty header bytes and hands them to core's parser, which reads the byte
+/// order from `EI_DATA` rather than assuming little-endian.
 pub fn elf_machine(path: &std::path::Path) -> Option<u16> {
     use std::io::Read as _;
 
     let mut header = [0u8; 20];
     let mut file = std::fs::File::open(path).ok()?;
     file.read_exact(&mut header).ok()?;
-    if &header[..4] != b"\x7fELF" {
-        return None;
-    }
-    let bytes = [header[18], header[19]];
-    Some(if header[5] == 1 {
-        u16::from_le_bytes(bytes)
-    } else {
-        u16::from_be_bytes(bytes)
-    })
+    microvms_core::provision::elf_machine(&header)
 }
 
 #[cfg(test)]
