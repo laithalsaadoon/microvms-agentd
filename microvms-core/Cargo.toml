@@ -177,6 +177,20 @@ hyper-util = { version = "0.1", features = [
     "server",
     "tokio",
 ] }
+# The behavior specs for the IMAGE requirements (#220, #221): Gherkin scenarios in
+# `tests/features/`, each run by its own `harness = false` target, tagged with the
+# requirement each one verifies. The same pin and features as the CLI's.
+cucumber = { version = "0.23", features = ["output-junit"] }
+# The fuzz harnesses over Dockerfile text and build contexts. `bolero::check!` runs as an
+# ordinary `#[test]` on stable and as a coverage-guided target under `cargo bolero test`.
+bolero = "0.13"
+# The same tokio with a runtime, for the Gherkin runners' `main`: the library itself does not
+# choose a runtime, so `rt` is a test-only feature here.
+tokio = { version = "1.53", features = ["rt", "macros"] }
+
+[[test]]
+name = "bdd_wrap"
+harness = false
 
 [lints.rust]
 # No hand-written `unsafe` in this crate; a future one is a build error, not a scan finding.

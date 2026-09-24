@@ -35,6 +35,7 @@
 
 pub mod client;
 pub mod output;
+pub mod wrap;
 
 use stateright::{Model, Property};
 
