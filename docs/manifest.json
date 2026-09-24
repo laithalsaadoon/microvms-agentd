@@ -3557,7 +3557,7 @@
         "code": "ERR_INTERRUPTED",
         "exit": 11,
         "finding": "The build log group survives Terraform",
-        "meaning": "interrupted after launch; teardown ran and any leak is named in the payload"
+        "meaning": "interrupted before the command finished: after a launch, teardown ran and any leak is named in the payload; a streamed exec whose stdout reader left keeps running"
       },
       {
         "code": "ERR_PRECONDITION",

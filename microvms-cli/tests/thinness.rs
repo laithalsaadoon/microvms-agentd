@@ -391,44 +391,41 @@ fn the_scan_cut_cannot_hide_production_code() {
     }
 }
 
-/// The one stdout write in this crate lives in `envelope.rs`, plus the two named exceptions.
+/// No print macro anywhere in the CLI's production code, `main.rs` and `envelope.rs` included.
 ///
-/// CLI-4's structural half: "exactly one envelope on stdout" is only enforceable if there is one
-/// place that writes to stdout. The two exceptions are `main.rs` — which prints clap's own help and
-/// the bare constants object, both documented at their call sites — and nothing else.
+/// Two requirements rest on it. CLI-4's structural half: "exactly one envelope on stdout" is only
+/// enforceable if there is one place that writes to stdout, `Output`. CLI-7: `print!` and
+/// `eprintln!` panic when their stream's reader has gone, which is how
+/// `microvm keepalive --help | head` exited 101 (#216); `Output` records the closed reader
+/// instead. Clap's help and `constants --emit-json` go through `Output::raw`.
 ///
-/// A guard on the *shape* of the code rather than on its behaviour, which is what makes it worth
-/// having beside the behavioural check in `exit_codes.rs`: that one catches a stray write that a
-/// test happens to exercise, and this one catches one that no test does.
+/// A guard on the *shape* of the code rather than on its behaviour, beside the crate-level
+/// `clippy::print_stdout`/`print_stderr` deny in `main.rs`: the lint catches a new macro at
+/// compile time, and this test catches one even where someone relaxed the lint.
+///
+/// **Falsification** — 2026-09-24. Restoring `print!("{error}")` for clap's help in `main.rs`
+/// turned this red (and the `@CLI-7` help scenarios in `tests/features/closed_output.feature`);
+/// restored after.
 #[test]
-fn only_the_envelope_module_and_mains_two_exceptions_write_to_stdout() {
+fn no_production_code_writes_with_a_print_macro() {
     for (path, source) in scannable_sources() {
         let name = path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
-        if name == "envelope.rs" || name == "main.rs" {
-            continue;
-        }
-        for macro_name in ["println!", "print!"] {
-            assert!(
-                !source.contains(macro_name),
-                "{name} writes to stdout with {macro_name}. Progress goes to stderr through \
-                 Output::progress and the envelope is written once by the dispatcher — a stray \
-                 stdout write passes an 'is the envelope there' check and breaks the parse \
-                 (CLI-4)."
-            );
+        for (number, line) in source.lines().enumerate() {
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
+            for macro_name in ["println!(", "print!(", "eprintln!(", "eprint!("] {
+                assert!(
+                    !line.contains(macro_name),
+                    "{name}:{} writes with {macro_name}. Every write goes through Output: a print \
+                     macro panics on a closed reader (CLI-7), and a stray stdout write breaks the \
+                     one-envelope parse (CLI-4).",
+                    number + 1
+                );
+            }
         }
     }
-
-    // And `main.rs` has exactly the two documented ones, so the exemption cannot grow.
-    let main =
-        std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/main.rs"))
-            .expect("readable");
-    let writes = production_region(&main).matches("print").count();
-    assert!(
-        writes <= 3,
-        "main.rs has grown extra stdout writes ({writes} `print` occurrences); the only two are \
-         clap's own help output and `constants --emit-json`, both documented at their call sites"
-    );
 }

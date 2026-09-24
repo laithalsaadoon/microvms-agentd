@@ -6,6 +6,22 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
 
 ## Unreleased
 
+### Fixed
+
+- **A closed stdout or stderr no longer panics the CLI (#216, CLI-7, CLI-8, CLI-9).**
+  `microvm keepalive --help | head -3` exited 101 with "failed printing to stdout: Broken
+  pipe": clap's help and `constants --emit-json` went through `print!`, which panics when
+  the reader has gone. Every write now goes through `Output`, which records a closed reader
+  and never writes to it again; print macros are denied in the CLI and core, and core's
+  drop-time warning about a live VM no longer panics inside `drop`. A closed reader never
+  changes the exit code: a `run` whose output nobody reads still tears down and keeps its
+  outcome. `exec --stream` stops at the next event once its stdout reader leaves, leaves
+  the exec running, names it and the reattach command on stderr, and exits
+  `ERR_INTERRUPTED`. SIGPIPE stays ignored, as std sets it: resetting it would kill a
+  teardown mid-way. Specified in `spec/core.symspec.json`, checked by the Stateright model
+  in `model/src/output.rs`, the Gherkin scenarios in
+  `microvms-cli/tests/features/closed_output.feature`, a bolero fuzz harness, and guards.
+
 ## [0.9.0] — 2026-09-24
 
 ### Security

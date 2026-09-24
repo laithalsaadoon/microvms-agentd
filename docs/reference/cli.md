@@ -741,7 +741,7 @@ The table has seventeen rows, 0 through 16, and is append-only because consumers
 | 8 | `ERR_WINDOW_CLOSED` | the launch-time suspended window passed, so there is nothing to resume | `idlePolicy` |
 | 9 | `ERR_PLATFORM` | a control-plane failure with no more specific class | |
 | 10 | `ERR_TIMEOUT` | a client-side deadline elapsed; the VM and the exec are untouched | |
-| 11 | `ERR_INTERRUPTED` | interrupted after launch; teardown ran and any leak is named in the payload | The build log group survives Terraform |
+| 11 | `ERR_INTERRUPTED` | interrupted before the command finished: after a launch, teardown ran and any leak is named in the payload; a streamed exec whose stdout reader left keeps running | The build log group survives Terraform |
 | 12 | `ERR_PRECONDITION` | a prerequisite is missing — run `microvm doctor` | |
 | 13 | `ERR_EXEC_FAILED` | the sandbox worked and the command in it exited non-zero | |
 | 14 | `ERR_NAME_TAKEN` | the VM name is registered to a live VM; refused locally, before any AWS call | |

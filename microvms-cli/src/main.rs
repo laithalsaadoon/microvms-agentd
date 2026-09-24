@@ -27,7 +27,13 @@
 //! fails if a lib target ever appears. That is why the modules below are declared in `main.rs`
 //! rather than in a `lib.rs` half the world could import.
 
+// CLI-7: a print macro panics when its stream's reader has gone (#216). Every write goes
+// through a checked writer instead.
+#![deny(clippy::print_stdout, clippy::print_stderr)]
 mod cli;
+mod closed_output;
+#[cfg(test)]
+mod closed_output_fuzz;
 mod commands;
 mod config;
 mod envelope;
@@ -103,8 +109,12 @@ fn main() -> ExitCode {
                     | ClapKind::DisplayVersion
                     | ClapKind::DisplayHelpOnMissingArgumentOrSubcommand
             ) {
-                print!("{error}");
-                return ExitCode::from(Exit::Ok.as_u8());
+                // CLI-7: through `Output`, which records a closed reader instead of panicking the
+                // way `print!` did (#216). CLI-8: the outcome is still success.
+                out.raw(&error.to_string());
+                let exit =
+                    closed_output::exit_code(Exit::Ok, !out.stdout_closed(), !out.stderr_closed());
+                return ExitCode::from(exit.as_u8());
             }
             return report(&mut out, &exit::from_parse_error(&error));
         }
@@ -193,7 +203,8 @@ async fn run<O: std::io::Write, E: std::io::Write>(
             let bare = matches!(&parsed.command, Command::Constants(args) if args.emit_json)
                 && !parsed.json;
             if bare {
-                println!("{text}");
+                // CLI-7: the checked writer, not `println!`.
+                out.raw(&format!("{text}\n"));
             } else if dense && out.format().is_json() {
                 out.emit_compact(&envelope, &text);
             } else {
@@ -201,7 +212,13 @@ async fn run<O: std::io::Write, E: std::io::Write>(
             }
             // Read *after* the envelope is written, which is what makes a second one impossible
             // rather than merely discouraged. See `commands/mod.rs` on `AlreadyReported`.
-            ExitCode::from(rendered.already_reported.unwrap_or(Exit::Ok).as_u8())
+            // CLI-8: the command's own outcome, whatever became of its readers.
+            let exit = closed_output::exit_code(
+                rendered.already_reported.unwrap_or(Exit::Ok),
+                !out.stdout_closed(),
+                !out.stderr_closed(),
+            );
+            ExitCode::from(exit.as_u8())
         }
         Err(failure) => report(out, &failure),
     }

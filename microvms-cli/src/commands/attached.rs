@@ -44,6 +44,7 @@ use crate::cli::{
     AckArgs, AttachArgs, AttachFlags, CpArgs, ExecArgs, HealthArgs, KeepaliveArgs, KillArgs,
     PsArgs, RegionFlags, StdinArgs,
 };
+use crate::closed_output;
 use crate::commands::{Ctx, Rendered, STREAM_RESPONSE, response_type};
 use crate::exit::{CliError, Exit};
 use crate::history::{Event, History};
@@ -369,9 +370,11 @@ async fn poll_existing<O: std::io::Write, E: std::io::Write>(
 /// but `microvms-core` to consume a stream. The wire behaviour is identical: same state machine,
 /// same reconnects, same cursor.
 ///
-/// [`ControlFlow::Continue`] on every event: this command streams to completion, and the `Break`
-/// arm exists for a consumer that stops early (a binding whose iterator was dropped). CLI-6's
-/// interrupt is a separate mechanism — a `select!` in `lifecycle.rs` — and not this.
+/// [`ControlFlow::Continue`] on every event while stdout's reader is there: this command streams to
+/// completion. CLI-9 is the one `Break`: once a stream event cannot reach stdout's reader, the
+/// callback stops at that event, the remote exec is left running (breaking only detaches), a note
+/// naming the exec id goes to stderr, and the command exits `ERR_INTERRUPTED`. CLI-6's interrupt
+/// is a separate mechanism — a `select!` in `lifecycle.rs` — and not this.
 ///
 /// What this function owns is the *reporting*: an event per line, a summary in the envelope, and
 /// `nextOffset` so an interrupted consumer can pass it back as `--from-offset`.
@@ -390,6 +393,8 @@ async fn stream_exec<O: std::io::Write, E: std::io::Write>(
     let mut bytes = 0u64;
     let mut gaps = 0u64;
     let mut exit: Option<microvms_core::protocol::exec::ExitEvent> = None;
+    // CLI-9: set when a stream event found stdout's reader gone.
+    let mut reader_left = false;
 
     // A mid-stream failure is raised rather than summarised, and the events already written stay
     // written. That asymmetry is correct: the bytes on stdout are real output the caller received,
@@ -412,6 +417,17 @@ async fn stream_exec<O: std::io::Write, E: std::io::Write>(
             if let ExecEvent::Exit(terminal) = event {
                 exit = Some(terminal);
             }
+            // CLI-9: stop at the first event that could not be delivered.
+            if ctx.out.stdout_closed()
+                && closed_output::on_failed_write(
+                    closed_output::Command::Stream,
+                    closed_output::Channel::Stdout,
+                    true,
+                ) == closed_output::Decision::StopStream
+            {
+                reader_left = true;
+                return ControlFlow::Break(());
+            }
             ControlFlow::Continue(())
         })
         .await?;
@@ -419,9 +435,17 @@ async fn stream_exec<O: std::io::Write, E: std::io::Write>(
     // `--from-offset` message below is for; an `Exited` reports the total.
     let next_offset = end.cursor;
     debug_assert!(
-        end.reason != EndReason::Stopped,
-        "this callback never breaks, so a Stopped ending would mean core reported one that did"
+        end.reason != EndReason::Stopped || reader_left,
+        "this callback breaks only when stdout's reader left, so any other Stopped ending would \
+         mean core reported one it did not"
     );
+    if reader_left && exit.is_none() {
+        // CLI-9: the exec keeps running on the daemon; the caller can reattach.
+        ctx.out.warn(&format!(
+            "stdout's reader closed, so streaming stopped; exec {exec_id} is still running. \
+             Reattach with `microvm exec --exec-id {exec_id} --stream --from-offset {next_offset}`"
+        ));
+    }
 
     // The terminal event's own fields, or nulls for a cut stream — a record claiming exit 0
     // for a stream that ended without its exit event would be the same lie the envelope
@@ -485,6 +509,10 @@ async fn stream_exec<O: std::io::Write, E: std::io::Write>(
     );
     let (kind, _) = STREAM_RESPONSE;
     let rendered = Rendered::ok(kind, data, text, dense);
+    if reader_left && exit.is_none() {
+        // CLI-9: stopped before the exec ended, so there is no outcome to report but this one.
+        return Ok(rendered.reporting(Exit::Interrupted));
+    }
     if exit.as_ref().is_some_and(|event| event.timed_out) {
         return Ok(rendered.reporting(Exit::Timeout));
     }

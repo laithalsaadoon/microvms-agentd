@@ -64,6 +64,10 @@
 //! helpers `docs/AGENT-VMS.md` specifies, which compose the surface and which nothing
 //! below depends on.
 
+// CLI-7: a print macro panics when its stream's reader has gone (#216). Every write goes
+// through a checked writer instead.
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+
 pub mod agents;
 pub mod constants;
 pub mod control;

@@ -82,7 +82,8 @@ Feature: A closed stdout or stderr never crashes the CLI or changes its outcome
     Scenario: a streamed exec stops when its stdout reader closes
       # The shipped binary reaches a daemon only through the AWS control plane, which mints
       # its proxy token, so this cannot run offline. It is covered in-crate by the guard
-      # tests over a scripted seam and by the output-layer fuzz harness.
+      # `a_stream_whose_reader_leaves_stops_detaches_and_exits_interrupted` in
+      # `microvms-cli/src/guards.rs`, over a scripted daemon, and by the fuzz harness.
       Given a daemon reachable without AWS credentials
       When I stream an exec and close stdout after the first event
       Then the CLI exited with code 11
