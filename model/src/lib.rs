@@ -36,8 +36,8 @@
 pub mod client;
 pub mod exec_start;
 pub mod output;
-pub mod wrap;
 pub mod provision;
+pub mod wrap;
 
 use stateright::{Model, Property};
 
