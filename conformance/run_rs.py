@@ -6,7 +6,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Live conformance run driving the **Rust** client stack through the `microvm` CLI.
 
-This is the only live suite, and it now expresses **every named check** — 188 of them, with
+This is the only live suite, and it now expresses **every named check** — 201 of them, with
 none recorded SKIP. `conformance/run.py` was the oracle — 56 checks through the Python
 client — and it went away with that client once both suites ran green against real AWS on
 the same commit (Python 56/56, this one 38/38 with 34 recorded SKIP). Those 34 were the
@@ -171,6 +171,12 @@ same VM (through `exec --env`, so no second billable launch), while the platform
 routes without it — which is exactly why that posture is `best-effort` and never `sealed`.
 Live because all three are claims about someone else's network.
 
+201 rather than 188: twelve background prompt checks exercise both installed agents'
+default and unrestricted policies, independently read a shell-created artifact, record
+version/uid/model/deadline metadata, and observe timeout plus an empty process group
+after the submitting CLI has exited. One Rust live test reads its launch key from disk
+in independent callers, requires one VM ID, then independently confirms termination.
+
 185 rather than 181: `ls --remote` (issue #159) adds four in `drive_named_vm`, against the
 kept named VM and that section's own `--state-dir`. A plain `ls` naming its source as the
 local ledger with `remote` null and the kept run listed; `ls --remote` marking the kept run
@@ -256,6 +262,7 @@ import argparse
 import itertools
 import json
 import os
+import re
 import secrets
 import shlex
 import stat
@@ -264,7 +271,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -328,6 +335,8 @@ class Envelope:
     error: str = ""
     finding: str = ""
     suggestions: tuple[str, ...] = ()
+    #: Observed subprocess status, separate from data.exitCode (the guest workload).
+    process_exit_code: int | None = None
 
     @property
     def kind(self) -> str | None:
@@ -382,7 +391,9 @@ class KindError(Exception):
     """
 
     def __init__(self, envelope: Envelope) -> None:
-        super().__init__(f"{envelope.code}: {envelope.error}")
+        super().__init__(
+            f"{envelope.code} (kind={envelope.kind!r}, exit={envelope.exit_code})"
+        )
         self.envelope = envelope
         self.kind = envelope.kind
         self.code = envelope.code
@@ -401,6 +412,74 @@ class EnvelopeError(Exception):
     stdout means the *binary* is wrong, and reporting that as "the daemon answered
     oddly" would send the reader to the wrong crate.
     """
+
+
+# Logs are public evidence; the actual argv and envelope remain available in memory.
+SECRET_ARGUMENT_FLAGS = frozenset(
+    {
+        "--agent-token",
+        "--client-token",
+        "--token",
+        "--bearer-token",
+        "--api-key",
+        "--password",
+        "--session-token",
+        "--aws-session-token",
+        "--access-key-id",
+        "--secret-access-key",
+        "--bedrock-token",
+        "--authorization",
+        "--header",
+        "--env",
+        "--launch-env",
+    }
+)
+
+
+def redacted_argv(argv: Sequence[str]) -> list[str]:
+    result = []
+    hide_next = False
+    for argument in argv:
+        if hide_next:
+            result.append("[REDACTED]")
+            hide_next = False
+            continue
+        flag, equal, _ = argument.partition("=")
+        if flag in SECRET_ARGUMENT_FLAGS:
+            result.append(flag + "=[REDACTED]" if equal else flag)
+            hide_next = not equal
+        else:
+            result.append(argument)
+            # The harness always places the positional task directly after this verb.
+            hide_next = argument == "agent-prompt"
+    return result
+
+
+def command_for_log(argv: Sequence[str]) -> str:
+    return shlex.join(redacted_argv(argv))
+
+
+def exception_summary(error: Exception) -> str:
+    if isinstance(error, KindError):
+        return repr(error)
+    return type(error).__name__
+
+
+def agent_output_summary(data: dict[str, Any]) -> str:
+    def scalar(key: str) -> str:
+        value = data.get(key)
+        return (
+            repr(value)
+            if value is None or isinstance(value, (int, bool))
+            else "invalid"
+        )
+
+    return (
+        f"exit={scalar('exitCode')} timedOut={scalar('timedOut')} "
+        f"truncated={scalar('truncated')} "
+        f"stdoutChars={len(str(data.get('stdout') or ''))} "
+        f"stderrChars={len(str(data.get('stderr') or ''))}"
+    )
 
 
 # ── the driver ──────────────────────────────────────────────────────────────
@@ -426,6 +505,20 @@ class Cli:
     def argv(self, *args: str) -> list[str]:
         return [str(self.binary), "--json", "--quiet", *args]
 
+    @staticmethod
+    def run_process(
+        argv: list[str], timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        try:
+            return subprocess.run(
+                argv, capture_output=True, text=True, check=False, timeout=timeout
+            )
+        except subprocess.TimeoutExpired as error:
+            # TimeoutExpired repr includes cmd, and captured streams may be agent output.
+            raise subprocess.TimeoutExpired(
+                redacted_argv(argv), error.timeout
+            ) from None
+
     def call(self, *args: str, timeout: float = 900.0) -> Envelope:
         """One invocation. Raises `KindError` on a failure envelope.
 
@@ -435,15 +528,15 @@ class Cli:
         that they agree, so a suite that read only one would not be checking it.
         """
         argv = self.argv(*args)
-        self.log.append(shlex.join(argv))
-        proc = subprocess.run(
-            argv, capture_output=True, text=True, check=False, timeout=timeout
+        self.log.append(command_for_log(argv))
+        proc = self.run_process(argv, timeout)
+        envelope = replace(
+            self.parse_stdout(proc.stdout, argv), process_exit_code=proc.returncode
         )
-        envelope = self.parse_stdout(proc.stdout, argv)
         if envelope.status == "error":
             if proc.returncode != envelope.exit_code:
                 raise EnvelopeError(
-                    f"{shlex.join(argv)} exited {proc.returncode} but its envelope says "
+                    f"{command_for_log(argv)} exited {proc.returncode} but its envelope says "
                     f"exitCode {envelope.exit_code}. CLI-3 is the claim that those agree."
                 )
             raise KindError(envelope)
@@ -479,15 +572,13 @@ class Cli:
         either shape would weaken that for the sixty invocations that are not streams.
         """
         argv = self.argv(*args)
-        self.log.append(shlex.join(argv))
-        proc = subprocess.run(
-            argv, capture_output=True, text=True, check=False, timeout=timeout
-        )
+        self.log.append(command_for_log(argv))
+        proc = self.run_process(argv, timeout)
         lines = [line for line in proc.stdout.splitlines() if line.strip()]
         if not lines:
             raise EnvelopeError(
-                f"{shlex.join(argv)} wrote nothing to stdout. A stream emits one event "
-                f"per line and the envelope last.\nstderr:\n{proc.stderr[:400]}"
+                f"{command_for_log(argv)} wrote nothing to stdout. A stream emits one event "
+                f"per line and the envelope last. stderrChars={len(proc.stderr)}"
             )
 
         documents: list[dict[str, Any]] = []
@@ -496,42 +587,41 @@ class Cli:
                 parsed = json.loads(line)
             except json.JSONDecodeError as exc:
                 raise EnvelopeError(
-                    f"{shlex.join(argv)} line {index} is not one JSON document ({exc}). "
+                    f"{command_for_log(argv)} line {index} is not one JSON document ({exc}). "
                     f"A streamed exec writes NDJSON — one object per line — so a record "
-                    f"spanning lines makes a line-reading consumer lose it. Line was:\n"
-                    f"{line[:400]}"
+                    f"spanning lines makes a line-reading consumer lose it. lineChars={len(line)}"
                 ) from None
             if not isinstance(parsed, dict):
                 raise EnvelopeError(
-                    f"{shlex.join(argv)} line {index} is a {type(parsed).__name__}"
+                    f"{command_for_log(argv)} line {index} is a {type(parsed).__name__}"
                 )
             documents.append(parsed)
 
         *events, final = documents
         if "status" not in final:
             raise EnvelopeError(
-                f"{shlex.join(argv)}'s last line is not the envelope: {str(final)[:200]}. "
+                f"{command_for_log(argv)}'s last line is not the envelope. "
                 "The envelope goes last precisely so a consumer reading line by line "
                 "receives every event before the terminator."
             )
         for index, event in enumerate(events):
             if "status" in event:
                 raise EnvelopeError(
-                    f"{shlex.join(argv)} line {index} looks like an envelope rather than "
+                    f"{command_for_log(argv)} line {index} looks like an envelope rather than "
                     f"an event. Exactly one envelope per invocation, and it is the last "
-                    f"line: {str(event)[:200]}"
+                    "line."
                 )
-        envelope = Envelope.parse(final)
+        envelope = replace(Envelope.parse(final), process_exit_code=proc.returncode)
         if envelope.status == "error":
             if proc.returncode != envelope.exit_code:
                 raise EnvelopeError(
-                    f"{shlex.join(argv)} exited {proc.returncode} but its envelope says "
+                    f"{command_for_log(argv)} exited {proc.returncode} but its envelope says "
                     f"exitCode {envelope.exit_code}. CLI-3 holds on the streaming path too."
                 )
             raise KindError(envelope)
         if envelope.type != "microvm.exec.stream":
             raise EnvelopeError(
-                f"{shlex.join(argv)} streamed but announced {envelope.type!r}. The "
+                f"{command_for_log(argv)} streamed but announced {envelope.type!r}. The "
                 "streaming shape must carry its own discriminant, or a consumer "
                 "branching on `type` cannot tell which parse to use."
             )
@@ -550,11 +640,13 @@ class Cli:
             document = json.loads(stdout)
         except json.JSONDecodeError as exc:
             raise EnvelopeError(
-                f"{shlex.join(argv)} did not write exactly one JSON document to stdout "
-                f"({exc}). Progress belongs on stderr (CLI-4). stdout was:\n{stdout[:400]}"
+                f"{command_for_log(argv)} did not write exactly one JSON document to stdout "
+                f"({exc}). Progress belongs on stderr (CLI-4). stdoutChars={len(stdout)}"
             ) from None
         if not isinstance(document, dict):
-            raise EnvelopeError(f"{shlex.join(argv)} wrote a {type(document).__name__}")
+            raise EnvelopeError(
+                f"{command_for_log(argv)} wrote a {type(document).__name__}"
+            )
         return Envelope.parse(document)
 
 
@@ -2157,7 +2249,9 @@ def drive_stdin(cli: Cli, launched: Envelope, results: Results) -> None:
         timeout=120.0,
     )
     argv = cli.argv("exec", "cat", "--stdin")
-    cli.log.append(shlex.join(cli.argv("exec", "cat", "--stdin", "--exec-id", "cat1")))
+    cli.log.append(
+        command_for_log(cli.argv("exec", "cat", "--stdin", "--exec-id", "cat1"))
+    )
     echoed = Cli.parse_stdout(proc.stdout, argv)
 
     results.check(
@@ -2758,7 +2852,7 @@ def _tunnel_fetch(
         "1",
         *(["--verify-identity"] if verify else []),
     )
-    cli.log.append(shlex.join(argv))
+    cli.log.append(command_for_log(argv))
     with subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
         try:
             body: str | None = None
@@ -3349,8 +3443,8 @@ def drive_project_build(
             )
 
 
-#: The fifteen names `drive_agent_vm` records, in the order it records them. A tuple
-#: rather than fifteen literals at the call sites because the section has a failure
+#: The sixteen names `drive_agent_vm` records, in the order it records them. A tuple
+#: rather than sixteen literals at the call sites because the section has a failure
 #: mode the others do not: `agent-up` itself can fail before any VM exists (no Bedrock
 #: access in the account, an expired credential chain), and the header's rule is that
 #: nothing here is ever recorded SKIP. So a failed `agent-up` records every one of these
@@ -3376,13 +3470,226 @@ AGENT_VM_CHECKS = (
 )
 
 
+BACKGROUND_AGENT_CHECKS = {
+    agent: tuple(
+        f"{agent}: {claim}"
+        for claim in (
+            "an omitted permission mode preserves agent-default",
+            "unrestricted mode performs a shell action without approval",
+            "the prompt reports its actual version, uid, model and deadline",
+            "a detached prompt retry keeps the same exec id",
+            "the daemon deadline survives the submitting CLI process",
+            "the timed-out prompt leaves no live process group",
+        )
+    )
+    for agent in ("claude-code", "codex")
+}
+
+
+def prompt_metadata_ok(
+    data: dict[str, Any], agent: str, model: str, mode: str, timeout: int | None
+) -> bool:
+    """Only recorded, typed facts count; absent fields cannot look like defaults."""
+    return (
+        data.get("agent") == agent
+        and data.get("model") == model
+        and bool(model)
+        and bool(re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", str(data.get("agentVersion"))))
+        and data.get("uid") == 1000
+        and data.get("permissionMode") == mode
+        and "executionTimeoutSec" in data
+        and data["executionTimeoutSec"] == timeout
+        and data.get("reapGroupOnExit") is (timeout is not None)
+    )
+
+
+def daemon_deadline_ok(data: dict[str, Any], process_exit_code: int | None) -> bool:
+    # A child can handle SIGTERM and exit 0; the daemon's deadline still fired.
+    # Cleanup is checked independently by the named process-group assertion.
+    outcome = data.get("outcome")
+    return (
+        data.get("phase") in ("exited", "acked")
+        and process_exit_code == 10
+        and data.get("timedOut") is True
+        and isinstance(outcome, dict)
+        and outcome.get("timed_out") is True
+    )
+
+
+def drive_background_agents(
+    cli: Cli,
+    attach: tuple[str, ...],
+    defaults: dict[str, Envelope],
+    models: dict[str, str],
+    results: Results,
+) -> None:
+    """Twelve checks; the CLI parent exits before each deadline is observed."""
+    print("\n-- background agent permissions and daemon deadlines --")
+    for agent, names in BACKGROUND_AGENT_CHECKS.items():
+        try:
+            results.check(
+                names[0],
+                prompt_metadata_ok(
+                    defaults[agent].data, agent, models[agent], "agent-default", None
+                ),
+                "default permission policy and prompt metadata",
+            )
+            nonce = secrets.token_hex(12)
+            path = f"/workspace/background-{agent}-{nonce}.txt"
+            prompt = cli.call(
+                "agent-prompt",
+                f"Use your shell tool to run `printf %s {nonce} > {path}`. "
+                "Then read the file and finish. Do not ask for approval.",
+                "--agent",
+                agent,
+                "--permission-mode",
+                "unrestricted",
+                "--execution-timeout",
+                "120",
+                "--timeout",
+                "150",
+                "--reap-group-on-exit",
+                *attach,
+                timeout=180,
+            )
+            kept = cli.call("exec", f"cat {path}", *attach, timeout=30)
+            results.check(
+                names[1],
+                prompt.data.get("exitCode") == 0
+                and prompt.data.get("timedOut") is False
+                and kept.data.get("exitCode") == 0
+                and kept.data.get("stdout") == nonce,
+                f"exit={prompt.data.get('exitCode')} artifact matches={kept.data.get('stdout') == nonce}",
+            )
+            results.check(
+                names[2],
+                prompt_metadata_ok(
+                    prompt.data, agent, models[agent], "unrestricted", 120
+                ),
+                f"version={prompt.data.get('agentVersion')} uid={prompt.data.get('uid')} "
+                f"model={prompt.data.get('model')} executionTimeoutSec={prompt.data.get('executionTimeoutSec')}",
+            )
+            exec_id = f"background-deadline-{agent}-{nonce}"
+            args = (
+                "agent-prompt",
+                "Use your shell tool to sleep for 300 seconds, then finish.",
+                "--agent",
+                agent,
+                "--permission-mode",
+                "unrestricted",
+                "--execution-timeout",
+                "5",
+                "--timeout",
+                "0.01",
+                "--reap-group-on-exit",
+                "--detach",
+                "--exec-id",
+                exec_id,
+                *attach,
+            )
+            first = cli.call(*args, timeout=60)
+            # This read happens in a new CLI process. Running here proves the parent
+            # has already gone away while the daemon deadline is still pending.
+            after_parent = cli.call("exec", "--poll", exec_id, *attach, timeout=30)
+            retry = cli.call(*args, timeout=60)
+            results.check(
+                names[3],
+                first.data.get("execId") == retry.data.get("execId") == exec_id
+                and first.data.get("phase") == retry.data.get("phase") == "running",
+                exec_id,
+            )
+            deadline = time.monotonic() + 25
+            terminal: dict[str, Any] = {}
+            process_exit_code = None
+            group = None
+            while time.monotonic() < deadline:
+                polled = cli.call("exec", "--poll", exec_id, *attach, timeout=30)
+                terminal = polled.data
+                process_exit_code = polled.process_exit_code
+                procs = cli.call("ps", *attach, timeout=30).data.get("procs") or []
+                group = next(
+                    (row for row in procs if row.get("execId") == exec_id), None
+                )
+                if (
+                    daemon_deadline_ok(terminal, process_exit_code)
+                    and group is not None
+                    and not group.get("pids")
+                ):
+                    break
+                time.sleep(1)
+            results.check(
+                names[4],
+                after_parent.data.get("phase") == "running"
+                and daemon_deadline_ok(terminal, process_exit_code),
+                f"phase={terminal.get('phase')} timedOut={terminal.get('timedOut')} "
+                f"exitCode={terminal.get('exitCode')} signal={terminal.get('signal')}",
+            )
+            results.check(
+                names[5],
+                group is not None and group.get("pids") == [],
+                f"groupFound={group is not None} remainingPids={len(group.get('pids') or []) if group else None}",
+            )
+            cli.call("ack", exec_id, *attach, timeout=30)
+        except Exception as exc:  # noqa: BLE001 - keep the named denominator on failure
+            recorded = set(results.passed) | {name for name, _ in results.failed}
+            for name in names:
+                if name not in recorded:
+                    results.check(
+                        name, False, f"{type(exc).__name__}: background probe failed"
+                    )
+
+
+def drive_stable_launch(cli: Cli, launched: Envelope, results: Results) -> None:
+    """One Rust live test owns its bounded launch and verifies cleanup independently."""
+    name = "a persisted Rust launch key replays one VM and cleanup reaches TERMINATED"
+    env = os.environ.copy()
+    env["MICROVM_BACKGROUND_TEST_IMAGE"] = str(launched.data["imageIdentifier"])
+    env["AWS_REGION"] = cli.region
+    command = [
+        "cargo",
+        "test",
+        "-p",
+        "microvms-core",
+        "--test",
+        "live_background",
+        "persisted_launch_key_replays_one_vm",
+        "--",
+        "--ignored",
+        "--exact",
+        "--nocapture",
+    ]
+    cli.log.append(command_for_log(command))
+    try:
+        run = subprocess.run(
+            command,
+            cwd=Path(__file__).resolve().parents[1],
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=15 * 60,
+            check=False,
+        )
+        results.check(
+            name,
+            run.returncode == 0,
+            f"exit={run.returncode} stdoutChars={len(run.stdout)} stderrChars={len(run.stderr)}",
+        )
+    except subprocess.TimeoutExpired:
+        results.check(
+            name,
+            False,
+            "Rust live check exceeded 15 minutes; VM lifetime capped at 300s",
+        )
+
+
 def drive_agent_vm(
     cli: Cli, binary: Path, state_dir: Path, logs: Any, results: Results
 ) -> None:
     """`agent-up` and `agent-prompt` (`docs/AGENT-VMS.md`), live, both profiles.
 
-    Fifteen checks against a VM this section launches and terminates itself, from an
-    image this section builds (or reuses) itself: the agent image is derived from the
+    Sixteen original checks plus twelve background checks against a VM this section
+    launches and terminates itself, from an image this section builds (or reuses)
+    itself: the agent image is derived from the
     profile set and the daemon bytes, so no launch from the suite's image can carry a
     coding agent. Live rather than only scripted for the reason the spec's Verification
     section gives: the local guards see the Dockerfile as text and the token as a shape,
@@ -3447,7 +3754,7 @@ def drive_agent_vm(
         # terminates on a failed mint or install and names any leak in `data.leaked`).
         # Every check fails with the same detail so the denominator does not move.
         leaked = exc.envelope.data if isinstance(exc, KindError) else {}
-        detail = f"agent-up failed: {exc!r}" + (
+        detail = f"agent-up failed: {exception_summary(exc)}" + (
             f" leaked={leaked.get('leaked')!r} microvm={leaked.get('microvmId')!r} "
             f"image={leaked.get('imageIdentifier')!r}"
             if leaked
@@ -3458,6 +3765,9 @@ def drive_agent_vm(
         )
         for name in AGENT_VM_CHECKS:
             results.check(name, False, detail)
+        for names in BACKGROUND_AGENT_CHECKS.values():
+            for name in names:
+                results.check(name, False, detail)
         return
     up_seconds = time.monotonic() - started
 
@@ -3519,7 +3829,7 @@ def drive_agent_vm(
             AGENT_VM_CHECKS[5],
             marker.data.get("exitCode") == 0
             and sorted(marker_agents) == ["claude-code", "codex"],
-            f"exit={marker.data.get('exitCode')} stdout={(marker.data.get('stdout') or '')[:200]!r}",
+            agent_output_summary(marker.data),
         )
         # AGENT-5: the credential file is the agent's and nobody else's. `%u` rather
         # than `%U` because al2023-minimal need not resolve uid 1000 to a name.
@@ -3528,7 +3838,7 @@ def drive_agent_vm(
             AGENT_VM_CHECKS[6],
             env_stat.data.get("exitCode") == 0
             and (env_stat.data.get("stdout") or "").strip() == "1000:600",
-            f"exit={env_stat.data.get('exitCode')} stdout={env_stat.data.get('stdout')!r}",
+            agent_output_summary(env_stat.data),
         )
 
         # The variable names in the credential file, and only the names: `sed` strips
@@ -3577,8 +3887,7 @@ def drive_agent_vm(
             and claude.data.get("exitCode") == 0
             and any(ch.isdigit() for ch in claude_out),
             f"type={claude.type} agent={claude.data.get('agent')!r} "
-            f"exit={claude.data.get('exitCode')!r} stdout={claude_out.strip()[:120]!r} "
-            f"stderr={(claude.data.get('stderr') or '').strip()[:200]!r}",
+            + agent_output_summary(claude.data),
         )
 
         # AGENT-7 through Codex: a file the workspace keeps, read back by a plain exec
@@ -3617,15 +3926,16 @@ def drive_agent_vm(
             and codex.data.get("agent") == "codex"
             and codex.data.get("exitCode") == 0,
             f"type={codex.type} agent={codex.data.get('agent')!r} "
-            f"exit={codex.data.get('exitCode')!r} prompts={attempts} "
-            f"stdout={(codex.data.get('stdout') or '').strip()[:120]!r} "
-            f"stderr={(codex.data.get('stderr') or '').strip()[:200]!r}",
+            f"prompts={attempts} " + agent_output_summary(codex.data),
         )
         results.check(
             AGENT_VM_CHECKS[10],
             kept.data.get("exitCode") == 0,
-            f"exit={kept.data.get('exitCode')!r} prompts={attempts} "
-            f"stdout={(kept.data.get('stdout') or '')[:120]!r}",
+            f"prompts={attempts} " + agent_output_summary(kept.data),
+        )
+
+        drive_background_agents(
+            cli, attach, {"claude-code": claude, "codex": codex}, models, results
         )
 
         # AGENT-8: the same command against the registered name is a refresh, not a
@@ -3657,7 +3967,7 @@ def drive_agent_vm(
             results.check(
                 AGENT_VM_CHECKS[12],
                 exc.code == "ERR_PRECONDITION" and exc.kind is None,
-                f"code={exc.code} kind={exc.kind!r} exit={exc.exit_code}: {exc}",
+                exception_summary(exc),
             )
     finally:
         # This section's own VM, image, and log group, this section's own teardown.
@@ -3680,7 +3990,9 @@ def drive_agent_vm(
                 timeout=15 * 60,
             )
         except Exception as exc:  # noqa: BLE001 - a teardown failure is a finding
-            results.check(AGENT_VM_CHECKS[13], False, f"{microvm_id}: {exc!r}")
+            results.check(
+                AGENT_VM_CHECKS[13], False, f"{microvm_id}: {exception_summary(exc)}"
+            )
             results.check(
                 AGENT_VM_CHECKS[14],
                 False,
@@ -3722,7 +4034,7 @@ def drive_agent_vm(
                     logs.delete_log_group(logGroupName=group)
                 except Exception as exc:  # noqa: BLE001 - the reason is the finding
                     if type(exc).__name__ != "ResourceNotFoundException":
-                        failures.append(f"{group}: {type(exc).__name__}: {exc}")
+                        failures.append(f"{group}: {exception_summary(exc)}")
             results.check(
                 AGENT_VM_CHECKS[15],
                 bool(groups) and not failures,
@@ -4302,6 +4614,11 @@ CASES = {
                   "data": {"execId": "c1", "phase": "exited", "exitCode": 0,
                            "stdout": "identity-live\\n", "stderr": "",
                            "truncated": False}}, 0),
+    "daemondeadline": ({"status": "ok", "apiVersion": "1", "type": "microvm.exec",
+                        "data": {"execId": "deadline-1", "phase": "exited", "exitCode": None,
+                                 "signal": 15, "timedOut": True,
+                                 "outcome": {"exit_code": None, "signal": 15,
+                                             "timed_out": True}}}, 10),
     "stdinwrite": ({"status": "ok", "apiVersion": "1", "type": "microvm.stdin",
                     "data": {"execId": "x-1", "written": 5, "eof": True}}, 0),
     "cp": ({"status": "ok", "apiVersion": "1", "type": "microvm.copy",
@@ -4318,6 +4635,33 @@ CASES = {
 
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
 case = args[0] if args else "ok"
+
+if case in {"echoargs", "agent-prompt"}:
+    print(json.dumps({"status": "ok", "apiVersion": "1", "type": "microvm.exec",
+                      "data": {"argv": sys.argv[1:]}}))
+    raise SystemExit(0)
+if case.startswith("private"):
+    marker = "private-transcript-canary"
+    if case == "privatemalformed":
+        print(marker)
+    elif case == "privateempty":
+        print(marker, file=sys.stderr)
+    elif case == "privatelast":
+        print(json.dumps({"event": "output", "text": marker}))
+    elif case == "privatefirst":
+        first = dict(STREAM_ENVELOPE, data={"stdout": marker})
+        print(json.dumps(first))
+        print(json.dumps(STREAM_ENVELOPE))
+    elif case == "privatetimeout":
+        import time
+        print(marker, flush=True)
+        time.sleep(2)
+    else:
+        print(json.dumps({"status": "error", "apiVersion": "1", "error": marker,
+                          "code": "ERR_PROTOCOL", "exitCode": 5, "finding": marker,
+                          "suggestions": [marker], "data": {"kind": "Conflict"}}))
+        raise SystemExit(7 if case == "privatemismatch" else 5)
+    raise SystemExit(0)
 
 if case == "twoenvelopes":
     print(json.dumps(CASES["ok"][0]))
@@ -4390,6 +4734,237 @@ sys.exit(code)
 '''
 
 
+def check_log_privacy(cli: Cli, results: Results, state_dir: Path) -> None:
+    """Canaries cross real subprocesses and the complete named agent drive paths."""
+    import io
+    from contextlib import redirect_stderr, redirect_stdout
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    secret = "private-argument-canary"
+    transcript = "private-transcript-canary"
+    forwarded = True
+    for flag in sorted(SECRET_ARGUMENT_FLAGS):
+        for args in ((flag, secret), (flag + "=" + secret,)):
+            response = cli.call("echoargs", *args)
+            forwarded &= all(argument in response.data["argv"] for argument in args)
+            cli.call_stream("stream", *args)
+    task = cli.call("agent-prompt", secret, "--agent", "codex")
+    forwarded &= secret in task.data["argv"]
+    results.check("log redaction preserves the actual CLI arguments", forwarded)
+    results.check(
+        "ordinary and streaming command logs redact secret flags and agent tasks",
+        secret not in "\n".join(cli.log) and "[REDACTED]" in "\n".join(cli.log),
+    )
+
+    failures = []
+    for method, case in (
+        (cli.call, "privatemalformed"),
+        (cli.call, "privatemessage"),
+        (cli.call, "privatemismatch"),
+        (cli.call_stream, "privatemalformed"),
+        (cli.call_stream, "privateempty"),
+        (cli.call_stream, "privatelast"),
+        (cli.call_stream, "privatefirst"),
+        (cli.call_stream, "privatemessage"),
+        (cli.call_stream, "privatemismatch"),
+    ):
+        try:
+            method(case, "--agent-token", secret)
+        except (EnvelopeError, KindError) as error:
+            failures.append(str(error) + repr(error))
+    results.check(
+        "parse and protocol errors retain kinds without argument or transcript excerpts",
+        len(failures) == 9
+        and all(
+            secret not in message and transcript not in message for message in failures
+        )
+        and any(
+            "Conflict" in message and "ERR_PROTOCOL" in message for message in failures
+        ),
+    )
+    timeouts = []
+    for method in (cli.call, cli.call_stream):
+        try:
+            method("privatetimeout", "--agent-token=" + secret, timeout=0.1)
+        except subprocess.TimeoutExpired as error:
+            timeouts.append(error)
+    results.check(
+        "subprocess timeout exceptions omit secret argv and captured transcripts",
+        len(timeouts) == 2
+        and all(
+            secret not in str(error) + repr(error)
+            and error.output is None
+            and error.stderr is None
+            for error in timeouts
+        ),
+    )
+
+    class AgentCli:
+        region = "us-test-1"
+
+        def __init__(self) -> None:
+            self.up_count = 0
+            self.polls: dict[str, int] = {}
+            self.artifacts: dict[str, str] = {}
+            self.log: list[str] = []
+
+        def call(self, *args: str, **_kwargs: Any) -> Envelope:
+            data: dict[str, Any] = {
+                "exitCode": 0,
+                "stdout": transcript,
+                "stderr": transcript,
+                "timedOut": False,
+            }
+            kind = "microvm.exec"
+            process_exit = 0
+            if args[0] == "agent-up":
+                self.up_count += 1
+                kind = "microvm.agent"
+                data = {
+                    "vmReused": self.up_count > 1,
+                    "imageReused": False,
+                    "imageIdentifier": "arn:image" if self.up_count == 1 else None,
+                    "imageName": "agent-vm-claude-code-codex-0123456789ab",
+                    "microvmId": "microvm-canary",
+                    "credentialExpiresAt": int(time.time()) + 600,
+                    "agents": [
+                        {"agent": agent, "model": "synthetic." + agent}
+                        for agent in BACKGROUND_AGENT_CHECKS
+                    ],
+                }
+            elif args[0] == "agent-prompt":
+                if "--agent" not in args:
+                    raise KindError(
+                        Envelope(
+                            "error",
+                            "1",
+                            "",
+                            {},
+                            code="ERR_PRECONDITION",
+                            exit_code=2,
+                            error=transcript,
+                        )
+                    )
+                agent = args[args.index("--agent") + 1]
+                kind = "microvm.agent.prompt"
+                timeout = (
+                    int(args[args.index("--execution-timeout") + 1])
+                    if "--execution-timeout" in args
+                    else None
+                )
+                data.update(
+                    agent=agent,
+                    model="synthetic." + agent,
+                    agentVersion="1.2.3",
+                    uid=1000,
+                    permissionMode="unrestricted" if timeout else "agent-default",
+                    executionTimeoutSec=timeout,
+                    reapGroupOnExit=timeout is not None,
+                    stdout="12 " + transcript,
+                )
+                match = re.search(r"printf %s ([a-f0-9]+) > ([^`]+)", args[1])
+                if match:
+                    self.artifacts[match[2]] = match[1]
+                if "--detach" in args:
+                    exec_id = args[args.index("--exec-id") + 1]
+                    self.polls.setdefault(exec_id, 0)
+                    data.update(execId=exec_id, phase="running")
+            elif args[0] == "exec":
+                if args[1] == "--poll":
+                    exec_id = args[2]
+                    self.polls[exec_id] += 1
+                    running = self.polls[exec_id] == 1
+                    data.update(
+                        execId=exec_id,
+                        phase="running" if running else "exited",
+                        timedOut=not running,
+                        exitCode=None,
+                        signal=15,
+                        outcome={"timed_out": not running},
+                    )
+                    process_exit = 0 if running else 10
+                elif args[1] == "cat /workspace/.agent-vm.json":
+                    data["stdout"] = json.dumps(
+                        {
+                            "agents": [
+                                {"agent": agent} for agent in BACKGROUND_AGENT_CHECKS
+                            ],
+                            "private": transcript,
+                        }
+                    )
+                elif args[1].startswith("stat "):
+                    data["stdout"] = "1000:600"
+                elif args[1].startswith("sed "):
+                    data["stdout"] = (
+                        "export HOME PATH AWS_REGION CLAUDE_CODE_USE_BEDROCK ANTHROPIC_MODEL AWS_BEARER_TOKEN_BEDROCK OPENAI_API_KEY "
+                        + transcript
+                    )
+                else:
+                    data["stdout"] = self.artifacts.get(
+                        args[1].removeprefix("cat "), transcript
+                    )
+            elif args[0] == "ps":
+                data = {
+                    "procs": [
+                        {"execId": exec_id, "pids": [], "private": transcript}
+                        for exec_id in self.polls
+                    ]
+                }
+            elif args[0] == "terminate":
+                kind = "microvm.teardown"
+                data = {
+                    "microvmId": "microvm-canary",
+                    "leaked": [],
+                    "undeletedLogGroups": ["/aws/lambda-microvms/canary"],
+                }
+            elif args[0] == "health":
+                raise KindError(
+                    Envelope(
+                        "error",
+                        "1",
+                        "",
+                        {},
+                        code="ERR_PRECONDITION",
+                        exit_code=2,
+                        error=transcript,
+                    )
+                )
+            return Envelope("ok", "1", kind, data, process_exit_code=process_exit)
+
+    output, agent_results = io.StringIO(), Results()
+    fake_cli = AgentCli()
+    with redirect_stdout(output), redirect_stderr(output):
+        drive_agent_vm(
+            fake_cli,
+            cli.binary,
+            state_dir,
+            SimpleNamespace(delete_log_group=lambda **_: None),
+            agent_results,
+        )
+        with patch.object(
+            subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess([], 0, transcript, transcript),
+        ):
+            drive_stable_launch(
+                fake_cli,
+                Envelope("ok", "1", "microvm.run", {"imageIdentifier": "arn:image"}),
+                agent_results,
+            )
+    expected_checks = (
+        len(AGENT_VM_CHECKS) + sum(map(len, BACKGROUND_AGENT_CHECKS.values())) + 1
+    )
+    results.check(
+        "agent and background drive paths retain all named checks without raw transcripts",
+        len(agent_results.passed) == expected_checks
+        and not agent_results.failed
+        and transcript not in output.getvalue()
+        and "stdoutChars=" in output.getvalue(),
+        f"{len(agent_results.passed)}/{expected_checks} named checks passed",
+    )
+
+
 def self_test() -> int:
     """Drives the envelope-to-exception mapping against the stub. No AWS, no money.
 
@@ -4406,6 +4981,7 @@ def self_test() -> int:
         stub.chmod(stub.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
         cli = Cli(binary=stub)
         results = Results()
+        check_log_privacy(cli, results, Path(tmp))
 
         # -- the success side -------------------------------------------------
         ok = cli.call("ok")
@@ -4498,6 +5074,78 @@ def self_test() -> int:
         # `already_reported`: the payload is right and the exit code is not zero. It must
         # NOT raise, because the caller asked for the output and the output is there.
         results.ok("a failing workload does not raise", lambda: cli.call("execfailed"))
+
+        timeout_envelope = cli.call("daemondeadline")
+        deadline = timeout_envelope.data
+        results.check(
+            "a daemon timeout parses its raw outcome after the CLI parent exits",
+            daemon_deadline_ok(deadline, timeout_envelope.process_exit_code),
+        )
+        for field, replacement in (
+            ("phase", "running"),
+            ("timedOut", False),
+            ("timedOut", None),
+            ("outcome", {"timed_out": False}),
+            ("outcome", {}),
+            ("outcome", None),
+        ):
+            changed = {**deadline, field: replacement}
+            results.check(
+                f"the deadline oracle refuses {field}={replacement!r}",
+                not daemon_deadline_ok(changed, timeout_envelope.process_exit_code),
+            )
+        graceful = {
+            **deadline,
+            "exitCode": 0,
+            "signal": None,
+            "outcome": {"exit_code": 0, "signal": None, "timed_out": True},
+        }
+        results.check(
+            "a child exiting cleanly after SIGTERM still records the authoritative deadline",
+            daemon_deadline_ok(graceful, timeout_envelope.process_exit_code),
+        )
+        results.check(
+            "a timeout with a successful CLI process exit is rejected",
+            not daemon_deadline_ok(deadline, 0),
+        )
+        metadata = {
+            "agent": "codex",
+            "model": "global.openai.gpt-5.6-sol",
+            "agentVersion": "1.2.3",
+            "uid": 1000,
+            "permissionMode": "unrestricted",
+            "executionTimeoutSec": 120,
+            "reapGroupOnExit": True,
+        }
+        results.check(
+            "the background metadata oracle accepts all reported facts",
+            prompt_metadata_ok(
+                metadata, "codex", metadata["model"], "unrestricted", 120
+            ),
+        )
+        for field in metadata:
+            changed = {key: value for key, value in metadata.items() if key != field}
+            results.check(
+                f"the background metadata oracle refuses missing {field}",
+                not prompt_metadata_ok(
+                    changed, "codex", metadata["model"], "unrestricted", 120
+                ),
+            )
+        default_metadata = {
+            **metadata,
+            "permissionMode": "agent-default",
+            "executionTimeoutSec": None,
+            "reapGroupOnExit": False,
+        }
+        results.check(
+            "the background metadata oracle also checks the unchanged default policy",
+            prompt_metadata_ok(
+                default_metadata, "codex", metadata["model"], "agent-default", None
+            )
+            and not prompt_metadata_ok(
+                metadata, "codex", metadata["model"], "agent-default", None
+            ),
+        )
 
         # -- CLI-4, three ways it can break ----------------------------------
         for case, why in (
@@ -4915,6 +5563,7 @@ def main() -> int:
             # that section just proved: every process fact here is read through `ps` and
             # every stop through `kill`, against the same shared VM.
             drive_kill_and_procs(cli, launched, results)
+            drive_stable_launch(cli, launched, results)
             # After the identity section because it leans on the same detach/poll/ack
             # surface that section just proved, so a rotation failure here points at the
             # rotation rather than at a broken poll.
@@ -5046,7 +5695,7 @@ def main() -> int:
             "now, under the names run.py gave them.\n  This report diffs line for line "
             "against the last oracle run in git history."
         )
-    print("\n  every invocation, for reproducing a failure by hand:")
+    print("\n  every invocation (secret arguments and agent tasks redacted):")
     for line in cli.log:
         print(f"    {line}")
     return 0 if not results.failed else 1

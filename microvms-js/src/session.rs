@@ -37,6 +37,7 @@ use tokio::sync::{Mutex, MutexGuard};
 use crate::errors::{AsyncError, js, js_async};
 use crate::exec::{ExecHandle, ExecResult, seconds_async};
 use crate::process::{ExecProcess, GapPolicy};
+use crate::region::Region;
 
 /// How long to wait for a daemon to report bootstrapped, matching the core's default.
 const DEFAULT_READY_TIMEOUT: f64 = 120.0;
@@ -339,6 +340,41 @@ impl Session {
         Ok(Session {
             held: Held::Owned(CoreSession::direct(endpoint, agent_token).map_err(js)?),
         })
+    }
+
+    /// Reattach using a private control record, without bootstrapping again.
+    /// Owns its transport independently of sandbox locks; use a separate attach with
+    /// a short requestTimeout for keepalives. Never publish or log agentToken.
+    #[napi(factory)]
+    pub async fn attach(
+        region: &Region,
+        microvm_id: String,
+        endpoint: String,
+        agent_token: String,
+        port: Option<u16>,
+        request_timeout: Option<f64>,
+    ) -> Result<Self, AsyncError> {
+        let timeout = request_timeout.map(seconds_async).transpose()?;
+        let session = CoreSession::attach(
+            region.inner.clone(),
+            microvm_id,
+            endpoint,
+            agent_token,
+            port,
+            timeout,
+        )
+        .await
+        .map_err(js_async)?;
+        Ok(Self {
+            held: Held::Owned(session),
+        })
+    }
+
+    /// The guest bearer credential. Store only in a private encrypted control record.
+    #[napi]
+    pub async fn agent_token(&self) -> Result<String, AsyncError> {
+        let live = self.live().await;
+        Ok(live.session().map_err(js_async)?.agent_token().to_string())
     }
 
     /// The endpoint this session addresses.

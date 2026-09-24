@@ -102,6 +102,7 @@ pub use protocol::exec::{
 struct Terminal {
     exit_code: Option<i32>,
     signal: Option<i32>,
+    timed_out: bool,
     truncated: bool,
     writers_may_be_alive: bool,
 }
@@ -551,6 +552,7 @@ impl Attach {
         let terminal = self.shared.terminal.lock().await.unwrap_or(Terminal {
             exit_code: None,
             signal: None,
+            timed_out: false,
             truncated: false,
             writers_may_be_alive: false,
         });
@@ -560,6 +562,7 @@ impl Attach {
             &ExitEvent {
                 exit_code: terminal.exit_code,
                 signal: terminal.signal,
+                timed_out: terminal.timed_out,
                 truncated: terminal.truncated,
                 writers_may_be_alive: terminal.writers_may_be_alive,
                 offset,
@@ -1319,6 +1322,7 @@ fn spawn(
         let terminal = Terminal {
             exit_code: outcome.exit_code,
             signal: outcome.signal,
+            timed_out: outcome.timed_out,
             truncated: outcome.truncated,
             writers_may_be_alive: outcome.writers_may_be_alive,
         };
@@ -1453,6 +1457,7 @@ async fn super_wait(
     Outcome {
         exit_code,
         signal,
+        timed_out,
         stdout: out_reader.into_string(),
         stderr: err_reader.into_string(),
         truncated,
@@ -1556,41 +1561,11 @@ impl<R: AsyncReadExt + Unpin> Capped<R> {
 
 /// SIGTERM, wait `grace` for the group to go, then SIGKILL.
 ///
-/// Returns whether the first signal was delivered. `done` lets the grace period
-/// end early when the child finishes on its own, so a well-behaved process does
-/// not cost the full grace period.
-async fn escalate(pgid: u32, grace: Duration, done: Arc<Shared>) -> bool {
-    if !signal_group(pgid, nix::sys::signal::Signal::SIGTERM) {
-        return false;
-    }
-
-    // Subscribe before the first check, so a publish between the check and the
-    // wait is a buffered `Finished` rather than a missed wakeup. The waiter task
-    // sends `Frame::Finished` immediately after writing `result`, so the frame is
-    // the wakeup this loop used to poll for at 20 ms intervals. A lagged receiver
-    // only ever means missed *chunk* frames; re-checking `result` covers it.
-    let mut live = done.live.subscribe();
-    let waited = tokio::time::timeout(grace, async {
-        loop {
-            if done.result.lock().await.is_some() {
-                return;
-            }
-            match live.recv().await {
-                Ok(Frame::Finished) | Err(broadcast::error::RecvError::Closed) => return,
-                Ok(Frame::Chunk { .. }) | Err(broadcast::error::RecvError::Lagged(_)) => {}
-            }
-        }
-    })
-    .await;
-
-    if waited.is_err() {
-        tracing::warn!(
-            pgid,
-            "process group survived SIGTERM; escalating to SIGKILL"
-        );
-        signal_group(pgid, nix::sys::signal::Signal::SIGKILL);
-    }
-    true
+/// Completion of the leader is not completion of the group: a child may close its
+/// pipes or ignore SIGTERM after the leader exits. Inspect live group members even
+/// when the exec result has already been published.
+async fn escalate(pgid: u32, grace: Duration, _done: Arc<Shared>) -> bool {
+    escalate_blind(pgid, grace).await
 }
 
 /// The timeout and reap paths' escalation, which has no `Shared` to watch because
@@ -1603,9 +1578,9 @@ async fn escalate(pgid: u32, grace: Duration, done: Arc<Shared>) -> bool {
 /// is all of them that behave. Measured 2026-09-12 on a live VM before this check
 /// read `/proc`: every `--reap` cost the whole ten seconds, for the reason
 /// [`group_has_live_members`] gives.
-async fn escalate_blind(pgid: u32, grace: Duration) {
+async fn escalate_blind(pgid: u32, grace: Duration) -> bool {
     if !signal_group(pgid, nix::sys::signal::Signal::SIGTERM) {
-        return;
+        return false;
     }
     let deadline = Instant::now() + grace;
     while Instant::now() < deadline {
@@ -1615,11 +1590,12 @@ async fn escalate_blind(pgid: u32, grace: Duration) {
             // an escalation is to keep going, so it reads as "still alive".
             .unwrap_or(true);
         if !alive {
-            return;
+            return true;
         }
         tokio::time::sleep(Duration::from_millis(50).min(grace)).await;
     }
     signal_group(pgid, nix::sys::signal::Signal::SIGKILL);
+    true
 }
 
 /// Whether anything in the group is still running — not merely still *existing*.
@@ -3631,6 +3607,7 @@ mod tests {
         *shared.terminal.lock().await = Some(Terminal {
             exit_code: Some(exit_code),
             signal: None,
+            timed_out: false,
             truncated: false,
             writers_may_be_alive: false,
         });
@@ -3794,5 +3771,73 @@ mod tests {
         let (gap, _, cursor) = log.since(8);
         assert_eq!(gap, None);
         assert_eq!(cursor, 8);
+    }
+
+    // The leader exits before cancellation; the survivor closes both pipes and ignores
+    // TERM. An exec-result-based escalation falsely concludes that this group is done.
+    #[tokio::test]
+    async fn cancellation_kills_a_term_ignoring_survivor_after_leader_exit() {
+        let state = state_with(|cfg| {
+            cfg.kill_grace = Duration::from_millis(50);
+            cfg.output_linger = Duration::from_millis(50);
+        });
+        let script = "(trap '' TERM; exec sleep 30) >/dev/null 2>&1 & echo $!";
+        let outcome = run(&state, req("term-survivor", &["/bin/sh", "-c", script])).await;
+        assert_eq!(outcome.exit_code, Some(0));
+        assert!(!outcome.timed_out);
+        let pid: u32 = outcome.stdout.trim().parse().unwrap();
+        // The child might not have installed its disposition yet. Observe /proc, not a
+        // fixed delay, before exercising the cancellation under test.
+        let mut ignores_term = false;
+        for _ in 0..600 {
+            let status = std::fs::read_to_string(format!("/proc/{pid}/status")).unwrap_or_default();
+            ignores_term = status
+                .lines()
+                .find_map(|line| line.strip_prefix("SigIgn:\t"))
+                .and_then(|value| u64::from_str_radix(value.trim(), 16).ok())
+                .is_some_and(|mask| mask & (1 << 14) != 0);
+            if ignores_term {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert!(ignores_term, "fixture must resist SIGTERM");
+        kill(State(state.clone()), Path("term-survivor".into())).await;
+        let mut remaining = group_of(&state, "term-survivor").await;
+        for _ in 0..600 {
+            if remaining.pids.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            remaining = group_of(&state, "term-survivor").await;
+        }
+        // Clean up even when this guard is deliberately tested against the broken path.
+        if let Some(pgid) = remaining.pgid {
+            signal_group(pgid, nix::sys::signal::Signal::SIGKILL);
+        }
+        assert!(
+            remaining.pids.is_empty(),
+            "cancellation left live survivors: {remaining:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn detached_deadline_kills_term_ignoring_group_and_marks_timeout() {
+        let state = state_with(|cfg| {
+            cfg.kill_grace = Duration::from_millis(50);
+            cfg.output_linger = Duration::from_millis(100);
+        });
+        let mut request = req(
+            "detached-deadline",
+            &["/bin/sh", "-c", "trap '' TERM; sleep 30 & echo ready; wait"],
+        );
+        request.timeout_sec = Some(0.15);
+        launch(&state, request); // No client wait controls the daemon's deadline.
+        let outcome = await_result(&state, "detached-deadline").await;
+        assert!(outcome.timed_out);
+        assert_eq!(outcome.signal, Some(9));
+        assert_eq!(outcome.stdout.trim(), "ready");
+        assert!(!outcome.writers_may_be_alive);
+        await_group_empty(&state, "detached-deadline").await;
     }
 }

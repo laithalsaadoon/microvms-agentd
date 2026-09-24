@@ -27,6 +27,10 @@ pre-commit:
       # because history does not change on commit.
       run: betterleaks git . --staged
 
+    - name: background example quality
+      run: mise run background:check
+      glob: "examples/background-coding-agent/**/*.{py,tf,toml,yml}"
+
     - name: license headers
       run: ./scripts/check-license-headers.py
       glob: "*.{rs,py,pyi,mjs,sh,tf}"

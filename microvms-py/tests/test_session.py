@@ -89,13 +89,13 @@ def test_no_proxy_token_is_reachable_anywhere_on_the_session_surface() -> None:
         "proxy_token",
         "token",
         "auth_token",
-        "agent_token",
         "proxy_auth",
         "headers",
     ):
         assert not hasattr(session, attribute), f"{attribute} is reachable"
     # The one observable that *is* exposed is a count, which carries no secret.
     assert session.proxy_mint_count is None
+    assert session.agent_token == "agent-token"
 
 
 def test_the_repr_names_the_endpoint_and_port_without_the_token() -> None:

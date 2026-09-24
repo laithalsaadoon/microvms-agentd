@@ -50,6 +50,11 @@
             "null"
           ]
         },
+        "timed_out": {
+          "default": false,
+          "description": "The daemon execution deadline fired. Absent on older daemons, which cannot\ndistinguish deadline expiry from other signal deaths.",
+          "type": "boolean"
+        },
         "truncated": {
           "type": "boolean"
         },
@@ -60,6 +65,7 @@
       "required": [
         "exit_code",
         "signal",
+        "timed_out",
         "truncated",
         "writers_may_be_alive",
         "offset"
@@ -316,6 +322,11 @@
         },
         "stdout": {
           "type": "string"
+        },
+        "timed_out": {
+          "default": false,
+          "description": "The daemon execution deadline fired. Absent on older daemons, which cannot\ndistinguish deadline expiry from other signal deaths.",
+          "type": "boolean"
         },
         "truncated": {
           "description": "Set when either stream hit `max_output_bytes` and was cut. An explicit\nflag rather than a sentinel string in the output: a marker inside the\nbytes is indistinguishable from output that happens to contain it.",

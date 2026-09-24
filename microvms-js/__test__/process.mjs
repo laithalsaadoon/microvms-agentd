@@ -47,6 +47,8 @@ async function startSpawnServer(scripts, { pollPhases = [] } = {}) {
   const requestedPaths = [];
   let attach = 0;
   let poll = 0;
+  let streamServed;
+  const firstStream = new Promise((resolve) => { streamServed = resolve; });
 
   const server = http.createServer((request, response) => {
     requestedPaths.push(`${request.method} ${request.url}`);
@@ -79,7 +81,7 @@ async function startSpawnServer(scripts, { pollPhases = [] } = {}) {
         'content-type': 'text/event-stream',
         'content-length': Buffer.byteLength(body),
       });
-      response.end(body);
+      response.end(body, streamServed);
       return;
     }
     // A poll. The phases script is what lets `wait()` be driven without a daemon.
@@ -108,7 +110,14 @@ async function startSpawnServer(scripts, { pollPhases = [] } = {}) {
         .map((path) => Number(path.split('offset=')[1]));
     },
     async close() {
-      await new Promise((resolve) => server.close(resolve));
+      // Session.spawn starts its SSE request asynchronously. Wait for the fixture
+      // to serve it even in tests that only call wait/kill: closing the listener
+      // earlier races that request and leaves its reconnect timer alive for 90s.
+      await firstStream;
+      await new Promise((resolve) => {
+        server.close(resolve);
+        server.closeAllConnections();
+      });
     },
   };
 }
@@ -453,7 +462,7 @@ test('wait resolves from the daemon record, not from the streams ending', async 
   }
 });
 
-test('a signal death reports a null exit code rather than inventing one', async () => {
+test('a signal death reports a null exit code rather than inventing one', { timeout: 5000 }, async () => {
   // The one place this shape and the harness's `{ exitCode: number }` differ, deliberately. The
   // two available lies are `0` — a killed build reported as passing — and `128 + signo`, a
   // number the daemon never published and which is indistinguishable from a child that really
@@ -485,7 +494,7 @@ test('a signal death reports a null exit code rather than inventing one', async 
   }
 });
 
-test('kill is idempotent, so a harness can call it in a finally without guarding', async () => {
+test('kill is idempotent, so a harness can call it in a finally without guarding', { timeout: 5000 }, async () => {
   const server = await startSpawnServer([[outputFrame(0, 'x', 'stdout'), exitFrame(1)]]);
   try {
     const proc = await spawnAgainst(server);

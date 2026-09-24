@@ -159,8 +159,8 @@ impl PyBearerToken {
         self.token.expose().to_string()
     }
 
-    /// The presign's expiry, seconds since the epoch. An upper bound: the service also
-    /// caps validity at the signing credentials' own expiry.
+    /// Effective expiry in Unix seconds, capped at known signing credential expiry.
+    /// With missing credential expiry metadata this is only an upper bound.
     #[getter]
     fn expires_at(&self) -> f64 {
         self.expires_at
@@ -219,6 +219,36 @@ pub fn mint_bedrock_token(
     Ok(py.detach(|| mint(&region.inner, ttl_seconds))?)
 }
 
+/// Mint with explicit STS credentials and their expiry without changing process env.
+/// `credentials_expires_at` is Unix seconds from STS Expiration. Secrets never enter repr.
+#[pyfunction]
+#[pyo3(signature = (region, *, access_key_id, secret_access_key, session_token=None, credentials_expires_at, ttl_seconds=None))]
+pub fn mint_bedrock_token_with_credentials(
+    region: PyRegion,
+    access_key_id: &str,
+    secret_access_key: &str,
+    session_token: Option<&str>,
+    credentials_expires_at: f64,
+    ttl_seconds: Option<f64>,
+) -> PyCoreResult<PyBearerToken> {
+    let expiry = UNIX_EPOCH
+        .checked_add(seconds(credentials_expires_at)?)
+        .ok_or_else(|| Error::invalid_arg("credential expiry is out of range"))?;
+    let minted = bedrock::mint_with_credentials(
+        &region.inner,
+        access_key_id,
+        secret_access_key,
+        session_token,
+        expiry,
+        lifetime_of(ttl_seconds)?,
+    )?;
+    Ok(PyBearerToken {
+        token: minted.token,
+        region: region.inner,
+        expires_at: minted.expires_at,
+    })
+}
+
 /// The agents a running VM was provisioned with, read from its guest marker.
 ///
 /// For a process holding only a session (`Session.direct` from the identifier triple):
@@ -256,8 +286,14 @@ pub fn install_agent_access(
 /// Runs the agent's headless command as uid 1000 in `/workspace`, sourcing the installed
 /// environment file. `timeout_sec` is the daemon-side budget for the agent process;
 /// `exec_id` is the idempotency key for a retry that must not spawn twice.
+/// `permission_mode` is agent-default or unrestricted. `reap_group_on_exit` stops
+/// residual children after the main agent exits. Neither option grants guest root.
 #[pyfunction]
-#[pyo3(signature = (session, agent, task, *, timeout_sec=None, exec_id=None))]
+#[pyo3(signature = (session, agent, task, *, timeout_sec=None, exec_id=None, permission_mode="agent-default", reap_group_on_exit=false))]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "keyword-only prompt options mirror core"
+)]
 pub fn prompt_agent(
     py: Python<'_>,
     session: &PySession,
@@ -265,10 +301,14 @@ pub fn prompt_agent(
     task: &str,
     timeout_sec: Option<f64>,
     exec_id: Option<String>,
+    permission_mode: &str,
+    reap_group_on_exit: bool,
 ) -> PyCoreResult<PyExecHandle> {
     let options = PromptOptions {
         exec_id,
         timeout: timeout_sec.map(seconds).transpose()?,
+        permission_mode: permission_mode.parse().map_err(CoreError)?,
+        reap_group_on_exit,
     };
     let handle = session.detached(py, |session| {
         runtime::block_on_detached(agents::prompt(session, &agent.inner, task, &options))
@@ -493,6 +533,8 @@ impl PyAgentVm {
         *,
         image_identifier,
         execution_role_arn=None,
+        agent_token=None,
+        client_token=None,
         max_idle_sec=None,
         suspended_sec=None,
         auto_resume=false,
@@ -507,6 +549,8 @@ impl PyAgentVm {
         py: Python<'_>,
         image_identifier: &str,
         execution_role_arn: Option<String>,
+        agent_token: Option<String>,
+        client_token: Option<String>,
         max_idle_sec: Option<u32>,
         suspended_sec: Option<u32>,
         auto_resume: bool,
@@ -514,6 +558,8 @@ impl PyAgentVm {
     ) -> PyCoreResult<PySession> {
         let mut request =
             agents::launch_request_for(&self.specs, image_identifier, execution_role_arn);
+        request.agent_token = agent_token;
+        request.client_token = client_token;
         if let Some(idle) = max_idle_sec {
             request.max_idle_sec = idle;
         }
@@ -561,7 +607,11 @@ impl PyAgentVm {
     }
 
     /// Starts one task for `agent` and returns its handle. Does not wait.
-    #[pyo3(signature = (agent, task, *, timeout_sec=None, exec_id=None))]
+    #[pyo3(signature = (agent, task, *, timeout_sec=None, exec_id=None, permission_mode="agent-default", reap_group_on_exit=false))]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "keyword-only prompt options mirror core"
+    )]
     fn prompt(
         &self,
         py: Python<'_>,
@@ -569,12 +619,16 @@ impl PyAgentVm {
         task: &str,
         timeout_sec: Option<f64>,
         exec_id: Option<String>,
+        permission_mode: &str,
+        reap_group_on_exit: bool,
     ) -> PyCoreResult<PyExecHandle> {
         let agent: Agent = agent.parse().map_err(CoreError)?;
         let spec = agents::spec_for(&self.specs, agent)?.clone();
         let options = PromptOptions {
             exec_id,
             timeout: timeout_sec.map(seconds).transpose()?,
+            permission_mode: permission_mode.parse().map_err(CoreError)?,
+            reap_group_on_exit,
         };
         let handle = self.detached(py, |sandbox| {
             Self::with_session(sandbox, |session| {
@@ -586,7 +640,11 @@ impl PyAgentVm {
 
     /// Start, wait, ack: one task's whole result. `timeout` defaults to 900 seconds,
     /// because agent tasks run minutes, and is also the daemon-side budget.
-    #[pyo3(signature = (agent, task, *, timeout=DEFAULT_PROMPT_TIMEOUT.as_secs_f64(), exec_id=None))]
+    #[pyo3(signature = (agent, task, *, timeout=DEFAULT_PROMPT_TIMEOUT.as_secs_f64(), exec_id=None, permission_mode="agent-default", reap_group_on_exit=false))]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "keyword-only prompt options mirror core"
+    )]
     fn prompt_sync(
         &self,
         py: Python<'_>,
@@ -594,6 +652,8 @@ impl PyAgentVm {
         task: &str,
         timeout: f64,
         exec_id: Option<String>,
+        permission_mode: &str,
+        reap_group_on_exit: bool,
     ) -> PyCoreResult<PyExecResult> {
         let agent: Agent = agent.parse().map_err(CoreError)?;
         let spec = agents::spec_for(&self.specs, agent)?.clone();
@@ -601,6 +661,8 @@ impl PyAgentVm {
         let options = PromptOptions {
             exec_id,
             timeout: Some(timeout),
+            permission_mode: permission_mode.parse().map_err(CoreError)?,
+            reap_group_on_exit,
         };
         let request = agents::prompt_request(&spec, task, &options)?;
         let result = self.detached(py, |sandbox| {

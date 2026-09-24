@@ -750,16 +750,17 @@ pub async fn prompt<O: std::io::Write, E: std::io::Write>(
              price of a model call.",
         ));
     }
+    let timeout = microvms_core::cost::duration_of_secs_f64(args.timeout)?;
+    let options = prompt_options(args)?;
     let (session, microvm_id) = super::attached::attach(ctx, &args.region, &args.attach).await?;
     let spec = choose_spec(&session, args.agent).await?;
-    let options = PromptOptions {
-        exec_id: args.exec_id.clone(),
-        timeout: None,
-    };
+    let actual_version = agents::installed_version(&session, spec.agent).await?;
     ctx.out.progress(&format!(
-        "prompting {} ({}) as uid {} in {}",
+        "prompting {} {} ({}) with {} permissions as uid {} in {}",
         spec.agent,
+        actual_version,
         spec.model(),
+        options.permission_mode.as_str(),
         agents::AGENT_UID,
         agents::WORKDIR
     ));
@@ -783,7 +784,6 @@ pub async fn prompt<O: std::io::Write, E: std::io::Write>(
             outcome: None,
         }
     } else {
-        let timeout = Duration::from_secs_f64(args.timeout.max(0.0));
         let result = handle.wait_and_ack(timeout).await?;
         history.append(Event::Exec {
             exec_id: exec_id.clone(),
@@ -805,7 +805,47 @@ pub async fn prompt<O: std::io::Write, E: std::io::Write>(
         .data
         .insert("agent".into(), json!(spec.agent.as_str()));
     rendered.data.insert("model".into(), json!(spec.model()));
+    rendered
+        .data
+        .insert("agentVersion".into(), json!(actual_version));
+    rendered.data.insert(
+        "permissionMode".into(),
+        json!(options.permission_mode.as_str()),
+    );
+    rendered.data.insert("uid".into(), json!(agents::AGENT_UID));
+    rendered
+        .data
+        .insert("executionTimeoutSec".into(), json!(args.execution_timeout));
+    rendered
+        .data
+        .insert("reapGroupOnExit".into(), json!(options.reap_group_on_exit));
     Ok(rendered)
+}
+
+fn prompt_options(args: &AgentPromptArgs) -> Result<PromptOptions, CliError> {
+    let timeout = args
+        .execution_timeout
+        .map(|seconds| {
+            if !seconds.is_finite() || seconds <= 0.0 {
+                return Err(Error::invalid_arg(
+                    "--execution-timeout must be positive and finite",
+                ));
+            }
+            let duration = microvms_core::cost::duration_of_secs_f64(seconds)?;
+            if duration.is_zero() {
+                return Err(Error::invalid_arg(
+                    "--execution-timeout is below timer precision",
+                ));
+            }
+            Ok(duration)
+        })
+        .transpose()?;
+    Ok(PromptOptions {
+        exec_id: args.exec_id.clone(),
+        timeout,
+        permission_mode: args.permission_mode.mode(),
+        reap_group_on_exit: args.reap_group_on_exit,
+    })
 }
 
 /// Keeps the compiler honest about the flag/profile mapping: every core agent has a flag.
@@ -928,5 +968,46 @@ mod tests {
                 .is_some_and(|command| command.contains("codex exec") && command.contains("<TASK>")),
             "{report}"
         );
+    }
+
+    #[test]
+    fn prompt_flags_keep_remote_and_wait_budgets_separate() {
+        use clap::Parser;
+        let parsed = crate::cli::Cli::try_parse_from([
+            "microvm",
+            "agent-prompt",
+            "--name",
+            "review",
+            "--timeout",
+            "7",
+            "--execution-timeout",
+            "1200",
+            "--permission-mode",
+            "unrestricted",
+            "--reap-group-on-exit",
+            "--detach",
+            "--exec-id",
+            "stable-task",
+            "review",
+        ])
+        .unwrap();
+        let crate::cli::Command::AgentPrompt(mut args) = parsed.command else {
+            panic!("prompt")
+        };
+        let options = prompt_options(&args).unwrap();
+        assert_eq!(args.timeout, 7.0);
+        assert_eq!(options.timeout, Some(Duration::from_secs(1200)));
+        assert_eq!(
+            options.permission_mode,
+            agents::AgentPermissionMode::Unrestricted
+        );
+        assert!(options.reap_group_on_exit);
+        assert_eq!(options.exec_id.as_deref(), Some("stable-task"));
+        args.execution_timeout = None;
+        assert!(prompt_options(&args).unwrap().timeout.is_none());
+        for invalid in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            args.execution_timeout = Some(invalid);
+            assert!(prompt_options(&args).is_err());
+        }
     }
 }

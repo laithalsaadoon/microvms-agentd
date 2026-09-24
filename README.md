@@ -126,6 +126,11 @@ separate model-provider API key is needed. For Codex CLI, replace
 [agent guide](https://laithalsaadoon.github.io/microvms-agentd/learn/operations/run-coding-agents-on-bedrock/)
 for model selection, both agents in one VM, and credential refresh.
 
+For jobs that continue after you disconnect, see the
+[background coding agent example](examples/background-coding-agent/README.md):
+a Lambda durable function turns a GitHub issue into a draft PR or reviews a pull
+request, with job state in DynamoDB.
+
 ## Run any command
 
 No model access is needed for a regular sandbox:

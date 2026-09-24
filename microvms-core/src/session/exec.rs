@@ -98,7 +98,9 @@ impl ExecResult {
     /// Whether the command succeeded. `false` for a signal death and for a still-running
     /// exec, since neither is a success.
     pub fn succeeded(&self) -> bool {
-        self.exit_code() == Some(0)
+        self.outcome
+            .as_ref()
+            .is_some_and(|outcome| outcome.exit_code == Some(0) && !outcome.timed_out)
     }
 
     pub fn stdout(&self) -> &str {

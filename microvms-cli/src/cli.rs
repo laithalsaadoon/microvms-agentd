@@ -1965,6 +1965,23 @@ pub struct AgentUpArgs {
     pub infra: InfraFlags,
 }
 
+/// Permission policy for the agent process inside the VM.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+pub enum AgentPermissionModeArg {
+    #[default]
+    AgentDefault,
+    Unrestricted,
+}
+
+impl AgentPermissionModeArg {
+    pub fn mode(self) -> microvms_core::agents::AgentPermissionMode {
+        match self {
+            Self::AgentDefault => microvms_core::agents::AgentPermissionMode::AgentDefault,
+            Self::Unrestricted => microvms_core::agents::AgentPermissionMode::Unrestricted,
+        }
+    }
+}
+
 #[derive(Args, Clone, Debug)]
 pub struct AgentPromptArgs {
     /// The task, as prose. Passed to the agent's headless command single-quoted for `sh`.
@@ -1975,7 +1992,19 @@ pub struct AgentPromptArgs {
     #[arg(long, value_enum, value_name = "AGENT")]
     pub agent: Option<AgentArg>,
 
-    /// How long to wait for the agent, in seconds. Agent tasks run minutes, not seconds.
+    /// Guest agent permission policy. Unrestricted bypasses agent approvals, still as uid 1000.
+    #[arg(long, value_enum, default_value = "agent-default")]
+    pub permission_mode: AgentPermissionModeArg,
+
+    /// Remote execution deadline in seconds; persists after detach. Must be positive and finite.
+    #[arg(long, value_name = "SECONDS")]
+    pub execution_timeout: Option<f64>,
+
+    /// Terminate residual process-group children when the main agent exits.
+    #[arg(long)]
+    pub reap_group_on_exit: bool,
+
+    /// Caller wait limit in seconds. Does not stop the agent when the wait expires.
     #[arg(long, default_value_t = 900.0)]
     pub timeout: f64,
 

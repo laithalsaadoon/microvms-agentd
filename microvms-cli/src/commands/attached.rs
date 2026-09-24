@@ -452,9 +452,28 @@ async fn stream_exec<O: std::io::Write, E: std::io::Write>(
         json!(exit.as_ref().map(|event| event.truncated)),
     );
 
+    data.insert("outcome".into(), json!(exit));
+    data.insert(
+        "timedOut".into(),
+        json!(exit.as_ref().map(|event| event.timed_out)),
+    );
+    data.insert(
+        "signal".into(),
+        json!(exit.as_ref().and_then(|event| event.signal)),
+    );
     let code = exit.as_ref().and_then(|event| event.exit_code);
-    let text = match code {
-        Some(code) => format!("exit code: {code} ({events} events, {bytes} bytes)"),
+    let text = match exit.as_ref() {
+        Some(event) if event.timed_out => {
+            format!("execution deadline expired ({events} events, {bytes} bytes)")
+        }
+        Some(event) if event.exit_code.is_some() => format!(
+            "exit code: {} ({events} events, {bytes} bytes)",
+            event.exit_code.unwrap()
+        ),
+        Some(event) => format!(
+            "exec {exec_id} died to signal {:?} ({events} events, {bytes} bytes)",
+            event.signal
+        ),
         None => format!(
             "the stream of {exec_id} ended without an exit event after {bytes} bytes, so the \
              command's outcome is unknown — re-attach with --from-offset {next_offset}"
@@ -466,6 +485,9 @@ async fn stream_exec<O: std::io::Write, E: std::io::Write>(
     );
     let (kind, _) = STREAM_RESPONSE;
     let rendered = Rendered::ok(kind, data, text, dense);
+    if exit.as_ref().is_some_and(|event| event.timed_out) {
+        return Ok(rendered.reporting(Exit::Timeout));
+    }
     if code != Some(0) {
         // Covers both a non-zero exit and a stream with no terminal event at all. The second is
         // the one worth noting: a cut stream reporting success would make a CI step pass on
@@ -523,6 +545,7 @@ fn event_to_json(event: &ExecEvent) -> Value {
             "event": "exit",
             "exitCode": terminal.exit_code,
             "signal": terminal.signal,
+            "timedOut": terminal.timed_out,
             "truncated": terminal.truncated,
             "writersMayBeAlive": terminal.writers_may_be_alive,
             "offset": terminal.offset,
@@ -562,6 +585,20 @@ pub(crate) fn render_exec_as(
         .as_ref()
         .is_some_and(|outcome| outcome.truncated);
     data.insert("truncated".into(), json!(truncated));
+    data.insert("outcome".into(), json!(result.outcome));
+    data.insert(
+        "signal".into(),
+        json!(result.outcome.as_ref().and_then(|outcome| outcome.signal)),
+    );
+    data.insert(
+        "timedOut".into(),
+        json!(
+            result
+                .outcome
+                .as_ref()
+                .is_some_and(|outcome| outcome.timed_out)
+        ),
+    );
 
     let code = result.exit_code();
     let dense = format!(
@@ -575,6 +612,13 @@ pub(crate) fn render_exec_as(
             lines.push(part.trim_end_matches('\n').to_string());
         }
     }
+    if result
+        .outcome
+        .as_ref()
+        .is_some_and(|outcome| outcome.timed_out)
+    {
+        lines.push("execution deadline expired".into());
+    }
     lines.push(match (result.done(), code) {
         (_, Some(code)) => format!("exit code: {code}"),
         // Still running, which for a poll is the normal answer and not a failure.
@@ -586,6 +630,13 @@ pub(crate) fn render_exec_as(
 
     let (kind, _) = response_type(command);
     let rendered = Rendered::ok(kind, data, lines.join("\n"), dense);
+    if result
+        .outcome
+        .as_ref()
+        .is_some_and(|outcome| outcome.timed_out)
+    {
+        return rendered.reporting(Exit::Timeout);
+    }
     // Keyed on a *present* non-zero code, so a running exec's absent one is not a failure. A
     // signal death is: the exec finished and did not succeed, and `succeeded()` is false for it.
     if result.done() && code != Some(0) {
@@ -2891,6 +2942,7 @@ mod tests {
         let exit = event_to_json(&ExecEvent::Exit(microvms_core::protocol::exec::ExitEvent {
             exit_code: Some(4),
             signal: None,
+            timed_out: false,
             truncated: true,
             writers_may_be_alive: true,
             offset: 8192,
@@ -3033,5 +3085,25 @@ mod tests {
                 "too small a chunk makes a large stdin pathologically slow over the proxy"
             );
         }
+    }
+
+    #[test]
+    fn a_deadline_with_zero_exit_code_is_still_a_timeout_and_preserves_outcome() {
+        let result = microvms_core::session::ExecResult {
+            exec_id: "deadline".into(),
+            phase: microvms_core::protocol::exec::Phase::Exited,
+            outcome: Some(microvms_core::protocol::exec::Outcome {
+                exit_code: Some(0),
+                timed_out: true,
+                stdout: "partial report".into(),
+                ..Default::default()
+            }),
+        };
+        assert!(!result.succeeded());
+        let rendered = render_exec_as("agent-prompt", "deadline", &result);
+        assert_eq!(rendered.already_reported, Some(Exit::Timeout));
+        assert_eq!(rendered.data["outcome"]["exit_code"], 0);
+        assert_eq!(rendered.data["outcome"]["timed_out"], true);
+        assert_eq!(rendered.data["stdout"], "partial report");
     }
 }

@@ -115,7 +115,17 @@ impl Transport {
     }
 
     /// Sends one request and returns the response whatever its status.
-    async fn request(&self, mut request: HttpRequest) -> Result<HttpResponse, Error> {
+    async fn request(&self, request: HttpRequest) -> Result<HttpResponse, Error> {
+        let timeout = request.timeout.unwrap_or(self.timeout);
+        let method = request.method;
+        let path = request.path.clone();
+        tokio::time::timeout(timeout, self.request_inner(request))
+            .await
+            .map_err(|_| Error::wire(WireKind::Transport,
+                format!("{method} {path} exceeded its request timeout (including proxy authentication)")))?
+    }
+
+    async fn request_inner(&self, mut request: HttpRequest) -> Result<HttpResponse, Error> {
         // Prepend, never replace: the caller's headers carry the content type
         // (exec start is application/json, file upload is octet-stream), and
         // replacing the vec silently stripped them — the daemon answered 400
@@ -226,6 +236,41 @@ impl Session {
             .build()
     }
 
+    /// Reattach to an existing AWS VM using a privately retained agent token.
+    ///
+    /// Resolves AWS credentials but does not probe the guest or bootstrap it again.
+    /// The returned session is independent of any sandbox lock: use a separate attach
+    /// with a short request timeout for supervisor keepalives during long transfers.
+    /// Keep `agent_token` in private encrypted storage, never in public job status.
+    pub async fn attach(
+        region: crate::Region,
+        microvm_id: impl Into<String>,
+        endpoint: impl Into<String>,
+        agent_token: impl Into<String>,
+        port: Option<u16>,
+        request_timeout: Option<Duration>,
+    ) -> Result<Self, Error> {
+        if request_timeout.is_some_and(|timeout| timeout.is_zero()) {
+            return Err(Error::invalid_arg("request timeout must be positive"));
+        }
+        let mut control = crate::control::ControlPlane::new(region).await?;
+        if let Some(port) = port {
+            control = control.with_port(port)?;
+        }
+        let port = control.port();
+        let minter = Arc::new(crate::sandbox::ControlPlaneMinter {
+            control: Arc::new(control),
+            microvm_id: microvm_id.into(),
+        });
+        let mut builder = Self::builder(endpoint, agent_token)
+            .with_minter(minter)
+            .with_port(port);
+        if let Some(timeout) = request_timeout {
+            builder = builder.with_timeout(timeout);
+        }
+        builder.build()
+    }
+
     /// A session with no proxy auth, for a daemon reached directly.
     ///
     /// The conformance path and every local-binary test go through here. See
@@ -289,7 +334,16 @@ impl Session {
     /// or stores the result.
     pub async fn connect_headers(&self, port: u16) -> Result<Vec<(String, String)>, Error> {
         match self.transport.proxy() {
-            Some(proxy) => proxy.headers_for_port(port).await,
+            Some(proxy) => {
+                tokio::time::timeout(self.transport.timeout, proxy.headers_for_port(port))
+                    .await
+                    .map_err(|_| {
+                        Error::wire(
+                            WireKind::Transport,
+                            "proxy authentication request timed out",
+                        )
+                    })?
+            }
             None => Ok(Vec::new()),
         }
     }
@@ -307,7 +361,16 @@ impl Session {
     /// behaviour. The middle value carries the credential.
     pub async fn connect_subprotocols(&self, port: u16) -> Result<Option<[String; 3]>, Error> {
         match self.transport.proxy() {
-            Some(proxy) => Ok(Some(proxy.subprotocols(port).await?)),
+            Some(proxy) => Ok(Some(
+                tokio::time::timeout(self.transport.timeout, proxy.subprotocols(port))
+                    .await
+                    .map_err(|_| {
+                        Error::wire(
+                            WireKind::Transport,
+                            "proxy authentication request timed out",
+                        )
+                    })??,
+            )),
             None => Ok(None),
         }
     }
@@ -767,6 +830,44 @@ mod tests {
             .iter()
             .find(|(key, _)| key.eq_ignore_ascii_case(name))
             .map(|(_, value)| value.clone())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn request_timeout_also_bounds_a_blocked_proxy_mint() {
+        struct BlockedMinter;
+        impl TokenMinter for BlockedMinter {
+            fn mint(&self) -> futures_util::future::BoxFuture<'_, Result<ProxyToken, Error>> {
+                Box::pin(std::future::pending())
+            }
+        }
+        let backend = Recorder::with([]);
+        let session = Session::builder("http://127.0.0.1:9", "private")
+            .with_backend(backend.clone())
+            .with_minter(Arc::new(BlockedMinter))
+            .with_timeout(Duration::from_secs(3))
+            .build()
+            .expect("session");
+        let result = tokio::time::timeout(Duration::from_secs(4), session.health())
+            .await
+            .expect("the request budget must include a stalled proxy mint")
+            .expect_err("mint never completed");
+        assert_eq!(result.wire_kind(), Some(WireKind::Transport));
+        assert!(result.retryable());
+        let result = tokio::time::timeout(Duration::from_secs(4), session.connect_headers(9000))
+            .await
+            .expect("external transfers must bound authentication too")
+            .expect_err("mint remains blocked");
+        assert!(result.retryable());
+        let result =
+            tokio::time::timeout(Duration::from_secs(4), session.connect_subprotocols(9000))
+                .await
+                .expect("external sockets must bound authentication too")
+                .expect_err("mint remains blocked");
+        assert!(result.retryable());
+        assert!(
+            backend.requests().is_empty(),
+            "no request could authenticate"
+        );
     }
 
     /// The live-run regression: `Transport::request` REPLACED the header vec with

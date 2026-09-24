@@ -71,11 +71,12 @@ test('no proxy token is reachable anywhere on the session surface', async () => 
   // `Display`, no `as_str`, and no `Deref`, and the binding adds no accessor — so "log the auth
   // token" is as inexpressible here as it is in Rust.
   const session = offline();
-  for (const name of ['proxyToken', 'token', 'authToken', 'agentToken', 'proxyAuth', 'headers']) {
+  for (const name of ['proxyToken', 'token', 'authToken', 'proxyAuth', 'headers']) {
     assert.equal(session[name], undefined, `${name} is reachable`);
   }
   // The one observable that *is* exposed is a count, which carries no secret.
   assert.equal(await session.proxyMintCount(), null);
+  assert.equal(await session.agentToken(), 'agent-token');
 });
 
 // -- the command contract ------------------------------------------------------

@@ -332,6 +332,9 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
             "agent-prompt",
             Command::AgentPrompt(crate::cli::AgentPromptArgs {
                 task: "count the files".into(),
+                permission_mode: crate::cli::AgentPermissionModeArg::AgentDefault,
+                execution_timeout: None,
+                reap_group_on_exit: false,
                 agent: Some(crate::cli::AgentArg::ClaudeCode),
                 timeout: 30.0,
                 detach: false,

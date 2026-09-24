@@ -25,8 +25,8 @@
 //! # A launched session lives inside its sandbox, and the lock is the borrow checker
 //!
 //! [`microvms_core::sandbox::Sandbox`] owns its `Session` by value and hands out only
-//! `Option<&Session>`; there is no accessor for the agent token, so a binding cannot build
-//! a second, independent session against the same VM. [`Held`] is the consequence: a
+//! `Option<&Session>`. A session obtained through that sandbox preserves its lifecycle
+//! exclusion; use [`PySession::attach`] for independent supervisor traffic. A
 //! session obtained from a sandbox borrows it under the sandbox's lock, and one built by
 //! [`PySession::direct`] owns itself.
 //!
@@ -47,6 +47,7 @@ use pyo3::types::{PyBytes, PyDict};
 
 use crate::errors::PyCoreResult;
 use crate::exec::{PyExecHandle, PyExecResult, seconds};
+use crate::region::PyRegion;
 use crate::runtime;
 
 /// How long to wait for a daemon to report bootstrapped, matching the core's default.
@@ -341,6 +342,49 @@ impl PySession {
         Ok(PySession {
             held: Held::Owned(Session::direct(endpoint, agent_token)?),
         })
+    }
+
+    /// Reattach using a private control record, without bootstrapping again.
+    /// AWS credentials mint fresh proxy tokens. This session owns its transport and
+    /// shares no sandbox lock; supervisors should attach separately for keepalives,
+    /// with a short `request_timeout`. Never publish or log `agent_token`.
+    #[staticmethod]
+    #[pyo3(signature = (region, microvm_id, endpoint, agent_token, *, port=None, request_timeout=None))]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "private attach record plus transport settings"
+    )]
+    fn attach(
+        py: Python<'_>,
+        region: PyRegion,
+        microvm_id: String,
+        endpoint: String,
+        agent_token: String,
+        port: Option<u16>,
+        request_timeout: Option<f64>,
+    ) -> PyCoreResult<Self> {
+        let timeout = request_timeout.map(seconds).transpose()?;
+        let session = runtime::block_on(
+            py,
+            Session::attach(
+                region.inner,
+                microvm_id,
+                endpoint,
+                agent_token,
+                port,
+                timeout,
+            ),
+        )?;
+        Ok(Self {
+            held: Held::Owned(session),
+        })
+    }
+
+    /// The guest bearer credential. Store only in a private encrypted control record.
+    /// It is never included in repr or ordinary status output.
+    #[getter]
+    fn agent_token(&self) -> PyCoreResult<String> {
+        Ok(self.with(|session| Ok(session.agent_token().to_string()))?)
     }
 
     /// The endpoint this session addresses.

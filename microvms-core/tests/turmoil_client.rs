@@ -861,6 +861,7 @@ fn exit_frame(total: u64) -> String {
     let payload = protocol::exec::ExitEvent {
         exit_code: Some(0),
         signal: None,
+        timed_out: false,
         truncated: false,
         writers_may_be_alive: false,
         offset: total,

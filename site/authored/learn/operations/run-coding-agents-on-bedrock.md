@@ -88,12 +88,13 @@ select your output files or output directory when collecting results.
 ## Long tasks and VM lifetime
 
 `agent-prompt` waits and collects output by default, with a 900-second
-timeout. Use `--timeout SECONDS` for another task budget. To return
-immediately, start a detached task and poll its exec ID (this example
-uses `jq`):
+caller wait limit. `--timeout SECONDS` changes only that wait; expiration leaves
+the remote agent running. `--execution-timeout SECONDS` sets a separate positive,
+finite daemon deadline that persists after the caller exits. To return immediately,
+start a detached task and poll its exec ID (this example uses `jq`):
 
 ```bash
-ID=$(microvm agent-prompt --name review --detach --json \
+ID=$(microvm agent-prompt --name review --execution-timeout 1200 --detach --json \
   "Run the test suite and write a summary to TESTS.md." | jq -r .data.execId)
 microvm exec --name review --poll "$ID"
 # After the exec finishes and you have collected its output:
@@ -101,7 +102,27 @@ microvm ack --name review "$ID"
 ```
 
 Repeat the poll until the task finishes. Add `--agent` when the VM carries
-both agents. A detached task keeps the same task timeout.
+both agents. Detached tasks have no execution deadline unless you set
+`--execution-timeout`. The deadline signals the whole process group with SIGTERM,
+then SIGKILL after the daemon's kill grace (10 seconds by default). The raw outcome
+reports `timed_out`; caller wait expiration is a separate timeout error and does
+not cancel the exec. Processes that leave the group require VM termination as
+the final cap.
+
+Use `--permission-mode unrestricted` to bypass agent approval prompts inside the
+VM; the default remains `agent-default`. Both modes run as uid/gid 1000 and retain
+the VM's existing IAM role and routing. `--reap-group-on-exit` stops residual test
+servers and fuzzers after the agent exits; it is off by default. Reports include
+the selected mode, UID, model and actual installed agent version.
+
+Python `timeout_sec` and TypeScript `timeoutSec` on asynchronous prompt methods
+set the remote deadline. Their `prompt_sync` / `promptSync` convenience methods
+currently couple the wait and execution budgets (`timeout` in Python,
+`timeoutSec` in TypeScript). Rust `PromptOptions.timeout` sets the remote budget;
+`ExecHandle::wait` takes its own wait budget.
+
+Detach alone does not keep a VM running after the laptop closes. The external
+runner must own health checks, artifact collection, cancellation and cleanup.
 
 | Setting | Default | Effect |
 | --- | --- | --- |

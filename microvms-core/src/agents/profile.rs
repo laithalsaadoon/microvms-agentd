@@ -78,6 +78,39 @@ impl std::fmt::Display for Agent {
     }
 }
 
+/// The permissions the guest agent may use. Does not change the VM's UID, IAM or network.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum AgentPermissionMode {
+    /// Preserve the agent profile's pre-approved tools or workspace sandbox.
+    #[default]
+    AgentDefault,
+    /// Explicitly bypass the agent's approval prompts and software sandbox.
+    Unrestricted,
+}
+
+impl AgentPermissionMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AgentDefault => "agent-default",
+            Self::Unrestricted => "unrestricted",
+        }
+    }
+}
+
+impl std::str::FromStr for AgentPermissionMode {
+    type Err = crate::Error;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "agent-default" => Ok(Self::AgentDefault),
+            "unrestricted" => Ok(Self::Unrestricted),
+            _ => Err(crate::Error::invalid_arg(
+                "permission mode must be agent-default or unrestricted",
+            )),
+        }
+    }
+}
+
 /// One agent's recipe. Every field is a default some caller-facing knob can override;
 /// see `docs/AGENT-VMS.md`, "The rule this changes".
 #[derive(Debug)]
@@ -213,18 +246,38 @@ pub fn codex_config(model: &str, region: &Region) -> String {
     )
 }
 
+/// A credential-free version probe, separate from the task command.
+pub fn version_command(agent: Agent) -> Vec<String> {
+    vec![
+        match agent {
+            Agent::ClaudeCode => "claude",
+            Agent::Codex => "codex",
+        }
+        .to_string(),
+        "--version".to_string(),
+    ]
+}
+
 /// The headless command for one task, already shell-quoted.
 ///
 /// `task` is single-quoted for `sh` by the caller through [`super::sh_single_quote`];
 /// this function receives the quoted form so the two agents' templates read as the
 /// literal command lines they are.
-pub fn headless_command(agent: Agent, quoted_task: &str) -> String {
-    match agent {
-        Agent::ClaudeCode => {
+pub fn headless_command(agent: Agent, quoted_task: &str, mode: AgentPermissionMode) -> String {
+    match (agent, mode) {
+        (Agent::ClaudeCode, AgentPermissionMode::AgentDefault) => {
             format!("claude -p {quoted_task} --allowedTools Bash,Read,Edit,Write,Grep,Glob")
         }
-        Agent::Codex => {
+        (Agent::Codex, AgentPermissionMode::AgentDefault) => {
             format!("codex exec --skip-git-repo-check -s workspace-write {quoted_task}")
+        }
+        (Agent::ClaudeCode, AgentPermissionMode::Unrestricted) => {
+            format!("claude -p {quoted_task} --dangerously-skip-permissions")
+        }
+        (Agent::Codex, AgentPermissionMode::Unrestricted) => {
+            format!(
+                "codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox {quoted_task}"
+            )
         }
     }
 }

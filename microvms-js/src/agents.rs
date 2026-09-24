@@ -38,7 +38,7 @@ use napi_derive::napi;
 use tokio::sync::Mutex;
 
 use crate::cost::SizeClass;
-use crate::errors::{AsyncError, js_async};
+use crate::errors::{AsyncError, js, js_async};
 use crate::exec::{ExecHandle, ExecResult, seconds_async};
 use crate::region::Region;
 use crate::sandbox::{Image, Sandbox, TeardownOptions, TeardownReport};
@@ -141,8 +141,8 @@ impl BearerToken {
         self.token.expose().to_string()
     }
 
-    /// The presign's expiry, seconds since the epoch. An upper bound: the service also caps
-    /// validity at the signing credentials' own expiry.
+    /// Effective Unix expiry, capped at the known signing credential expiry.
+    /// With missing credential expiry metadata this is only an upper bound.
     #[napi(getter)]
     pub fn expires_at(&self) -> f64 {
         self.expires_at
@@ -184,6 +184,40 @@ pub async fn mint_bedrock_token(
     BearerToken::mint(&region.inner, ttl_seconds).await
 }
 
+/// Mint using explicit STS credentials without changing the process environment.
+/// credentialsExpiresAt is Unix seconds from STS Expiration. Do not log these inputs.
+#[napi]
+pub fn mint_bedrock_token_with_credentials(
+    region: &Region,
+    access_key_id: String,
+    secret_access_key: String,
+    session_token: Option<String>,
+    credentials_expires_at: f64,
+    ttl_seconds: Option<f64>,
+) -> napi::Result<BearerToken, String> {
+    let expiry = UNIX_EPOCH
+        .checked_add(crate::exec::seconds(credentials_expires_at)?)
+        .ok_or_else(|| js(Error::invalid_arg("credential expiry is out of range")))?;
+    let lifetime = ttl_seconds
+        .map(crate::exec::seconds)
+        .transpose()?
+        .unwrap_or(MAX_LIFETIME);
+    let minted = bedrock::mint_with_credentials(
+        &region.inner,
+        &access_key_id,
+        &secret_access_key,
+        session_token.as_deref(),
+        expiry,
+        lifetime,
+    )
+    .map_err(js)?;
+    Ok(BearerToken {
+        token: minted.token,
+        region: region.inner.clone(),
+        expires_at: minted.expires_at,
+    })
+}
+
 /// The knobs on one prompt.
 #[derive(Default)]
 #[napi(object)]
@@ -192,12 +226,24 @@ pub struct PromptOptions {
     pub timeout_sec: Option<f64>,
     /// A stable exec id, for a retry that must not spawn twice.
     pub exec_id: Option<String>,
+    /// Agent process permissions: agent-default (default) or unrestricted.
+    #[napi(ts_type = "'agent-default' | 'unrestricted'")]
+    pub permission_mode: Option<String>,
+    /// Stop residual children when the main agent exits. Defaults to false.
+    pub reap_group_on_exit: Option<bool>,
 }
 
 impl PromptOptions {
     fn into_core(self) -> Result<CorePromptOptions, AsyncError> {
         Ok(CorePromptOptions {
             exec_id: self.exec_id,
+            permission_mode: self
+                .permission_mode
+                .as_deref()
+                .unwrap_or("agent-default")
+                .parse()
+                .map_err(js_async)?,
+            reap_group_on_exit: self.reap_group_on_exit.unwrap_or(false),
             timeout: match self.timeout_sec {
                 Some(timeout) => Some(seconds_async(timeout)?),
                 None => None,
@@ -308,6 +354,10 @@ pub struct AgentLaunchOptions {
     pub image_identifier: String,
     /// The execution role. Optional in the model; every real launch needs one.
     pub execution_role_arn: Option<String>,
+    /// Persist this secret privately before launch when recovery is needed.
+    pub agent_token: Option<String>,
+    /// Persist once per intended launch and reuse with the identical request.
+    pub client_token: Option<String>,
     pub max_idle_sec: Option<f64>,
     pub suspended_sec: Option<f64>,
     pub auto_resume: Option<bool>,
@@ -499,6 +549,8 @@ impl AgentVm {
             options.image_identifier,
             options.execution_role_arn,
         );
+        request.agent_token = options.agent_token;
+        request.client_token = options.client_token;
         if let Some(idle) = options.max_idle_sec {
             request.max_idle_sec =
                 crate::numbers::u32_number(idle, "maxIdleSec").map_err(js_async)?;
@@ -583,10 +635,8 @@ impl AgentVm {
             Some(timeout) => seconds_async(timeout)?,
             None => DEFAULT_PROMPT_TIMEOUT,
         };
-        let core_options = CorePromptOptions {
-            exec_id: options.exec_id,
-            timeout: Some(timeout),
-        };
+        let mut core_options = options.into_core()?;
+        core_options.timeout = Some(timeout);
         let request = agents::prompt_request(&spec, &task, &core_options).map_err(js_async)?;
         let guard = self.sandbox.lock().await;
         let result = Self::require_session(&guard)?
