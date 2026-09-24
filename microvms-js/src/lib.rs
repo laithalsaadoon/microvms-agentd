@@ -80,6 +80,7 @@ pub mod cost;
 pub mod errors;
 pub mod exec;
 pub mod hooks;
+pub mod keepalive;
 mod numbers;
 pub mod process;
 pub mod region;

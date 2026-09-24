@@ -5,11 +5,12 @@
 //!
 //! Same constraint as the Python side, and it comes from the landed core rather than from
 //! either binding: `Sandbox` owns its `Session` by value and hands out only
-//! `Option<&Session>`, `Session` is not `Clone`, and there is no accessor for the agent
-//! token — so a binding cannot build a second independent session against the same VM.
-//! [`Held`] is the consequence: `Session.direct(...)` owns its session, and a launched one
-//! reaches into the sandbox through the same `Arc<tokio::sync::Mutex<Sandbox>>`
-//! [`crate::sandbox::Sandbox`] holds.
+//! `Option<&Session>`, so ordinary calls go through the sandbox. [`Held`] is the
+//! consequence: `Session.direct(...)` owns its session, and a launched one reaches into the
+//! sandbox through the same `Arc<tokio::sync::Mutex<Sandbox>>` [`crate::sandbox::Sandbox`]
+//! holds. The one exception is `keepAwake`, which clones the session (a clone shares its
+//! transport) and gates on the sandbox's lifecycle watch, because it must keep polling
+//! while a long call holds the lock.
 //!
 //! The mutex is **tokio's** here and `std`'s on the Python side, and the difference is
 //! forced: every method below is `async` and holds the guard across an `await`, which a
@@ -397,6 +398,48 @@ impl Session {
         let live = self.live().await;
         let session = live.session().map_err(js_async)?;
         Ok(Health::wrap(session.health().await.map_err(js_async)?))
+    }
+
+    /// Keeps the VM awake by polling health from this process until stopped.
+    ///
+    /// The platform counts only inbound requests as activity, so an exec working with no
+    /// client traffic is suspended once `maxIdleDurationSeconds` passes. Resolves at once
+    /// with a running handle. On a sandbox-held session a suspend or terminate through the
+    /// sandbox ends the keepalive before its next poll; stop it before suspending through
+    /// anything else, or the next poll auto-resumes the VM.
+    #[napi]
+    pub async fn keep_awake(
+        &self,
+        options: Option<crate::keepalive::KeepAwakeOptions>,
+    ) -> Result<crate::keepalive::KeepAwake, AsyncError> {
+        let options = options.unwrap_or_default();
+        let (session, running, known): (_, Option<microvms_core::session::RunningGate>, _) =
+            match &self.held {
+                Held::Owned(session) => (session.clone(), None, None),
+                Held::InSandbox(sandbox) => {
+                    let guard = sandbox.lock().await;
+                    let session = guard
+                        .session()
+                        .ok_or_else(|| {
+                            Error::new(
+                                ErrorKind::Precondition,
+                                "this sandbox holds no running session to keep awake",
+                            )
+                        })
+                        .map_err(js_async)?
+                        .clone();
+                    let lifecycle = guard.watch_lifecycle();
+                    let gate: microvms_core::session::RunningGate = Box::new(move || {
+                        *lifecycle.borrow() == microvms_core::sandbox::Lifecycle::Running
+                    });
+                    (session, Some(gate), guard.idle_window())
+                }
+            };
+        let task = options
+            .policy(known)?
+            .spawn(session, running)
+            .map_err(js_async)?;
+        Ok(crate::keepalive::KeepAwake::wrap(task))
     }
 
     /// Polls health until the daemon reports bootstrapped.

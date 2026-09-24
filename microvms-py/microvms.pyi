@@ -792,6 +792,62 @@ class Image:
     def version(self, /) -> str: ...
 
 @final
+class KeepAwake:
+    """
+    A running keepalive. Use as a context manager, or call `stop()`.
+    
+    Keep a reference: dropping this object stops the keepalive.
+    """
+    def __enter__(self, /) -> KeepAwake: ...
+    def __exit__(self, /, exc_type: Any |None = None, exc_value: Any |None = None, traceback: Any |None = None) -> bool:
+        """
+        Stops the keepalive. A poll error does not mask an exception already in flight.
+        """
+    def __repr__(self, /) -> str: ...
+    @property
+    def running(self, /) -> bool:
+        """
+        Whether the keepalive is still polling.
+        """
+    def stop(self, /) -> KeepAwakeReport:
+        """
+        Stops polling and returns the report. Raises the poll's error if one ended it.
+        """
+    def wait(self, /, timeout: float |None = None) -> KeepAwakeReport |None:
+        """
+        Waits for the keepalive to end on its own (`while_busy` or `max_duration`).
+        
+        Returns `None` if it is still running when `timeout` seconds pass.
+        """
+
+@final
+class KeepAwakeReport:
+    """
+    What a finished keepalive did.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def elapsed_sec(self, /) -> float:
+        """
+        Seconds from start to end.
+        """
+    @property
+    def end(self, /) -> str:
+        """
+        Why it ended: `"stopped"`, `"idle"`, `"elapsed"`, or `"not-running"`.
+        """
+    @property
+    def last_busy(self, /) -> bool |None:
+        """
+        `busy` from the last answered poll, or `None` when none answered.
+        """
+    @property
+    def polls(self, /) -> int:
+        """
+        Health polls that answered.
+        """
+
+@final
 class LineItem:
     """
     One phase's one billing line: what was consumed, and what that costs.
@@ -1500,6 +1556,22 @@ class Session:
     def health(self, /) -> Health:
         """
         Unauthenticated liveness.
+        """
+    def keep_awake(self, /, interval: float |None = None, *, while_busy: bool = False, max_duration: float |None = None, idle_window: float |None = None) -> KeepAwake:
+        """
+        Keeps the VM awake by polling health from this process until stopped.
+        
+        The platform counts only inbound requests as activity, so an exec working with no
+        client traffic is suspended once `maxIdleDurationSeconds` passes. This polls
+        `/v1/health` every `interval` seconds (default: a third of the idle window, at most
+        20) on a background task and returns at once. `while_busy` ends it once no exec is
+        running; `max_duration` ends it after that many seconds. `idle_window` is the VM's
+        `maxIdleDurationSeconds`: a sandbox-held session knows it, an attached one assumes
+        the platform minimum of 60, and `interval` may be at most half of it.
+        
+        On a sandbox-held session a suspend or terminate through the sandbox ends the
+        keepalive before its next poll. Stop it before suspending through anything else,
+        or the next poll auto-resumes the VM. Dropping the returned handle stops it.
         """
     def kill(self, /, exec_id: str) -> bool:
         """

@@ -409,6 +409,45 @@ impl PySession {
         })?))
     }
 
+    /// Keeps the VM awake by polling health from this process until stopped.
+    ///
+    /// The platform counts only inbound requests as activity, so an exec working with no
+    /// client traffic is suspended once `maxIdleDurationSeconds` passes. This polls
+    /// `/v1/health` every `interval` seconds (default: a third of the idle window, at most
+    /// 20) on a background task and returns at once. `while_busy` ends it once no exec is
+    /// running; `max_duration` ends it after that many seconds. `idle_window` is the VM's
+    /// `maxIdleDurationSeconds`: a sandbox-held session knows it, an attached one assumes
+    /// the platform minimum of 60, and `interval` may be at most half of it.
+    ///
+    /// On a sandbox-held session a suspend or terminate through the sandbox ends the
+    /// keepalive before its next poll. Stop it before suspending through anything else,
+    /// or the next poll auto-resumes the VM. Dropping the returned handle stops it.
+    #[pyo3(signature = (interval=None, *, while_busy=false, max_duration=None, idle_window=None))]
+    fn keep_awake(
+        &self,
+        py: Python<'_>,
+        interval: Option<f64>,
+        while_busy: bool,
+        max_duration: Option<f64>,
+        idle_window: Option<f64>,
+    ) -> PyCoreResult<crate::keepalive::PyKeepAwake> {
+        let explicit = idle_window.map(seconds).transpose()?;
+        let (source, known) = match &self.held {
+            Held::Owned(session) => (crate::keepalive::Source::Owned(session.clone()), None),
+            Held::InSandbox(sandbox) => py
+                .detach(|| crate::keepalive::Source::in_sandbox(sandbox))
+                .ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::Precondition,
+                        "this sandbox holds no running session to keep awake",
+                    )
+                })?,
+        };
+        let policy =
+            crate::keepalive::policy(explicit.or(known), interval, while_busy, max_duration)?;
+        Ok(crate::keepalive::PyKeepAwake::start(source, policy)?)
+    }
+
     /// Polls health until the daemon reports bootstrapped.
     ///
     /// Connection errors on the way are expected rather than exceptional: a VM that has

@@ -133,6 +133,7 @@ For a `Sandbox` named `vm` and its `session`:
 | --- | --- |
 | Start a task and poll or stream later | `session.run(argv)` → `ExecHandle` |
 | Wait for and release saved output | `handle.wait_and_ack(timeout=60)` |
+| Keep the VM awake while an exec runs | `with session.keep_awake(while_busy=True): ...` |
 | Upload input or download results | `session.upload_file(path, bytes)`, `session.download_file(path)` |
 | Transfer a directory | `session.upload_tar(path, tar_bytes)`, `session.download_tar(path)` |
 | Freeze and restore a workspace | `vm.suspend()`, `vm.resume()` |
