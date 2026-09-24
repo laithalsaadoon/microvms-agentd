@@ -273,6 +273,7 @@ pub async fn exec<O: std::io::Write, E: std::io::Write>(
             exec_id: exec_id.clone(),
             phase: microvms_core::protocol::exec::Phase::Running,
             outcome: None,
+            client_deadline: None,
         };
         // A null exit code, honestly: the outcome is not known yet, and a record claiming
         // one would be a record this process never observed.
@@ -3144,6 +3145,7 @@ mod tests {
             exec_id: "x-1".into(),
             phase: microvms_core::protocol::exec::Phase::Running,
             outcome: None,
+            client_deadline: None,
         };
         let rendered = render_exec("x-1", &running);
         assert_eq!(rendered.already_reported, None, "polling is not a failure");
@@ -3164,6 +3166,7 @@ mod tests {
                 truncated: true,
                 ..microvms_core::protocol::exec::Outcome::default()
             }),
+            client_deadline: None,
         };
         let rendered = render_exec("x-2", &failed);
         assert_eq!(rendered.already_reported, Some(Exit::ExecFailed));
@@ -3186,6 +3189,7 @@ mod tests {
                 signal: Some(9),
                 ..microvms_core::protocol::exec::Outcome::default()
             }),
+            client_deadline: None,
         };
         let rendered = render_exec("x-3", &killed);
         assert_eq!(rendered.data["exitCode"], Value::Null);
@@ -3254,6 +3258,7 @@ mod tests {
                 stdout: "partial report".into(),
                 ..Default::default()
             }),
+            client_deadline: None,
         };
         assert!(!result.succeeded());
         let rendered = render_exec_as("agent-prompt", "deadline", &result);

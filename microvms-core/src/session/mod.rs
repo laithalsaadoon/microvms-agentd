@@ -29,6 +29,7 @@
 //! port-forwarder's listener and its 403-vs-502 diagnostic. [`tunnel`] is the WebSocket
 //! client that carries raw TCP to the daemon's relay.
 
+pub mod complete;
 pub mod exec;
 pub mod files;
 pub mod forward;
@@ -42,6 +43,10 @@ pub mod tunnel;
 use std::sync::Arc;
 use std::time::Duration;
 
+pub use complete::{
+    ClientDeadline, CompletionOptions, CompletionPlan, DEFAULT_CLIENT_GRACE, KillAnswer,
+    NO_TIMEOUT_CEILING, OutputSink,
+};
 pub use exec::{EndReason, ExecHandle, ExecResult, StreamEnd, StreamOptions, mint_exec_id};
 pub use forward::{
     DEFAULT_EXCHANGE_TIMEOUT, ForwardClient, ForwardEvent, ForwardSpec, forwards_request_header,
@@ -667,6 +672,9 @@ pub(crate) mod testing {
         Chunks(u16, Vec<Vec<u8>>),
         /// A transport failure, i.e. the request never produced a status.
         Cut(&'static str),
+        /// A 200 stream that delivers these chunks and then goes silent without ending, the
+        /// shape of a command that outlives its caller's deadline.
+        Stalled(Vec<Vec<u8>>),
     }
 
     impl Reply {
@@ -733,6 +741,20 @@ pub(crate) mod testing {
         }
     }
 
+    /// [`Queued`], except that running out of chunks never ends the body.
+    struct Stalling(std::collections::VecDeque<Vec<u8>>);
+
+    impl ChunkSource for Stalling {
+        fn next_chunk(&mut self) -> BoxFuture<'_, Result<Option<Vec<u8>>, Error>> {
+            Box::pin(async move {
+                match self.0.pop_front() {
+                    Some(chunk) => Ok(Some(chunk)),
+                    None => std::future::pending().await,
+                }
+            })
+        }
+    }
+
     impl HttpBackend for Recorder {
         fn send(&self, request: HttpRequest) -> BoxFuture<'_, Result<HttpResponse, Error>> {
             let reply = self.record(request);
@@ -745,6 +767,11 @@ pub(crate) mod testing {
                     }),
                     Reply::Chunks(status, chunks) => Ok(HttpResponse {
                         status,
+                        headers: HashMap::new(),
+                        body: chunks.concat(),
+                    }),
+                    Reply::Stalled(chunks) => Ok(HttpResponse {
+                        status: 200,
                         headers: HashMap::new(),
                         body: chunks.concat(),
                     }),
@@ -764,6 +791,16 @@ pub(crate) mod testing {
                     Reply::Chunks(status, chunks) => (status, chunks),
                     Reply::Body(status, body) => (status, vec![body]),
                     Reply::Cut(why) => return Err(Error::wire(WireKind::Transport, why)),
+                    Reply::Stalled(chunks) => {
+                        let head = HttpResponse {
+                            status: 200,
+                            headers: HashMap::new(),
+                            body: Vec::new(),
+                        };
+                        let source: Box<dyn ChunkSource> =
+                            Box::new(Stalling(chunks.into_iter().collect()));
+                        return Ok((head, source));
+                    }
                 };
                 let head = HttpResponse {
                     status,
