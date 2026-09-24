@@ -470,6 +470,40 @@ impl Sandbox {
         self.inner.lock().await.bootstrap_count()
     }
 
+    /// A sandbox for a VM another process launched, from its private record.
+    ///
+    /// The lifecycle is read from `GetMicrovm`, so suspend, resume, and terminate start from
+    /// the service's state and keep every guard. The VM was bootstrapped by its own launch,
+    /// so `run` is refused and no run-hook payload is ever sent. Never publish or log
+    /// `agentToken`; it appears in no error.
+    #[napi(factory)]
+    pub async fn adopt(
+        region: &Region,
+        microvm_id: String,
+        endpoint: String,
+        agent_token: String,
+        port: Option<u16>,
+    ) -> Result<Sandbox, AsyncError> {
+        let sandbox = CoreSandbox::adopt_in(
+            region.inner.clone(),
+            microvm_id,
+            endpoint,
+            agent_token,
+            port,
+        )
+        .await
+        .map_err(js_async)?;
+        Ok(Sandbox {
+            inner: Arc::new(Mutex::new(sandbox)),
+        })
+    }
+
+    /// Whether this sandbox was built by `adopt` rather than by its own launch.
+    #[napi]
+    pub async fn adopted(&self) -> bool {
+        self.inner.lock().await.adopted()
+    }
+
     /// The VM id, once launched.
     #[napi]
     pub async fn microvm_id(&self) -> Option<String> {

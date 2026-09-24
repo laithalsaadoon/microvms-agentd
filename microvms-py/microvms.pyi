@@ -80,6 +80,14 @@ class AgentVm:
         by the core before any AWS call.
         """
     def __repr__(self, /) -> str: ...
+    @staticmethod
+    def adopt(region: Region, microvm_id: str, endpoint: str, agent_token: str, agents: Sequence[AgentSpec] |None = None, *, port: int |None = None) -> AgentVm:
+        """
+        An agent VM for a VM another process launched; see `Sandbox.adopt`.
+        
+        `agents` states what the VM carries and defaults to Claude Code alone; read
+        `installed_agents(session)` first when the adopting process does not know.
+        """
     @property
     def agents(self, /) -> list[AgentSpec]:
         """
@@ -1378,6 +1386,21 @@ class Sandbox:
         `Region.parse` (refused) or `Region.unlisted` (opted into, at the call site).
         """
     def __repr__(self, /) -> str: ...
+    @staticmethod
+    def adopt(region: Region, microvm_id: str, endpoint: str, agent_token: str, *, port: int |None = None) -> Sandbox:
+        """
+        A sandbox for a VM another process launched, from its private record.
+        
+        The lifecycle is read from `GetMicrovm`, so suspend, resume, and terminate start
+        from the service's state and keep every guard. The VM was bootstrapped by its own
+        launch, so `run` is refused and no run-hook payload is ever sent. Keep `agent_token`
+        in private encrypted storage; it never appears in repr or an error.
+        """
+    @property
+    def adopted(self, /) -> bool:
+        """
+        Whether this sandbox was built by `adopt` rather than by its own launch.
+        """
     @property
     def bootstrap_count(self, /) -> int:
         """

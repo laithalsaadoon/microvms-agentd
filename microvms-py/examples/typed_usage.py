@@ -32,6 +32,8 @@ nothing to annotate.
 from __future__ import annotations
 
 from microvms import (
+    AgentSpec,
+    AgentVm,
     BuildHookTimeout,
     ControlPlane,
     CostReport,
@@ -177,6 +179,25 @@ def deferred_launch(region: Region, image: str) -> str:
     sandbox.run(image_identifier=image, wait=False, log_group="/team/agents")
     session = sandbox.wait_until_running(timeout=300.0)
     return session.endpoint
+
+
+def adopted_step(region: Region, record: dict[str, str]) -> str:
+    """A durable step that adopts the VM an earlier step launched. Written for the checker."""
+    sandbox = Sandbox.adopt(
+        region, record["microvm_id"], record["endpoint"], record["agent_token"]
+    )
+    adopted: bool = sandbox.adopted
+    if adopted and sandbox.lifecycle == "SUSPENDED":
+        sandbox.resume()
+    vm = AgentVm.adopt(
+        region,
+        record["microvm_id"],
+        record["endpoint"],
+        record["agent_token"],
+        [AgentSpec.claude_code()],
+    )
+    report = vm.terminate(wait_for_terminated=True)
+    return report.lifecycle or "unknown"
 
 
 def main() -> None:

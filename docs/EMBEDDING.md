@@ -238,6 +238,24 @@ for item in plane.list(image_identifier=vm.image_arn):
 
 Pair `vm.endpoint` with the agent token in `Session.attach` for exec and files.
 
+To drive the VM with a `Sandbox`'s guards instead, adopt it from its private record:
+
+```python
+sandbox = microvms.Sandbox.adopt(region, microvm_id, endpoint, agent_token)
+if sandbox.lifecycle == "SUSPENDED":
+    sandbox.resume()
+sandbox.terminate(wait_for_terminated=True)
+```
+
+`Sandbox.adopt` (JS `Sandbox.adopt`, and `AgentVm.adopt` with the agent specs) reads the
+lifecycle from `GetMicrovm`, so suspend, resume, and terminate keep STATE-5, STATE-7,
+STATE-11, and STATE-12, with the suspended window from the reported `idlePolicy`. The VM
+was bootstrapped by the launch that made it, so an adopted sandbox refuses `run` and never
+re-sends a run-hook payload (STATE-3), and dropping it prints no leak warning: the
+launching record owns the teardown. A VM adopted while already SUSPENDED has no suspend
+time this client saw, so the service answers a late resume. The `endpoint` must match the
+one `GetMicrovm` reports.
+
 Two launch options make a launch step safe to retry. `Sandbox.run(wait=False)` returns
 once `RunMicrovm` is accepted and `wait_until_running()` finishes the wait later. A
 persisted `client_token` with an explicit `agent_token` makes a retried launch adopt the

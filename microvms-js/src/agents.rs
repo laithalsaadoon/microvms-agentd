@@ -457,6 +457,41 @@ impl AgentVm {
         })
     }
 
+    /// An agent VM for a VM another process launched; see `Sandbox.adopt`.
+    ///
+    /// `agents` states what the VM carries and defaults to Claude Code alone; read
+    /// `installedAgents(session)` first when the adopting process does not know.
+    #[napi(factory)]
+    pub async fn adopt(
+        region: &Region,
+        microvm_id: String,
+        endpoint: String,
+        agent_token: String,
+        agents_: Option<Vec<AgentSpecInput>>,
+        port: Option<u16>,
+    ) -> Result<AgentVm, AsyncError> {
+        let specs = match agents_ {
+            Some(inputs) => specs_from(inputs).map_err(js_async)?,
+            None => vec![CoreSpec::new(Agent::ClaudeCode)],
+        };
+        let vm = agents::AgentVm::adopt_in(
+            region.inner.clone(),
+            specs,
+            microvm_id,
+            endpoint,
+            agent_token,
+            port,
+        )
+        .await
+        .map_err(js_async)?;
+        let (sandbox, specs) = vm.into_parts();
+        Ok(AgentVm {
+            sandbox: Arc::new(Mutex::new(sandbox)),
+            specs,
+            region: region.inner.clone(),
+        })
+    }
+
     /// The specs this VM carries, resolved, in profile order.
     #[napi]
     pub fn agents(&self) -> Vec<AgentSpec> {
