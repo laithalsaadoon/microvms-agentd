@@ -91,6 +91,10 @@ pub struct Health {
     /// Each identity-repair step and its outcome. Empty until the run hook repairs this
     /// VM's identity.
     pub identity_steps: Vec<IdentityStep>,
+    /// How many variables the daemon's image-environment snapshot holds, or `null` when it
+    /// holds none. `null` is also what a daemon built before `inheritImageEnv` reports, and
+    /// such a daemon ignores that option. The values are never reported.
+    pub image_env_keys: Option<i64>,
 }
 
 /// One lifecycle-hook invocation, as the daemon observed it.
@@ -170,6 +174,7 @@ impl Health {
                     error: step.error,
                 })
                 .collect(),
+            image_env_keys: health.image_env_keys.map(|keys| keys as i64),
         }
     }
 }
@@ -213,12 +218,19 @@ impl ProcGroup {
 /// How an exec should be started. Every field optional; the defaults are the daemon's.
 #[napi(object)]
 pub struct ExecOptions {
-    /// A single script string rather than an argv. Requires `shell: true`.
-    pub shell: Option<bool>,
+    /// `true` runs a single script string under `/bin/sh -c`; a string such as `"bash"`
+    /// runs it under that shell, resolved by the daemon in the guest, and a shell the guest
+    /// does not have is refused (`unknown_shell`) before anything starts.
+    pub shell: Option<Either<bool, String>>,
     pub cwd: Option<String>,
     pub env: Option<HashMap<String, String>>,
-    pub user: Option<f64>,
-    pub group: Option<f64>,
+    /// A numeric uid, or a name the daemon resolves against the guest's `/etc/passwd`. An
+    /// unknown name is refused (`unknown_user`) before anything starts. A user with a passwd
+    /// row gets `HOME`, `USER` and `LOGNAME` from it, beneath the launch environment and
+    /// `env`.
+    pub user: Option<Either<f64, String>>,
+    /// A numeric gid, or a name the daemon resolves against the guest's `/etc/group`.
+    pub group: Option<Either<f64, String>>,
     /// The daemon's own kill deadline for the child, distinct from a client-side `wait`.
     pub timeout_sec: Option<f64>,
     /// Whether to open a stdin pipe. Writing without this is a 409.
@@ -233,6 +245,10 @@ pub struct ExecOptions {
     /// backgrounded outlives it. Off by default, which keeps the backgrounded-grandchild-output
     /// guarantee for callers who rely on it.
     pub reap_group_on_exit: Option<bool>,
+    /// Start the child's environment from the image's `ENV` (minus `AGENTD_*`, never the
+    /// token), beneath everything else. Off by default, which keeps the child's environment
+    /// exactly the launch environment plus `env`.
+    pub inherit_image_env: Option<bool>,
 }
 
 impl ExecOptions {
@@ -248,6 +264,7 @@ impl ExecOptions {
             exec_id: None,
             timeout: None,
             reap_group_on_exit: None,
+            inherit_image_env: None,
         }
     }
 
@@ -267,16 +284,34 @@ impl ExecOptions {
                 Either::A(single) => vec![single],
                 Either::B(argv) => argv,
             },
-            shell: self.shell.unwrap_or(false),
+            shell: match self.shell {
+                None => protocol::exec::Shell::Flag(false),
+                Some(Either::A(flag)) => protocol::exec::Shell::Flag(flag),
+                Some(Either::B(name)) => protocol::exec::Shell::Named(name),
+            },
             cwd: self.cwd,
             env: self.env.unwrap_or_default(),
-            user: crate::numbers::optional_u32(self.user, "user").map_err(js_async)?,
-            group: crate::numbers::optional_u32(self.group, "group").map_err(js_async)?,
+            user: principal(self.user, "user").map_err(js_async)?,
+            group: principal(self.group, "group").map_err(js_async)?,
             timeout_sec: self.timeout_sec,
             stdin: self.stdin.unwrap_or(false),
             reap_group_on_exit: self.reap_group_on_exit.unwrap_or(false),
+            inherit_image_env: self.inherit_image_env.unwrap_or(false),
         })
     }
+}
+
+/// A user or group as a caller names it: a number is range-checked as a u32 id, a string is
+/// passed through for the daemon to resolve in the guest.
+fn principal(
+    value: Option<Either<f64, String>>,
+    field: &str,
+) -> Result<Option<protocol::exec::NameOrId>, microvms_core::Error> {
+    Ok(match value {
+        None => None,
+        Some(Either::A(id)) => crate::numbers::optional_u32(Some(id), field)?.map(Into::into),
+        Some(Either::B(name)) => Some(name.into()),
+    })
 }
 
 /// How a `spawn` should behave: the exec's own options, plus the stream's.

@@ -447,7 +447,7 @@ pub async fn install_access(
     let request = crate::protocol::exec::StartRequest {
         exec_id: mint_exec_id(),
         command: vec![format!("chown -R {AGENT_UID}:{AGENT_GID} {WORKDIR}")],
-        shell: true,
+        shell: true.into(),
         cwd: None,
         env: std::collections::HashMap::new(),
         user: None,
@@ -455,6 +455,7 @@ pub async fn install_access(
         timeout_sec: Some(CHOWN_TIMEOUT.as_secs_f64()),
         stdin: false,
         reap_group_on_exit: false,
+        inherit_image_env: false,
     };
     let result = session.run_sync(request, CHOWN_TIMEOUT).await?;
     if !result.succeeded() {
@@ -542,17 +543,18 @@ pub async fn installed_version(session: &Session, agent: Agent) -> Result<String
     let request = crate::protocol::exec::StartRequest {
         exec_id: mint_exec_id(),
         command: profile::version_command(agent),
-        shell: false,
+        shell: false.into(),
         cwd: Some(WORKDIR.to_string()),
         env: std::collections::HashMap::from([(
             "PATH".into(),
             "/usr/local/bin:/usr/bin:/bin".into(),
         )]),
-        user: Some(AGENT_UID),
-        group: Some(AGENT_GID),
+        user: Some(AGENT_UID.into()),
+        group: Some(AGENT_GID.into()),
         timeout_sec: Some(VERSION_PROBE_TIMEOUT.as_secs_f64()),
         stdin: false,
         reap_group_on_exit: true,
+        inherit_image_env: false,
     };
     let result = session.run_sync(request, VERSION_PROBE_WAIT).await?;
     if result.succeeded()
@@ -629,16 +631,17 @@ pub fn prompt_request(
     Ok(crate::protocol::exec::StartRequest {
         exec_id: options.exec_id.clone().unwrap_or_else(mint_exec_id),
         command: vec![command],
-        shell: true,
+        shell: true.into(),
         cwd: Some(WORKDIR.to_string()),
         // Empty on the wire: the environment file is the environment, sourced by the
         // command, so the token never rides in a request body.
         env: std::collections::HashMap::new(),
-        user: Some(AGENT_UID),
-        group: Some(AGENT_GID),
+        user: Some(AGENT_UID.into()),
+        group: Some(AGENT_GID.into()),
         timeout_sec: options.timeout.map(|timeout| timeout.as_secs_f64()),
         stdin: false,
         reap_group_on_exit: options.reap_group_on_exit,
+        inherit_image_env: false,
     })
 }
 
@@ -1182,10 +1185,10 @@ mod tests {
         )
         .expect("builds");
         assert_eq!(request.exec_id, "p1");
-        assert_eq!(request.user, Some(1000));
-        assert_eq!(request.group, Some(1000));
+        assert_eq!(request.user, Some(1000.into()));
+        assert_eq!(request.group, Some(1000.into()));
         assert_eq!(request.cwd.as_deref(), Some("/workspace"));
-        assert!(request.shell);
+        assert!(request.shell.is_shell());
         assert!(
             request.env.is_empty(),
             "the token never rides in the request"
@@ -1378,7 +1381,10 @@ mod tests {
             assert!(request.command[0].contains(expected));
             assert!(!request.command[0].contains(forbidden));
             assert!(request.command[0].contains(&sh_single_quote(task)));
-            assert_eq!((request.user, request.group), (Some(1000), Some(1000)));
+            assert_eq!(
+                (request.user, request.group),
+                (Some(1000.into()), Some(1000.into()))
+            );
             assert_eq!(request.timeout_sec, Some(1200.0));
             assert!(request.reap_group_on_exit);
             assert_eq!(request.exec_id, "same-task");

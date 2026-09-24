@@ -379,6 +379,8 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 env: Vec::new(),
                 user: None,
                 group: None,
+                shell: None,
+                inherit_image_env: false,
                 exec_id: None,
                 poll: None,
                 detach: false,
@@ -3454,6 +3456,8 @@ fn exec_command(shape: impl FnOnce(&mut ExecArgs)) -> Command {
         env: Vec::new(),
         user: None,
         group: None,
+        shell: None,
+        inherit_image_env: false,
         exec_id: None,
         poll: None,
         detach: false,
@@ -3634,8 +3638,8 @@ async fn env_user_and_group_reach_the_wire_verbatim_and_default_to_absent() {
             ("PATH".into(), "/usr/bin:/bin".into()),
             ("EMPTY".into(), String::new()),
         ];
-        args.user = Some(1000);
-        args.group = Some(2000);
+        args.user = Some(1000.into());
+        args.group = Some(2000.into());
     });
     let (result, _, _) = against_daemon(&script, &command).await;
     result.expect("the exec succeeds");
@@ -7780,6 +7784,8 @@ async fn a_stream_whose_reader_leaves_stops_detaches_and_exits_interrupted() {
             env: Vec::new(),
             user: None,
             group: None,
+            shell: None,
+            inherit_image_env: false,
             exec_id: Some("e1".into()),
             poll: None,
             detach: false,

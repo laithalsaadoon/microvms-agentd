@@ -219,8 +219,10 @@ pub async fn exec<O: std::io::Write, E: std::io::Write>(
             // flags win on a repeated KEY, which is the shell convention (`FOO=a FOO=b cmd`
             // runs with `b`).
             env: args.env.iter().cloned().collect(),
-            user: args.user,
-            group: args.group,
+            user: args.user.clone(),
+            group: args.group.clone(),
+            shell: args.shell.clone(),
+            inherit_image_env: args.inherit_image_env,
             reap: args.reap,
         });
     let exec_id = request.exec_id.clone();
@@ -881,6 +883,9 @@ pub async fn health<O: std::io::Write, E: std::io::Write>(
                 .collect::<Vec<_>>()
         ),
     );
+    // A count, never the values; `null` from a daemon with no snapshot or one that predates
+    // `exec --inherit-image-env`, which such a daemon ignores.
+    data.insert("imageEnvKeys".into(), json!(health.image_env_keys));
 
     // The observations also land in the VM's local history, deduplicated, so "did my
     // validate hook even run?" is answerable after the VM is gone. The id is always in
@@ -1652,7 +1657,7 @@ async fn sync_pass<O: std::io::Write, E: std::io::Write>(
                 microvms_core::protocol::exec::StartRequest {
                     exec_id,
                     command,
-                    shell: false,
+                    shell: false.into(),
                     cwd: Some(crate::sync::REMOTE_WORKDIR.into()),
                     env: Default::default(),
                     user: None,
@@ -1660,6 +1665,7 @@ async fn sync_pass<O: std::io::Write, E: std::io::Write>(
                     timeout_sec: Some(delete_timeout),
                     stdin: false,
                     reap_group_on_exit: false,
+                    inherit_image_env: false,
                 },
                 Duration::from_secs_f64(delete_timeout.max(1.0) + 30.0),
             )
