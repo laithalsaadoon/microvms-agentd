@@ -33,6 +33,7 @@ For a running daemon's wire contract, use `/v1/schema`.
 | [Agent VMs](AGENT-VMS.md) | Agent lifecycle and Bedrock integration |
 | [Strategy](STRATEGY.md) | Project scope and priorities |
 | [Harness capabilities](HARNESS-CAPABILITIES.md) | Integration requirements and remaining gaps |
+| [Traceability](TRACEABILITY.md) | Generated: where each traced requirement is modeled, specified, fuzzed, tested, and implemented |
 | [Wire schema](schema.json) | Generated daemon contract |
 | [CLI manifest](manifest.json) | Generated commands, flags, responses, and exit codes |
 

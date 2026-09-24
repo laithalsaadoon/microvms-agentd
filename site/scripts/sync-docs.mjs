@@ -155,7 +155,8 @@ const AUTHORITATIVE = new Map([
   ["STRATEGY.md", { label: "Strategy", order: 6 }],
   ["HARNESS-CAPABILITIES.md", { label: "Harness capabilities", order: 7 }],
   ["AGENT-VMS.md", { label: "Agent VMs", order: 8 }],
-  ["CLI-COVERAGE-PLAN.md", { label: "CLI coverage plan", order: 9 }]
+  ["CLI-COVERAGE-PLAN.md", { label: "CLI coverage plan", order: 9 }],
+  ["TRACEABILITY.md", { label: "Traceability", order: 9 }]
 ])
 
 /** Anything else at the tree root: published, ranked after the named documents, before the categories. */

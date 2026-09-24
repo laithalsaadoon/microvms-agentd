@@ -403,7 +403,13 @@ depends = [
   "live:check",
   "build",
   "background:check",
+  "trace:check",
 ]
+
+[tasks."trace:check"]
+description = "Every traced requirement appears in the model, a Gherkin tag, a fuzz harness, a test, and the code; docs/TRACEABILITY.md is current"
+# Offline and dependency-free. `./scripts/check-trace.py --write` regenerates the matrix.
+run = "./scripts/check-trace.py --check"
 
 [tasks."background:check"]
 description = "Check the background coding example"
