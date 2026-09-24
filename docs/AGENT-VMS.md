@@ -293,7 +293,8 @@ vm.terminate(delete_image=False)
 
 The binding holds the same lock the sandbox and every session it hands out hold, so a
 `terminate` and a session call cannot interleave; `vm.sandbox` and `vm.session` reach
-the same VM for suspend, resume, and file transfer. `terminate(delete_image=True)` deletes
+the same VM for suspend, resume, and file transfer ([Suspend and resume](SUSPEND-RESUME.md)
+records what an agent's processes and connections keep across a freeze). `terminate(delete_image=True)` deletes
 only an image the object itself built, the sandbox's existing rule; a reused image is
 reported `image_deleted: false` with no failure, and the caller deletes it. The core's `AgentVm` owns its
 sandbox, which one binding class cannot share, so the bindings drive the layer through

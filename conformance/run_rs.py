@@ -3861,8 +3861,9 @@ def drive_auto_resume(cli: Cli, launched: Envelope, aws: Any, results: Results) 
     """`run --auto-resume`: a suspended VM resumes itself on an incoming request (#68).
 
     **New in 0.6.0 and not yet run live** — written for the next live-conformance sweep.
-    `docs/PLATFORM.md` flags `autoResumeEnabled` as the field this client always sent
-    `false` for, and records that "its interaction with the idle timer was not measured".
+    `autoResumeEnabled` was the field this client always sent `false` for. Its
+    interaction with the idle timer after an auto-resume is still unmeasured: the
+    2026-09-23 probe in `docs/PLATFORM.md` measured resume-on-request, not the timer after it.
     This section is that measurement as named checks, in two halves against one VM:
 
     1. Launch with `--auto-resume`, write a marker, suspend explicitly, and then send an

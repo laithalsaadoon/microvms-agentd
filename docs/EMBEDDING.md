@@ -166,7 +166,9 @@ surface as a suspend during exactly the long run it was added to protect
 (`docs/HARNESS-CAPABILITIES.md`, gap 6). Neither does in-guest *work*: a VM
 running a multi-hour exec with no outside traffic is suspended mid-work at the
 idle window. The process survives — suspend is a freeze, not a kill — but
-nothing external can reach it until someone resumes it.
+nothing external can reach it until someone resumes it. What survives the
+freeze, including clocks and outbound connections, is in
+[Suspend and resume](SUSPEND-RESUME.md).
 
 `/v1/health` is the right route for the poll: unauthenticated, one small
 request, and it carries `busy` and `execs` so the poll is informed rather than

@@ -63,7 +63,7 @@ It only recognizes resources under this project's own name prefixes, so anything
 
 `run` tears down by default, and an interruption after launch is `ERR_INTERRUPTED` (exit 11): teardown ran, and any leak is named in the envelope's `data.leaked`. A process killed before it could report leaves the ledger entry that `ls` reads. A run under `--keep` is a leak you asked for, and its name is released when the terminate is accepted, so a `--vm-name` refused with `ERR_NAME_TAKEN` (exit 14) means a live VM still holds it.
 
-Two things that look like leaks are not. A VM suspended past its `--suspended-sec` window was terminated by the platform, and a resume is refused with `ERR_WINDOW_CLOSED` (exit 8) because there is nothing to resume. And a build log group under `/aws/lambda-microvms/` outliving `terraform destroy` is expected; it is why `verify-clean` exists.
+Two things that look like leaks are not. A VM suspended past its `--suspended-sec` window was terminated by the platform, and a resume fails because there is nothing to resume (the SDKs report `ERR_WINDOW_CLOSED` when the same `Sandbox` launched the VM). And a build log group under `/aws/lambda-microvms/` outliving `terraform destroy` is expected; it is why `verify-clean` exists.
 
 ## 6. A name registered on another machine
 

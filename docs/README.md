@@ -29,6 +29,7 @@ For a running daemon's wire contract, use `/v1/schema`.
 | [Embedding](EMBEDDING.md) | Image requirements and integration with a custom harness |
 | [Trust](TRUST.md) | Bootstrap, credentials, workload boundaries, and networking |
 | [Platform](PLATFORM.md) | Dated observations and corrections to AWS behavior |
+| [Suspend and resume](SUSPEND-RESUME.md) | What survives a suspend, what triggers it, and what is unknown |
 | [Agent VMs](AGENT-VMS.md) | Agent lifecycle and Bedrock integration |
 | [Strategy](STRATEGY.md) | Project scope and priorities |
 | [Harness capabilities](HARNESS-CAPABILITIES.md) | Integration requirements and remaining gaps |
