@@ -2320,6 +2320,17 @@ def drive_suspend_resume(cli: Cli, launched: Envelope, results: Results) -> None
         *attach,
     )
     cli.call("exec", "echo 'written before the suspend' > /tmp/survives.txt", *attach)
+    # Workload hook handlers (#198), installed at runtime rather than baked into the
+    # suite's image: the daemon looks for `<hooks dir>/<hook>` when the hook fires, and
+    # an exec runs as root, so this is the same file an image would carry. Each handler
+    # appends its hook name and the guest clock, so the file proves which ran and when.
+    cli.call(
+        "exec",
+        "mkdir -p /etc/agentd/hooks.d && for hook in suspend resume; do "
+        "printf '#!/bin/sh\\necho \"$AGENTD_HOOK $(date +%%s)\" >> /tmp/handlers.txt\\n' "
+        "> /etc/agentd/hooks.d/$hook && chmod 0755 /etc/agentd/hooks.d/$hook; done",
+        *attach,
+    )
     time.sleep(5)
 
     print("  suspending")
@@ -2439,6 +2450,38 @@ def drive_suspend_resume(cli: Cli, launched: Envelope, results: Results) -> None
         f"suspend={cycle_hooks['suspend']!r} resume={cycle_hooks['resume']!r}",
     )
 
+    # The handlers' own evidence: the suspend handler ran before the freeze and the
+    # resume handler after it, so the resume line's guest clock is at least the
+    # suspension later than the suspend line's.
+    ran = cli.call("exec", "cat /tmp/handlers.txt", *after)
+    lines = [
+        line.split() for line in (ran.data.get("stdout") or "").splitlines() if line
+    ]
+    stamps = {parts[0]: int(parts[1]) for parts in lines if len(parts) == 2}
+    results.check(
+        "the workload's suspend and resume handlers ran across the cycle",
+        [parts[0] for parts in lines] == ["suspend", "resume"]
+        and stamps["resume"] - stamps["suspend"] >= 20,
+        f"handlers.txt={lines!r}",
+    )
+    outcomes = {
+        h.get("hook"): h.get("handler") for h in hooks if h.get("hook") in stamps
+    }
+    results.check(
+        "health reports each handler's outcome on its hook entry",
+        all(
+            (outcomes.get(name) or {}).get("succeeded") is True
+            and (outcomes.get(name) or {}).get("exitCode") == 0
+            for name in ("suspend", "resume")
+        ),
+        f"outcomes={outcomes!r}",
+    )
+    results.check(
+        "a hook with no handler keeps the handler-free shape",
+        all("handler" not in h for h in hooks if h.get("hook") == "run"),
+        f"run entries={[h for h in hooks if h.get('hook') == 'run']!r}",
+    )
+
     # And the local history, read the way a user would. The `resume` above polled
     # health and the `health` call just did too, each appending unseen observations
     # deduplicated on (hook, firedAt) — so the JSONL carries hookObserved events for
@@ -2455,6 +2498,73 @@ def drive_suspend_resume(cli: Cli, launched: Envelope, results: Results) -> None
         and len(observed) == len(set(observed)),
         f"hookObserved={observed!r}",
     )
+
+
+def drive_identity_per_vm(cli: Cli, launched: Envelope, results: Results) -> None:
+    """Two VMs from one image get distinct machine-ids (#205).
+
+    The suite's VM and a second one launched from the same image. Before the fix both
+    carried the machine-id the daemon wrote at startup in the image-build VM, which the
+    snapshot captured (measured 2026-09-23). Now repair runs at each VM's run hook.
+    """
+    print("\n-- identity per VM (two VMs, one image) --")
+    second = cli.call(
+        "run",
+        "--image",
+        str(launched.data["imageIdentifier"]),
+        "--name",
+        f"microvm-cli-conformance-identity-{secrets.token_hex(4)}",
+        "--memory",
+        str(BASELINE_MEMORY_MIB),
+        "--keep",
+        "--region",
+        cli.region,
+        "--max-idle-sec",
+        "600",
+        "--suspended-sec",
+        "600",
+        "--max-duration-sec",
+        "1800",
+    )
+    second_id = str(second.data["microvmId"])
+    try:
+        ids = [
+            (
+                cli.call("exec", "cat /etc/machine-id", *attach_args(cli, vm)).data.get(
+                    "stdout"
+                )
+                or ""
+            ).strip()
+            for vm in (launched, second)
+        ]
+        results.check(
+            "two VMs from one image have distinct machine-ids",
+            all(len(value) == 32 for value in ids) and ids[0] != ids[1],
+            f"lengths={[len(value) for value in ids]} equal={ids[0] == ids[1]}",
+        )
+        steps = [
+            cli.call("health", *attach_args(cli, vm)).data.get("identitySteps") or []
+            for vm in (launched, second)
+        ]
+        results.check(
+            "health reports the machine-id step repaired on both VMs",
+            all(
+                any(
+                    step.get("name") == "machine-id"
+                    and step.get("outcome") == "repaired"
+                    for step in vm_steps
+                )
+                for vm_steps in steps
+            ),
+            f"steps={steps!r}",
+        )
+    finally:
+        gone = cli.call("terminate", second_id, "--wait", "--region", cli.region)
+        results.check(
+            "the second identity VM tore down clean",
+            gone.data.get("microvmId") == second_id and not gone.data.get("leaked"),
+            f"leaked={gone.data.get('leaked')}",
+        )
 
 
 def drive_token_rotation(cli: Cli, launched: Envelope, results: Results) -> None:
@@ -5847,6 +5957,9 @@ def main() -> int:
             # on the execution role, which the conformance caller already has.
             drive_platform_posture(cli, launched, aws, results)
             drive_exec_identity(cli, launched, results)
+            # Machine-id per VM (#205): a second VM from the suite's image, compared
+            # against the suite's own.
+            drive_identity_per_vm(cli, launched, results)
             # After the identity section because it leans on the same detach/poll surface
             # that section just proved: every process fact here is read through `ps` and
             # every stop through `kill`, against the same shared VM.

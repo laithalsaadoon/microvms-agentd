@@ -83,8 +83,15 @@ this misconfiguration and confirms an attacker can win that race.
 
 Restored images can share files and cached userspace state. Firecracker
 VMGenID and Linux kernel reseeding do not repair identifiers already stored
-on disk or cached by applications. Optional identity repair runs during
-bootstrap and reports its result through health.
+on disk or cached by applications. Optional identity repair runs at the first
+successful run hook and reports each step through health (`identity_steps`).
+
+It cannot run earlier. The daemon starts in the image-build VM, so repair at
+daemon start is captured by the snapshot and every VM launched from one image
+inherits the same "repaired" machine-id (measured 2026-09-23, two VMs from one
+image). The run hook is the first per-VM moment, and nothing has read the
+identifiers by then: the platform forwards no traffic until the hook answers,
+and workloads start only after readiness.
 
 `agentd/src/identity.rs` uses a fresh 128-bit seed to:
 
@@ -97,13 +104,38 @@ bootstrap and reports its result through health.
 Repair cannot revoke values a process already read, update arbitrary
 application caches, or override missing kernel capabilities. A bind mount is
 namespace-local. Failures leave the daemon serving and set `identity_degraded`;
-callers that require repaired identity must check it. Opting out is reported
-separately through `identity_repaired`.
+callers that require repaired identity must check it, and `identity_steps` names
+the failed step. `identity_repaired` is false until repair runs on this VM, and
+stays false when repair is switched off.
+
+`boot_id` is fixed by the kernel at boot. `procfs` refuses writes to it even for
+root, so it can only be shadowed by a bind mount, which needs `CAP_SYS_ADMIN`;
+`sethostname` needs it too. Without those capabilities both steps fail with
+`EPERM`, and VMs from one image keep the same `boot_id` and hostname while their
+machine-ids differ. Do not key uniqueness on either.
 
 The August 2026 measurement succeeded with `additionalOsCapabilities: ["ALL"]`.
 September measurements found a restricted capability set even when repair was
 requested. Those observations are both retained in [Platform](PLATFORM.md);
 requesting `ALL` is not proof that every repair operation succeeded.
+
+## Workload hook handlers
+
+An executable at `<hooks dir>/<hook>` runs when the platform posts that
+lifecycle hook ([Protocol](PROTOCOL.md), "Workload hook handlers"). It is
+image-owned code with the daemon's privileges:
+
+- It runs as root, like the daemon, with the daemon's environment, the launch
+  environment, and `AGENTD_HOOK`. The agent token is never in either
+  environment. Keep secrets out of shared images; a handler is part of the image.
+- The hook routes are unauthenticated and reachable over loopback from inside
+  the guest, so any guest process can make a handler run. A handler must be
+  idempotent and safe to run when no real lifecycle event happened. The hook
+  log's cap bounds the number of runs, and handlers run one at a time.
+- Output goes to the daemon's log, not to `/v1/health`, because health needs no
+  agent token. The outcome (exit code, signal, timeout, duration) is on health.
+- The hook always answers 200. A failing handler does not stop a suspend, a
+  resume, or a launch.
 
 ## Tunnel identity: proving which VM answered
 

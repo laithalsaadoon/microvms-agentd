@@ -210,6 +210,38 @@ impl Platform for Host {
     }
 }
 
+/// How a VM's identity gets repaired, injected into the daemon's state.
+///
+/// Called once, on the first successful run hook. Injected so tests and route
+/// fixtures never rewrite the machine they run on.
+pub type Repairer = std::sync::Arc<dyn Fn() -> Report + Send + Sync>;
+
+/// A repairer that does nothing: tests, and a daemon with repair switched off.
+pub fn no_repair() -> Repairer {
+    std::sync::Arc::new(Report::skipped)
+}
+
+/// The production repairer: the real paths on the real host.
+pub fn host_repairer() -> Repairer {
+    std::sync::Arc::new(|| repair(&Layout::default(), &Host))
+}
+
+impl Step {
+    /// The step as `/v1/health` reports it.
+    pub fn to_wire(&self) -> protocol::health::IdentityStep {
+        let (outcome, error) = match &self.result {
+            StepResult::Repaired => ("repaired", None),
+            StepResult::NotApplicable => ("not_applicable", None),
+            StepResult::Failed { error } => ("failed", Some(error.clone())),
+        };
+        protocol::health::IdentityStep {
+            name: self.name.to_string(),
+            outcome: outcome.to_string(),
+            error,
+        }
+    }
+}
+
 /// Runs every repair step, logging each outcome.
 ///
 /// Order matters in one place: the machine id is minted first because the hostname

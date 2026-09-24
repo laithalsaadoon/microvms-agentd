@@ -197,22 +197,29 @@ struct Inner {
     /// write paths so a test can inject a filesystem that is full, or one that
     /// fills mid-upload, without depending on the host's actual free space.
     space_probe: disk::SpaceProbe,
-    /// What startup identity repair did. Immutable after construction: repair runs
-    /// once, before serving.
-    identity: identity::Report,
+    /// What identity repair did on this VM. `skipped` until the first successful
+    /// run hook, which is the earliest moment that is per VM: the daemon starts in
+    /// the image-build VM, so repair at startup is captured by the snapshot and every
+    /// VM inherits one "repaired" identity.
+    identity: Mutex<identity::Report>,
+    /// Performs the repair. Injected so tests never touch the host's identity files.
+    repairer: identity::Repairer,
+    /// Serializes workload hook handlers: one runs at a time, so an in-guest caller
+    /// posting hook routes cannot run handlers concurrently.
+    handler_lock: tokio::sync::Mutex<()>,
 }
 
 impl AppState {
     pub fn new(config: Config) -> Self {
-        Self::with_probe(config, disk::available_bytes, identity::Report::skipped())
+        Self::with_probe(config, disk::available_bytes, identity::no_repair())
     }
 
-    /// Construction with the seams exposed, for `main` (which has a real repair
-    /// report to hand in) and for tests (which inject a fake probe).
+    /// Construction with the seams exposed, for `main` (which hands in the real
+    /// repairer) and for tests (which inject a fake probe or repairer).
     pub fn with_probe(
         config: Config,
         space_probe: disk::SpaceProbe,
-        identity: identity::Report,
+        repairer: identity::Repairer,
     ) -> Self {
         Self {
             inner: Arc::new(Inner {
@@ -223,7 +230,9 @@ impl AppState {
                 execs: Mutex::new(HashMap::new()),
                 hooks: Mutex::new(HookLog::default()),
                 space_probe,
-                identity,
+                identity: Mutex::new(identity::Report::skipped()),
+                repairer,
+                handler_lock: tokio::sync::Mutex::new(()),
             }),
         }
     }
@@ -241,8 +250,20 @@ impl AppState {
         }
     }
 
-    pub fn identity_report(&self) -> &identity::Report {
-        &self.inner.identity
+    pub fn identity_report(&self) -> identity::Report {
+        recover(&self.inner.identity, "identity").clone()
+    }
+
+    /// Runs identity repair and records its report. Called by the run hook on the
+    /// winning bootstrap only, so a replayed or conflicting hook never re-mints.
+    pub fn repair_identity(&self) {
+        let report = (self.inner.repairer)();
+        *recover(&self.inner.identity, "identity") = report;
+    }
+
+    /// The lock a hook handler holds while it runs.
+    pub fn handler_lock(&self) -> &tokio::sync::Mutex<()> {
+        &self.inner.handler_lock
     }
 
     /// Installs the agent token and the launch environment, once. Returns which of
@@ -349,16 +370,30 @@ impl AppState {
     /// invocation is counted rather than kept — first-N-wins, because the earliest
     /// entries are the platform's real firings and later spam is what an in-guest
     /// caller posting these unauthenticated routes can produce.
-    pub fn record_hook(&self, hook: &str) {
+    ///
+    /// Returns the entry's slot, or `None` when the cap dropped it. A dropped
+    /// invocation also runs no workload handler, so the cap bounds how many times an
+    /// in-guest caller can make the daemon run one.
+    pub fn record_hook(&self, hook: &str) -> Option<usize> {
         let mut log = recover(&self.inner.hooks, "hooks");
         if log.observed.len() >= HOOK_LOG_CAP {
             log.dropped = log.dropped.saturating_add(1);
-            return;
+            return None;
         }
         log.observed.push(protocol::health::HookObservation {
             hook: hook.to_string(),
             fired_at: epoch_secs(),
+            handler: None,
         });
+        Some(log.observed.len() - 1)
+    }
+
+    /// Attaches a workload handler's outcome to the hook entry it ran for.
+    pub fn record_handler(&self, slot: usize, outcome: protocol::health::HandlerOutcome) {
+        let mut log = recover(&self.inner.hooks, "hooks");
+        if let Some(entry) = log.observed.get_mut(slot) {
+            entry.handler = Some(outcome);
+        }
     }
 
     /// The hook log as health reports it: every kept observation, oldest first,
@@ -473,9 +508,9 @@ mod tests {
         // The default hook would print a backtrace for a panic the test is causing
         // deliberately, which makes a passing run look like a failing one.
         std::panic::set_hook(Box::new(|_| {}));
-        let result = std::panic::catch_unwind(move || {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
             state.with_execs(|_| f());
-        });
+        }));
         std::panic::set_hook(previous);
         assert!(result.is_err(), "the deliberate panic must have unwound");
     }
@@ -562,10 +597,10 @@ mod tests {
         let inner = state.inner.clone();
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
-        let result = std::panic::catch_unwind(move || {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
             let _guard = inner.token.lock().expect("held");
             panic!("panic with the token lock held");
-        });
+        }));
         std::panic::set_hook(previous);
         assert!(result.is_err());
         assert!(

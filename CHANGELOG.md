@@ -8,6 +8,33 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
 
 ### Security
 
+- **Each VM gets its own machine-id: identity repair moves from daemon start to the run hook
+  (#205).** Two VMs launched from one image had the same `/etc/machine-id`, `boot_id` and
+  hostname (measured 2026-09-23, us-east-1), and both reported `identity_repaired: true`.
+  The daemon starts in the image-build VM, so the repair it ran at startup was captured by
+  the snapshot and handed to every VM. Repair now runs once, on the winning run hook: the
+  first per-VM moment, before the platform forwards traffic or any workload starts.
+  `/v1/health` adds `identity_steps` (each step's name, outcome and error) so
+  `identity_degraded` says which step failed. `boot_id` and the hostname still need
+  `CAP_SYS_ADMIN`, which the platform's capability set lacks, so those steps report
+  `EPERM` and stay shared; do not key uniqueness on them.
+
+### Added
+
+- **Workload handlers for the lifecycle hooks (#198).** An executable at
+  `/etc/agentd/hooks.d/<hook>` runs for `run`, `suspend`, `resume`
+  and `terminate`, before the daemon answers the platform, within a budget
+  (`AGENTD_HOOK_HANDLER_TIMEOUT_SECS`, default 20, at most 55) after which its process group
+  is killed. The hook always answers 200; the outcome (exit code, signal, timeout,
+  duration) is on that hook's `/v1/health` entry as `handler`, and output goes to the
+  daemon log. The platform keeps a suspended VM's full memory and disk with no option to
+  change it, and held outbound connections are aborted on resume (measured 2026-09-23), so
+  this is where a workload closes and reopens them. Handlers run as root and can be
+  triggered by any guest process posting a hook path; see `docs/TRUST.md`.
+- **`Health.hooks`, `hooks_dropped` and `identity_steps` in both bindings (#203).** Python
+  adds `HookObservation`, `HandlerOutcome` and `IdentityStep`; JS adds the same shapes as
+  plain objects. `microvm health` carries `handler` on hook entries and `identitySteps`.
+
 - **Every run reports what its outbound network actually is, and "no `--egress`" no longer
   reads as a seal.** A defensive review of an unrelated tool reported that a VM launched
   without `--egress` reached `extensions.duckdb.org` (301) and `pypi.org` (200) and that a

@@ -816,14 +816,43 @@ pub async fn health<O: std::io::Write, E: std::io::Write>(
             health
                 .hooks
                 .iter()
-                .map(|observation| json!({
-                    "hook": observation.hook,
-                    "firedAt": observation.fired_at,
-                }))
+                .map(|observation| {
+                    let mut entry = json!({
+                        "hook": observation.hook,
+                        "firedAt": observation.fired_at,
+                    });
+                    // Present only when the image carries a handler for this hook, as
+                    // on the daemon's wire.
+                    if let Some(handler) = &observation.handler {
+                        entry["handler"] = json!({
+                            "exitCode": handler.exit_code,
+                            "signal": handler.signal,
+                            "timedOut": handler.timed_out,
+                            "durationMs": handler.duration_ms,
+                            "error": handler.error,
+                            "succeeded": handler.succeeded(),
+                        });
+                    }
+                    entry
+                })
                 .collect::<Vec<_>>()
         ),
     );
     data.insert("hooksDropped".into(), json!(health.hooks_dropped));
+    data.insert(
+        "identitySteps".into(),
+        json!(
+            health
+                .identity_steps
+                .iter()
+                .map(|step| json!({
+                    "name": step.name,
+                    "outcome": step.outcome,
+                    "error": step.error,
+                }))
+                .collect::<Vec<_>>()
+        ),
+    );
 
     // The observations also land in the VM's local history, deduplicated, so "did my
     // validate hook even run?" is answerable after the VM is gone. The id is always in

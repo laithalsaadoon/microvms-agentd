@@ -14,10 +14,10 @@ never gets bootstrapped.
 | --- | --- | --- |
 | `POST HOOKS/ready` | none (platform hook) | image-build readiness probe |
 | `POST HOOKS/validate` | none (platform hook) | image-build validation probe |
-| `POST HOOKS/run` | none (platform hook) | one-shot token bootstrap from `runHookPayload`, plus the optional launch environment |
-| `POST HOOKS/suspend` | none (platform hook) | acknowledged and logged |
-| `POST HOOKS/resume` | none (platform hook) | acknowledged and recorded; memory, processes, and the token survive a suspend ([Suspend and resume](SUSPEND-RESUME.md)) |
-| `POST HOOKS/terminate` | none (platform hook) | acknowledged; begins graceful shutdown |
+| `POST HOOKS/run` | none (platform hook) | one-shot token bootstrap from `runHookPayload`, plus the optional launch environment; the winning bootstrap repairs identity and runs the workload's `run` handler |
+| `POST HOOKS/suspend` | none (platform hook) | runs the workload's `suspend` handler, then acknowledges |
+| `POST HOOKS/resume` | none (platform hook) | runs the workload's `resume` handler, then acknowledges; memory, processes, and the token survive a suspend ([Suspend and resume](SUSPEND-RESUME.md)) |
+| `POST HOOKS/terminate` | none (platform hook) | runs the workload's `terminate` handler; acknowledged; begins graceful shutdown |
 | `POST /v1/exec/start` | bearer | start a command under a caller-minted `exec_id` |
 | `GET /v1/exec/{id}` | bearer | poll status and output; never mutates |
 | `GET /v1/exec/{id}/stream?offset=` | bearer | follow output as SSE from a byte offset |
@@ -56,6 +56,50 @@ counted in `hooks_dropped`. Read an observation as "the daemon saw this hook
 fire", never as "only the platform could have fired it". Both fields are
 `#[serde(default)]` like `busy` and `execs`, and for the same reason: an older
 daemon omits them, and empty/zero is the honest reading.
+
+## Workload hook handlers
+
+The platform always keeps a suspended VM's full memory and disk, and
+`SuspendMicrovm` takes no option to change what survives. What a workload can
+control is what runs at the boundary. When the image carries an executable at
+`/etc/agentd/hooks.d/<hook>` (fixed; the directory is image-owned and not read from the
+environment, because it decides what the daemon executes as root), the
+daemon runs it for the `run`, `suspend`, `resume`, and `terminate` hooks:
+
+- **Before answering.** A `suspend` handler runs before the freeze; a `resume`
+  handler runs before the platform forwards traffic it held during the resume.
+  The `run` handler runs once, after the winning bootstrap installs the token;
+  a replayed or conflicting run hook runs none.
+- **Within a budget.** `AGENTD_HOOK_HANDLER_TIMEOUT_SECS` (default 20, clamped
+  to 1–55) is kept below the image's hook timeout, which the client sets to 30
+  seconds. At the budget the handler's whole process group is killed.
+- **Always 200.** The hook answers 200 whatever the handler did. The platform's
+  handling of a failing or slow hook is undocumented, and a VM that cannot
+  suspend or resume is the worse outcome. Check the outcome instead.
+- **One at a time,** and only for invocations the hook log kept, so the log's cap
+  bounds how many handlers an in-guest caller can trigger.
+
+The outcome lands on the hook's `/v1/health` entry as `handler`:
+`{exit_code, signal, timed_out, duration_ms, error}`. `error` says why the
+handler could not run at all, such as `not executable`. The key is absent when
+the image has no handler for that hook, so an entry reads exactly as it did
+before handlers existed. Handler output is logged by the daemon (the image's
+log group), never returned on `/v1/health`, which needs no agent token.
+
+A handler runs as the daemon's user (root) with the daemon's environment, the
+launch environment, and `AGENTD_HOOK=<hook>`; never the agent token. Any process
+in the guest can post a hook path, so a handler must be safe to run spuriously.
+See [Trust](TRUST.md).
+
+## Identity repair, per VM
+
+`/v1/health` reports `identity_repaired` (repair ran on this VM),
+`identity_degraded` (a step failed), and `identity_steps`, each step's
+`{name, outcome, error}`. Repair runs at the winning run hook, not at daemon
+start: the daemon starts in the image-build VM, so startup repair was captured
+by the snapshot, and every VM launched from one image shared its machine-id
+(measured 2026-09-23). Before the run hook, `identity_repaired` is false and
+`identity_steps` is empty.
 
 ## Rules that exist because a defect proved them necessary
 

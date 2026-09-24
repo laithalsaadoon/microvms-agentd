@@ -115,6 +115,57 @@ pub struct Health {
     /// reading of a daemon that dropped nothing it could tell us about.
     #[serde(default)]
     pub hooks_dropped: u64,
+    /// Each identity-repair step and its outcome, in the order they ran.
+    ///
+    /// Empty until repair runs, which is at the first successful run hook: repair at
+    /// daemon start would run in the image-build VM and be captured by the snapshot,
+    /// giving every VM the same "repaired" identity. `identity_degraded` says whether
+    /// any step failed; this says which one and why.
+    ///
+    /// Defaulted for `busy`'s reason: an older daemon omits it.
+    #[serde(default)]
+    pub identity_steps: Vec<IdentityStep>,
+}
+
+/// One identity-repair step, as the daemon ran it.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct IdentityStep {
+    /// `machine-id`, `hostname`, `boot-id`, `random-seed`, or `cached-credential`.
+    pub name: String,
+    /// `repaired`, `not_applicable`, or `failed`.
+    pub outcome: String,
+    /// The OS error for a failed step. Names a path or an errno, never a value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// What a workload's handler for a lifecycle hook did.
+///
+/// The daemon runs `<hooks dir>/<hook>` when the image carries one. Output is not
+/// here: `/v1/health` is readable without the agent token, so a handler's output
+/// goes to the daemon's log instead.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct HandlerOutcome {
+    /// The handler's exit code, or `None` when it was killed or never started.
+    pub exit_code: Option<i32>,
+    /// The signal that ended it, if one did.
+    #[serde(default)]
+    pub signal: Option<i32>,
+    /// Whether the daemon killed it for exceeding its time budget.
+    #[serde(default)]
+    pub timed_out: bool,
+    /// Wall-clock milliseconds from spawn to exit or kill.
+    pub duration_ms: u64,
+    /// Why the handler could not run at all: not executable, or spawn failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+impl HandlerOutcome {
+    /// Whether the handler ran and exited 0.
+    pub fn succeeded(&self) -> bool {
+        self.exit_code == Some(0) && !self.timed_out && self.error.is_none()
+    }
 }
 
 /// One lifecycle-hook invocation, as the daemon observed it.
@@ -131,6 +182,11 @@ pub struct HookObservation {
     /// The daemon's clock rather than any caller's, and recorded before the handler
     /// does any work — a run hook that was invoked and refused still fired.
     pub fired_at: u64,
+    /// The workload handler's outcome, when the image carries a handler for this
+    /// hook. Absent on the wire otherwise, so an entry without one reads exactly as
+    /// it did before handlers existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handler: Option<HandlerOutcome>,
 }
 
 /// The disk half of [`Health`].
@@ -165,6 +221,7 @@ mod tests {
             execs: 0,
             hooks: Vec::new(),
             hooks_dropped: 0,
+            identity_steps: Vec::new(),
         })
         .expect("serializes");
         assert!(written.contains(r#""disk":null"#), "{written}");
@@ -189,6 +246,7 @@ mod tests {
             execs: 7,
             hooks: Vec::new(),
             hooks_dropped: 0,
+            identity_steps: Vec::new(),
         })
         .expect("serializes");
         assert!(written.contains(r#""busy":false"#), "{written}");
@@ -215,13 +273,16 @@ mod tests {
                 HookObservation {
                     hook: "validate".to_string(),
                     fired_at: 1_756_500_000,
+                    handler: None,
                 },
                 HookObservation {
                     hook: "run".to_string(),
                     fired_at: 1_756_500_100,
+                    handler: None,
                 },
             ],
             hooks_dropped: 3,
+            identity_steps: Vec::new(),
         })
         .expect("serializes");
         // The wire keys are pinned to the response's own convention — snake_case,
@@ -255,5 +316,53 @@ mod tests {
         assert_eq!(read.hooks_dropped, 0);
         assert!(!read.busy);
         assert_eq!(read.execs, 0);
+    }
+
+    /// A handler outcome and the identity steps round-trip, and a hook with no
+    /// handler keeps the exact spelling older clients parse.
+    #[test]
+    fn handler_outcomes_and_identity_steps_round_trip() {
+        let written = serde_json::to_string(&Health {
+            version: Cow::Borrowed("0.1.0"),
+            bootstrapped: true,
+            disk: None,
+            identity_degraded: true,
+            identity_repaired: true,
+            busy: false,
+            execs: 0,
+            hooks: vec![
+                HookObservation {
+                    hook: "run".to_string(),
+                    fired_at: 1,
+                    handler: None,
+                },
+                HookObservation {
+                    hook: "suspend".to_string(),
+                    fired_at: 2,
+                    handler: Some(HandlerOutcome {
+                        exit_code: None,
+                        signal: Some(9),
+                        timed_out: true,
+                        duration_ms: 20_000,
+                        error: None,
+                    }),
+                },
+            ],
+            hooks_dropped: 0,
+            identity_steps: vec![IdentityStep {
+                name: "boot-id".to_string(),
+                outcome: "failed".to_string(),
+                error: Some("EPERM: Operation not permitted".to_string()),
+            }],
+        })
+        .expect("serializes");
+        assert!(
+            written.contains(r#"{"hook":"run","fired_at":1}"#),
+            "{written}"
+        );
+        let read: Health = serde_json::from_str(&written).expect("deserializes");
+        let handler = read.hooks[1].handler.as_ref().expect("a handler outcome");
+        assert!(handler.timed_out && !handler.succeeded());
+        assert_eq!(read.identity_steps[0].outcome, "failed");
     }
 }

@@ -68,6 +68,9 @@ pub struct PyHealth {
     identity_repaired: bool,
     busy: bool,
     execs: usize,
+    hooks: Vec<protocol::health::HookObservation>,
+    hooks_dropped: u64,
+    identity_steps: Vec<protocol::health::IdentityStep>,
 }
 
 impl PyHealth {
@@ -82,6 +85,9 @@ impl PyHealth {
             identity_repaired: health.identity_repaired,
             busy: health.busy,
             execs: health.execs,
+            hooks: health.hooks,
+            hooks_dropped: health.hooks_dropped,
+            identity_steps: health.identity_steps,
         }
     }
 }
@@ -156,10 +162,178 @@ impl PyHealth {
         self.execs
     }
 
+    /// Every lifecycle-hook invocation the daemon observed, oldest first, each with its
+    /// workload handler's outcome when the image carries one.
+    ///
+    /// The hook routes are reachable over loopback from inside the guest, so a workload
+    /// can add entries; the earliest are the platform's.
+    #[getter]
+    fn hooks(&self) -> Vec<PyHookObservation> {
+        self.hooks
+            .iter()
+            .cloned()
+            .map(PyHookObservation::wrap)
+            .collect()
+    }
+
+    /// How many hook invocations the daemon's log cap dropped.
+    #[getter]
+    fn hooks_dropped(&self) -> u64 {
+        self.hooks_dropped
+    }
+
+    /// Each identity-repair step and its outcome. Empty until the run hook repairs this
+    /// VM's identity.
+    #[getter]
+    fn identity_steps(&self) -> Vec<PyIdentityStep> {
+        self.identity_steps
+            .iter()
+            .cloned()
+            .map(|inner| PyIdentityStep { inner })
+            .collect()
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "Health(version={:?}, bootstrapped={}, identity_degraded={}, busy={}, execs={})",
             self.version, self.bootstrapped, self.identity_degraded, self.busy, self.execs
+        )
+    }
+}
+
+/// One lifecycle-hook invocation, as the daemon observed it.
+#[pyclass(frozen, name = "HookObservation", module = "microvms")]
+pub struct PyHookObservation {
+    inner: protocol::health::HookObservation,
+}
+
+impl PyHookObservation {
+    fn wrap(inner: protocol::health::HookObservation) -> Self {
+        Self { inner }
+    }
+}
+
+#[pymethods]
+impl PyHookObservation {
+    /// `ready`, `validate`, `run`, `suspend`, `resume`, or `terminate`.
+    #[getter]
+    fn hook(&self) -> &str {
+        &self.inner.hook
+    }
+
+    /// Seconds since the epoch on the daemon's clock when the hook arrived.
+    #[getter]
+    fn fired_at(&self) -> u64 {
+        self.inner.fired_at
+    }
+
+    /// The workload handler's outcome, or `None` when the image has no handler for
+    /// this hook.
+    #[getter]
+    fn handler(&self) -> Option<PyHandlerOutcome> {
+        self.inner
+            .handler
+            .clone()
+            .map(|inner| PyHandlerOutcome { inner })
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "HookObservation(hook={:?}, fired_at={}, handler={})",
+            self.inner.hook,
+            self.inner.fired_at,
+            self.handler()
+                .map_or_else(|| "None".to_string(), |handler| handler.__repr__())
+        )
+    }
+}
+
+/// What a workload's hook handler did. Its output is in the daemon's log, not here.
+#[pyclass(frozen, name = "HandlerOutcome", module = "microvms")]
+pub struct PyHandlerOutcome {
+    inner: protocol::health::HandlerOutcome,
+}
+
+#[pymethods]
+impl PyHandlerOutcome {
+    /// The exit code, or `None` when the handler was killed or never started.
+    #[getter]
+    fn exit_code(&self) -> Option<i32> {
+        self.inner.exit_code
+    }
+
+    /// The signal that ended it, if one did.
+    #[getter]
+    fn signal(&self) -> Option<i32> {
+        self.inner.signal
+    }
+
+    /// Whether the daemon killed it at its time budget.
+    #[getter]
+    fn timed_out(&self) -> bool {
+        self.inner.timed_out
+    }
+
+    /// Milliseconds from spawn to exit or kill.
+    #[getter]
+    fn duration_ms(&self) -> u64 {
+        self.inner.duration_ms
+    }
+
+    /// Why it could not run at all, such as `not executable`.
+    #[getter]
+    fn error(&self) -> Option<&str> {
+        self.inner.error.as_deref()
+    }
+
+    /// Whether it ran and exited 0 within its budget.
+    #[getter]
+    fn succeeded(&self) -> bool {
+        self.inner.succeeded()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "HandlerOutcome(exit_code={:?}, signal={:?}, timed_out={}, duration_ms={}, error={:?})",
+            self.inner.exit_code,
+            self.inner.signal,
+            self.inner.timed_out,
+            self.inner.duration_ms,
+            self.inner.error
+        )
+    }
+}
+
+/// One identity-repair step.
+#[pyclass(frozen, name = "IdentityStep", module = "microvms")]
+pub struct PyIdentityStep {
+    inner: protocol::health::IdentityStep,
+}
+
+#[pymethods]
+impl PyIdentityStep {
+    /// `machine-id`, `hostname`, `boot-id`, `random-seed`, or `cached-credential`.
+    #[getter]
+    fn name(&self) -> &str {
+        &self.inner.name
+    }
+
+    /// `repaired`, `not_applicable`, or `failed`.
+    #[getter]
+    fn outcome(&self) -> &str {
+        &self.inner.outcome
+    }
+
+    /// The OS error for a failed step.
+    #[getter]
+    fn error(&self) -> Option<&str> {
+        self.inner.error.as_deref()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "IdentityStep(name={:?}, outcome={:?}, error={:?})",
+            self.inner.name, self.inner.outcome, self.inner.error
         )
     }
 }

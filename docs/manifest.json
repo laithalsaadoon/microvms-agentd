@@ -1457,7 +1457,8 @@
           "busy",
           "execs",
           "hooks",
-          "hooksDropped"
+          "hooksDropped",
+          "identitySteps"
         ],
         "responseType": "microvm.health",
         "summary": "Ask a running MicroVM's daemon whether it is up, and what its identity repair did",

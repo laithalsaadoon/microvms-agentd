@@ -657,6 +657,43 @@ class Gap:
     def start(self, /) -> int: ...
 
 @final
+class HandlerOutcome:
+    """
+    What a workload's hook handler did. Its output is in the daemon's log, not here.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def duration_ms(self, /) -> int:
+        """
+        Milliseconds from spawn to exit or kill.
+        """
+    @property
+    def error(self, /) -> str |None:
+        """
+        Why it could not run at all, such as `not executable`.
+        """
+    @property
+    def exit_code(self, /) -> int |None:
+        """
+        The exit code, or `None` when the handler was killed or never started.
+        """
+    @property
+    def signal(self, /) -> int |None:
+        """
+        The signal that ended it, if one did.
+        """
+    @property
+    def succeeded(self, /) -> bool:
+        """
+        Whether it ran and exited 0 within its budget.
+        """
+    @property
+    def timed_out(self, /) -> bool:
+        """
+        Whether the daemon killed it at its time budget.
+        """
+
+@final
 class Health:
     """
     The daemon's liveness answer. `bootstrapped` is the useful field.
@@ -694,6 +731,20 @@ class Health:
         is a VM holding unacked output somebody still has to collect.
         """
     @property
+    def hooks(self, /) -> list[HookObservation]:
+        """
+        Every lifecycle-hook invocation the daemon observed, oldest first, each with its
+        workload handler's outcome when the image carries one.
+        
+        The hook routes are reachable over loopback from inside the guest, so a workload
+        can add entries; the earliest are the platform's.
+        """
+    @property
+    def hooks_dropped(self, /) -> int:
+        """
+        How many hook invocations the daemon's log cap dropped.
+        """
+    @property
     def identity_degraded(self, /) -> bool:
         """
         Whether any startup identity repair step failed — a duplicate machine-id or
@@ -704,6 +755,12 @@ class Health:
         """
         False when identity repair was switched off by config. Separate from `degraded` so
         a monitor can tell "opted out" from "nothing to do".
+        """
+    @property
+    def identity_steps(self, /) -> list[IdentityStep]:
+        """
+        Each identity-repair step and its outcome. Empty until the run hook repairs this
+        VM's identity.
         """
     @property
     def reserve_bytes(self, /) -> int |None:
@@ -720,6 +777,51 @@ class Health:
     def version(self, /) -> str:
         """
         The daemon's own version, distinct from the protocol version.
+        """
+
+@final
+class HookObservation:
+    """
+    One lifecycle-hook invocation, as the daemon observed it.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def fired_at(self, /) -> int:
+        """
+        Seconds since the epoch on the daemon's clock when the hook arrived.
+        """
+    @property
+    def handler(self, /) -> HandlerOutcome |None:
+        """
+        The workload handler's outcome, or `None` when the image has no handler for
+        this hook.
+        """
+    @property
+    def hook(self, /) -> str:
+        """
+        `ready`, `validate`, `run`, `suspend`, `resume`, or `terminate`.
+        """
+
+@final
+class IdentityStep:
+    """
+    One identity-repair step.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def error(self, /) -> str |None:
+        """
+        The OS error for a failed step.
+        """
+    @property
+    def name(self, /) -> str:
+        """
+        `machine-id`, `hostname`, `boot-id`, `random-seed`, or `cached-credential`.
+        """
+    @property
+    def outcome(self, /) -> str:
+        """
+        `repaired`, `not_applicable`, or `failed`.
         """
 
 @final

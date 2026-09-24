@@ -185,7 +185,7 @@ async fn run_hook(
     // malformed and answers 400 was still invoked, and the record is of the
     // invocation. This is what `microvm history` ultimately surfaces, so a launch
     // the platform terminated at this hook still leaves the fact that it fired.
-    state.record_hook("run");
+    let slot = state.record_hook("run");
     let Ok(Json(envelope)) = body else {
         // A malformed hook body is 400. It is never 404: a client that maps 404
         // onto "missing file" would report a phantom absent artifact for what is
@@ -245,6 +245,18 @@ async fn run_hook(
                 tunnel_identity = identity_delivered,
                 "agent token installed"
             );
+            // Per-VM identity, at the first moment that is per VM. The daemon starts
+            // in the image-build VM, so repair at startup is captured by the snapshot
+            // and shared by every VM launched from it. Nothing has read these values
+            // yet: the platform forwards no traffic until this hook answers.
+            let repairing = state.clone();
+            if tokio::task::spawn_blocking(move || repairing.repair_identity())
+                .await
+                .is_err()
+            {
+                tracing::warn!("identity repair panicked; serving with the image's identity");
+            }
+            crate::hook_handlers::run(&state, "run", slot).await;
             StatusCode::OK.into_response()
         }
         Bootstrap::AlreadyIdentical => {
@@ -284,9 +296,12 @@ async fn validate_hook(State(state): State<AppState>) -> StatusCode {
     StatusCode::OK
 }
 
+/// Suspend notice. Runs the workload's handler, if any, before answering, so it
+/// runs before the freeze. Always 200: see [`crate::hook_handlers`].
 async fn suspend_hook(State(state): State<AppState>) -> StatusCode {
-    state.record_hook("suspend");
+    let slot = state.record_hook("suspend");
     tracing::info!("suspend hook");
+    crate::hook_handlers::run(&state, "suspend", slot).await;
     StatusCode::OK
 }
 
@@ -306,8 +321,13 @@ async fn suspend_hook(State(state): State<AppState>) -> StatusCode {
 /// The one thing that does change across a suspend is the guest's view of time: it
 /// observes the whole suspension as a single jump, so any timeout, lease, or
 /// session held by a running command expires at once on resume.
+///
+/// Outbound connections do not survive that jump (measured 2026-09-23: every held
+/// TLS socket was aborted on resume), which is what a workload's resume handler is
+/// for. It runs before this answers, so before the platform forwards held traffic.
 async fn resume_hook(State(state): State<AppState>) -> StatusCode {
-    state.record_hook("resume");
+    let slot = state.record_hook("resume");
+    crate::hook_handlers::run(&state, "resume", slot).await;
     if state.is_bootstrapped() {
         tracing::info!("resumed with bootstrap state intact");
     } else {
@@ -327,8 +347,9 @@ async fn terminate_hook(State(state): State<AppState>) -> StatusCode {
     // Recorded even though nothing may live to report it: a suspend that follows a
     // terminate hook does not exist, but a health poll racing the drain can still
     // read it, and the record costs nothing.
-    state.record_hook("terminate");
+    let slot = state.record_hook("terminate");
     tracing::info!("terminate hook");
+    crate::hook_handlers::run(&state, "terminate", slot).await;
     StatusCode::OK
 }
 
@@ -373,6 +394,7 @@ async fn health(State(state): State<AppState>) -> Json<Health> {
             }),
         identity_degraded: identity.degraded(),
         identity_repaired: identity.attempted,
+        identity_steps: identity.steps.iter().map(|step| step.to_wire()).collect(),
         busy,
         execs,
         // The daemon's own observations of the platform's lifecycle hooks —
@@ -760,6 +782,8 @@ static SSE_EVENTS: &[schema::SseEvent] = &[
 mod tests {
     use super::*;
     use crate::config::Config;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// The platform's own body shape: the caller's payload as a JSON *string* inside
     /// `{"runHookPayload": ...}`. Built with `serde_json` rather than by formatting,
@@ -989,5 +1013,127 @@ mod tests {
             "an invocation is recorded whatever the verdict"
         );
         assert_eq!(dropped, 0);
+    }
+
+    /// A repairer that counts its calls and reports one repaired and one failed step.
+    fn counting_repairer() -> (crate::identity::Repairer, Arc<AtomicUsize>) {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counted = calls.clone();
+        let repairer: crate::identity::Repairer = Arc::new(move || {
+            counted.fetch_add(1, Ordering::SeqCst);
+            crate::identity::Report {
+                attempted: true,
+                steps: vec![
+                    crate::identity::Step {
+                        name: "machine-id",
+                        result: crate::identity::StepResult::Repaired,
+                    },
+                    crate::identity::Step {
+                        name: "boot-id",
+                        result: crate::identity::StepResult::Failed {
+                            error: "EPERM".to_string(),
+                        },
+                    },
+                ],
+            }
+        });
+        (repairer, calls)
+    }
+
+    /// Identity is repaired per VM: at the winning run hook, never at construction
+    /// (the image-build VM) and never again on a replayed or conflicting hook.
+    #[tokio::test]
+    async fn identity_is_repaired_once_at_the_winning_run_hook() {
+        let (repairer, calls) = counting_repairer();
+        let state = AppState::with_probe(Config::default(), crate::disk::available_bytes, repairer);
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "no repair before the run hook"
+        );
+        let before = health(State(state.clone())).await.0;
+        assert!(!before.identity_repaired && before.identity_steps.is_empty());
+
+        for token in ["a", "a", "b"] {
+            post_hook(
+                &state,
+                envelope(serde_json::json!({ "agent_token": token })),
+            )
+            .await;
+        }
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "replay and conflict do not re-mint"
+        );
+
+        let after = health(State(state.clone())).await.0;
+        assert!(after.identity_repaired && after.identity_degraded);
+        let steps: Vec<_> = after
+            .identity_steps
+            .iter()
+            .map(|step| {
+                (
+                    step.name.as_str(),
+                    step.outcome.as_str(),
+                    step.error.as_deref(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            steps,
+            [
+                ("machine-id", "repaired", None),
+                ("boot-id", "failed", Some("EPERM"))
+            ]
+        );
+    }
+
+    /// The run handler runs after the bootstrap installs, once, and its outcome lands
+    /// on the run hook's entry; a replay records an entry but runs nothing.
+    #[tokio::test]
+    async fn the_run_handler_runs_once_on_the_winning_bootstrap() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let count = dir.path().join("count");
+        let handler = dir.path().join("run");
+        std::fs::write(
+            &handler,
+            format!("#!/bin/sh\necho x >> {}\n", count.display()),
+        )
+        .expect("write");
+        std::fs::set_permissions(&handler, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        let state = AppState::new(Config {
+            hooks_dir: dir.path().to_path_buf(),
+            ..Config::default()
+        });
+        for _ in 0..2 {
+            post_hook(&state, envelope(serde_json::json!({"agent_token": "a"}))).await;
+        }
+        assert_eq!(std::fs::read_to_string(&count).expect("ran"), "x\n");
+        let (observed, _) = state.hook_report();
+        assert!(observed[0].handler.as_ref().expect("outcome").succeeded());
+        assert!(observed[1].handler.is_none(), "the replay ran no handler");
+    }
+
+    /// A failing suspend handler still answers 200: the platform's handling of a
+    /// failed hook is undocumented, and a VM that cannot suspend is the worse outcome.
+    #[tokio::test]
+    async fn a_failing_suspend_handler_still_answers_200() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let handler = dir.path().join("suspend");
+        std::fs::write(&handler, "#!/bin/sh\nexit 1\n").expect("write");
+        std::fs::set_permissions(&handler, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        let state = AppState::new(Config {
+            hooks_dir: dir.path().to_path_buf(),
+            ..Config::default()
+        });
+        assert_eq!(suspend_hook(State(state.clone())).await, StatusCode::OK);
+        let (observed, _) = state.hook_report();
+        assert_eq!(
+            observed[0].handler.as_ref().expect("outcome").exit_code,
+            Some(1)
+        );
     }
 }

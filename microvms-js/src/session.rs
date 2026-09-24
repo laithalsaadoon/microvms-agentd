@@ -81,6 +81,55 @@ pub struct Health {
     /// How many execs are registered, in any phase. `busy: false` with a non-zero count is a
     /// VM holding unacked output somebody still has to collect.
     pub execs: i64,
+    /// Every lifecycle-hook invocation the daemon observed, oldest first, each with its
+    /// workload handler's outcome when the image carries one. The hook routes are
+    /// reachable over loopback from inside the guest, so a workload can add entries; the
+    /// earliest are the platform's.
+    pub hooks: Vec<HookObservation>,
+    /// How many hook invocations the daemon's log cap dropped.
+    pub hooks_dropped: i64,
+    /// Each identity-repair step and its outcome. Empty until the run hook repairs this
+    /// VM's identity.
+    pub identity_steps: Vec<IdentityStep>,
+}
+
+/// One lifecycle-hook invocation, as the daemon observed it.
+#[napi(object)]
+pub struct HookObservation {
+    /// `ready`, `validate`, `run`, `suspend`, `resume`, or `terminate`.
+    pub hook: String,
+    /// Seconds since the epoch on the daemon's clock when the hook arrived.
+    pub fired_at: i64,
+    /// The workload handler's outcome, or `null` when the image has no handler for it.
+    pub handler: Option<HandlerOutcome>,
+}
+
+/// What a workload's hook handler did. Its output is in the daemon's log, not here.
+#[napi(object)]
+pub struct HandlerOutcome {
+    /// The exit code, or `null` when the handler was killed or never started.
+    pub exit_code: Option<i32>,
+    /// The signal that ended it, if one did.
+    pub signal: Option<i32>,
+    /// Whether the daemon killed it at its time budget.
+    pub timed_out: bool,
+    /// Milliseconds from spawn to exit or kill.
+    pub duration_ms: i64,
+    /// Why it could not run at all, such as `not executable`.
+    pub error: Option<String>,
+    /// Whether it ran and exited 0 within its budget.
+    pub succeeded: bool,
+}
+
+/// One identity-repair step.
+#[napi(object)]
+pub struct IdentityStep {
+    /// `machine-id`, `hostname`, `boot-id`, `random-seed`, or `cached-credential`.
+    pub name: String,
+    /// `repaired`, `not_applicable`, or `failed`.
+    pub outcome: String,
+    /// The OS error for a failed step.
+    pub error: Option<String>,
 }
 
 impl Health {
@@ -95,6 +144,32 @@ impl Health {
             identity_repaired: health.identity_repaired,
             busy: health.busy,
             execs: health.execs as i64,
+            hooks: health
+                .hooks
+                .into_iter()
+                .map(|hook| HookObservation {
+                    hook: hook.hook,
+                    fired_at: hook.fired_at as i64,
+                    handler: hook.handler.map(|handler| HandlerOutcome {
+                        succeeded: handler.succeeded(),
+                        exit_code: handler.exit_code,
+                        signal: handler.signal,
+                        timed_out: handler.timed_out,
+                        duration_ms: handler.duration_ms as i64,
+                        error: handler.error,
+                    }),
+                })
+                .collect(),
+            hooks_dropped: health.hooks_dropped as i64,
+            identity_steps: health
+                .identity_steps
+                .into_iter()
+                .map(|step| IdentityStep {
+                    name: step.name,
+                    outcome: step.outcome,
+                    error: step.error,
+                })
+                .collect(),
         }
     }
 }
