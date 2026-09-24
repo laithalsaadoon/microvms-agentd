@@ -4,6 +4,7 @@
 import base64
 import io
 import json
+import os
 import subprocess
 import tarfile
 from pathlib import Path
@@ -78,8 +79,15 @@ class Repo:
         return pull
 
 
+# A git hook exports GIT_DIR and GIT_INDEX_FILE, which would point these fixture commands
+# at the repository running the hook instead of the temporary one.
+CLEAN_ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
 def git(path, *args):
-    subprocess.run(["git", "-C", str(path), *args], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), *args], check=True, capture_output=True, env=CLEAN_ENV
+    )
 
 
 def export(tmp_path, change) -> dict[str, bytes]:
@@ -94,7 +102,7 @@ def export(tmp_path, change) -> dict[str, bytes]:
     git(project, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base")
     change(project)
     script = handler.EXPORT.replace("/workspace/results", str(results))
-    subprocess.run(["bash", "-c", script], cwd=project, check=True)
+    subprocess.run(["bash", "-c", script], cwd=project, check=True, env=CLEAN_ENV)
     (results / "REPORT.md").write_text("Fixed it.\n")
     return {path.name: path.read_bytes() for path in results.iterdir()}
 
