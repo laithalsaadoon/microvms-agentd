@@ -6,21 +6,29 @@
 # SPDX-License-Identifier: Apache-2.0
 """Check that each traced requirement appears in every verification layer.
 
-A requirement in `spec/core.symspec.json` is traced when it is listed in `TRACED`
-below. Each traced key must appear in six places, and this script reports where:
+Requirements are defined in `spec/core.symspec.json` and `spec/agentd.symspec.json`. A
+requirement is traced when it is listed in `TRACED` below. Each traced key must appear
+in six places, and this script reports where:
 
   model    a Stateright property whose name starts with the key (`model/src/`)
-  gherkin  a tag `@KEY` on a scenario (`microvms-cli/tests/features/`)
-  fuzz     a mention in a fuzz harness (a file calling `bolero::check!` or
+  gherkin  a tag `@KEY` on a scenario (`<crate>/tests/features/*.feature`)
+  fuzz     a mention in a fuzz harness (a Rust file calling `bolero::check!` or
            `fuzz_target!`)
-  test     a mention in a Rust test: `microvms-cli/src/guards.rs`, a file under a
-           crate's `tests/`, or a source file's test module
-  impl     a mention in production source (`microvms-cli/src/`, `microvms-core/src/`)
+  test     a mention in a test: a file under a Rust crate's `tests/`, a source
+           file's test module, `microvms-cli/src/guards.rs`, or a binding test under
+           `microvms-py/tests/` or `microvms-js/__test__/`
+  impl     a mention in production Rust source of the CLI, core, daemon, protocol,
+           or either binding
   live     a live conformance check whose name starts with the key
            (`conformance/run_rs.py`, run against AWS by `mise run live`)
 
+A traced key may waive a layer with a reason, for example the live layer of a pure
+function that makes no AWS call. The waiver and its reason are rendered in the matrix,
+so an absent layer is a stated decision rather than a gap.
+
 It also refuses a mention of an unknown key, so a typo such as `CLI-10` for `CLI-9`
-cannot pass as coverage. `docs/TRACEABILITY.md` is the rendered matrix:
+cannot pass as coverage. Keys are recognized by the prefixes the two specs define.
+`docs/TRACEABILITY.md` is the rendered matrix:
 
   ./scripts/check-trace.py           print the matrix; fail if a layer is missing
   ./scripts/check-trace.py --write   also render docs/TRACEABILITY.md
@@ -36,11 +44,15 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SPEC = ROOT / "spec" / "core.symspec.json"
+SPECS = (
+    ROOT / "spec" / "core.symspec.json",
+    ROOT / "spec" / "agentd.symspec.json",
+)
 DOC = ROOT / "docs" / "TRACEABILITY.md"
 
-# Requirements traced end to end, and the issue that introduced each set.
-TRACED = {
+# Requirements traced end to end. The value is the issue that introduced the key, or
+# `(issue, {layer: reason})` for a key that waives a layer; see the module docs.
+TRACED: dict[str, str | tuple[str, dict[str, str]]] = {
     "CLI-7": "#216",
     "CLI-8": "#216",
     "CLI-9": "#216",
@@ -48,25 +60,61 @@ TRACED = {
 
 LAYERS = ("model", "gherkin", "fuzz", "test", "impl", "live")
 
-KEY = re.compile(r"\b(CLI-\d+)\b")
-PROPERTY = re.compile(
-    r'Property::(?:<\w+>::)?(?:always|sometimes|eventually)\(\s*"(CLI-\d+)\b'
+# Production Rust source, and the directories whose every file is a test.
+IMPL_DIRS = (
+    "microvms-cli/src",
+    "microvms-core/src",
+    "agentd/src",
+    "protocol/src",
+    "microvms-py/src",
+    "microvms-js/src",
 )
-TAG = re.compile(r"@(CLI-\d+)\b")
-# A live conformance check whose name starts with the requirement key.
-LIVE_CHECK = re.compile(r'results\.(?:check|eq)\(\s*f?"(CLI-\d+)\b')
+RUST_TEST_DIRS = (
+    "microvms-cli/tests",
+    "microvms-core/tests",
+    "agentd/tests",
+    "agentd/fuzz/fuzz_targets",
+)
+BINDING_TESTS = (
+    ("microvms-py/tests", "*.py"),
+    ("microvms-js/__test__", "*.mjs"),
+    ("microvms-js/__test__", "*.ts"),
+)
+
 FUZZ_MARKER = re.compile(r"bolero::check!|fuzz_target!")
 TEST_MODULE = re.compile(r"^#\[cfg\(test\)\]\s*$", re.MULTILINE)
 
 
 def spec_keys() -> dict[str, str]:
-    """Every requirement key in the spec, with its EARS sentence."""
-    document = json.loads(SPEC.read_text())
-    return {
-        entry["key"]: entry["sentence"]
-        for entry in document["requirements"].values()
-        if entry.get("key")
-    }
+    """Every requirement key in either spec, with its EARS sentence."""
+    keys: dict[str, str] = {}
+    for spec in SPECS:
+        document = json.loads(spec.read_text())
+        for entry in document["requirements"].values():
+            if entry.get("key"):
+                keys[entry["key"]] = entry["sentence"]
+    return keys
+
+
+class Patterns:
+    """The key-matching expressions, built from the prefixes the specs define."""
+
+    def __init__(self, keys: dict[str, str]) -> None:
+        prefixes = sorted({key.rsplit("-", 1)[0] for key in keys})
+        key = rf"(?:{'|'.join(map(re.escape, prefixes))})-\d+"
+        self.key = re.compile(rf"\b({key})\b")
+        self.property = re.compile(
+            rf'Property::(?:<\w+>::)?(?:always|sometimes|eventually)\(\s*"({key})\b'
+        )
+        self.tag = re.compile(rf"@({key})\b")
+        # A live conformance check whose name starts with the requirement key.
+        self.live = re.compile(rf'results\.(?:check|eq)\(\s*f?"({key})\b')
+
+
+def waivers(key: str) -> dict[str, str]:
+    """The layers a traced key waives, each with its reason."""
+    entry = TRACED[key]
+    return entry[1] if isinstance(entry, tuple) else {}
 
 
 def rel(path: Path) -> str:
@@ -91,7 +139,7 @@ def split_test_region(text: str) -> tuple[str, str]:
     return text, ""
 
 
-def collect() -> dict[str, dict[str, set[str]]]:
+def collect(patterns: Patterns) -> dict[str, dict[str, set[str]]]:
     """For every key found anywhere, the files each layer found it in."""
     found: dict[str, dict[str, set[str]]] = {}
 
@@ -99,35 +147,45 @@ def collect() -> dict[str, dict[str, set[str]]]:
         found.setdefault(key, {layer: set() for layer in LAYERS})[layer].add(rel(path))
 
     for path in rust_files("model/src"):
-        for key in PROPERTY.findall(path.read_text()):
+        for key in patterns.property.findall(path.read_text()):
             note(key, "model", path)
 
-    for path in sorted(
-        (ROOT / "microvms-cli" / "tests" / "features").glob("*.feature")
-    ):
-        for key in TAG.findall(path.read_text()):
+    for path in sorted(ROOT.glob("*/tests/features/*.feature")):
+        for key in patterns.tag.findall(path.read_text()):
             note(key, "gherkin", path)
 
-    cli_tests = rust_files("microvms-cli/tests", "microvms-core/tests")
-    for path in rust_files("microvms-cli/src", "microvms-core/src") + cli_tests:
+    rust_tests = rust_files(*RUST_TEST_DIRS)
+    for path in rust_files(*IMPL_DIRS) + rust_tests:
         text = path.read_text()
         if FUZZ_MARKER.search(text):
-            for key in KEY.findall(text):
+            for key in patterns.key.findall(text):
                 note(key, "fuzz", path)
             continue
-        if path in cli_tests or path.name == "guards.rs":
-            for key in KEY.findall(text):
+        if path in rust_tests or path.name == "guards.rs":
+            for key in patterns.key.findall(text):
                 note(key, "test", path)
             continue
         production, tests = split_test_region(text)
-        for key in KEY.findall(production):
+        for key in patterns.key.findall(production):
             note(key, "impl", path)
-        for key in KEY.findall(tests):
+        for key in patterns.key.findall(tests):
             note(key, "test", path)
 
-    for key in LIVE_CHECK.findall((ROOT / "conformance" / "run_rs.py").read_text()):
-        note(key, "live", ROOT / "conformance" / "run_rs.py")
+    for directory, pattern in BINDING_TESTS:
+        for path in sorted((ROOT / directory).glob(pattern)):
+            for key in patterns.key.findall(path.read_text()):
+                note(key, "test", path)
+
+    live = ROOT / "conformance" / "run_rs.py"
+    for key in patterns.live.findall(live.read_text()):
+        note(key, "live", live)
     return found
+
+
+def cell(found: dict[str, dict[str, set[str]]], key: str, layer: str) -> str:
+    if layer in waivers(key):
+        return "waived"
+    return str(len(found.get(key, {}).get(layer, ())))
 
 
 def render(found: dict[str, dict[str, set[str]]], sentences: dict[str, str]) -> str:
@@ -136,21 +194,23 @@ def render(found: dict[str, dict[str, set[str]]], sentences: dict[str, str]) -> 
         "",
         "Generated by `./scripts/check-trace.py --write`; `mise run trace:check` fails when",
         "this file is stale or a traced requirement is missing a layer. Requirements are",
-        "defined in `spec/core.symspec.json`.",
+        "defined in `spec/core.symspec.json` and `spec/agentd.symspec.json`.",
         "",
         "| Requirement | " + " | ".join(LAYERS) + " |",
         "|---|" + "---|" * len(LAYERS),
     ]
     for key in TRACED:
-        cells = [str(len(found.get(key, {}).get(layer, ()))) for layer in LAYERS]
+        cells = [cell(found, key, layer) for layer in LAYERS]
         lines.append(f"| {key} | " + " | ".join(cells) + " |")
     for key in TRACED:
         lines += ["", f"## {key}", "", sentences[key], ""]
         for layer in LAYERS:
             files = sorted(found.get(key, {}).get(layer, ()))
-            lines.append(
-                f"- **{layer}:** " + (", ".join(f"`{f}`" for f in files) or "none")
-            )
+            listed = ", ".join(f"`{f}`" for f in files)
+            reason = waivers(key).get(layer)
+            if reason:
+                listed = f"waived: {reason}" + (f" ({listed})" if listed else "")
+            lines.append(f"- **{layer}:** " + (listed or "none"))
     return "\n".join(lines) + "\n"
 
 
@@ -164,12 +224,17 @@ def main() -> int:
     args = parser.parse_args()
 
     sentences = spec_keys()
-    found = collect()
+    found = collect(Patterns(sentences))
     problems: list[str] = []
 
     for key in TRACED:
         if key not in sentences:
-            problems.append(f"{key} is traced but not defined in {rel(SPEC)}")
+            problems.append(f"{key} is traced but not defined in either spec")
+        for layer, reason in waivers(key).items():
+            if layer not in LAYERS or not reason.strip():
+                problems.append(
+                    f"{key} waives {layer!r} without a known layer and reason"
+                )
     for key, layers in sorted(found.items()):
         if key not in sentences:
             where = sorted({path for paths in layers.values() for path in paths})
@@ -178,15 +243,13 @@ def main() -> int:
             )
     for key in TRACED:
         for layer in LAYERS:
-            if not found.get(key, {}).get(layer):
+            if layer not in waivers(key) and not found.get(key, {}).get(layer):
                 problems.append(f"{key} has no {layer} layer")
 
     width = max(len(layer) for layer in LAYERS)
     print("requirement  " + "  ".join(layer.ljust(width) for layer in LAYERS))
     for key in TRACED:
-        counts = [
-            str(len(found.get(key, {}).get(layer, ()))).ljust(width) for layer in LAYERS
-        ]
+        counts = [cell(found, key, layer).ljust(width) for layer in LAYERS]
         print(f"{key:<11}  " + "  ".join(counts))
 
     rendered = render(found, sentences) if not problems or args.write else ""
