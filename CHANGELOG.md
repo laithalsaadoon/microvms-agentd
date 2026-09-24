@@ -8,6 +8,14 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
 
 ### Fixed
 
+- **`agent-prompt --agent codex` no longer fails as a precondition on a healthy fresh VM.**
+  The installed-version probe had a 10 s budget; Codex's first `--version` on a new VM
+  takes about 13 s while its executable pages in. The probe now allows 60 s, and a probe
+  that does time out is reported as `ERR_TIMEOUT` naming the budget instead of telling the
+  caller to check the image. Found by a full live run; the live suite also records a
+  section that raises as one named FAIL with the envelope's message and runs the sections
+  after it, where before it stopped the run.
+
 - **A closed stdout or stderr no longer panics the CLI (#216, CLI-7, CLI-8, CLI-9).**
   `microvm keepalive --help | head -3` exited 101 with "failed printing to stdout: Broken
   pipe": clap's help and `constants --emit-json` went through `print!`, which panics when

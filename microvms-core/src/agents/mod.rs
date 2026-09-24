@@ -524,6 +524,18 @@ pub async fn installed_agents(session: &Session) -> Result<Vec<AgentSpec>, Error
     Ok(specs)
 }
 
+/// The daemon-side budget for one `--version` probe.
+///
+/// Sized for the first run on a fresh VM, not a warm one. A launched VM reads its disk on
+/// demand, so the first exec of an agent pages the whole executable in: measured
+/// 2026-09-24 in us-east-1, Codex 0.156.1's first `--version` took 13.0 s and the second
+/// 0.1 s (Claude Code's took 7 ms). The earlier 10 s budget killed that first probe and
+/// `agent-prompt --agent codex` failed as a precondition on a healthy VM.
+pub const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The client's wait for the probe: the daemon budget plus room for the round trips.
+pub const VERSION_PROBE_WAIT: Duration = Duration::from_secs(90);
+
 /// Probe the installed executable as the guest agent UID, without sourcing credentials.
 /// Only a numeric version is returned; arbitrary guest stdout/stderr never enters reports.
 pub async fn installed_version(session: &Session, agent: Agent) -> Result<String, Error> {
@@ -538,15 +550,30 @@ pub async fn installed_version(session: &Session, agent: Agent) -> Result<String
         )]),
         user: Some(AGENT_UID),
         group: Some(AGENT_GID),
-        timeout_sec: Some(10.0),
+        timeout_sec: Some(VERSION_PROBE_TIMEOUT.as_secs_f64()),
         stdin: false,
         reap_group_on_exit: true,
     };
-    let result = session.run_sync(request, Duration::from_secs(25)).await?;
+    let result = session.run_sync(request, VERSION_PROBE_WAIT).await?;
     if result.succeeded()
         && let Some(version) = reported_version(result.stdout())
     {
         return Ok(version.to_string());
+    }
+    if result
+        .outcome
+        .as_ref()
+        .is_some_and(|outcome| outcome.timed_out)
+    {
+        return Err(Error::new(
+            ErrorKind::Timeout,
+            format!(
+                "{agent} --version did not answer within {}s; the first run on a fresh VM \
+                 reads the executable from a demand-paged disk, so retry once before \
+                 suspecting the image",
+                VERSION_PROBE_TIMEOUT.as_secs(),
+            ),
+        ));
     }
     Err(Error::new(
         ErrorKind::Precondition,
@@ -1406,6 +1433,31 @@ mod tests {
         }
     }
 
+    /// **A cold first run is a timeout, not a broken image.** Measured 2026-09-24: Codex's
+    /// first `--version` on a fresh VM took 13 s and the old 10 s budget killed it, which
+    /// failed the live suite's Codex prompt as `ERR_PRECONDITION` on a healthy VM.
+    ///
+    /// **Falsification** — 2026-09-24. Drop the `timed_out` branch and this reports
+    /// `Precondition` ("verify the pinned agent executable"); restored after.
+    #[tokio::test]
+    async fn a_timed_out_version_probe_reports_a_timeout_naming_the_budget() {
+        let recorder = Recorder::with([
+            Reply::ok(serde_json::json!({"exec_id":"version","phase":"running"})),
+            Reply::ok(serde_json::json!({"exec_id":"version","phase":"exited"})),
+            Reply::ok(serde_json::json!({
+                "exec_id":"version","phase":"exited","exit_code":null,"signal":9,
+                "stdout":"","stderr":"","timed_out":true,
+                "truncated":false,"writers_may_be_alive":false
+            })),
+        ]);
+        let (session, _, _) = session_with(Arc::clone(&recorder));
+        let error = installed_version(&session, Agent::Codex)
+            .await
+            .expect_err("a killed probe has no version");
+        assert_eq!(error.kind(), ErrorKind::Timeout, "{error}");
+        assert!(error.to_string().contains("60s"), "{error}");
+    }
+
     #[tokio::test]
     async fn installed_version_probe_is_demoted_and_never_sources_agent_credentials() {
         let recorder = Recorder::with([
@@ -1432,7 +1484,12 @@ mod tests {
             start["env"],
             serde_json::json!({"PATH":"/usr/local/bin:/usr/bin:/bin"})
         );
-        assert_eq!(start["timeout_sec"], 10.0);
+        assert_eq!(start["timeout_sec"], VERSION_PROBE_TIMEOUT.as_secs_f64());
+        assert!(
+            VERSION_PROBE_TIMEOUT >= Duration::from_secs(30),
+            "must cover a cold first run"
+        );
+        assert!(VERSION_PROBE_WAIT > VERSION_PROBE_TIMEOUT);
         assert_eq!(start["reap_group_on_exit"], true);
     }
 }

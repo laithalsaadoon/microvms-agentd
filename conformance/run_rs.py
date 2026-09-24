@@ -466,6 +466,38 @@ def exception_summary(error: Exception) -> str:
     return type(error).__name__
 
 
+def run_section(
+    results: "Results",
+    name: str,
+    section: Callable[..., Any],
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
+    """Runs one suite section so a raise inside it is a named FAIL, not the end of the run.
+
+    A section's CLI call that fails with an envelope raises `KindError`; before this
+    wrapper that exception left `main`, skipped every later section, and printed only the
+    code. Measured 2026-09-24: Codex's version probe timing out in `drive_agent_vm`
+    aborted the suite 200 checks in, so the three keepalive sections after it never ran.
+    The FAIL carries the envelope's message, so the finding names its cause.
+    """
+    try:
+        return section(*args, **kwargs)
+    except Exception as exc:  # noqa: BLE001 - a section's raise is a finding, not an abort
+        results.check(
+            f"section {name} ran to completion", False, section_failure_detail(exc)
+        )
+        return None
+
+
+def section_failure_detail(error: Exception) -> str:
+    """The code and message of a section's raise; secrets never enter envelopes."""
+    if isinstance(error, KindError):
+        envelope = error.envelope
+        return f"{envelope.code} (exit={envelope.exit_code}): {envelope.error[:300]}"
+    return f"{type(error).__name__}: {str(error)[:300]}"
+
+
 def agent_output_summary(data: dict[str, Any]) -> str:
     def scalar(key: str) -> str:
         value = data.get(key)
@@ -5624,6 +5656,38 @@ def check_closing_reader_helper(results: Results) -> None:
     )
 
 
+def check_run_section(results: "Results") -> None:
+    """A section's raise becomes one named FAIL with the envelope's message, and the run
+    goes on; a section that returns hands its value back unchanged."""
+    probe = Results(probe=True)
+    envelope = Envelope(
+        "error",
+        "1",
+        "",
+        {},
+        code="ERR_PRECONDITION",
+        exit_code=12,
+        error="could not read codex's installed version",
+    )
+
+    def raises() -> None:
+        raise KindError(envelope)
+
+    returned = run_section(probe, "agent_vm", raises)
+    after = run_section(probe, "auto_resume", lambda: "ran")
+    names = [name for name, _ in probe.failed]
+    detail = probe.failed[0][1] if probe.failed else ""
+    results.check(
+        "a raising section is recorded as a named FAIL and the next section still runs",
+        returned is None
+        and after == "ran"
+        and names == ["section agent_vm ran to completion"]
+        and "ERR_PRECONDITION" in detail
+        and "installed version" in detail,
+        f"failed={probe.failed!r} after={after!r}",
+    )
+
+
 def self_test() -> int:
     """Drives the envelope-to-exception mapping against the stub. No AWS, no money.
 
@@ -5642,6 +5706,7 @@ def self_test() -> int:
         results = Results()
         check_log_privacy(cli, results, Path(tmp))
         check_closing_reader_helper(results)
+        check_run_section(results)
 
         # -- the success side -------------------------------------------------
         ok = cli.call("ok")
@@ -6186,7 +6251,7 @@ def main() -> int:
             # grew the five surfaces `docs/CLI-COVERAGE-PLAN.md` names, so there is nothing
             # left to announce. The summary still prints a skip count, which should read
             # zero — see `Results.skip`.
-            drive_local_commands(cli, results)
+            run_section(results, "local_commands", drive_local_commands, cli, results)
             launched = drive_lifecycle(
                 cli,
                 binary,
@@ -6195,8 +6260,14 @@ def main() -> int:
                 build_log_group,
                 build_log_stream_prefix,
             )
-            drive_build_logging(
-                aws.client("logs"), build_log_group, build_log_stream_prefix, results
+            run_section(
+                results,
+                "build_logging",
+                drive_build_logging,
+                aws.client("logs"),
+                build_log_group,
+                build_log_stream_prefix,
+                results,
             )
 
             # The daemon lane pokes the VM the CLI launched, over raw HTTP. Composed
@@ -6209,92 +6280,201 @@ def main() -> int:
                 microvm_id=str(launched.data["microvmId"]),
                 microvm_client=aws.client(SERVICE),
             )
-            drive_daemon_lane(daemon, results)
+            run_section(results, "daemon_lane", drive_daemon_lane, daemon, results)
 
-            drive_exec(cli, launched, results)
-            drive_health(cli, launched, results)
+            run_section(results, "exec", drive_exec, cli, launched, results)
+            run_section(results, "health", drive_health, cli, launched, results)
             # Platform posture (#154, #155) on the suite's own connector-less VM: the pins
             # are the measured facts, and two of them are designed to go red the day the
             # platform starts honouring an omitted egress connector. Needs `iam:Get/List`
             # on the execution role, which the conformance caller already has.
-            drive_platform_posture(cli, launched, aws, results)
-            drive_exec_identity(cli, launched, results)
+            run_section(
+                results,
+                "platform_posture",
+                drive_platform_posture,
+                cli,
+                launched,
+                aws,
+                results,
+            )
+            run_section(
+                results, "exec_identity", drive_exec_identity, cli, launched, results
+            )
             # Machine-id per VM (#205): a second VM from the suite's image, compared
             # against the suite's own.
-            drive_identity_per_vm(cli, launched, results)
+            run_section(
+                results,
+                "identity_per_vm",
+                drive_identity_per_vm,
+                cli,
+                launched,
+                results,
+            )
             # After the identity section because it leans on the same detach/poll surface
             # that section just proved: every process fact here is read through `ps` and
             # every stop through `kill`, against the same shared VM.
-            drive_kill_and_procs(cli, launched, results)
-            drive_stable_launch(cli, launched, results)
+            run_section(
+                results, "kill_and_procs", drive_kill_and_procs, cli, launched, results
+            )
+            run_section(
+                results, "stable_launch", drive_stable_launch, cli, launched, results
+            )
             # Lifecycle by id (#195, #197, #201, #203) on its own bounded VMs, from the
             # suite's image.
-            drive_lifecycle_by_id(cli, launched, aws, results)
+            run_section(
+                results,
+                "lifecycle_by_id",
+                drive_lifecycle_by_id,
+                cli,
+                launched,
+                aws,
+                results,
+            )
             # Adoption (#196) on its own bounded VM, from the suite's image.
-            drive_adopt_by_id(cli, launched, results)
+            run_section(
+                results, "adopt_by_id", drive_adopt_by_id, cli, launched, results
+            )
             # Names (#202): a CLI-registered VM found and released through core.
-            drive_find_by_name(cli, launched, results)
+            run_section(
+                results, "find_by_name", drive_find_by_name, cli, launched, results
+            )
             # After the identity section because it leans on the same detach/poll/ack
             # surface that section just proved, so a rotation failure here points at the
             # rotation rather than at a broken poll.
-            drive_token_rotation(cli, launched, results)
-            drive_streaming(cli, launched, results)
-            drive_closed_output(cli, launched, results)
-            drive_stdin(cli, launched, results)
-            drive_file_transfer(cli, launched, results, Path(tmp))
+            run_section(
+                results, "token_rotation", drive_token_rotation, cli, launched, results
+            )
+            run_section(results, "streaming", drive_streaming, cli, launched, results)
+            run_section(
+                results, "closed_output", drive_closed_output, cli, launched, results
+            )
+            run_section(results, "stdin", drive_stdin, cli, launched, results)
+            run_section(
+                results,
+                "file_transfer",
+                drive_file_transfer,
+                cli,
+                launched,
+                results,
+                Path(tmp),
+            )
             # The cap trio *after* the file and stream sections, deliberately: it pushes
             # 32 MiB through the guest and asserts the daemon survived, so anything that
             # ran before it is evidence the survival claim is about a daemon that was
             # already doing real work — and anything after it would be confounded by it.
-            drive_output_cap(cli, launched, results)
+            run_section(results, "output_cap", drive_output_cap, cli, launched, results)
             # Suspend/resume last among the shared-VM sections, because it is the only one
             # that changes the VM's state for forty seconds and every section above wants a
             # running one.
-            drive_suspend_resume(cli, launched, results)
+            run_section(
+                results, "suspend_resume", drive_suspend_resume, cli, launched, results
+            )
             # Named VMs on their own VM (from the suite's image, no second build):
             # registration only happens at launch, so the suite's VM cannot carry it.
-            drive_named_vm(cli, launched, Path(tmp) / "named-state", results)
+            run_section(
+                results,
+                "named_vm",
+                drive_named_vm,
+                cli,
+                launched,
+                Path(tmp) / "named-state",
+                results,
+            )
             # Tunnel identity on its own VM as well (launched `--identity`, from the
             # suite's image): the seed is delivered only at launch, so the suite's VM
             # cannot carry one.
-            drive_tunnel_identity(cli, launched, Path(tmp) / "ident-state", results)
+            run_section(
+                results,
+                "tunnel_identity",
+                drive_tunnel_identity,
+                cli,
+                launched,
+                Path(tmp) / "ident-state",
+                results,
+            )
             # microvm.toml + run <DIR> on their own VM too (launched *through the config
             # file*, from the suite's image): the config merge and the sync round trip
             # both happen at launch, so the suite's VM cannot carry them either.
-            drive_config_and_sync(cli, launched, Path(tmp) / "sync-project", results)
+            run_section(
+                results,
+                "config_and_sync",
+                drive_config_and_sync,
+                cli,
+                launched,
+                Path(tmp) / "sync-project",
+                results,
+            )
             # The self-provisioned quickstart is the one section with its own build:
             # provisioning fires only when building, so no launch from the suite's
             # image can exercise it. See its docstring for the version-coupled caveat.
-            drive_provisioned_quickstart(
-                cli, Path(tmp) / "quickstart-state", aws.client("logs"), results
+            run_section(
+                results,
+                "provisioned_quickstart",
+                drive_provisioned_quickstart,
+                cli,
+                Path(tmp) / "quickstart-state",
+                aws.client("logs"),
+                results,
             )
             # `build --project` on its own build too (#74): the environment layer is
             # baked at build time, so no launch from the suite's image can carry one.
             # Beside the other own-build section so the two ~3-minute builds sit together.
-            drive_project_build(
-                cli, binary, Path(tmp) / "project", aws.client("logs"), results
+            run_section(
+                results,
+                "project_build",
+                drive_project_build,
+                cli,
+                binary,
+                Path(tmp) / "project",
+                aws.client("logs"),
+                results,
             )
             # Agent VMs on their own build and their own VM (`docs/AGENT-VMS.md`): the
             # image is derived from the profile set and the daemon bytes, so no launch
             # from the suite's image can carry a coding agent. The only section that
             # needs Bedrock; it prints the model ids it used to stderr. Beside the
             # other own-build sections for the same reason `drive_project_build` is.
-            drive_agent_vm(
-                cli, binary, Path(tmp) / "agent-state", aws.client("logs"), results
+            run_section(
+                results,
+                "agent_vm",
+                drive_agent_vm,
+                cli,
+                binary,
+                Path(tmp) / "agent-state",
+                aws.client("logs"),
+                results,
             )
             # Auto-resume on its own VM (launched `--auto-resume` from the suite's image):
             # the policy is set only at launch, so the suite's VM cannot carry it. NEW in
             # 0.6.0 (#68) and not yet run live — first execution is the next sweep. Slow
             # (~4 minutes of deliberate waiting), so it sits with the other slow section.
-            drive_auto_resume(cli, launched, aws, results)
+            run_section(
+                results, "auto_resume", drive_auto_resume, cli, launched, aws, results
+            )
             # The idle-keepalive section runs on its own VM (launched from the image this
             # suite already built, so no second build) and is the slowest section here —
             # its own output says how long. Last, so its four minutes of deliberate
             # waiting delay nothing, and so a failure in any cheaper section is reported
             # before this one spends its time.
-            drive_idle_keepalive(cli, launched, aws, results)
+            run_section(
+                results,
+                "idle_keepalive",
+                drive_idle_keepalive,
+                cli,
+                launched,
+                aws,
+                results,
+            )
             # The busy-VM case of the same meter, through the supported helper (#199).
-            drive_keepalive_helper(cli, launched, aws, results)
+            run_section(
+                results,
+                "keepalive_helper",
+                drive_keepalive_helper,
+                cli,
+                launched,
+                aws,
+                results,
+            )
 
             print("\n== daemon logs ==")
             lines = read_daemon_logs(

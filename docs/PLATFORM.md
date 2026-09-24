@@ -689,3 +689,14 @@ log stream in that group within 120 s for a VM that ran one command. The executi
 permitted log writes under that prefix; whether a group outside a granted prefix fails
 the launch or drops the logs was not measured. The group is the caller's: teardown does
 not delete it.
+
+## The first exec of a large binary on a fresh VM pays for paging it in
+
+Measured 2026-09-24, us-east-1, API 2025-09-09, live, one agent VM built by `agent-up`
+for Claude Code and Codex. The first `codex --version` (Codex 0.156.1, a 328 MB npm
+package with a native arm64 executable) took 13.0 s; every later run took 0.1 s.
+`claude --version` took 7 ms. On a codex-only VM the first probe happened to finish in
+under 10 s, so the delay varies from launch to launch. Consistent with AWS's statement that a
+MicroVM's disk is paged in on demand after launch (grade: measured; the mechanism is
+inferred). Budget the first exec of any large executable accordingly: the agent version
+probe allows 60 s (`microvms-core/src/agents/mod.rs`, `VERSION_PROBE_TIMEOUT`).
