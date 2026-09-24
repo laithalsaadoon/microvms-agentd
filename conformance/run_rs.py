@@ -4194,8 +4194,9 @@ def drive_lifecycle_by_id(
     group = (
         f"/aws/lambda-microvms/microvm-cli-conformance-vmlogs-{secrets.token_hex(4)}"
     )
+    vm_id = ""
     try:
-        cli.call(
+        ran = cli.call(
             "run",
             "--image",
             str(launched.data["imageIdentifier"]),
@@ -4211,6 +4212,7 @@ def drive_lifecycle_by_id(
             cli.region,
             timeout=15 * 60,
         )
+        vm_id = str(ran.data.get("microvmId") or "")
         streams: list[dict[str, Any]] = []
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline and not streams:
@@ -4232,15 +4234,46 @@ def drive_lifecycle_by_id(
             "a per-VM log group receives the VM's own log streams", False, repr(exc)
         )
     finally:
+        deleted, detail = delete_vm_log_group(logs, aws.client(SERVICE), vm_id, group)
+        results.check("the per-VM log group was deleted", deleted, detail)
+
+
+def delete_vm_log_group(
+    logs: Any, microvms: Any, vm_id: str, group: str
+) -> tuple[bool, str]:
+    """Deletes a per-VM log group once nothing can write to it, and proves it stays gone.
+
+    `run --exec` returns while its VM is still TERMINATING, and the VM's last log flush
+    recreates a group deleted before then. Measured 2026-09-24: a full live run deleted
+    this group, the check passed, and the leak check found it again five minutes later.
+    So wait for TERMINATED, delete, wait, and look again.
+    """
+    deadline = time.monotonic() + 300
+    state = ""
+    while vm_id and time.monotonic() < deadline:
+        try:
+            state = str(microvms.get_microvm(microvmIdentifier=vm_id).get("state"))
+        except Exception:  # noqa: BLE001 - a VM already gone is terminated
+            state = "TERMINATED"
+        if state == "TERMINATED":
+            break
+        time.sleep(10)
+    recreated = 0
+    for attempt in range(3):
         try:
             logs.delete_log_group(logGroupName=group)
-            deleted = True
         except logs.exceptions.ResourceNotFoundException:
-            deleted = True
+            pass
         except Exception as exc:  # noqa: BLE001 - reported as the check's detail
-            print(f"    delete {group}: {type(exc).__name__}")
-            deleted = False
-        results.check("the per-VM log group was deleted", deleted, group)
+            return False, f"{group}: delete failed with {type(exc).__name__}"
+        time.sleep(30)
+        present = logs.describe_log_groups(logGroupNamePrefix=group).get(
+            "logGroups", []
+        )
+        if not any(g.get("logGroupName") == group for g in present):
+            return True, f"{group} absent 30 s after delete (vm {state or 'unknown'})"
+        recreated = attempt + 1
+    return False, f"{group} came back {recreated} time(s) after delete"
 
 
 def drive_agent_vm(
