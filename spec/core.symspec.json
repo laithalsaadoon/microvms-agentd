@@ -268,6 +268,27 @@
       "verificationMethod": "test",
       "verifies": []
     },
+    "4fa375fb-bb55-4208-a6f6-1b08f36910ab": {
+      "createdAt": "2026-09-24T12:21:46.000Z",
+      "derives": [],
+      "id": "4fa375fb-bb55-4208-a6f6-1b08f36910ab",
+      "key": "CLI-9",
+      "negated": false,
+      "patternType": "unwanted-behavior",
+      "priority": "high",
+      "refines": [
+        "497ae4df-3012-468f-8574-25ce6a45e268"
+      ],
+      "satisfies": [],
+      "sentence": "If the stdout reader of a streaming command closes, then the CLI crate shall stop streaming within one further event, leave the remote exec running, and exit with ERR_INTERRUPTED naming the exec id on stderr.",
+      "status": "approved",
+      "systemName": "CLI crate",
+      "systemResponse": "stop streaming within one further event, leave the remote exec running, and exit with ERR_INTERRUPTED naming the exec id on stderr",
+      "trigger": "the stdout reader of a streaming command closes",
+      "updatedAt": "2026-09-24T12:21:46.000Z",
+      "verificationMethod": "test",
+      "verifies": []
+    },
     "509e7f3e-85cb-4b48-b796-55c1c604c83c": {
       "createdAt": "2026-08-08T01:55:37.262Z",
       "derives": [],
@@ -460,6 +481,27 @@
       "updatedAt": "2026-08-08T02:10:17.186Z",
       "verificationMethod": "analysis",
       "verificationNote": "resume is only offered from SUSPENDED; a TERMINATED VM is gone",
+      "verifies": []
+    },
+    "736910b1-6db8-4500-ae55-cc47cfc7d627": {
+      "createdAt": "2026-09-24T12:21:46.000Z",
+      "derives": [],
+      "id": "736910b1-6db8-4500-ae55-cc47cfc7d627",
+      "key": "CLI-7",
+      "negated": false,
+      "patternType": "unwanted-behavior",
+      "priority": "high",
+      "refines": [
+        "497ae4df-3012-468f-8574-25ce6a45e268"
+      ],
+      "satisfies": [],
+      "sentence": "If a reader closes the CLI's stdout or stderr, then the CLI crate shall exit with a status from its exit table and neither panic nor terminate by signal.",
+      "status": "approved",
+      "systemName": "CLI crate",
+      "systemResponse": "exit with a status from its exit table and neither panic nor terminate by signal",
+      "trigger": "a reader closes the CLI's stdout or stderr",
+      "updatedAt": "2026-09-24T12:21:46.000Z",
+      "verificationMethod": "test",
       "verifies": []
     },
     "74cb5034-76f7-45f6-b363-853f0b22fefd": {
@@ -970,6 +1012,28 @@
       "updatedAt": "2026-08-08T02:10:17.186Z",
       "verificationMethod": "test",
       "verificationNote": "PLATFORM.md: root in the guest is not enough; sethostname and bind mounts need additionalOsCapabilities",
+      "verifies": []
+    },
+    "eddbeca9-08ba-44a7-a900-fa0cd84850da": {
+      "createdAt": "2026-09-24T12:21:46.000Z",
+      "derives": [],
+      "id": "eddbeca9-08ba-44a7-a900-fa0cd84850da",
+      "key": "CLI-8",
+      "negated": false,
+      "patternType": "unwanted-behavior",
+      "priority": "critical",
+      "refines": [
+        "14925aae-4f1b-4848-94af-f48c152978ca",
+        "497ae4df-3012-468f-8574-25ce6a45e268"
+      ],
+      "satisfies": [],
+      "sentence": "If the reader of stdout or stderr closes after a command has started, then the CLI crate shall perform every teardown and ledger write that command owes and exit with the code of the command's own outcome, except for a streaming command whose stdout reader closes.",
+      "status": "approved",
+      "systemName": "CLI crate",
+      "systemResponse": "perform every teardown and ledger write that command owes and exit with the code of the command's own outcome, except for a streaming command whose stdout reader closes",
+      "trigger": "the reader of stdout or stderr closes after a command has started",
+      "updatedAt": "2026-09-24T12:21:46.000Z",
+      "verificationMethod": "test",
       "verifies": []
     },
     "ede8bc5f-f417-43f6-a4a8-0731f1b2d07b": {
