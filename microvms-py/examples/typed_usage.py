@@ -46,6 +46,7 @@ from microvms import (
     MicrovmSummary,
     NameRecord,
     NameRegistry,
+    ProvisionedAgentd,
     Region,
     RunHookTimeout,
     Sandbox,
@@ -55,6 +56,8 @@ from microvms import (
     WindowClosedError,
     core_version,
     estimate_run,
+    provision_agentd,
+    provision_agentd_report,
     run_report,
     wrap_dockerfile,
 )
@@ -130,6 +133,19 @@ def task_image_inputs(task_dockerfile: str) -> tuple[str, BaseImage]:
     """
     wrapped: str = wrap_dockerfile(task_dockerfile, workdir="/srv/task")
     return wrapped, BaseImage.from_dockerfile(wrapped)
+
+
+def daemon_for_image(state_dir: str) -> bytes:
+    """The daemon binary a harness bakes into its image, for this client's own version.
+
+    Written for the checker: a call fetches from GitHub when nothing is cached. `data` is
+    `bytes` and `verification` is `str | None`, so neither can be mistaken for the other.
+    """
+    report: ProvisionedAgentd = provision_agentd_report(state_dir=state_dir)
+    proof: str | None = report.verification
+    same: bytes = provision_agentd(version=report.version, state_dir=state_dir)
+    assert proof is None or report.source != "caller-supplied"
+    return same if same == report.data else report.data
 
 
 def launch(region: Region, size: SizeClass) -> str:

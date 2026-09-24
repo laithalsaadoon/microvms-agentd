@@ -1318,6 +1318,51 @@ class ProcGroup:
         """
 
 @final
+class ProvisionedAgentd:
+    """
+    A provisioned `agentd` binary and how it got here: `provision_agentd_report()`'s answer.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def data(self, /) -> bytes:
+        """
+        The binary itself, an aarch64 ELF: the bytes to write into an image build context.
+        """
+    @property
+    def path(self, /) -> str:
+        """
+        Where the binary is on disk: the cache entry, or the caller's own path.
+        """
+    @property
+    def sha256(self, /) -> str:
+        """
+        The lowercase hex SHA-256 of `data`.
+        """
+    @property
+    def source(self, /) -> str:
+        """
+        `"caller-supplied"`, `"cache"`, or `"fetched"`.
+        """
+    @property
+    def supplied_by(self, /) -> str |None:
+        """
+        For a caller-supplied binary, `"argument"` (the `binary` parameter) or `"env"`
+        (`$MICROVM_AGENTD`); otherwise `None`.
+        """
+    @property
+    def verification(self, /) -> str |None:
+        """
+        How the bytes were proven, when fetched or when the cache entry was installed:
+        `"attestation"` (`gh attestation verify`, provenance) or `"checksum"` (the release's
+        `SHA256SUMS`, integrity). `None` for a caller-supplied binary.
+        """
+    @property
+    def version(self, /) -> str:
+        """
+        The release version the binary was provisioned for, without a leading `v`.
+        """
+
+@final
 class RateTable:
     """
     The pinned rate table, and everything it says about itself.
@@ -2224,6 +2269,24 @@ def prompt_agent(session: Session, agent: AgentSpec, task: str, *, timeout_sec: 
     `exec_id` is the idempotency key for a retry that must not spawn twice.
     `permission_mode` is agent-default or unrestricted. `reap_group_on_exit` stops
     residual children after the main agent exits. Neither option grants guest root.
+    """
+
+def provision_agentd(version: str |None = None, state_dir: str |PathLike[str] |None = None, binary: str |PathLike[str] |None = None) -> bytes:
+    """
+    The `agentd` daemon binary for `version` (default: this client's own), as bytes.
+    
+    Answered from `binary` or `$MICROVM_AGENTD` when either names a file, else the
+    version's cache entry under `state_dir` (default: the CLI's, so both share one cache),
+    else the GitHub release asset, verified by `gh attestation verify` or, when `gh` cannot
+    download, by the release's `SHA256SUMS`. A fetch that cannot be verified raises
+    `PreconditionError`, and so does any binary that is not an aarch64 ELF. Blocking: a
+    fetch runs `gh` or `curl` and can take seconds.
+    """
+
+def provision_agentd_report(version: str |None = None, state_dir: str |PathLike[str] |None = None, binary: str |PathLike[str] |None = None) -> ProvisionedAgentd:
+    """
+    `provision_agentd`, answering with the bytes and how they got here: the source, the
+    verification, the path, the version, and the digest.
     """
 
 def run_report(size: SizeClass, *, running: Duration |None = None, suspended: Duration |None = None, image_build: Duration |None = None, image_gb: float |None = None, image_retained: Duration |None = None, suspend_resume_cycles: int = 0, snapshot_gb: float |None = None, launched: bool = True, label: str = "run", rates: RateTable |None = None) -> CostReport:

@@ -24,6 +24,8 @@ task = open("environment/Dockerfile").read()
 dockerfile = microvms.wrap_dockerfile(task)
 # The managed base, paired with the Dockerfile's own FROM.
 base = microvms.BaseImage.from_dockerfile(dockerfile)
+# The daemon for this client's version: fetched, verified, and cached once.
+agentd_bytes = microvms.provision_agentd()
 
 image = sandbox.build_image(
     name="my-task-image",
@@ -80,8 +82,39 @@ choice, and `microvm build --dockerfile` takes the result:
 ```
 microvm dockerfile --workdir /workspace > Dockerfile
 # edit: insert your RUN layers between the chmod line and the ENV lines
-microvm build ./agentd --dockerfile Dockerfile --name my-task-image
+microvm build --dockerfile Dockerfile --name my-task-image
 ```
+
+With no binary, `build` provisions the daemon itself: the release asset for
+the CLI's own version, verified and cached under the state directory. The
+`agentd_bytes` above come from the bindings, with the same chain behind them
+(`microvms-core/src/provision.rs`):
+
+```python
+import microvms
+
+agentd = microvms.provision_agentd()  # bytes, for this client's version
+report = microvms.provision_agentd_report()  # .source, .verification, .path, .sha256
+```
+
+```js
+import { provisionAgentd, provisionAgentdReport } from '@theagenticguy/microvms';
+
+const agentd = await provisionAgentd(); // Buffer, for this client's version
+const { source, verification } = await provisionAgentdReport();
+```
+
+The call answers from, in order, a `binary` you pass (or `$MICROVM_AGENTD`),
+the cache entry for the version, and a fetch of the GitHub release asset. The
+version defaults to `core_version()`, so the daemon you bake always speaks the
+protocol of the client that drives it. A fetch is verified by
+`gh attestation verify` (the release workflow's Sigstore attestation) or, when
+`gh` cannot download, by the release's `SHA256SUMS`; one that cannot be
+verified raises `PreconditionError` rather than warning. Every binary it
+returns, including one you supplied, is checked for an aarch64 ELF header
+first, because a wrong-architecture daemon fails 45 minutes later as a run-hook
+timeout. A cache entry is served only while it still matches the digest
+recorded when it was verified.
 
 The worked example is
 [`examples/coding-agents-on-bedrock/Dockerfile`](../examples/coding-agents-on-bedrock/Dockerfile):
