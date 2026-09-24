@@ -344,6 +344,15 @@ pub struct RunOptions {
     pub ready_timeout: Option<f64>,
     /// A label for the run token. Never the token.
     pub token_scope: Option<String>,
+    /// Whether `run` waits for RUNNING (default `true`). `false` resolves once the launch
+    /// is accepted, with the lifecycle PENDING; `waitUntilRunning` finishes it.
+    pub wait: Option<bool>,
+    /// Per-VM CloudWatch log group. Omitted keeps the service's default destination.
+    pub log_group: Option<String>,
+    /// An exact log stream inside `logGroup`.
+    pub log_stream: Option<String>,
+    /// Turns per-VM logging off. Cannot be combined with `logGroup` or `logStream`.
+    pub disable_logging: Option<bool>,
 }
 
 /// What a teardown should delete beyond the VM itself.
@@ -608,6 +617,13 @@ impl Sandbox {
                 None => defaults.ready_timeout,
             },
             token_scope: options.token_scope,
+            logging: microvms_core::control::ops::Logging::from_parts(
+                options.log_group,
+                options.log_stream,
+                options.disable_logging.unwrap_or(false),
+            )
+            .map_err(js_async)?,
+            wait: options.wait.unwrap_or(defaults.wait),
         };
         // The core answers `&mut Session`, which cannot cross into JS — so the return value is
         // discarded and the session is reached through the sandbox. That is not a workaround:
@@ -616,6 +632,24 @@ impl Sandbox {
         {
             let mut guard = self.inner.lock().await;
             guard.run(request).await.map_err(js_async)?;
+        }
+        Ok(Session::in_sandbox(Arc::clone(&self.inner)))
+    }
+
+    /// Finishes a `run({ wait: false })`: waits for RUNNING and resolves with the session.
+    ///
+    /// A launch whose `clientToken` adopted an existing, idle-suspended VM resumes it; a
+    /// fresh launch that reaches a terminal state first rejects with the service's
+    /// `stateReason`. Refused unless the launch is still PENDING.
+    #[napi]
+    pub async fn wait_until_running(&self, timeout: Option<f64>) -> Result<Session, AsyncError> {
+        let timeout = match timeout {
+            Some(timeout) => seconds_async(timeout)?,
+            None => RunRequest::new().ready_timeout,
+        };
+        {
+            let mut guard = self.inner.lock().await;
+            guard.wait_until_running(timeout).await.map_err(js_async)?;
         }
         Ok(Session::in_sandbox(Arc::clone(&self.inner)))
     }

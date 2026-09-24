@@ -117,11 +117,13 @@ class AgentVm:
         Returns the token used, so `expires_at` says when to call this again. Re-runnable
         on a running VM: that call is the credential refresh.
         """
-    def launch(self, /, *, image_identifier: str, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None) -> Session:
+    def launch(self, /, *, image_identifier: str, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None, image_version: str |None = None, egress_network_connectors: Sequence[str] |None = None, log_group: str |None = None, log_stream: str |None = None, disable_logging: bool = False) -> Session:
         """
         Launches with egress and waits for the daemon to answer.
         
-        Egress is not optional: neither agent reaches Bedrock without it. The idle knobs
+        Egress is not optional: neither agent reaches Bedrock without it. The managed
+        internet connector is the default; `egress_network_connectors` replaces it with
+        customer-managed VPC connectors, whose VPC must route to Bedrock. The idle knobs
         default to the core's figures (ten-minute idle and suspended windows, a one-hour
         ceiling); a multi-hour session raises `max_duration_sec` and polls `health` from
         outside to stay awake.
@@ -266,6 +268,48 @@ class BuildHookTimeout:
     def __str__(self, /) -> str: ...
     @property
     def seconds(self, /) -> int: ...
+
+@final
+class ControlPlane:
+    """
+    MicroVM lifecycle by ID: get, list, suspend, resume, terminate, and wait.
+    
+    Holds no lifecycle state, so it checks nothing a `Sandbox` would (STATE-5, STATE-7,
+    STATE-12): a suspend of a SUSPENDED VM is the service's to refuse. Use it when a
+    process has only an identifier, such as a durable workflow step in a fresh process.
+    """
+    def __new__(cls, /, region: Region) -> ControlPlane:
+        """
+        Resolves credentials for `region` from the default chain.
+        """
+    def __repr__(self, /) -> str: ...
+    def get(self, /, microvm_id: str) -> Microvm:
+        """
+        `GetMicrovm`.
+        """
+    def list(self, /, *, image_identifier: str |None = None, image_version: str |None = None) -> list[MicrovmSummary]:
+        """
+        `ListMicrovms`, every page, optionally narrowed to one image and version.
+        """
+    def resume(self, /, microvm_id: str) -> None:
+        """
+        `ResumeMicrovm`. Returns once accepted; `wait_for_state` for RUNNING.
+        """
+    def suspend(self, /, microvm_id: str) -> None:
+        """
+        `SuspendMicrovm`. Returns once accepted; `wait_for_state` for SUSPENDED.
+        """
+    def terminate(self, /, microvm_id: str) -> None:
+        """
+        `TerminateMicrovm`. Returns once accepted; `wait_for_state` for TERMINATED.
+        """
+    def wait_for_state(self, /, microvm_id: str, wanted: Sequence[str], *, fail_on: Sequence[str] |None = None, timeout: float = 300.0, poll_interval: float = 5.0) -> Microvm:
+        """
+        Polls `GetMicrovm` until the state is one of `wanted`.
+        
+        Reaching one of `fail_on` first raises `LaunchDiedError` naming the state and
+        `stateReason`; running past `timeout` raises `TimeoutError`.
+        """
 
 @final
 class CostReport:
@@ -679,6 +723,28 @@ class Health:
         """
 
 @final
+class IdlePolicy:
+    """
+    The idle policy the service reports a VM is running under.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def auto_resume(self, /) -> bool:
+        """
+        `autoResumeEnabled`: whether a request to a suspended VM resumes it.
+        """
+    @property
+    def max_idle_sec(self, /) -> int:
+        """
+        `maxIdleDurationSeconds`: inbound-traffic silence before an auto-suspend.
+        """
+    @property
+    def suspended_sec(self, /) -> int:
+        """
+        `suspendedDurationSeconds`: how long a suspended VM lasts before it is terminated.
+        """
+
+@final
 class Image:
     """
     A built image, and the log group the service created alongside it.
@@ -770,6 +836,70 @@ class LineItem:
         """
     @property
     def unit(self, /) -> str: ...
+
+@final
+class Microvm:
+    """
+    A MicroVM as `GetMicrovm` last described it.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def endpoint(self, /) -> str:
+        """
+        The proxy endpoint. Pair it with the agent token in `Session.attach`.
+        """
+    @property
+    def id(self, /) -> str: ...
+    @property
+    def idle_policy(self, /) -> IdlePolicy |None:
+        """
+        The idle policy the service reports, or `None` when it sent none.
+        """
+    @property
+    def image_arn(self, /) -> str: ...
+    @property
+    def image_version(self, /) -> str: ...
+    @property
+    def maximum_duration_seconds(self, /) -> int |None:
+        """
+        `maximumDurationInSeconds`. Suspended time counts toward it.
+        """
+    @property
+    def started_at(self, /) -> float |None:
+        """
+        When the VM first started, as Unix seconds.
+        """
+    @property
+    def state(self, /) -> str:
+        """
+        `"PENDING"`, `"RUNNING"`, `"SUSPENDING"`, `"SUSPENDED"`, `"TERMINATING"`, or
+        `"TERMINATED"`, as the service spells it. Eventually consistent.
+        """
+    @property
+    def state_reason(self, /) -> str |None:
+        """
+        Why the VM is in this state, when the service said.
+        """
+    @property
+    def terminated_at(self, /) -> float |None:
+        """
+        When the VM terminated, as Unix seconds, once it has.
+        """
+
+@final
+class MicrovmSummary:
+    """
+    One `ListMicrovms` item: narrower than `Microvm`, with no endpoint or reason.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def id(self, /) -> str: ...
+    @property
+    def image_arn(self, /) -> str: ...
+    @property
+    def image_version(self, /) -> str: ...
+    @property
+    def state(self, /) -> str: ...
 
 @final
 class OutputChunk:
@@ -1178,7 +1308,7 @@ class Sandbox:
         token survived the freeze, and re-delivering it would hit the daemon's one-shot
         bootstrap and be refused — a 409 that reads like a broken VM.
         """
-    def run(self, /, *, image_identifier: str |None = None, image_version: str |None = None, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, launch_env: dict[str, str] |None = None, egress: bool = False, egress_network_connectors: Sequence[str] |None = None, deny_egress: bool = False, shell: bool = False, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None, ready_timeout: float |None = None, token_scope: str |None = None) -> Session:
+    def run(self, /, *, image_identifier: str |None = None, image_version: str |None = None, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, launch_env: dict[str, str] |None = None, egress: bool = False, egress_network_connectors: Sequence[str] |None = None, deny_egress: bool = False, shell: bool = False, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None, ready_timeout: float |None = None, token_scope: str |None = None, wait: bool = True, log_group: str |None = None, log_stream: str |None = None, disable_logging: bool = False) -> Session:
         """
         Launches a MicroVM, waits for RUNNING, and returns its session.
         
@@ -1263,6 +1393,14 @@ class Sandbox:
         
         Set by the platform reporting RUNNING, not by the launch call: the run hook is what
         delivers the token, and a launch that died during startup delivered nothing.
+        """
+    def wait_until_running(self, /, *, timeout: float |None = None) -> Session:
+        """
+        Finishes a `run(wait=False)`: waits for RUNNING and returns the session.
+        
+        A launch whose `client_token` adopted an existing, idle-suspended VM resumes it;
+        a fresh launch that reaches a terminal state first raises `LaunchDiedError` with
+        the service's `stateReason`. Refused unless the launch is still PENDING.
         """
     @property
     def was_terminated(self, /) -> bool:

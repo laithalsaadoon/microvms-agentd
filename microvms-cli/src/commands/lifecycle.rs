@@ -18,12 +18,11 @@
 //! commands the same type `run` and `build` use. It was assessed and refused, and the reason
 //! is not the one that looks obvious.
 //!
-//! The obvious reason is STATE-12: `suspendedDurationSeconds` exists only in the
-//! `RunMicrovm` **request**, `GetMicrovm` does not return it, so a process that did not send
-//! the launch cannot know the window. That is true, and on its own it would only mean an
-//! attached sandbox carries `suspended_window: None` and lets the service answer — which is
-//! exactly what [`microvms_core::sandbox::Sandbox`]'s `require_open_suspended_window`
-//! already does for that case, and what `cli.py:1756` chose for the same stated reason. A
+//! The obvious reason is STATE-12: a process that did not issue the suspend cannot know
+//! when it began, even though `GetMicrovm` reports the window itself in `idlePolicy`. On its
+//! own that would only mean an attached sandbox lets the service answer — which is exactly
+//! what [`microvms_core::sandbox::Sandbox`]'s `require_open_suspended_window` already does
+//! when it has no suspend time, and what `cli.py:1756` chose for the same stated reason. A
 //! documented limitation, not a blocker.
 //!
 //! The real reason is the **initial state**. `spec/core.symspec.json`'s state model declares
@@ -437,6 +436,33 @@ pub fn merge_config(
     })
 }
 
+/// The per-VM launch flags' refusals, before anything is built, uploaded, or launched.
+fn require_launch_flags(
+    args: &RunArgs,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Result<(), crate::exit::CliError> {
+    args.launch.logging()?;
+    if args.launch.stable_launch(env)?.is_none() {
+        return Ok(());
+    }
+    if args.image.is_none() {
+        return Err(crate::exit::CliError::new(
+            Exit::InvalidArg,
+            "--client-token launches an existing image: a retried build creates a new image, \
+             so the retry would not be the identical launch the key promises.",
+        )
+        .suggest("pass --image <arn-or-name>"));
+    }
+    if args.identity {
+        return Err(crate::exit::CliError::new(
+            Exit::InvalidArg,
+            "--client-token and --identity cannot be combined: the tunnel identity is freshly \
+             generated per attempt, so a retry would not be an identical launch.",
+        ));
+    }
+    Ok(())
+}
+
 /// A [`crate::config::ConfigError`] as the `ERR_CONFIG` row, with the remedy attached.
 fn config_error(error: crate::config::ConfigError) -> crate::exit::CliError {
     crate::exit::CliError::new(Exit::Config, error.to_string())
@@ -512,6 +538,7 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
         packed = Some(work);
     }
     let args = &args;
+    require_launch_flags(args, ctx.env)?;
 
     let region = args.region.resolve(ctx.env)?;
     let size = args.memory.size_class();
@@ -1060,6 +1087,15 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
     }
     if args.shell {
         request = request.with_shell();
+    }
+    // Validated by `require_launch_flags` before any call; read again here for the values.
+    request.logging = args.launch.logging()?;
+    if let Some(group) = &args.launch.vm_log_group {
+        ledger.record_vm_log_group(group);
+    }
+    if let Some((client_token, agent_token)) = args.launch.stable_launch(ctx.env)? {
+        request.client_token = Some(client_token);
+        request.agent_token = Some(agent_token);
     }
 
     ctx.out.progress("launching");
@@ -1990,12 +2026,11 @@ pub async fn suspend<O: std::io::Write, E: std::io::Write>(
 
 /// Thaws a suspended MicroVM and reports its endpoint.
 ///
-/// The suspended window is **not** checked here, and that is correct rather than a gap:
-/// `suspendedDurationSeconds` exists only in the `RunMicrovm` request, so a process that did
-/// not send the launch cannot know it. Inventing a default would either reject an open window
-/// or accept a closed one, both worse than letting the service answer — which is what
-/// `fail_on: DEAD_STATES` does, failing fast with `stateReason` instead of burning the poll
-/// timeout.
+/// The suspended window is **not** checked here, and that is correct rather than a gap: the
+/// window is in `GetMicrovm`'s `idlePolicy`, but when the suspend began is known only to the
+/// process that issued it. Guessing would either reject an open window or accept a closed
+/// one, both worse than letting the service answer — which is what `fail_on: DEAD_STATES`
+/// does, failing fast with `stateReason` instead of burning the poll timeout.
 pub async fn resume<O: std::io::Write, E: std::io::Write>(
     ctx: &mut Ctx<'_, O, E>,
     args: &ResumeArgs,

@@ -31,16 +31,16 @@
 //! control-plane calls rather than answered by AWS. The test asserts the call count, which
 //! is the observable that distinguishes the two.
 //!
-//! # The suspended window is the client's alone (STATE-12)
+//! # The suspended window is checked before the call (STATE-12)
 //!
-//! `suspendedDurationSeconds` exists only in the `RunMicrovm` **request**. `GetMicrovm`
-//! does not return it, so the client that sent the launch is the only party that can name
-//! the window it asked for — and the launch-time `idlePolicy` *terminates* a suspended VM
-//! once that window passes, which means "resume later" silently stops working. A resume
-//! past the window is refused locally, before `ResumeMicrovm`, because the alternative is
-//! calling and reading the failure: the service answers about a terminated id, which is
-//! not the same statement as "the window you set at launch closed", and getting there
-//! costs the full poll timeout first.
+//! The launch-time `idlePolicy` *terminates* a suspended VM once `suspendedDurationSeconds`
+//! passes, which means "resume later" silently stops working. A resume past the window is
+//! refused locally, before `ResumeMicrovm`, because the alternative is calling and reading
+//! the failure: the service answers about a terminated id, which is not the same statement
+//! as "the window you set at launch closed", and getting there costs the full poll timeout
+//! first. The window comes from this sandbox's own `RunMicrovm` request, falling back to the
+//! `idlePolicy` that `GetMicrovm` reports (measured 2026-08-15, `docs/PLATFORM.md`). Only
+//! the suspend's start time is the client's alone.
 //!
 //! # Teardown never raises, and the log group is last
 //!
@@ -245,6 +245,14 @@ pub struct RunRequest {
     pub ready_timeout: Duration,
     /// A label for the run token (TRAP-1). Never the token.
     pub token_scope: Option<String>,
+    /// Per-VM `logging` (#201). See [`RunMicrovmRequest::logging`].
+    pub logging: Option<crate::control::ops::Logging>,
+    /// Whether [`Sandbox::run`] waits for RUNNING before returning (the default).
+    ///
+    /// Off returns as soon as `RunMicrovm` is accepted, with the lifecycle still PENDING:
+    /// the session is addressable, and [`Sandbox::wait_until_running`] finishes the wait
+    /// later — from this process, or after a durable workflow's next step.
+    pub wait: bool,
 }
 
 impl Default for RunRequest {
@@ -267,6 +275,8 @@ impl Default for RunRequest {
             max_duration_sec: 3_600,
             ready_timeout: DEFAULT_READY_TIMEOUT,
             token_scope: None,
+            logging: None,
+            wait: true,
         }
     }
 }
@@ -296,6 +306,20 @@ impl RunRequest {
     #[must_use]
     pub fn with_egress_network_connector(mut self, arn: impl Into<String>) -> Self {
         self.egress_network_connectors.push(arn.into());
+        self
+    }
+
+    /// Replaces managed internet egress with customer-managed VPC connectors, when any are
+    /// given; an empty list leaves the request unchanged.
+    ///
+    /// The two cannot be combined, so a launch surface that requests managed egress by
+    /// default (an agent VM) uses this to switch rather than failing the launch.
+    #[must_use]
+    pub fn with_vpc_egress(mut self, arns: Vec<String>) -> Self {
+        if !arns.is_empty() {
+            self.egress = false;
+            self.egress_network_connectors = arns;
+        }
         self
     }
 
@@ -561,8 +585,15 @@ pub struct Sandbox {
     was_terminated: bool,
     bootstrap_count: u32,
 
-    /// The window from *our own* `RunMicrovm` request. `GetMicrovm` does not return it.
+    /// The window from *our own* `RunMicrovm` request. `GetMicrovm` also reports it (in
+    /// `idlePolicy`), which is the fallback when this sandbox has no request of its own.
     suspended_window: Option<Duration>,
+    /// Whether the accepted launch carried a caller client token, and so may have adopted
+    /// a VM an earlier attempt launched (#195).
+    launch_adoptable: bool,
+    /// The launch's agent token, held until the session that carries it is built. Kept out
+    /// of `Debug` like every other credential here.
+    pending_agent_token: Option<String>,
     /// The clock reading when the suspend call was accepted, or `None` when not suspended.
     suspended_at: Option<Duration>,
     /// Set by [`Sandbox::terminate`], so `Drop` can tell an abandoned VM from a torn-down
@@ -625,6 +656,8 @@ impl Sandbox {
             was_terminated: false,
             bootstrap_count: 0,
             suspended_window: None,
+            launch_adoptable: false,
+            pending_agent_token: None,
             suspended_at: None,
             torn_down: false,
             tunnel_identity: None,
@@ -894,6 +927,7 @@ impl Sandbox {
         wire.max_duration_sec = request.max_duration_sec;
         wire.token_scope = request.token_scope.clone();
         wire.client_token = request.client_token.clone();
+        wire.logging = request.logging.clone();
         if request.egress {
             wire = wire.with_egress();
         }
@@ -915,40 +949,76 @@ impl Sandbox {
         // enforces was set by *this* request and a launch that then fails still leaves a VM
         // the caller may have to reason about.
         self.suspended_window = Some(Duration::from_secs(u64::from(request.suspended_sec)));
-        let id = launched.id.clone();
         self.microvm = Some(launched);
+        // A caller-supplied client token can adopt the VM an earlier attempt launched, which
+        // may have idle-suspended since (#195); a minted token always launches afresh.
+        self.launch_adoptable = request.client_token.is_some();
+        self.pending_agent_token = Some(agent_token);
 
-        let running = self
-            .control
-            .wait_for_running(
-                &id,
-                WaitOpts {
-                    timeout: request.ready_timeout,
-                    poll_interval: LIFECYCLE_POLL_INTERVAL,
-                    stall_grace: Duration::MAX,
-                },
-            )
-            .await?;
+        if request.wait {
+            return self.wait_until_running(request.ready_timeout).await;
+        }
+        // Not waiting: the endpoint is in the launch reply, so the session is addressable
+        // now, and a daemon request before RUNNING fails like any other unready request.
+        self.build_session()?;
+        Ok(self.session.as_mut().expect("just assigned"))
+    }
 
-        // STATE-2. The platform reported the run hook succeeded, so the token is in the
-        // guest's memory — and this is the one place that counts it (STATE-3).
-        self.lifecycle = Lifecycle::Running;
-        self.token_installed = true;
-        self.bootstrap_count += 1;
-        let endpoint = running.endpoint.clone();
-        self.microvm = Some(running);
-
+    /// The session for the launched VM, from its endpoint and the launch's agent token.
+    fn build_session(&mut self) -> Result<(), Error> {
+        let (Some(vm), Some(agent_token)) = (&self.microvm, &self.pending_agent_token) else {
+            return Err(Error::new(
+                ErrorKind::Precondition,
+                "no launch to build a session for",
+            ));
+        };
         let minter = Arc::new(ControlPlaneMinter {
             control: Arc::clone(&self.control),
-            microvm_id: id,
+            microvm_id: vm.id.clone(),
         });
-        let mut builder = Session::builder(endpoint, agent_token)
+        let mut builder = Session::builder(vm.endpoint.clone(), agent_token.clone())
             .with_minter(minter)
             .with_port(self.control.port());
         if let Some(backend) = &self.session_backend {
             builder = builder.with_backend(Arc::clone(backend));
         }
         self.session = Some(builder.build()?);
+        Ok(())
+    }
+
+    /// Waits for a launch accepted by [`Sandbox::run`] to reach RUNNING.
+    ///
+    /// `run` calls this itself unless [`RunRequest::wait`] was off. A launch that adopted an
+    /// existing VM through its client token resumes it if it idle-suspended (#195); a fresh
+    /// launch that reaches any terminal state first fails fast with `stateReason` (TRAP-8).
+    pub async fn wait_until_running(&mut self, timeout: Duration) -> Result<&mut Session, Error> {
+        let id = self.require_microvm("wait_until_running")?;
+        if self.lifecycle != Lifecycle::Pending {
+            return Err(Error::invalid_arg(format!(
+                "microvm {id} is {}; wait_until_running finishes a launch that is still PENDING",
+                self.lifecycle,
+            )));
+        }
+        let opts = WaitOpts {
+            timeout,
+            poll_interval: LIFECYCLE_POLL_INTERVAL,
+            stall_grace: Duration::MAX,
+        };
+        let running = if self.launch_adoptable {
+            self.control.wait_for_launch(&id, opts).await?
+        } else {
+            self.control.wait_for_running(&id, opts).await?
+        };
+
+        // STATE-2. The platform reported the run hook succeeded, so the token is in the
+        // guest's memory — and this is the one place that counts it (STATE-3).
+        self.lifecycle = Lifecycle::Running;
+        self.token_installed = true;
+        self.bootstrap_count += 1;
+        self.microvm = Some(running);
+        if self.session.is_none() {
+            self.build_session()?;
+        }
         Ok(self.session.as_mut().expect("just assigned"))
     }
 
@@ -1114,9 +1184,15 @@ impl Sandbox {
     /// The message names the elapsed time, the window, and the `idlePolicy` finding, because
     /// "cannot resume" alone sends a reader looking for the flag that reopens it.
     fn require_open_suspended_window(&self, id: &str) -> Result<(), Error> {
-        let (Some(window), Some(since)) = (self.suspended_window, self.suspended_at) else {
-            // No window recorded means this sandbox did not send the launch — the attach
-            // path — and guessing a default would refuse a resume the service would honour.
+        let reported = self
+            .microvm
+            .as_ref()
+            .and_then(|vm| vm.idle_policy.as_ref())
+            .map(|policy| Duration::from_secs(u64::from(policy.suspended_duration_seconds)));
+        let (Some(window), Some(since)) = (self.suspended_window.or(reported), self.suspended_at)
+        else {
+            // No window or no suspend time means this sandbox cannot know how long the VM
+            // has been suspended, and guessing would refuse a resume the service would honour.
             return Ok(());
         };
         let elapsed = self.control.clock().elapsed().saturating_sub(since);
@@ -1129,10 +1205,9 @@ impl Sandbox {
                 "microvm {id} has been suspended {}s, past the {}s suspendedDurationSeconds \
                  window set at launch — the idlePolicy terminates a suspended VM once that window \
                  passes, so there is nothing left to resume (docs/PLATFORM.md, '`idlePolicy`'). \
-                 Refused before ResumeMicrovm because suspendedDurationSeconds exists only in the \
-                 RunMicrovm request: GetMicrovm does not return it, so this client is the only \
-                 party that can name the number. A longer window has to be set at launch on the \
-                 next VM; there is no call that extends this one.",
+                 Refused before ResumeMicrovm, because calling would cost the full poll timeout \
+                 to learn the same thing less clearly. A longer window has to be set at launch \
+                 on the next VM; there is no call that extends this one.",
                 elapsed.as_secs(),
                 window.as_secs(),
             ),
@@ -2132,8 +2207,8 @@ mod tests {
         );
         assert!(message.contains("idlePolicy"), "the finding: {message}");
         assert!(
-            message.contains("GetMicrovm does not return it"),
-            "why the client is the only party that can say this: {message}"
+            message.contains("Refused before ResumeMicrovm"),
+            "why the refusal is local: {message}"
         );
         assert_eq!(
             recorder.call_count("ResumeMicrovm"),
@@ -2145,6 +2220,109 @@ mod tests {
             elapsed_before,
             "the refusal must be immediate rather than polled to the deadline"
         );
+    }
+
+    /// **STATE-12's fallback.** With no window from its own request, the sandbox uses the
+    /// `suspendedDurationSeconds` that `GetMicrovm` reported (600 in the fake).
+    #[tokio::test]
+    async fn the_window_falls_back_to_the_idle_policy_the_service_reported() {
+        let (mut sandbox, recorder, clock) = suspended_with_window(60).await;
+        sandbox.suspended_window = None;
+        recorder.answer("ResumeMicrovm", Answer::ok(fake::empty_response()));
+        clock.advance(Duration::from_secs(601));
+        let error = sandbox
+            .resume()
+            .await
+            .expect_err("past the reported window");
+        assert_eq!(error.kind(), ErrorKind::WindowClosed);
+        assert!(error.to_string().contains("600s"), "{error}");
+        assert_eq!(recorder.call_count("ResumeMicrovm"), 0);
+    }
+
+    /// **#195 at the sandbox.** A client-token launch that adopts an idle-suspended VM is
+    /// resumed and reaches RUNNING with the token counted once. The same poll on a launch
+    /// without a caller token is still a startup death (TRAP-8).
+    #[tokio::test]
+    async fn a_client_token_launch_resumes_the_vm_it_adopted() {
+        let (mut sandbox, recorder, _) = planted();
+        recorder
+            .answer(
+                "RunMicrovm",
+                Answer::ok(fake::microvm_response("SUSPENDED", None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("SUSPENDED", None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("RUNNING", None)),
+            )
+            .answer("ResumeMicrovm", Answer::ok(fake::empty_response()))
+            .answer(
+                "CreateMicrovmAuthToken",
+                Answer::ok(fake::auth_token_response("proxy-token")),
+            );
+        let mut request = RunRequest::new().with_image("arn:image");
+        request.client_token = Some("job-195".into());
+        request.agent_token = Some("agent-token".into());
+        sandbox
+            .run(request)
+            .await
+            .expect("the adopted VM is resumed");
+        assert_eq!(sandbox.lifecycle(), Lifecycle::Running);
+        assert_eq!(sandbox.bootstrap_count(), 1);
+        assert_eq!(recorder.call_count("ResumeMicrovm"), 1);
+
+        let (mut fresh, recorder, _) = planted();
+        recorder
+            .answer(
+                "RunMicrovm",
+                Answer::ok(fake::microvm_response("PENDING", None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("SUSPENDED", Some("hook failed"))),
+            );
+        let error = fresh
+            .run(RunRequest::new().with_image("arn:image"))
+            .await
+            .expect_err("a fresh launch that reads SUSPENDED died during startup");
+        assert_eq!(error.kind(), ErrorKind::LaunchDied);
+        assert_eq!(recorder.call_count("ResumeMicrovm"), 0);
+    }
+
+    /// **`wait: false`.** The launch returns once accepted, with an addressable session and
+    /// the lifecycle still PENDING; `wait_until_running` finishes it, exactly once.
+    #[tokio::test]
+    async fn a_launch_that_does_not_wait_is_finished_by_wait_until_running() {
+        let (mut sandbox, recorder, _) = planted();
+        answer_launch(&recorder);
+        let mut request = RunRequest::new().with_image("arn:image");
+        request.wait = false;
+        let endpoint = sandbox
+            .run(request)
+            .await
+            .expect("accepted")
+            .endpoint()
+            .to_string();
+        assert!(endpoint.starts_with("https://"), "{endpoint}");
+        assert_eq!(sandbox.lifecycle(), Lifecycle::Pending);
+        assert_eq!(sandbox.bootstrap_count(), 0);
+        assert_eq!(recorder.call_count("GetMicrovm"), 0, "nothing polled yet");
+
+        sandbox
+            .wait_until_running(DEFAULT_READY_TIMEOUT)
+            .await
+            .expect("reaches RUNNING");
+        assert_eq!(sandbox.lifecycle(), Lifecycle::Running);
+        assert_eq!(sandbox.bootstrap_count(), 1);
+        let error = sandbox
+            .wait_until_running(DEFAULT_READY_TIMEOUT)
+            .await
+            .expect_err("a running launch has nothing to wait for");
+        assert_eq!(error.kind(), ErrorKind::InvalidArg);
+        assert_eq!(sandbox.bootstrap_count(), 1, "counted once (STATE-3)");
     }
 
     /// A resume **inside** the window goes through, so the guard is a comparison rather than

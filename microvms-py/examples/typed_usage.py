@@ -33,10 +33,14 @@ from __future__ import annotations
 
 from microvms import (
     BuildHookTimeout,
+    ControlPlane,
     CostReport,
     Duration,
     EstimatedUsd,
+    IdlePolicy,
+    Microvm,
     MicrovmError,
+    MicrovmSummary,
     Region,
     RunHookTimeout,
     Sandbox,
@@ -144,6 +148,30 @@ def launch(region: Region, size: SizeClass) -> str:
             return f"{error.kind}: {error}"
         endpoint = sandbox.endpoint
         return endpoint if endpoint is not None else "no endpoint"
+
+
+def lifecycle_by_id(region: Region, microvm_id: str) -> float | None:
+    """Lifecycle from a process that holds only an identifier. Written for the checker."""
+    plane = ControlPlane(region)
+    vm: Microvm = plane.get(microvm_id)
+    policy: IdlePolicy | None = vm.idle_policy
+    if policy is not None and policy.auto_resume:
+        plane.resume(microvm_id)
+    listed: list[MicrovmSummary] = plane.list(image_identifier=vm.image_arn)
+    if any(item.state == "SUSPENDED" for item in listed):
+        plane.wait_for_state(
+            microvm_id, ["RUNNING"], fail_on=["TERMINATED"], timeout=60.0
+        )
+    plane.terminate(microvm_id)
+    return vm.started_at
+
+
+def deferred_launch(region: Region, image: str) -> str:
+    """A launch that returns once accepted, then waits. Written for the checker."""
+    sandbox = Sandbox(region)
+    sandbox.run(image_identifier=image, wait=False, log_group="/team/agents")
+    session = sandbox.wait_until_running(timeout=300.0)
+    return session.endpoint
 
 
 def main() -> None:

@@ -660,6 +660,14 @@ async fn launch_and_provision<O: std::io::Write, E: std::io::Write>(
     launch.suspended_sec = args.suspended_sec;
     launch.auto_resume = args.auto_resume;
     launch.max_duration_sec = args.max_duration_sec;
+    launch.logging = args.launch.logging()?;
+    if let Some(group) = &args.launch.vm_log_group {
+        ledger.record_vm_log_group(group);
+    }
+    if let Some((client_token, agent_token)) = args.launch.stable_launch(ctx.env)? {
+        launch.client_token = Some(client_token);
+        launch.agent_token = Some(agent_token);
+    }
     ctx.out.progress("launching with egress");
     let session = vm.launch(launch).await?;
     let endpoint = session.endpoint().to_string();
@@ -888,6 +896,7 @@ mod tests {
                 unlisted_region: None,
             },
             infra: crate::cli::InfraFlags::default(),
+            launch: Default::default(),
         }
     }
 

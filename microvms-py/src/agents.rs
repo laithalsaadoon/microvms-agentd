@@ -525,7 +525,9 @@ impl PyAgentVm {
 
     /// Launches with egress and waits for the daemon to answer.
     ///
-    /// Egress is not optional: neither agent reaches Bedrock without it. The idle knobs
+    /// Egress is not optional: neither agent reaches Bedrock without it. The managed
+    /// internet connector is the default; `egress_network_connectors` replaces it with
+    /// customer-managed VPC connectors, whose VPC must route to Bedrock. The idle knobs
     /// default to the core's figures (ten-minute idle and suspended windows, a one-hour
     /// ceiling); a multi-hour session raises `max_duration_sec` and polls `health` from
     /// outside to stay awake.
@@ -539,6 +541,11 @@ impl PyAgentVm {
         suspended_sec=None,
         auto_resume=false,
         max_duration_sec=None,
+        image_version=None,
+        egress_network_connectors=None,
+        log_group=None,
+        log_stream=None,
+        disable_logging=false,
     ))]
     #[allow(
         clippy::too_many_arguments,
@@ -555,9 +562,21 @@ impl PyAgentVm {
         suspended_sec: Option<u32>,
         auto_resume: bool,
         max_duration_sec: Option<u32>,
+        // Pins the launch to one image version rather than the latest active one.
+        image_version: Option<String>,
+        // Customer-managed VPC egress connector ARNs. When given they replace the managed
+        // internet connector, and the VPC must route to Bedrock. Not a doc comment: a doc
+        // comment on a function parameter is a compile error.
+        egress_network_connectors: Option<Vec<String>>,
+        log_group: Option<String>,
+        log_stream: Option<String>,
+        disable_logging: bool,
     ) -> PyCoreResult<PySession> {
         let mut request =
-            agents::launch_request_for(&self.specs, image_identifier, execution_role_arn);
+            agents::launch_request_for(&self.specs, image_identifier, execution_role_arn)
+                .with_vpc_egress(egress_network_connectors.unwrap_or_default());
+        request.image_version = image_version;
+        request.logging = crate::sandbox::logging_for(log_group, log_stream, disable_logging)?;
         request.agent_token = agent_token;
         request.client_token = client_token;
         if let Some(idle) = max_idle_sec {

@@ -113,6 +113,8 @@ class Oracle:
         self.image_names: set[str] = set()
         self.image_arns: set[str] = set()
         self.log_groups: set[str] = set()
+        #: Caller-chosen per-VM log groups (`vmLogGroup`), outside the service namespace.
+        self.vm_log_groups: set[str] = set()
         #: record path -> the parsed record, for `prune_records`.
         self.records: dict[Path, dict[str, Any]] = {}
 
@@ -143,6 +145,8 @@ def ledger_oracle(state_dir: Path) -> Oracle:
             oracle.image_names.add(record["imageName"])
         if isinstance(record.get("imageIdentifier"), str):
             oracle.image_arns.add(record["imageIdentifier"])
+        if isinstance(record.get("vmLogGroup"), str):
+            oracle.vm_log_groups.add(record["vmLogGroup"])
         for entry in record.get("leaked") or []:
             if isinstance(entry, str) and entry.startswith(SERVICE_LOG_PREFIX):
                 oracle.log_groups.add(entry)
@@ -224,6 +228,18 @@ def service_log_groups(logs: Any) -> list[dict[str, Any]]:
     return groups
 
 
+def existing_log_groups(logs: Any, names: set[str]) -> list[dict[str, Any]]:
+    """The groups among `names` that exist, matched exactly rather than by prefix."""
+    found: list[dict[str, Any]] = []
+    for name in sorted(names):
+        paginator = logs.get_paginator("describe_log_groups")
+        for page in paginator.paginate(logGroupNamePrefix=name):
+            found.extend(
+                g for g in page.get("logGroups", []) if g["logGroupName"] == name
+            )
+    return found
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -243,6 +259,13 @@ def main() -> int:
         action="store_true",
         help="fail the verdict on an unclassified log group too (for an account that exists "
         "only for this suite)",
+    )
+    parser.add_argument(
+        "--vm-log-group",
+        action="append",
+        default=[],
+        help="a per-VM log group (RunMicrovm logging) this run created, outside the service "
+        "namespace: reported as a leak and removed by --delete. Repeatable",
     )
     parser.add_argument(
         "--self-test",
@@ -318,6 +341,18 @@ def main() -> int:
         log_groups.append(group)
         label = "ours by prefix" if owner == OURS else f"named in {state_dir}"
         leaks.append(f"log group {name} ({label})")
+
+    # Per-VM groups are named by the caller, so no sweep finds them. A group passed on the
+    # command line is this run's to clean; one only a ledger record names is the caller's
+    # chosen destination, reported as standing rather than deleted.
+    named = set(args.vm_log_group)
+    for group in existing_log_groups(logs, named | oracle.vm_log_groups):
+        name = group["logGroupName"]
+        if name in named:
+            log_groups.append(group)
+            leaks.append(f"log group {name} (per-VM, named with --vm-log-group)")
+        else:
+            standing.append(f"per-VM log group {name} (named in {state_dir})")
 
     for note in pending:
         print(f"  pending: {note}")
@@ -435,6 +470,16 @@ def self_test() -> int:
                 }
             )
         )
+        (state / "1757600005-105.json").write_text(
+            json.dumps(
+                {
+                    "runId": "1757600005-105",
+                    "region": "us-east-1",
+                    "microvmId": "microvm-ghi",
+                    "vmLogGroup": "/team/agents",
+                }
+            )
+        )
         (state / "1757600001-101.json").write_text("{not json")
         (state / "1757600002-102.json").write_text(
             json.dumps({"runId": "x", "region": "us-east-1"})
@@ -490,6 +535,11 @@ def self_test() -> int:
         expect(
             "a group listed under leaked is known by its full name",
             "/aws/lambda-microvms/torn-down" in oracle.log_groups,
+        )
+        expect(
+            "a caller-chosen per-VM log group outside the namespace is known",
+            oracle.vm_log_groups == {"/team/agents"}
+            and "/team/agents" not in oracle.log_groups,
         )
         expect(
             "an image is known by name or by ARN",
