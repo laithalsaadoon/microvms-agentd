@@ -60,6 +60,7 @@ mod exec;
 mod hooks;
 mod keepalive;
 mod names;
+mod provision;
 mod region;
 mod runtime;
 mod sandbox;
@@ -137,6 +138,8 @@ mod microvms {
     use super::keepalive::{PyKeepAwake, PyKeepAwakeReport};
     #[pymodule_export]
     use super::names::{PyNameRecord, PyNameRegistry};
+    #[pymodule_export]
+    use super::provision::{PyProvisionedAgentd, provision_agentd, provision_agentd_report};
     #[pymodule_export]
     use super::region::PyRegion;
     #[pymodule_export]

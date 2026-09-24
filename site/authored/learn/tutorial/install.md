@@ -60,7 +60,9 @@ The guest daemon is a static ARM64 Linux binary on every host platform.
 
 For a daemon you build or manage yourself, set `MICROVM_AGENTD` to its
 path, or pass the path as the positional argument to `agent-up`, `run`,
-or `build`. `microvm doctor --binary ./agentd` checks its architecture.
+or `build`. A `MICROVM_AGENTD` binary that is not an ARM64 ELF is refused
+before any build. `microvm doctor --binary ./agentd` checks a positional
+binary's architecture.
 
 ## Build the CLI from this repository
 

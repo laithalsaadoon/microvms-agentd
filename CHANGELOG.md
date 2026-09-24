@@ -60,6 +60,24 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
     `agentd/tests/features/exec_start.feature`, a bolero harness over the union fields'
     deserialization and resolution, and live checks keyed AGENTD-*.
 
+- **Daemon provisioning moved into core and reached every surface (#219, BIND-17..BIND-20).**
+  `microvms_core::provision::agentd(version, state_dir)` returns the `agentd` binary with its
+  path, source (`caller-supplied`, `cache`, `fetched`), verification, version, and SHA-256,
+  from the chain the CLI already ran: a caller-supplied binary or `$MICROVM_AGENTD`, then
+  the version's cache entry, then the GitHub release asset verified by
+  `gh attestation verify` or the release's `SHA256SUMS`. The version defaults to the core's
+  own. Python gains `microvms.provision_agentd(version=None, state_dir=None, binary=None)`
+  (bytes) and `provision_agentd_report()` (a `ProvisionedAgentd`); Node gains
+  `provisionAgentd(options?)` and `provisionAgentdReport(options?)`. The CLI calls core and
+  keeps its envelope. Two refusals are new on every surface, the CLI included: a
+  caller-supplied binary (`$MICROVM_AGENTD` or `binary`) that is not an aarch64 ELF is
+  `ERR_PRECONDITION`, where the CLI used to bake it; and a cache entry is served only while
+  it matches the digest recorded beside it at install, so a changed entry, or one an older
+  client installed with no record, is fetched again once. A version that is not a plain
+  release tag is `ERR_INVALID_ARG`. Specified in `spec/core.symspec.json`, checked by the
+  Stateright model in `model/src/provision.rs`, and driven through a fake release by
+  `microvms-core/tests/features/provision.feature`.
+
 - **`Sandbox.detach()` hands a launched VM to another process without a leak warning.** A
   durable workflow's launch step used to end by dropping its `Sandbox`, which printed the
   "dropped without terminate()" billing warning for a VM a later step was about to adopt.

@@ -50,9 +50,11 @@ napi-derive = "3"
 # escape loop; serde_json's writer is the definition of the grammar being emitted.
 serde_json = "1"
 # The core's own poll and deadline paths need a runtime with `time`; napi
-# provides the runtime, and this names the features the futures require. No
-# `rt-multi-thread` — napi owns the runtime, and a library does not choose it.
-tokio = { version = "1.53", features = ["time", "sync"] }
+# provides the runtime, and this names the features the futures require. `rt` is
+# `spawn_blocking`, which keeps daemon provisioning's `gh`/`curl` subprocesses off the
+# runtime's workers (`src/provision.rs`). No `rt-multi-thread` — napi owns the runtime,
+# and a library does not choose it.
+tokio = { version = "1.53", features = ["time", "sync", "rt"] }
 
 # No `futures-util`, and its absence is the point. It was here to name the
 # `Stream` trait `ExecHandle::stream_with` answers with, because `Stream` is not

@@ -177,19 +177,27 @@ hyper-util = { version = "0.1", features = [
     "server",
     "tokio",
 ] }
-# The behavior specs for the IMAGE requirements (#220, #221): Gherkin scenarios in
-# `tests/features/`, each run by its own `harness = false` target, tagged with the
-# requirement each one verifies. The same pin and features as the CLI's.
+# The behavior specs for the IMAGE requirements (#220, #221) and daemon provisioning
+# (BIND-17..20, #219): Gherkin scenarios in `tests/features/`, each run by its own
+# `harness = false` target, tagged with the requirement each one verifies. The same pin and
+# features as the CLI's.
 cucumber = { version = "0.23", features = ["output-junit"] }
-# The fuzz harnesses over Dockerfile text and build contexts. `bolero::check!` runs as an
-# ordinary `#[test]` on stable and as a coverage-guided target under `cargo bolero test`.
+# The fuzz harnesses over Dockerfile text, build contexts, and the provisioning parsers
+# (`src/provision_fuzz.rs`). `bolero::check!` runs as an ordinary `#[test]` on stable and as
+# a coverage-guided target under `cargo bolero test`.
 bolero = "0.13"
 # The same tokio with a runtime, for the Gherkin runners' `main`: the library itself does not
 # choose a runtime, so `rt` is a test-only feature here.
 tokio = { version = "1.53", features = ["rt", "macros"] }
+# Temp state directories for the provisioning tests: random names, cleanup on drop.
+tempfile = "3"
 
 [[test]]
 name = "bdd_wrap"
+harness = false
+
+[[test]]
+name = "bdd_provision"
 harness = false
 
 [lints.rust]

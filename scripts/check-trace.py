@@ -91,6 +91,10 @@ TRACED: dict[str, str | tuple[str, dict[str, str]]] = {
     "AGENTD-14": "#226",
     "AGENTD-15": "#226",
     "AGENTD-16": "#224",
+    "BIND-17": "#219",
+    "BIND-18": "#219",
+    "BIND-19": "#219",
+    "BIND-20": "#219",
 }
 
 LAYERS = ("model", "gherkin", "fuzz", "test", "impl", "live")

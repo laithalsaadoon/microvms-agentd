@@ -84,6 +84,7 @@ pub mod keepalive;
 pub mod names;
 mod numbers;
 pub mod process;
+pub mod provision;
 pub mod region;
 pub mod sandbox;
 pub mod session;
