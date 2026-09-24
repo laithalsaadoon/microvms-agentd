@@ -6,6 +6,8 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
 
 ## Unreleased
 
+## [0.9.0] — 2026-09-24
+
 ### Security
 
 - **Each VM gets its own machine-id: identity repair moves from daemon start to the run hook

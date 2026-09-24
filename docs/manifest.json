@@ -3619,7 +3619,7 @@
         "type": "boolean"
       }
     ],
-    "version": "0.8.0"
+    "version": "0.9.0"
   },
   "status": "ok",
   "type": "microvm.manifest"
