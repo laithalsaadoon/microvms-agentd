@@ -142,7 +142,7 @@ async fn complete(run: &mut Run, with_callback: bool) {
     let request = StartRequest {
         exec_id: microvms_core::session::mint_exec_id(),
         command: vec!["bash".into(), "-c".into(), "the scripted command".into()],
-        shell: false,
+        shell: false.into(),
         cwd: None,
         env: Default::default(),
         user: None,
@@ -150,6 +150,7 @@ async fn complete(run: &mut Run, with_callback: bool) {
         timeout_sec: run.timeout_sec,
         stdin: false,
         reap_group_on_exit: false,
+        inherit_image_env: false,
     };
     let mut options = CompletionOptions::default();
     if let Some(grace) = run.grace {

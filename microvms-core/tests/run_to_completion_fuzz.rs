@@ -139,7 +139,7 @@ fn drive(plan: &Plan) -> (ExecResult, Vec<String>, bool) {
         let request = StartRequest {
             exec_id: "x-fuzz".into(),
             command: vec!["bash".into(), "-c".into(), "fuzzed".into()],
-            shell: false,
+            shell: false.into(),
             cwd: None,
             env: Default::default(),
             user: None,
@@ -147,6 +147,7 @@ fn drive(plan: &Plan) -> (ExecResult, Vec<String>, bool) {
             timeout_sec,
             stdin: false,
             reap_group_on_exit: false,
+            inherit_image_env: false,
         };
         let options = CompletionOptions {
             client_grace: Duration::from_secs(u64::from(plan.grace % SPAN)),

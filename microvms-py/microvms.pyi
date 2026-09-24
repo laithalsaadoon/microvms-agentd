@@ -2015,7 +2015,7 @@ class Session:
         """
         Start, wait, ack. The one-shot shape, for when output is all you want.
         """
-    def run_to_completion(self, /, command: Sequence[str] |str, *, on_output: Any |None = None, shell: bool = False, cwd: str |None = None, env: dict[str, str] |None = None, user: int |None = None, group: int |None = None, timeout_sec: float |None = None, exec_id: str |None = None, client_grace_sec: float = ...) -> ExecResult:
+    def run_to_completion(self, /, command: Sequence[str] |str, *, on_output: Any |None = None, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, exec_id: str |None = None, inherit_image_env: bool = False, client_grace_sec: float = ...) -> ExecResult:
         """
         Start, stream, and collect one command: exactly one `ExecResult` back (BIND-6..10).
         
@@ -2028,8 +2028,9 @@ class Session:
         `notes` say what ended the command.
         
         An exception from `on_output` stops delivery; the exec is still waited for and acked
-        so nothing is left behind, and then the exception is re-raised. `shell=True` runs
-        `/bin/sh -c`; for bash semantics pass `["bash", "-c", script]` with `shell=False`.
+        so nothing is left behind, and then the exception is re-raised. `shell`, `user`,
+        `group`, and `inherit_image_env` mean what they mean on `run()`: `shell="bash"` with a
+        script string runs it under bash, which dash-based images need for `pipefail`.
         """
     def upload_file(self, /, path: str, data: bytes, *, mode: str |None = None) -> None:
         """

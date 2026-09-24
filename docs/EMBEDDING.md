@@ -259,7 +259,13 @@ string through `/bin/sh -c`, and on Debian-family images `/bin/sh` is dash,
 which rejects `set -o pipefail`, arrays, and `[[`. A harness whose contract is
 bash semantics passes the command as an argv with `shell=False` (the default),
 so bash parses it and no other shell is in between. The image must ship bash;
-the managed al2023 base and every Harbor-built main image do.
+the managed al2023 base does (`GNU bash, version 5.2.15` at `/usr/bin/bash`,
+measured in us-east-1 on 2026-09-24). The named shell replaces the idiom:
+`run_to_completion(command, shell="bash")` sends the script string with
+`shell: "bash"`, which the daemon resolves in the guest and refuses with
+`400 unknown_shell` when the image has no bash, instead of the exit 127 the
+argv form reports. It needs a daemon that knows named shells (`docs/PROTOCOL.md`,
+"shell"); the argv form works with every daemon.
 
 ## The proxy-token reality
 

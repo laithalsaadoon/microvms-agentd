@@ -48,11 +48,14 @@ function outcome(phase, exitCode, { signal = null, stdout = '', timedOut = false
 /** A loopback server answering `route(method, path)` for every request, logging each. */
 async function serve(route) {
   const log = [];
+  const starts = [];
   const server = http.createServer((request, response) => {
-    request.resume();
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(chunk));
     request.on('end', () => {
       const path = request.url.split('?')[0];
       log.push(`${request.method} ${path}`);
+      if (path === '/v1/exec/start') starts.push(JSON.parse(Buffer.concat(chunks).toString()));
       const [status, body, type] = route(request.method, path);
       response.writeHead(status, {
         'content-type': type,
@@ -65,6 +68,7 @@ async function serve(route) {
   const { port } = server.address();
   return {
     log,
+    starts,
     session: Session.direct(`http://127.0.0.1:${port}`, 'agent-token'),
     close: () => new Promise((resolve) => server.close(resolve)),
   };
@@ -113,6 +117,33 @@ test('BIND-8: chunks reach onOutput in order and one ack is the result', async (
     'GET /v1/exec/x-rtc/stream',
     'POST /v1/exec/x-rtc/ack',
   ]);
+});
+
+test('the start carries the run fields through unchanged', async (t) => {
+  const server = await serve(streamed([], outcome('acked', 0)));
+  t.after(server.close);
+  await server.session.runToCompletion('set -o pipefail; true', {
+    shell: 'bash',
+    user: 'agent',
+    group: 100,
+    inheritImageEnv: true,
+    cwd: '/work',
+    env: { A: '1' },
+    timeoutSec: 5,
+    execId: 'x-rtc',
+  });
+  assert.equal(server.starts.length, 1);
+  const [start] = server.starts;
+  assert.deepEqual(start.command, ['set -o pipefail; true']);
+  assert.equal(start.shell, 'bash');
+  assert.equal(start.user, 'agent');
+  assert.equal(start.group, 100);
+  assert.equal(start.inherit_image_env, true);
+  assert.equal(start.cwd, '/work');
+  assert.deepEqual(start.env, { A: '1' });
+  assert.equal(start.timeout_sec, 5);
+  assert.equal(start.exec_id, 'x-rtc');
+  assert.equal(start.stdin, false);
 });
 
 test('BIND-8: without a callback the call waits and acks', async (t) => {

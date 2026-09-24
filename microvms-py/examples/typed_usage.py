@@ -274,10 +274,10 @@ def named_step(region: Region, state_dir: str, stored: dict[str, object]) -> str
     return f"{found} {names} {len(restored)} {released} {report.lifecycle}"
 
 
-def harness_exec(
+def harness_run_to_completion(
     session: Session, script: str, timeout_sec: int | None
 ) -> tuple[str, int]:
-    """A harness's `exec` as one call (#222). Written for the checker.
+    """A harness's `exec` as one call, streamed and collected (#222). Written for the checker.
 
     `["bash", "-c", script]` because the daemon's `shell=True` is `/bin/sh -c`; the notes go
     to stderr as they are, and `posix_exit_code` is already the harness's return code.

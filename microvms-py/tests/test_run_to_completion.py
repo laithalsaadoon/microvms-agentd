@@ -80,16 +80,19 @@ class ExecServer:
 
     def __init__(self, route: Route) -> None:
         self.log: list[str] = []
+        self.starts: list[dict[str, object]] = []
         log = self.log
+        starts = self.starts
 
         class Handler(http.server.BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
 
             def answer(self) -> None:
                 length = int(self.headers.get("content-length") or 0)
-                if length:
-                    self.rfile.read(length)
+                body = self.rfile.read(length) if length else b""
                 path = self.path.split("?")[0]
+                if path == "/v1/exec/start":
+                    starts.append(json.loads(body))
                 log.append(f"{self.command} {path}")
                 status, body, content_type = route(self.command, path)
                 self.send_response(status)
@@ -184,6 +187,33 @@ def test_run_to_completion_streams_chunks_in_order_and_acks_once(exec_server) ->
         "GET /v1/exec/x-rtc/stream",
         "POST /v1/exec/x-rtc/ack",
     ]
+
+
+def test_the_start_carries_the_run_fields_through_unchanged(exec_server) -> None:
+    """Thin wrapper: a named shell, a user by name, and `inherit_image_env` reach the wire."""
+    server = exec_server(streamed([], outcome("acked", 0)))
+    server.session.run_to_completion(
+        "set -o pipefail; true",
+        shell="bash",
+        user="agent",
+        group=100,
+        inherit_image_env=True,
+        cwd="/work",
+        env={"A": "1"},
+        timeout_sec=5.0,
+        exec_id="x-rtc",
+    )
+    (start,) = server.starts
+    assert start["command"] == ["set -o pipefail; true"]
+    assert start["shell"] == "bash"
+    assert start["user"] == "agent"
+    assert start["group"] == 100
+    assert start["inherit_image_env"] is True
+    assert start["cwd"] == "/work"
+    assert start["env"] == {"A": "1"}
+    assert start["timeout_sec"] == 5.0
+    assert start["exec_id"] == "x-rtc"
+    assert start["stdin"] is False
 
 
 def test_without_a_callback_it_waits_and_acks(exec_server) -> None:

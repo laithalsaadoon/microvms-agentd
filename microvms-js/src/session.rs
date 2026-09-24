@@ -720,7 +720,8 @@ impl Session {
     ///
     /// A throwing `onOutput` stops delivery; the exec is still waited for and acked so nothing
     /// is left behind, and then the promise rejects with the callback's message. `shell: true`
-    /// runs `/bin/sh -c`; for bash semantics pass `["bash", "-c", script]`.
+    /// runs `/bin/sh -c`; for bash semantics pass `shell: "bash"` with a script string, or
+    /// `["bash", "-c", script]` for a daemon that predates named shells.
     #[napi(
         ts_args_type = "command: string | string[], options?: CompletionRequest | undefined | null, onOutput?: ((chunk: StreamEvent) => unknown) | undefined | null"
     )]

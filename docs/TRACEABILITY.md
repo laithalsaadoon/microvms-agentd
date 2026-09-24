@@ -230,6 +230,8 @@ When a start request carries its user and group as integers and its shell as a b
 - **fuzz:** `agentd/src/exec_start_fuzz.rs`
 - **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `agentd/tests/bdd_exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
 - **impl:** `agentd/src/exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-js/src/session.rs`, `microvms-py/src/session.rs`
+- **live:** `conformance/run_rs.py`
+
 ## BIND-6
 
 The microvms-core shall report a finished exec's POSIX exit code as 124 when a deadline ended the command, as 128 plus the signal number for any other signal death, and otherwise as the exit code.

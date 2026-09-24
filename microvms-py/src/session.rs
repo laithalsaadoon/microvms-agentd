@@ -804,19 +804,21 @@ impl PySession {
     /// `notes` say what ended the command.
     ///
     /// An exception from `on_output` stops delivery; the exec is still waited for and acked
-    /// so nothing is left behind, and then the exception is re-raised. `shell=True` runs
-    /// `/bin/sh -c`; for bash semantics pass `["bash", "-c", script]` with `shell=False`.
+    /// so nothing is left behind, and then the exception is re-raised. `shell`, `user`,
+    /// `group`, and `inherit_image_env` mean what they mean on `run()`: `shell="bash"` with a
+    /// script string runs it under bash, which dash-based images need for `pipefail`.
     #[pyo3(signature = (
         command,
         *,
         on_output=None,
-        shell=false,
+        shell=ShellArg::Flag(false),
         cwd=None,
         env=None,
         user=None,
         group=None,
         timeout_sec=None,
         exec_id=None,
+        inherit_image_env=false,
         client_grace_sec=DEFAULT_CLIENT_GRACE_SEC,
     ))]
     #[allow(
@@ -829,26 +831,28 @@ impl PySession {
         py: Python<'_>,
         command: Command,
         on_output: Option<Py<PyAny>>,
-        shell: bool,
+        shell: ShellArg,
         cwd: Option<String>,
         env: Option<std::collections::HashMap<String, String>>,
-        user: Option<u32>,
-        group: Option<u32>,
+        user: Option<Principal>,
+        group: Option<Principal>,
         timeout_sec: Option<f64>,
         exec_id: Option<String>,
+        inherit_image_env: bool,
         client_grace_sec: f64,
     ) -> PyResult<PyExecResult> {
         let request = protocol::exec::StartRequest {
             exec_id: exec_id.unwrap_or_else(mint_exec_id),
             command: command.into_argv(),
-            shell,
+            shell: shell.into(),
             cwd,
             env: env.unwrap_or_default(),
-            user,
-            group,
+            user: user.map(Into::into),
+            group: group.map(Into::into),
             timeout_sec,
             stdin: false,
             reap_group_on_exit: false,
+            inherit_image_env,
         };
         let options = CompletionOptions {
             client_grace: seconds(client_grace_sec).map_err(CoreError)?,

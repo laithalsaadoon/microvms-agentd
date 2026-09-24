@@ -331,7 +331,7 @@ mod tests {
         protocol::exec::StartRequest {
             exec_id: "e1".into(),
             command: vec!["bash".into(), "-c".into(), "echo hi".into()],
-            shell: false,
+            shell: false.into(),
             cwd: None,
             env: Default::default(),
             user: None,
@@ -339,6 +339,7 @@ mod tests {
             timeout_sec,
             stdin: false,
             reap_group_on_exit: false,
+            inherit_image_env: false,
         }
     }
 

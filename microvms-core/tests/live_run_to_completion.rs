@@ -47,7 +47,7 @@ fn bash(script: &str, timeout_sec: Option<f64>) -> StartRequest {
     StartRequest {
         exec_id: mint_exec_id(),
         command: vec!["bash".into(), "-c".into(), script.into()],
-        shell: false,
+        shell: false.into(),
         cwd: None,
         env: Default::default(),
         user: None,
@@ -55,6 +55,7 @@ fn bash(script: &str, timeout_sec: Option<f64>) -> StartRequest {
         timeout_sec,
         stdin: false,
         reap_group_on_exit: false,
+        inherit_image_env: false,
     }
 }
 
