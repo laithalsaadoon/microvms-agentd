@@ -71,6 +71,7 @@ pub struct PyHealth {
     hooks: Vec<protocol::health::HookObservation>,
     hooks_dropped: u64,
     identity_steps: Vec<protocol::health::IdentityStep>,
+    image_env_keys: Option<usize>,
 }
 
 impl PyHealth {
@@ -88,6 +89,7 @@ impl PyHealth {
             hooks: health.hooks,
             hooks_dropped: health.hooks_dropped,
             identity_steps: health.identity_steps,
+            image_env_keys: health.image_env_keys,
         }
     }
 }
@@ -191,6 +193,14 @@ impl PyHealth {
             .cloned()
             .map(|inner| PyIdentityStep { inner })
             .collect()
+    }
+
+    /// How many variables the daemon's image-environment snapshot holds, or `None` when it
+    /// holds none. `None` is also what a daemon built before `inherit_image_env` reports,
+    /// and such a daemon ignores that flag; the values are never reported.
+    #[getter]
+    fn image_env_keys(&self) -> Option<usize> {
+        self.image_env_keys
     }
 
     fn __repr__(&self) -> String {
@@ -639,14 +649,26 @@ impl PySession {
     /// Starts a command and returns its handle. Does not wait.
     ///
     /// `command` is a list, or a string that becomes a one-element argv — never
-    /// whitespace-split. `shell=True` wants a single script string. `reap_group_on_exit`
-    /// asks the daemon to signal the whole process group once the command's own child
-    /// exits, so nothing it backgrounded outlives it; off by default, which keeps the
-    /// backgrounded-grandchild-output guarantee for callers who rely on it.
+    /// whitespace-split. `shell=True` wants a single script string for `/bin/sh -c`;
+    /// `shell="bash"` runs it under a shell the daemon resolves in the guest, and a shell
+    /// the guest does not have is refused (`unknown_shell`) before anything starts.
+    ///
+    /// `user` and `group` are a numeric id or a name the daemon resolves against the
+    /// guest's `/etc/passwd` and `/etc/group`; an unknown name is refused (`unknown_user`,
+    /// `unknown_group`) before anything starts. A user with a passwd row gets `HOME`,
+    /// `USER` and `LOGNAME` from it, beneath the launch environment and `env`.
+    ///
+    /// `inherit_image_env` starts the child's environment from the image's `ENV` (minus
+    /// `AGENTD_*`, never the token), beneath everything else; off by default, which keeps
+    /// the child's environment exactly the launch environment plus `env`.
+    ///
+    /// `reap_group_on_exit` asks the daemon to signal the whole process group once the
+    /// command's own child exits, so nothing it backgrounded outlives it; off by default,
+    /// which keeps the backgrounded-grandchild-output guarantee for callers who rely on it.
     #[pyo3(signature = (
         command,
         *,
-        shell=false,
+        shell=ShellArg::Flag(false),
         cwd=None,
         env=None,
         user=None,
@@ -655,6 +677,7 @@ impl PySession {
         stdin=false,
         exec_id=None,
         reap_group_on_exit=false,
+        inherit_image_env=false,
     ))]
     #[allow(
         clippy::too_many_arguments,
@@ -666,27 +689,29 @@ impl PySession {
         &self,
         py: Python<'_>,
         command: Command,
-        shell: bool,
+        shell: ShellArg,
         cwd: Option<String>,
         env: Option<std::collections::HashMap<String, String>>,
-        user: Option<u32>,
-        group: Option<u32>,
+        user: Option<Principal>,
+        group: Option<Principal>,
         timeout_sec: Option<f64>,
         stdin: bool,
         exec_id: Option<String>,
         reap_group_on_exit: bool,
+        inherit_image_env: bool,
     ) -> PyCoreResult<PyExecHandle> {
         let request = protocol::exec::StartRequest {
             exec_id: exec_id.unwrap_or_else(mint_exec_id),
             command: command.into_argv(),
-            shell,
+            shell: shell.into(),
             cwd,
             env: env.unwrap_or_default(),
-            user,
-            group,
+            user: user.map(Into::into),
+            group: group.map(Into::into),
             timeout_sec,
             stdin,
             reap_group_on_exit,
+            inherit_image_env,
         };
         // The request is moved into the closure, so it is built before the detach rather
         // than inside it — a `Command` extraction needs the GIL and the closure does not
@@ -711,7 +736,7 @@ impl PySession {
         command,
         *,
         timeout=DEFAULT_RUN_SYNC_TIMEOUT,
-        shell=false,
+        shell=ShellArg::Flag(false),
         cwd=None,
         env=None,
         user=None,
@@ -720,6 +745,7 @@ impl PySession {
         stdin=false,
         exec_id=None,
         reap_group_on_exit=false,
+        inherit_image_env=false,
     ))]
     #[allow(
         clippy::too_many_arguments,
@@ -731,27 +757,29 @@ impl PySession {
         py: Python<'_>,
         command: Command,
         timeout: f64,
-        shell: bool,
+        shell: ShellArg,
         cwd: Option<String>,
         env: Option<std::collections::HashMap<String, String>>,
-        user: Option<u32>,
-        group: Option<u32>,
+        user: Option<Principal>,
+        group: Option<Principal>,
         timeout_sec: Option<f64>,
         stdin: bool,
         exec_id: Option<String>,
         reap_group_on_exit: bool,
+        inherit_image_env: bool,
     ) -> PyCoreResult<PyExecResult> {
         let request = protocol::exec::StartRequest {
             exec_id: exec_id.unwrap_or_else(mint_exec_id),
             command: command.into_argv(),
-            shell,
+            shell: shell.into(),
             cwd,
             env: env.unwrap_or_default(),
-            user,
-            group,
+            user: user.map(Into::into),
+            group: group.map(Into::into),
             timeout_sec,
             stdin,
             reap_group_on_exit,
+            inherit_image_env,
         };
         let timeout = seconds(timeout)?;
         Ok(PyExecResult::wrap(self.detached(py, move |session| {
@@ -916,6 +944,45 @@ impl PySession {
 pub enum Command {
     Argv(Vec<String>),
     One(String),
+}
+
+/// A user or group as a caller names it: an `int` id or a `str` name (AGENTD-7, AGENTD-16).
+///
+/// Passed through unchanged; the daemon resolves a name in the guest, because only the guest
+/// has the `/etc/passwd` that answers it. `Id` first so an `int` is never read as a name.
+#[derive(FromPyObject)]
+pub enum Principal {
+    Id(u32),
+    Name(String),
+}
+
+impl From<Principal> for protocol::exec::NameOrId {
+    fn from(principal: Principal) -> Self {
+        match principal {
+            Principal::Id(id) => protocol::exec::NameOrId::Id(id),
+            Principal::Name(name) => protocol::exec::NameOrId::Name(name),
+        }
+    }
+}
+
+/// `shell` as a caller gives it: a `bool`, or the name of a shell for the daemon to resolve
+/// (AGENTD-14).
+///
+/// `Flag` first: PyO3's `bool` extraction takes only a real `bool`, so a string always
+/// reaches `Named`.
+#[derive(FromPyObject)]
+pub enum ShellArg {
+    Flag(bool),
+    Named(String),
+}
+
+impl From<ShellArg> for protocol::exec::Shell {
+    fn from(shell: ShellArg) -> Self {
+        match shell {
+            ShellArg::Flag(flag) => protocol::exec::Shell::Flag(flag),
+            ShellArg::Named(name) => protocol::exec::Shell::Named(name),
+        }
+    }
 }
 
 impl Command {

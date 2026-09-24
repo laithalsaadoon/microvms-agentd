@@ -81,6 +81,16 @@ TRACED: dict[str, str | tuple[str, dict[str, str]]] = {
             "live": "a pure function of Dockerfile text; it makes no AWS call",
         },
     ),
+    "AGENTD-7": "#224",
+    "AGENTD-8": "#224",
+    "AGENTD-9": "#224",
+    "AGENTD-10": "#225",
+    "AGENTD-11": "#225",
+    "AGENTD-12": "#225",
+    "AGENTD-13": "#225",
+    "AGENTD-14": "#226",
+    "AGENTD-15": "#226",
+    "AGENTD-16": "#224",
 }
 
 LAYERS = ("model", "gherkin", "fuzz", "test", "impl", "live")

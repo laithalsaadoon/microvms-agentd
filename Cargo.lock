@@ -18,8 +18,10 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.23.1",
+ "bolero",
  "bytes",
  "const-hex",
+ "cucumber",
  "futures-util",
  "getrandom 0.4.3",
  "http-body-util",

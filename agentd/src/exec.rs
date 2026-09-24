@@ -365,9 +365,15 @@ pub async fn start(
         Err(detail) => return fail(StatusCode::BAD_REQUEST, ERROR_MALFORMED_REQUEST, detail),
     };
 
-    let command = match build_command(&req, &state.launch_env()) {
+    // Resolution of the user, group and shell happens here too, and a name the guest does
+    // not have answers 400 with its own slug (AGENTD-8, AGENTD-15). Before the idempotency
+    // check as well as before the spawn: the answer to a request is a function of the
+    // request, so a retry that could never have started is refused the same way.
+    let command = match build_command(&req, &state) {
         Ok(command) => command,
-        Err(detail) => return fail(StatusCode::BAD_REQUEST, ERROR_MALFORMED_REQUEST, detail),
+        Err(rejection) => {
+            return fail(StatusCode::BAD_REQUEST, rejection.error, rejection.detail);
+        }
     };
 
     // Idempotency: decided under the registry lock, before the spawn, so two
@@ -1170,53 +1176,78 @@ fn validate_timeout(raw: Option<f64>) -> Result<Option<Duration>, String> {
     Ok(Some(Duration::from_secs_f64(secs)))
 }
 
-/// Assembles the child command, including the shell decision and demotion.
+/// Assembles the child command: resolution first (`exec_start::plan`), then the spawn
+/// settings, so a request the guest cannot satisfy is refused before a child exists.
 ///
-/// `launch_env` is the map delivered in the run-hook payload, and it is the *base*
-/// of the child's environment: the per-request `env` is overlaid on top of it, so a
-/// request that names a key the launch set wins. That direction is the useful one —
-/// a launch env is a default for the whole VM and a request is the specific thing
-/// happening now — and it is also the only direction that leaves the per-request
-/// contract unchanged for callers who never send a launch env at all.
+/// The environment is the plan's four layers, lowest first: the image snapshot (only with
+/// `inherit_image_env`), the passwd identity, the launch environment, the request's `env`.
+/// A launch env is a default for the whole VM and a request is the specific thing happening
+/// now, so the request wins; the identity sits under both so a caller who sets `HOME` keeps
+/// it, and over the image so a demoted user does not keep the image's root `HOME`.
 ///
-/// The agent token is not in either map and cannot be: `launch_env` comes from a
-/// parameter [`crate::state::AppState::bootstrap`] never writes the token into, and
-/// `env_clear` below still runs, so the daemon's own environment reaches nothing.
+/// The agent token is in no layer and cannot be: the launch env comes from a parameter
+/// [`crate::state::AppState::bootstrap`] never writes the token into, the snapshot was taken
+/// before any token existed and drops `AGENTD_*` besides, and `env_clear` below still runs,
+/// so the daemon's own live environment reaches nothing.
 fn build_command(
     req: &StartRequest,
-    launch_env: &std::collections::HashMap<String, String>,
-) -> Result<Command, String> {
-    let mut command = if req.shell {
-        // A single argument to `sh -c`, not a constructed wrapper. The
-        // predecessor built `"cd %s && {\n%s\n}"`, which made an empty command
-        // and a comment-terminated command into syntax errors and let an
-        // unbalanced `}` in the script escape the group it was supposed to be
-        // confined by. `sh -c ''` exits 0, which is the correct answer.
-        let script = req.command.join("\n");
-        let mut command = Command::new("/bin/sh");
-        command.arg("-c").arg(script);
-        command
-    } else {
-        let Some((program, args)) = req.command.split_first() else {
-            return Err("command must not be empty when shell is false".to_string());
-        };
-        let mut command = Command::new(program);
-        command.args(args);
-        command
+    state: &AppState,
+) -> Result<Command, crate::exec_start::Rejection> {
+    use crate::exec_start::{Guest, Program, is_executable_file, plan, read_database};
+
+    let launch_env = state.launch_env();
+    let config = state.config();
+    // Read per request rather than cached: a workload that runs `useradd` before its next
+    // exec is asking for exactly that user, and the files are a few kilobytes.
+    let passwd = match req.user {
+        Some(_) => read_database(&config.passwd_path),
+        None => String::new(),
+    };
+    let group = match req.group {
+        Some(protocol::exec::NameOrId::Name(_)) => read_database(&config.group_path),
+        _ => String::new(),
+    };
+    let plan = plan(
+        req,
+        &Guest {
+            launch_env: &launch_env,
+            image_env: state.image_env(),
+            passwd: &passwd,
+            group: &group,
+            is_executable: &is_executable_file,
+        },
+    )?;
+
+    let mut command = match &plan.program {
+        Program::Argv { program, args } => {
+            let mut command = Command::new(program);
+            command.args(args);
+            command
+        }
+        // A single argument to `<shell> -c`, not a constructed wrapper. The predecessor
+        // built `"cd %s && {\n%s\n}"`, which made an empty command and a comment-terminated
+        // command into syntax errors and let an unbalanced `}` in the script escape the
+        // group it was supposed to be confined by. `sh -c ''` exits 0, which is the correct
+        // answer.
+        Program::Script { shell, script } => {
+            let mut command = Command::new(shell);
+            command.arg("-c").arg(script);
+            command
+        }
     };
 
-    // Only what the launch and the request asked for. Inheriting the daemon's
-    // environment would carry the agent token into the child, and that is one of the
-    // three security properties the model pins — so the environment starts empty and
-    // nothing here reads from `std::env`.
+    // Only the plan's layers. Inheriting the daemon's live environment would carry anything
+    // it holds into the child, and that is one of the three security properties the model
+    // pins — so the environment starts empty and nothing here reads from `std::env`.
     //
-    // Two `envs` calls in this order, not a merged map: `Command::envs` applies each
-    // pair in turn, so the request's copy of a key overwrites the launch's. Written
-    // as a pre-merged `HashMap` it would be one more place the precedence could be
-    // silently inverted by an `extend` in the wrong direction.
+    // One `envs` call per layer in order, not a merged map: `Command::envs` applies each
+    // pair in turn, so a higher layer's copy of a key overwrites a lower one's. Written as a
+    // pre-merged `HashMap` it would be one more place the precedence could be silently
+    // inverted by an `extend` in the wrong direction.
     command.env_clear();
-    command.envs(launch_env);
-    command.envs(&req.env);
+    for layer in &plan.layers {
+        command.envs(layer);
+    }
 
     // Omitted cwd means inherit. Not `/`.
     if let Some(cwd) = &req.cwd {
@@ -1226,10 +1257,10 @@ fn build_command(
     // Demotion between fork and exec, in C. Never through `pre_exec`: a closure
     // there runs interpreted-equivalent code in a forked child of a threaded
     // process, where a lock held by another thread at fork time is held forever.
-    if let Some(gid) = req.group {
+    if let Some(gid) = plan.gid {
         command.gid(gid);
     }
-    if let Some(uid) = req.user {
+    if let Some(uid) = plan.uid {
         command.uid(uid);
     }
 
@@ -1653,6 +1684,7 @@ fn unix_signal(_status: &std::process::ExitStatus) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::path::Path;
 
     use super::*;
     use crate::config::Config;
@@ -1671,7 +1703,7 @@ mod tests {
         StartRequest {
             exec_id: id.to_string(),
             command: argv.iter().map(|s| s.to_string()).collect(),
-            shell: false,
+            shell: false.into(),
             cwd: None,
             env: HashMap::new(),
             user: None,
@@ -1679,6 +1711,7 @@ mod tests {
             timeout_sec: None,
             stdin: false,
             reap_group_on_exit: false,
+            inherit_image_env: false,
         }
     }
 
@@ -1692,7 +1725,7 @@ mod tests {
     async fn run(state: &AppState, req: StartRequest) -> Outcome {
         let id = req.exec_id.clone();
         let timeout = validate_timeout(req.timeout_sec).expect("valid timeout");
-        let command = build_command(&req, &state.launch_env()).expect("buildable command");
+        let command = build_command(&req, state).expect("buildable command");
         spawn(state, &id, command, timeout, req.reap_group_on_exit).expect("spawn");
         await_result(state, &id).await
     }
@@ -1871,7 +1904,7 @@ mod tests {
     fn launch(state: &AppState, request: StartRequest) {
         let id = request.exec_id.clone();
         let timeout = validate_timeout(request.timeout_sec).expect("valid timeout");
-        let command = build_command(&request, &state.launch_env()).expect("buildable command");
+        let command = build_command(&request, state).expect("buildable command");
         spawn(state, &id, command, timeout, request.reap_group_on_exit).expect("spawn");
     }
 
@@ -1910,7 +1943,7 @@ mod tests {
     async fn an_empty_shell_command_exits_zero() {
         let state = state();
         let mut request = req("e3", &[]);
-        request.shell = true;
+        request.shell = true.into();
         let outcome = run(&state, request).await;
         assert_eq!(
             outcome.exit_code,
@@ -1926,7 +1959,7 @@ mod tests {
     async fn a_comment_terminated_shell_command_exits_zero() {
         let state = state();
         let mut request = req("e4", &["echo hi", "# trailing comment"]);
-        request.shell = true;
+        request.shell = true.into();
         let outcome = run(&state, request).await;
         assert_eq!(outcome.exit_code, Some(0));
         assert_eq!(outcome.stdout.trim(), "hi");
@@ -1936,7 +1969,7 @@ mod tests {
     async fn an_unbalanced_brace_cannot_escape_the_wrapper() {
         let state = state();
         let mut request = req("e5", &["echo a", "}", "echo b"]);
-        request.shell = true;
+        request.shell = true.into();
         let outcome = run(&state, request).await;
         // It is a shell syntax error inside `sh -c`, which is the honest result:
         // nothing after the stray brace runs, and the daemon reports the code.
@@ -2271,7 +2304,7 @@ mod tests {
         let state = state();
         let request = req("live", &["/bin/sh", "-c", "sleep 30"]);
         let timeout = validate_timeout(request.timeout_sec).expect("valid");
-        let command = build_command(&request, &state.launch_env()).expect("buildable");
+        let command = build_command(&request, &state).expect("buildable");
         spawn(&state, "live", command, timeout, false).expect("spawn");
 
         let response = ack(State(state.clone()), Path("live".to_string())).await;
@@ -2294,7 +2327,7 @@ mod tests {
             cfg.output_linger = Duration::from_millis(200);
         });
         let request = req("group", &["/bin/sh", "-c", "sleep 30 & echo started; wait"]);
-        let command = build_command(&request, &state.launch_env()).expect("buildable");
+        let command = build_command(&request, &state).expect("buildable");
         spawn(&state, "group", command, None, false).expect("spawn");
 
         let pgid = state
@@ -2838,9 +2871,9 @@ mod tests {
     #[test]
     fn a_demotion_request_builds_without_pre_exec() {
         let mut request = req("demote", &["/bin/true"]);
-        request.user = Some(65534);
-        request.group = Some(65534);
-        let command = build_command(&request, &HashMap::new()).expect("buildable");
+        request.user = Some(65534.into());
+        request.group = Some(65534.into());
+        let command = build_command(&request, &state()).expect("buildable");
         assert_eq!(
             command.as_std().get_program(),
             std::ffi::OsStr::new("/bin/true")
@@ -2853,6 +2886,282 @@ mod tests {
         assert_eq!(phase_of(false, false), Phase::Running);
         assert_eq!(phase_of(false, true), Phase::Exited);
         assert_eq!(phase_of(true, true), Phase::Acked);
+    }
+
+    // ---- names, the image environment, and named shells (AGENTD-7..16) ----
+
+    /// This process's `id -u` or `id -g`. The guest user in these tests carries it, because
+    /// demotion to your own uid is the one demotion a non-root test can actually spawn.
+    fn own_id(flag: &str) -> u32 {
+        let output = std::process::Command::new("/usr/bin/id")
+            .arg(flag)
+            .output()
+            .expect("id runs");
+        String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse()
+            .expect("a numeric id")
+    }
+
+    /// A daemon whose passwd lists `tester` (this process's uid and gid, home
+    /// `/home/tester`) and whose group file lists `crew` (this process's gid), holding
+    /// `inherited` as the environment it inherited at startup, bootstrapped with `launch`.
+    fn guest(inherited: &[(&str, &str)], launch: &[(&str, &str)]) -> (AppState, tempfile::TempDir) {
+        let dir = tempfile::tempdir().expect("a guest directory");
+        let (uid, gid) = (own_id("-u"), own_id("-g"));
+        std::fs::write(
+            dir.path().join("passwd"),
+            format!(
+                "root:x:0:0:root:/root:/bin/bash\n\
+                 # comment\n\
+                 malformed line\n\
+                 tester:x:{uid}:{gid}:Tester:/home/tester:/bin/sh\n"
+            ),
+        )
+        .expect("passwd");
+        std::fs::write(
+            dir.path().join("group"),
+            format!("root:x:0:\ncrew:x:{gid}:tester\n"),
+        )
+        .expect("group");
+        let config = Config {
+            passwd_path: dir.path().join("passwd"),
+            group_path: dir.path().join("group"),
+            ..Config::default()
+        };
+        let state = AppState::with_image_env(config, launch_env(inherited));
+        state.bootstrap(b"tok-exec-start-7f3a", launch_env(launch));
+        (state, dir)
+    }
+
+    /// Starts through the real handler and waits for the result: whatever resolution the
+    /// daemon does happens exactly as a client would reach it.
+    async fn started(state: &AppState, request: StartRequest) -> Outcome {
+        let id = request.exec_id.clone();
+        let response = start(State(state.clone()), Ok(Json(request))).await;
+        let status = response.status();
+        assert_eq!(status, StatusCode::OK, "{}", body_json(response).await);
+        await_result(state, &id).await
+    }
+
+    /// Starts through the real handler and expects a refusal with `error`, returning the
+    /// detail, then checks that nothing was registered and nothing ran.
+    async fn refused(
+        state: &AppState,
+        request: StartRequest,
+        error: &str,
+        marker: &Path,
+    ) -> String {
+        let id = request.exec_id.clone();
+        let response = start(State(state.clone()), Ok(Json(request))).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = body_json(response).await;
+        assert_eq!(body["error"], error, "{body}");
+        assert!(
+            state.with_execs(|execs| !execs.contains_key(&id)),
+            "a refused start registered an exec"
+        );
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(!marker.exists(), "the refused command ran");
+        body["detail"].as_str().unwrap_or_default().to_string()
+    }
+
+    /// The printed `KEY=VALUE` lines of `env`, sorted.
+    fn env_lines(outcome: &Outcome) -> Vec<&str> {
+        let mut lines: Vec<&str> = outcome.stdout.lines().collect();
+        lines.sort_unstable();
+        lines
+    }
+
+    /// **AGENTD-7, AGENTD-9.** A user named by string runs as its passwd row's uid and
+    /// primary gid, with HOME, USER and LOGNAME from the row.
+    #[tokio::test]
+    async fn a_named_user_resolves_to_its_row_with_its_identity() {
+        let (state, _dir) = guest(&[], &[]);
+        let mut request = req("named", &["id -u; id -g; echo \"$HOME|$USER|$LOGNAME\""]);
+        request.shell = true.into();
+        request.user = Some("tester".into());
+        let outcome = started(&state, request).await;
+        assert_eq!(
+            outcome.stdout.lines().collect::<Vec<_>>(),
+            [
+                own_id("-u").to_string(),
+                own_id("-g").to_string(),
+                "/home/tester|tester|tester".to_string()
+            ]
+        );
+    }
+
+    /// **AGENTD-8.** An unknown user is 400 `unknown_user` naming it, and the command that
+    /// would have left a marker never ran.
+    #[tokio::test]
+    async fn an_unknown_user_is_400_and_spawns_nothing() {
+        let (state, dir) = guest(&[], &[]);
+        let marker = dir.path().join("ran");
+        let mut request = req("ghost", &[&format!("touch {}", marker.display())]);
+        request.shell = true.into();
+        request.user = Some("ghost-user".into());
+        let detail = refused(&state, request, "unknown_user", &marker).await;
+        assert!(detail.contains("ghost-user"), "{detail}");
+    }
+
+    /// **AGENTD-8.** An unknown group is 400 `unknown_group`, and nothing ran.
+    #[tokio::test]
+    async fn an_unknown_group_is_400_and_spawns_nothing() {
+        let (state, dir) = guest(&[], &[]);
+        let marker = dir.path().join("ran");
+        let mut request = req(
+            "ghostgroup",
+            &["/usr/bin/touch", &marker.display().to_string()],
+        );
+        request.group = Some("ghost-crew".into());
+        let detail = refused(&state, request, "unknown_group", &marker).await;
+        assert!(detail.contains("ghost-crew"), "{detail}");
+    }
+
+    /// **AGENTD-9.** The request's HOME wins over the passwd HOME, and the launch's HOME
+    /// does too when the request sets none.
+    #[tokio::test]
+    async fn the_request_and_launch_home_override_the_passwd_home() {
+        let (state, _dir) = guest(&[], &[("HOME", "/from-launch")]);
+        let mut request = req("home-request", &["/bin/sh", "-c", "echo $HOME $USER"]);
+        request.user = Some("tester".into());
+        request.env.insert("HOME".into(), "/from-request".into());
+        let outcome = started(&state, request).await;
+        assert_eq!(outcome.stdout.trim(), "/from-request tester");
+
+        let mut request = req("home-launch", &["/bin/sh", "-c", "echo $HOME $USER"]);
+        request.user = Some("tester".into());
+        let outcome = started(&state, request).await;
+        assert_eq!(outcome.stdout.trim(), "/from-launch tester");
+    }
+
+    /// **AGENTD-14.** `shell: "bash"` runs the script under bash: a pipefail pipeline fails
+    /// where a POSIX `sh` that is dash would refuse the option outright, and `$0` names bash.
+    #[tokio::test]
+    async fn bash_runs_a_pipefail_command() {
+        let state = state();
+        let mut request = req("pipefail", &["set -o pipefail; false | true"]);
+        request.shell = "bash".into();
+        let outcome = started(&state, request).await;
+        assert_eq!(outcome.exit_code, Some(1), "{outcome:?}");
+
+        let mut request = req("dollar0", &["echo $0"]);
+        request.shell = "bash".into();
+        let outcome = started(&state, request).await;
+        assert!(outcome.stdout.trim().ends_with("/bash"), "{outcome:?}");
+    }
+
+    /// **AGENTD-15.** A shell the guest does not have is 400 `unknown_shell` naming it, and
+    /// nothing ran; so is an absolute path to nothing.
+    #[tokio::test]
+    async fn a_nonexistent_shell_is_400_and_spawns_nothing() {
+        let (state, dir) = guest(&[], &[]);
+        let marker = dir.path().join("ran");
+        for (id, shell) in [
+            ("noshell", "no-such-shell-9q"),
+            ("noabs", "/nonexistent/bash"),
+        ] {
+            let mut request = req(id, &[&format!("touch {}", marker.display())]);
+            request.shell = shell.into();
+            let detail = refused(&state, request, "unknown_shell", &marker).await;
+            assert!(detail.contains(shell), "{detail}");
+        }
+    }
+
+    /// **AGENTD-10.** With the flag unset, a daemon holding an image snapshot still gives a
+    /// child exactly the launch map: the snapshot is inert unless asked for.
+    #[tokio::test]
+    async fn with_the_flag_unset_the_environment_is_exactly_the_launch_map() {
+        let (state, _dir) = guest(
+            &[("PATH", "/image/bin"), ("JAVA_HOME", "/opt/java")],
+            &[("SAFE", "value")],
+        );
+        let outcome = started(&state, req("exact", &["/usr/bin/env"])).await;
+        assert_eq!(env_lines(&outcome), ["SAFE=value"]);
+    }
+
+    /// **AGENTD-11, AGENTD-9.** With the flag set: image < passwd < launch < request, each
+    /// key taking its highest layer and every lower layer's other keys surviving.
+    #[tokio::test]
+    async fn with_the_flag_set_the_layers_stack_image_passwd_launch_request() {
+        let (state, _dir) = guest(
+            &[
+                ("PATH", "/image/bin"),
+                ("HOME", "/root"),
+                ("JAVA_HOME", "/opt/java"),
+                ("SHARED", "image"),
+                ("AGENTD_PORT", "9000"),
+            ],
+            &[("SHARED", "launch"), ("LOGNAME", "from-launch")],
+        );
+        let mut request = req("layers", &["/usr/bin/env"]);
+        request.inherit_image_env = true;
+        request.user = Some("tester".into());
+        request.env.insert("PATH".into(), "/request/bin".into());
+        let outcome = started(&state, request).await;
+        assert_eq!(
+            env_lines(&outcome),
+            [
+                "HOME=/home/tester",
+                "JAVA_HOME=/opt/java",
+                "LOGNAME=from-launch",
+                "PATH=/request/bin",
+                "SHARED=launch",
+                "USER=tester",
+            ]
+        );
+    }
+
+    /// **AGENTD-12.** Even inheriting the image env, a child holds neither the token nor any
+    /// `AGENTD_` variable, and the snapshot a state keeps has dropped every one of them.
+    #[tokio::test]
+    async fn the_token_and_agentd_configuration_never_reach_an_inheriting_child() {
+        let (state, _dir) = guest(
+            &[
+                ("PATH", "/usr/bin:/bin"),
+                ("AGENTD_PORT", "9000"),
+                ("AGENTD_LOG", "info"),
+            ],
+            &[],
+        );
+        let mut request = req("inherit-token", &["/usr/bin/env"]);
+        request.inherit_image_env = true;
+        let outcome = started(&state, request).await;
+        assert!(
+            !outcome.stdout.contains("tok-exec-start-7f3a"),
+            "{}",
+            outcome.stdout
+        );
+        assert!(!outcome.stdout.contains("AGENTD_"), "{}", outcome.stdout);
+        assert_eq!(env_lines(&outcome), ["PATH=/usr/bin:/bin"]);
+        let snapshot = state.image_env().expect("a snapshot");
+        assert!(snapshot.keys().all(|key| !key.starts_with("AGENTD_")));
+    }
+
+    /// **AGENTD-16.** An integer uid and `shell: true` keep protocol 1's meaning: that uid,
+    /// the daemon's gid, `/bin/sh`; and with no passwd row, no identity variables at all.
+    #[tokio::test]
+    async fn an_integer_uid_and_a_true_shell_keep_their_old_meaning() {
+        let (state, dir) = guest(&[], &[]);
+        let mut request = req("numeric", &["id -u; echo $0"]);
+        request.shell = true.into();
+        request.user = Some(own_id("-u").into());
+        let outcome = started(&state, request).await;
+        assert_eq!(
+            outcome.stdout.lines().collect::<Vec<_>>(),
+            [own_id("-u").to_string(), "/bin/sh".to_string()]
+        );
+
+        std::fs::write(
+            dir.path().join("passwd"),
+            "root:x:0:0:root:/root:/bin/bash\n",
+        )
+        .expect("passwd without this uid");
+        let mut request = req("numeric-norow", &["/usr/bin/env"]);
+        request.user = Some(own_id("-u").into());
+        let outcome = started(&state, request).await;
+        assert_eq!(outcome.stdout, "", "no row, no HOME/USER/LOGNAME");
     }
 
     // ---- streaming ----

@@ -34,6 +34,7 @@
 //! instead of asserting that the invariant is fine.
 
 pub mod client;
+pub mod exec_start;
 pub mod output;
 pub mod wrap;
 

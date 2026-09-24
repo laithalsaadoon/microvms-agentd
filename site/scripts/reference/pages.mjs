@@ -621,6 +621,17 @@ const definitionSection = (name, definition, names) => {
         definition.oneOf.map((variant) => [code(variant.const), cell(variant.description ?? "")])
       )
     )
+  } else if (definition.anyOf !== undefined) {
+    parts.push(
+      `One of ${definition.anyOf.length} JSON types, told apart by the type itself:`,
+      table(
+        ["Type", "Meaning"],
+        definition.anyOf.map((variant) => [
+          typeText(variant, names),
+          cell(rustdocLinks(variant.description ?? "", names))
+        ])
+      )
+    )
   } else if (properties.length === 0) {
     parts.push(`An object with no declared properties.`)
   } else {

@@ -30,7 +30,7 @@ never gets bootstrapped.
 | `GET /v1/fs/tar?path=` | bearer | streaming tar download |
 | `PUT /v1/fs/file` | bearer | write one file |
 | `GET /v1/fs/file?path=&start_line=&end_line=` | bearer | read one file, or a 1-based inclusive line range of it |
-| `GET /v1/health` | none | liveness, version, bootstrap state, exec-activity, hook observations |
+| `GET /v1/health` | none | liveness, version, bootstrap state, exec-activity, hook observations, image-environment key count |
 | `GET /v1/schema` | none | this contract as a JSON Schema document: every route, shape, status, and limit |
 
 **Every hook invocation is recorded and reported on `/v1/health`.** The daemon
@@ -148,9 +148,11 @@ backgrounded grandchild wrote afterward.
 
 **A shell wraps the command only when the caller asks for one.** An argv array
 execs directly. `shell: true` wraps in
-`sh -c` with the command as a single argument. The predecessor's brace-group
-wrapper turned empty and comment-terminated commands into syntax errors and let
-an unbalanced `}` escape the group.
+`sh -c` with the command as a single argument, and `shell: "bash"` does the same
+with a shell the daemon resolves in the guest (see
+[Naming the user, group and shell](#naming-the-user-group-and-shell)). The
+predecessor's brace-group wrapper turned empty and comment-terminated commands
+into syntax errors and let an unbalanced `}` escape the group.
 
 **Tar extraction mirrors the CPython `data` filter contract.** In-tree symlinks
 are preserved, because harnesses legitimately pack them. Absolute link targets
@@ -256,6 +258,75 @@ refusal names the byte count, the ceiling, and how much of it the env is, becaus
 "4142 bytes, ceiling 4096" alone does not say whether to shorten the token or drop
 a variable. One bearer token fits with room to spare; a set of AWS session
 credentials does not, and that is what makes this ceiling reachable in practice.
+
+## Naming the user, group and shell
+
+Three fields of `POST /v1/exec/start` accept a second JSON type, and one flag is
+new. All four are backward compatible in both directions that matter: a request
+that sends integers and booleans is byte-identical to what it always was, and a
+daemon that predates them refuses a string it cannot read as `malformed_request`
+rather than misreading it. `PROTOCOL_VERSION` stays `1`.
+
+| Field | Accepts | Refused before spawn with |
+| --- | --- | --- |
+| `user` | a uid (integer) or a name (string) | `400 unknown_user` |
+| `group` | a gid (integer) or a name (string) | `400 unknown_group` |
+| `shell` | `false`, `true` (`/bin/sh -c`), or a shell name or absolute path | `400 unknown_shell` |
+| `inherit_image_env` | `false` (default) or `true` | never |
+
+**A name is resolved in the guest, before anything is spawned.** The daemon reads
+the guest's `/etc/passwd` and `/etc/group` on each request that names one, so a
+user created by an earlier exec resolves on the next. A name that matches no row
+answers 400 with the stable slug and a `detail` naming the value, and no child
+exists: the exec id is not registered, so a poll of it is 404. A string of ASCII
+digits that matches no name is read as that id, the way `docker exec -u 1000`
+reads it. Supplementary groups are not set; a root daemon's demotion clears them.
+
+**A user with a passwd row gets `HOME`, `USER` and `LOGNAME` from it.** That holds
+however the user was given, name or uid. A uid with no row sets none of them,
+as before. A user given by *name* also gets the row's primary gid when `group` is
+omitted, the way `su` does; a user given as an integer keeps the daemon's group,
+which is what protocol 1 always did.
+
+**A named shell is resolved on the child's `PATH`, the image's `PATH`, `/bin`,
+then `/usr/bin`.** The first executable regular file wins and runs as
+`<shell> -c <command>`. An absolute path is checked as given. A shell the guest
+does not have answers `400 unknown_shell` naming it, instead of the exit 127 a
+caller cannot tell from the command failing. `shell: true` stays `/bin/sh`,
+which is dash on Debian-family images and rejects `set -o pipefail`, arrays and
+`[[`; send `"bash"` for bash semantics.
+
+**`inherit_image_env` makes the image's `ENV` the lowest layer.** At startup the
+daemon snapshots the environment it inherited as the container `CMD`, minus
+every `AGENTD_*` variable, and keeps it immutable. The snapshot is taken in the
+image-build VM and rides the memory image into every VM, like the hook
+observations. The child's environment is built one layer at a time, each key
+from its highest layer:
+
+1. the image snapshot, only with `inherit_image_env: true`;
+2. the passwd identity (`HOME`, `USER`, `LOGNAME`);
+3. the launch environment;
+4. the request's `env`.
+
+The identity sits above the image so a user demoted from root does not keep the
+image's root `HOME`, and below the launch and the request so a caller who sets
+one of the three wins. Without the flag the first layer is empty and the
+child's environment is exactly what it was: the launch map, the request map, and
+the identity of a user with a row.
+
+**The token is never in the snapshot.** It arrives in the run-hook payload,
+after the snapshot is taken, into a slot that is not an environment. The daemon
+cannot write its own environment (`set_var` needs `unsafe`, which the crate
+forbids), and the `AGENTD_` filter would drop anything under that prefix
+regardless. `GET /v1/health` reports `image_env_keys`, the snapshot's key count,
+and never its values; `null` means no snapshot, which is also what a daemon that
+predates the flag reports. Such a daemon ignores `inherit_image_env`, as serde
+ignores any unknown key, so a caller that depends on it checks the count first.
+
+The model in `model/src/exec_start.rs` checks these rules over every request
+shape (AGENTD-7 through AGENTD-16 in `spec/agentd.symspec.json`), including that
+no refused request ever has a child and that neither the token nor `AGENTD_*`
+configuration reaches one.
 
 ## Line-ranged text reads
 

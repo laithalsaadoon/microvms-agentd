@@ -86,6 +86,13 @@ pub struct Config {
     /// answers the platform first. `AGENTD_HOOK_HANDLER_TIMEOUT_SECS`, clamped to
     /// 1..=[`MAX_HOOK_HANDLER_SECS`].
     pub hook_handler_timeout: Duration,
+    /// The passwd database a start request's user name is resolved against. Fixed at
+    /// `/etc/passwd` outside tests and never read from the environment: it decides which
+    /// uid a named user becomes, so it is the image's, like `hooks_dir`.
+    pub passwd_path: std::path::PathBuf,
+    /// The group database a start request's group name is resolved against. `/etc/group`
+    /// outside tests, for `passwd_path`'s reason.
+    pub group_path: std::path::PathBuf,
 }
 
 /// The handler budget's ceiling: five seconds under the platform's 60 s hook limit.
@@ -119,6 +126,8 @@ impl Default for Config {
             repair_identity: true,
             hooks_dir: std::path::PathBuf::from("/etc/agentd/hooks.d"),
             hook_handler_timeout: Duration::from_secs(20),
+            passwd_path: std::path::PathBuf::from("/etc/passwd"),
+            group_path: std::path::PathBuf::from("/etc/group"),
         }
     }
 }

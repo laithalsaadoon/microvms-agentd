@@ -403,7 +403,27 @@ pub const EXEC_START: &[Status] = &[
         StatusCode::BAD_REQUEST,
         "malformed_request",
         "the body is not a valid start request, exec_id is empty, timeout_sec is \
-         not a positive finite number, or command is empty with shell false",
+         not a positive finite number, command is empty with shell false, or shell \
+         is an empty string",
+    ),
+    Status::new(
+        StatusCode::BAD_REQUEST,
+        "unknown_user",
+        "user names no row of the guest's /etc/passwd and is not all digits. \
+         Nothing was spawned; detail names the user.",
+    ),
+    Status::new(
+        StatusCode::BAD_REQUEST,
+        "unknown_group",
+        "group names no row of the guest's /etc/group and is not all digits. \
+         Nothing was spawned; detail names the group.",
+    ),
+    Status::new(
+        StatusCode::BAD_REQUEST,
+        "unknown_shell",
+        "shell names no executable file on the child's PATH, the image's PATH, /bin \
+         or /usr/bin, or is an absolute path to none. Nothing was spawned; detail \
+         names the shell.",
     ),
     UNAUTHORIZED,
     NOT_BOOTSTRAPPED,

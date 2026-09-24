@@ -829,7 +829,7 @@ mod tests {
         protocol::exec::StartRequest {
             exec_id: exec_id.to_string(),
             command: vec!["/bin/true".to_string()],
-            shell: false,
+            shell: false.into(),
             cwd: None,
             env: Default::default(),
             user: None,
@@ -837,6 +837,7 @@ mod tests {
             timeout_sec: None,
             stdin: false,
             reap_group_on_exit: false,
+            inherit_image_env: false,
         }
     }
 

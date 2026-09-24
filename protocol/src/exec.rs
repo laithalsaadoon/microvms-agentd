@@ -102,28 +102,148 @@ impl StreamKind {
     }
 }
 
-/// A start request. `command` is either an argv array or, with `shell: true`, a
-/// single script string.
+/// A user or group as a start request names it: a numeric id, or a name the daemon
+/// resolves against the guest's `/etc/passwd` or `/etc/group`.
+///
+/// Untagged, so the wire carries a bare JSON integer or a bare JSON string and nothing
+/// else. An integer serializes exactly as the `u32` this field used to be, which is what
+/// keeps a client that only ever sends ids byte-compatible with a daemon that predates
+/// names. A string sent to such a daemon is refused as `malformed_request` rather than
+/// misread.
+///
+/// A string that names no row and is all ASCII digits is read as that id, the way
+/// `docker exec -u 1000` reads it: a harness that carries a uid as a string reaches the
+/// same account an integer would.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum NameOrId {
+    /// A numeric uid or gid, applied as given.
+    Id(u32),
+    /// A user or group name, resolved in the guest before anything is spawned.
+    Name(String),
+}
+
+impl From<u32> for NameOrId {
+    fn from(id: u32) -> Self {
+        NameOrId::Id(id)
+    }
+}
+
+impl From<&str> for NameOrId {
+    fn from(name: &str) -> Self {
+        NameOrId::Name(name.to_string())
+    }
+}
+
+impl From<String> for NameOrId {
+    fn from(name: String) -> Self {
+        NameOrId::Name(name)
+    }
+}
+
+impl std::str::FromStr for NameOrId {
+    type Err = std::convert::Infallible;
+
+    /// A command-line spelling: all digits is an id, anything else is a name.
+    ///
+    /// An id is sent as an integer rather than as its digits so a daemon that predates
+    /// names still accepts it.
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        Ok(match raw.parse::<u32>() {
+            Ok(id) if raw.bytes().all(|b| b.is_ascii_digit()) => NameOrId::Id(id),
+            _ => NameOrId::Name(raw.to_string()),
+        })
+    }
+}
+
+impl std::fmt::Display for NameOrId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NameOrId::Id(id) => write!(f, "{id}"),
+            NameOrId::Name(name) => f.write_str(name),
+        }
+    }
+}
+
+/// How a start request's `command` is run: `false` (an argv), `true` (`/bin/sh -c`), or
+/// the name of a shell the daemon resolves and runs as `<shell> -c`.
+///
+/// Untagged for [`NameOrId`]'s reason: a boolean serializes exactly as the field always
+/// did, so an old daemon keeps accepting it, and a string sent to an old daemon is refused
+/// rather than misread.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum Shell {
+    /// `false` execs `command` as an argv; `true` runs it under `/bin/sh -c`.
+    Flag(bool),
+    /// A shell name such as `"bash"` (resolved on the child's `PATH`, the image's `PATH`,
+    /// `/bin` and `/usr/bin`) or an absolute path to one.
+    Named(String),
+}
+
+impl Default for Shell {
+    fn default() -> Self {
+        Shell::Flag(false)
+    }
+}
+
+impl From<bool> for Shell {
+    fn from(flag: bool) -> Self {
+        Shell::Flag(flag)
+    }
+}
+
+impl From<&str> for Shell {
+    fn from(name: &str) -> Self {
+        Shell::Named(name.to_string())
+    }
+}
+
+impl From<String> for Shell {
+    fn from(name: String) -> Self {
+        Shell::Named(name)
+    }
+}
+
+impl Shell {
+    /// Whether `command` is a script for a shell rather than an argv.
+    pub fn is_shell(&self) -> bool {
+        !matches!(self, Shell::Flag(false))
+    }
+}
+
+/// A start request. `command` is either an argv array or, with `shell` set, a single
+/// script string.
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct StartRequest {
     /// Caller-minted idempotency key. Harbor retries, and a retry must not
     /// produce a second child.
     pub exec_id: String,
-    /// argv when `shell` is false, or the script when it is true.
+    /// argv when `shell` is false, or the script when it is set.
     pub command: Vec<String>,
+    /// `false`, `true` (`/bin/sh -c`), or a shell name such as `"bash"`. A name the guest
+    /// cannot resolve answers 400 `unknown_shell` before anything is spawned.
     #[serde(default)]
-    pub shell: bool,
+    pub shell: Shell,
     /// Omitted means inherit the daemon's working directory. See the module docs.
     #[serde(default)]
     pub cwd: Option<String>,
     #[serde(default)]
     pub env: HashMap<String, String>,
-    /// Numeric uid to demote to. Optional; omitted means run as the daemon's own
-    /// user.
+    /// The user to demote to: a numeric uid, or a name resolved against the guest's
+    /// `/etc/passwd`. Optional; omitted means run as the daemon's own user. A name the
+    /// guest does not have answers 400 `unknown_user` before anything is spawned.
+    ///
+    /// A user with a passwd row, however it was given, gets `HOME`, `USER` and `LOGNAME`
+    /// from the row, beneath the launch environment and `env`. A user given by name also
+    /// gets the row's primary gid when `group` is omitted; a numeric uid keeps the
+    /// daemon's group, as it always did.
     #[serde(default)]
-    pub user: Option<u32>,
+    pub user: Option<NameOrId>,
+    /// The group to demote to: a numeric gid, or a name resolved against `/etc/group`. A
+    /// name the guest does not have answers 400 `unknown_group`.
     #[serde(default)]
-    pub group: Option<u32>,
+    pub group: Option<NameOrId>,
     /// Wall-clock budget. Validated before the child spawns — the predecessor
     /// raised on a bad value inside the waiter thread, by which point the child
     /// was already running and became an orphan.
@@ -153,6 +273,19 @@ pub struct StartRequest {
     /// exec is already escalated and is not escalated twice.
     #[serde(default)]
     pub reap_group_on_exit: bool,
+    /// Whether the child's environment starts from the image's `ENV`.
+    ///
+    /// Off by default, which keeps the property the daemon has always had: nothing from
+    /// its own environment reaches a child. Set, the environment the daemon inherited as
+    /// the container `CMD`, minus every `AGENTD_*` variable, is the lowest layer, under
+    /// the passwd identity, the launch environment and `env`. The agent token is never in
+    /// that snapshot: it arrives in the run hook, after the snapshot is taken.
+    ///
+    /// A daemon that predates this field ignores it, as serde ignores any unknown key; a
+    /// caller that depends on it can read `image_env_keys` on `GET /v1/health`, which such
+    /// a daemon does not report.
+    #[serde(default)]
+    pub inherit_image_env: bool,
 }
 
 /// `POST /v1/exec/{id}/stdin` body.
@@ -343,6 +476,15 @@ pub const ERROR_STDIN_WRITE_TIMEOUT: &str = "stdin_write_timeout";
 pub const ERROR_STDIN_WRITE_TOO_LARGE: &str = "stdin_write_too_large";
 /// The write to the pipe failed for a reason other than a broken pipe.
 pub const ERROR_STDIN_WRITE_FAILED: &str = "stdin_write_failed";
+/// A start request named a user the guest's `/etc/passwd` does not contain. 400, and
+/// nothing was spawned; `detail` names the user.
+pub const ERROR_UNKNOWN_USER: &str = "unknown_user";
+/// A start request named a group the guest's `/etc/group` does not contain. 400, and
+/// nothing was spawned; `detail` names the group.
+pub const ERROR_UNKNOWN_GROUP: &str = "unknown_group";
+/// A start request named a shell that no searched directory holds as an executable
+/// file. 400, and nothing was spawned; `detail` names the shell and where it looked.
+pub const ERROR_UNKNOWN_SHELL: &str = "unknown_shell";
 
 #[cfg(test)]
 mod tests {
@@ -418,7 +560,13 @@ mod tests {
     fn a_start_request_omitting_every_defaulted_field_deserializes() {
         let request: StartRequest =
             serde_json::from_str(r#"{"exec_id":"e1","command":["true"]}"#).expect("deserializes");
-        assert!(!request.shell);
+        assert_eq!(request.shell, Shell::Flag(false));
+        assert!(!request.shell.is_shell());
+        assert!(request.user.is_none() && request.group.is_none());
+        assert!(
+            !request.inherit_image_env,
+            "inheriting the image env is opt-in: an old client keeps the exact launch map"
+        );
         assert!(request.cwd.is_none());
         assert!(request.env.is_empty());
         assert!(request.timeout_sec.is_none());
@@ -427,6 +575,68 @@ mod tests {
             !request.reap_group_on_exit,
             "reaping is opt-in: an old client that never heard of the flag keeps today's \
              grandchild-output guarantee"
+        );
+    }
+
+    /// The union fields read both spellings and write each back as it came, so a client
+    /// that only ever sends integers and booleans sends the bytes it always did.
+    #[test]
+    fn user_group_and_shell_read_both_spellings_and_write_them_back() {
+        let request: StartRequest = serde_json::from_str(
+            r#"{"exec_id":"e1","command":["id"],"user":1000,"group":"staff","shell":"bash","inherit_image_env":true}"#,
+        )
+        .expect("deserializes");
+        assert_eq!(request.user, Some(NameOrId::Id(1000)));
+        assert_eq!(request.group, Some(NameOrId::Name("staff".into())));
+        assert_eq!(request.shell, Shell::Named("bash".into()));
+        assert!(request.inherit_image_env);
+
+        let written = serde_json::to_value(&request).expect("serializes");
+        assert_eq!(written["user"], 1000);
+        assert_eq!(written["group"], "staff");
+        assert_eq!(written["shell"], "bash");
+
+        let legacy: StartRequest =
+            serde_json::from_str(r#"{"exec_id":"e1","command":["id"],"shell":true,"user":0}"#)
+                .expect("deserializes");
+        assert_eq!(legacy.shell, Shell::Flag(true));
+        let written = serde_json::to_value(&legacy).expect("serializes");
+        assert_eq!(written["shell"], true);
+        assert_eq!(written["user"], 0);
+    }
+
+    /// Anything but an integer or a string for a user, or a boolean or a string for a
+    /// shell, is a malformed body rather than a coerced value.
+    #[test]
+    fn other_json_types_for_the_union_fields_are_refused() {
+        for body in [
+            r#"{"exec_id":"e1","command":["id"],"user":-1}"#,
+            r#"{"exec_id":"e1","command":["id"],"user":1.5}"#,
+            r#"{"exec_id":"e1","command":["id"],"user":["root"]}"#,
+            r#"{"exec_id":"e1","command":["id"],"group":{"name":"x"}}"#,
+            r#"{"exec_id":"e1","command":["id"],"shell":1}"#,
+            r#"{"exec_id":"e1","command":["id"],"shell":null}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<StartRequest>(body).is_err(),
+                "accepted {body}"
+            );
+        }
+    }
+
+    /// The command-line spelling: digits are an id and go out as an integer.
+    #[test]
+    fn a_flag_of_digits_is_an_id_and_anything_else_a_name() {
+        assert_eq!("1000".parse::<NameOrId>(), Ok(NameOrId::Id(1000)));
+        assert_eq!("0".parse::<NameOrId>(), Ok(NameOrId::Id(0)));
+        assert_eq!(
+            "agent".parse::<NameOrId>(),
+            Ok(NameOrId::Name("agent".into()))
+        );
+        assert_eq!("+1".parse::<NameOrId>(), Ok(NameOrId::Name("+1".into())));
+        assert_eq!(
+            "99999999999".parse::<NameOrId>(),
+            Ok(NameOrId::Name("99999999999".into()))
         );
     }
 

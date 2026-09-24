@@ -26,6 +26,40 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
   `model/src/wrap.rs`, the Gherkin scenarios in `microvms-core/tests/features/`, and a
   bolero harness over Dockerfile text.
 
+- **An exec can name its user, group and shell, and inherit the image's `ENV` (#224, #225,
+  #226, AGENTD-7..AGENTD-16).** Three backward-compatible additions to `POST /v1/exec/start`;
+  `PROTOCOL_VERSION` stays `1`, and a request that sends integers and booleans is
+  byte-identical to before.
+  - `user` and `group` take a JSON integer or a string. A string is resolved against the
+    guest's `/etc/passwd` and `/etc/group` before anything is spawned; a name the guest does
+    not have answers `400 unknown_user` or `400 unknown_group` naming it, and no child
+    exists. All-digit strings that name no row are read as ids. A user with a passwd row
+    (by name or uid) gets `HOME`, `USER` and `LOGNAME` from it, beneath the launch
+    environment and the request's `env`; a named user with no `group` gets the row's
+    primary gid. A numeric uid keeps the daemon's group, as before, and one with no row
+    sets no variables.
+  - `shell` takes `false`, `true` (`/bin/sh -c`, unchanged), or a shell name such as
+    `"bash"`, resolved on the child's `PATH`, the image's `PATH`, `/bin` and `/usr/bin`. A
+    missing shell answers `400 unknown_shell` before spawning, instead of an exit 127 that a
+    caller cannot tell from the command failing.
+  - `inherit_image_env: true` makes the daemon's startup snapshot of its own environment,
+    minus every `AGENTD_*` variable, the lowest layer of the child's environment: image <
+    passwd identity < launch env < request env. Off by default, which keeps the child's
+    environment exactly the launch and request maps. The token is never in the snapshot: it
+    arrives in the run hook after the snapshot is taken. `GET /v1/health` reports
+    `image_env_keys`, the count and never the values; `null` means no snapshot, which is
+    also what an older daemon reports, and such a daemon ignores the flag.
+  - Clients pass the fields through: `microvm exec --user NAME|UID --group NAME|GID
+    --shell bash --inherit-image-env`, Python `run`/`run_sync(user: int | str, group: int |
+    str, shell: bool | str, inherit_image_env=False)` and `Health.image_env_keys`, Node
+    `ExecOptions.user`/`group` (`number | string`), `shell` (`boolean | string`),
+    `inheritImageEnv` and `Health.imageEnvKeys`, and `microvm health` `imageEnvKeys`.
+  - Specified in `spec/agentd.symspec.json`, checked by the Stateright model in
+    `model/src/exec_start.rs` (validation before spawn, layer precedence, the token and
+    `AGENTD_*` never in a child), the Gherkin scenarios in
+    `agentd/tests/features/exec_start.feature`, a bolero harness over the union fields'
+    deserialization and resolution, and live checks keyed AGENTD-*.
+
 - **`Sandbox.detach()` hands a launched VM to another process without a leak warning.** A
   durable workflow's launch step used to end by dropping its `Sandbox`, which printed the
   "dropped without terminate()" billing warning for a VM a later step was about to adopt.

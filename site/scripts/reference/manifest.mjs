@@ -97,6 +97,7 @@ import { readFileSync } from "node:fs"
  * @property {ReadonlyArray<string>} [required]
  * @property {ReadonlyArray<string>} [enum]
  * @property {ReadonlyArray<{ const: string, description?: string }>} [oneOf]
+ * @property {ReadonlyArray<SchemaProperty>} [anyOf] an untagged union: each variant a type
  */
 
 /**
@@ -368,9 +369,10 @@ export const validateSchema = (parsed, source = SOURCES.schema) => {
     if (
       definition.type === undefined &&
       definition.oneOf === undefined &&
+      definition.anyOf === undefined &&
       definition.enum === undefined
     ) {
-      throw drift(source, where, "a definition with `type`, `oneOf` or `enum`", definition)
+      throw drift(source, where, "a definition with `type`, `oneOf`, `anyOf` or `enum`", definition)
     }
     if (definition.description !== undefined)
       check.string(definition.description, `${where}.description`)
@@ -393,6 +395,16 @@ export const validateSchema = (parsed, source = SOURCES.schema) => {
       check.nonEmptyArray(definition.oneOf, `${where}.oneOf`).forEach((item, at) => {
         const variant = check.record(item, `${where}.oneOf[${at}]`)
         check.string(variant.const, `${where}.oneOf[${at}].const`)
+      })
+    }
+    // serde's untagged enums, such as `NameOrId` (an integer or a string): each variant is a
+    // type the page renders, so each must say which.
+    if (definition.anyOf !== undefined) {
+      check.nonEmptyArray(definition.anyOf, `${where}.anyOf`).forEach((item, at) => {
+        const variant = check.record(item, `${where}.anyOf[${at}]`)
+        if (variant.type === undefined && variant.$ref === undefined) {
+          throw drift(source, `${where}.anyOf[${at}]`, "a variant with `type` or `$ref`", variant)
+        }
       })
     }
   }

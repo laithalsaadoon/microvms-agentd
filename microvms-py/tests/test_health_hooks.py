@@ -98,3 +98,4 @@ def test_an_older_daemon_reports_empty_lists() -> None:
         health = microvms.Session.direct(endpoint, "token").health()
     assert health.hooks == [] and health.identity_steps == []
     assert health.hooks_dropped == 0
+    assert health.image_env_keys is None

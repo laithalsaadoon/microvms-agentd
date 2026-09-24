@@ -1133,8 +1133,8 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
         // refuses its own tools as root, so `run --exec` carries the same `--user`/`--group`
         // that `exec` does, through the same spec.
         let request = start_request(StartSpec {
-            user: args.user,
-            group: args.group,
+            user: args.user.clone(),
+            group: args.group.clone(),
             // The synced tree is the working directory: `run . --exec "make test"` means
             // "run make test in my project", and an exec that started in the image's own
             // WORKDIR would make every command spell the path itself.
@@ -1861,10 +1861,15 @@ pub struct StartSpec<'a> {
     /// agent token must never leak into a child — so this map is not merged into anything:
     /// what is here is everything the child sees.
     pub env: std::collections::HashMap<String, String>,
-    /// Numeric uid to demote to. `None` runs as the daemon's own user.
-    pub user: Option<u32>,
-    /// Numeric gid to demote to. `None` keeps the daemon's own group.
-    pub group: Option<u32>,
+    /// The user to demote to, by name or uid. `None` runs as the daemon's own user.
+    pub user: Option<microvms_core::protocol::exec::NameOrId>,
+    /// The group to demote to, by name or gid. `None` keeps the daemon's own group, or a
+    /// named user's primary group.
+    pub group: Option<microvms_core::protocol::exec::NameOrId>,
+    /// A shell to run the command under, resolved by the daemon. `None` is `/bin/sh -c`.
+    pub shell: Option<String>,
+    /// Whether the child's environment starts from the image's `ENV`.
+    pub inherit_image_env: bool,
     /// Whether the daemon signals the whole process group once the child exits. Off keeps
     /// the backgrounded-grandchild-output guarantee; `exec --reap` is the opt-in.
     pub reap: bool,
@@ -1881,6 +1886,8 @@ impl<'a> StartSpec<'a> {
             env: std::collections::HashMap::new(),
             user: None,
             group: None,
+            shell: None,
+            inherit_image_env: false,
             reap: false,
         }
     }
@@ -1916,20 +1923,22 @@ pub fn start_request(spec: StartSpec<'_>) -> microvms_core::protocol::exec::Star
             .exec_id
             .unwrap_or_else(microvms_core::session::mint_exec_id),
         command: vec![spec.command.to_string()],
-        shell: true,
+        // Always a script: a one-element command under `shell: false` would look for a binary
+        // literally named `ls -la`. A named shell is forwarded for the daemon to resolve,
+        // because only the guest knows which shells it has.
+        shell: spec
+            .shell
+            .map_or(microvms_core::protocol::exec::Shell::Flag(true), Into::into),
         cwd: spec.cwd,
         // Verbatim, not merged: the daemon `env_clear()`s before applying this map
         // (`agentd/src/exec.rs:1003`), so the caller's `--env` flags are the child's whole
         // environment and there is nothing on this side to merge them into.
         env: spec.env,
-        // Forwarded as the numbers the caller gave, unvalidated. The earlier reason for
-        // leaving these `None` — "a uid flag on this surface would be a number with no way to
-        // check it means anything in that guest" — still holds as far as it goes, but it
-        // holds equally against the Python and Node bindings, which do expose them; the guest's
-        // uid space is unknowable from *any* client, and the daemon's spawn failure for a uid
-        // it cannot assume is the real check. What the reason bought was parity-breaking
-        // caution, not a guard: `--user`/`--group` now forward, and omission stays the
-        // default, which is "run as the daemon's own user".
+        // Forwarded as the caller gave them, unvalidated: a name or a number. The guest's
+        // accounts are unknowable from *any* client, and the daemon resolves a name against
+        // the guest's `/etc/passwd` and `/etc/group` before it spawns, answering
+        // `unknown_user`/`unknown_group` for one it does not have. Omission stays the default,
+        // which is "run as the daemon's own user".
         user: spec.user,
         group: spec.group,
         // The client-side deadline is the caller's `--timeout`, applied by `run_sync`. Sending it
@@ -1944,6 +1953,9 @@ pub fn start_request(spec: StartSpec<'_>) -> microvms_core::protocol::exec::Star
         // too, so dropping this line would not fail anything — the exec would just quietly
         // keep leaving its grandchildren running, which is why the guard asserts on the wire.
         reap_group_on_exit: spec.reap,
+        // Forwarded as asked and defaulted off, which keeps the exact `--env` map as the
+        // child's environment.
+        inherit_image_env: spec.inherit_image_env,
     }
 }
 
@@ -2425,7 +2437,12 @@ mod tests {
             cwd: Some("/workspace".into()),
             ..StartSpec::command("pytest -q && echo done")
         });
-        assert!(request.shell, "a shell line needs the shell flag");
+        assert_eq!(
+            request.shell,
+            microvms_core::protocol::exec::Shell::Flag(true),
+            "a shell line needs the shell flag"
+        );
+        assert!(!request.inherit_image_env);
         assert_eq!(request.command, ["pytest -q && echo done"]);
         assert_eq!(request.cwd.as_deref(), Some("/workspace"));
         assert!(
@@ -2507,8 +2524,10 @@ mod tests {
                 ("PATH".to_string(), "/usr/bin:/bin".to_string()),
                 ("EMPTY".to_string(), String::new()),
             ]),
-            user: Some(1000),
-            group: Some(2000),
+            user: Some(1000.into()),
+            group: Some("staff".into()),
+            shell: Some("bash".into()),
+            inherit_image_env: true,
             ..StartSpec::command("env")
         });
         assert_eq!(request.env.len(), 2);
@@ -2522,8 +2541,13 @@ mod tests {
             Some(""),
             "an empty value survives to the wire; it is not the same as unset"
         );
-        assert_eq!(request.user, Some(1000));
-        assert_eq!(request.group, Some(2000));
+        assert_eq!(request.user, Some(1000.into()));
+        assert_eq!(request.group, Some("staff".into()));
+        assert_eq!(
+            request.shell,
+            microvms_core::protocol::exec::Shell::Named("bash".into())
+        );
+        assert!(request.inherit_image_env);
 
         // And the defaults stay the defaults: no demotion, empty environment. The one-shot
         // constructor is what `run --exec` uses, so a stray value here would give every run's
@@ -2546,12 +2570,12 @@ mod tests {
     #[test]
     fn run_exec_and_exec_agree_on_the_start_request_they_send() {
         let command = "id -u";
-        let (user, group) = (Some(1000), Some(2000));
+        let (user, group) = (Some(1000.into()), Some(2000.into()));
 
         // `run --exec 'id -u' --user 1000 --group 2000`, as lifecycle.rs builds it.
         let from_run = start_request(StartSpec {
-            user,
-            group,
+            user: user.clone(),
+            group: group.clone(),
             ..StartSpec::command(command)
         });
         // `microvm exec 'id -u' --user 1000 --group 2000`, as attached.rs builds it —
@@ -2564,6 +2588,8 @@ mod tests {
             env: std::collections::HashMap::new(),
             user,
             group,
+            shell: None,
+            inherit_image_env: false,
             reap: false,
         });
 

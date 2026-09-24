@@ -125,6 +125,20 @@ pub struct Health {
     /// Defaulted for `busy`'s reason: an older daemon omits it.
     #[serde(default)]
     pub identity_steps: Vec<IdentityStep>,
+    /// How many variables the daemon's image-environment snapshot holds, or `None` when
+    /// it holds no snapshot.
+    ///
+    /// The snapshot is the environment the daemon inherited as the container `CMD`, minus
+    /// every `AGENTD_*` variable, taken once at startup; a start request with
+    /// `inherit_image_env` starts its child from it. A count and never the values: this
+    /// route answers without the agent token, and an image's `ENV` can hold anything its
+    /// author put there.
+    ///
+    /// Defaulted for `busy`'s reason, and `None` is also what a daemon that predates
+    /// `inherit_image_env` reads as, which is how a caller tells whether the flag will be
+    /// honoured: such a daemon ignores the flag rather than refusing it.
+    #[serde(default)]
+    pub image_env_keys: Option<usize>,
 }
 
 /// One identity-repair step, as the daemon ran it.
@@ -222,6 +236,7 @@ mod tests {
             hooks: Vec::new(),
             hooks_dropped: 0,
             identity_steps: Vec::new(),
+            image_env_keys: None,
         })
         .expect("serializes");
         assert!(written.contains(r#""disk":null"#), "{written}");
@@ -247,6 +262,7 @@ mod tests {
             hooks: Vec::new(),
             hooks_dropped: 0,
             identity_steps: Vec::new(),
+            image_env_keys: None,
         })
         .expect("serializes");
         assert!(written.contains(r#""busy":false"#), "{written}");
@@ -283,6 +299,7 @@ mod tests {
             ],
             hooks_dropped: 3,
             identity_steps: Vec::new(),
+            image_env_keys: None,
         })
         .expect("serializes");
         // The wire keys are pinned to the response's own convention — snake_case,
@@ -354,6 +371,7 @@ mod tests {
                 outcome: "failed".to_string(),
                 error: Some("EPERM: Operation not permitted".to_string()),
             }],
+            image_env_keys: None,
         })
         .expect("serializes");
         assert!(
@@ -364,5 +382,35 @@ mod tests {
         let handler = read.hooks[1].handler.as_ref().expect("a handler outcome");
         assert!(handler.timed_out && !handler.succeeded());
         assert_eq!(read.identity_steps[0].outcome, "failed");
+    }
+
+    /// AGENTD-13 on the wire: a count, and an older daemon's missing key reads as `None`,
+    /// the same answer as a daemon with no snapshot, so a caller cannot mistake a daemon
+    /// that would ignore `inherit_image_env` for one that honours it.
+    #[test]
+    fn the_image_env_count_round_trips_and_an_older_daemon_reads_as_none() {
+        let written = serde_json::to_value(Health {
+            version: Cow::Borrowed("0.1.0"),
+            bootstrapped: true,
+            disk: None,
+            identity_degraded: false,
+            identity_repaired: true,
+            busy: false,
+            execs: 0,
+            hooks: Vec::new(),
+            hooks_dropped: 0,
+            identity_steps: Vec::new(),
+            image_env_keys: Some(4),
+        })
+        .expect("serializes");
+        assert_eq!(written["image_env_keys"], 4);
+        let read: Health = serde_json::from_value(written).expect("deserializes");
+        assert_eq!(read.image_env_keys, Some(4));
+
+        let older: Health = serde_json::from_str(
+            r#"{"version":"0.9.0","bootstrapped":true,"disk":null,"identity_degraded":false,"identity_repaired":true}"#,
+        )
+        .expect("an older daemon's body deserializes");
+        assert_eq!(older.image_env_keys, None);
     }
 }

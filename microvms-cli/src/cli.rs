@@ -856,24 +856,23 @@ pub struct RunArgs {
     #[arg(long, value_name = "KEY=VALUE", value_parser = parse_env_pair)]
     pub launch_env: Vec<(String, String)>,
 
-    /// Numeric uid to run --exec's command as. Omitted runs as the daemon's own user.
+    /// User to run --exec's command as: a name or a numeric uid. Omitted runs as the
+    /// daemon's own user.
     ///
-    /// Numeric because that is the protocol's type (`StartRequest.user: Option<u32>`) and the
-    /// daemon's mechanism (`Command::uid`, between fork and exec) — a *name* would need an
-    /// `/etc/passwd` lookup inside a guest whose base image may not have one. The number is
-    /// not validated here: the guest's uid space is the daemon's to know, and the spawn
-    /// failure it answers for a uid it cannot assume is the real check.
+    /// Resolved by the daemon against the guest's `/etc/passwd`, the only place the answer
+    /// exists; see `exec --user`.
     ///
     /// Meaningless without --exec — there is no command to demote — so that combination is
     /// refused locally before any billable call.
-    #[arg(long, value_name = "UID", requires = "exec")]
-    pub user: Option<u32>,
+    #[arg(long, value_name = "USER", requires = "exec", value_parser = parse_name_or_id)]
+    pub user: Option<microvms_core::protocol::exec::NameOrId>,
 
-    /// Numeric gid to run --exec's command as. Omitted keeps the daemon's own group.
+    /// Group to run --exec's command as: a name or a numeric gid. Omitted keeps the daemon's
+    /// own group, or a named user's primary group.
     ///
     /// Refused without --exec, for the same reason as --user.
-    #[arg(long, value_name = "GID", requires = "exec")]
-    pub group: Option<u32>,
+    #[arg(long, value_name = "GROUP", requires = "exec", value_parser = parse_name_or_id)]
+    pub group: Option<microvms_core::protocol::exec::NameOrId>,
 
     /// Leave the VM and image running. You are then paying for them.
     #[arg(long)]
@@ -1118,11 +1117,12 @@ pub struct ExecArgs {
 
     /// Set one environment variable for the command, as KEY=VALUE. Repeatable.
     ///
-    /// These flags are the child's *whole* environment: the daemon starts every exec from an
-    /// empty one (`env_clear()`, so the agent token never leaks into a child,
-    /// `agentd/src/exec.rs:1003`) and applies exactly this map. There is no inherited PATH to
-    /// append to — a command that needs one must be handed one, which is the failure the
-    /// coding-agents example documents.
+    /// These flags, over the launch environment, are the child's *whole* environment: the
+    /// daemon starts every exec from an empty one (`env_clear()`, so the agent token never
+    /// leaks into a child) and applies exactly these maps, plus `HOME`/`USER`/`LOGNAME` for a
+    /// --user with a passwd row. There is no inherited PATH to append to unless
+    /// --inherit-image-env asks for the image's; otherwise a command that needs one must be
+    /// handed one, which is the failure the coding-agents example documents.
     ///
     /// Split at the **first** `=`, so a value may itself contain `=` (`--env A=b=c` sets `A`
     /// to `b=c`). An empty value is legal and explicit (`--env EMPTY=` sets the variable to
@@ -1132,19 +1132,43 @@ pub struct ExecArgs {
     #[arg(long, value_name = "KEY=VALUE", value_parser = parse_env_pair)]
     pub env: Vec<(String, String)>,
 
-    /// Numeric uid to run the command as. Omitted runs as the daemon's own user.
+    /// User to run the command as: a name or a numeric uid. Omitted runs as the daemon's own
+    /// user.
     ///
-    /// Numeric because that is the protocol's type (`StartRequest.user: Option<u32>`) and the
-    /// daemon's mechanism (`Command::uid`, between fork and exec) — a *name* would need an
-    /// `/etc/passwd` lookup inside a guest whose base image may not have one. The number is
-    /// not validated here: the guest's uid space is the daemon's to know, and the spawn
-    /// failure it answers for a uid it cannot assume is the real check.
-    #[arg(long, value_name = "UID")]
-    pub user: Option<u32>,
+    /// All digits is sent as an integer uid, anything else as a name (AGENTD-7, AGENTD-16).
+    /// The daemon resolves a name against the guest's `/etc/passwd` before it spawns anything and answers
+    /// `unknown_user` (`ERR_PROTOCOL`) for a name the guest does not have. A user with a
+    /// passwd row gets `HOME`, `USER` and `LOGNAME` from it, beneath `--env`; a named user
+    /// also gets the row's primary group when --group is omitted. Nothing is validated here:
+    /// the guest's accounts are the daemon's to know.
+    #[arg(long, value_name = "USER", value_parser = parse_name_or_id)]
+    pub user: Option<microvms_core::protocol::exec::NameOrId>,
 
-    /// Numeric gid to run the command as. Omitted keeps the daemon's own group.
-    #[arg(long, value_name = "GID")]
-    pub group: Option<u32>,
+    /// Group to run the command as: a name (resolved against the guest's `/etc/group`) or a
+    /// numeric gid. Omitted keeps the daemon's own group, or a named user's primary group.
+    #[arg(long, value_name = "GROUP", value_parser = parse_name_or_id)]
+    pub group: Option<microvms_core::protocol::exec::NameOrId>,
+
+    /// Run the command under this shell instead of `/bin/sh`, for example `bash` (AGENTD-14).
+    ///
+    /// The daemon resolves the name on the child's `PATH`, the image's `PATH`, `/bin` and
+    /// `/usr/bin` and runs `<shell> -c COMMAND`; a shell the guest does not have answers
+    /// `unknown_shell` (`ERR_PROTOCOL`) before anything is spawned, rather than the exit 127
+    /// a caller cannot tell from the command failing. Omitted runs `/bin/sh -c`, which is
+    /// dash on Debian-family images and rejects `set -o pipefail`.
+    #[arg(long, value_name = "SHELL")]
+    pub shell: Option<String>,
+
+    /// Start the command's environment from the image's `ENV` rather than from nothing
+    /// (AGENTD-11).
+    ///
+    /// The daemon snapshots the environment it inherited as the container `CMD` at startup,
+    /// minus every `AGENTD_*` variable, and uses it as the lowest layer: beneath a demoted
+    /// user's `HOME`/`USER`/`LOGNAME`, the launch environment and `--env`. The agent token is
+    /// never in it. A daemon built before this flag ignores it; `microvm health` reports
+    /// `imageEnvKeys` on one that honours it.
+    #[arg(long)]
+    pub inherit_image_env: bool,
 
     /// Use this exec id instead of a fresh one, making a retry idempotent.
     ///
@@ -2138,6 +2162,19 @@ pub struct AgentPromptArgs {
     pub region: RegionFlags,
 }
 
+/// The parser for `--user` and `--group`: all digits is an id, sent as a JSON integer, and
+/// anything else a name.
+///
+/// Named explicitly rather than left to clap's inference, which is the bug this exists for:
+/// `NameOrId` implements `From<String>`, and clap's `value_parser!` prefers that over
+/// `FromStr`, so `--user 1000` parsed as the *name* "1000" and went out as a string, which a
+/// daemon that predates names refuses as malformed (AGENTD-16).
+fn parse_name_or_id(
+    raw: &str,
+) -> Result<microvms_core::protocol::exec::NameOrId, std::convert::Infallible> {
+    raw.parse()
+}
+
 /// One `--env KEY=VALUE` pair, split at the first `=`.
 ///
 /// A parser rather than a raw `Vec<String>` the handler splits later, for the CLI-5 reason:
@@ -2711,8 +2748,8 @@ mod tests {
         let Command::Run(args) = parsed.command else {
             panic!("parsed a run");
         };
-        assert_eq!(args.user, Some(1000));
-        assert_eq!(args.group, Some(2000));
+        assert_eq!(args.user, Some(1000.into()));
+        assert_eq!(args.group, Some(2000.into()));
     }
 
     /// `--env` splits at the first `=`, keeps an empty VALUE, and refuses the two misreads.
@@ -2955,7 +2992,7 @@ mod tests {
     /// A name would need an `/etc/passwd` lookup inside a guest whose base image may not have
     /// one; the daemon's `Command::uid`/`gid` take numbers and so does the wire.
     #[test]
-    fn user_and_group_are_numeric_and_a_name_is_refused_at_parse_time() {
+    fn user_and_group_digits_parse_as_ids_and_anything_else_as_names() {
         let attach = [
             "--endpoint",
             "https://vm.example",
@@ -2970,15 +3007,32 @@ mod tests {
         let Command::Exec(args) = cli.command else {
             panic!("an exec parses as an exec");
         };
-        assert_eq!(args.user, Some(1000));
-        assert_eq!(args.group, Some(1000));
+        assert_eq!(args.user, Some(1000.into()));
+        assert_eq!(args.group, Some(1000.into()));
 
-        let mut named = vec!["microvm", "exec", "id", "--user", "nobody"];
+        // A name is a name on the wire (AGENTD-7), resolved by the daemon in the guest; the
+        // digits above stay an integer, which a daemon that predates names still accepts.
+        let mut named = vec![
+            "microvm",
+            "exec",
+            "id",
+            "--user",
+            "nobody",
+            "--group",
+            "nogroup",
+            "--shell",
+            "bash",
+            "--inherit-image-env",
+        ];
         named.extend(attach);
-        assert!(
-            Cli::try_parse_from(&named).is_err(),
-            "a user *name* has no meaning on the wire; the protocol carries a u32"
-        );
+        let cli = Cli::try_parse_from(&named).expect("names parse");
+        let Command::Exec(args) = cli.command else {
+            panic!("an exec parses as an exec");
+        };
+        assert_eq!(args.user, Some("nobody".into()));
+        assert_eq!(args.group, Some("nogroup".into()));
+        assert_eq!(args.shell.as_deref(), Some("bash"));
+        assert!(args.inherit_image_env);
     }
 
     /// `--from-offset` cannot be asked for without the stream it is a cursor into.

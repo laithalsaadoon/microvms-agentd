@@ -135,6 +135,17 @@ tempfile = "3"
 # framing implementation whose bugs read as relay bugs. Dev-only: nothing that ships into a
 # guest image needs a WebSocket client.
 tokio-tungstenite = "0.30"
+# The Gherkin behavior spec for exec start (AGENTD-7..16, `tests/bdd_exec_start.rs`), the same
+# cucumber line the CLI's runner uses so the workspace resolves one copy.
+cucumber = { version = "0.23", features = ["output-junit"] }
+# The fuzz harness over start resolution (`src/exec_start_fuzz.rs`). `bolero::check!` runs as
+# an ordinary `#[test]` on stable and as a coverage-guided target under `cargo bolero test`;
+# the same crate and line the CLI's output harness uses.
+bolero = "0.13"
+
+[[test]]
+name = "bdd_exec_start"
+harness = false
 
 [lints.rust]
 # No hand-written `unsafe` in this crate; a future one is a build error, not a scan finding.

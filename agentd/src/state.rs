@@ -161,6 +161,14 @@ struct Inner {
     /// env as a separate argument, so there is no struct field a future refactor
     /// could accidentally forward.
     launch_env: Mutex<HashMap<String, String>>,
+    /// The environment this daemon inherited as the container `CMD`, minus every
+    /// `AGENTD_*` variable, taken once at startup. `None` for a state built without one,
+    /// which is every test that does not ask and is reported as such on `/v1/health`.
+    ///
+    /// Immutable, so it needs no lock: nothing after startup can add to it, and in
+    /// particular the token, which arrives in the run hook after this is taken, cannot be
+    /// in it. A child sees it only when its start request sets `inherit_image_env`.
+    image_env: Option<HashMap<String, String>>,
     /// The tunnel's identity material, delivered in the same run-hook payload.
     ///
     /// `None` until a run hook carrying both identity halves arrives, and `None`
@@ -221,11 +229,41 @@ impl AppState {
         space_probe: disk::SpaceProbe,
         repairer: identity::Repairer,
     ) -> Self {
+        Self::with_parts(config, space_probe, repairer, None)
+    }
+
+    /// A state holding a snapshot of `inherited`, with the default seams. For tests of
+    /// `inherit_image_env`, which hand in the environment the daemon would have inherited
+    /// rather than the test process's own; it is filtered exactly as `main` filters the
+    /// real one, `AGENTD_*` dropped.
+    pub fn with_image_env(config: Config, inherited: HashMap<String, String>) -> Self {
+        let snapshot = crate::exec_start::snapshot_image_env(
+            inherited
+                .into_iter()
+                .map(|(key, value)| (key.into(), value.into())),
+        );
+        Self::with_parts(
+            config,
+            disk::available_bytes,
+            identity::no_repair(),
+            Some(snapshot),
+        )
+    }
+
+    /// Every seam at once: what `main` builds, handing in the snapshot it took before
+    /// serving anything.
+    pub fn with_parts(
+        config: Config,
+        space_probe: disk::SpaceProbe,
+        repairer: identity::Repairer,
+        image_env: Option<HashMap<String, String>>,
+    ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 config,
                 token: Mutex::new(None),
                 launch_env: Mutex::new(HashMap::new()),
+                image_env,
                 tunnel_identity: Mutex::new(None),
                 execs: Mutex::new(HashMap::new()),
                 hooks: Mutex::new(HookLog::default()),
@@ -336,6 +374,11 @@ impl AppState {
     /// one having been delivered. Nothing branches on the difference.
     pub fn launch_env(&self) -> HashMap<String, String> {
         recover(&self.inner.launch_env, "launch_env").clone()
+    }
+
+    /// The image-environment snapshot, or `None` when this daemon holds none.
+    pub fn image_env(&self) -> Option<&HashMap<String, String>> {
+        self.inner.image_env.as_ref()
     }
 
     /// The tunnel's identity material, or `None` on a VM launched without it.

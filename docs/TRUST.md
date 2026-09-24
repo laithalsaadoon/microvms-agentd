@@ -53,11 +53,26 @@ not present an authentication credential to the run hook.
    drain (64 KiB by default) reduces connection resets; excess data closes the
    connection rather than causing an unbounded allocation.
 4. **Explicit child environments.** Exec uses `env_clear()` and adds only the
-   launch/request environment. The installed agent token is never implicitly
+   launch/request environment and, for a user with a passwd row, that row's
+   `HOME`, `USER` and `LOGNAME`. The installed agent token is never implicitly
    inherited. Caller-supplied environment values are intentionally available
    to child processes. User changes use `Command::uid`/`gid`; avoid Rust
    `pre_exec` closures in a multithreaded process because inherited locks can
-   deadlock after fork. Implemented in `agentd/src/exec.rs`.
+   deadlock after fork. Implemented in `agentd/src/exec.rs` and
+   `agentd/src/exec_start.rs`.
+
+   **The one opt-in exception is `inherit_image_env`.** A start request that
+   sets it starts the child from the environment the daemon inherited as the
+   container `CMD`, snapshotted at startup, beneath everything else. That
+   snapshot is the image's `ENV` plus whatever the platform set for the
+   process, minus every `AGENTD_*` variable. It never holds the token, which
+   arrives in the run hook after the snapshot is taken and is never written to
+   the process environment. Treat it like the image: anything an image author
+   put in an `ENV` line reaches every child that asks, so keep secrets out of
+   images (they already reach anyone who can pull the image). Health reports
+   only the snapshot's key count, never its values, because health is
+   unauthenticated. The default stays off, and with it off no variable from the
+   daemon's own environment reaches a child.
 5. **Distinct status codes.** Protected routes return 503 before bootstrap and
    401 for an invalid token afterward. Unknown routes return 404. `/v1/health`
    and `/v1/schema` remain unauthenticated; health exposes bootstrap state so
