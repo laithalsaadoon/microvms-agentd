@@ -1204,7 +1204,7 @@
           {
             "choices": null,
             "default": null,
-            "help": "Run the command under this shell instead of `/bin/sh`, for example `bash`",
+            "help": "Run the command under this shell instead of `/bin/sh`, for example `bash` (AGENTD-14)",
             "name": "shell",
             "positional": false,
             "required": false,
@@ -1213,7 +1213,7 @@
           {
             "choices": null,
             "default": null,
-            "help": "Start the command's environment from the image's `ENV` rather than from nothing",
+            "help": "Start the command's environment from the image's `ENV` rather than from nothing (AGENTD-11)",
             "name": "inherit-image-env",
             "positional": false,
             "required": false,

@@ -246,7 +246,7 @@ pub struct ExecOptions {
     /// guarantee for callers who rely on it.
     pub reap_group_on_exit: Option<bool>,
     /// Start the child's environment from the image's `ENV` (minus `AGENTD_*`, never the
-    /// token), beneath everything else. Off by default, which keeps the child's environment
+    /// token), beneath everything else (AGENTD-11). Off by default, which keeps the child's environment
     /// exactly the launch environment plus `env`.
     pub inherit_image_env: Option<bool>,
 }
@@ -302,7 +302,7 @@ impl ExecOptions {
 }
 
 /// A user or group as a caller names it: a number is range-checked as a u32 id, a string is
-/// passed through for the daemon to resolve in the guest.
+/// passed through for the daemon to resolve in the guest (AGENTD-7, AGENTD-16).
 fn principal(
     value: Option<Either<f64, String>>,
     field: &str,

@@ -14,6 +14,16 @@ defined in `spec/core.symspec.json` and `spec/agentd.symspec.json`.
 | IMAGE-3 | 1 | 1 | 1 | 1 | 1 | waived |
 | IMAGE-4 | 1 | 1 | 1 | 4 | 1 | waived |
 | IMAGE-5 | waived | waived | waived | 2 | 2 | waived |
+| AGENTD-7 | 1 | 1 | 1 | 6 | 4 | 1 |
+| AGENTD-8 | 1 | 1 | 1 | 4 | 2 | 1 |
+| AGENTD-9 | 1 | 1 | 1 | 2 | 1 | 1 |
+| AGENTD-10 | 1 | 1 | 1 | 2 | 1 | 1 |
+| AGENTD-11 | 1 | 1 | 1 | 4 | 3 | 1 |
+| AGENTD-12 | 1 | 1 | 1 | 2 | 2 | 1 |
+| AGENTD-13 | 1 | 1 | 1 | 3 | 1 | 1 |
+| AGENTD-14 | 1 | 1 | 1 | 4 | 3 | 1 |
+| AGENTD-15 | 1 | 1 | 1 | 2 | 2 | 1 |
+| AGENTD-16 | 1 | 1 | 1 | 5 | 4 | 1 |
 
 ## CLI-7
 
@@ -102,3 +112,113 @@ The language bindings layer shall expose wrap_dockerfile and the from-Dockerfile
 - **test:** `microvms-js/__test__/wrap.mjs`, `microvms-py/tests/test_wrap_dockerfile.py`
 - **impl:** `microvms-js/src/sandbox.rs`, `microvms-py/src/sandbox.rs`
 - **live:** waived: a pure function of Dockerfile text; it makes no AWS call
+
+## AGENTD-7
+
+When a start request names its user or its group with a JSON string, the agentd shall resolve the name against the guest's /etc/passwd or /etc/group before it spawns the child.
+
+- **model:** `model/src/exec_start.rs`
+- **gherkin:** `agentd/tests/features/exec_start.feature`
+- **fuzz:** `agentd/src/exec_start_fuzz.rs`
+- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `agentd/tests/bdd_exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
+- **impl:** `agentd/src/exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-js/src/session.rs`, `microvms-py/src/session.rs`
+- **live:** `conformance/run_rs.py`
+
+## AGENTD-8
+
+If a start request names a user or a group that the guest's /etc/passwd or /etc/group does not contain, then the agentd shall answer Bad Request with the unknown_user or unknown_group error naming the value and spawn no child.
+
+- **model:** `model/src/exec_start.rs`
+- **gherkin:** `agentd/tests/features/exec_start.feature`
+- **fuzz:** `agentd/src/exec_start_fuzz.rs`
+- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
+- **impl:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
+- **live:** `conformance/run_rs.py`
+
+## AGENTD-9
+
+When the user of a start request resolves to a passwd row, the agentd shall set HOME, USER and LOGNAME from the passwd row beneath the launch environment and the request environment.
+
+- **model:** `model/src/exec_start.rs`
+- **gherkin:** `agentd/tests/features/exec_start.feature`
+- **fuzz:** `agentd/src/exec_start_fuzz.rs`
+- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
+- **impl:** `agentd/src/exec_start.rs`
+- **live:** `conformance/run_rs.py`
+
+## AGENTD-10
+
+While a start request leaves inherit_image_env unset, the agentd shall build the child environment from the passwd identity, the launch environment and the request environment only.
+
+- **model:** `model/src/exec_start.rs`
+- **gherkin:** `agentd/tests/features/exec_start.feature`
+- **fuzz:** `agentd/src/exec_start_fuzz.rs`
+- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
+- **impl:** `agentd/src/exec_start.rs`
+- **live:** `conformance/run_rs.py`
+
+## AGENTD-11
+
+When a start request sets inherit_image_env, the agentd shall place the environment the agentd inherited at startup beneath the passwd identity, the launch environment and the request environment.
+
+- **model:** `model/src/exec_start.rs`
+- **gherkin:** `agentd/tests/features/exec_start.feature`
+- **fuzz:** `agentd/src/exec_start_fuzz.rs`
+- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
+- **impl:** `agentd/src/exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-js/src/session.rs`
+- **live:** `conformance/run_rs.py`
+
+## AGENTD-12
+
+The agentd shall exclude each AGENTD_ variable and the agent token from the image environment snapshot.
+
+- **model:** `model/src/exec_start.rs`
+- **gherkin:** `agentd/tests/features/exec_start.feature`
+- **fuzz:** `agentd/src/exec_start_fuzz.rs`
+- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
+- **impl:** `agentd/src/exec_start.rs`, `agentd/src/main.rs`
+- **live:** `conformance/run_rs.py`
+
+## AGENTD-13
+
+The agentd shall report on /v1/health whether an image environment snapshot exists and its key count, without its values.
+
+- **model:** `model/src/exec_start.rs`
+- **gherkin:** `agentd/tests/features/exec_start.feature`
+- **fuzz:** `agentd/src/exec_start_fuzz.rs`
+- **test:** `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`, `protocol/src/health.rs`
+- **impl:** `agentd/src/routes.rs`
+- **live:** `conformance/run_rs.py`
+
+## AGENTD-14
+
+When a start request names a shell, the agentd shall resolve the shell name on the child PATH, the image PATH, /bin and /usr/bin and run the command as the -c script of the resolved shell.
+
+- **model:** `model/src/exec_start.rs`
+- **gherkin:** `agentd/tests/features/exec_start.feature`
+- **fuzz:** `agentd/src/exec_start_fuzz.rs`
+- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
+- **impl:** `agentd/src/exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-py/src/session.rs`
+- **live:** `conformance/run_rs.py`
+
+## AGENTD-15
+
+If a start request names a shell that no searched directory holds as an executable file, then the agentd shall answer Bad Request with the unknown_shell error naming the shell and spawn no child.
+
+- **model:** `model/src/exec_start.rs`
+- **gherkin:** `agentd/tests/features/exec_start.feature`
+- **fuzz:** `agentd/src/exec_start_fuzz.rs`
+- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
+- **impl:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
+- **live:** `conformance/run_rs.py`
+
+## AGENTD-16
+
+When a start request carries its user and group as integers and its shell as a boolean, the agentd shall demote the child to exactly those ids and run a true shell as /bin/sh -c.
+
+- **model:** `model/src/exec_start.rs`
+- **gherkin:** `agentd/tests/features/exec_start.feature`
+- **fuzz:** `agentd/src/exec_start_fuzz.rs`
+- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `agentd/tests/bdd_exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
+- **impl:** `agentd/src/exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-js/src/session.rs`, `microvms-py/src/session.rs`
+- **live:** `conformance/run_rs.py`

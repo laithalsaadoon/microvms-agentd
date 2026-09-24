@@ -864,14 +864,14 @@ pub struct RunArgs {
     ///
     /// Meaningless without --exec — there is no command to demote — so that combination is
     /// refused locally before any billable call.
-    #[arg(long, value_name = "USER", requires = "exec")]
+    #[arg(long, value_name = "USER", requires = "exec", value_parser = parse_name_or_id)]
     pub user: Option<microvms_core::protocol::exec::NameOrId>,
 
     /// Group to run --exec's command as: a name or a numeric gid. Omitted keeps the daemon's
     /// own group, or a named user's primary group.
     ///
     /// Refused without --exec, for the same reason as --user.
-    #[arg(long, value_name = "GROUP", requires = "exec")]
+    #[arg(long, value_name = "GROUP", requires = "exec", value_parser = parse_name_or_id)]
     pub group: Option<microvms_core::protocol::exec::NameOrId>,
 
     /// Leave the VM and image running. You are then paying for them.
@@ -1135,21 +1135,21 @@ pub struct ExecArgs {
     /// User to run the command as: a name or a numeric uid. Omitted runs as the daemon's own
     /// user.
     ///
-    /// All digits is sent as an integer uid, anything else as a name. The daemon resolves a
-    /// name against the guest's `/etc/passwd` before it spawns anything and answers
+    /// All digits is sent as an integer uid, anything else as a name (AGENTD-7, AGENTD-16).
+    /// The daemon resolves a name against the guest's `/etc/passwd` before it spawns anything and answers
     /// `unknown_user` (`ERR_PROTOCOL`) for a name the guest does not have. A user with a
     /// passwd row gets `HOME`, `USER` and `LOGNAME` from it, beneath `--env`; a named user
     /// also gets the row's primary group when --group is omitted. Nothing is validated here:
     /// the guest's accounts are the daemon's to know.
-    #[arg(long, value_name = "USER")]
+    #[arg(long, value_name = "USER", value_parser = parse_name_or_id)]
     pub user: Option<microvms_core::protocol::exec::NameOrId>,
 
     /// Group to run the command as: a name (resolved against the guest's `/etc/group`) or a
     /// numeric gid. Omitted keeps the daemon's own group, or a named user's primary group.
-    #[arg(long, value_name = "GROUP")]
+    #[arg(long, value_name = "GROUP", value_parser = parse_name_or_id)]
     pub group: Option<microvms_core::protocol::exec::NameOrId>,
 
-    /// Run the command under this shell instead of `/bin/sh`, for example `bash`.
+    /// Run the command under this shell instead of `/bin/sh`, for example `bash` (AGENTD-14).
     ///
     /// The daemon resolves the name on the child's `PATH`, the image's `PATH`, `/bin` and
     /// `/usr/bin` and runs `<shell> -c COMMAND`; a shell the guest does not have answers
@@ -1159,7 +1159,8 @@ pub struct ExecArgs {
     #[arg(long, value_name = "SHELL")]
     pub shell: Option<String>,
 
-    /// Start the command's environment from the image's `ENV` rather than from nothing.
+    /// Start the command's environment from the image's `ENV` rather than from nothing
+    /// (AGENTD-11).
     ///
     /// The daemon snapshots the environment it inherited as the container `CMD` at startup,
     /// minus every `AGENTD_*` variable, and uses it as the lowest layer: beneath a demoted
@@ -2161,6 +2162,19 @@ pub struct AgentPromptArgs {
     pub region: RegionFlags,
 }
 
+/// The parser for `--user` and `--group`: all digits is an id, sent as a JSON integer, and
+/// anything else a name.
+///
+/// Named explicitly rather than left to clap's inference, which is the bug this exists for:
+/// `NameOrId` implements `From<String>`, and clap's `value_parser!` prefers that over
+/// `FromStr`, so `--user 1000` parsed as the *name* "1000" and went out as a string, which a
+/// daemon that predates names refuses as malformed (AGENTD-16).
+fn parse_name_or_id(
+    raw: &str,
+) -> Result<microvms_core::protocol::exec::NameOrId, std::convert::Infallible> {
+    raw.parse()
+}
+
 /// One `--env KEY=VALUE` pair, split at the first `=`.
 ///
 /// A parser rather than a raw `Vec<String>` the handler splits later, for the CLI-5 reason:
@@ -2978,7 +2992,7 @@ mod tests {
     /// A name would need an `/etc/passwd` lookup inside a guest whose base image may not have
     /// one; the daemon's `Command::uid`/`gid` take numbers and so does the wire.
     #[test]
-    fn user_and_group_are_numeric_and_a_name_is_refused_at_parse_time() {
+    fn user_and_group_digits_parse_as_ids_and_anything_else_as_names() {
         let attach = [
             "--endpoint",
             "https://vm.example",

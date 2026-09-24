@@ -213,6 +213,8 @@ fn digits(raw: &str) -> Option<u32> {
     raw.parse().ok()
 }
 
+/// A user by uid or name (AGENTD-7); a name that matches no row and is not all digits is
+/// `unknown_user` (AGENTD-8).
 fn resolve_user<'a>(spec: &NameOrId, rows: &'a [PasswdRow]) -> Result<User<'a>, Rejection> {
     let by_uid = |uid: u32| rows.iter().find(|row| row.uid == uid);
     match spec {
@@ -244,6 +246,7 @@ fn resolve_user<'a>(spec: &NameOrId, rows: &'a [PasswdRow]) -> Result<User<'a>, 
     }
 }
 
+/// A group by gid or name (AGENTD-7); an unmatched name is `unknown_group` (AGENTD-8).
 fn resolve_group(spec: &NameOrId, rows: &[GroupRow]) -> Result<u32, Rejection> {
     match spec {
         NameOrId::Id(gid) => Ok(*gid),
@@ -261,8 +264,9 @@ fn resolve_group(spec: &NameOrId, rows: &[GroupRow]) -> Result<u32, Rejection> {
     }
 }
 
-/// Resolves a named shell: an absolute path is checked as given; a bare name is searched on
-/// the child's `PATH`, then the image's `PATH`, then `/bin` and `/usr/bin`.
+/// Resolves a named shell (AGENTD-14): an absolute path is checked as given; a bare name is
+/// searched on the child's `PATH`, then the image's `PATH`, then `/bin` and `/usr/bin`. A
+/// miss is `unknown_shell` (AGENTD-15).
 ///
 /// The child's `PATH` first because it is where the shell would look for everything else;
 /// the image's next because a daemon started as the container `CMD` knows it even when the
@@ -343,10 +347,13 @@ pub fn plan(request: &StartRequest, guest: &Guest<'_>) -> Result<Plan, Rejection
             .map(|row| row.gid),
     };
 
+    // The image layer: empty unless the request asks (AGENTD-10), lowest when it does
+    // (AGENTD-11).
     let image = match (request.inherit_image_env, guest.image_env) {
         (true, Some(image)) => image.clone(),
         _ => Env::new(),
     };
+    // The passwd identity, above the image and beneath the launch and the request (AGENTD-9).
     let mut identity = Env::new();
     if let Some(row) = user.as_ref().and_then(|user| user.row) {
         identity.insert("HOME".into(), row.home.clone());

@@ -946,7 +946,7 @@ pub enum Command {
     One(String),
 }
 
-/// A user or group as a caller names it: an `int` id or a `str` name.
+/// A user or group as a caller names it: an `int` id or a `str` name (AGENTD-7, AGENTD-16).
 ///
 /// Passed through unchanged; the daemon resolves a name in the guest, because only the guest
 /// has the `/etc/passwd` that answers it. `Id` first so an `int` is never read as a name.
@@ -965,7 +965,8 @@ impl From<Principal> for protocol::exec::NameOrId {
     }
 }
 
-/// `shell` as a caller gives it: a `bool`, or the name of a shell for the daemon to resolve.
+/// `shell` as a caller gives it: a `bool`, or the name of a shell for the daemon to resolve
+/// (AGENTD-14).
 ///
 /// `Flag` first: PyO3's `bool` extraction takes only a real `bool`, so a string always
 /// reaches `Named`.

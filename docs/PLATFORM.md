@@ -700,3 +700,17 @@ under 10 s, so the delay varies from launch to launch. Consistent with AWS's sta
 MicroVM's disk is paged in on demand after launch (grade: measured; the mechanism is
 inferred). Budget the first exec of any large executable accordingly: the agent version
 probe allows 60 s (`microvms-core/src/agents/mod.rs`, `VERSION_PROBE_TIMEOUT`).
+
+## The daemon's own environment holds the image `ENV` plus four platform variables
+
+Measured 2026-09-24, us-east-1, API 2025-09-09, live, through `exec env
+--inherit-image-env` on a VM from the conformance image (`al2023-minimal` with
+`ENV MICROVMS_CONFORMANCE_IMAGE_ENV`, `ENV AGENTD_PORT`, `ENV AGENTD_LOG`). The daemon, as
+the container `CMD`, inherited `AWS_LAMBDA_MICROVM_IMAGE_ARN`,
+`AWS_LAMBDA_MICROVM_IMAGE_NAME`, `AWS_LAMBDA_MICROVM_IMAGE_VERSION`, `AWS_REGION`, `HOME`,
+`PATH`, the image's own variable, and the two `AGENTD_*` lines. The startup snapshot
+dropped the `AGENTD_*` pair and `/v1/health` reported `image_env_keys: 7`; the child also
+showed `PWD`, `SHLVL` and `_`, which `/bin/sh` sets itself. No credential or token
+variable was present. The snapshot is taken in the image-build VM, so these are the
+build VM's values carried by the snapshot: key names only were recorded, and whether
+`AWS_REGION` or the image variables differ per launch was not measured.
