@@ -154,9 +154,9 @@ CLI-2 names, that every AWS call goes through `microvms-core`.
   bare `protocol::` path — every one of the 25 references is qualified through core, as at
   `microvms-cli/src/commands/attached.rs:178`.
 - **Both bindings do have a direct `protocol` edge**, and it is live rather than vestigial:
-  `microvms-py/src/session.rs:73` and `microvms-js/src/session.rs:136` name
+  `microvms-py/src/session.rs:73` and `microvms-js/src/session.rs:143` name
   `protocol::health::Health` directly, and both build `protocol::exec::StartRequest`
-  (`microvms-py/src/session.rs:338`, `microvms-js/src/session.rs:264`). Core's public signatures
+  (`microvms-py/src/session.rs:338`, `microvms-js/src/session.rs:284`). Core's public signatures
   already return these types, so a binding that mapped them without naming the crate would
   re-declare their fields, which is the drift `protocol` was extracted to prevent
   (`microvms-py/Cargo.toml:27-32`, `microvms-js/Cargo.toml:22-25`).

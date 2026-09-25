@@ -14,6 +14,12 @@ or [Node/TypeScript](../../microvms-js/README.md).
 | Run Claude Code or Codex with Bedrock access | `AgentVm` |
 | Terminate and check cleanup | `TeardownOpts` and `TeardownReport` |
 | Build images or call the control plane directly | `ControlPlane` and `CreateImageRequest` |
+| Turn a task Dockerfile into one that runs `agentd` | `wrap_dockerfile` and `BaseImage::from_dockerfile` |
+| Get the `agentd` binary for this client's version | `provision::agentd` |
+| Build or reuse one image for many trials | `Sandbox::ensure_image` |
+| Run one command to exactly one result | `Session::run_to_completion` |
+| Hand a VM to another process | `Sandbox::detach` and `Sandbox::adopt` |
+| Check a harness can launch before queueing work | `preflight` and `SizeClass::from_request` |
 
 `microvms-core` is the Rust client. The Python `microvms` package and Node
 `microvms` package expose bindings to it. Core re-exports `protocol`, the shared
@@ -31,6 +37,110 @@ creation and VPC configuration use the separate AWS Lambda core API.
 Custom connectors conflict with the managed `egress` option. Supplying an ARN
 does not certify isolation: no internet egress requires a VPC without an IGW
 or NAT gateway and no alternative internet route. See [Networking](../NETWORKING.md).
+
+## Harness helpers
+
+These calls compose the lifecycle for a harness that brings its own task image and
+runs many trials. Each is one core function, and each binding passes straight through
+to it. [Embedding](../EMBEDDING.md) is the walkthrough; this section names them and
+their source.
+
+| Core (Rust) | Python `microvms` | Node `microvms` |
+| --- | --- | --- |
+| `control::wrap_dockerfile` | `wrap_dockerfile` | `wrapDockerfile` |
+| `control::BaseImage::from_dockerfile` | `BaseImage.from_dockerfile` | `baseImageFromDockerfile` |
+| `provision::agentd` | `provision_agentd`, `provision_agentd_report` | `provisionAgentd`, `provisionAgentdReport` |
+| `Sandbox::ensure_image` | `Sandbox.ensure_image` | `Sandbox.ensureImage` |
+| `Session::run_to_completion` | `Session.run_to_completion` | `Session.runToCompletion` |
+| `Sandbox::detach` | `Sandbox.detach` | `Sandbox.detach` |
+| `control::egress_posture_for`, `Session::egress_posture` | `egress_posture_for`, `Session.egress_posture` | `egressPostureFor`, `Session.egressPosture` |
+| `SizeClass::from_request` | `SizeClass.from_request` | `SizeClass.fromRequest` |
+| `preflight::preflight` | `preflight` | `preflight` |
+
+### wrap_dockerfile and BaseImage::from_dockerfile
+
+`wrap_dockerfile(task, &WrapOptions)` returns the task Dockerfile verbatim with the
+`agentd` stanza appended: `USER root` only when the task's last `USER` is someone
+else, then the same stanza `default_dockerfile` writes, so `ENTRYPOINT []` and
+`CMD ["/agentd"]` are the last instructions whatever the task set. It refuses a
+Dockerfile with no `FROM`, an unfinished last instruction, a keepalive at or over
+the client's stream idle timeout, a port of 0, a workdir that isn't one absolute
+path, and `inherit_workdir` with no `WORKDIR` anywhere.
+`BaseImage::from_dockerfile` pairs the managed base's `name` with the Dockerfile's
+own first `FROM`, so the create call's `FROM` guard passes by construction. Both are
+local and make no AWS call. `microvms-core/src/control/artifact.rs:562-611`,
+`microvms-core/src/control/artifact.rs:375-408`, `microvms-core/src/control/artifact.rs:536-550`.
+
+### provision::agentd
+
+`provision::agentd(version, state_dir)` returns verified aarch64 `agentd` bytes as
+`Provisioned { bytes, path, source, version, sha256 }`. It answers from a caller's
+path (`$MICROVM_AGENTD`), then the cache under the state directory, then a fetch of
+this repository's release asset, proven with `gh attestation verify` when `gh`
+can run, else checked against the release's `SHA256SUMS`; a fetch it can't verify
+is an error. Every binary it returns is checked to be an aarch64 ELF, and the
+version defaults to the core's own, never "latest". It blocks, because a fetch runs
+subprocesses. `microvms-core/src/provision.rs:1-51`, `microvms-core/src/provision.rs:179-190`,
+`microvms-core/src/provision.rs:880-890`.
+
+### Sandbox::ensure_image
+
+`ensure_image(EnsureImageRequest)` builds or reuses the content-addressed image for
+its inputs. The name is `<name_prefix>-<hash12>`, hashed over the daemon, the
+Dockerfile, the build context, the base, and the size class, so equal inputs name
+one image. It reuses a ready image, waits out one a sibling is building, deletes a
+failed one (any one under `force`), or builds, uploading the artifact only when a
+build is needed. Everything local runs before the first call, so a request the
+client refuses costs nothing. It returns `EnsuredImage { image, reused,
+artifact_uri, uploaded, warnings }`. `microvms-core/src/sandbox.rs:891-924`,
+`microvms-core/src/control/ensure.rs:1-40`, `microvms-core/src/control/ensure.rs:240-268`,
+`microvms-core/src/control/ensure.rs:297-311`.
+
+### Session::run_to_completion
+
+`run_to_completion(request, CompletionOptions, on_output)` starts the exec and drives
+it to exactly one `ExecResult`: output goes to the callback when there is one, a
+stream that ends without its `exit` event falls back to wait-and-ack, and on the
+client deadline (the request's `timeout_sec` plus `client_grace`, 60 seconds by
+default) it kills the process group, acks within the grace, and synthesizes exit
+code 124 when even that fails. A callback that answers `Break` stops delivery, and
+the exec is still waited for and acked. `microvms-core/src/session/complete.rs:1-58`,
+`microvms-core/src/session/complete.rs:261-272`.
+
+### Sandbox::detach
+
+`detach()` hands the VM to another process and returns `Detached { microvm_id,
+endpoint, region, port }` plus the agent token through `agent_token()`, which
+`Debug` redacts. The VM keeps running and nothing is sent to AWS; the sandbox that
+detached refuses every later lifecycle call, and it drops without the leak warning.
+It's refused (`Precondition`) when there's no live VM to hand off. The adopting
+process passes those fields to `Sandbox::adopt`. `microvms-core/src/sandbox.rs:662-679`,
+`microvms-core/src/sandbox.rs:1368-1424`.
+
+### Egress posture
+
+`egress_posture_for(egress, egress_network_connectors, deny_egress, region)` answers,
+with no AWS call, the `EgressPosture` a launch with those options would report, or
+the refusal it would raise. The posture is `Open` (`INTERNET_EGRESS` requested),
+`Unsealed` (the default), or `BestEffort` (the advisory in-guest deny); it never
+answers `Sealed`, because no launch option proves VPC routing without an internet or
+NAT gateway. `Session::egress_posture` carries the launched session's answer, which
+is also the CLI envelope's `egressPosture`. `microvms-core/src/control/connector.rs:119-143`,
+`microvms-core/src/control/connector.rs:180-196`, `microvms-core/src/session/mod.rs:326-328`.
+
+### preflight and SizeClass::from_request
+
+`preflight(region)` runs three checks, in order, and reports each as a `Check`:
+the region resolves (from the argument or `$AWS_REGION` / `$AWS_DEFAULT_REGION`),
+the default credential chain resolves credentials, and one free
+`ListManagedMicrovmImages` page answers in that region. `PreflightReport::ok()` is
+true exactly when no fatal check failed or was skipped. It doesn't check roles,
+buckets, quotas, or connectors. `SizeClass::from_request(cpus, memory_mib)` returns
+the smallest class whose baseline covers the request, `SizeClass::DEFAULT` when
+neither axis asks for anything, and an invalid-argument refusal naming the largest
+class when no class covers it. `microvms-core/src/preflight.rs:1-32`,
+`microvms-core/src/preflight.rs:105-123`, `microvms-core/src/preflight.rs:203-213`,
+`microvms-core/src/sizing.rs:170-212`.
 
 ## microvms-core
 
@@ -93,7 +203,7 @@ pub struct Session {
 
 The control API of one running MicroVM.
 
-`microvms-core/src/session/mod.rs:212`
+`microvms-core/src/session/mod.rs:219`
 
 ### ControlPlane
 
@@ -103,7 +213,7 @@ pub struct ControlPlane {
 
 The control-plane client, holding its transport and clock behind `Arc` so a caller keeping one across tasks does not need a second credential chain.
 
-`microvms-core/src/control/mod.rs:172`
+`microvms-core/src/control/mod.rs:181`
 
 ### Sandbox
 
@@ -183,7 +293,7 @@ pub struct Transport {
 
 A backend, the agent token, and the proxy auth every request needs, kept separate from `Session` because `ExecHandle` needs it and holding a whole session would make the two mutually recursive.
 
-`microvms-core/src/session/mod.rs:77`
+`microvms-core/src/session/mod.rs:84`
 
 ### BuildHookTimeout
 
@@ -215,7 +325,7 @@ pub struct ExecHandle {
 
 One exec addressed by its caller-minted id, which is also the idempotency key, so rebuilding a handle with the same id after a process restart still addresses the same server-side exec.
 
-`microvms-core/src/session/exec.rs:216`
+`microvms-core/src/session/exec.rs:329`
 
 ### RateTable
 
@@ -248,12 +358,13 @@ pub struct ExecResult {
     pub phase: protocol::exec::Phase,
     /// `None` while running. Present once the child has exited.
     pub outcome: Option<protocol::exec::Outcome>,
+    pub client_deadline: Option<super::complete::ClientDeadline>,
 }
 ```
 
-An exec's phase and, once it has one, its outcome — a thin wrapper over the daemon's `PollResponse` rather than a re-modelling of it, so the two cannot disagree.
+An exec's phase and, once it has one, its outcome — a thin wrapper over the daemon's `PollResponse` rather than a re-modelling of it, so the two cannot disagree. `client_deadline` is the one field the wire doesn't carry: what the client did when its own deadline expired, set only on a result `Session::run_to_completion` returned after one. `posix_exit_code()` is the code a POSIX shell would report (124 for any timeout, the daemon's or the client's; 128 plus the signal for another signal death; otherwise the exit code), and `notes()` lists one line per condition worth telling a reader (truncated output, the daemon's deadline, writers still alive, the client deadline). The bindings carry both, plus `synthesized`. `microvms-core/src/session/exec.rs:124-156`, `microvms-core/src/session/exec.rs:158-209`.
 
-`microvms-core/src/session/exec.rs:66-72`
+`microvms-core/src/session/exec.rs:66-77`
 
 ### Image
 
@@ -298,9 +409,9 @@ The `GET /v1/health` response: daemon version, bootstrap state, disk pressure, w
 pub struct StartRequest {
 ```
 
-The `POST /v1/exec/start` body, whose `command` field is either an argv array or, with `shell: true`, a single script string.
+The `POST /v1/exec/start` body, whose `command` field is either an argv array or, with `shell` set (`true`, or a shell's name such as `"bash"`), a single script string. `user` and `group` take a name or a numeric id, and `inherit_image_env` starts the child from the image's `ENV`.
 
-`protocol/src/exec.rs:107-108`
+`protocol/src/exec.rs:215-289`
 
 ### protocol::exec::Outcome
 
@@ -328,11 +439,11 @@ pub struct PollResponse {
 
 The `GET /v1/exec/{id}` body, which flattens the outcome into the response and omits it entirely while the exec is still running.
 
-`protocol/src/exec.rs:288-295`
+`protocol/src/exec.rs:421-428`
 
 ## microvms-py
 
-The Python module is declared rather than assembled: a `#[pymodule] mod microvms` lists its members in `#[pymodule_export]` use statements, 30 classes and 12 functions (the agent layer's `AgentSpec`, `AgentVm`, and `BearerToken`, with `mint_bedrock_token`, `installed_agents`, `install_agent_access`, `prompt_agent`, and `agent_constants`, arrived with `docs/AGENT-VMS.md`), so the macro can see the whole membership and `maturin generate-stubs` emits the real surface instead of a `__getattr__` escape hatch (`microvms-py/src/lib.rs:113-148`). The exception hierarchy stays imperative in `#[pymodule_init]`, because `create_exception!` builds its types at runtime and leaves no introspection record for `#[pymodule_export]` to carry (`microvms-py/src/lib.rs:108-156`). Every method is sync, blocking on one shared multi-thread tokio runtime with `py.detach` first (`microvms-py/src/lib.rs:42-46`). The generated stub and its PEP 561 marker are committed as `microvms-py/microvms.pyi` and `microvms-py/py.typed`, and `mise run stubs:check` fails when the committed stub no longer matches the pyo3 surface (`mise.toml:216-218`).
+The Python module is declared rather than assembled: a `#[pymodule] mod microvms` lists its members in `#[pymodule_export]` use statements, 46 classes and 18 functions (the agent layer's `AgentSpec`, `AgentVm`, and `BearerToken`, with `mint_bedrock_token`, `installed_agents`, `install_agent_access`, `prompt_agent`, and `agent_constants`, arrived with `docs/AGENT-VMS.md`), so the macro can see the whole membership and `maturin generate-stubs` emits the real surface instead of a `__getattr__` escape hatch (`microvms-py/src/lib.rs:115-157`). The exception hierarchy stays imperative in `#[pymodule_init]`, because `create_exception!` builds its types at runtime and leaves no introspection record for `#[pymodule_export]` to carry (`microvms-py/src/lib.rs:110-165`). Every method is sync, blocking on one shared multi-thread tokio runtime with `py.detach` first (`microvms-py/src/lib.rs:42-46`). The generated stub and its PEP 561 marker are committed as `microvms-py/microvms.pyi` and `microvms-py/py.typed`, and `mise run stubs:check` fails when the committed stub no longer matches the pyo3 surface (`mise.toml:216-218`).
 
 ### microvms-py Region
 
@@ -355,7 +466,7 @@ pub struct PySandbox {
 
 One MicroVM's whole life, with `build_image`, `run`, `suspend`, `resume`, and `terminate` as the five transitions and every state guard left in the core.
 
-`microvms-py/src/sandbox.rs:303-304`
+`microvms-py/src/sandbox.rs:472-473`
 
 ### microvms-py Session
 
@@ -366,7 +477,7 @@ pub struct PySession {
 
 One running MicroVM's control API, with the proxy auth handled for you.
 
-`microvms-py/src/session.rs:433-434`
+`microvms-py/src/session.rs:449-450`
 
 ### microvms-py EstimatedUsd
 
@@ -387,7 +498,7 @@ A dollar figure with no `__float__`, `__int__`, `__index__`, or `__add__`, whose
 
 ## microvms-js
 
-The Node surface has no barrel: every `#[napi]` item in the crate is exported, and `index.d.ts` plus the `index.js` loader and the compiled `.node` addon are generated by `napi build` and excluded from the repository as one platform's build output (`.gitignore:27-29`). Two shapes appear side by side and mean different things: `#[napi]` on a struct is a JS class with methods, while `#[napi(object)]` is a copied plain object with no methods, which is how the same wire results that pyo3 renders as frozen classes arrive in Node (`microvms-js/src/exec.rs:65-66`, `microvms-js/src/session.rs:50-51`). Construction diverges from Python for a reason that is structural rather than stylistic: `PySandbox` has a `#[new]` constructor that blocks on the shared runtime (`microvms-py/src/sandbox.rs:353-359`), and a `#[napi(constructor)]` cannot be async, so the Node class is built through a static factory instead (`microvms-js/src/sandbox.rs:423-427`).
+The Node surface has no barrel: every `#[napi]` item in the crate is exported, and `index.d.ts` plus the `index.js` loader and the compiled `.node` addon are generated by `napi build` and excluded from the repository as one platform's build output (`.gitignore:27-29`). Two shapes appear side by side and mean different things: `#[napi]` on a struct is a JS class with methods, while `#[napi(object)]` is a copied plain object with no methods, which is how the same wire results that pyo3 renders as frozen classes arrive in Node (`microvms-js/src/exec.rs:65-66`, `microvms-js/src/session.rs:53-54`). Construction diverges from Python for a reason that is structural rather than stylistic: `PySandbox` has a `#[new]` constructor that blocks on the shared runtime (`microvms-py/src/sandbox.rs:522-528`), and a `#[napi(constructor)]` cannot be async, so the Node class is built through a static factory instead (`microvms-js/src/sandbox.rs:631-635`).
 
 ### microvms-js Region
 
@@ -410,7 +521,7 @@ pub struct Session {
 
 One running MicroVM's control API, with the proxy auth handled for you.
 
-`microvms-js/src/session.rs:351-352`
+`microvms-js/src/session.rs:443-444`
 
 ### microvms-js Sandbox
 
@@ -421,7 +532,7 @@ pub struct Sandbox {
 
 One MicroVM's whole life, with `buildImage`, `run`, `suspend`, `resume`, and `terminate` as the five transitions and every state guard left in the core.
 
-`microvms-js/src/sandbox.rs:406-407`
+`microvms-js/src/sandbox.rs:614-615`
 
 ### microvms-js ExecProcess
 
@@ -436,7 +547,7 @@ A long-running exec in the AI SDK's `SandboxProcess` shape, built by `Session.sp
 
 ## HTTP
 
-The daemon serves 20 routes. All of them come from one list, `surface_docs`, which `app` walks to build the router and `GET /v1/schema` walks to publish the document (`agentd/src/routes.rs:441-750`). A route cannot be served unless it appears in that list, and a listed route with no handler panics at startup rather than serving an undocumented surface (`agentd/src/routes.rs:110-142`). Each row also declares its auth, which is what splits the router in two: `Auth::Bearer` rows go behind the token guard, `Auth::Open` and `Auth::PlatformHook` rows do not (`agentd/src/routes.rs:51-59`).
+The daemon serves 20 routes. All of them come from one list, `surface_docs`, which `app` walks to build the router and `GET /v1/schema` walks to publish the document (`agentd/src/routes.rs:443-752`). A route cannot be served unless it appears in that list, and a listed route with no handler panics at startup rather than serving an undocumented surface (`agentd/src/routes.rs:110-142`). Each row also declares its auth, which is what splits the router in two: `Auth::Bearer` rows go behind the token guard, `Auth::Open` and `Auth::PlatformHook` rows do not (`agentd/src/routes.rs:51-59`).
 
 The six lifecycle hooks sit under a prefix fixed by the service, `/aws/lambda-microvms/runtime/v1` (`protocol/src/hook.rs:15`). They are unauthenticated because the platform has no token to present, and a consumer must never call them.
 
@@ -444,67 +555,67 @@ The six lifecycle hooks sit under a prefix fixed by the service, `/aws/lambda-mi
 
 The image-build readiness probe, answering 200 even before bootstrap, because the question it answers is whether the daemon started.
 
-`agentd/src/routes.rs:471-479`
+`agentd/src/routes.rs:473-481`
 
 ### POST /aws/lambda-microvms/runtime/v1/resume
 
 Acknowledged; the token, filesystem, exec records, and even backgrounded processes survive a suspend/resume cycle, but the guest's view of time jumps, so any timeout or lease held by a running command expires at once.
 
-`agentd/src/routes.rs:519-528`
+`agentd/src/routes.rs:521-530`
 
 ### POST /aws/lambda-microvms/runtime/v1/run
 
 The one-shot token bootstrap and the optional launch environment beside it, both one JSON parse deeper than the request body inside `runHookPayload`, sharing the platform's 4096-byte payload budget.
 
-`agentd/src/routes.rs:489-511`
+`agentd/src/routes.rs:491-513`
 
 ### POST /aws/lambda-microvms/runtime/v1/suspend
 
 Acknowledged and logged.
 
-`agentd/src/routes.rs:512-518`
+`agentd/src/routes.rs:514-520`
 
 ### POST /aws/lambda-microvms/runtime/v1/terminate
 
 Acknowledged; begins graceful shutdown with in-flight requests draining.
 
-`agentd/src/routes.rs:529-535`
+`agentd/src/routes.rs:531-537`
 
 ### POST /aws/lambda-microvms/runtime/v1/validate
 
 The image-build validation probe, on the same reasoning as `ready`.
 
-`agentd/src/routes.rs:480-488`
+`agentd/src/routes.rs:482-490`
 
 ### POST /v1/exec/start
 
 Starts a command under a caller-minted `exec_id`, idempotent on that id, so a retry returns success without spawning a second child.
 
-`agentd/src/routes.rs:536-547`
+`agentd/src/routes.rs:538-549`
 
 ### GET `/v1/exec/{id}`
 
 Polls status and output, read-only, so polling never mutates the entry and output survives until an explicit ack.
 
-`agentd/src/routes.rs:548-558`
+`agentd/src/routes.rs:550-560`
 
 ### POST `/v1/exec/{id}/ack`
 
 Releases output and enters TTL collection; only acked entries are ever collected, so output nobody read is never destroyed.
 
-`agentd/src/routes.rs:592-602`
+`agentd/src/routes.rs:594-604`
 
 ### POST `/v1/exec/{id}/kill`
 
 Sends SIGTERM then SIGKILL to the whole process group rather than the direct child alone, because a shell that backgrounded a server leaves the interesting process outside the child pid.
 
-`agentd/src/routes.rs:603-614`
+`agentd/src/routes.rs:605-616`
 
 ### POST `/v1/exec/{id}/stdin`
 
 Writes to a child's stdin or signals EOF, a separate request from the output stream so a dropped attach does not cost the ability to feed the process.
 
-`agentd/src/routes.rs:577-591`
+`agentd/src/routes.rs:579-593`
 
 ### GET /v1/procs
 
@@ -522,43 +633,43 @@ A WebSocket relayed to `127.0.0.1:<port>` in the guest, loopback-only, one conne
 
 Follows output as Server-Sent Events from a byte offset, resumable with `?offset=N`; a body that ends without an `exit` event means the connection failed, not the command.
 
-`agentd/src/routes.rs:559-576`
+`agentd/src/routes.rs:561-578`
 
 ### GET /v1/fs/file
 
 Reads one file, or a 1-based inclusive line range of it, always streamed — an `end_line` past the last line reads through EOF without error, and omitting both bounds returns the whole file byte-identically.
 
-`agentd/src/routes.rs:660-675`
+`agentd/src/routes.rs:662-677`
 
 ### PUT /v1/fs/file
 
 Writes one file, deliberately not confined to a root, because the same token authorizes exec and a root prefix would add no security while breaking harnesses that write to home directories and `/etc`.
 
-`agentd/src/routes.rs:676-688`
+`agentd/src/routes.rs:678-690`
 
 ### GET /v1/fs/tar
 
 Downloads a tree as tar, packing symlinks as symlinks, which is the producing half of what extraction accepts.
 
-`agentd/src/routes.rs:689-700`
+`agentd/src/routes.rs:691-702`
 
 ### PUT /v1/fs/tar
 
 Uploads and extracts a tar under `?path=`, the one confined write path because member paths come from the archive rather than the caller, mirroring the CPython tarfile `data` filter.
 
-`agentd/src/routes.rs:701-716`
+`agentd/src/routes.rs:703-718`
 
 ### GET /v1/health
 
 Reports liveness, daemon version, bootstrap completion, and whether any exec is still running; `busy` exists so an orchestrator outside the VM can hold it alive, since the platform measures idleness by inbound traffic through a proxy that terminates outside the guest.
 
-`agentd/src/routes.rs:717-738`
+`agentd/src/routes.rs:719-740`
 
 ### GET /v1/schema
 
 Returns this document: every route, shape, status code, and operative limit.
 
-`agentd/src/routes.rs:739-748`
+`agentd/src/routes.rs:741-750`
 
 ## See also
 
