@@ -4,7 +4,6 @@
   "entries": [
     { "category": "placement", "key": "microvms-cli -> const-hex", "issue": 260 },
     { "category": "placement", "key": "microvms-cli -> globset", "issue": 260 },
-    { "category": "placement", "key": "microvms-cli -> notify", "issue": 285 },
     { "category": "placement", "key": "microvms-cli -> sha2", "issue": 260 },
     { "category": "placement", "key": "microvms-cli -> tar", "issue": 260 },
     { "category": "subprocess", "key": "microvms-cli/src/seam.rs: Command::new(\"aws\")", "issue": 258 },
@@ -12,6 +11,11 @@
     { "category": "port-impl", "key": "microvms-cli/src/seam.rs: TokenMinter for PlaneMinter", "issue": 270 }
   ],
   "decisions": [
+    {
+      "category": "placement",
+      "key": "microvms-cli -> notify",
+      "reason": "watching the local tree for `sync --watch` is a terminal affordance of the CLI's interactive loop; an event only wakes a re-hash, and the sync pass that decides what moves goes to core in #260"
+    },
     {
       "category": "subprocess",
       "key": "agentd/src/exec.rs: Command::new(program)",

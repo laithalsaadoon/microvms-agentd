@@ -1,0 +1,29 @@
+# The driving-adapter contract (AGENTS.md, Architecture), for the calls a dependency set can't
+# see. This crate parses input, converts types, bridges to the host, and renders output. A
+# subprocess or a read of the process environment here is behavior the other surfaces don't
+# get, so it belongs below the adapter. The crate root denies both lints, so a hit fails the
+# build. A recorded exception carries `#[expect(..., reason = "...")]` at the call site, and
+# `AdapterLintTests` in `scripts/test_ratchet.py` lists every such site, so a new one (or an
+# `allow` anywhere) fails `ratchet:check` until a reviewer adds it there. A subprocess exception
+# also needs its entry or decision in `ratchet/drift.json`.
+#
+# `microvms_core::env::process` is banned by name as well: it's the production lookup, meant to
+# be handed to core's resolvers once, where the adapter composes them. Calling it is the same
+# direct read as `std::env::var`.
+#
+# `tokio::process::Command` is listed even where this crate's own tokio doesn't declare the
+# `process` feature (a dependency turns it on today): the ban shouldn't depend on which crate
+# enables it.
+
+disallowed-types = [
+  { path = "std::process::Command", reason = "a subprocess belongs below the adapter: put it behind a port in microvms-core" },
+  { path = "tokio::process::Command", reason = "a subprocess belongs below the adapter: put it behind a port in microvms-core" },
+]
+
+disallowed-methods = [
+  { path = "std::env::var", reason = "pass the adapter's environment lookup to a core resolver instead of reading a variable here" },
+  { path = "std::env::var_os", reason = "pass the adapter's environment lookup to a core resolver instead of reading a variable here" },
+  { path = "std::env::vars", reason = "pass the adapter's environment lookup to a core resolver instead of reading the environment here" },
+  { path = "std::env::vars_os", reason = "pass the adapter's environment lookup to a core resolver instead of reading the environment here" },
+  { path = "microvms_core::env::process", reason = "hand this lookup to core's resolvers where the adapter composes them (a listed site in AdapterLintTests); calling it is a direct read" },
+]

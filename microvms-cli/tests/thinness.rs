@@ -92,6 +92,12 @@ fn manifest_path() -> PathBuf {
 ///
 /// **Falsification** — add `reqwest = "0.13"` to `microvms-cli/Cargo.toml` and this goes red
 /// naming it. Verified; see the packet's guard proofs.
+///
+/// Redundant once the CLI's allowed set in `arch/placement.toml` is asserted exactly, since
+/// every name above is outside it. That happens when #260 clears the CLI's placement drift, and
+/// the change that does it should delete this test (#285 asked for the deletion and left it to
+/// that change). The sets don't read dev dependencies, which this test does, so that change
+/// should also say whether a dev-only HTTP client still needs refusing.
 #[test]
 fn no_direct_dependency_is_a_second_path_to_aws() {
     let package = package();

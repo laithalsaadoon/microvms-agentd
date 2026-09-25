@@ -24,6 +24,15 @@
 //! `conformance/run_rs.py` sets for the live suite's kept VM, with the caller's AWS
 //! credentials inherited. Without it they are left out, and the runner says so on stderr.
 
+// The crate's `clippy.toml` bans `Command` and environment reads from the adapter's code. This
+// runner is on the other side of that line: it spawns the binary under test and reads its own
+// switches (`MICROVM_BDD_ATTACH`, `CUCUMBER_JUNIT`) from the environment.
+#![expect(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    reason = "a test runner that spawns the binary under test and reads its own switches"
+)]
+
 #[allow(dead_code)]
 mod support;
 

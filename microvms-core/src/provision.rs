@@ -871,11 +871,6 @@ fn fetched(
     })
 }
 
-/// The process environment, for the entry points that do not take one.
-fn process_env(name: &str) -> Option<String> {
-    std::env::var(name).ok()
-}
-
 /// **The one call.** The daemon binary for `version` (default: [`crate::VERSION`]) under
 /// `state_dir` (default: the CLI's), from `$MICROVM_AGENTD`, the cache, or a verified fetch
 /// through `gh` or `curl`.
@@ -891,7 +886,7 @@ pub fn agentd(version: Option<&str>, state_dir: Option<&Path>) -> Result<Provisi
 
 /// [`agentd`] with a caller-supplied binary as well: the bindings' entry point.
 pub fn agentd_with(request: &Request<'_>) -> Result<Provisioned, Error> {
-    resolve(request, &process_env, &SubprocessFetch, &mut |_| {}).map_err(Error::from)
+    resolve(request, &crate::env::process, &SubprocessFetch, &mut |_| {}).map_err(Error::from)
 }
 
 #[cfg(test)]

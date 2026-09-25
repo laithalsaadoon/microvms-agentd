@@ -13,6 +13,13 @@
 //! "exactly one JSON document on stdout" is a claim about a real file descriptor with progress
 //! interleaved on the other one, which an in-process test with captured buffers cannot make.
 
+// The crate's `clippy.toml` bans `Command` from the adapter's code. A test harness is the other
+// side of that line: the binary under test is only reachable as a child process.
+#![expect(
+    clippy::disallowed_types,
+    reason = "an integration test reaches this binary-only crate by spawning it"
+)]
+
 use std::path::PathBuf;
 use std::process::{Command, Output};
 

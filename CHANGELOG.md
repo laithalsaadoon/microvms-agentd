@@ -6,6 +6,14 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
 
 ## Unreleased
 
+### Added
+
+- **`microvms_core::env::process`, the process-environment lookup (#285).** The lookup
+  `Region::from_env`, `FileNameStore::default_location` and the other resolvers take, in
+  production. The CLI and both bindings pass it instead of each wrapping `std::env::var`,
+  which their `clippy.toml` now bans along with the other environment reads,
+  `std::process::Command` and `tokio::process::Command`. No behavior changes.
+
 ## [0.10.0] — 2026-09-25
 
 ### Added

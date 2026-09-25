@@ -69,6 +69,12 @@
 //! two byte streams, for a consumer shaped like the AI SDK's `SandboxProcess`; [`sandbox`] is
 //! the lifecycle; [`agents`] is the L3 layer over it, one VM with coding agents in it.
 
+// The driving-adapter contract (AGENTS.md, Architecture): no subprocess and no direct read of
+// the process environment in this crate. The banned paths and their reasons are in this
+// crate's `clippy.toml`. `AdapterLintTests` in `scripts/test_ratchet.py` lists each `#[expect]`
+// of these lints, and fails on an `allow` of them anywhere in `src/`.
+#![deny(clippy::disallowed_methods, clippy::disallowed_types)]
+
 // `pub` rather than private: the `#[napi]` macro registers each item at module-init time
 // through a link-section constructor rather than through a Rust path, so with private modules
 // every exported function is `dead_code` as far as rustc can see. Making the modules public is

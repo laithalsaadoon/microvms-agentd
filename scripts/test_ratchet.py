@@ -5,15 +5,20 @@ The rule tests drive `compare` with small in-memory files. The collector and see
 build throwaway cargo workspaces under a temporary directory and run the real tools over them
 (`cargo metadata` and `ast-grep`), because a collector tested against a mocked tool proves the
 mock. Both tools come from `mise.toml`, so run this through `mise run ratchet:check`.
+
+The adapter lint tests are here too: each driving adapter's `clippy.toml` is the enforcing half
+of the subprocess rule the ratchet counts (#285), and they run real clippy the same way.
 """
 
 import json
 import os
+import re
 import runpy
 import shutil
 import subprocess
 import tempfile
 import textwrap
+import tomllib
 import unittest
 from collections import Counter
 from datetime import datetime
@@ -818,7 +823,7 @@ class SentinelTests(unittest.TestCase):
 
 
 class SeededFaultTests(unittest.TestCase):
-    """The faults #281 names. Each also fired once by hand in the real tree (see the PR)."""
+    """The faults #281 and #285 name. Each also fired once by hand in the real tree (see the PR)."""
 
     def real_placement(self, ws):
         shutil.copy(ROOT / "arch" / "placement.toml", ws.root / "placement.toml")
@@ -842,6 +847,27 @@ class SeededFaultTests(unittest.TestCase):
             "new drift: [placement] microvms-py -> reqwest. Move it below the adapter, "
             "or add a decision with its reason.",
             failures,
+        )
+
+    def test_a_globset_in_microvms_py_fails_with_a_placement_key(self):
+        # #285's fault. The binding's exact-set test in `dependency_direction.rs` fails on it
+        # too; this is the ratchet's half.
+        ws = self.real_placement(
+            Workspace(self)
+            .crate(
+                "microvms-py",
+                deps='microvms-core = { path = "../microvms-core" }\nglobset = "0.4"',
+            )
+            .crate("microvms-core")
+            .crate("microvms-cli")
+            .crate("microvms-js")
+        )
+        now = collect(ws.scope())
+        self.assertEqual(keys(now, "placement"), ["microvms-py -> globset"])
+        self.assertIn(
+            "new drift: [placement] microvms-py -> globset. Move it below the adapter, "
+            "or add a decision with its reason.",
+            compare(now, ratchet(), None, "main"),
         )
 
     def test_an_aws_subprocess_in_microvms_js_fails_with_a_subprocess_key(self):
@@ -903,6 +929,288 @@ class SeededFaultTests(unittest.TestCase):
             [
                 'fixed: [subprocess] adapter/src/lib.rs: std::process::Command::new("aws"). '
                 "Run `mise run ratchet:update` and commit the file."
+            ],
+        )
+
+
+# The crate-root attribute that turns the adapters' clippy rules into errors under a plain
+# `cargo clippy`, not only under `lint`'s `-D warnings`.
+DENY = "#![deny(clippy::disallowed_methods, clippy::disallowed_types)]"
+
+# Every site in an adapter's `src/` that turns one of those lints off, by file and lint, with
+# how many `#[expect]` attributes it carries there. Clippy itself can't tell a reviewed
+# exception from a quiet bypass, so this list is the record: a new `expect` fails until it's
+# added here, and an `allow` or `warn` fails outright. A `disallowed_types` site also needs its
+# subprocess entry or decision in `ratchet/drift.json`. The environment reads have no drift
+# category, so for them this list is the only record.
+LINT_EXCEPTIONS = {
+    # The CLI's composition root, which hands core's process lookup to every handler.
+    ("microvms-cli/src/main.rs", "clippy::disallowed_methods"): 1,
+    # `put_via_aws_cli`, which #258 deletes.
+    ("microvms-cli/src/seam.rs", "clippy::disallowed_types"): 1,
+    # `doctor`'s `terraform output`, a subprocess decision.
+    ("microvms-cli/src/commands/doctor.rs", "clippy::disallowed_types"): 1,
+    # Each binding's name store, the one place it composes core's process lookup.
+    ("microvms-py/src/names.rs", "clippy::disallowed_methods"): 1,
+    ("microvms-js/src/names.rs", "clippy::disallowed_methods"): 1,
+}
+
+# The lint names an attribute could use to turn the adapter rules off: the two lints and the
+# groups they belong to.
+SILENCEABLE = re.compile(r"clippy::(?:disallowed_methods|disallowed_types|style|all)\b")
+LEVEL = re.compile(r"\b(allow|warn|expect|deny|forbid)\s*\(")
+
+
+def lint_levels(text):
+    """`(level, lint, line)` for each mention of a `SILENCEABLE` lint in a lint attribute.
+
+    Line comments are dropped first, so prose naming a lint isn't counted. The level is the
+    last one opened between the attribute's `#` and the lint, which also reads the level inside
+    `cfg_attr(...)`.
+    """
+    code = re.sub(r"//.*", "", text)
+    for match in SILENCEABLE.finditer(code):
+        start = code.rfind("#", 0, match.start())
+        levels = LEVEL.findall(code[start : match.start()])
+        yield (
+            levels[-1] if levels else None,
+            match.group(0),
+            code.count("\n", 0, match.start()) + 1,
+        )
+
+
+class AdapterLintTests(unittest.TestCase):
+    """Each driving adapter's `clippy.toml` refuses a subprocess and a direct environment read.
+
+    The fault cases copy the adapter's real `clippy.toml` into a throwaway crate and run real
+    clippy over it, because the rule's paths only mean something to the toolchain: a path
+    clippy can't resolve is silently ignored. Cargo runs from the repository root so rustup
+    picks the toolchain `rust-toolchain.toml` pins, clippy included.
+    """
+
+    def roots(self):
+        """Each adapter's crate root (its `lib` or `bin` target), from `cargo metadata`."""
+        metadata = RATCHET["cargo_metadata"](RATCHET["REPO"])
+        roots = {}
+        for package in metadata["packages"]:
+            if package["name"] not in RATCHET["REPO"].adapters:
+                continue
+            for target in package["targets"]:
+                if {"lib", "cdylib", "bin"} & set(target["kind"]):
+                    roots[package["name"]] = Path(target["src_path"])
+        self.assertEqual(sorted(roots), sorted(RATCHET["REPO"].adapters))
+        return roots
+
+    def clippy(self, adapter, files):
+        """Real clippy over a crate that carries `adapter`'s `clippy.toml` and `files`.
+
+        The crate depends on a stand-in `microvms-core` whose `env::process` has the real
+        one's path, so the ban on calling it resolves the way it does in the workspace.
+        """
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        core = Path(tmp.name) / "microvms-core"
+        (core / "src").mkdir(parents=True)
+        (core / "Cargo.toml").write_text(
+            '[package]\nname = "microvms-core"\nversion = "0.0.0"\nedition = "2024"\n'
+            "publish = false\n\n[workspace]\n"
+        )
+        (core / "src" / "lib.rs").write_text(
+            "pub mod env {\n"
+            "    pub fn process(name: &str) -> Option<String> {\n"
+            "        std::env::var(name).ok()\n"
+            "    }\n"
+            "}\n"
+        )
+        crate = Path(tmp.name) / adapter
+        (crate / "src").mkdir(parents=True)
+        (crate / "Cargo.toml").write_text(
+            f'[package]\nname = "{adapter}"\nversion = "0.0.0"\nedition = "2024"\n'
+            "publish = false\n\n[workspace]\n\n[dependencies]\n"
+            'microvms-core = { path = "../microvms-core" }\n'
+        )
+        shutil.copy(ROOT / adapter / "clippy.toml", crate / "clippy.toml")
+        for path, text in files.items():
+            (crate / path).write_text(textwrap.dedent(text))
+        env = {k: v for k, v in os.environ.items() if k != "CLIPPY_CONF_DIR"}
+        env["CARGO_TARGET_DIR"] = str(Path(tmp.name) / "target")
+        return subprocess.run(
+            [
+                "cargo",
+                "clippy",
+                "--offline",
+                "--quiet",
+                "--manifest-path",
+                str(crate / "Cargo.toml"),
+            ],
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_every_adapter_root_denies_the_disallowed_lints(self):
+        for adapter, root in self.roots().items():
+            with self.subTest(adapter=adapter):
+                lines = root.read_text(encoding="utf-8").splitlines()
+                self.assertTrue(DENY in lines, f"{root} lacks {DENY}")
+
+    def test_every_adapter_bans_both_commands_and_every_env_read(self):
+        for adapter in RATCHET["REPO"].adapters:
+            with self.subTest(adapter=adapter):
+                config = tomllib.loads((ROOT / adapter / "clippy.toml").read_text())
+                self.assertEqual(
+                    sorted(t["path"] for t in config["disallowed-types"]),
+                    ["std::process::Command", "tokio::process::Command"],
+                )
+                self.assertEqual(
+                    sorted(m["path"] for m in config["disallowed-methods"]),
+                    [
+                        "microvms_core::env::process",
+                        "std::env::var",
+                        "std::env::var_os",
+                        "std::env::vars",
+                        "std::env::vars_os",
+                    ],
+                )
+                for item in config["disallowed-types"] + config["disallowed-methods"]:
+                    self.assertTrue(item.get("reason"), item)
+
+    def test_an_aws_subprocess_in_microvms_js_session_fails_clippy(self):
+        out = self.clippy(
+            "microvms-js",
+            {
+                "src/lib.rs": f"{DENY}\npub mod session;\n",
+                "src/session.rs": """\
+                    pub fn upload() {
+                        let _ = std::process::Command::new("aws");
+                    }
+                """,
+            },
+        )
+        self.assertNotEqual(out.returncode, 0, out.stderr)
+        self.assertIn("use of a disallowed type `std::process::Command`", out.stderr)
+        self.assertIn("src/session.rs", out.stderr)
+
+    def test_an_env_read_in_a_cli_handler_fails_clippy(self):
+        out = self.clippy(
+            "microvms-cli",
+            {
+                "src/lib.rs": f"{DENY}\npub mod commands;\n",
+                "src/commands.rs": """\
+                    pub fn run() -> Option<String> {
+                        std::env::var("AWS_REGION").ok()
+                    }
+                """,
+            },
+        )
+        self.assertNotEqual(out.returncode, 0, out.stderr)
+        self.assertIn("use of a disallowed method `std::env::var`", out.stderr)
+
+    def test_every_adapter_refuses_each_banned_call(self):
+        # The same faults in each crate, so a `clippy.toml` edited in one of them fails here.
+        # The iterator reads and the call to core's lookup by name are each a way to read
+        # `AWS_REGION` that the two single-variable bans don't see.
+        for adapter in RATCHET["REPO"].adapters:
+            with self.subTest(adapter=adapter):
+                out = self.clippy(
+                    adapter,
+                    {
+                        "src/lib.rs": f"""\
+                            {DENY}
+                            pub fn spawn() {{
+                                let _ = std::process::Command::new("aws");
+                            }}
+                            pub fn region() -> bool {{
+                                std::env::var_os("AWS_REGION").is_some()
+                            }}
+                            pub fn region_by_scan() -> bool {{
+                                std::env::vars().any(|(key, _)| key == "AWS_REGION")
+                            }}
+                            pub fn region_by_os_scan() -> bool {{
+                                std::env::vars_os().any(|(key, _)| key == "AWS_REGION")
+                            }}
+                            pub fn region_from_core() -> Option<String> {{
+                                microvms_core::env::process("AWS_REGION")
+                            }}
+                        """,
+                    },
+                )
+                self.assertNotEqual(out.returncode, 0, out.stderr)
+                for message in [
+                    "disallowed type `std::process::Command`",
+                    "disallowed method `std::env::var_os`",
+                    "disallowed method `std::env::vars`",
+                    "disallowed method `std::env::vars_os`",
+                    "disallowed method `microvms_core::env::process`",
+                ]:
+                    self.assertIn(message, out.stderr)
+
+    def test_no_adapter_source_turns_the_lints_off_outside_its_listed_sites(self):
+        roots = {root.resolve() for root in self.roots().values()}
+        found = Counter()
+        for adapter in RATCHET["REPO"].adapters:
+            for path in sorted((ROOT / adapter / "src").rglob("*.rs")):
+                rel = path.relative_to(ROOT).as_posix()
+                for level, lint, line in lint_levels(path.read_text(encoding="utf-8")):
+                    where = f"{rel}:{line}: {level}({lint})"
+                    if (
+                        level == "deny"
+                        and path.resolve() in roots
+                        and "disallowed" in lint
+                    ):
+                        continue
+                    self.assertEqual(
+                        level,
+                        "expect",
+                        f"{where} turns the adapter contract off. Move the call below the "
+                        "adapter, or make it a reviewed #[expect] listed in LINT_EXCEPTIONS.",
+                    )
+                    self.assertIn(
+                        (rel, lint),
+                        LINT_EXCEPTIONS,
+                        f"{where} isn't a listed exception. Move the call below the adapter, "
+                        "or add the site to LINT_EXCEPTIONS with the record it points at.",
+                    )
+                    found[(rel, lint)] += 1
+        self.assertEqual(dict(found), LINT_EXCEPTIONS)
+
+        drift = json.loads(
+            (ROOT / "ratchet" / "drift.json").read_text(encoding="utf-8")
+        )
+        subprocess_keys = [
+            record["key"]
+            for record in drift["entries"] + drift["decisions"]
+            if record["category"] == "subprocess"
+        ]
+        for rel, lint in LINT_EXCEPTIONS:
+            if lint == "clippy::disallowed_types":
+                with self.subTest(site=rel):
+                    self.assertTrue(
+                        any(key.startswith(f"{rel}: ") for key in subprocess_keys),
+                        f"{rel} expects a subprocess with no entry or decision in "
+                        "ratchet/drift.json",
+                    )
+
+    def test_lint_levels_reads_the_level_and_skips_comments(self):
+        text = textwrap.dedent("""\
+            // #[allow(clippy::disallowed_methods)] in prose
+            #![deny(clippy::disallowed_methods, clippy::disallowed_types)]
+            #[cfg_attr(test, allow(clippy::disallowed_types))]
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "x"
+            )]
+            #[warn(clippy::style)]
+        """)
+        self.assertEqual(
+            list(lint_levels(text)),
+            [
+                ("deny", "clippy::disallowed_methods", 2),
+                ("deny", "clippy::disallowed_types", 2),
+                ("allow", "clippy::disallowed_types", 3),
+                ("expect", "clippy::disallowed_methods", 5),
+                ("warn", "clippy::style", 8),
             ],
         )
 

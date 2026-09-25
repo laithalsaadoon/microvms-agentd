@@ -19,6 +19,12 @@
 //! comment. Here it is a property: `microvms-cli` has no `lib` target, so there is no Rust API for
 //! a binding to depend on even if someone wanted to. That is the strongest available form —
 //! inexpressible rather than merely forbidden — and this file asserts it from the metadata.
+//!
+//! # Each driving adapter's allowed set
+//!
+//! The last test goes past the edges between our crates to every direct dependency of a driving
+//! adapter, against its set in `arch/placement.toml` (#285). It reads the ratchet's files rather
+//! than a copy of them, and it covers each adapter the ratchet holds no placement drift for.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -238,5 +244,156 @@ fn no_workspace_crate_depends_on_the_cli() {
              does, it belongs in microvms-core (ARCH-5).",
             package.name
         );
+    }
+}
+
+/// A crate's direct dependencies of one kind, by package name. A dependency repeated per
+/// target is one edge.
+fn direct(
+    metadata: &cargo_metadata::Metadata,
+    name: &str,
+    kind: cargo_metadata::DependencyKind,
+) -> BTreeSet<String> {
+    let package = metadata
+        .packages
+        .iter()
+        .find(|package| package.name.as_str() == name)
+        .unwrap_or_else(|| panic!("{name} is a workspace member"));
+    package
+        .dependencies
+        .iter()
+        .filter(|dependency| dependency.kind == kind)
+        .map(|dependency| dependency.name.clone())
+        .collect()
+}
+
+/// A file under the repository root, read as text.
+fn repo_file(path: &str) -> String {
+    let full = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join(path);
+    std::fs::read_to_string(&full).unwrap_or_else(|error| panic!("{}: {error}", full.display()))
+}
+
+/// What a driving adapter may depend on directly, for one kind (`normal` or `build`).
+///
+/// Its set in `arch/placement.toml`, plus each crate a placement decision in
+/// `ratchet/drift.json` records for it. Both files are the ratchet's, read here rather than
+/// copied, so the two checks can't disagree about what's allowed. A decision is the only way
+/// a crate joins an existing set: the ratchet refuses a set that grows.
+fn allowed(crate_name: &str, kind: &str) -> BTreeSet<String> {
+    let sets: toml::Table = repo_file("arch/placement.toml")
+        .parse()
+        .expect("arch/placement.toml is TOML");
+    let table = sets
+        .get(crate_name)
+        .and_then(toml::Value::as_table)
+        .unwrap_or_else(|| panic!("arch/placement.toml has no [{crate_name}] table"));
+    let mut allowed: BTreeSet<String> = table
+        .get(kind)
+        .and_then(toml::Value::as_array)
+        .map(|names| {
+            names
+                .iter()
+                .map(|name| name.as_str().expect("a crate name").to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // The ratchet keys a build dependency with a suffix, so a normal decision never covers a
+    // build edge or the other way round.
+    let suffix = if kind == "build" { " (build)" } else { "" };
+    let prefix = format!("{crate_name} -> ");
+    for decision in placement_records("decisions") {
+        if let Some(dependency) = decision
+            .strip_prefix(&prefix)
+            .and_then(|rest| rest.strip_suffix(suffix))
+            .filter(|dependency| !dependency.contains(' '))
+        {
+            allowed.insert(dependency.to_string());
+        }
+    }
+    allowed
+}
+
+/// The keys of the placement `entries` or `decisions` in `ratchet/drift.json`.
+fn placement_records(list: &str) -> Vec<String> {
+    let drift: serde_json::Value =
+        serde_json::from_str(&repo_file("ratchet/drift.json")).expect("drift.json is JSON");
+    drift[list]
+        .as_array()
+        .unwrap_or_else(|| panic!("drift.json has a {list} list"))
+        .iter()
+        .filter(|record| record["category"] == "placement")
+        .map(|record| record["key"].as_str().expect("a key").to_string())
+        .collect()
+}
+
+/// The driving adapters the ratchet holds no placement drift for. Their sets are exact.
+///
+/// Read from the drift file rather than listed, so an adapter joins the moment its last entry
+/// is fixed and `mise run ratchet:update` removes it: `microvms-cli` joins when #260 moves
+/// directory sync (`tar`, `globset`, `sha2`, `const-hex`) into core. Until then the ratchet
+/// asserts the CLI's surplus, entry by entry.
+fn exact_adapters() -> Vec<String> {
+    let sets: toml::Table = repo_file("arch/placement.toml")
+        .parse()
+        .expect("arch/placement.toml is TOML");
+    let drifting: BTreeSet<String> = placement_records("entries")
+        .iter()
+        .filter_map(|key| key.split(" -> ").next().map(str::to_string))
+        .collect();
+    sets.keys()
+        .filter(|name| !drifting.contains(*name))
+        .cloned()
+        .collect()
+}
+
+/// **The driving-adapter contract.** Each adapter the ratchet holds no placement drift for
+/// depends directly on exactly its allowed set, normal and build.
+///
+/// Exact both ways, like the edge assertions above: a crate added to a binding's manifest
+/// fails, and so does a listed crate the binding no longer uses, since a stale entry is a set
+/// that allows more than the crate needs. Dev dependencies are out: they never ship.
+///
+/// This is stricter than the ratchet, which it doesn't replace. The ratchet still collects all
+/// three adapters, and only it can hold the CLI's remaining drift as entries; this test covers
+/// an adapter once that drift is gone, and it's the one that says a set has gone stale.
+///
+/// **Falsification**: add `globset = "0.4"` to `microvms-py/Cargo.toml` and this goes red
+/// naming it (the ratchet fails too, as new placement drift). Delete `napi-build` from
+/// `microvms-js`'s build dependencies and it goes red on the stale set entry.
+#[test]
+fn each_exact_adapter_depends_on_exactly_its_allowed_set() {
+    let exact = exact_adapters();
+    for binding in ["microvms-py", "microvms-js"] {
+        assert!(
+            exact.contains(&binding.to_string()),
+            "{binding} has placement entries in ratchet/drift.json, so its set isn't asserted \
+             exactly. The bindings' sets have been exact since #285, and the ratchet refuses a new \
+             entry, so the file was edited around the check. Fix the dependency instead."
+        );
+    }
+
+    let metadata = metadata();
+    for adapter in &exact {
+        for (kind, cargo_kind) in [
+            ("normal", cargo_metadata::DependencyKind::Normal),
+            ("build", cargo_metadata::DependencyKind::Build),
+        ] {
+            let actual = direct(&metadata, adapter, cargo_kind);
+            let allowed = allowed(adapter, kind);
+            let added: Vec<&String> = actual.difference(&allowed).collect();
+            let stale: Vec<&String> = allowed.difference(&actual).collect();
+            assert!(
+                added.is_empty() && stale.is_empty(),
+                "{adapter}'s direct {kind} dependencies differ from its set in \
+                 arch/placement.toml. Outside the set: {added:?}. Listed but unused: {stale:?}. \
+                 An adapter parses input, converts types, bridges to the host, and renders \
+                 output (AGENTS.md, Architecture); a crate doing other work belongs in a lower \
+                 layer. A crate listed but unused comes out of the set, or out of \
+                 ratchet/drift.json when a placement decision allows it."
+            );
+        }
     }
 }
