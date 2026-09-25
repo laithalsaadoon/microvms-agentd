@@ -24,6 +24,9 @@ defined in `spec/core.symspec.json` and `spec/agentd.symspec.json`.
 | AGENTD-14 | 1 | 1 | 1 | 4 | 3 | 1 |
 | AGENTD-15 | 1 | 1 | 1 | 2 | 2 | 1 |
 | AGENTD-16 | 1 | 1 | 1 | 5 | 4 | 1 |
+| BIND-11 | 1 | 1 | 1 | 4 | 1 | 1 |
+| BIND-12 | 1 | 1 | 1 | 6 | 3 | 1 |
+| BIND-13 | 1 | 1 | 1 | 4 | 3 | waived |
 | BIND-17 | 1 | 1 | 1 | 4 | 3 | 1 |
 | BIND-18 | 1 | 1 | 1 | 2 | 1 | 1 |
 | BIND-19 | 1 | 1 | 1 | 2 | 1 | 1 |
@@ -231,6 +234,39 @@ When a start request carries its user and group as integers and its shell as a b
 - **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `agentd/tests/bdd_exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
 - **impl:** `agentd/src/exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-js/src/session.rs`, `microvms-py/src/session.rs`
 - **live:** `conformance/run_rs.py`
+
+## BIND-11
+
+The microvms-core shall derive a launch's egress posture from its launch options alone, as open when managed internet egress is requested, best-effort when the advisory deny is requested, and unsealed otherwise, and never as sealed.
+
+- **model:** `model/src/posture.rs`
+- **gherkin:** `microvms-core/tests/features/egress_posture.feature`
+- **fuzz:** `microvms-core/src/control/posture_fuzz.rs`
+- **test:** `microvms-core/src/control/connector.rs`, `microvms-core/tests/bdd_posture.rs`, `microvms-js/__test__/egress_posture.mjs`, `microvms-py/tests/test_egress_posture.py`
+- **impl:** `microvms-core/src/control/connector.rs`
+- **live:** `conformance/run_rs.py`
+
+## BIND-12
+
+The language bindings layer shall expose on each session the egress posture the CLI envelope reports for the same launch options, and unsealed for a session whose launch options the session does not hold.
+
+- **model:** `model/src/posture.rs`
+- **gherkin:** `microvms-core/tests/features/egress_posture.feature`
+- **fuzz:** `microvms-core/src/control/posture_fuzz.rs`
+- **test:** `microvms-cli/src/guards.rs`, `microvms-core/src/sandbox.rs`, `microvms-core/tests/bdd_posture.rs`, `microvms-core/tests/live_posture.rs`, `microvms-js/__test__/egress_posture.mjs`, `microvms-py/tests/test_egress_posture.py`
+- **impl:** `microvms-cli/src/commands/lifecycle.rs`, `microvms-core/src/sandbox.rs`, `microvms-core/src/session/mod.rs`
+- **live:** `conformance/run_rs.py`
+
+## BIND-13
+
+When a caller asks for the egress posture of a set of launch options, the microvms-core shall answer with the posture a launch with those options would report, or with the invalid-argument refusal the launch would raise, without any AWS call.
+
+- **model:** `model/src/posture.rs`
+- **gherkin:** `microvms-core/tests/features/egress_posture.feature`
+- **fuzz:** `microvms-core/src/control/posture_fuzz.rs`
+- **test:** `microvms-core/src/control/connector.rs`, `microvms-core/tests/bdd_posture.rs`, `microvms-js/__test__/egress_posture.mjs`, `microvms-py/tests/test_egress_posture.py`
+- **impl:** `microvms-cli/src/commands/lifecycle.rs`, `microvms-core/src/control/connector.rs`, `microvms-core/src/sandbox.rs`
+- **live:** waived: a pure function that makes no AWS call; its refusals precede any call, so the service never sees them (zero calls asserted by the Gherkin scenarios and the fuzz harness)
 
 ## BIND-17
 

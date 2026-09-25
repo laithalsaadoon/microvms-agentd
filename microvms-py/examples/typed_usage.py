@@ -57,6 +57,7 @@ from microvms import (
     Total,
     WindowClosedError,
     core_version,
+    egress_posture_for,
     estimate_run,
     provision_agentd,
     provision_agentd_report,
@@ -226,6 +227,17 @@ def deferred_launch(region: Region, image: str) -> str:
     sandbox.run(image_identifier=image, wait=False, log_group="/team/agents")
     session = sandbox.wait_until_running(timeout=300.0)
     return session.endpoint
+
+
+def no_network_launch(region: Region, image: str, connectors: list[str]) -> str:
+    """Refuse a no-network task unless the launch would be sealed. Written for the checker."""
+    before: str = egress_posture_for(False, connectors, False, region=region)
+    if before != "sealed":
+        return f"refused: the launch would be {before}"
+    sandbox = Sandbox(region)
+    session = sandbox.run(image_identifier=image, egress_network_connectors=connectors)
+    after: str = session.egress_posture
+    return after
 
 
 def launch_step(region: Region, image: str) -> dict[str, object]:

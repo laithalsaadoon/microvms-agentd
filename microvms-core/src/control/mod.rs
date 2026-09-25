@@ -97,7 +97,9 @@ pub use artifact::{
     BaseImage, Ecosystem, ProjectFiles, WrapOptions, artifact_content_hash, build_artifact,
     default_dockerfile, wrap_dockerfile,
 };
-pub use connector::{ConnectorIntent, EgressPosture, PLATFORM_HONOURS_OMITTED_EGRESS};
+pub use connector::{
+    ConnectorIntent, EgressPosture, PLATFORM_HONOURS_OMITTED_EGRESS, egress_posture_for,
+};
 pub use image::{Image, WaitOpts};
 pub use microvm::{Microvm, MicrovmFilter, ProxyToken, RunHookPayload};
 
@@ -1107,6 +1109,9 @@ pub(crate) fn timed_out(what: &str, waited: Duration) -> Error {
 
 #[cfg(test)]
 pub(crate) mod fake;
+
+#[cfg(test)]
+mod posture_fuzz;
 
 #[cfg(test)]
 mod tests {

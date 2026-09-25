@@ -460,6 +460,37 @@ choose, and `disable_logging` turns them off; the execution role must be allowed
 there. The CLI spells these `--vm-log-group`, `--vm-log-stream`, and `--no-vm-logs`, since
 `--log-group` already names the image build's logs.
 
+## Advertising network isolation
+
+A harness that offers a no-network task mode must enforce it or reject the task before it
+starts. Omitting `egress` does not enforce it: a VM launched without the managed egress
+connector still reaches the internet (`docs/PLATFORM.md`, measured 2026-09-11 and
+2026-09-12), and `deny_egress` only sets proxy variables a workload can ignore. Internet
+isolation needs a VPC egress connector attached to a VPC with no internet gateway or NAT
+gateway, with its routes audited separately (`docs/NETWORKING.md`).
+
+Every launch reports what its outbound network is, as one of `open`, `unsealed`,
+`best-effort`, or `sealed`. `egress_posture_for` answers it for a set of launch options
+before anything is built, with no AWS call, and raises the launch's own `InvalidArgError`
+for options the launch would refuse. The launched session carries the same value, and so
+does the CLI envelope's `egressPosture` for the same options:
+
+```python
+posture = microvms.egress_posture_for(False, connectors, False, region=region)
+if task_needs_no_network and posture != "sealed":
+    raise RuntimeError(f"no-network needs a sealed launch; this one is {posture}")
+session = sandbox.run(image_identifier=image, egress_network_connectors=connectors)
+assert session.egress_posture == posture
+```
+
+Node spells these `egressPostureFor(egress, connectors, denyEgress, region)` and
+`await session.egressPosture()`. Advertise network isolation, such as Harbor's
+`disable_internet` capability, only when the launch would be `sealed`, and reject a
+no-network task otherwise. No launch option answers `sealed` today: the client cannot
+see a VPC's routes, so a VPC connector alone reports `unsealed`. A session that did not
+launch its VM (`Session.direct`, `Session.attach`, an adopted sandbox) holds no launch
+options and reports `unsealed`.
+
 ## What the hand-rolled daemons needed, and where agentd covers it
 
 The two daemon shapes this supersedes are described in

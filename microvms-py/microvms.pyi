@@ -1922,6 +1922,16 @@ class Session:
         The raw tar bytes of a remote tree.
         """
     @property
+    def egress_posture(self, /) -> str:
+        """
+        The launch's egress posture: `"open"`, `"unsealed"`, `"best-effort"`, or `"sealed"`.
+        
+        The value the CLI envelope's `egressPosture` reports for the same launch options, and
+        what `egress_posture_for` answers before the launch. A session that does not hold its
+        launch options (`Session.direct`, `Session.attach`, an adopted sandbox) reports
+        `"unsealed"`. Advertise network isolation only for `"sealed"`.
+        """
+    @property
     def endpoint(self, /) -> str:
         """
         The endpoint this session addresses.
@@ -2256,6 +2266,21 @@ def cost_constants() -> dict:
     A dict rather than a class because it is a transcription of published constants, and
     the Python client publishes the same set. `provenances` and `phases` are here so a
     caller can enumerate the closed sets rather than hardcoding spellings.
+    """
+
+def egress_posture_for(egress: bool = False, connectors: Sequence[str] |None = None, deny_egress: bool = False, *, region: Region |None = None) -> str:
+    """
+    The egress posture `Sandbox.run` with these options would report, without launching.
+    
+    One of `"open"`, `"unsealed"`, `"best-effort"`, or `"sealed"`: the value the launched
+    session's `egress_posture` and the CLI envelope's `egressPosture` carry. Raises the
+    launch's own `InvalidArgError` for options it would refuse. No AWS call and no credentials,
+    so a harness can decide before a build whether a no-network task is satisfiable.
+    
+    Only `"sealed"` is network isolation, and no option answers it: isolation needs a VPC
+    egress connector and separately verified VPC routing without an internet gateway or NAT
+    gateway. Omitting `egress` is `"unsealed"`; `deny_egress` is `"best-effort"`. Without a
+    `region`, each connector ARN is checked against the region it names.
     """
 
 def estimate_run(size: SizeClass, *, running_seconds: float = 0.0, suspended_seconds: float = 0.0, image_gb: float |None = None, image_retained_seconds: float |None = None, suspend_resume_cycles: int = 0, snapshot_gb: float |None = None, launched: bool = True, label: str = "plan", rates: RateTable |None = None) -> CostReport:
