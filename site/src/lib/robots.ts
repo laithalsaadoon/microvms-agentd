@@ -13,10 +13,13 @@ import type { AstroIntegration } from "astro"
  * this repository; a file emitted at `/microvms-agentd/robots.txt` has no protocol meaning and is dead
  * weight that reads as a policy.
  *
+ * That origin-root file is published by the user-site repository `laithalsaadoon/laithalsaadoon.github.io`
+ * (since 2026-09-25), together with a `/sitemap.xml` index that lists this site's `sitemap-0.xml`. Its
+ * groups and Content-Signal lines mirror the policy below, so a change here is a change there too.
+ *
  * So the integration below gates on the base and says so in the build log rather than shipping a file
  * nobody fetches. The policy is written and tested here so that the day this site moves to a root
- * origin — a custom domain, or a user/organization Pages site — it ships without anyone rediscovering
- * the decision.
+ * origin — a custom domain — it ships without anyone rediscovering the decision.
  */
 
 /**
@@ -55,6 +58,15 @@ export const robotsPolicy = (
 #   * "Sitemap:" is NOT part of RFC 9309 (s2.2.4, "Other Records"). It must be an absolute URL, belongs
 #     to no group, and MUST NOT terminate a group.
 #
+# CONTENT SIGNALS. Each group carries a "Content-Signal:" line stating how the content may be used after
+# it is fetched, in the three categories of draft-romm-aipref-contentsignals-00 (https://contentsignals.org):
+# search (a search index and its results), ai-input (retrieval, grounding and other real-time use in a
+# generated answer), and ai-train (training or fine-tuning). It is a stated preference, not access
+# control, and RFC 9309 parsers skip the line. It is repeated in every group because a crawler reads only
+# its own group. The draft expired on 2026-04-04 without adoption, so the syntax may still change. All
+# three are "yes", matching the Allow lines; to decline training, set ai-train=no on every line and say
+# why here.
+#
 # Propagation after an edit, from each vendor's own documentation: OpenAI, Perplexity, Meta and Amazon
 # roughly 24 hours; DuckDuckGo 72 hours; Amazon may act on a cached copy up to 30 days old.
 
@@ -87,6 +99,7 @@ User-agent: Perplexity-User
 User-agent: DuckAssistBot
 User-agent: Amzn-User
 User-agent: meta-externalfetcher
+Content-Signal: search=yes, ai-input=yes, ai-train=yes
 Allow: /
 
 
@@ -111,6 +124,8 @@ User-agent: CCBot
 User-agent: meta-externalagent
 User-agent: Applebot
 User-agent: Amazonbot
+User-agent: Bytespider
+Content-Signal: search=yes, ai-input=yes, ai-train=yes
 Allow: /
 
 # A2 - AI search and answer indexes. Each vendor states these do not feed model training; Perplexity
@@ -121,6 +136,7 @@ User-agent: PerplexityBot
 User-agent: meta-webindexer
 User-agent: Amzn-SearchBot
 User-agent: Google-CloudVertexBot
+Content-Signal: search=yes, ai-input=yes, ai-train=yes
 Allow: /
 
 # A3 - control-only tokens. These crawlers never fetch: Google states Google-Extended "doesn't have a
@@ -129,6 +145,7 @@ Allow: /
 # affects Gemini training and grounding and explicitly not crawling, Search inclusion, or ranking.
 User-agent: Google-Extended
 User-agent: Applebot-Extended
+Content-Signal: search=yes, ai-input=yes, ai-train=yes
 Allow: /
 
 
@@ -139,12 +156,18 @@ Allow: /
 # Deliberately empty of Disallow lines. Blocking /_astro/ is the classic self-inflicted wound: a crawler
 # that renders a page to judge it needs the CSS and JS, and a blocked asset is scored as a broken page.
 #
-# Two tokens are NOT listed anywhere above, and their absence is the finding rather than an omission.
-# "anthropic-ai" and "Claude-Web" appear nowhere in Anthropic's current crawler documentation, which
-# lists exactly three tokens (ClaudeBot, Claude-User, Claude-SearchBot). Copy-pasted robots.txt files
-# carry them; a rule naming them matches nothing in Anthropic's fleet.
+# LEGACY TOKENS. "anthropic-ai" and "Claude-Web" appear nowhere in Anthropic's current crawler
+# documentation, which lists exactly three tokens (ClaudeBot, Claude-User, Claude-SearchBot); a rule
+# naming them matches nothing in Anthropic's fleet. They get a group of their own anyway because older
+# robots.txt files and agent-readiness scanners still check for them, and the group says what they are.
+
+User-agent: Claude-Web
+User-agent: anthropic-ai
+Content-Signal: search=yes, ai-input=yes, ai-train=yes
+Allow: /
 
 User-agent: *
+Content-Signal: search=yes, ai-input=yes, ai-train=yes
 Allow: /
 
 
@@ -171,7 +194,7 @@ export const robotsPolicyFile = (base: string, site: URL): AstroIntegration => (
         logger.warn(
           `no robots.txt emitted: this site is served from ${segment}, and RFC 9309 §2.3 puts ` +
             `robots.txt at the origin root. ${new URL("/robots.txt", site).href} governs this ` +
-            "corpus and belongs to the account, not to this repository. The policy in " +
+            "corpus; on github.io the account's user-site repository publishes it. The policy in " +
             "`src/lib/robots.ts` ships automatically at a root base."
         )
         return
