@@ -64,3 +64,17 @@ routes are generated from a schema.
 Publishing and version changes are documented in CONTRIBUTING.md. Do not
 change the stub generator's maturin pin without checking its output-path
 behavior. Run Ruff on `.` so the repository selection is respected.
+
+## Code comments
+
+Comments document intent, constraints, invariants, and non-obvious tradeoffs—not syntax.
+Add a comment when behavior is surprising, externally constrained, concurrency-sensitive, security-sensitive, performance-motivated, or likely to be "simplified" incorrectly by a future maintainer. Prefer clearer names, types, and structure when they can make the comment unnecessary.
+
+A useful threshold is: would a competent engineer reading this six months from now reasonably ask "why?" If yes, comment it. If they would only ask "what does this syntax do?", prefer clearer code instead.
+
+## Counts in docs
+
+Documentation doesn't state counts of lines, files, modules, tests, checks, or
+classes in prose. Those numbers drift with every commit, and a stale count reads
+as a fact. A number may appear only when the build generates it, or when it's a
+dated measurement that names the commit it was taken at.

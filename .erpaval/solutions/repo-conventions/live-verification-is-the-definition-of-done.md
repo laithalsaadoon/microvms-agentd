@@ -1,13 +1,13 @@
 ---
 tags: [microvms-agentd, live-conformance, verification, fixtures]
-modules: [conformance/run_rs.py, CLAUDE.md, microvms-cli/src/guards.rs]
+modules: [conformance/run_rs.py, AGENTS.md, microvms-cli/src/guards.rs]
 ---
 
 # Live verification is the task-level definition of done (Laith, 2026-08-28)
 
 `mise run check` is the definition of done for a *change*; a task touching the platform
 surface is done only after a live AWS exercise of the new path plus a permanent check in
-`conformance/run_rs.py`. Policy is in the repo's CLAUDE.md — strongly worded, at Laith's
+`conformance/run_rs.py`. Policy is in the repo's AGENTS.md — strongly worded, at Laith's
 direction, after the named-VMs feature shipped fully green locally and broke on its first
 live run.
 

@@ -248,7 +248,7 @@ through the session recorder, the CLI guards (both commands fail closed through 
 seam and name their door; a registered name skips the build door; an empty task is
 refused with zero doors), and the manifest count.
 
-The live half, per `CLAUDE.md`'s rule, is `drive_agent_vm` in `conformance/run_rs.py`:
+The live half, per `AGENTS.md`'s rule, is `drive_agent_vm` in `conformance/run_rs.py`:
 `agent-up` with both profiles builds or reuses the image and launches; the marker names
 both; the credential file exports the variable each installed agent reads (names only, so
 no value reaches a log); `agent-prompt --agent claude-code` completes a Bash task with exit 0 and a
