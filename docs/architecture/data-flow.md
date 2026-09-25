@@ -1,21 +1,21 @@
 # microvms-agentd · Data flow
 
 Two surfaces trigger work in this system and nothing else does: a CLI invocation, dispatched
-through a 17-arm exhaustive match (`microvms-cli/src/main.rs:382-403`), and a daemon HTTP
+through an exhaustive match (`microvms-cli/src/main.rs:382-403`), and a daemon HTTP
 request, dispatched through a handler table walked from the same list `/v1/schema` publishes
 (`agentd/src/routes.rs:110`). The bindings re-enter the same `microvms-core` surfaces the CLI
 uses, so they add no distinct flow, and the daemon's only recurring job is a 30-second
 expired-exec reaper rather than a request lifecycle (`agentd/src/main.rs:61`,
 `agentd/src/exec.rs:951`).
 
-The three flows below are ranked by how much of the client-to-daemon boundary each exercises,
+The flows below are ranked by how much of the client-to-daemon boundary each exercises,
 tie-broken by whether it is named after one of the system's core verbs. Flow 1 is the only arm
-that launches a VM and the only one that touches all four actors. Flow 2 is the streaming read
-path, whose correctness rests on a byte-offset cursor that survives a reconnect through the
-endpoint proxy. Flow 3 is the file-transfer path, and it ends in the daemon's one confined
-write.
+that launches a VM and the only one that touches the CLI, core, AWS, and the daemon. Flow 2 is
+the streaming read path, whose correctness rests on a byte-offset cursor that survives a
+reconnect through the endpoint proxy. Flow 3 is the file-transfer path, and it ends in the
+daemon's one confined write.
 
-Participants are the workspace crates named in `architecture/module-map.md` plus two external
+Participants are the workspace crates named in `architecture/module-map.md` plus external
 actors. `microvm CLI` is `microvms-cli`; `agentd` is the in-VM daemon; `AWS MicroVMs` is the
 control plane together with its endpoint proxy.
 
@@ -181,8 +181,8 @@ sequenceDiagram
 
 ## See also
 
-- [processes](../behavior/processes.md) — 13 shared source citations
-- [sequences](../diagrams/behavioral/sequences.md) — 11 shared source citations
-- [debugging guide](../insights/debugging-guide.md) — 9 shared source citations
-- [impact analysis](../insights/impact-analysis.md) — 9 shared source citations
-- [business logic](../insights/business-logic.md) — 8 shared source citations
+- [processes](../behavior/processes.md)
+- [sequences](../diagrams/behavioral/sequences.md)
+- [debugging guide](../insights/debugging-guide.md)
+- [impact analysis](../insights/impact-analysis.md)
+- [business logic](../insights/business-logic.md)

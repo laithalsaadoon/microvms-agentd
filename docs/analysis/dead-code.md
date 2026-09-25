@@ -1,5 +1,7 @@
 # microvms-agentd · Dead code
 
+Figures on this page were measured at `5e6f752` (2026-08-17).
+
 The compiler already owns most of this question. `rustc`'s `unused_imports` and `dead_code`
 are warn-by-default, Rust 1.97 added `dead_code_pub_in_binary`, and
 `cargo clippy --all-targets --all-features` over all seven workspace members exits 0 with
@@ -139,8 +141,8 @@ repo. The eight `microvms-js/__test__/*.mjs` files have no linter, so their
 
 ## See also
 
-- [impact analysis](../insights/impact-analysis.md) — 7 shared source citations
-- [contract map](../insights/contract-map.md) — 6 shared source citations
-- [processes](../behavior/processes.md) — 5 shared source citations
-- [tech debt](../insights/tech-debt.md) — 5 shared source citations
-- [risk hotspots](risk-hotspots.md) — 4 shared source citations
+- [impact analysis](../insights/impact-analysis.md)
+- [contract map](../insights/contract-map.md)
+- [processes](../behavior/processes.md)
+- [tech debt](../insights/tech-debt.md)
+- [risk hotspots](risk-hotspots.md)

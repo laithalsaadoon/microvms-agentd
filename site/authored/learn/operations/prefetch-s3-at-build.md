@@ -19,7 +19,7 @@ A fresh VM's first S3 call carries a measured five-to-ten-second penalty, and a 
 
 An image build boots the image in a snapshot VM, calls the build-time hooks against the daemon, and captures the memory and disk snapshot only after they answer. So anything that completes before the daemon answers those hooks is inside the snapshot. The wrapper here runs `aws s3 sync` first and only then hands the process to agentd, strictly ordered: the daemon cannot answer a hook until the sync is done, and the snapshot cannot be captured until the daemon answers.
 
-Two shapes of the same rule, observed in [Platform](/internals/platform/). The model allows build hooks an hour, and an observed failure reads `Ready hook invocation timed out after PT5M`, so plan the transfer to fit well inside five minutes and measure before assuming the full hour is reachable. And one build runs the snapshot pass once per chipset generation, so the prefetch downloads twice per image; a launch restores the snapshot rather than re-running `CMD`, so it never prefetches, which is the entire point.
+The same rule shows up in practice, observed in [Platform](/internals/platform/). The model allows build hooks an hour, and an observed failure reads `Ready hook invocation timed out after PT5M`, so plan the transfer to fit well inside five minutes and measure before assuming the full hour is reachable. And one build runs the snapshot pass once per chipset generation, so the prefetch downloads twice per image; a launch restores the snapshot rather than re-running `CMD`, so it never prefetches, which is the entire point.
 
 ## 2. The Dockerfile pieces
 
@@ -53,7 +53,7 @@ RUN printf '%s\n' \
     > /start.sh && chmod 0755 /start.sh
 ```
 
-The `CMD` becomes `["/start.sh"]` with `ENTRYPOINT []` kept. `run.sh` rewrites the two `ENV` lines with your values before building, so each distinct URI is a different Dockerfile hash, a different image name, and a fresh build, and re-running with the same URI reuses the already-prefetched image in seconds.
+The `CMD` becomes `["/start.sh"]` with `ENTRYPOINT []` kept. `run.sh` rewrites the `PREFETCH_URI` and `PREFETCH_NO_SIGN` `ENV` lines with your values before building, so each distinct URI is a different Dockerfile hash, a different image name, and a fresh build, and re-running with the same URI reuses the already-prefetched image in seconds.
 
 ## 3. Fail loud, never empty
 

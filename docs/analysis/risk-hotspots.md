@@ -1,5 +1,7 @@
 # microvms-agentd · Risk hotspots
 
+Figures on this page were measured at `5e6f752` (2026-08-17).
+
 Risk here is composed from two measured signals, because the one the default recipe reaches
 for is empty. Both gate-level static-analysis passes return zero findings on every file:
 `cargo clippy --all-targets --message-format=json` emits 0 diagnostics at `warning` or
@@ -69,7 +71,7 @@ a file that never ships in a binary at the top.
 
 The shape of that list is the finding. Nine of the twelve rows are binding files, and the
 reason is structural rather than per-file: all 18 files under `microvms-py/src/` and
-`microvms-js/src/` — 3,856 and 3,773 LOC respectively — contain zero `#[cfg(test)]` modules
+`microvms-js/src/` — 3,856 and 3,760 LOC respectively — contain zero `#[cfg(test)]` modules
 and zero `#[test]` functions, while the other five crates hold 770 between them — an average
 of 19 per file in `microvms-core`, 11 in `microvms-cli`, 10 in `agentd`. The three
 non-binding rows (`microvms-core/src/cost.rs`, `microvms-core/src/sandbox.rs`,
@@ -261,8 +263,8 @@ Every number above traces to one of these, run from the repository root at commi
 
 ## See also
 
-- [business logic](../insights/business-logic.md) — 6 shared source citations
-- [impact analysis](../insights/impact-analysis.md) — 6 shared source citations
-- [contract map](../insights/contract-map.md) — 5 shared source citations
-- [public api](../reference/public-api.md) — 5 shared source citations
-- [dead code](dead-code.md) — 4 shared source citations
+- [business logic](../insights/business-logic.md)
+- [impact analysis](../insights/impact-analysis.md)
+- [contract map](../insights/contract-map.md)
+- [public api](../reference/public-api.md)
+- [dead code](dead-code.md)

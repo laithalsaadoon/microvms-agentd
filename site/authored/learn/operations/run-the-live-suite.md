@@ -37,7 +37,7 @@ mise run build           # the aarch64 daemon
 mise run build:cli       # the host-architecture microvm binary
 ```
 
-Rebuild `target/release/microvm` explicitly: `check` does not build it, and a live run against a stale binary verifies nothing. `mise run live` depends on all three, so it does them for you; a targeted round trip by hand does not. `build --reuse` makes repeat image builds nearly free, which is what makes a targeted exercise cheap to repeat.
+Rebuild `target/release/microvm` explicitly: `check` does not build it, and a live run against a stale binary verifies nothing. `mise run live` depends on these tasks, so it does them for you; a targeted round trip by hand does not. `build --reuse` makes repeat image builds nearly free, which is what makes a targeted exercise cheap to repeat.
 
 ## 4. Run it
 
@@ -45,7 +45,7 @@ Rebuild `target/release/microvm` explicitly: `check` does not build it, and a li
 mise run live
 ```
 
-In order: `live:paths` (the pagination cursor encoding and the colon image ARN against the real signer; read-only and free), `live:versions` (the version and build operations, including the one `PATCH` this client sends; costs one short VM), `live:conformance-rs` (the conformance suite through the real CLI against real VMs), then `live:rates` (the pinned rate table against the AWS Pricing API; free, and placed after the billable suite so a drifted rate cannot abort it mid-flight). The leak check runs in a shell trap so it fires on the failure path too, and on success the task records the commit as live-verified in a per-clone marker the pre-push hook reads.
+In order: `live:paths` (the pagination cursor encoding and the colon image ARN against the real signer; read-only and free), `live:versions` (the version and build operations, including the `PATCH` this client sends; costs one short VM), `live:conformance-rs` (the conformance suite through the real CLI against real VMs), then `live:rates` (the pinned rate table against the AWS Pricing API; free, and placed after the billable suite so a drifted rate cannot abort it mid-flight). The leak check runs in a shell trap so it fires on the failure path too, and on success the task records the commit as live-verified in a per-clone marker the pre-push hook reads.
 
 To run the suite by hand:
 
@@ -74,7 +74,7 @@ mise run live:verify-clean
 mise run live:destroy
 ```
 
-Verify teardown independently, and do not trust a success message. The scripts delete the MicroVM, the image, and the log group in `finally`, and `terraform destroy` handles the stack, yet the service creates `/aws/lambda-microvms/<image-name>` itself, so Terraform never owns that log group and `destroy` reports success while the group survives. Six leaked that way before anyone noticed. `live:verify-clean` asks the account directly and separates leak, standing, and pending; [Recover a leaked VM](/learn/operations/recover-a-leaked-vm/) explains the three. `live:destroy` tears the Terraform stack back down when you are done.
+Verify teardown independently, and do not trust a success message. The scripts delete the MicroVM, the image, and the log group in `finally`, and `terraform destroy` handles the stack, yet the service creates `/aws/lambda-microvms/<image-name>` itself, so Terraform never owns that log group and `destroy` reports success while the group survives. Six leaked that way before anyone noticed. `live:verify-clean` asks the account directly and separates leak, standing, and pending; [Recover a leaked VM](/learn/operations/recover-a-leaked-vm/) explains each. `live:destroy` tears the Terraform stack back down when you are done.
 
 ## 7. Platform claims need a date, a region, and an API version
 

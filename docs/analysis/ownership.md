@@ -1,5 +1,8 @@
 # microvms-agentd · Ownership
 
+Figures on this page were measured at `5e6f752` (2026-08-17), unless a figure names its own
+commit.
+
 Per-author ownership analysis does not apply to this repository, and this file says so with
 numbers before it measures anything else.
 
@@ -173,7 +176,7 @@ price of live AWS runs.
    Consulting them before a fix costs minutes; rediscovering one costs a session.
 7. `mise.toml` — the command surface. `mise run check` is the local gate; `mise run live` is
    billable and manual.
-8. `microvms-core/src/` — the largest crate at 39,097 lines and 1,572 symbols.
+8. `microvms-core/src/` — the largest crate at 39,097 lines (at `78304e3`) and 1,572 symbols.
    `constants.rs` and `cost.rs` are where the measured platform values land in code.
 9. `docs/STRATEGY.md` — scope, audience, and the labeling discipline every claim follows:
    measured, documented, vendor-claimed, or inferred.
@@ -186,7 +189,7 @@ The per-path shares below are still worth stating, because with only two identit
 history the split is between the human author and the `bgagent` automated identity, and which
 one holds a file predicts whether any person reviewed it. Read each percentage against its
 commit count: on a file with three commits a share above 70% carries little information, so
-every bullet names the count. Shares are computed with
+the bullets name the count. Shares are computed with
 `git log --no-merges --pretty=format:%ae -- <path>`.
 
 - `mise.toml` — sole human author (71% of 17 commits). Bring both symspec gates inside
@@ -219,18 +222,18 @@ every bullet names the count. Shares are computed with
   plausible-looking wrong value against the correct `dec!(0.0811111030)` — so keep
   `scripts/check-live-rates.py` in the billable tier and treat a rate edit as a measurement.
 - `agentd/src/routes.rs` — `bgagent` automated identity (86% of 7 commits). This file splits
-  the 20 daemon endpoints into the Bearer-guarded `control` router and the `open` router at
+  the daemon endpoints into the Bearer-guarded `control` router and the `open` router at
   `agentd/src/routes.rs:48-56`, which makes it the repository's authorization boundary; it
   should carry a named human reviewer on every change, since no commit on it currently does.
 - `docs/reference/cli.md` — sole human author (100% of 9 commits). A hand-written reference
   for a surface that `microvm manifest` already emits machine-readably, so generate the
   overlapping sections or add a drift check, rather than maintaining two descriptions of one
   command set.
-- `spec/core.symspec.json` — `bgagent` automated identity (100% of 2 commits). 51 requirements
+- `spec/core.symspec.json` — `bgagent` automated identity. 51 requirements
   in a single file with no second copy and no gate inside `check`; approve changes to it the
   way a schema change is approved, and pair every edit with the `docs/PLATFORM.md` section it
   encodes.
-- `scripts/check-model-drift.py` — `bgagent` automated identity (100% of 1 commit).
+- `scripts/check-model-drift.py` — `bgagent` automated identity.
   `scripts/check-model-drift.py:254` and `:266` hold `PINNED_REGIONS` and
   `PINNED_SIZE_CLASSES` as deliberate hand-maintained copies, and `:57` states they are the
   second reader for two values no AWS service model publishes; any change to the Rust
@@ -238,8 +241,8 @@ every bullet names the count. Shares are computed with
 
 ## See also
 
-- [system overview](../architecture/system-overview.md) — 6 shared source citations
-- [contract map](../insights/contract-map.md) — 4 shared source citations
-- [impact analysis](../insights/impact-analysis.md) — 4 shared source citations
-- [module map](../architecture/module-map.md) — 3 shared source citations
-- [state machines](../behavior/state-machines.md) — 3 shared source citations
+- [system overview](../architecture/system-overview.md)
+- [contract map](../insights/contract-map.md)
+- [impact analysis](../insights/impact-analysis.md)
+- [module map](../architecture/module-map.md)
+- [state machines](../behavior/state-machines.md)

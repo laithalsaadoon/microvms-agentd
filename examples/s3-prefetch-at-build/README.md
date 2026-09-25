@@ -28,7 +28,7 @@ PREFETCH_URI=s3://a-public-bucket/prefix/ PREFETCH_NO_SIGN=1 bash examples/s3-pr
 
 An image build boots the image in a snapshot VM, calls the build-time hooks
 (`/ready`, `/validate`) against the daemon, and captures the memory and disk
-snapshot only after they answer — three in-repo sources pin the ordering:
+snapshot only after they answer — in-repo sources pin the ordering:
 
 - `agentd/src/state.rs` (the hook log): "build-time hooks (validate, ready)
   fire in the snapshot VM **before the snapshot is taken**, so their records
@@ -55,7 +55,7 @@ instead of agentd, doing the work inside your `/validate` handler is the
 equivalent placement, with up to 3600 seconds of budget
 (`docs/PLATFORM.md`, hook-timeout table).
 
-Two shapes of the same rule, observed in `docs/PLATFORM.md`:
+The same rule shows up in practice, observed in `docs/PLATFORM.md`:
 
 - **Budget.** The model allows build hooks 3600 seconds, but an observed
   failure reads `Ready hook invocation timed out after PT5M` — plan the
@@ -72,7 +72,7 @@ The wrapper is `set -e`: a failed sync means agentd never starts, the ready
 hook times out, and the **build fails with a named reason** instead of
 producing an image whose snapshot silently lacks the data. The failure
 signature is `stateReason: Ready hook invocation timed out after PT5M` on
-the **build** record (`docs/PLATFORM.md` documents which of the three shapes
+the **build** record (`docs/PLATFORM.md` documents which of the failed-build shapes
 carries the reason), and the wrapper's own log lines are in the build log
 group — `microvm logs` prints the `aws logs tail` command that reads them. An empty `PREFETCH_URI` skips the prefetch with a log line,
 so the Dockerfile also builds as checked in; `run.sh` refuses to run without

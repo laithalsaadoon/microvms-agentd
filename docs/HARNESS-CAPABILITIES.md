@@ -48,7 +48,7 @@ buffered output, live log streaming, kill with signal, sudo, cwd/env, batch
 file writes as gzipped tarballs, a `node:fs/promises`-shaped metadata
 surface, declared ports mapping to public URLs, SNI-domain and CIDR egress
 policy applied to the live session, and snapshot/fork. Agent frameworks
-layered on it need far less: eve's backend adapter is about ten session
+layered on it need far less: eve's backend adapter is a short list of session
 methods (run, spawn with byte streams and kill, read/write file, remove,
 resolve path, set network policy, stop), and the AI SDK's canonical
 sandbox tool needs only create, blocking exec with captured output, and
@@ -82,7 +82,7 @@ providers' hand-rolled daemons did, with proofs behind each behavior:
   refusal of illegal transitions with zero billable calls.
 - Teardown that never raises, reports leaked identifiers, and a local
   ledger (`microvm ls`) that records leaks before attempting deletes.
-- Image builds from a Dockerfile with local pre-flight of the two platform
+- Image builds from a Dockerfile with local pre-flight of the platform
   traps (FROM/base agreement, WORKDIR requirement) and clientToken replay
   protection.
 - A machine-readable manifest, one JSON envelope per invocation, stable
@@ -102,12 +102,12 @@ a numeric id, `--shell`, and `--inherit-image-env`
 (`microvms-cli/src/commands/attached.rs:211-227`). The empty `env` in
 `StartSpec::command` is now only the default a caller overrides
 (`microvms-cli/src/commands/lifecycle.rs:1885-1898`). Every harness passes
-env per exec (Harbor merges three layers of it on every call), and the PATH
+env per exec (Harbor merges layers of it on every call), and the PATH
 failure the coding-agents example documents was this gap biting a real
 workload.
 
 **2. Ship the platform daemon as the reusable answer to "no exec API".**
-Harbor and Omnigent each carry a several-hundred-line stdlib Python daemon
+Harbor and Omnigent each carry a stdlib Python daemon
 baked into task images. agentd already does everything those daemons do,
 better tested. What is missing is packaging: a documented recipe (and a
 `Dockerfile` stanza helper) for appending agentd to an arbitrary task image,
@@ -178,8 +178,8 @@ bill silently to the 8-hour ceiling. `busy` is "producing", not
 "unfinished" — an exited exec awaiting an ack reads false — and `execs`
 counts every registered entry so a caller can tell a drained VM from one
 holding output nobody read. The one thing this section left unmeasured — that
-a poll from outside does in fact reset the timer — has since been measured
-twice over: by hand in `docs/PLATFORM.md` ("An outside poll of `/v1/health`
+a poll from outside does in fact reset the timer — has since been measured,
+by hand in `docs/PLATFORM.md` ("An outside poll of `/v1/health`
 does reset the idle timer"), and on every live run by
 `conformance/run_rs.py`'s `drive_idle_keepalive`, which runs a VM to the edge
 of a 60-second idle window while polling and watches it survive under the
@@ -187,8 +187,8 @@ check name `a VM polled from outside outlives its idle window` — then stops
 polling and watches the same VM suspend, which is the control that proves the
 survival was the polling.
 
-**7. An eve backend adapter (separate package, later).** Ten session
-methods over the Node binding makes this platform a pinnable eve backend:
+**7. An eve backend adapter (separate package, later).** Implementing eve's session
+methods over the Node binding make this platform a pinnable eve backend:
 real VMs where the consolidator today accepts a pure-JS bash interpreter.
 Worth doing as its own repo once 1-3 land; it depends on eve's types, so it
 can never live here.
@@ -206,8 +206,8 @@ can never live here.
   Omnigent launcher, and the eve backend all import their harness's
   packages, so they live in those ecosystems (or standalone adapter repos),
   never here. This repo's deliverable is the daemon, the clients, and the
-  published behavior they can rely on. `docs/AGENT-VMS.md` now carries two
-  agent profiles (Claude Code, Codex) as the L3 layer such a class would
+  published behavior they can rely on. `docs/AGENT-VMS.md` now carries
+  agent profiles for Claude Code and Codex as the L3 layer such a class would
   call: one function that builds, launches, and provisions the VM, one that
   hands the agent a task. The non-goal still holds for the class itself,
   because it imports the harness's packages and this repo does not.

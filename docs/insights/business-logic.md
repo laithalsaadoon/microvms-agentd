@@ -23,33 +23,38 @@ with no visible failure.
 
 ### The rules are formal requirements first, code second
 
-`spec/core.symspec.json` carries 51 EARS requirements for `microvms-core`, every one at
-`status: approved`, in six families:
+`spec/core.symspec.json` carries the EARS requirements for `microvms-core`, every one at
+`status: approved`, in these families:
 
-| Family | Count | What it governs |
-| --- | --- | --- |
-| `TRAP-1` … `TRAP-13` | 13 | closures over platform behavior that misleads |
-| `STATE-1` … `STATE-12` | 12 | the VM lifecycle |
-| `COST-1` … `COST-10` | 10 | cost honesty |
-| `CLI-1` … `CLI-6` | 6 | the binary's surface and its exit contract |
-| `ARCH-1` … `ARCH-5` | 5 | crate boundaries |
-| `BIND-1` … `BIND-5` | 5 | what a language binding may not weaken |
+| Family | What it governs |
+| --- | --- |
+| `TRAP-*` | closures over platform behavior that misleads |
+| `STATE-*` | the VM lifecycle |
+| `COST-*` | cost honesty |
+| `CLI-*` | the binary's surface, its exit contract, and a reader that closes stdout or stderr |
+| `ARCH-*` | crate boundaries |
+| `BIND-*` | what a language binding may not weaken, and the core behavior the bindings expose: exec results, egress posture, sizing, preflight, and the agentd binary |
+| `IMAGE-*` | wrapping a task Dockerfile, and building or reusing the image it describes |
 
-`spec/agentd.symspec.json` adds 6 requirements, all `status: draft`, covering the daemon's
-bootstrap and control-token ladder — accept a control request whose token equals the installed
+`spec/agentd.symspec.json` adds the daemon's own requirements. Its bootstrap and control-token
+ladder is still `status: draft` — accept a control request whose token equals the installed
 one, reject a differing one, reject any control request while none is installed, install on
-first bootstrap, accept an identical replay, reject a different token.
+first bootstrap, accept an identical replay, reject a different token. The approved ones cover
+how a start request resolves its user, group, shell, and child environment, and what
+`/v1/health` reports about the image environment snapshot.
 
-The spec's `stateModel` names five variables: `vm_state` over
+The spec's `stateModel` names its variables: `vm_state` over
 `PENDING / RUNNING / SUSPENDING / SUSPENDED / TERMINATING / TERMINATED`, plus
 `token_installed`, `image_exists`, `was_terminated`, and `bootstrap_count` bounded `0..3`, all
-`frame: stable`. Three lifecycle invariants over that model are proved in Z3 by
-`mise run spec:core`, whose recorded run reports 3 constraints proved under hypotheses, 0
-violated, 0 unknown (`mise.toml:224-226`) — that task needs a symspec v5 CLI at an absolute
-path, so it is deliberately outside `mise run check` (`mise.toml:222-227`). The runnable half is
-`stateright`, which restates the same three over every interleaving in
-`model/src/client.rs:554-569` and passes under `cargo test -p agentd-model`. One waiver exists,
-`GTWR_R6_MISSING_UNITS` against TRAP-5, because the linter's unit list does not include bytes.
+`frame: stable`. Lifecycle invariants over that model are proved in Z3 by
+`mise run spec:core`, whose run recorded 2026-08-08 reports 3 constraints proved under
+hypotheses, 0 violated, 0 unknown (`mise.toml:224-226` at 9c462f0) — that task needs a
+symspec v5 CLI at an absolute path, so it is deliberately outside `mise run check`
+(`mise.toml:222-227`). The runnable half is `stateright`, which restates the same invariants
+over every interleaving in
+`model/src/client.rs:554-569` and passes under `cargo test -p agentd-model`. The waivers are all
+`GTWR_R6_MISSING_UNITS`: against TRAP-5, because the linter's unit list does not include bytes,
+and against BIND-6 and BIND-10, whose 124 and 128 are POSIX exit statuses that carry no unit.
 
 ### The strength ladder, and how to read the failure-mode column
 
@@ -62,10 +67,11 @@ Every closure is ranked, strongest first, at `microvms-core/src/lib.rs:21-40`:
   Weaker, because the guard is code that can regress, but the cost is seconds rather than a
   build cycle. Every boundary where a bare integer or string still has to be judged lands here.
 - **S3, correct by default and overridable** — weakest, because it protects only the caller who
-  accepts the default. An S3 closure must state what the override costs. There is exactly one.
+  accepts the default. An S3 closure must state what the override costs, as
+  `Region::unlisted` does below.
 
-Two conventions follow. **Every error message names its finding** rather than restating the
-constraint, because the guards exist so a reader can reach the measurement
+The ladder comes with conventions. **Every error message names its finding** rather than
+restating the constraint, because the guards exist so a reader can reach the measurement
 (`microvms-core/src/lib.rs:42-48`). **Every guard has a demonstrated way to fail** — a named
 plausible edit that must turn a specific test red; "delete the feature and the test fails" does
 not count (`microvms-core/src/lib.rs:50-57`).
@@ -77,8 +83,8 @@ what a caller cannot write rather than what they are told.
 
 ### Control-plane request shapes
 
-Nine `require_*` functions in one module, each guarding a member the pinned service model
-constrains and the SDK does not check.
+The `require_*` functions in `microvms-core/src/control/mod.rs`, each guarding a member the
+pinned service model constrains and the SDK does not check.
 
 | Rule | Domain | Citation | Failure mode |
 | --- | --- | --- | --- |
@@ -86,7 +92,7 @@ constrains and the SDK does not check.
 | `idlePolicy.maxIdleDurationSeconds` under 60 is refused | Launch | `microvms-core/src/control/mod.rs:748-778`, constant at `microvms-core/src/constants.rs:241-258` | `ERR_INVALID_ARG`. The model states no maximum and the client adds none; the bound that ends a VM's life is `maximumDurationInSeconds` |
 | A `Version` value that is empty, over 2048 characters, or carries whitespace anywhere is refused | Image build, Launch | `microvms-core/src/control/mod.rs:496-542`, constants at `microvms-core/src/constants.rs:121`, `:128` | Three separate `ERR_INVALID_ARG` messages. The pattern is `[^\s]+`, so a version pasted with a trailing newline satisfies "non-empty" and fails; the message names the character it found |
 | A `NonBlankString` member (`codeArtifact.uri`, `baseImageArn`, `nameFilter`, `imageVersion`, `buildId`) that is empty, over 2048 characters, or carries whitespace is refused | Image build | `microvms-core/src/control/mod.rs:544-596`, constants at `microvms-core/src/constants.rs:141`, `:145` | `ERR_INVALID_ARG` naming the character. A blank `nameFilter` rides in the query string, where it either 400s or filters differently from what was meant |
-| An identifier that is empty or over 256 characters is refused | Every operation | `microvms-core/src/control/mod.rs:598-651`, constants at `microvms-core/src/constants.rs:174`, `:183` | `ERR_INVALID_ARG`. An empty identifier is the case that pays for this guard: ten of these members are URI parameters, so an empty one collapses `/microvms/<id>` onto the listing and a `DELETE` on a collapsed path is worse |
+| An identifier that is empty or over 256 characters is refused | Every operation | `microvms-core/src/control/mod.rs:598-651`, constants at `microvms-core/src/constants.rs:174`, `:183` | `ERR_INVALID_ARG`. An empty identifier is the case that pays for this guard: where the member is a URI parameter, an empty one collapses `/microvms/<id>` onto the listing and a `DELETE` on a collapsed path is worse |
 | A `RoleArn` under 20 characters, over 2048, or off-pattern is refused | Image build, Launch | `microvms-core/src/control/mod.rs:653-708`, constants at `microvms-core/src/constants.rs:209`, `:212`, `:225` | Three messages. The short case says a value that short is almost always a role *name*; the pattern case names the twelve account digits |
 | A port of 0 is refused; there is no ceiling branch | Image build, Session | `microvms-core/src/control/mod.rs:710-746`, constants at `microvms-core/src/constants.rs:232`, `:239` | `ERR_INVALID_ARG`. Zero means "let the kernel choose" to a listener and is not a port the platform can forward to. `PortNumber.max` equals `u16::MAX`, so a ceiling branch would be unreachable — pinned instead by `microvms-core/src/constants.rs:1244` |
 | A tag key that is empty, over 128 characters, or off-pattern is refused; a tag value over 256 or off-pattern is refused | Image build | `microvms-core/src/control/mod.rs:780-846`, constants at `microvms-core/src/constants.rs:186`, `:189`, `:206` | `ERR_INVALID_ARG` naming the offending key. An empty tag *value* is legal and an empty key is not, and the two ceilings differ by 2x |
@@ -98,8 +104,8 @@ guards before it builds a wire body (`microvms-core/src/control/microvm.rs:356-3
 
 ### Image build and Dockerfile agreement
 
-Five guards compare what this client sends against what the caller's Dockerfile declares. Every
-one of them defends against the same failure shape: a build that succeeds, a daemon that logs
+The Dockerfile guards compare what this client sends against what the caller's Dockerfile declares.
+Every one of them defends against the same failure shape: a build that succeeds, a daemon that logs
 that it started, and an image that still lands in `CREATE_FAILED` naming nothing.
 
 | Rule | Domain | Citation | Failure mode |
@@ -120,7 +126,7 @@ that it started, and an image that still lands in `CREATE_FAILED` naming nothing
 | TRAP-1: the scope label is truncated at its **tail**, never its head, and the nonce is never truncated | Idempotency | `microvms-core/src/control/token.rs:55-71`, `:150` | Silent truncation of the label only. 64-byte scope plus an 8-byte hex nonce stays under the 128-character `clientToken` ceiling (`microvms-core/src/constants.rs:423`) |
 | TRAP-2: an image in `CREATING` past the stall grace with builds listed, non-empty, and **every** build still `PENDING` fails the wait | Image build | `microvms-core/src/control/image.rs:318-324`, `:338-390` | `ERR_BUILD_WEDGED`, naming the `clientToken` replay signature. A `clientToken` is a permanent idempotency key, so a replayed create is a no-op: the image sits in `CREATING`, cannot be deleted, and its only version cannot be dropped. Two images were wedged this way for ~15 hours |
 | TRAP-3: guest identity repair is a `bool` intent; the client injects the one accepted enum value `["ALL"]` | Image build | `microvms-core/src/control/image.rs:181-185`, `microvms-core/src/constants.rs:276-280` | Unwritable (S1). There is no capability list a caller can populate, and no way to ask for `CAP_SYS_ADMIN` alone |
-| TRAP-4: a connector is an enumerated intent that derives a fully-qualified ARN for the request region | Networking | `microvms-core/src/control/connector.rs:39-47`, `:60-83` | Unwritable (S1). Two intents (`AllIngress`, `Egress`), no free-form string. `ConnectorIntent::ALL` at `:54` is the complete set a test can enumerate |
+| TRAP-4: a connector is an enumerated intent that derives a fully-qualified ARN for the request region | Networking | `microvms-core/src/control/connector.rs:39-47`, `:60-83` | Unwritable (S1). Enumerated intents (`AllIngress`, `HttpIngress`, `ShellIngress`, `Egress`), no free-form string. `ConnectorIntent::ALL` at `:54` is the complete set a test can enumerate |
 | TRAP-5: a `runHookPayload` over 4096 bytes is refused locally before any control-plane call | Launch | `microvms-core/src/control/microvm.rs:161-185`, constant at `microvms-core/src/constants.rs:83` | `ERR_INVALID_ARG` naming the service-model ceiling. Inclusive, measured 2026-08-07: 4096 passes, 4097 fails. Bytes, not characters. `docs/STRATEGY.md`, `docs/TRUST.md`, and the model's own documentation string all claim 16 KB (`microvms-core/src/constants.rs:97`), which is wrong by 4x in the dangerous direction — the shape `RunMicrovmRequestRunHookPayloadString` is the authority |
 | TRAP-6: a region outside the five that carry MicroVMs is refused before the first control-plane call | Region | `microvms-core/src/region.rs:38-63`, `:137-164` | S1 for a held `Region`, S2 at the `FromStr` boundary. `ERR_INVALID_ARG` naming the null-message `AccessDeniedException` finding |
 | TRAP-8: a VM reaching a state in `fail_on` before the wanted one fails the wait with state **and** `stateReason` attached | Launch | `microvms-core/src/control/microvm.rs:461-466`, `:482-500` | `ERR_LAUNCH_DIED`. Fails fast rather than polling to the deadline. Both facts, because either alone is unactionable: the state says the VM is gone, the reason is the only evidence that survives it |
@@ -147,10 +153,10 @@ that it started, and an image that still lands in `CREATE_FAILED` naming nothing
 | Rule | Domain | Citation | Failure mode |
 | --- | --- | --- | --- |
 | COST-1: every duration carries a `measured` or `projected` provenance label; there is no unlabelled constructor | Cost | `microvms-core/src/cost.rs:419-425` | Unwritable (S1). `DurationP` is an enum whose every variant names its provenance; no `From<Duration>`, no `Default`, both pinned by `compile_fail` doctests at `:395-408` |
-| COST-2: an estimated dollar amount has no coercion to a bare float | Cost | `microvms-core/src/cost.rs:546-578` | Unwritable (S1). Private field, no `From`, no `Into<f64>`, no `Deref`. Three `compile_fail` doctests at `:519-545`, each pinning its own error code |
+| COST-2: an estimated dollar amount has no coercion to a bare float | Cost | `microvms-core/src/cost.rs:546-578` | Unwritable (S1). Private field, no `From`, no `Into<f64>`, no `Deref`. The `compile_fail` doctests at `:519-545` each pin their own error code |
 | COST-3: an unpriced quantity is a distinct `Unpriced` variant carrying a reason, never zero dollars | Cost | `microvms-core/src/cost.rs:614-625` | S1 by exhaustive `match`. Zero is a claim about the bill; unpriced is a claim about the documentation |
 | COST-6: `gb_decimal` is the only place an `f64` becomes a `Decimal`, and it is fallible | Cost | `microvms-core/src/cost.rs:138-152` | `ERR_INVALID_ARG`. A negative size would render as a credit; `NaN`, an infinity, and a magnitude past 28 digits have no decimal reading. `EstimatedUsd::new` takes a `Decimal` so it cannot become a third boundary (`:553-561`) |
-| COST-9: a rate catalog whose ARM compute line is missing is rejected rather than substituted | Cost | `microvms-core/src/cost.rs:1191-1199`, `:1200-1258`, `:1268-1302` | S1 for direct construction — the rate fields are private and there are exactly two doors. S2 at `from_catalog`, which refuses four ways: a missing ARM line whose x86 sibling is present, a missing line with no sibling, a restated unit, and two products where there was one. The ARM message names the x86 rate it will not substitute and the ~18% error that substituting would introduce |
+| COST-9: a rate catalog whose ARM compute line is missing is rejected rather than substituted | Cost | `microvms-core/src/cost.rs:1191-1199`, `:1200-1258`, `:1268-1302` | S1 for direct construction — the rate fields are private and the only doors are `pinned_rates` and `from_catalog`. S2 at `from_catalog`, which refuses a missing ARM line whose x86 sibling is present, a missing line with no sibling, a restated unit, and two products where there was one. The ARM message names the x86 rate it will not substitute and the ~18% error that substituting would introduce |
 | A calendar date arriving from outside the crate is validated against its month's real length | Cost | `microvms-core/src/cost.rs:232-241` | S2. `2026-02-30` would otherwise yield a day number for March 2nd and an age two days out |
 
 ### Daemon authorization
@@ -199,18 +205,18 @@ class lives.
 | Rule | Domain | Citation | Failure mode |
 | --- | --- | --- | --- |
 | CLI-5: `--memory` is a closed value set over the five documented baselines | CLI | `microvms-cli/src/cli.rs:364-383`, reasoning at `:4-19` | Unparseable (S1 at the parser). 1500 never reaches a handler. The difference between refusing it at the parser and refusing it in core is a build cycle |
-| CLI-5: `--region` is a closed value set over the five MicroVM regions | CLI | `microvms-cli/src/cli.rs:417-435` | Unparseable. `--unlisted-region` is the named way out, declared `conflicts_with = "region"` once on a flattened struct so the relationship cannot be forgotten on the twelfth command (`:466-499`) |
-| The domains are spelled out rather than generated, and a test asserts the enum equals the size table | CLI | `microvms-cli/src/cli.rs:13-19`, `microvms-cli/tests/manifest.rs:90` | A domain computed at runtime is invisible to `--help`, to shell completion, and to the manifest's `choices` field. A sixth size class that does not reach `cli.rs` fails the test rather than shipping unreachable |
-| No `--capabilities`, `--connector`, or `--architecture` flag exists; `--client-token` only on the launch commands `run` and `agent-up` | CLI | `microvms-cli/src/cli.rs:21-31` | Unwritable. Core has no such parameter for the three, so there is nothing to forward. Absence asserted by `microvms-cli/tests/thinness.rs:426` and the manifest cross-check |
+| CLI-5: `--region` is a closed value set over the five MicroVM regions | CLI | `microvms-cli/src/cli.rs:417-435` | Unparseable. `--unlisted-region` is the named way out, declared `conflicts_with = "region"` once on a flattened struct so the relationship cannot be forgotten on a new command (`:466-499`) |
+| The domains are spelled out rather than generated, and a test asserts the enum equals the size table | CLI | `microvms-cli/src/cli.rs:13-19`, `microvms-cli/tests/manifest.rs:90` | A domain computed at runtime is invisible to `--help`, to shell completion, and to the manifest's `choices` field. A new size class that does not reach `cli.rs` fails the test rather than shipping unreachable |
+| No `--capabilities`, `--connector`, or `--architecture` flag exists; `--client-token` only on the launch commands `run` and `agent-up` | CLI | `microvms-cli/src/cli.rs:21-31` | Unwritable. Core has no such parameter for those flags, so there is nothing to forward. Absence asserted by `microvms-cli/tests/thinness.rs:426` and the manifest cross-check |
 | A `microvm cp --mode` conflicts with `--tar`; `--poll` conflicts with every writing flag; `--detach` conflicts with the shapes that must not return early | CLI | `microvms-cli/src/cli.rs:1199`, `:1219`, `:1576` | Unparseable, pinned by `microvms-cli/src/cli.rs:2636`, `:2688` |
 
 ## Invariants
 
-### VM lifecycle (the twelve STATE requirements)
+### VM lifecycle (the STATE requirements)
 
 Enforced in `microvms-core/src/sandbox.rs`, whose `Lifecycle` enum is the spec's `vm_state`
-verbatim and which carries the other four spec variables beside it. Every one of those fields is
-private and every mutation happens in one of the five lifecycle methods, which is what makes the
+verbatim and which carries the other spec variables beside it. Every one of those fields is
+private and every mutation happens in one of the lifecycle methods, which is what makes the
 Z3 and `stateright` proofs proofs about *this struct's* reachable states
 (`microvms-core/src/sandbox.rs:9-17`, `:120-134`, `:775-791`).
 
@@ -229,7 +235,7 @@ Z3 and `stateright` proofs proofs about *this struct's* reachable states
 | STATE-11: a terminated VM never returns to RUNNING, checked before the window check and before any call | Application, `Sandbox::resume` | `microvms-core/src/sandbox.rs:1553-1561` |
 | STATE-12: a resume past the launch-time suspended window is refused with the elapsed window named | Application, before `ResumeMicrovm` | `microvms-core/src/sandbox.rs:1569-1570`, `:1611-1644` |
 | The suspended-window clock is stamped after the suspend call and before the wait, and cleared on a successful resume | Application, `Sandbox` | `microvms-core/src/sandbox.rs:1486-1489`, `:1597-1600` |
-| The three Z3-proved invariants hold over every interleaving: bootstrap at most once, no suspend outside RUNNING, a terminated VM never reaches RUNNING | `stateright` model | `model/src/client.rs:554-569` |
+| The Z3-proved invariants hold over every interleaving: bootstrap at most once, no suspend outside RUNNING, a terminated VM never reaches RUNNING | `stateright` model | `model/src/client.rs:554-569` |
 | A locally refused call costs **zero** wire calls — resume after terminate, resume with the window closed, and the payload count matching the launch count are all checked as counters, not as end states | `stateright` model | `model/src/client.rs:584-598`, `:623-640` |
 | The installed token is never replaced and survives a suspend/resume cycle | `stateright` model | `model/src/client.rs:599-616` |
 | `image_exists` is true exactly when a launch was accepted, and a bootstrapped token implies one | `stateright` model | `model/src/client.rs:570-582` |
@@ -262,8 +268,8 @@ Z3 and `stateright` proofs proofs about *this struct's* reachable states
 | ARCH-3 / ARCH-4 / BIND-1: `cli -> core -> protocol`, bindings depend only on core, core depends on neither | Test over `cargo_metadata` | `microvms-cli/tests/dependency_direction.rs:68`, `:95`, `:219` |
 | ARCH-5: the CLI exports no library target at all | Test over `cargo_metadata` | `microvms-cli/tests/dependency_direction.rs:126` |
 | CLI-2: the CLI reaches the control plane and the endpoint proxy only through core, and the guard names *which* seam door was entered | Injected refusing seam | `microvms-cli/src/guards.rs:403`, `:487`; source scan at `microvms-cli/tests/thinness.rs:426` |
-| The CLI's direct dependency set contains none of the twelve denylisted transport and signing crates | Test over `cargo_metadata` | `microvms-cli/tests/thinness.rs:96` |
-| Only the envelope module and two named exceptions in `main` write to stdout | Source scan | `microvms-cli/tests/thinness.rs:503` |
+| The CLI's direct dependency set contains none of the denylisted transport and signing crates | Test over `cargo_metadata` | `microvms-cli/tests/thinness.rs:96` |
+| Only the envelope module and named exceptions in `main` write to stdout | Source scan | `microvms-cli/tests/thinness.rs:503` |
 | CLI-4: one JSON envelope per invocation on stdout, on success, on failure, and on a stream that died before its first event | Spawned-binary test | `microvms-cli/tests/exit_codes.rs:154`, `:198`, `:233` |
 | BIND-5: both bindings preserve provenance-labelled durations, estimate-typed dollars, and the distinct `Unpriced` value | Application, by absent constructors | `microvms-py/src/cost.rs:9`, `:23-27`, `:220-241`; `microvms-js/src/cost.rs:20-31`, `:52-57`. `new Duration(3600)` is a `TypeError`, `Amount.usd` is null for an unpriced line, and `to_json`/`to_dict` omit the key entirely rather than emitting a null anything permissive sums as zero |
 | Every constant in `constants::as_json` is checked against the pinned botocore service model by the build gate (TRAP-12), and the key set is pinned by a test | Build gate plus a key-set test | `microvms-core/src/constants.rs:33-46`, `:589`, `:693` |
@@ -358,11 +364,11 @@ conclusion the comparison supports is "avoid churn" rather than "avoid residency
 
 Every documented peak is exactly four times its baseline, which makes `baseline × 4` look like
 the obvious simplification. The sizing module must not compute it that way. The regularity belongs
-to AWS's current table rather than to the service's contract, so a sixth row that broke the pattern
+to AWS's current table rather than to the service's contract, so a new row that broke the pattern
 would get the pattern applied to it, reporting a burst ceiling the service does not offer
 (`microvms-core/src/sizing.rs:13-23`).
 
-So `SIZE_CLASSES` (`microvms-core/src/sizing.rs:64-99`) is the only place any of the twenty
+So `SIZE_CLASSES` (`microvms-core/src/sizing.rs:64-99`) is the only place any of the table's
 numbers appears, and every accessor reads a row out of it through one lookup. To make the guard
 falsifiable, `row_in` and `class_for_baseline_in` take the table as a **parameter**
 (`microvms-core/src/sizing.rs:247`, `:255`) so a test can drive the accessors over a table whose
@@ -419,7 +425,7 @@ be March-based, which puts February's variable length last; `719468` is the day 
   section rather than restating the constraint, because the guards exist so a reader can reach the
   measurement. `microvms-core/src/lib.rs:42-48`.
 
-- **The one S3 escape hatch, and what it costs.** `Region::unlisted` accepts a region this client
+- **The S3 escape hatch, and what it costs.** `Region::unlisted` accepts a region this client
   has not seen carry MicroVMs, because AWS adds regions faster than the list is re-read and a
   client that refuses a region AWS just launched in is its own kind of wrong. The override costs
   the diagnostic: if the region does not carry MicroVMs, the first control-plane call answers
@@ -566,7 +572,7 @@ be March-based, which puts February's variable length last; `719468` is the day 
   the key names are a contract with a script.** `constants::as_json` publishes every hardcoded
   constraint keyed with the names `scripts/check-model-drift.py` reads, and the key set is pinned by
   a test — because a rename here does not fail compilation, it makes a check silently stop
-  comparing. The two values no model states, `MICROVM_REGIONS` and `SIZE_CLASSES`, are compared
+  comparing. The values no model states, `MICROVM_REGIONS` and `SIZE_CLASSES`, are compared
   against pinned literals in the script instead, since a value compared only against itself passes
   by construction. The gate hard-fails when `MODEL_API_VERSION` disagrees with the service directory
   it resolves, rather than skipping: a constraint checked against a different API version is a
@@ -592,9 +598,10 @@ be March-based, which puts February's variable length last; `719468` is the day 
   understate a create-and-destroy suite by four orders of magnitude.
   `microvms-core/src/cost.rs:1191-1199`, `:1253-1258`.
 
-- **Four `WireKind`s collapse onto one exit code deliberately, and `Unauthorized` is not one of
-  them.** A shell cannot act differently on "the daemon rejected the request on its merits" in four
-  flavours, and a caller that can reads `data.kind`. But a 401's remedy is a credential rather than
+- **`ProtocolError`, `NotFound`, `Conflict`, `StdinClosed`, and `TooLarge` collapse onto one exit
+  code deliberately, and `Unauthorized` is not one of them.** A shell cannot act differently on
+  "the daemon rejected the request on its merits" in each of those flavours, and a caller that
+  can reads `data.kind`. But a 401's remedy is a credential rather than
   a wait, so it maps to `ERR_CREDENTIALS`: retrying a 401 forever and failing a launch that was
   200 ms from ready are the two mistakes the classification exists to prevent. A `match` on a closed
   enum has no ordering to get wrong. `microvms-core/src/error.rs:358-397`,
@@ -602,8 +609,8 @@ be March-based, which puts February's variable length last; `719468` is the day 
 
 ## See also
 
-- [impact analysis](impact-analysis.md) — 23 shared source citations
-- [contract map](contract-map.md) — 22 shared source citations
-- [debugging guide](debugging-guide.md) — 17 shared source citations
-- [processes](../behavior/processes.md) — 14 shared source citations
-- [public api](../reference/public-api.md) — 13 shared source citations
+- [impact analysis](impact-analysis.md)
+- [contract map](contract-map.md)
+- [debugging guide](debugging-guide.md)
+- [processes](../behavior/processes.md)
+- [public api](../reference/public-api.md)

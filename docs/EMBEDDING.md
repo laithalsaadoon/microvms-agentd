@@ -4,7 +4,7 @@ The platform has no exec API: a MicroVM exposes one HTTPS endpoint and forwards
 it to whatever the image's `CMD` is listening on. Every harness that wants to
 run commands inside a VM therefore ships a daemon in its task image, and before
 agentd each harness wrote its own — evaluation harnesses and session servers
-each carry a several-hundred-line stdlib Python daemon baked into their images
+each carry a stdlib Python daemon baked into their images
 (`docs/HARNESS-CAPABILITIES.md`, gap 2). agentd supersedes those daemons. This
 document is the recipe for appending it to an arbitrary task image, and the
 orientation a harness client needs to drive it over the published wire
@@ -13,7 +13,7 @@ at `GET /v1/schema` on any running daemon; nothing here duplicates either.
 
 ## The recipe
 
-A task that brings its own Dockerfile needs two calls to become buildable, and
+A task that brings its own Dockerfile becomes buildable through library calls, with
 no string literal of the harness's own:
 
 ```python
@@ -113,8 +113,8 @@ recorded when it was verified.
 
 The worked example is
 [`examples/coding-agents-on-bedrock/Dockerfile`](../examples/coding-agents-on-bedrock/Dockerfile):
-the stanza's lines, plus `dnf install` and `npm install -g` layers that put two
-coding-agent CLIs in the image, plus a `/workspace` WORKDIR.
+the stanza's lines, plus `dnf install` and `npm install -g` layers that put the Claude Code
+and Codex CLIs in the image, plus a `/workspace` WORKDIR.
 
 Two lines in the stanza are load-bearing and must survive any edit.
 `ENTRYPOINT []` plus `CMD ["/agentd"]` is the deployment invariant the trust
@@ -490,7 +490,7 @@ launching record owns the teardown. A VM adopted while already SUSPENDED has no 
 time this client saw, so the service answers a late resume. The `endpoint` must match the
 one `GetMicrovm` reports.
 
-Two launch options make a launch step safe to retry. `Sandbox.run(wait=False)` returns
+These launch options make a launch step safe to retry. `Sandbox.run(wait=False)` returns
 once `RunMicrovm` is accepted and `wait_until_running()` finishes the wait later. A
 persisted `client_token` with an explicit `agent_token` makes a retried launch adopt the
 VM the first attempt made; if that VM idle-suspended in between, the launch resumes it
@@ -566,7 +566,7 @@ zero on an axis means no requirement on that axis. With neither set, the result 
 class, so the harness can reject the task.
 
 `microvms.preflight(region=None)` (JS `await preflight(region)`) says whether a launch could
-proceed, before any build. It checks three things in order, and each check is in
+proceed, before any build. It runs these checks in order, and each check is in
 `report.checks` with `ok`, `fatal`, `ran`, `detail`, and `remedy`:
 
 1. **region**: the region resolves, from the argument or `$AWS_REGION` / `$AWS_DEFAULT_REGION`.
@@ -674,7 +674,7 @@ What each call replaces, and where its behavior is specified:
 
 The image is kept at `stop` on purpose: `ensure_image` names it by content, so the next
 trial of the task reuses it, and deleting it is a separate cleanup the harness schedules
-once the task set is finished. Two sketch choices depend on the daemon the image carries:
+once the task set is finished. Some sketch choices depend on the daemon the image carries:
 `shell="bash"`, `user` by name, and `inherit_image_env` need a daemon built with those
 fields, which `provision_agentd()` guarantees because it fetches the daemon for the
 client's own version. With an older daemon, fall back to `["bash", "-c", command]` and a
@@ -727,7 +727,7 @@ last one.
 ## Coding agents over the daemon
 
 The one opinionated layer this repo ships over the recipe above is `docs/AGENT-VMS.md`:
-`microvm agent-up` derives a Dockerfile from your agentd stanza plus three layers
+`microvm agent-up` derives a Dockerfile from your agentd stanza plus the profile layers
 (Node 22 with `nodejs22-npm`, `npm install -g` of Claude Code and/or Codex, a uid
 1000), launches with egress, mints a Bedrock bearer token from the caller's own
 credentials, and installs it as `/workspace/.agent-env` for the agent to source;
@@ -743,7 +743,7 @@ Every `AGENTD_*` variable is read at startup by `Config::from_env`
 (`agentd/src/config.rs:116-152`); an unset or unparseable value keeps the
 default rather than refusing to boot, because a daemon that will not start
 strands the VM with no way in. Set them as `ENV` lines in your Dockerfile —
-the stanza already sets the first two.
+the stanza already sets `AGENTD_PORT` and `AGENTD_LOG`.
 
 | Variable | Default | What it bounds |
 | --- | --- | --- |

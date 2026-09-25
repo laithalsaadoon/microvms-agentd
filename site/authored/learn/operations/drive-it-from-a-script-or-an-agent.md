@@ -16,7 +16,7 @@ Every command is built to be driven by something that is not a person at a termi
 
 ## 1. One envelope on stdout
 
-`--json` is one of the three [global flags](/reference/#3-global-flags), so `microvm --json ls` and `microvm ls --json` are the same invocation. It emits the typed JSON envelope on stdout instead of human output and wins over every other format, including an interactive terminal. Progress always goes to stderr, and `--quiet` suppresses progress but never a warning, so a leaked resource is still reported in quiet mode.
+`--json` is a [global flag](/reference/#3-global-flags), so `microvm --json ls` and `microvm ls --json` are the same invocation. It emits the typed JSON envelope on stdout instead of human output and wins over every other format, including an interactive terminal. Progress always goes to stderr, and `--quiet` suppresses progress but never a warning, so a leaked resource is still reported in quiet mode.
 
 A success envelope carries `status`, `apiVersion`, `type`, and `data`. `type` is the discriminant to branch on first, and each command's `data` keys are published in the manifest as `responseKeys`:
 
@@ -56,7 +56,7 @@ A reader that closes early never changes the exit code. `microvm manifest | head
 
 `microvm manifest` emits the whole command surface, its exit codes, and its envelope schema, generated from the CLI's own argument tree rather than written down. It is always JSON, and it needs no credentials, no region, and no network, so it doubles as a liveness check. Each command's entry carries its parameters with `type`, `default`, `choices`, `required`, and `positional`, its `responseType` and `responseKeys`, and for `exec` an `alternateResponse` naming when it applies. The `conventions` list is the contract in prose. `microvm manifest --dense` prints one line per command with its parameters.
 
-The agent layer's two commands follow the same rules: `agent-up --json` is one `microvm.agent` envelope whose `agents` list carries each installed agent's model and the exact `headlessCommand` `agent-prompt` will run, and `agent-prompt --json` is a `microvm.agent.prompt` envelope, `exec`'s keys plus `agent` and `model`. An agent that declines a task and exits 0 is an `ok` envelope, so read the effect back with `exec` rather than trusting the prompt's exit alone.
+The agent layer's commands follow the same rules: `agent-up --json` is one `microvm.agent` envelope whose `agents` list carries each installed agent's model and the exact `headlessCommand` `agent-prompt` will run, and `agent-prompt --json` is a `microvm.agent.prompt` envelope, `exec`'s keys plus `agent` and `model`. An agent that declines a task and exits 0 is an `ok` envelope, so read the effect back with `exec` rather than trusting the prompt's exit alone.
 
 `microvm constants --emit-json` emits every service constraint this client believes, unwrapped by an envelope, for the drift gate that compares them against the pinned service model.
 
@@ -70,13 +70,13 @@ The agent layer's two commands follow the same rules: `agent-up --json` is one `
 {"status":"ok","apiVersion":"1","type":"microvm.exec.stream","data":{"execId":"x-1","events":2,"bytes":12,"nextOffset":12,"gaps":0,"exitCode":0,"truncated":false}}
 ```
 
-Three things keep the two contracts distinguishable. The discriminant differs: a streamed exec's final envelope has `type` `microvm.exec.stream`, so a consumer learns which parse applies from the field it already reads first. The manifest publishes it, as `exec`'s `alternateResponse` with `when: "--stream"`. And the envelope is written compact once a stream has started, because "the last line is the envelope" is only true if the envelope is one line.
+Each of the following keeps the two contracts distinguishable. The discriminant differs: a streamed exec's final envelope has `type` `microvm.exec.stream`, so a consumer learns which parse applies from the field it already reads first. The manifest publishes it, as `exec`'s `alternateResponse` with `when: "--stream"`. And the envelope is written compact once a stream has started, because "the last line is the envelope" is only true if the envelope is one line.
 
 Event kinds are `output` (with `stream`, `offset`, `bytes`, `text`, `lossy`), `gap` (with `from` and `to`, the only report of lost bytes), and `exit`. The envelope's keys summarize the stream rather than repeating it: `events` and `bytes` let a caller assert it read everything, and `nextOffset` is where `--from-offset` would resume. A stream cut before its exit event reports `exitCode: null` rather than `0`, because zero would turn a truncated stream into a passing build, and the command exits `ERR_EXEC_FAILED`. A stream that fails part-way through gets the failure envelope as its compact last line. The stream chunks are the command's output, so they cannot go to stderr; `microvm exec --stream build.sh > log` has to write the log.
 
 ## 5. Token-lean output
 
-`--dense` is the second [global flag](/reference/#3-global-flags): token-lean output, for a consumer paying per token. It renders tab-separated text, one field per column; a dense failure is the code, then the message, tab-separated, so field one is always the code. `--json` wins over `--dense`, and `--dense --json` together emit the compact one-line JSON document rather than the pretty one. Neither depends on whether stdout is a terminal; without either, a terminal gets a human rendering and a pipe gets plain text.
+`--dense` is another [global flag](/reference/#3-global-flags): token-lean output, for a consumer paying per token. It renders tab-separated text, one field per column; a dense failure is the code, then the message, tab-separated, so field one is always the code. `--json` wins over `--dense`, and `--dense --json` together emit the compact one-line JSON document rather than the pretty one. Neither depends on whether stdout is a terminal; without either, a terminal gets a human rendering and a pipe gets plain text.
 
 ## 6. Retries and idempotency
 

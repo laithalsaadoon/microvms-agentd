@@ -130,7 +130,7 @@ is also the CLI envelope's `egressPosture`. `microvms-core/src/control/connector
 
 ### preflight and SizeClass::from_request
 
-`preflight(region)` runs three checks, in order, and reports each as a `Check`:
+`preflight(region)` runs these checks, in order, and reports each as a `Check`:
 the region resolves (from the argument or `$AWS_REGION` / `$AWS_DEFAULT_REGION`),
 the default credential chain resolves credentials, and one free
 `ListManagedMicrovmImages` page answers in that region. `PreflightReport::ok()` is
@@ -334,7 +334,7 @@ One exec addressed by its caller-minted id, which is also the idempotency key, s
 pub struct RateTable {
 ```
 
-The five us-east-1 rates, held privately so that pricing compute from the ARM rate is a property of the type rather than of a code path a caller can bypass.
+The us-east-1 rates, held privately so that pricing compute from the ARM rate is a property of the type rather than of a code path a caller can bypass.
 
 `microvms-core/src/cost.rs:838-839`
 
@@ -445,7 +445,7 @@ The `GET /v1/exec/{id}` body, which flattens the outcome into the response and o
 
 The [Python SDK reference](https://laithalsaadoon.github.io/microvms-agentd/reference/python/) is generated from the committed stub and gives every class, function, and exception its full signature.
 
-The Python module is declared rather than assembled: a `#[pymodule] mod microvms` lists its members in `#[pymodule_export]` use statements, 46 classes and 18 functions (the agent layer's `AgentSpec`, `AgentVm`, and `BearerToken`, with `mint_bedrock_token`, `installed_agents`, `install_agent_access`, `prompt_agent`, and `agent_constants`, arrived with `docs/AGENT-VMS.md`), so the macro can see the whole membership and `maturin generate-stubs` emits the real surface instead of a `__getattr__` escape hatch (`microvms-py/src/lib.rs:115-157`). The exception hierarchy stays imperative in `#[pymodule_init]`, because `create_exception!` builds its types at runtime and leaves no introspection record for `#[pymodule_export]` to carry (`microvms-py/src/lib.rs:110-165`). Every method is sync, blocking on one shared multi-thread tokio runtime with `py.detach` first (`microvms-py/src/lib.rs:42-46`). The generated stub and its PEP 561 marker are committed as `microvms-py/microvms.pyi` and `microvms-py/py.typed`, and `mise run stubs:check` fails when the committed stub no longer matches the pyo3 surface (`mise.toml:216-218`).
+The Python module is declared rather than assembled: a `#[pymodule] mod microvms` lists its members in `#[pymodule_export]` use statements (the agent layer's `AgentSpec`, `AgentVm`, and `BearerToken`, with `mint_bedrock_token`, `installed_agents`, `install_agent_access`, `prompt_agent`, and `agent_constants`, arrived with `docs/AGENT-VMS.md`), so the macro can see the whole membership and `maturin generate-stubs` emits the real surface instead of a `__getattr__` escape hatch (`microvms-py/src/lib.rs:115-157`). The exception hierarchy stays imperative in `#[pymodule_init]`, because `create_exception!` builds its types at runtime and leaves no introspection record for `#[pymodule_export]` to carry (`microvms-py/src/lib.rs:110-165`). Every method is sync, blocking on one shared multi-thread tokio runtime with `py.detach` first (`microvms-py/src/lib.rs:42-46`). The generated stub and its PEP 561 marker are committed as `microvms-py/microvms.pyi` and `microvms-py/py.typed`, and `mise run stubs:check` fails when the committed stub no longer matches the pyo3 surface (`mise.toml:216-218`).
 
 ### microvms-py Region
 
@@ -466,7 +466,7 @@ An AWS region, closed over the five that run MicroVMs plus a named escape hatch,
 pub struct PySandbox {
 ```
 
-One MicroVM's whole life, with `build_image`, `run`, `suspend`, `resume`, and `terminate` as the five transitions and every state guard left in the core.
+One MicroVM's whole life, with `build_image`, `run`, `suspend`, `resume`, and `terminate` as the transitions and every state guard left in the core.
 
 `microvms-py/src/sandbox.rs:472-473`
 
@@ -534,7 +534,7 @@ One running MicroVM's control API, with the proxy auth handled for you.
 pub struct Sandbox {
 ```
 
-One MicroVM's whole life, with `buildImage`, `run`, `suspend`, `resume`, and `terminate` as the five transitions and every state guard left in the core.
+One MicroVM's whole life, with `buildImage`, `run`, `suspend`, `resume`, and `terminate` as the transitions and every state guard left in the core.
 
 `microvms-js/src/sandbox.rs:614-615`
 
@@ -551,7 +551,7 @@ A long-running exec in the AI SDK's `SandboxProcess` shape, built by `Session.sp
 
 ## HTTP
 
-The daemon serves 20 routes. All of them come from one list, `surface_docs`, which `app` walks to build the router and `GET /v1/schema` walks to publish the document (`agentd/src/routes.rs:443-752`). A route cannot be served unless it appears in that list, and a listed route with no handler panics at startup rather than serving an undocumented surface (`agentd/src/routes.rs:110-142`). Each row also declares its auth, which is what splits the router in two: `Auth::Bearer` rows go behind the token guard, `Auth::Open` and `Auth::PlatformHook` rows do not (`agentd/src/routes.rs:51-59`).
+The daemon's routes all come from one list, `surface_docs`, which `app` walks to build the router and `GET /v1/schema` walks to publish the document (`agentd/src/routes.rs:443-752`). A route cannot be served unless it appears in that list, and a listed route with no handler panics at startup rather than serving an undocumented surface (`agentd/src/routes.rs:110-142`). Each row also declares its auth, which is what splits the router in two: `Auth::Bearer` rows go behind the token guard, `Auth::Open` and `Auth::PlatformHook` rows do not (`agentd/src/routes.rs:51-59`).
 
 The six lifecycle hooks sit under a prefix fixed by the service, `/aws/lambda-microvms/runtime/v1` (`protocol/src/hook.rs:15`). They are unauthenticated because the platform has no token to present, and a consumer must never call them.
 
@@ -677,8 +677,8 @@ Returns this document: every route, shape, status code, and operative limit.
 
 ## See also
 
-- [contract map](../insights/contract-map.md) — 22 shared source citations
-- [impact analysis](../insights/impact-analysis.md) — 21 shared source citations
-- [business logic](../insights/business-logic.md) — 13 shared source citations
-- [system overview](../architecture/system-overview.md) — 8 shared source citations
-- [debugging guide](../insights/debugging-guide.md) — 8 shared source citations
+- [contract map](../insights/contract-map.md)
+- [impact analysis](../insights/impact-analysis.md)
+- [business logic](../insights/business-logic.md)
+- [system overview](../architecture/system-overview.md)
+- [debugging guide](../insights/debugging-guide.md)

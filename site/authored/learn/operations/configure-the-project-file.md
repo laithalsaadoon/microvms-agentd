@@ -56,13 +56,13 @@ Most field names match their flags; the repeatable connector flag uses the plura
 | `log-group`        | `run --log-group`      | The CloudWatch log group build logs go to. Validated against the platform's group-name shape; a colon usually means an ARN was pasted.            |
 | `log-stream`       | `run --log-stream`     | A stream-name prefix inside `log-group`, which it requires. Capped at 495 characters and refused when it carries `:` or `*`.                     |
 
-`binary` resolves relative to the file because `--config /repo/microvm.toml` from another directory is the flag's flagship case, and a `target/agentd` resolved against wherever the caller stands is either a miss or a different binary that happens to share the name. Two Windows path shapes that mean two things at once, a rooted path with no drive and a drive with no root, are refused rather than guessed.
+`binary` resolves relative to the file because `--config /repo/microvm.toml` from another directory is the flag's flagship case, and a `target/agentd` resolved against wherever the caller stands is either a miss or a different binary that happens to share the name. Windows path shapes that mean two things at once, a rooted path with no drive and a drive with no root, are refused rather than guessed.
 
 ## 3. Which source wins
 
 A typed flag beats the file, and the file beats the built-in default. "Typed" is read off the parse rather than off the value, so `--memory 2048` overrides a file that says `4096` even though 2048 is also the default. The merge happens in one place and its outcome is on the `run` envelope as `resolvedConfig`: each knob's winning value and the source it came from, `flag`, `config`, `env`, or `default`. `env` appears only on the region, the one knob whose chain continues past the file into `$AWS_REGION` and `$AWS_DEFAULT_REGION`. `configPath` names the file that was read.
 
-The `[env]` table merges per key, so a project pinning `RUST_LOG` is not discarded because you passed `--launch-env CI=1`; the flag wins its own key and the rest of the table survives. One pairing rule: a typed `BINARY` positional with no typed `--image` suppresses the file's `image`, because `run` builds exactly when the merged image is absent, and a file that silently won that pair would run your tests against a stale pinned image. A directory positional does not suppress it, because sync mode launches and the pinned image is exactly what `run .` wants.
+The `[env]` table merges per key, so a project pinning `RUST_LOG` is not discarded because you passed `--launch-env CI=1`; the flag wins its own key and the rest of the table survives. A pairing rule: a typed `BINARY` positional with no typed `--image` suppresses the file's `image`, because `run` builds exactly when the merged image is absent, and a file that silently won that pair would run your tests against a stale pinned image. A directory positional does not suppress it, because sync mode launches and the pinned image is exactly what `run .` wants.
 
 ## 4. What the loader refuses
 

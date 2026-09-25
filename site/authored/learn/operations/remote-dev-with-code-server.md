@@ -53,7 +53,7 @@ microvm exec "timeout 60 bash -c 'until echo > /dev/tcp/127.0.0.1/8080; do sleep
 
 `--detach` starts code-server and returns; the second exec waits for the listener with bash's `/dev/tcp`, so nothing has to be installed for the wait. `--user 1000` because an IDE hands a terminal to whoever reaches it, and that terminal should not be root's.
 
-`--auth none` is sound here because three layers already gate the path. The local listener binds `127.0.0.1`, so nothing off your machine reaches the forward. Every request the forward relays crosses the endpoint proxy, which requires an auth token scoped to this MicroVM and port set, and `port-forward` mints and attaches it for you. Inside the guest, code-server binds loopback only. A password prompt on top would authenticate nothing the proxy token has not already authenticated.
+`--auth none` is sound here because other layers already gate the path. The local listener binds `127.0.0.1`, so nothing off your machine reaches the forward. Every request the forward relays crosses the endpoint proxy, which requires an auth token scoped to this MicroVM and port set, and `port-forward` mints and attaches it for you. Inside the guest, code-server binds loopback only. A password prompt on top would authenticate nothing the proxy token has not already authenticated.
 
 ## 4. The forward
 

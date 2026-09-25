@@ -40,7 +40,7 @@ Append your `RUN` layers after the `chmod` line and pass the result to `--docker
 docker buildx build --platform linux/arm64 -t guest-check -f guest.Dockerfile .
 ```
 
-A `dnf` typo or a missing package is free to find here and expensive to find server-side. With `qemu-aarch64` binfmt registered this builds the real target architecture on an x86 host. Two errors in the repository's own example Dockerfile were caught this way in seconds.
+A `dnf` typo or a missing package is free to find here and expensive to find server-side. With `qemu-aarch64` binfmt registered this builds the real target architecture on an x86 host. Errors in the repository's own example Dockerfile were caught this way in seconds.
 
 ## 3. The rules the client checks before any call
 
@@ -73,9 +73,9 @@ The daemon itself stays root; demotion is per command, with `exec --user 1000 --
 
 The image becomes a shared snapshot, so every VM launched from it sees the same bytes. Per-VM credentials travel through the platform's one-shot `runHookPayload` at launch: the agent token always, and anything you add with `run --launch-env KEY=VALUE`, which shares the payload's 4096-byte ceiling. Larger material goes in after bootstrap with `microvm cp --mode 0600` over the authenticated channel.
 
-## 6. The build context holds two members
+## 6. The build context holds the Dockerfile and the daemon
 
-The artifact `microvm build` uploads carries exactly the Dockerfile and the `agentd` binary, so there is no file beside them for a `COPY` to find. A script the image needs is materialized in the Dockerfile with `printf`; [Prefetch S3 content at image build](/learn/operations/prefetch-s3-at-build/) shows a start wrapper written that way. `build --project` is the one widening: it adds the project's manifest and lockfile pair at the archive root, so `COPY pyproject.toml uv.lock ./` finds them.
+The artifact `microvm build` uploads carries exactly the Dockerfile and the `agentd` binary, so there is no file beside them for a `COPY` to find. A script the image needs is materialized in the Dockerfile with `printf`; [Prefetch S3 content at image build](/learn/operations/prefetch-s3-at-build/) shows a start wrapper written that way. `build --project` widens it: it adds the project's manifest and lockfile pair at the archive root, so `COPY pyproject.toml uv.lock ./` finds them.
 
 ## 7. The daemon's knobs
 
@@ -96,6 +96,6 @@ Handlers run as root, and any process in the VM can trigger one by posting a hoo
 
 ## 9. Working examples
 
-Three Dockerfiles in the repository respect all of the above: [coding-agents-on-bedrock](https://github.com/laithalsaadoon/microvms-agentd/tree/main/examples/coding-agents-on-bedrock) adds Node, Python, and two agent CLIs; [code-server-remote-dev](https://github.com/laithalsaadoon/microvms-agentd/tree/main/examples/code-server-remote-dev) installs an IDE from a release RPM; [s3-prefetch-at-build](https://github.com/laithalsaadoon/microvms-agentd/tree/main/examples/s3-prefetch-at-build) replaces `CMD` with a wrapper that fetches before it hands off to the daemon.
+The example Dockerfiles in the repository respect all of the above: [coding-agents-on-bedrock](https://github.com/laithalsaadoon/microvms-agentd/tree/main/examples/coding-agents-on-bedrock) adds Node, Python, and the Claude Code and Codex CLIs; [code-server-remote-dev](https://github.com/laithalsaadoon/microvms-agentd/tree/main/examples/code-server-remote-dev) installs an IDE from a release RPM; [s3-prefetch-at-build](https://github.com/laithalsaadoon/microvms-agentd/tree/main/examples/s3-prefetch-at-build) replaces `CMD` with a wrapper that fetches before it hands off to the daemon.
 
 When a build fails anyway, [Debug a failed build](/learn/operations/debug-a-failed-build/) says where the reason lives. The measurements behind every rule above are in [Platform](/internals/platform/).

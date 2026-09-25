@@ -3,27 +3,27 @@
 Something is broken. This tells you where to look first.
 
 Almost every failure mode below was found against real AWS after the offline tiers were
-green, so the operational knowledge is already written down in four places rather than in
+green, so the operational knowledge is already written down in these places rather than in
 anyone's head:
 
 - `docs/PLATFORM.md` — measured platform behavior, each entry carrying a date, a region, and an
   API version. Contradictions are appended rather than deleted, so the file reads as a log of
   surprises.
-- `EXIT_TABLE` in `microvms-cli/src/exit.rs:173-258` — fourteen rows. Each carries an integer, an
+- `EXIT_TABLE` in `microvms-cli/src/exit.rs:173-258`. Each row carries an integer, an
   `ERR_*` code, a `meaning` (what to do next), and a `finding` (the `docs/PLATFORM.md` section
   that measured it). The `finding` column turns an exit code into a documentation lookup.
 - Trap messages in the library. `microvms-core` writes the finding into the message itself, so
   the failure explains itself without a doc lookup — see
   `microvms-core/src/control/image.rs:371-386`.
-- `.erpaval/solutions/` — twelve compounded lessons, each the conclusion of a real debugging
+- `.erpaval/solutions/` — compounded lessons, each the conclusion of a real debugging
   session.
 
 No `.rs` or `.py` file in the workspace carries a `TODO`, `FIXME`, `HACK`, `INCIDENT`, or
 `POSTMORTEM` marker; the repo convention is that comments record constraints and defects
-defended against rather than narration. The four sources above are the history.
+defended against rather than narration. The sources above are the history.
 
 Two operational facts before you start. `mise run check` is the free offline gate — lint,
-security, all six Rust tiers, schema, manifest, Python stub and TypeScript declaration
+security, every Rust tier, schema, manifest, Python stub and TypeScript declaration
 freshness, model drift, publishability, live wiring, the release cross-compile, the background
 example, and the requirement traceability matrix (`mise.toml:417-433`). `mise run live` is
 BILLABLE, takes about fifteen minutes against real AWS, and is never a first debugging step
@@ -68,11 +68,11 @@ under `/aws/lambda-microvms/` that outlive `terraform destroy` (`docs/PLATFORM.m
 | Surface | Where it emits | What to grep for | Citation |
 | --- | --- | --- | --- |
 | Daemon structured log | JSON to **stdout**, which is where the platform's CloudWatch capture reads from. Level from `AGENTD_LOG`, defaulting to `info`; targets on | `agentd listening` for the bind line with `addr` and `version`; `recovering a poisoned lock` for a handler panic; `exec exceeded its timeout and its process group was signalled`; `process group survived SIGTERM; escalating to SIGKILL`; `ignoring unparseable configuration value` for a bad `AGENTD_*` | `agentd/src/main.rs:84-97`, `agentd/src/main.rs:79` |
-| Daemon `warn` sites | The same stdout JSON stream. 38 `warn`/`error` calls, all in the daemon — `agentd/src/fs.rs` 19, `agentd/src/exec.rs` 14, `agentd/src/routes.rs` 13, and one to four each in `serve`, `main`, `identity`, `config`, `state`, `disk` | `tar member refused`, `archive over cap`, `refusing a write: the target filesystem is under the disk reserve`, `exec stream subscriber lagged`, `spawn failed`, `bootstrap refused: a different token is already installed`, `run hook body is not JSON` | `agentd/src/fs.rs:161-178`, `agentd/src/exec.rs:624`, `agentd/src/routes.rs:186-231` |
+| Daemon `warn` sites | The same stdout JSON stream. Every `warn`/`error` call is in the daemon, most of them in `agentd/src/fs.rs`, `agentd/src/routes.rs`, and `agentd/src/exec.rs` | `tar member refused`, `archive over cap`, `refusing a write: the target filesystem is under the disk reserve`, `exec stream subscriber lagged`, `spawn failed`, `bootstrap refused: a different token is already installed`, `run hook body is not JSON` | `agentd/src/fs.rs:161-178`, `agentd/src/exec.rs:624`, `agentd/src/routes.rs:186-231` |
 | Build log group | `/aws/lambda-microvms/<image-name>`, created by the service. Not `/aws/lambda/microvms/*` | An *empty* group beside `reason=unknown` is the IAM-prefix signature, not a silent service | `microvms-core/src/control/image.rs:55`, `microvms-core/src/control/image.rs:76-81` |
 | `microvm logs <image-name>` | A success that names the group and hands you the read: `data.tailCommand` is the working `aws logs tail` invocation (AWS CLI v2 only — the subcommand does not exist in v1), and `data.lines` is explicitly `null`, never `[]`, because an empty list reads as "there are no logs" when this client did not read the group. CloudWatch is not in the transport's dependency set; the read runs under your own identity, granted by the stack's `logs_read_policy_arn` | `data.logGroup`, `data.tailCommand`, `data.tailRequires`, `data.streams` | `microvms-cli/src/commands/local.rs:228` |
 | `GET /v1/health` | The daemon, on the unauthenticated router so it answers during the pre-bootstrap window | `bootstrapped`, `disk.under_pressure`, `disk.available_bytes`, `identity_degraded`, `identity_repaired`, `busy`, `execs`. `disk: null` means unmeasurable, not zero | `agentd/src/routes.rs:314-338`, `protocol/src/health.rs:11-45` |
-| `GET /v1/schema` and `docs/schema.json` | The daemon serves the same list the router is assembled from, so a route cannot be served unless it appears in the list and a listed route with no handler panics at startup | The 20 endpoints and their `auth` field, which is what splits the Bearer-guarded router from the open one | `agentd/src/routes.rs:36-59`, `agentd/src/routes.rs:110-139` |
+| `GET /v1/schema` and `docs/schema.json` | The daemon serves the same list the router is assembled from, so a route cannot be served unless it appears in the list and a listed route with no handler panics at startup | Every endpoint and its `auth` field, which is what splits the Bearer-guarded router from the open one | `agentd/src/routes.rs:36-59`, `agentd/src/routes.rs:110-139` |
 | `microvms-agentd-version` response header | Stamped on **every** response by middleware applied outside `route_layer` — handler bodies, the auth middleware's 401/503, the body-limit layer's 413, and the 404 fallback | The header's presence. A version header a client only sometimes receives is one it cannot use as a precondition | `agentd/src/routes.rs:142-164` |
 | Daemon error-body slug | The response body of a failing control route, as `{"error": "<slug>", "detail": "..."}` | The slug paired with the status: `malformed_request`, `unknown_exec`, `spawn_failed`, `still_running`, `already_acked`, `stdin_not_requested`, `stdin_closed`, `stdin_write_timeout`, `stdin_write_too_large`, `stdin_write_failed` | `protocol/src/exec.rs:266-286` |
 | Exec result flags | The poll and stream payloads | `truncated` (the per-stream cap was hit) and `writers_may_be_alive` (the linger deadline expired with a writer still holding the pipe). Both are explicit rather than inferred from a short log | `protocol/src/exec.rs:66-73` |
@@ -81,7 +81,7 @@ under `/aws/lambda-microvms/` that outlive `terraform destroy` (`docs/PLATFORM.m
 | CLI human failure rendering | stdout on the plain path. Deterministic: sorted data keys, byte-identical across two renders | First line `error ERR_*: <message>`; then `see docs/PLATFORM.md, '<finding>'`; then `hint:` lines; then `<key>: <value>` per sorted data key | `microvms-cli/src/envelope.rs:345-377` |
 | CLI progress and warnings | **stderr**, always, so stdout stays exactly one document. `--quiet` suppresses progress and never a warning | A leak warning survives `--quiet`, because a leak nobody is told about is the one thing silence must not buy | `microvms-cli/src/envelope.rs:481-493`, `microvms-cli/tests/exit_codes.rs:154-190` |
 | `exec --stream` NDJSON | The one invocation allowed more than one object on stdout: every line before the last is an event, the last is the envelope, under its own discriminant `microvm.exec.stream` | Branch on `type`. A streamed exec that fails before any event writes exactly one document | `microvms-cli/tests/exit_codes.rs:232-278` |
-| Exit code in `$?` | The process. Fourteen rows, 0 through 13, append-only, `#[repr(u8)]` with explicit discriminants so a variant inserted in the middle cannot silently renumber the contract | The integer, then `Exit::row()`'s `meaning` and `finding`. Thirteen distinct non-zero codes; no two rows share one | `microvms-cli/src/exit.rs:78-102`, `microvms-cli/src/exit.rs:173-258` |
+| Exit code in `$?` | The process. Append-only, `#[repr(u8)]` with explicit discriminants so a variant inserted in the middle cannot silently renumber the contract | The integer, then `Exit::row()`'s `meaning` and `finding`. Every non-zero code is distinct; no two rows share one | `microvms-cli/src/exit.rs:78-102`, `microvms-cli/src/exit.rs:173-258` |
 | Run ledger on disk | One JSON file per invocation under `$MICROVM_STATE_DIR`, else `~/.microvm/runs`. Written **before** each delete is attempted, and its file is refused deletion while `leaked` is non-empty | `leaked` — the operator's to-do list. For a `CREATING` image and a service-created log group the identifier *is* the remedy, because there is no second way to find them. A write failure is swallowed, so an unwritable state dir costs the `ls` entry and nothing else | `microvms-cli/src/ledger.rs:1-22`, `microvms-cli/src/ledger.rs:37-49`, `microvms-cli/src/seam.rs:450-459` |
 | `microvm ls` | stdout. Rows marked as alarms plus a trailing count | "N run(s), M with something still billing" | `microvms-cli/src/main.rs:209-247` |
 | `microvm doctor` | A **success** envelope with `ok: false` plus exit `ERR_PRECONDITION`, because the check succeeded — it found what was wrong | `checks[]` per named check. Advisory checks do not fail the run; the fatal ones do | `microvms-cli/src/commands/doctor.rs:62-83` |
@@ -100,16 +100,16 @@ money.
    non-zero — which is the one non-zero exit that says nothing is wrong with the platform.
    `microvms-cli/src/exit.rs:173-258`
 2. **Read the envelope's `finding`, `suggestions`, and `data.kind`.** All three keys are
-   always present. `data.kind` is the distinction the exit code deliberately collapses: five
+   always present. `data.kind` is the distinction the exit code deliberately collapses: several
    wire kinds share `ERR_PROTOCOL`, so a 400 and a 409 arrive with the same integer and
-   different `data.kind`. Two failures sharing `ERR_CREDENTIALS` also get different
+   different `data.kind`. A 401 and an unresolvable credential chain share `ERR_CREDENTIALS` but get different
    `suggestions`, so read the line rather than assuming which one you have.
    `microvms-cli/src/exit.rs:336-365`
 3. **Run `microvm doctor --binary target/aarch64-unknown-linux-musl/release/agentd`.** It is
    the only command that must work with nothing configured, and its check order is the
    diagnosis order: region first (a wrong region produces the null-message denial that reads
    as IAM), then whether the credential chain resolves at all — which spends no API call, so
-   `doctor` cannot fail on a throttle — then the three Terraform outputs by name, then whether
+   `doctor` cannot fail on a throttle — then the Terraform outputs `s3_bucket`, `build_role_arn`, and `execution_role_arn` by name, then whether
    the stack is actually applied, then the managed bases, then the binary's architecture last
    because it is the one failure that costs a full build cycle.
    `microvms-cli/src/commands/doctor.rs:36-60`
@@ -123,13 +123,13 @@ money.
    delete is attempted, so the identifiers survive a process that died inside the call.
    `microvms-cli/src/ledger.rs:11-22`
 6. **Run `mise run check`.** It is offline, free, and the definition of done: lint, security,
-   all six Rust tiers, `schema:check`, `manifest:check`, `stubs:check`, `dts:check`,
+   every Rust tier, `schema:check`, `manifest:check`, `stubs:check`, `dts:check`,
    `model:check`, `publish:check`, `live:check`, the release cross-compile,
    `background:check`, and `trace:check`. A drifted generated artifact — the served schema,
    the CLI manifest, the Python stub, the TypeScript declarations, the traceability matrix, a
    hardcoded API constraint against botocore's model — fails here rather than in production.
    `mise.toml:417-433`
-7. **If the VM is reachable: `GET /v1/health`.** One call answers six questions.
+7. **If the VM is reachable: `GET /v1/health`.** One call answers several questions.
    `bootstrapped` false plus 503s everywhere means the run hook has not landed;
    `disk.under_pressure` means writes are about to be refused with 507; `identity_degraded`
    means this VM still shares a value from the image with every sibling restored from the same
@@ -170,7 +170,7 @@ These recur. Each is recorded in `.erpaval/solutions/` or in `docs/PLATFORM.md` 
   Signal: a policy test that only checks where files ended up. Mitigation: compute the expected
   status from the generated member and assert on it, which makes the same break shrink to a
   one-member archive. `.erpaval/solutions/test-failures/proptest-and-dst-tiers-need-verdict-assertions.md:11-33`
-- **The guard never watched failing:** five distinct shapes found in one session. A bare
+- **The guard never watched failing:** distinct shapes, all found in one session. A bare
   `compile_fail` block passes for any build error including a typo in the doctest, so each is
   pinned to a measured rustc error code. A fake that models the failure *event* cannot catch
   lateness, because a client refreshing too late presents a token with no life left rather than
@@ -186,12 +186,12 @@ These recur. Each is recorded in `.erpaval/solutions/` or in `docs/PLATFORM.md` 
   Signal: a side effect with no channel to assert absence through. Mitigation: give the side
   effect its own recorder — a separate `uploads` vec, deliberately not mixed into `calls` — and
   assert it is empty on a request the library refuses. Falsification is a pure reorder, and
-  both call sites need the break run separately.
+  each call site needs the break run separately.
   `.erpaval/solutions/best-practices/ordering-defects-need-their-own-recorder-channel.md:9-30`
-- **The fake more forgiving than the real server:** 310 fake-backed tests were green over a
+- **The fake more forgiving than the real server:** the fake-backed tests were green over a
   client whose auth-header injection replaced the request headers, stripping content-type,
   where the real daemon's typed extractor answered 400. Separately, the `run` envelope
-  published a null `agentToken` through 139 CLI tests because nothing round-tripped the
+  published a null `agentToken` through the whole CLI test suite because nothing round-tripped the
   envelope into a second command. Signal: a live tier failing a request every local tier
   accepts. Mitigation: run the live tier before trusting a transport that has only ever spoken
   to fakes, because a fake that accepts what the real server rejects converts integration bugs
@@ -220,16 +220,16 @@ These recur. Each is recorded in `.erpaval/solutions/` or in `docs/PLATFORM.md` 
   `default-features = false` looks right when you have hand-rolled an HTTP client, and it is
   wrong — the credential chain does its own HTTP for IMDS, SSO, and STS, and `load()` panics
   with `"a http_client is required"` before asking any credential question. Nothing caught it
-  because all 300 tests constructed through the injectable transport, and the one constructor
+  because every test constructed through the injectable transport, and the one constructor
   that talks to the world had no test at all. Signal: a `new()` that touches the real
   environment with no test calling it. Mitigation: `default-https-client` stays on
-  (`microvms-core/Cargo.toml:59-62`), and one test constructs the real transport and accepts
+  (`microvms-core/Cargo.toml:59-62`), and a test constructs the real transport and accepts
   either `Result` flavor — a panic is the bug
   (`microvms-core/src/control/transport.rs:899-908`).
   `.erpaval/solutions/api-patterns/aws-config-needs-its-own-http-client.md:11-22`
-- **The credential in a derived `Debug`:** three of six token-carrying types in this workspace
-  leaked secrets through `#[derive(Debug)]` while their three siblings hand-wrote redaction —
-  the invariant was known and still missed half its sites, because a derive is the default and
+- **The credential in a derived `Debug`:** some token-carrying types in this workspace
+  leaked secrets through `#[derive(Debug)]` while their siblings hand-wrote redaction —
+  the invariant was known and still missed sites, because a derive is the default and
   nothing flags it. Signal: any struct holding a token, an `Authorization` header, or a hook
   payload. Mitigation: hand-write `Debug` printing names and lengths only, add a per-type guard
   that formats with `{:?}` and asserts the secret absent, and redact *all* header values rather
@@ -261,7 +261,7 @@ These recur. Each is recorded in `.erpaval/solutions/` or in `docs/PLATFORM.md` 
   harness's control requests arrive from `127.0.0.1`, because the endpoint proxy terminates
   outside the VM and forwards over loopback. A source-address rule rejecting loopback callers on
   the bootstrap route therefore rejects the platform's own legitimate bootstrap and breaks every
-  launch; an attempt at one broke 39 tests, and those failures were reporting a real defect.
+  launch; an attempt at one broke tests across the suite, and those failures were reporting a real defect.
   Mitigation: the one-shot bootstrap is the only available defense on that route, and its
   sufficiency is checked in the `model/` crate. `docs/PLATFORM.md:463-485`
 - **The probe that looks like an attack:** the daemon receives raw TLS handshake bytes on its
@@ -286,8 +286,8 @@ These recur. Each is recorded in `.erpaval/solutions/` or in `docs/PLATFORM.md` 
 
 ## See also
 
-- [impact analysis](impact-analysis.md) — 18 shared source citations
-- [business logic](business-logic.md) — 17 shared source citations
-- [contract map](contract-map.md) — 16 shared source citations
-- [processes](../behavior/processes.md) — 15 shared source citations
-- [tech debt](tech-debt.md) — 11 shared source citations
+- [impact analysis](impact-analysis.md)
+- [business logic](business-logic.md)
+- [contract map](contract-map.md)
+- [processes](../behavior/processes.md)
+- [tech debt](tech-debt.md)

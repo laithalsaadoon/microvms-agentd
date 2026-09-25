@@ -1,10 +1,10 @@
 # microvms-agentd · State machines
 
-Four machines, each declared once as a Rust enum. Three of them are also declared formally —
+Each machine below is declared once as a Rust enum. Boot, ExecPhase, and Lifecycle are also declared formally —
 twice over for the VM lifecycle — and the formal declaration is the authority: the `model/`
 crate holds `stateright` models whose properties hold over every interleaving
 (`model/src/lib.rs:433-517`, `model/src/client.rs:546-699`), and `spec/core.symspec.json`
-carries a five-variable state model with a machine-readable transition effect per requirement
+carries a state model with a machine-readable transition effect per requirement
 (`spec/core.symspec.json:995-1041`).
 
 The models are ordinary `cargo test` targets in the `agentd-model` crate
@@ -54,12 +54,12 @@ Mirrors:
   diagram's edge labels. `AppState::bootstrap` decides all three under the token lock
   (`agentd/src/state.rs:202-221`) and `POST /run` maps them to 200/200/409
   (`agentd/src/routes.rs:213-234`).
-- `spec/agentd.symspec.json:11-114` — four of its six EARS requirements are this machine:
+- `spec/agentd.symspec.json:11-114` — the EARS requirements that are this machine:
   install the agent token (`spec/agentd.symspec.json:89`), accept an identical token
   (`spec/agentd.symspec.json:21`), reject a differing token (`spec/agentd.symspec.json:72`), and
   reject a control request while the token is not installed (`spec/agentd.symspec.json:56`).
 
-Two `always` properties hold over the whole reachable space: `bootstrap is one-shot`
+These `always` properties hold over the whole reachable space: `bootstrap is one-shot`
 (`token_replacements == 0`, `model/src/lib.rs:446-448`) and `control API is closed before
 bootstrap` (`model/src/lib.rs:458-465`). `attacker never authorized`
 (`model/src/lib.rs:443-445`) is stated unconditionally rather than consulting the config it
@@ -132,7 +132,7 @@ Mirrors:
   it derives one from `acked_at.is_some()` and `result.is_some()`, asserted exhaustively at
   `agentd/src/exec.rs:2375-2377`.
 
-Three `always` properties hold over the whole reachable space: `output is never released before
+These `always` properties hold over the whole reachable space: `output is never released before
 ack` (`model/src/lib.rs:466-472`), `a retried start never spawns twice` (`spawns == 1`,
 `model/src/lib.rs:473-475`), and `one exec entry per id` (`model/src/lib.rs:476-481`). The first
 is audited against itself rather than asserted: the collect predicate flags any entry it would
@@ -157,17 +157,18 @@ Defined at: `model/src/lib.rs:74-81`
 
 ## Lifecycle
 
-One MicroVM's whole life, as the client tracks it. Six states and no others, which is the point
+One MicroVM's whole life, as the client tracks it. A closed set of states, which is the point
 of the enum: a lifecycle held as a `String` would let `"RUNNING "` and `"Running"` both exist,
 and every guard would have to decide which it meant (`microvms-core/src/sandbox.rs:115-119`). The
-state is a private field, and the five `Sandbox` methods are the only writers.
+state is a private field written only through `set_lifecycle` (`microvms-core/src/sandbox.rs:825-828`), which
+`run`, `wait_until_running`, `adopt`, `suspend`, `resume`, and `terminate` call.
 
 Entry is `Lifecycle::Pending` (`microvms-core/src/sandbox.rs:727`), matching the symspec's
 `initial` (`spec/core.symspec.json:996`) and the model's sole init state
 (`model/src/client.rs:287`).
 
 Edge labels below are the model's `Action` variants (`model/src/client.rs:116-142`), which is the
-one vocabulary all three declarations share. Each row gives the symspec key, the symspec's
+one vocabulary the declarations share. Each row gives the symspec key, the symspec's
 `stateEffect`, the model arm, and the client site:
 
 - `LaunchAccepted` · `Pending --> Pending` · STATE-1 (`spec/core.symspec.json:690`),
@@ -239,7 +240,7 @@ assertion rather than the resulting state:
 
 `Lifecycle::as_str` maps each state to the uppercase name the service uses, which is also what an
 error message prints — `microvms-core/src/sandbox.rs:136-147`. `Lifecycle::is_live` is true for
-`Pending`, `Running`, `Suspending`, `Suspended`. Three places read it: `Sandbox::adopt`, to decide
+`Pending`, `Running`, `Suspending`, `Suspended`. These places read it: `Sandbox::adopt`, to decide
 whether an adopted VM gets a session (`microvms-core/src/sandbox.rs:1275`); `Sandbox::detach`,
 which refuses to hand off a VM that is not live (`microvms-core/src/sandbox.rs:1388`); and the
 `Drop` warning about a VM still billing, which stays silent for a detached or adopted sandbox —
@@ -248,7 +249,7 @@ which refuses to hand off a VM that is not live (`microvms-core/src/sandbox.rs:1
 Mirrors:
 
 - `spec/core.symspec.json:1004-1011` — `vm_state`, an enum whose domain is exactly `PENDING`,
-  `RUNNING`, `SUSPENDING`, `SUSPENDED`, `TERMINATING`, `TERMINATED`, beside the four other
+  `RUNNING`, `SUSPENDING`, `SUSPENDED`, `TERMINATING`, `TERMINATED`, beside the other
   variables the `Sandbox` carries: `token_installed`, `image_exists`, `was_terminated`,
   `bootstrap_count` (`:1012-1040`). The `STATE-1`..`STATE-12` keys cited above are EARS
   sentences in the same document.
@@ -257,7 +258,7 @@ Mirrors:
   `Action` (`:116-142`), each answered `Issued`, `RefusedLocally`, or `Ignored`
   (`model/src/client.rs:99-108`).
 
-The three invariants Z3 proves over the symspec are restated as `stateright` `always`
+The invariants Z3 proves over the symspec are restated as `stateright` `always`
 properties over every interleaving of the model's actions: `bootstrap happens at most once`
 (`model/src/client.rs:554-556`), `no suspend call outside RUNNING`
 (`model/src/client.rs:557-566`), and `a terminated VM never reaches RUNNING`
@@ -351,7 +352,7 @@ Out of `Attached`, on the next decoded `ExecEvent`:
   `microvms-core/src/session/exec.rs:726-731`.
 
 `Done` yields nothing and ends the stream — `:468`. `StreamState::cursor()` returns `None` for
-`Done` rather than a number: `Done` is reached from three different places, so any value invented
+`Done` rather than a number: `Done` is reached from more than one place, so any value invented
 there could shadow the last real cursor the caller already holds — `:753-767`.
 
 `for_each_event_async` reports which `Done` path was taken as `EndReason`
@@ -386,8 +387,8 @@ Defined at: `microvms-core/src/session/exec.rs:738-751`
 
 ## See also
 
-- [business logic](../insights/business-logic.md) — 9 shared source citations
-- [contract map](../insights/contract-map.md) — 8 shared source citations
-- [debugging guide](../insights/debugging-guide.md) — 8 shared source citations
-- [impact analysis](../insights/impact-analysis.md) — 8 shared source citations
-- [processes](processes.md) — 6 shared source citations
+- [business logic](../insights/business-logic.md)
+- [contract map](../insights/contract-map.md)
+- [debugging guide](../insights/debugging-guide.md)
+- [impact analysis](../insights/impact-analysis.md)
+- [processes](processes.md)

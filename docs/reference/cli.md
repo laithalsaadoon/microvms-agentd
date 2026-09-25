@@ -1,10 +1,10 @@
 # microvms-agentd · CLI
 
-The `microvm` binary has twenty-nine subcommands, declared as one `clap` `Subcommand` enum in `microvms-cli/src/cli.rs` and built from `microvms-cli/Cargo.toml:20-22`.
+The `microvm` binary's subcommands are declared as one `clap` `Subcommand` enum in `microvms-cli/src/cli.rs` and built from `microvms-cli/Cargo.toml:20-22`.
 
 ## Global flags
 
-These three are `global = true`, so they parse on either side of the subcommand. `microvm --json ls` and `microvm ls --json` are the same invocation. `microvms-cli/src/cli.rs:65-82`.
+These are `global = true`, so they parse on either side of the subcommand. `microvm --json ls` and `microvm ls --json` are the same invocation. `microvms-cli/src/cli.rs:65-82`.
 
 Flags:
 
@@ -12,13 +12,13 @@ Flags:
 - `--dense` — token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with `--json`. `microvms-cli/src/cli.rs:76-78`.
 - `--quiet` — suppress progress on stderr; warnings still print. `microvms-cli/src/cli.rs:80-82`.
 
-The output format depends only on the two flags and on whether stdout is a terminal. `--json` is checked first, then `--dense`; after that, a terminal gets a ratatui surface and a pipe gets plain text. `microvms-cli/src/envelope.rs:342-349`.
+The output format depends only on `--json`, `--dense`, and whether stdout is a terminal. `--json` is checked first, then `--dense`; after that, a terminal gets a ratatui surface and a pipe gets plain text. `microvms-cli/src/envelope.rs:342-349`.
 
-The manifest publishes the three as `globalFlags` (#131), in the same parameter shape as a command's own, read off the root command's `global = true` arguments without building the tree — building would propagate each global into every subcommand's parameter list. `microvms-cli/src/manifest.rs:91-95`. The generated Reference overview renders that array as its "Global flags" table.
+The manifest publishes them as `globalFlags` (#131), in the same parameter shape as a command's own, read off the root command's `global = true` arguments without building the tree — building would propagate each global into every subcommand's parameter list. `microvms-cli/src/manifest.rs:91-95`. The generated Reference overview renders that array as its "Global flags" table.
 
 ## Shared flag groups
 
-Four flattened `Args` structs supply the flags that repeat across commands, so a relationship like the region conflict is declared once rather than per command. `RegionFlags`, `AttachFlags` and `InfraFlags` are described here; `ConfigFlags` (`--config` / `--no-config`, flattened into `run` and `doctor`) is described under `run`. `microvms-cli/src/cli.rs:471-472`, `microvms-cli/src/cli.rs:509-510`, `microvms-cli/src/cli.rs:555-556`, `microvms-cli/src/cli.rs:606-607`.
+Flattened `Args` structs supply the flags that repeat across commands, so a relationship like the region conflict is declared once rather than per command. `RegionFlags`, `AttachFlags` and `InfraFlags` are described here; `ConfigFlags` (`--config` / `--no-config`, flattened into `run` and `doctor`) is described under `run`. `microvms-cli/src/cli.rs:471-472`, `microvms-cli/src/cli.rs:509-510`, `microvms-cli/src/cli.rs:555-556`, `microvms-cli/src/cli.rs:606-607`.
 
 `RegionFlags` — flattened into every command that talks to AWS. `microvms-cli/src/cli.rs:471-483`.
 
@@ -38,7 +38,7 @@ Flags:
 - `--port <PORT>` — the daemon's port inside the guest.
 - `--state-dir <STATE_DIR>` — where the local state lives: the name registry, and exec's per-VM history. Defaults to `$MICROVM_STATE_DIR` or `~/.microvm/runs`.
 
-`InfraFlags` — the three account-specific values the AWS commands need. Carried by `run`, `build`, and `doctor`. `microvms-cli/src/cli.rs:605-619`.
+`InfraFlags` — the account-specific values the AWS commands need. Carried by `run`, `build`, and `doctor`. `microvms-cli/src/cli.rs:605-619`.
 
 Flags:
 
@@ -154,7 +154,7 @@ Egress is always requested, because neither agent reaches Bedrock without it. Th
 
 A failure after the launch and before the registration (token mint, project upload, credential install, or an interrupt) tears the VM down, because a VM with no name and no credentials is one nobody can use; the failure envelope carries `microvmId`, `imageIdentifier`, `leaked`, and `terminateAccepted`. The image stays, as the durable artifact. The name is registered last, over a VM every step succeeded on; a registry write failure is `ERR_PRECONDITION` with the identifier triple in `data`. No new exit row: every failure maps onto the existing table.
 
-The success envelope's type is `microvm.agent`; its keys are `vmName`, `microvmId`, `endpoint`, `agentToken`, `imageIdentifier`, `imageName`, `imageReused`, `vmReused`, `agents` (`[{agent, model, cliVersion, headlessCommand}]`), `credentialExpiresAt` (epoch seconds), `workdir`, `project` (`{workdir, uploadedBytes, uploadedMembers}` or `null`), and `agentd`. On the refresh path the two image keys and `imageReused` are `null`, because no image was built or looked up. `agents[].headlessCommand` is the exact template `agent-prompt` runs with `<TASK>` where the quoted task goes, so a caller who wants `exec --stream --user 1000 --group 1000` over it can spell the command without knowing the profile. `microvms-cli/src/commands/mod.rs`, the `agent-up` row.
+The success envelope's type is `microvm.agent`; its keys are `vmName`, `microvmId`, `endpoint`, `agentToken`, `imageIdentifier`, `imageName`, `imageReused`, `vmReused`, `agents` (`[{agent, model, cliVersion, headlessCommand}]`), `credentialExpiresAt` (epoch seconds), `workdir`, `project` (`{workdir, uploadedBytes, uploadedMembers}` or `null`), and `agentd`. On the refresh path `imageIdentifier`, `imageName`, and `imageReused` are `null`, because no image was built or looked up. `agents[].headlessCommand` is the exact template `agent-prompt` runs with `<TASK>` where the quoted task goes, so a caller who wants `exec --stream --user 1000 --group 1000` over it can spell the command without knowing the profile. `microvms-cli/src/commands/mod.rs`, the `agent-up` row.
 
 ## agent-prompt
 
@@ -183,7 +183,7 @@ The success envelope's type is `microvm.agent.prompt`, under its own discriminan
 microvm exec [OPTIONS] --endpoint <ENDPOINT> --agent-token <AGENT_TOKEN> --microvm-id <MICROVM_ID> [COMMAND]
 ```
 
-Runs one command in a MicroVM that is already running. The single subcommand covers four uses. It can start a command and wait for it, start one and stream its output (`--stream`), start one and feed its stdin (`--stdin`), or read an existing exec (`--poll`).
+Runs one command in a MicroVM that is already running. The single subcommand covers several uses. It can start a command and wait for it, start one and stream its output (`--stream`), start one and feed its stdin (`--stdin`), or read an existing exec (`--poll`).
 
 `microvms-cli/src/commands/attached.rs:179`
 
@@ -523,13 +523,13 @@ Flags:
 microvm doctor [OPTIONS]
 ```
 
-Checks every prerequisite and says which one is wrong. The checks cover the project config file, credentials, the region, the three Terraform outputs, whether the stack is applied, the managed base images AWS publishes, and whether the daemon binary is aarch64.
+Checks every prerequisite and says which one is wrong. The checks cover the project config file, credentials, the region, the Terraform outputs, whether the stack is applied, the managed base images AWS publishes, and whether the daemon binary is aarch64.
 
 The config check runs first because it is the one check that is entirely local, and a malformed file fails `run` before anything else would. `doctor --config ci.toml` validates the exact file `run --config ci.toml` would read, through the same loader, so the two commands cannot disagree about which config applies. A broken file — unparseable, an unknown key, a value outside its flag's domain — is a fatal fail naming the reason; an absent `./microvm.toml` is an advisory pass, because a project configured by flags is not a finding. A valid file's pass line names which knobs it pins. `microvms-cli/src/commands/doctor.rs`'s `check_config`.
 
 `microvms-cli/src/commands/doctor.rs:33`
 
-Two of the checks are about the managed base rather than about this machine, and both are advisory.
+The `managed-bases` and `base-image-versions` checks are about the managed base rather than about this machine, and both are advisory.
 
 `managed-bases` reads `ListManagedMicrovmImages` and answers whether AWS publishes a base this client does not know about. It reports rather than offers, and the reason is a limitation in the shape: `ManagedMicrovmImageSummary` carries an ARN and two timestamps and nothing else — no registry reference, no architecture, no working directory. A `BaseImage` in `microvms-core` pairs the ARN *with* the Dockerfile `FROM` and with whether the image declares a `WORKDIR`, because `require_matching_from` compares a caller's Dockerfile against the first and `require_workdir` refuses inheritance on the second. Neither guard has an input from this listing, and the registry ref is not derivable from the ARN — `al2023-1` pairs with `public.ecr.aws/amazonlinux/amazonlinux:2023-minimal` and nothing in the ARN says so. So a discovered base cannot be built from through this client, and the check says which one it knows.
 
@@ -577,7 +577,7 @@ microvm dockerfile [OPTIONS]
 
 Prints the Dockerfile stanza that wraps any base image with agentd. The stanza is what `microvm build` bakes when no `--dockerfile` is given, so appending your own `RUN` layers to this output and passing the result to `build --dockerfile` is the default build plus your layers. The text comes from `microvms-core`'s own generator rather than a copy, so it cannot drift from what a default build produces. `microvms-cli/src/commands/local.rs:843`, reusing `microvms-core/src/control/artifact.rs:470`.
 
-The output's comments name the two platform constraints a hand-written wrapper hits. The `FROM` must match the managed base's `docker_ref`, because the build runs the Dockerfile on top of the base that `baseImageArn` names and `microvms-core` refuses a Dockerfile whose `FROM` disagrees. And a `WORKDIR` is required when the base declares none — the managed al2023 base does not, so without one every relative path resolves against `/`. `microvms-core/src/control/artifact.rs:1168-1198`, `microvms-core/src/control/artifact.rs:851-875`.
+The output's comments name the platform constraints a hand-written wrapper hits. The `FROM` must match the managed base's `docker_ref`, because the build runs the Dockerfile on top of the base that `baseImageArn` names and `microvms-core` refuses a Dockerfile whose `FROM` disagrees. And a `WORKDIR` is required when the base declares none — the managed al2023 base does not, so without one every relative path resolves against `/`. `microvms-core/src/control/artifact.rs:1168-1198`, `microvms-core/src/control/artifact.rs:851-875`.
 
 This is a local command: no account is involved, and the stanza is built from compile-time constants.
 
@@ -657,7 +657,7 @@ Branch on `code` rather than `error`; the `error` text may be reworded between r
 
 ### data.kind
 
-`data.kind` carries the daemon's own status name when the exit code is coarser than the failure. Five `WireKind`s (`Conflict`, `NotFound`, `ProtocolError`, `StdinClosed`, `TooLarge`) all map to `ERR_PROTOCOL`. Collapsing them is deliberate. A shell branching on `$?` cannot act differently on a 400 than on a 409, and a consumer that can act differently reads `data.kind` instead. `microvms-cli/src/exit.rs:39-44`, inserted at `microvms-cli/src/envelope.rs:370-372`, and pinned at `microvms-cli/src/exit.rs:594-627`.
+`data.kind` carries the daemon's own status name when the exit code is coarser than the failure. The `WireKind`s `Conflict`, `NotFound`, `ProtocolError`, `StdinClosed`, and `TooLarge` all map to `ERR_PROTOCOL`. Collapsing them is deliberate. A shell branching on `$?` cannot act differently on a 400 than on a 409, and a consumer that can act differently reads `data.kind` instead. `microvms-cli/src/exit.rs:39-44`, inserted at `microvms-cli/src/envelope.rs:370-372`, and pinned at `microvms-cli/src/exit.rs:594-627`.
 
 A request rejected locally reports no `data.kind`, because nothing reached the daemon. `microvms-cli/src/envelope.rs:489-494`.
 
@@ -674,6 +674,7 @@ Each command declares its `type` discriminant and the `data` keys its success en
 | `agent-prompt` | `microvm.agent.prompt` |
 | `exec` | `microvm.exec` |
 | `health` | `microvm.health` |
+| `keepalive` | `microvm.keepalive` |
 | `ack` | `microvm.exec` |
 | `kill` | `microvm.kill` |
 | `ps` | `microvm.procs` |
@@ -712,7 +713,7 @@ Third, the envelope is written compact once a stream has started, because "the l
 {"status":"ok","apiVersion":"1","type":"microvm.exec.stream","data":{"execId":"x-1","events":2,"bytes":12,"nextOffset":12,"gaps":0,"exitCode":0,"truncated":false}}
 ```
 
-Three event kinds reach a line: `output` (with `stream`, `offset`, `bytes`, `text`, `lossy`), `gap` (with `from` and `to`), and `exit` (with `exitCode`, `signal`, `timedOut`, `truncated`, `writersMayBeAlive`, `offset`). `microvms-cli/src/commands/attached.rs:545-585`.
+These event kinds reach a line: `output` (with `stream`, `offset`, `bytes`, `text`, `lossy`), `gap` (with `from` and `to`), and `exit` (with `exitCode`, `signal`, `timedOut`, `truncated`, `writersMayBeAlive`, `offset`). `microvms-cli/src/commands/attached.rs:545-585`.
 
 Output arrives as lossy text beside the true byte count rather than as base64. `lossy` is set when the conversion actually replaced anything, so a consumer can tell when the text differs from the original bytes. The non-JSON path carries the exact bytes. `microvms-cli/src/commands/attached.rs:533-564`.
 
@@ -728,7 +729,7 @@ A stream that ended without an exit event was cut. `exitCode` is reported as `nu
 
 ## Exit codes
 
-The table has seventeen rows, 0 through 16, and is append-only because consumers branch on the values. The rows are split by what the caller should do next; a distinction that does not change the caller's next action does not get its own integer. `microvms-cli/src/exit.rs:196-309`, with the enum's explicit discriminants at `microvms-cli/src/exit.rs:76-133`.
+The table is append-only because consumers branch on the values. The rows are split by what the caller should do next; a distinction that does not change the caller's next action does not get its own integer. `microvms-cli/src/exit.rs:196-309`, with the enum's explicit discriminants at `microvms-cli/src/exit.rs:76-133`.
 
 | Exit | Code | Meaning | `docs/PLATFORM.md` finding |
 | --- | --- | --- | --- |
@@ -766,7 +767,7 @@ The exit code comes from the failure class and nothing else. The CLI adds the su
 
 ## Conventions
 
-`microvm manifest` publishes six conventions alongside the command tree. `microvms-cli/src/manifest.rs:129-146`.
+`microvm manifest` publishes these conventions alongside the command tree. `microvms-cli/src/manifest.rs:129-146`.
 
 - Exactly one envelope object on stdout per invocation; progress is on stderr.
 - Branch on `code`, never on `error`.
@@ -777,7 +778,7 @@ The exit code comes from the failure class and nothing else. The CLI adds the su
 
 ## Closed option domains
 
-Two options carry a closed set rather than free text, and the parser refuses everything else before any handler runs. Refusing an off-table value in the parser reports the error immediately, while refusing it in `microvms-core` would cost a build cycle first. `microvms-cli/src/cli.rs:4-19`.
+`--memory` and `--region` carry a closed set rather than free text, and the parser refuses everything else before any handler runs. Refusing an off-table value in the parser reports the error immediately, while refusing it in `microvms-core` would cost a build cycle first. `microvms-cli/src/cli.rs:4-19`.
 
 `--memory` accepts exactly `512`, `1024`, `2048`, `4096`, `8192`, the five documented size-class baselines. `microvms-cli/src/cli.rs:372-384`.
 
@@ -785,7 +786,7 @@ Two options carry a closed set rather than free text, and the parser refuses eve
 
 The escape hatch is a separate flag rather than a permissive parser. `--unlisted-region <NAME>` conflicts with `--region` and carries its cost in its help text, so a reader of a command line can see that someone opted in. `microvms-cli/src/cli.rs:33-39`.
 
-Three option names — `--capabilities`, `--connector`, and `--architecture` — are deliberately absent. Two of them because `microvms-core` has no parameter for the values they would carry; `--connector` because the intent is spelled `--egress` (the managed connector) or `--egress-network-connector <ARN>` (an existing VPC connector, see above). `--client-token` exists only on the two launch commands, `run` and `agent-up`, where core validates it and a retried launch adopts the VM the first attempt made; an image build never takes one, because a replayed create wedges the image in `CREATING`. A test asserts the absence of the three names over every argument of every subcommand, and that exactly those two commands carry `--client-token`. `microvms-cli/src/cli.rs:21-31`, `microvms-cli/src/cli.rs:3107-3142`.
+The option names `--capabilities`, `--connector`, and `--architecture` are deliberately absent. `--capabilities` and `--architecture` because `microvms-core` has no parameter for the values they would carry; `--connector` because the intent is spelled `--egress` (the managed connector) or `--egress-network-connector <ARN>` (an existing VPC connector, see above). `--client-token` exists only on the launch commands, `run` and `agent-up`, where core validates it and a retried launch adopts the VM the first attempt made; an image build never takes one, because a replayed create wedges the image in `CREATING`. A test asserts the absence of those names over every argument of every subcommand, and that exactly those commands carry `--client-token`. `microvms-cli/src/cli.rs:21-31`, `microvms-cli/src/cli.rs:3107-3142`.
 
 In the manifest, a boolean flag reports `type: "boolean"` and `choices: null` even though clap gives a `SetTrue` flag the possible values `["true", "false"]`. Publishing those would put a `choices` array on every flag and make the closed-domain field unreadable. `microvms-cli/src/manifest.rs:151-170`.
 

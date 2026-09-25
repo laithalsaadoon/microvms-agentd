@@ -15,23 +15,22 @@ Three tiers, all of which cross a boundary a single `cargo build` cannot fully p
    HTTP/SSE wire format, the `--json` envelope the Python conformance suite parses, the
    generated Python stub, the generated Node declarations.
 3. **A contract stated as a machine-checked assertion rather than as a type**: the generated
-   `docs/schema.json`, the 51 EARS requirements in `spec/core.symspec.json`, and the
+   `docs/schema.json`, the EARS requirements in `spec/core.symspec.json`, and the
    cross-language agreement tests such as
    `every_rate_byte_matches_the_python_literal` (`microvms-core/src/cost.rs:2179-2196`).
 
-Ranking is by distinct consumer *file* count, measured with
+Ranking is by distinct consumer *file* count, measured at 9c462f0 with
 `rg -l` over qualified paths and `rg -o … | uniq -c` over occurrences. `agentd` counts as one
 consumer of every `protocol` type, because `agentd/src/exec.rs:87-90` re-exports the whole
 `protocol::exec` surface in one block. Every client-side consumer reaches the same types
 through `microvms_core::protocol::…`, because `microvms-core/src/lib.rs:77` re-exports the
-crate — which is what lets `microvms-cli` name wire types while its allowlisted dependency
-set (`microvms-cli/tests/thinness.rs:66`) contains six entries and none of them is
-`protocol`.
+crate — which is what lets `microvms-cli` name wire types while its direct dependency
+set (`microvms-cli/tests/thinness.rs:66`) doesn't include `protocol`.
 
 ### Gate coverage, which is not symmetric
 
-Three surfaces in this repo are generated from Rust and consumed by something that cannot
-read Rust. Two have a regenerate-then-diff gate; one does not.
+These surfaces are generated from Rust and consumed by something that cannot read Rust.
+The schema and the Python stub have a regenerate-then-diff gate; the Node declarations don't.
 
 | Surface | Producer | Gate |
 | --- | --- | --- |
@@ -58,9 +57,9 @@ state of the art.
 **Consumer(s):**
 
 - `microvms-cli/src/exit.rs:140-156` — `Exit::for_kind`, a total match that turns a
-  fourteenth kind into a compile error rather than a fall-through to `ERR_UNEXPECTED`.
+  new kind into a compile error rather than a fall-through to `ERR_UNEXPECTED`.
 - `microvms-cli/src/exit.rs:486-503` — asserts the CLI's `EXIT_TABLE` and `ErrorKind::ALL`
-  are the same thirteen classes with byte-identical code strings.
+  are the same classes with byte-identical code strings.
 - `microvms-py/src/errors.rs:129-145` — `exception_for`, one Python exception type per kind.
 - `microvms-js/src/errors.rs:143-149` — `error_codes()`, enumerated from `ErrorKind::ALL`
   rather than transcribed.
@@ -71,7 +70,7 @@ state of the art.
 - The daemon's own uses: `agentd/src/disk.rs:69`, `agentd/src/exec.rs:776`,
   `agentd/src/fs.rs:1107`, `agentd/src/identity.rs:411`.
 
-Count: 36 non-declaring files, from
+Count at 9c462f0: 36 non-declaring files, from
 `rg -l '\bErrorKind\b' --type rust --glob '!microvms-core/src/error.rs'`.
 
 **Shape:**
@@ -122,7 +121,7 @@ pub enum ErrorKind {
   an integer table.
 - **`ALL` is in exit-code order, and two independent hand-written tables depend on that
   order.** `microvms-core/src/error.rs:434-452` and `microvms-cli/src/exit.rs:406-433` both
-  spell the thirteen codes out as literals, deliberately: "a generated list would agree with
+  spell the codes out as literals, deliberately: "a generated list would agree with
   a typo" (`microvms-core/src/error.rs:430-431`).
 - **Retryability is derived, never stored.** `microvms-core/src/error.rs:116-118` reads the
   kind; `microvms-core/src/error.rs:399-417` keeps a second, test-only table so the two can
@@ -135,14 +134,14 @@ pub enum ErrorKind {
   on every path (`microvms-js/src/errors.rs:70-80`). Restates
   `.erpaval/solutions/api-patterns/napi-async-collapses-error-codes.md`.
 
-**Drift risk:** adding a fourteenth kind is forced into three exhaustive matches
+**Drift risk:** adding a kind is forced into the exhaustive matches
 (`microvms-core/src/error.rs:188`, `microvms-cli/src/exit.rs:141`,
 `microvms-py/src/errors.rs:130`) but **not** into `ALL`, so a variant added without an `ALL`
 entry compiles and silently vanishes from `error_codes()`
 (`microvms-js/src/errors.rs:143-149`) and from every consumer that enumerates the catalog.
 The cross-check at `microvms-cli/src/exit.rs:486-492` catches it only when an `EXIT_TABLE` row
 is added in the same change. Mitigation: assert `ErrorKind::ALL.len()` against a literal
-alongside the thirteen spelled codes at `microvms-core/src/error.rs:434-452`.
+alongside the spelled codes at `microvms-core/src/error.rs:434-452`.
 
 ## microvms_core::Region — the closed region set, S1 closure
 
@@ -158,7 +157,7 @@ alongside the thirteen spelled codes at `microvms-core/src/error.rs:434-452`.
   `microvms-core/src/sandbox.rs:705`, plus `control/{artifact,connector,image,microvm,mod,transport}.rs`
 - `microvms-core/tests/live_pagination.rs:59`, `microvms-core/tests/live_versions.rs:37`
 
-Count: 20 non-declaring files, from
+Count at 9c462f0: 20 non-declaring files, from
 `rg -l '\bRegion\b' --type rust --glob '!microvms-core/src/region.rs'`.
 
 **Shape:**
@@ -204,7 +203,7 @@ pub enum Region {
 
 **Drift risk:** AWS launching a sixth MicroVM region leaves every caller on the `Unlisted`
 path, which works but discards the null-message diagnostic that is the whole reason the enum
-exists. Mitigation: the region list is the one constant with no model to check it against, so
+exists. Mitigation: the region list has no model to check it against, so
 re-read it whenever `docs/PLATFORM.md` gains a dated region finding and update both
 `microvms-core/src/region.rs:73` and `scripts/check-model-drift.py`'s `PINNED_REGIONS` in the
 same commit.
@@ -223,7 +222,7 @@ same commit.
   `microvms-core/src/session/{http,proxy}.rs`
 - `microvms-core/tests/turmoil_client.rs:66`
 
-Count: 17 non-declaring files, from
+Count at 9c462f0: 17 non-declaring files, from
 `rg -l '\bSession\b' --type rust --glob '!microvms-core/src/session/mod.rs'`.
 
 **Shape:**
@@ -273,7 +272,7 @@ the scope and the header are assigned from one value.
 - `microvms-cli/src/envelope.rs:321-339` — writes `data.kind` from it.
 - `microvms-cli/src/exit.rs:336-365` — keys the remedy suggestion on it where two conditions
   share an exit code.
-- `microvms-cli/src/exit.rs:534-560` — pins which five collapse onto `ERR_PROTOCOL`.
+- `microvms-cli/src/exit.rs:534-560` — pins which ones collapse onto `ERR_PROTOCOL`.
 - `microvms-cli/src/guards.rs:2470`
 - `microvms-py/src/errors.rs:161-164` — sets `.wire_kind` on the raised exception.
 - `microvms-js/src/errors.rs:70-80`, `:152-158` — the cause's cause, and `wire_kinds()`.
@@ -281,12 +280,12 @@ the scope and the header are assigned from one value.
   `session/{exec,files,http,mod,proxy,sse}.rs`
 - `microvms-core/tests/turmoil_client.rs:63`
 
-Count: 15 non-declaring files, from
+Count at 9c462f0: 15 non-declaring files, from
 `rg -l '\bWireKind\b' --type rust --glob '!microvms-core/src/error.rs'`.
 
 **Shape:**
 
-The thirteen variants are listed at `microvms-core/src/error.rs:219-268`. The load-bearing
+The variants are listed at `microvms-core/src/error.rs:219-268`. The load-bearing
 member is the status table, because it is where a consumer's 400-versus-404 distinction is
 either preserved or lost:
 
@@ -317,8 +316,8 @@ either preserved or lost:
 - **5xx *does* fall back, and 503 is the one exception.** `microvms-core/src/error.rs:535-540`
   — "come back in a moment" is not "the daemon broke".
 - **`status()` and `from_status()` are inverses wherever both are defined**, asserted at
-  `microvms-core/src/error.rs:546-556`, and four variants deliberately have no status
-  (`Transport`, `AuthTokenMint`, `ExecTimeout`, `OutputGap` — `:326-329`).
+  `microvms-core/src/error.rs:546-556`, and `Transport`, `AuthTokenMint`, `ExecTimeout`,
+  and `OutputGap` deliberately have no status (`:326-329`).
 - **The `as_str` strings are Python exception class names, not a re-spelling.**
   `microvms-core/src/error.rs:288-291` — the conformance oracle compares against them, and
   `conformance/run_rs.py:187-196` reads them out of `data.kind`.
@@ -326,7 +325,7 @@ either preserved or lost:
   `data.kind` means the client refused before any call. The CLI preserves that by inserting
   the key only when a wire kind exists (`microvms-cli/src/envelope.rs:326-328`), and
   `microvms-core/src/error.rs:562-567` asserts a local reject carries none.
-- **Exactly five variants are retryable**, named as literals so a sixth added by mistake
+- **The retryable variants are named as literals**, so one added by mistake
   fails a test rather than a retry loop (`microvms-core/src/error.rs:485-501`).
 
 **Drift risk:** a new variant added to `WireKind` reaches `error_kind()` as a compile error
@@ -346,7 +345,7 @@ declare one whenever the daemon does.
 - `microvms-py/src/sandbox.rs:6`, `microvms-py/src/session.rs:27`, `microvms-py/src/runtime.rs:12`
 - `microvms-js/src/sandbox.rs:6`, `microvms-js/src/session.rs:7`, `microvms-js/src/region.rs:11`
 
-Count: 14 non-declaring files, from
+Count at 9c462f0: 14 non-declaring files, from
 `rg -l '\bSandbox\b' --type rust --glob '!microvms-core/src/sandbox.rs'`.
 
 **Shape:**
@@ -393,7 +392,7 @@ pub struct Sandbox {
 
 - **Every field is private; the contract is the accessor set.** `lifecycle()`,
   `token_installed()`, `image_exists()`, `was_terminated()`, `bootstrap_count()` at
-  `microvms-core/src/sandbox.rs:771-791` are named after the symspec's five state variables,
+  `microvms-core/src/sandbox.rs:771-791` are named after the symspec's state variables,
   so a consumer asserting against the formal model reads them rather than reconstructing
   state.
 - **`Suspended` is still billing.** `Lifecycle::is_live` at
@@ -417,7 +416,7 @@ pub struct Sandbox {
 - **`Debug` omits the agent token** (`microvms-core/src/sandbox.rs:644-648`), so a consumer
   logging a sandbox does not leak the credential.
 
-**Drift risk:** the six `Lifecycle` variants and the six `MICROVM_STATES` wire strings are two
+**Drift risk:** the `Lifecycle` variants and the `MICROVM_STATES` wire strings are two
 readers of one AWS fact, and `microvms-core/src/constants.rs:341-347` states plainly that a
 wire string cannot be exhaustively matched. A state AWS respells fails the model gate
 (`scripts/check-model-drift.py`) and a subset test, but does not fail to compile.
@@ -489,7 +488,7 @@ impl StreamKind {
 `microvms-js/src/process.rs:172` and silently routes to stdout. Mitigation: rewrite
 `is_stderr` as a total match returning the channel, so the Node binding fails to build.
 
-## protocol::exec::Phase — the exec lifecycle, and its two redundant name tables
+## protocol::exec::Phase — the exec lifecycle, and its redundant name tables
 
 **Producer:** `protocol/src/exec.rs:22-54`
 
@@ -552,24 +551,24 @@ impl Phase {
   `agentd/src/exec.rs:92-99` — after an ack, `result` is `None` again and is no longer usable
   as "has this exec finished?", so a stream attaching then would wait on a channel that never
   carries another message.
-- **`as_str` is meant to be the only phase-name table, and two consumers spell their own
+- **`as_str` is meant to be the only phase-name table, and some consumers spell their own
   anyway.** The bindings comply (`microvms-py/src/session.rs:596-599`,
   `microvms-js/src/session.rs:993-997`), but `microvms-core/src/session/exec.rs:264-269` and
-  `microvms-cli/src/commands/attached.rs:442-448` each hand-write all three strings. Those
+  `microvms-cli/src/commands/attached.rs:442-448` each hand-write every phase string. Those
   matches are exhaustive, so a new *variant* is a compile error — a renamed *wire spelling* is
   not, because `as_str` and serde would move together under the test at
-  `protocol/src/exec.rs:318` while the two copies keep emitting the old string.
+  `protocol/src/exec.rs:318` while the hand-written copies keep emitting the old string.
 - **`ALL` is in lifecycle order**, and the CLI's `phase_name` deliberately avoids `Debug`
   because `Debug` emits `Running` where the wire carries `running`
   (`microvms-cli/src/commands/attached.rs:437-441`).
 
 **Drift risk:** renaming a phase on the wire (a `#[serde(rename)]` on a variant) updates
-`as_str` under compiler pressure from `protocol/src/exec.rs:318` but leaves the two
+`as_str` under compiler pressure from `protocol/src/exec.rs:318` but leaves the
 hand-spelled tables emitting the old string, so the CLI envelope and a core timeout message
 would disagree with the daemon's own JSON. Mitigation: route both call sites through
 `Phase::as_str` and delete the local tables.
 
-## protocol::health::Health — the liveness answer, with two defaulted fields
+## protocol::health::Health — the liveness answer, with defaulted fields
 
 **Producer:** `protocol/src/health.rs:10-89` (`Health`), `:92-102` (`DiskHealth`)
 
@@ -624,7 +623,7 @@ pub struct Health {
     pub identity_repaired: bool,
 ```
 
-The two defaulted fields, and the reason the asymmetry is deliberate
+The defaulted `busy` and `execs` fields, and the reason the asymmetry is deliberate
 (`protocol/src/health.rs:44-88`):
 
 ```rust
@@ -667,7 +666,7 @@ pub struct DiskHealth {
 
 **Assumptions consumers make:**
 
-- **`busy: false` is not an assertion of idleness.** `busy` and `execs` are the only
+- **`busy: false` is not an assertion of idleness.** `busy` and `execs` are
   `#[serde(default)]` fields (`protocol/src/health.rs:75`, `:87`), and the reason at
   `:68-74` is that the daemon is baked into an image while the client installs separately —
   so `false`/`0` is also what a pre-feature daemon returns. A required field would turn a
@@ -677,7 +676,7 @@ pub struct DiskHealth {
   a proxy that terminates outside the guest, so in-guest traffic cannot reset the idle timer.
 - **`disk: None` is not `disk: 0`.** Asserted at `protocol/src/health.rs:111-128`:
   unmeasurable is not full, and a monitor that conflated them would page on a missing
-  `statvfs`. Both bindings preserve the distinction by flattening into three `Option`s
+  `statvfs`. Both bindings preserve the distinction by flattening into `Option`s
   (`microvms-py/src/session.rs:77-79`, `microvms-js/src/session.rs:147-149`).
 - **`busy` and `execs` answer different questions.** `protocol/src/health.rs:78-86` —
   `busy: false, execs: 7` is a VM holding seven unacked results, and terminating it loses
@@ -702,7 +701,7 @@ first release, and take `busy`'s doc comment (`protocol/src/health.rs:68-74`) as
 - `agentd/src/exec.rs:87-90` (re-export; the daemon's extractor target)
 - `microvms-core/src/session/mod.rs:380` — `pub async fn run(&self, req: protocol::exec::StartRequest)`
 - `microvms-cli/src/commands/lifecycle.rs:1917` — `pub fn start_request(spec: StartSpec<'_>) -> microvms_core::protocol::exec::StartRequest`
-- `microvms-py/src/session.rs:338`, `:400` — two construction sites
+- `microvms-py/src/session.rs:338`, `:400` — construction sites
 - `microvms-js/src/session.rs:280` — `fn into_request(self, command: Either<String, Vec<String>>) -> protocol::exec::StartRequest`
 
 **Shape:**
@@ -834,7 +833,7 @@ no signal that it belongs to the finished-exec half. Mitigation: `agentd/tests/s
 already asserts `definition_collisions == []`; extend it to assert the expected `$defs` key
 set so a flatten added or removed shows up as a named failure.
 
-## The `/v1/exec/{id}/stream` SSE contract — three payloads and three event names
+## The `/v1/exec/{id}/stream` SSE contract — its payloads and event names
 
 **Producer:** `protocol/src/exec.rs:180-206` (`OutputEvent`, `GapEvent`, `ExitEvent`), `:256-258` (`EVENT_*`), `:171-178` (`StreamQuery`)
 
@@ -845,7 +844,7 @@ set so a flatten added or removed shows up as a named failure.
 - `microvms-core/src/session/sse.rs:272` — matches on `protocol::exec::EVENT_OUTPUT` /
   `EVENT_GAP`, and deserializes each payload into `ExecEvent` (`microvms-core/src/session/sse.rs:240-256`).
 - `microvms-cli/src/commands/attached.rs:253`, `:1027` — renders `ExitEvent` into the NDJSON stream.
-- `microvms-core/tests/turmoil_client.rs:855`, `:870` — drives all three event names under
+- `microvms-core/tests/turmoil_client.rs:855`, `:870` — drives every event name under
   simulated faults.
 
 **Shape:**
@@ -911,7 +910,7 @@ pub const EVENT_EXIT: &str = "exit";
   (`protocol/src/exec.rs:174-177`) — not "everything the command ever wrote". The window is
   `stream_replay_bytes: 1048576` in `docs/schema.json`.
 
-**Drift risk:** a fourth event name added on the daemon side is dropped silently by
+**Drift risk:** a new event name added on the daemon side is dropped silently by
 `microvms-core/src/session/sse.rs` (`Ok(None)`), which is the correct degradation for an old
 client but means a *new* client failing to dispatch a name it should handle looks identical.
 Mitigation: the `EVENT_*` constants are the single source; a consumer adding dispatch should
@@ -978,7 +977,7 @@ pub fn error(failure: &CliError) -> Value {
   takes the CLI at its word and reads them directly.
 - **Exactly one JSON object reaches stdout, except on the streaming path.**
   `microvms-cli/src/envelope.rs:4-11` — progress goes to stderr always, and
-  `microvms-cli/tests/thinness.rs:503` asserts no module but `envelope` and two `main`
+  `microvms-cli/tests/thinness.rs:503` asserts no module but `envelope` and named `main`
   exceptions writes to stdout. `conformance/run_rs.py:252-258` types a second document as an
   `EnvelopeError`, deliberately distinct from a protocol result, because it means the binary
   is wrong.
@@ -992,7 +991,7 @@ pub fn error(failure: &CliError) -> Value {
   `conformance/run_rs.py:268-271` relies on this to pass `--quiet` on every invocation.
 - **`data.kind` is the only place the daemon's fine status survives.**
   `microvms-cli/src/envelope.rs:27-31` names `conformance/run_rs.py` as the consumer that
-  needs it, because `ERR_PROTOCOL` covers five `WireKind`s.
+  needs it, because `ERR_PROTOCOL` covers several `WireKind`s.
 - **`apiVersion` bumps on a meaning change, not on a new command.**
   `microvms-cli/src/envelope.rs:62-65` — adding a command changes `microvm manifest`, not this.
 
@@ -1007,45 +1006,46 @@ edited in one commit.
 
 - **`microvms_core::SizeClass`** — `microvms-core/src/sizing.rs:112-119`, five closed baselines
   with `ALL` at `:132`, `DEFAULT = Mib2048` at `:129`, and the one S2 boundary at
-  `from_baseline_mib` (`:146`). 13 consumer files across cli, py, js, and core's cost engine.
+  `from_baseline_mib` (`:146`). 13 consumer files at 9c462f0, across cli, py, js, and core's
+  cost engine.
 - **`microvms-cli::Exit` and `EXIT_TABLE`** — `microvms-cli/src/exit.rs:78-102`, `:173-258`.
-  Fourteen append-only rows; `#[repr(u8)]` with explicit discriminants so an inserted variant
-  cannot silently renumber the contract (`:74-77`). 9 consumer files.
+  Append-only rows; `#[repr(u8)]` with explicit discriminants so an inserted variant
+  cannot silently renumber the contract (`:74-77`).
 - **`microvms-cli::CliError`** — `microvms-cli/src/exit.rs:266-278`. Carries `wire_kind`,
   `suggestions`, and a `data` map so a partial result stays machine-readable on the failure
-  path. 9 consumer files.
+  path. 9 consumer files at 9c462f0.
 - **`microvms_core::session::ExecEvent` / `ExecResult`** — `microvms-core/src/session/sse.rs:240-256`,
-  `microvms-core/src/session/exec.rs:67-72`. The client-side view of the wire types, 8 and 7
-  consumer files.
+  `microvms-core/src/session/exec.rs:67-72`. The client-side view of the wire types;
+  `ExecEvent` had 8 consumer files at 9c462f0.
 - **`microvms_core::sandbox::TeardownReport`** — `microvms-core/src/sandbox.rs:493-520`.
   Returned where a `finally` would run; `image_deleted: Option<bool>` separates "not asked
-  for" from "failed". 5 consumer files.
+  for" from "failed". 5 consumer files at 9c462f0.
 - **`docs/schema.json`** — generated by `agentd/src/bin/schema.rs`, gated by
-  `mise.toml:184-189`. 20 routes, 21 `$defs`, `protocol_version: "1"`,
+  `mise.toml:184-189`. Routes, `$defs`, `protocol_version: "1"`,
   `definition_collisions: []`, plus a `limits` object publishing every operative cap.
   `agentd/tests/schema_artifact.rs:149-328` probes the real router against it.
 - **`microvms-py/microvms.pyi` + `microvms-py/py.typed`** — generated by
-  `scripts/generate-py-stubs.py`, gated by `mise.toml:219-235`. 1476 lines, with the
+  `scripts/generate-py-stubs.py`, gated by `mise.toml:219-235`, with the
   do-not-edit header at `microvms-py/microvms.pyi:1-8`. The script pins `maturin@1.14.1`
   because maturin 1.15.0 moved `generate-stubs` output into the module's package dir, so
   bumping that pin breaks `mise run stubs:check`.
 - **`microvms-js/index.d.ts`** — generated by `napi build --platform`
-  (`microvms-js/package.json:12`), gitignored at `.gitignore:29`, **no drift gate**. 1075
-  lines, declared as the package's `"types"` at `microvms-js/package.json:8`.
+  (`microvms-js/package.json:12`), gitignored at `.gitignore:29`, **no drift gate**.
+  Declared as the package's `"types"` at `microvms-js/package.json:8`.
 - **`pinned_rates()` and its Python twin** — `microvms-core/src/cost.rs:1011-1026` against
   `scripts/check-live-rates.py:119-145`. A deliberate second copy: `:112-118` states that
   importing the values would compare a table against itself. `verify_twin` (`:148-211`) reads
   the Rust literals as text, so a reflow of `pinned_rates()` is a named exit 1.
   `every_rate_byte_matches_the_python_literal` (`microvms-core/src/cost.rs:2179-2196`) checks
   scale as well as value.
-- **`microvms-core/src/constants.rs` against the botocore service model** — 40+ constants
+- **`microvms-core/src/constants.rs` against the botocore service model** — the constants
   (`MODEL_API_VERSION = "2025-09-09"` at `:57`, `MAX_RUN_HOOK_PAYLOAD_BYTES = 4096` at `:83`)
   read back out of the shipped `lambda-microvms` model by `scripts/check-model-drift.py`.
   `DOCUMENTED_RUN_HOOK_PAYLOAD_BYTES = 16_384` (`:97`) is retained as the contradicted prose
   figure the check caught.
 - **`session_constants`, which diverges between the two bindings** —
-  `microvms-py/src/session.rs:578-604` publishes 7 keys;
-  `microvms-js/src/session.rs:990-1025` publishes 10, adding `wsSubprotocol`,
+  `microvms-js/src/session.rs:990-1025` publishes every key
+  `microvms-py/src/session.rs:578-604` does, plus `wsSubprotocol`,
   `wsAuthSubprotocolPrefix`, `wsPortSubprotocolPrefix`. Nothing asserts the two dictionaries
   agree.
 - **`protocol::hook::RunHookEnvelope` / `RunHook`** — `protocol/src/hook.rs:26-30`, `:45-54`.
@@ -1059,7 +1059,7 @@ edited in one commit.
   `mode` is a string so `0644` and `644` both parse (`:21-23`); line ranges are 1-based
   inclusive on both ends with `end_line` past EOF reading through, verbatim from the AI SDK
   harness contract (`:34-37`).
-- **`protocol::exec::ErrorBody` and the ten `ERROR_*` slugs** — `protocol/src/exec.rs:245-249`,
+- **`protocol::exec::ErrorBody` and the `ERROR_*` slugs** — `protocol/src/exec.rs:245-249`,
   `:266-286`. A client branches on `error` plus the status code and never on `detail`
   (`:240-244`). The fs routes answer `text/plain` instead (`protocol/src/fs.rs:5-6`), and
   `ErrorBody` gets **no `$defs` entry** in `docs/schema.json`.
@@ -1067,20 +1067,20 @@ edited in one commit.
   `protocol/src/lib.rs:40-54` states what a client must do on each mismatch case, including that a
   differing `daemon_version` under the same `protocol_version` must not be treated as an
   error.
-- **`spec/core.symspec.json` and `spec/agentd.symspec.json`** — 51 EARS requirements held as
+- **`spec/core.symspec.json` and `spec/agentd.symspec.json`** — EARS requirements held as
   an id-keyed object (each with `key`, `patternType`, `priority`, `sentence`, `systemName`,
-  `verificationMethod`) plus a `stateModel` whose five variables are mirrored field-for-field
+  `verificationMethod`) plus a `stateModel` whose variables are mirrored field-for-field
   by `microvms-core/src/sandbox.rs:595-603`.
 - **The workspace dependency edges** — `microvms-cli/tests/dependency_direction.rs:68-125`
   asserts them as equalities, not as `assert!(no edge)`, because a stub crate with no
   dependencies passes a negative assertion (`:11-12`).
-  `microvms-cli/tests/thinness.rs:66` holds the CLI's six-entry allowlist, each with a
+  `microvms-cli/tests/thinness.rs:66` holds the CLI's allowlist, each entry with a
   paragraph, and `:145-213` asserts the direct dependency set is exactly that.
 
 ## See also
 
-- [impact analysis](impact-analysis.md) — 40 shared source citations
-- [business logic](business-logic.md) — 22 shared source citations
-- [public api](../reference/public-api.md) — 22 shared source citations
-- [debugging guide](debugging-guide.md) — 16 shared source citations
-- [tech debt](tech-debt.md) — 13 shared source citations
+- [impact analysis](impact-analysis.md)
+- [business logic](business-logic.md)
+- [public api](../reference/public-api.md)
+- [debugging guide](debugging-guide.md)
+- [tech debt](tech-debt.md)
