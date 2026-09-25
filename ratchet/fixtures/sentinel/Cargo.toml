@@ -4,3 +4,7 @@
 [workspace]
 members = ["adapter", "kernel"]
 resolver = "3"
+
+# CI's license-consistency step asks every tracked Cargo.toml to declare a license.
+[workspace.package]
+license = "Apache-2.0"
