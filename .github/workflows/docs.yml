@@ -76,7 +76,9 @@ jobs:
       # `uv run --locked --script site/scripts/reference/griffe_dump.py`, whose inline block pins
       # Griffe exactly and whose committed `.lock` beside it is what `--locked` enforces. The same
       # hash as every other `setup-uv` in this repo, so one Dependabot bump moves them together.
-      # No cache: the script's whole environment is one pure-Python wheel.
+      # No cache: the script's whole environment is one pure-Python wheel. uv also runs
+      # `scripts/ratchet-history.py` for the Architecture drift page, which reads the history of
+      # `ratchet/drift.json` out of the full clone above and has no dependencies at all.
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           enable-cache: false

@@ -1,0 +1,10 @@
+# A file that marks itself test-only with an inner `#![cfg(test)]`.
+id: test-file
+language: rust
+severity: info
+message: a test-only file
+rule:
+  kind: inner_attribute_item
+  regex: '^#!\[cfg\(test\)\]$'
+  inside:
+    kind: source_file

@@ -10,12 +10,12 @@ import { AUDITED_PAGES, BASE, DIST_DIR, KNOWN_A11Y_FAILURES } from "../src/gates
 import { type StaticSite, serveStatic } from "./static-server.js"
 
 /**
- * The accessibility gate: axe-core over nine representative pages, plus four probes for things axe
+ * The accessibility gate: axe-core over a representative sample of pages, plus four probes for things axe
  * does not do or does not do reliably. Ported from memhtml-public's `apps/docs/tests/a11y.test.ts`.
  *
- * Nine pages rather than the whole corpus, and that bound is the reason this gate will still be here
+ * A sample rather than the whole corpus, and that bound is the reason this gate will still be here
  * in a year: a check whose cost grows with the corpus gets deleted the first time it makes someone
- * wait. `src/gates.ts` says why these nine, and `tests/built-site.test.ts` proves the sample is not
+ * wait. `src/gates.ts` says why these pages, and `tests/built-site.test.ts` proves the sample is not
  * silently narrower than the site.
  *
  * WCAG 2.2 AA is asserted through axe's own tag set. `best-practice` is deliberately absent: it is
@@ -23,7 +23,7 @@ import { type StaticSite, serveStatic } from "./static-server.js"
  * teaches its readers that AA failures are matters of taste.
  *
  * Every page is visited ONCE, in `beforeAll`, and each case reads the findings collected there. Two
- * reasons: nine page loads instead of forty-five, and the spacing probe has to restyle the page,
+ * reasons: one load per page instead of one per case, and the spacing probe has to restyle the page,
  * which no case that ran after it could be trusted to un-see.
  *
  * A page that is not in the build fails here by name, with its HTTP status, rather than auditing the

@@ -32,6 +32,10 @@ lefthook = "latest"
 node = "24"
 "cargo:cargo-deny" = "latest"
 "aqua:rhysd/actionlint" = "latest"
+# `ratchet:check`'s Rust collectors. Exact, unlike the rest, because a tree-sitter grammar update
+# can change what a rule matches, and the ratchet fails on any change in what's found. CI
+# installs the same release by checksum (ci.yml's `security` job, a required check).
+"aqua:ast-grep/ast-grep" = "0.43.0"
 
 [env]
 # The shipping target. MicroVMs are ARM64-only, and a static binary is what lets
@@ -430,7 +434,32 @@ depends = [
   "build",
   "background:check",
   "trace:check",
+  "ratchet:check",
 ]
+
+[tasks."ratchet:check"]
+description = "Fail on new layering drift, and on a fix ratchet/drift.json doesn't record yet"
+# `ratchet/drift.json` is the count of places a driving adapter does work that belongs below it,
+# each with the issue that removes it (#281). A pass/fail rule can't say whether that count is
+# shrinking, and `tests/thinness.rs` showed it can move drift sideways: it pushed an upload into
+# an `aws s3 cp` subprocess it couldn't see. The script's docstring has the four rules.
+#
+# In `check` for `model:check`'s reason: `cargo metadata --no-deps --offline` and ast-grep over
+# local files, so no network, no credentials, no money. Rule 3 compares with the merge base of
+# HEAD and origin/main, a local ref; CI passes the PR's base branch, or HEAD^ on main.
+#
+# The unit tests run first because they build throwaway workspaces and run both tools over them;
+# if a tool changed under the pin, the tests say so before the gate reads the tree through it.
+run = [
+  "uv run python -m unittest discover -s scripts -p 'test_ratchet.py'",
+  "./scripts/ratchet.py",
+]
+
+[tasks."ratchet:update"]
+description = "Delete the entries ratchet/drift.json holds for drift that's gone. Never adds one"
+# Adding an entry is a hand edit on purpose, and the check refuses one the base branch doesn't
+# have: new drift is fixed or recorded as a decision with its reason, never waved through.
+run = "./scripts/ratchet.py update"
 
 [tasks."trace:check"]
 description = "Every traced requirement appears in the model, a Gherkin tag, a fuzz harness, a test, and the code; docs/TRACEABILITY.md is current"

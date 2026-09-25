@@ -1,0 +1,22 @@
+[package]
+name = "adapter"
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+kernel = { path = "../kernel" }
+serde = "1"
+tar = "0.4"
+
+# A target-specific repeat of a normal dependency is still one key.
+[target.'cfg(unix)'.dependencies]
+tar = "0.4"
+
+[build-dependencies]
+cc = "1"
+
+# Out of scope: a dev dependency never ships.
+[dev-dependencies]
+tempfile = "3"

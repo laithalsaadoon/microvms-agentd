@@ -9,7 +9,7 @@ behavior and [Trust](docs/TRUST.md) before changing authentication or execution.
 ```bash
 mise install
 mise run install       # install git hooks
-mise run check         # code, security, tests, schema, stubs and declarations, API drift, packaging, build, traceability
+mise run check         # code, security, tests, schema, stubs and declarations, API drift, packaging, build, traceability, layering drift
 mise tasks             # all available tasks
 ```
 
@@ -44,6 +44,17 @@ For a new invariant guard, demonstrate that the test catches the intended
 failure, restore the implementation, and record the result in the PR. In
 network simulation tests, coordinate child processes through stdin rather than
 wall-clock sleeps: child processes and the simulator use different clocks.
+
+`mise run ratchet:check` holds `ratchet/drift.json` equal to the layering drift
+its collectors find, such as an adapter dependency outside `arch/placement.toml`
+or a subprocess in a shipping crate. A new finding fails, and so does a fix the
+file still lists: run `mise run ratchet:update` and commit the file. The check
+refuses an entry the base branch doesn't have, and a crate added to a set the
+base already has, so new drift moves below the adapter or goes under
+`decisions` with its reason. Moving recorded drift to another file or crate
+isn't a fix: re-key its entry in the same change. A re-keyed entry keeps its
+issue and changes its path or its text, not both, so a move and a rename land
+in separate PRs.
 
 ## Generated contracts and API changes
 

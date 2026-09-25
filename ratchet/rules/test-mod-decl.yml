@@ -1,0 +1,16 @@
+# `#[cfg(test)] mod x;`: the module's file is test-only, wherever it lives.
+id: test-mod-decl
+language: rust
+severity: info
+message: a test-only module declaration
+rule:
+  all:
+    - kind: mod_item
+    - matches: test-item
+    - not:
+        has:
+          field: body
+          kind: declaration_list
+    - has:
+        field: name
+        pattern: $NAME

@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "enforced": [],
+  "entries": [
+    { "category": "placement", "key": "microvms-cli -> const-hex", "issue": 260 },
+    { "category": "placement", "key": "microvms-cli -> globset", "issue": 260 },
+    { "category": "placement", "key": "microvms-cli -> notify", "issue": 285 },
+    { "category": "placement", "key": "microvms-cli -> sha2", "issue": 260 },
+    { "category": "placement", "key": "microvms-cli -> tar", "issue": 260 },
+    { "category": "subprocess", "key": "microvms-cli/src/seam.rs: Command::new(\"aws\")", "issue": 258 },
+    { "category": "subprocess", "key": "microvms-core/src/provision.rs: std::process::Command::new(&argv[0])", "issue": 284 },
+    { "category": "port-impl", "key": "microvms-cli/src/seam.rs: TokenMinter for PlaneMinter", "issue": 270 }
+  ],
+  "decisions": [
+    {
+      "category": "subprocess",
+      "key": "agentd/src/exec.rs: Command::new(program)",
+      "reason": "runs the caller's argv inside the VM; executing the user's commands is agentd's job"
+    },
+    {
+      "category": "subprocess",
+      "key": "agentd/src/exec.rs: Command::new(shell)",
+      "reason": "runs the caller's script under its shell inside the VM; executing the user's commands is agentd's job"
+    },
+    {
+      "category": "subprocess",
+      "key": "agentd/src/hook_handlers.rs: tokio::process::Command::new(path)",
+      "reason": "runs the image's lifecycle hook executables inside the VM; running hooks is agentd's job"
+    },
+    {
+      "category": "subprocess",
+      "key": "microvms-cli/src/commands/doctor.rs: std::process::Command::new(\"terraform\")",
+      "reason": "reads the local Terraform stack's outputs; no Rust library reads Terraform state backends"
+    }
+  ]
+}

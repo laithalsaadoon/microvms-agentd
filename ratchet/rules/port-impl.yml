@@ -1,0 +1,18 @@
+# Every trait impl outside test code. The script keeps the ones whose trait is one of core's
+# public traits (`port-trait`), by the last path segment, so the short and every qualified form
+# (`TokenMinter`, `microvms_core::session::TokenMinter`, a `crate::` re-export) are one rule.
+id: port-impl
+language: rust
+severity: info
+message: a port implementation
+rule:
+  all:
+    - kind: impl_item
+    - has:
+        field: trait
+        pattern: $TRAIT
+    - has:
+        field: type
+        pattern: $TYPE
+    - not:
+        matches: test-only

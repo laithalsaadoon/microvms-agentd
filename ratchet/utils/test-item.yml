@@ -1,0 +1,30 @@
+# An item compiled only for tests: one that follows `#[cfg(test)]`, or a function that follows
+# `#[test]` or `#[tokio::test(...)]`. The walk back over siblings passes other attributes and doc
+# comments, and it stops at the first sibling that is neither, so an item after a test-only item
+# isn't mistaken for one.
+id: test-item
+language: rust
+rule:
+  any:
+    - any:
+        - kind: mod_item
+        - kind: function_item
+        - kind: impl_item
+        - kind: trait_item
+        - kind: struct_item
+        - kind: enum_item
+        - kind: const_item
+        - kind: static_item
+      follows:
+        stopBy:
+          not:
+            any: [kind: attribute_item, kind: line_comment, kind: block_comment]
+        kind: attribute_item
+        regex: '^#\[cfg\(test\)\]$'
+    - kind: function_item
+      follows:
+        stopBy:
+          not:
+            any: [kind: attribute_item, kind: line_comment, kind: block_comment]
+        kind: attribute_item
+        regex: '^#\[(tokio::)?test(\(.*\))?\]$'

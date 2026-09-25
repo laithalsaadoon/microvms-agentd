@@ -1,0 +1,12 @@
+{
+  "placement": ["adapter -> cc (build)", "adapter -> tar"],
+  "subprocess": [
+    "adapter/src/lib.rs: std::process::Command::new(\"aws\")",
+    "adapter/src/lib.rs: tokio::process::Command::new(\"gh\")",
+    "kernel/src/lib.rs: std::process::Command::new(&argv[0])"
+  ],
+  "port-impl": [
+    "adapter/src/lib.rs: TokenMinter for Minter",
+    "adapter/src/session.rs: Fetch for Session"
+  ]
+}

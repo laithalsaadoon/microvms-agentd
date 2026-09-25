@@ -162,7 +162,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          # betterleaks scans history, and a shallow clone has none.
+          # betterleaks scans history, and the ratchet's rule 3 reads the base branch's copy of
+          # ratchet/drift.json. A shallow clone has neither.
           fetch-depth: 0
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
@@ -224,6 +225,31 @@ jobs:
         uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
         with:
           fail-on-error: true
+      # The layering drift ratchet (#281). It runs in this job rather than its own because this
+      # job is a required status check, and rule 3 only holds where it can block a merge: a
+      # separate job would go red and the PR would merge anyway.
+      # For `cargo metadata --no-deps`, which reads manifests and builds nothing, so no cache.
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: stable
+      # The version `mise.toml` pins, by checksum, the way betterleaks arrives above. The hash
+      # is the release's own asset digest. Refreshing it means the version here, the one in
+      # `mise.toml`, and this hash, together.
+      - name: install ast-grep (pinned, checksummed)
+        run: |
+          curl -sSfL -o ast-grep.zip https://github.com/ast-grep/ast-grep/releases/download/0.43.0/app-x86_64-unknown-linux-gnu.zip
+          echo "a26253a9c821d935f7e383e40f0de7c2ca62a4121de1f73a6d81ec32eae631e0  ast-grep.zip" | sha256sum -c -
+          unzip -q ast-grep.zip ast-grep -d "$RUNNER_TEMP/ast-grep"
+          echo "$RUNNER_TEMP/ast-grep" >> "$GITHUB_PATH"
+      - name: ratchet unit tests
+        run: uv run python -m unittest discover -s scripts -p 'test_ratchet.py'
+      # A pull request compares with its base branch. A push to main compares with the commit
+      # before it: the merge base of main and itself is itself, and rule 3 would pass vacuously.
+      # The script appends the per-category counts and their change to the job summary.
+      - name: ratchet check
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
+        run: ./scripts/ratchet.py --base "$BASE"
 
   sbom:
     name: SBOM and vulnerability scans

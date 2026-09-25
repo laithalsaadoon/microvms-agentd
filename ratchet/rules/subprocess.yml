@@ -1,0 +1,17 @@
+# Every `Command::new` call outside test code, qualified or not, std or tokio.
+id: subprocess
+language: rust
+severity: info
+message: a subprocess
+rule:
+  all:
+    - kind: call_expression
+    - has:
+        field: function
+        regex: '(^|::)\s*Command\s*::\s*new$'
+        pattern: $FN
+    - has:
+        field: arguments
+        pattern: $ARGS
+    - not:
+        matches: test-only

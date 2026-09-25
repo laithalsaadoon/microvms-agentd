@@ -1,0 +1,14 @@
+# A macro invocation whose arguments hold a `Command::new`, outside test code. tree-sitter keeps
+# a macro's arguments as raw tokens, so `subprocess` can't see a call wrapped in `tokio::select!`
+# or `vec![...]`. The script reads the calls out of the matched text and keys each one the way
+# `subprocess` does, so wrapping a recorded call in a macro doesn't re-key it.
+id: subprocess-in-macro
+language: rust
+severity: info
+message: a subprocess inside a macro invocation
+rule:
+  all:
+    - kind: macro_invocation
+    - regex: 'Command\s*::\s*new'
+    - not:
+        matches: test-only
