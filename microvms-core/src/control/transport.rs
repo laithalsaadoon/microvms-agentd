@@ -311,6 +311,44 @@ pub async fn send_with_retry(transport: &dyn Transport, call: Call) -> Result<Re
         .await
 }
 
+/// [`send_with_retry`], answering `Ok` for the statuses in `accept` as well as for a
+/// success.
+///
+/// For a call whose failure status is an answer rather than an error: `GetMicrovmImage`'s 404
+/// is "there is no image under this name", which `ensure_image` reads as a state
+/// ([`crate::control::ensure`]). Retries are unchanged — a throttle or a 5xx is still
+/// retried — and every other status is still classified by [`classify_failure`].
+pub async fn send_accepting(
+    transport: &dyn Transport,
+    call: Call,
+    accept: &[u16],
+) -> Result<Reply, Error> {
+    use backon::{ExponentialBuilder, Retryable};
+
+    let operation = call.operation;
+    let attempt = || {
+        let call = call.clone();
+        async move {
+            let reply = transport.send(call).await?;
+            if reply.is_success() || accept.contains(&reply.status) {
+                return Ok(reply);
+            }
+            Err(classify_failure(operation, &reply))
+        }
+    };
+
+    attempt
+        .retry(
+            ExponentialBuilder::default()
+                .with_jitter()
+                .with_min_delay(std::time::Duration::from_millis(200))
+                .with_max_delay(std::time::Duration::from_secs(20))
+                .with_max_times(5),
+        )
+        .when(Error::retryable)
+        .await
+}
+
 /// Turns a failure status and body into an [`Error`] of the right kind.
 ///
 /// # The statuses are the control plane's, not the daemon's
@@ -440,34 +478,11 @@ impl SignedTransport {
     /// are temporary, so each request re-resolves and picks up a rotation. That is why
     /// this is a provider field and not a `Credentials` field.
     pub async fn new(region: Region) -> Result<Self, Error> {
-        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(aws_config::Region::new(region.as_str().to_string()))
-            .load()
-            .await;
-        let credentials = config.credentials_provider().ok_or_else(|| {
-            Error::new(
-                ErrorKind::Credentials,
-                "no credentials provider resolved. The default chain looks at environment \
-                 variables, the shared config files, SSO, a credential process, then the EC2 \
-                 instance metadata service; none of them answered. `aws sts get-caller-identity` \
-                 is the cheapest way to see the same failure.",
-            )
-        })?;
-
-        let http = reqwest::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(10))
-            // Generous rather than tight: a control-plane call is not a hot path, and a
-            // timeout shorter than the service's own tail latency turns a slow answer into
-            // a retry storm against an operation that may not be idempotent.
-            .timeout(std::time::Duration::from_secs(60))
-            .build()
-            .map_err(|error| {
-                Error::new(
-                    ErrorKind::Precondition,
-                    format!("could not build the HTTP client: {error}"),
-                )
-                .with_source(error)
-            })?;
+        let credentials = default_credentials(&region).await?;
+        // Generous rather than tight: a control-plane call is not a hot path, and a timeout
+        // shorter than the service's own tail latency turns a slow answer into a retry storm
+        // against an operation that may not be idempotent.
+        let http = http_client(std::time::Duration::from_secs(60))?;
 
         Ok(Self {
             endpoint: endpoint_for(&region),
@@ -482,6 +497,62 @@ impl SignedTransport {
     fn url(&self, call: &Call) -> String {
         format!("{}{}", self.endpoint, call.path)
     }
+}
+
+/// The default credential chain for `region`, as a provider re-asked per request.
+///
+/// Shared by [`SignedTransport`] and [`crate::control::SignedBuildServices`], so the STS and
+/// S3 calls `ensure_image` makes resolve exactly the identity the control-plane calls do.
+pub(crate) async fn default_credentials(
+    region: &Region,
+) -> Result<aws_credential_types::provider::SharedCredentialsProvider, Error> {
+    let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+        .region(aws_config::Region::new(region.as_str().to_string()))
+        .load()
+        .await;
+    config.credentials_provider().ok_or_else(|| {
+        Error::new(
+            ErrorKind::Credentials,
+            "no credentials provider resolved. The default chain looks at environment \
+             variables, the shared config files, SSO, a credential process, then the EC2 \
+             instance metadata service; none of them answered. `aws sts get-caller-identity` \
+             is the cheapest way to see the same failure.",
+        )
+    })
+}
+
+/// A reqwest client with a 10-second connect timeout and the given overall `timeout`.
+pub(crate) fn http_client(timeout: std::time::Duration) -> Result<reqwest::Client, Error> {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(timeout)
+        .build()
+        .map_err(|error| {
+            Error::new(
+                ErrorKind::Precondition,
+                format!("could not build the HTTP client: {error}"),
+            )
+            .with_source(error)
+        })
+}
+
+/// Resolves the current credentials from `provider`, naming `operation` on failure.
+pub(crate) async fn resolve_credentials(
+    provider: &aws_credential_types::provider::SharedCredentialsProvider,
+    operation: &str,
+) -> Result<aws_credential_types::Credentials, Error> {
+    use aws_credential_types::provider::ProvideCredentials as _;
+
+    provider.provide_credentials().await.map_err(|error| {
+        Error::new(
+            ErrorKind::Credentials,
+            format!(
+                "could not resolve credentials for {operation}: {error}. Waiting will not fix \
+                 this — the identity is wrong or absent."
+            ),
+        )
+        .with_source(error)
+    })
 }
 
 /// `https://lambda.<region>.amazonaws.com`, from the model's `endpointPrefix`.
@@ -524,25 +595,9 @@ impl Transport for SignedTransport {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Reply, Error>> + Send + '_>>
     {
         Box::pin(async move {
-            use aws_credential_types::provider::ProvideCredentials as _;
-
             // Re-resolved per request so an instance-profile rotation is picked up. The
             // provider caches internally, so this is not a metadata call per request.
-            let credentials = self
-                .credentials
-                .provide_credentials()
-                .await
-                .map_err(|error| {
-                    Error::new(
-                        ErrorKind::Credentials,
-                        format!(
-                            "could not resolve credentials for {}: {error}. Waiting will not fix \
-                             this — the identity is wrong or absent.",
-                            call.operation
-                        ),
-                    )
-                    .with_source(error)
-                })?;
+            let credentials = resolve_credentials(&self.credentials, call.operation).await?;
 
             let url = self.url(&call);
             let body = call.body_bytes().to_vec();
@@ -618,16 +673,37 @@ fn sign_in_place(
     credentials: &aws_credential_types::Credentials,
     region: &Region,
 ) -> Result<(), Error> {
-    use aws_sigv4::http_request::{SignableBody, SignableRequest, SigningSettings, sign};
+    sign_for(
+        request,
+        credentials,
+        region,
+        SIGNING_NAME,
+        aws_sigv4::http_request::SigningSettings::default(),
+    )
+}
+
+/// Signs `request` in place with SigV4 for `service` in `region`, under `settings`.
+///
+/// The control plane signs as `lambda` with the default settings; the build services sign
+/// as `sts`, and as `s3` with S3's own settings (a single-encoded path and a signed
+/// `x-amz-content-sha256`), which is why the name and settings are parameters here.
+pub(crate) fn sign_for(
+    request: &mut http::Request<Vec<u8>>,
+    credentials: &aws_credential_types::Credentials,
+    region: &Region,
+    service: &str,
+    settings: aws_sigv4::http_request::SigningSettings,
+) -> Result<(), Error> {
+    use aws_sigv4::http_request::{SignableBody, SignableRequest, sign};
     use aws_sigv4::sign::v4;
 
     let identity = credentials.clone().into();
     let params: aws_sigv4::http_request::SigningParams = v4::SigningParams::builder()
         .identity(&identity)
         .region(region.as_str())
-        .name(SIGNING_NAME)
+        .name(service)
         .time(SystemTime::now())
-        .settings(SigningSettings::default())
+        .settings(settings)
         .build()
         .map_err(|error| {
             Error::new(

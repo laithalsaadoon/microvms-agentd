@@ -789,7 +789,7 @@ impl AgentVm {
     /// The create request for this VM's image, named per [`AgentVm::image_name`].
     ///
     /// `code_artifact_uri` is left **empty** for the caller to fill: the upload is theirs
-    /// (S3 is not in this crate's dependency set), and the key they choose is usually
+    /// (this path does not upload), and the key they choose is usually
     /// derived from the name this method just computed. `Sandbox::preflight` refuses a
     /// request whose URI is still blank.
     pub fn image_request(

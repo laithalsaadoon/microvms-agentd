@@ -171,10 +171,10 @@ impl ControlPlane {
     /// checks are [`Self::preflight`], so an uploading caller can run the same list before
     /// the upload and pay nothing for a request this client itself refuses.
     ///
-    /// The artifact is built here too, but **not** uploaded — S3 is not in this crate's
-    /// dependency set, so [`CreateImageRequest::code_artifact_uri`] is where the caller
-    /// says they have already put it. [`ControlPlane::build_artifact_for`] produces the
-    /// bytes to upload.
+    /// The artifact is built here too, but **not** uploaded:
+    /// [`CreateImageRequest::code_artifact_uri`] is where the caller says they have already
+    /// put it, and [`ControlPlane::build_artifact_for`] produces the bytes to upload.
+    /// [`crate::sandbox::Sandbox::ensure_image`] is the path that uploads for itself.
     pub async fn create_image(&self, request: CreateImageRequest) -> Result<Image, Error> {
         self.preflight(&request)?;
 

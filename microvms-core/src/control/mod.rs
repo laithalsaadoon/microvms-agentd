@@ -84,9 +84,12 @@
 
 pub mod artifact;
 pub mod connector;
+pub mod context;
+pub mod ensure;
 pub mod image;
 pub mod microvm;
 pub mod ops;
+pub mod services;
 pub mod token;
 pub mod transport;
 
@@ -100,8 +103,11 @@ pub use artifact::{
 pub use connector::{
     ConnectorIntent, EgressPosture, PLATFORM_HONOURS_OMITTED_EGRESS, egress_posture_for,
 };
+pub use context::{BuildContext, ContextEntry};
+pub use ensure::{EnsureImageRequest, EnsuredImage};
 pub use image::{Image, WaitOpts};
 pub use microvm::{Microvm, MicrovmFilter, ProxyToken, RunHookPayload};
+pub use services::{BuildServices, SignedBuildServices};
 
 use crate::error::{Error, ErrorKind};
 use crate::hooks::{BuildHookTimeout, RunHookTimeout};
@@ -329,8 +335,9 @@ pub struct CreateImageRequest {
     /// file into the shared snapshot through this field, which is the TRAP-5 property
     /// restated as a type.
     pub project_files: Option<ProjectFiles>,
-    /// Where the artifact is uploaded to. This client does not upload — S3 is not in the
-    /// crate's dependency set — so the caller puts the bytes there and passes the URI.
+    /// Where the artifact is uploaded to. `create_image` does not upload: the caller puts
+    /// the bytes there and passes the URI. [`crate::sandbox::Sandbox::ensure_image`] is the
+    /// path that uploads for itself ([`services`]).
     pub code_artifact_uri: String,
     /// The build role, which must grant logs on `/aws/lambda-microvms/*`.
     pub build_role_arn: String,

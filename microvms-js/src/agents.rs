@@ -19,7 +19,7 @@
 //!
 //! # The upload is still the caller's
 //!
-//! S3 is not in the core's dependency set. `findImage` says whether the content-named image
+//! The agent image path does not upload. `findImage` says whether the content-named image
 //! exists; `buildArtifact` gives the bytes to put at `s3://<bucket>/<name>.zip`; `buildImage`
 //! takes that URI.
 

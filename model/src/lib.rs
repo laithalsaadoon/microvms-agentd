@@ -35,6 +35,7 @@
 
 pub mod client;
 pub mod exec_start;
+pub mod image;
 pub mod output;
 pub mod posture;
 pub mod preflight;

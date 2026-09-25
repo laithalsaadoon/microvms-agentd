@@ -193,6 +193,11 @@ tokio = { version = "1.53", features = ["rt", "macros"] }
 # Temp state directories for the provisioning tests: random names, cleanup on drop.
 tempfile = "3"
 
+# An independent oracle for the `.dockerignore` matcher in `tests/context_fuzz.rs`: the
+# fuzzed matcher is hand-written, and the oracle translates the same patterns to regexes the
+# way moby's patternmatcher does. Already in the tree through the workspace.
+regex = "1.13"
+
 [[test]]
 name = "bdd_wrap"
 harness = false
@@ -213,6 +218,10 @@ harness = false
 # The behavior spec for BIND-14..16 (#223): size-class selection and preflight.
 [[test]]
 name = "bdd_preflight"
+harness = false
+
+[[test]]
+name = "bdd_ensure"
 harness = false
 
 [lints.rust]

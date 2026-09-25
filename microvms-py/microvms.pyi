@@ -490,6 +490,39 @@ class Duration:
         """
 
 @final
+class EnsuredImage:
+    """
+    What `Sandbox.ensure_image` returns: the ready image and how this call got it.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def artifact_uri(self, /) -> str:
+        """
+        `s3://<bucket>/<prefix>/<name>/artifact.zip`, whether or not this call uploaded it.
+        """
+    @property
+    def image(self, /) -> Image:
+        """
+        The ready image; pass `image.identifier` to `run`.
+        """
+    @property
+    def reused(self, /) -> bool:
+        """
+        True when this call's own create did not build the image: it was ready, a build
+        already running was waited out, or a concurrent caller won the create race.
+        """
+    @property
+    def uploaded(self, /) -> bool:
+        """
+        Whether this call uploaded the artifact.
+        """
+    @property
+    def warnings(self, /) -> list[str]:
+        """
+        What reading the build context skipped (symlinks, special files), one line each.
+        """
+
+@final
 class EstimatedUsd:
     """
     Dollars derived from published rates. Not the bill.
@@ -1708,7 +1741,7 @@ class Sandbox:
         """
         The artifact bytes to upload to `code_artifact_uri`.
         
-        The upload is the caller's: S3 is not in the core's dependency set. Same parameters
+        The upload is the caller's on this path (`ensure_image` uploads for itself). Same parameters
         as [`Self::build_image`] so the bytes a caller puts in the bucket are the bytes the
         build will receive.
         """
@@ -1756,6 +1789,32 @@ class Sandbox:
     def endpoint(self, /) -> str |None:
         """
         The proxy endpoint, once launched.
+        """
+    def ensure_image(self, /, *, name_prefix: str, binary: Sequence[int], dockerfile: str, s3_bucket: str, build_role_arn: str, context_dir: str |PathLike[str] |None = None, s3_key_prefix: str |None = None, size: SizeClass |None = None, base_image: BaseImage |None = None, force: bool = False, tags: dict[str, str] |None = None, wait_timeout: float |None = None) -> EnsuredImage:
+        """
+        Builds or reuses the content-addressed image for a task: one call from build inputs
+        to a ready image.
+        
+        The name is `<name_prefix>-<hash12>`, the hash over the daemon, the Dockerfile, the
+        build context, the base image and the size class, so equal inputs name one image.
+        The ARN is built from the caller's account (looked up once per sandbox). The image
+        is described, then:
+        
+        - ready: returned, with `reused=True` and no upload;
+        - building: waited out and returned, `reused=True`;
+        - failed, or any state under `force=True`: deleted, the name awaited free, rebuilt;
+        - absent: the artifact is uploaded to `s3://<s3_bucket>/<s3_key_prefix>/<name>/
+          artifact.zip` and the image created and waited for, `reused=False`.
+        
+        When a concurrent caller creates the name first, this call's create is refused; it
+        describes again and waits for that build, returning it with `reused=True`.
+        
+        `dockerfile` is usually `wrap_dockerfile(task)`. `context_dir` is the directory the
+        Dockerfile's `COPY` lines read, taken as `docker build` takes it:
+        `Dockerfile.dockerignore`, else `.dockerignore`, is honoured, and symlinks are skipped
+        with a line in `warnings`. `base_image` defaults to
+        `BaseImage.from_dockerfile(dockerfile)`. `wait_timeout` is the build wait in seconds
+        (45 minutes by default). Every local check runs before the first AWS call.
         """
     @staticmethod
     def from_name(region: Region, name: str, registry: NameRegistry, *, port: int |None = None) -> Sandbox:

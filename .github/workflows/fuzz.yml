@@ -25,6 +25,8 @@ on:
       - 'microvms-core/src/provision*.rs'
       - 'microvms-core/src/control/artifact.rs'
       - 'microvms-core/tests/wrap_fuzz.rs'
+      - 'microvms-core/src/control/context.rs'
+      - 'microvms-core/tests/context_fuzz.rs'
       - 'agentd/src/exec_start*.rs'
       - 'protocol/src/exec.rs'
       - 'microvms-core/src/control/connector.rs'
@@ -186,4 +188,31 @@ jobs:
         with:
           name: egress-posture-fuzz-crashes
           path: microvms-core/src/control/__fuzz__/
+          if-no-files-found: ignore
+
+  # The build context, the context hash and the artifact key (IMAGE-6..IMAGE-8; #221),
+  # coverage-guided. The ignore-rule harness checks the matcher against moby's own regex
+  # translation of each pattern.
+  build-context:
+    name: fuzz (context_fuzz, bounded)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - name: install cargo-bolero
+        run: cargo install cargo-bolero --version 0.13.4 --locked
+      # `+nightly`, because `rust-toolchain.toml` pins stable and libFuzzer needs `-Z`.
+      - name: fuzz the ignore rules for one minute
+        run: cargo +nightly bolero test ignore_rules_agree_with_mobys_regex_translation -p microvms-core -T 60s
+      - name: fuzz the context hash for one minute
+        run: cargo +nightly bolero test the_context_hash_extends_the_legacy_one_and_follows_every_entry -p microvms-core -T 60s
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: failure()
+        with:
+          name: build-context-fuzz-crashes
+          path: microvms-core/tests/__fuzz__/
           if-no-files-found: ignore

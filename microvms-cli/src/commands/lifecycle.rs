@@ -1679,9 +1679,8 @@ fn build_request_from<O: std::io::Write, E: std::io::Write>(
             return Err(Error::new(
                 ErrorKind::Precondition,
                 "no --artifact-uri and no --bucket. CreateMicrovmImage names an artifact that \
-                 must already be in S3, and microvms-core does not upload — S3 is deliberately \
-                 absent from its dependency set, and an S3 client in this CLI would give it a \
-                 second path to AWS. Either pass --bucket (the artifact is uploaded with the \
+                 must already be in S3, and the create path this command uses does not upload \
+                 it; an S3 client in this CLI would give it a second path to AWS. Either pass --bucket (the artifact is uploaded with the \
                  `aws` CLI) or upload it yourself and pass --artifact-uri.",
             ));
         }

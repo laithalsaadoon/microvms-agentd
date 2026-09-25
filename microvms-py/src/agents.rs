@@ -15,7 +15,7 @@
 //!
 //! # The upload is still the caller's
 //!
-//! S3 is not in the core's dependency set, so the sequence a caller writes is the CLI's:
+//! The agent image path does not upload, so the sequence a caller writes is the CLI's:
 //! `image_name` or `find_image` to learn whether the image exists, `build_artifact` for the
 //! bytes, their own `put_object` to `s3://<bucket>/<name>.zip`, then `build_image` with that
 //! URI. `find_image` is what makes the second run cost seconds rather than minutes.

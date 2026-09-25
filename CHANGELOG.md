@@ -8,6 +8,30 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
 
 ### Added
 
+- **`Sandbox.ensure_image` goes from build inputs to a usable image in one call (#221,
+  IMAGE-6..IMAGE-12).** A harness provider used to spend about 180 lines on this: naming,
+  the STS lookup, the context zip, the upload, and describe/wait/delete/race handling.
+  Core now does all of it (Python `Sandbox.ensure_image(...)`, JS `sandbox.ensureImage(...)`,
+  both returning the image with `reused`, `uploaded`, `artifact_uri` and `warnings`).
+  - The image is named `<prefix>-<hash12>`, over the daemon, the Dockerfile, the build
+    context, the base image and the size class.
+  - `BuildContext::from_dir` reads a task directory the way `docker build` does:
+    `Dockerfile.dockerignore`, else `.dockerignore`. Symlinks are skipped with a warning.
+  - The artifact has fixed dates and modes, and goes to `<prefix>/<name>/artifact.zip`.
+  - The image ARN comes from one `GetCallerIdentity` per sandbox.
+  - A ready image is reused and a building one waited out. A failed one, or any one under
+    `force`, is deleted and rebuilt.
+  - A create refused because a sibling created the name first joins the sibling's build.
+
+  The artifact hash of a request without a context is unchanged, so no `build --reuse`
+  name moves. STS and S3 are hand-signed with the control plane's credential chain behind
+  a `BuildServices` seam. Every local check runs before the first call. Specified in
+  `spec/core.symspec.json` and checked by the Stateright model of two concurrent callers
+  in `model/src/image.rs`, the Gherkin scenarios over a stateful fake platform, and
+  bolero harnesses over the ignore rules (against moby's regex translation), the hash and
+  the key. A live conformance section builds a task image with two concurrent calls,
+  reuses it, launches from it, and force-rebuilds it.
+
 - **`SizeClass.from_request` and `preflight` (#223, BIND-14..16).**
   - `SizeClass.from_request(cpus, memory_mib)` (JS `SizeClass.fromRequest`, core
     `SizeClass::from_request`) returns the smallest class whose baseline covers both
