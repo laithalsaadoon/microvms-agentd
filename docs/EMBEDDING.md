@@ -554,6 +554,7 @@ no-network task otherwise. No launch option answers `sealed` today: the client c
 see a VPC's routes, so a VPC connector alone reports `unsealed`. A session that did not
 launch its VM (`Session.direct`, `Session.attach`, an adopted sandbox) holds no launch
 options and reports `unsealed`.
+
 ## Before queueing work: size class and preflight
 
 A harness that takes CPU and memory requests picks a class with
@@ -585,6 +586,97 @@ service-model check either, because the bindings are Rust and speak the API vers
 built against. The listing is the evidence that the endpoint accepts that version. A harness
 that also calls the service through boto3 must check its own boto3. `doctor` shares the
 region and credentials checks.
+
+## The provider shape
+
+A harness environment provider, such as a Harbor `BaseEnvironment` subclass, is
+the harness's own contract over the calls above: its type and capabilities, its
+task-definition validation, its start and stop ordering, and its file transfers.
+Everything else is one binding call per step. The class imports the harness's
+packages, so it lives with the harness, not in this repo
+(`docs/HARNESS-CAPABILITIES.md`, non-goals). A sketch, with the harness's own
+method signatures abbreviated:
+
+```python
+import microvms
+
+
+class LambdaMicrovmEnvironment:  # the harness's environment base class
+    def __init__(self, task, region, bucket, build_role_arn, connectors=()):
+        # Constructor: reject what the platform cannot satisfy, before any build.
+        self.size = microvms.SizeClass.from_request(task.cpus, task.memory_mib)
+        posture = microvms.egress_posture_for(False, list(connectors), False, region=region)
+        if task.no_network and posture != "sealed":
+            raise ValueError(f"no-network needs a sealed launch; this one is {posture}")
+        self.task, self.region, self.connectors = task, region, list(connectors)
+        self.bucket, self.build_role_arn = bucket, build_role_arn
+
+    def start(self, force_build=False):
+        report = microvms.preflight(self.region)
+        if not report.ok:
+            raise RuntimeError([c.detail for c in report.checks if not c.ok])
+        self.sandbox = microvms.Sandbox(self.region)
+        ensured = self.sandbox.ensure_image(
+            name_prefix=f"harbor-{self.task.name}",
+            binary=microvms.provision_agentd(),
+            dockerfile=microvms.wrap_dockerfile(self.task.dockerfile),
+            context_dir=self.task.environment_dir,
+            s3_bucket=self.bucket,
+            build_role_arn=self.build_role_arn,
+            size=self.size,
+            force=force_build,
+        )
+        self.session = self.sandbox.run(
+            image_identifier=ensured.image.identifier,
+            egress_network_connectors=self.connectors or None,
+        )
+
+    def exec(self, command, cwd=None, env=None, timeout_sec=None, user=None):
+        result = self.session.run_to_completion(
+            command,
+            shell="bash",
+            user=user,
+            inherit_image_env=True,
+            cwd=cwd,
+            env=env,
+            timeout_sec=timeout_sec,
+        )
+        stderr = "\n".join([result.stderr, *result.notes])
+        return result.stdout, stderr, result.posix_exit_code
+
+    def upload_file(self, source, target):
+        self.session.upload_file(target, open(source, "rb").read())
+
+    def download_file(self, source, target):
+        open(target, "wb").write(self.session.download_file(source))
+
+    # upload_dir / download_dir: session.upload_tar / session.download_tar
+
+    def stop(self):
+        # The image stays: the next trial of this task reuses it (see below).
+        self.sandbox.terminate(wait_for_terminated=True)
+```
+
+What each call replaces, and where its behavior is specified:
+
+| Provider step | Call | Section above | Requirements |
+| --- | --- | --- | --- |
+| Pick a size from a resource request | `SizeClass.from_request` | Before queueing work | BIND-13, BIND-14 |
+| Refuse a no-network task the launch cannot seal | `egress_posture_for`, `Session.egress_posture` | Advertising network isolation | BIND-11, BIND-12 |
+| Check the account before paying for a build | `preflight` | Before queueing work | BIND-15, BIND-16 |
+| Obtain the daemon for this client's version | `provision_agentd` | The recipe | BIND-17 to BIND-20 |
+| Turn the task Dockerfile into a buildable one | `wrap_dockerfile`, `BaseImage.from_dockerfile` | The recipe | IMAGE-1 to IMAGE-5 |
+| Build once per content, reuse across trials | `Sandbox.ensure_image` | From build inputs to an image ARN | IMAGE-6 to IMAGE-12 |
+| Bash semantics, a user by name, the image `ENV` | `shell="bash"`, `user=`, `inherit_image_env=` | A harness exec in one call | AGENTD-7 to AGENTD-16 |
+| One command to one exit code | `Session.run_to_completion`, `posix_exit_code`, `notes` | Running one command to one result | BIND-6 to BIND-10 |
+
+The image is kept at `stop` on purpose: `ensure_image` names it by content, so the next
+trial of the task reuses it, and deleting it is a separate cleanup the harness schedules
+once the task set is finished. Two sketch choices depend on the daemon the image carries:
+`shell="bash"`, `user` by name, and `inherit_image_env` need a daemon built with those
+fields, which `provision_agentd()` guarantees because it fetches the daemon for the
+client's own version. With an older daemon, fall back to `["bash", "-c", command]` and a
+numeric `user`.
 
 ## What the hand-rolled daemons needed, and where agentd covers it
 
