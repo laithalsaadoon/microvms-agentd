@@ -8,6 +8,28 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
 
 ### Added
 
+- **`SizeClass.from_request` and `preflight` (#223, BIND-14..16).**
+  - `SizeClass.from_request(cpus, memory_mib)` (JS `SizeClass.fromRequest`, core
+    `SizeClass::from_request`) returns the smallest class whose baseline covers both
+    values. `None` or zero means no requirement on that axis. With neither set, it returns
+    the default class. It raises `InvalidArgError` naming the largest class when nothing
+    covers the request.
+  - `microvms.preflight(region=None)` (JS `await preflight(region)`, core
+    `preflight::preflight`) returns a `PreflightReport` of three checks: the region
+    resolves, the credential chain resolves credentials, and one free, read-only
+    `ListManagedMicrovmImages` page answers in that region. A check after a failure is
+    reported as not run and makes no call. `ok` is true only when every fatal check passed.
+    Nothing billable is called.
+  - `microvm doctor` now shares the region and credentials checks. Its credentials line
+    resolves the chain instead of only building a client. The default chain always has a
+    provider, so `doctor` used to report "resolved a provider" on a machine with no
+    identity.
+  - `docs/EMBEDDING.md` says what preflight does not check.
+  - Specified in `spec/core.symspec.json` and checked by the Stateright model in
+    `model/src/preflight.rs`, the Gherkin scenarios in
+    `microvms-core/tests/features/request_and_preflight.feature`, a bolero harness over
+    `from_request`, and a live section (`drive_preflight`, four checks).
+
 - **`wrap_dockerfile` and `BaseImage.from_dockerfile` make a task's own Dockerfile
   buildable in two calls (#220, IMAGE-1..IMAGE-5).** A harness whose tasks bring a
   Dockerfile used to carry the agentd stanza as a string literal and build a `BaseImage`

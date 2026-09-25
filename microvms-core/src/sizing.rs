@@ -167,6 +167,50 @@ impl SizeClass {
         )))
     }
 
+    /// The smallest class whose **baseline** covers a resource request (BIND-14).
+    ///
+    /// A harness is handed CPUs and memory as requests (Harbor's `cpus` and `memory_mb`). The
+    /// baseline is the covering figure because it is what is billed and always present; the
+    /// peak above it is provisioned too, but choosing by peak would hand a 2-vCPU task the
+    /// 0.5-vCPU class. `None` or zero on an axis is no requirement on it; with no requirement on
+    /// either the answer is [`SizeClass::DEFAULT`], not the smallest class, for the reason
+    /// `DEFAULT` gives. A request no class covers is an invalid-argument refusal naming the
+    /// largest class, and so is a CPU figure that is not a finite non-negative number.
+    pub fn from_request(cpus: Option<f64>, memory_mib: Option<u32>) -> Result<SizeClass, Error> {
+        if let Some(cpus) = cpus
+            && !(cpus.is_finite() && cpus >= 0.0)
+        {
+            return Err(Error::invalid_arg(format!(
+                "a CPU request must be a finite non-negative number of vCPUs, not {cpus}"
+            )));
+        }
+        let cpus = cpus.filter(|cpus| *cpus > 0.0);
+        let memory_mib = memory_mib.filter(|mib| *mib > 0);
+        if cpus.is_none() && memory_mib.is_none() {
+            return Ok(SizeClass::DEFAULT);
+        }
+        let covers = |class: &SizeClass| {
+            cpus.is_none_or(|cpus| class.baseline_vcpu() >= cpus)
+                && memory_mib.is_none_or(|mib| class.baseline_mib() >= mib)
+        };
+        SizeClass::ALL.into_iter().find(covers).ok_or_else(|| {
+            let largest = SizeClass::ALL[SizeClass::ALL.len() - 1];
+            let asked = [
+                cpus.map(|cpus| format!("{cpus} vCPU")),
+                memory_mib.map(|mib| format!("{mib} MiB")),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" / ");
+            Error::invalid_arg(format!(
+                "a request for {asked} is more than the largest size class covers: {largest}. \
+                 Size classes are chosen by baseline; reduce the request or run the task \
+                 elsewhere."
+            ))
+        })
+    }
+
     /// This class's row of the documented table.
     ///
     /// The one reader of [`SIZE_CLASSES`] for a known class, which is what keeps
@@ -370,6 +414,93 @@ mod tests {
         assert_eq!(SizeClass::Mib2048.baseline_mib(), 2048);
         assert_eq!(SizeClass::Mib4096.baseline_mib(), 4096);
         assert_eq!(SizeClass::Mib8192.baseline_mib(), 8192);
+    }
+
+    /// **BIND-14: an exact baseline match selects that class**, on either axis alone and on
+    /// both together.
+    #[test]
+    fn a_request_equal_to_a_baseline_selects_that_class() {
+        for class in SizeClass::ALL {
+            let (vcpu, mib) = (class.baseline_vcpu(), class.baseline_mib());
+            assert_eq!(
+                SizeClass::from_request(Some(vcpu), Some(mib)).unwrap(),
+                class
+            );
+            assert_eq!(SizeClass::from_request(None, Some(mib)).unwrap(), class);
+            assert_eq!(SizeClass::from_request(Some(vcpu), None).unwrap(), class);
+        }
+    }
+
+    /// **BIND-14: the smaller class never wins by covering one axis.** 2 vCPU / 1 GiB needs
+    /// the 4096 MiB class for its CPUs; 0.5 vCPU / 3 GiB needs 4096 MiB for its memory; one
+    /// MiB or a sliver of a vCPU over a baseline moves up a class.
+    #[test]
+    fn the_axis_that_needs_more_decides_and_just_over_moves_up() {
+        let cases = [
+            (Some(2.0), Some(1024), SizeClass::Mib4096),
+            (Some(0.5), Some(3072), SizeClass::Mib4096),
+            (Some(0.25), Some(513), SizeClass::Mib1024),
+            (Some(1.01), None, SizeClass::Mib4096),
+            (None, Some(2049), SizeClass::Mib4096),
+            (Some(0.1), Some(1), SizeClass::Mib512),
+        ];
+        for (cpus, mib, expected) in cases {
+            assert_eq!(
+                SizeClass::from_request(cpus, mib).unwrap(),
+                expected,
+                "{cpus:?} vCPU / {mib:?} MiB"
+            );
+        }
+    }
+
+    /// **BIND-14: nothing requested is the default class**, not the smallest one; a zero on an
+    /// axis is no requirement on it, as the harvester's `size_class` read it.
+    #[test]
+    fn a_request_that_names_nothing_is_the_default_class() {
+        for (cpus, mib) in [
+            (None, None),
+            (Some(0.0), None),
+            (None, Some(0)),
+            (Some(0.0), Some(0)),
+        ] {
+            assert_eq!(
+                SizeClass::from_request(cpus, mib).unwrap(),
+                SizeClass::DEFAULT,
+                "{cpus:?} / {mib:?}"
+            );
+        }
+        assert_eq!(
+            SizeClass::from_request(Some(0.0), Some(600)).unwrap(),
+            SizeClass::Mib1024,
+            "one named axis is a request, and the smallest class covering it answers"
+        );
+    }
+
+    /// **BIND-14: over the largest class is a typed refusal naming it**, on either axis.
+    #[test]
+    fn a_request_over_the_largest_class_is_refused_naming_it() {
+        let largest = SizeClass::Mib8192;
+        for (cpus, mib) in [
+            (Some(4.5), None),
+            (None, Some(8193)),
+            (Some(8.0), Some(16384)),
+            (Some(4.0), Some(u32::MAX)),
+        ] {
+            let error = SizeClass::from_request(cpus, mib).expect_err("nothing covers it");
+            assert_eq!(error.kind(), ErrorKind::InvalidArg, "{error}");
+            let message = error.to_string();
+            assert!(message.contains(&largest.to_string()), "{message}");
+            assert!(message.contains("largest size class"), "{message}");
+        }
+    }
+
+    /// A CPU figure that is not a finite non-negative number is refused, not compared.
+    #[test]
+    fn a_cpu_figure_that_is_not_a_quantity_is_refused() {
+        for cpus in [f64::NAN, f64::INFINITY, -1.0, -0.0001] {
+            let error = SizeClass::from_request(Some(cpus), None).expect_err("not a quantity");
+            assert_eq!(error.kind(), ErrorKind::InvalidArg, "{cpus}: {error}");
+        }
     }
 
     /// TRAP-10: the five documented baselines are accepted and answer with their own

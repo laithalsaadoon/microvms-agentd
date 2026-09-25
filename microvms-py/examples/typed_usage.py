@@ -48,6 +48,7 @@ from microvms import (
     NameRecord,
     NameRegistry,
     OutputChunk,
+    PreflightReport,
     ProvisionedAgentd,
     Region,
     RunHookTimeout,
@@ -59,6 +60,7 @@ from microvms import (
     core_version,
     egress_posture_for,
     estimate_run,
+    preflight,
     provision_agentd,
     provision_agentd_report,
     run_report,
@@ -238,6 +240,20 @@ def no_network_launch(region: Region, image: str, connectors: list[str]) -> str:
     session = sandbox.run(image_identifier=image, egress_network_connectors=connectors)
     after: str = session.egress_posture
     return after
+
+
+def sized_for_task(cpus: float | None, memory_mib: int | None) -> SizeClass:
+    """A harness's task request, as the class that covers it. Written for the checker."""
+    return SizeClass.from_request(cpus, memory_mib)
+
+
+def ready_to_queue(region: Region | None) -> bool:
+    """Refuse to queue work the account cannot run. Written for the checker."""
+    report: PreflightReport = preflight(region)
+    for check in report.checks:
+        if not check.ok and check.fatal:
+            print(f"{check.name}: {check.detail} ({check.remedy})")
+    return report.ok
 
 
 def launch_step(region: Region, image: str) -> dict[str, object]:

@@ -36,6 +36,9 @@ defined in `spec/core.symspec.json` and `spec/agentd.symspec.json`.
 | BIND-8 | 1 | 1 | 1 | 4 | 1 | 1 |
 | BIND-9 | 1 | 1 | 1 | 4 | 2 | 1 |
 | BIND-10 | 1 | 1 | 1 | 5 | 4 | 1 |
+| BIND-14 | waived | 1 | 1 | 4 | 3 | waived |
+| BIND-15 | 1 | 1 | waived | 6 | 5 | 1 |
+| BIND-16 | 1 | 1 | waived | 5 | 4 | 1 |
 
 ## CLI-7
 
@@ -365,4 +368,37 @@ If the acknowledgement that follows a client-deadline kill fails, then the micro
 - **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
 - **test:** `microvms-core/src/session/complete.rs`, `microvms-core/tests/bdd_run_to_completion.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
 - **impl:** `microvms-core/src/session/complete.rs`, `microvms-core/src/session/exec.rs`, `microvms-js/src/exec.rs`, `microvms-py/src/exec.rs`
+- **live:** `conformance/run_rs.py`
+
+## BIND-14
+
+The sizing model shall select for a resource request the smallest size class whose baseline memory and baseline vCPU both cover the request, the default class when the request names neither, and an invalid-argument refusal naming the largest class when no class covers the request.
+
+- **model:** waived: a stateless selection over the five-row size table; the bolero harness checks minimality and coverage over arbitrary requests instead
+- **gherkin:** `microvms-core/tests/features/request_and_preflight.feature`
+- **fuzz:** `microvms-core/src/sizing_fuzz.rs`
+- **test:** `microvms-core/src/sizing.rs`, `microvms-core/tests/bdd_preflight.rs`, `microvms-js/__test__/request_and_preflight.mjs`, `microvms-py/tests/test_request_and_preflight.py`
+- **impl:** `microvms-core/src/sizing.rs`, `microvms-js/src/cost.rs`, `microvms-py/src/cost.rs`
+- **live:** waived: a pure function of the request and the documented table; it makes no AWS call
+
+## BIND-15
+
+When a caller asks for a preflight, the microvms-core shall report whether the region resolves to a supported region, whether the credential chain resolves credentials, and whether the MicroVMs service answers a free read-only listing in that region, as one report whose ok is true only when every fatal check passed.
+
+- **model:** `model/src/preflight.rs`
+- **gherkin:** `microvms-core/tests/features/request_and_preflight.feature`
+- **fuzz:** waived: the outcome space (3 region x 2 credential x 3 service worlds) is enumerated exhaustively by the Stateright model; there is no input stream to fuzz
+- **test:** `microvms-cli/src/guards.rs`, `microvms-core/src/preflight.rs`, `microvms-core/tests/bdd_preflight.rs`, `microvms-core/tests/live_preflight.rs`, `microvms-js/__test__/request_and_preflight.mjs`, `microvms-py/tests/test_request_and_preflight.py`
+- **impl:** `microvms-core/src/control/image.rs`, `microvms-core/src/control/transport.rs`, `microvms-core/src/preflight.rs`, `microvms-js/src/preflight.rs`, `microvms-py/src/preflight.rs`
+- **live:** `conformance/run_rs.py`
+
+## BIND-16
+
+The microvms-core shall not make a billable or mutating AWS call during a preflight, nor any AWS call after the region or the credentials failed to resolve.
+
+- **model:** `model/src/preflight.rs`
+- **gherkin:** `microvms-core/tests/features/request_and_preflight.feature`
+- **fuzz:** waived: the outcome space (3 region x 2 credential x 3 service worlds) is enumerated exhaustively by the Stateright model; there is no input stream to fuzz
+- **test:** `microvms-core/src/preflight.rs`, `microvms-core/tests/bdd_preflight.rs`, `microvms-core/tests/live_preflight.rs`, `microvms-js/__test__/request_and_preflight.mjs`, `microvms-py/tests/test_request_and_preflight.py`
+- **impl:** `microvms-core/src/control/image.rs`, `microvms-core/src/preflight.rs`, `microvms-js/src/preflight.rs`, `microvms-py/src/preflight.rs`
 - **live:** `conformance/run_rs.py`

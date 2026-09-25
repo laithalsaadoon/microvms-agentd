@@ -1296,6 +1296,65 @@ class OutputChunk:
         """
 
 @final
+class PreflightCheck:
+    """
+    One line of a preflight report.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def detail(self, /) -> str: ...
+    @property
+    def fatal(self, /) -> bool:
+        """
+        Whether a failure decides the report's `ok`. An unlisted region's line is advisory.
+        """
+    @property
+    def name(self, /) -> str:
+        """
+        `"region"`, `"credentials"`, or `"service"`.
+        """
+    @property
+    def ok(self, /) -> bool: ...
+    @property
+    def ran(self, /) -> bool:
+        """
+        False when an earlier check's failure kept this one from running (and calling AWS).
+        """
+    @property
+    def remedy(self, /) -> str:
+        """
+        What to do about a failure; empty on a pass.
+        """
+    def to_dict(self, /) -> dict: ...
+
+@final
+class PreflightReport:
+    """
+    What `preflight` found: three checks and whether a launch could proceed.
+    """
+    def __repr__(self, /) -> str: ...
+    def check(self, /, name: str) -> PreflightCheck |None:
+        """
+        The check named `name`, or `None`.
+        """
+    @property
+    def checks(self, /) -> list[PreflightCheck]:
+        """
+        `region`, `credentials`, and `service`, in that order.
+        """
+    @property
+    def ok(self, /) -> bool:
+        """
+        True exactly when no fatal check failed or was skipped.
+        """
+    @property
+    def region(self, /) -> str |None:
+        """
+        The region checked, or `None` when none resolved.
+        """
+    def to_dict(self, /) -> dict: ...
+
+@final
 class ProcGroup:
     """
     One exec's process group, as `GET /v1/procs` reports it.
@@ -2110,6 +2169,17 @@ class SizeClass:
         Off-table figures are refused rather than snapped to a neighbour: the two
         plausible readings differ in both memory and rate, and neither has been measured.
         """
+    @staticmethod
+    def from_request(cpus: float |None = None, memory_mib: int |None = None) -> SizeClass:
+        """
+        The smallest class whose baseline covers a resource request (BIND-14).
+        
+        `cpus` in vCPUs and `memory_mib` in MiB, each a request; `None` or zero is no
+        requirement on that axis, and with none on either the answer is `default_class()`.
+        Chosen by baseline, the billed and always-present figure. Raises `InvalidArgError`
+        naming the largest class when no class covers the request, or for a CPU figure that is
+        not a finite non-negative number.
+        """
     @property
     def peak_gb(self, /) -> float:
         """
@@ -2324,6 +2394,20 @@ def mint_bedrock_token_with_credentials(region: Region, *, access_key_id: str, s
     """
     Mint with explicit STS credentials and their expiry without changing process env.
     `credentials_expires_at` is Unix seconds from STS Expiration. Secrets never enter repr.
+    """
+
+def preflight(region: Region |None = None) -> PreflightReport:
+    """
+    Whether a harness can launch in `region` (default: `$AWS_REGION`, `$AWS_DEFAULT_REGION`,
+    then us-east-1), checked before it queues work.
+    
+    Three checks: the region resolves (advisory when `Region.unlisted`), the credential chain
+    resolves credentials (no AWS call), and one `ListManagedMicrovmImages` page answers in that
+    region, the only AWS operation, free and read-only. A check after a failure is reported
+    with `ran=False` and makes no call. Nothing billable, nothing mutating. It does not check
+    roles, the artifact bucket, quotas, or VPC connectors, and there is no boto3 service-model
+    check: this client speaks the API version it was built against, and the listing is the
+    evidence the endpoint accepts it. Never raises; read `report.ok`.
     """
 
 def prompt_agent(session: Session, agent: AgentSpec, task: str, *, timeout_sec: float |None = None, exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecHandle:

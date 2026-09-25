@@ -83,6 +83,7 @@ pub mod hooks;
 pub mod keepalive;
 pub mod names;
 mod numbers;
+pub mod preflight;
 pub mod process;
 pub mod provision;
 pub mod region;

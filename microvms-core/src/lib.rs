@@ -77,6 +77,7 @@ pub mod error;
 pub mod hooks;
 pub mod identity;
 pub mod names;
+pub mod preflight;
 pub mod provision;
 #[cfg(test)]
 mod provision_fuzz;
@@ -84,6 +85,9 @@ pub mod region;
 pub mod sandbox;
 pub mod session;
 pub mod sizing;
+
+#[cfg(test)]
+mod sizing_fuzz;
 
 // Re-exported so consumers name wire types through this crate rather than
 // depending on `protocol` directly — the CLI's thinness guard counts on that.
