@@ -417,6 +417,16 @@ jobs:
         run: |
           npx -y -p @napi-rs/cli@3 napi build --manifest-path Cargo.toml --package microvms-js --platform --output-dir . --cwd microvms-js
           node --test "microvms-js/__test__/*.mjs"
+      # The committed `index.d.ts` against the crate it describes: `stubs:check`'s argument for the
+      # other binding. The build above has just rewritten the file in place, so a diff here is the
+      # drift. The docs site's TypeScript reference is generated from this file, so a stale copy
+      # would publish signatures the package no longer has. `mise run dts:check` is the local form.
+      - name: typescript declarations are not stale
+        run: |
+          if ! git diff --exit-code -- microvms-js/index.d.ts; then
+            echo "::error file=microvms-js/index.d.ts::stale: run \`mise run dts\` and commit the result"
+            exit 1
+          fi
       # The generated loader against the package name it will be published under. This is the
       # only job that builds the addon, so it is the only place the real `index.js` exists on a
       # pull request — and a loader generated for a stale package name passes every test above,

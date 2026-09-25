@@ -24,12 +24,13 @@ dist-wheel/
 .venv-typed/
 .venv-bindings/
 # The napi-rs build outputs. `napi build --platform` writes the compiled addon plus a
-# generated loader and type declarations beside `package.json`; all three are derived from
-# `microvms-js/src/` and are rebuilt by `npm run build`, so committing them would commit one
-# platform's binary into a repo other platforms clone.
+# generated loader and type declarations beside `package.json`, all three derived from
+# `microvms-js/src/`. The addon and the loader stay out: committing them would commit one
+# platform's binary into a repo other platforms clone. `index.d.ts` is committed, the way
+# `microvms-py/microvms.pyi` is: it is the same on every platform, the docs site's TypeScript
+# reference is generated from it, and `mise run dts:check` fails when it drifts from the source.
 microvms-js/*.node
 microvms-js/index.js
-microvms-js/index.d.ts
 microvms-js/node_modules/
 # One package directory per entry in `package.json`'s `napi.targets`, written by
 # `napi create-npm-dirs` and filled by `napi artifacts`. Derived in full — name, `os`,

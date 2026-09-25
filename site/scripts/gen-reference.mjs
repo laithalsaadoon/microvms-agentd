@@ -4,7 +4,11 @@
  * Write the generated Reference tier into the site's content directory.
  *
  * `scripts/sync-docs.mjs` publishes `docs/` and `authored/`; this script publishes the pages that
- * `scripts/reference/pages.mjs` derives from `docs/manifest.json` and `docs/schema.json`. The two share
+ * `scripts/reference/pages.mjs` derives from `docs/manifest.json` and `docs/schema.json`, and the SDK
+ * pages that `scripts/reference/sdk/` derives from the two binding declaration files:
+ * `microvms-py/microvms.pyi` through Griffe (run by `uv`) and `microvms-js/index.d.ts` through
+ * TypeDoc. Both declaration files are committed and drift-gated against the Rust source, so every
+ * page here is a function of a file the build can see. The two share
  * `src/content/docs/reference/`, so ownership has to be explicit:
  *
  * - This script keeps its own manifest, `.reference-manifest.json`, listing every file it wrote. On the
@@ -33,6 +37,8 @@ import { fileURLToPath } from "node:url"
 
 import { loadManifest, loadSchema, SOURCES } from "./reference/manifest.mjs"
 import { referencePages, TIER } from "./reference/pages.mjs"
+import { loadPythonSurface, pythonPages } from "./reference/sdk/python.mjs"
+import { typescriptPages } from "./reference/sdk/typescript.mjs"
 
 const SITE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const REPO_ROOT = resolve(SITE_ROOT, "..")
@@ -127,10 +133,20 @@ const ownedIn = (path) => {
  * @param {import("./reference/manifest.mjs").Schema} options.schema
  * @param {boolean} [options.dryRun]
  * @param {string} [options.repoRoot] where `git log` runs for `lastUpdated`; omit to stamp nothing
+ * @param {ReadonlyArray<import("./reference/pages.mjs").ReferencePage>} [options.sdkPages] the
+ *   Python and TypeScript SDK pages from `reference/sdk/`, which need uv and TypeDoc to derive and
+ *   so arrive already rendered; written and owned exactly as the CLI pages are
  * @returns {{ written: string[], unchanged: string[], removed: string[], pages: ReadonlyArray<import("./reference/pages.mjs").ReferencePage> }}
  */
-export const generate = ({ contentDir, manifest, schema, dryRun = false, repoRoot }) => {
-  const pages = referencePages(manifest, schema)
+export const generate = ({
+  contentDir,
+  manifest,
+  schema,
+  dryRun = false,
+  repoRoot,
+  sdkPages = []
+}) => {
+  const pages = [...referencePages(manifest, schema), ...sdkPages]
   const owned = new Set(ownedIn(join(contentDir, OWNERSHIP_MANIFEST)))
   const foreign = new Set(ownedIn(join(contentDir, SYNC_MANIFEST)))
 
@@ -143,11 +159,13 @@ export const generate = ({ contentDir, manifest, schema, dryRun = false, repoRoo
     }
   }
 
-  const lastUpdated = {
-    [SOURCES.manifest]:
-      repoRoot === undefined ? undefined : lastUpdatedAt(repoRoot, SOURCES.manifest),
-    [SOURCES.schema]: repoRoot === undefined ? undefined : lastUpdatedAt(repoRoot, SOURCES.schema)
-  }
+  const sources = [...new Set([...Object.values(SOURCES), ...pages.map((page) => page.source)])]
+  const lastUpdated = Object.fromEntries(
+    sources.map((source) => [
+      source,
+      repoRoot === undefined ? undefined : lastUpdatedAt(repoRoot, source)
+    ])
+  )
 
   const written = []
   const unchanged = []
@@ -186,7 +204,7 @@ export const generate = ({ contentDir, manifest, schema, dryRun = false, repoRoo
       join(contentDir, OWNERSHIP_MANIFEST),
       `${JSON.stringify(
         {
-          sources: Object.values(SOURCES),
+          sources,
           cli: manifest.data.cli,
           version: manifest.data.version,
           owned: [...paths].sort()
@@ -199,7 +217,7 @@ export const generate = ({ contentDir, manifest, schema, dryRun = false, repoRoo
   return { written, unchanged, removed, pages }
 }
 
-const main = () => {
+const main = async () => {
   const argv = process.argv.slice(2)
   const dryRun = argv.includes("--dry-run")
   for (const arg of argv) {
@@ -212,12 +230,17 @@ const main = () => {
   }
   const manifest = loadManifest(join(REPO_ROOT, SOURCES.manifest))
   const schema = loadSchema(join(REPO_ROOT, SOURCES.schema))
+  const sdkPages = [
+    ...pythonPages(loadPythonSurface(REPO_ROOT), { repoRoot: REPO_ROOT }),
+    ...(await typescriptPages({ repoRoot: REPO_ROOT }))
+  ]
   const { written, unchanged, removed, pages } = generate({
     contentDir: CONTENT_DIR,
     manifest,
     schema,
     dryRun,
-    repoRoot: REPO_ROOT
+    repoRoot: REPO_ROOT,
+    sdkPages
   })
   const out = process.stdout
   const label = (path) => relative(process.cwd(), join(CONTENT_DIR, path))
@@ -226,7 +249,8 @@ const main = () => {
   for (const path of removed) out.write(`${dryRun ? "would remove" : "removed"}  ${label(path)}\n`)
   out.write(
     `${dryRun ? "dry run: " : ""}${pages.length} reference pages from ${manifest.data.cli} ` +
-      `${manifest.data.version}, ${written.length} ${verb}, ${unchanged.length} unchanged, ` +
+      `${manifest.data.version} and the SDK declarations (${sdkPages.length} of them SDK pages), ` +
+      `${written.length} ${verb}, ${unchanged.length} unchanged, ` +
       `${removed.length} removed\n`
   )
 }
@@ -239,5 +263,5 @@ if (
   process.argv[1] !== undefined &&
   import.meta.url === new URL(`file://${process.argv[1]}`).href
 ) {
-  main()
+  await main()
 }

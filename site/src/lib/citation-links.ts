@@ -83,6 +83,14 @@ export interface CitationLinksOptions {
   readonly permalink?: (target: CitationTarget) => string
   /** The intra-site href for a tree page. Defaults to `${siteBase}/${slug}/`. */
   readonly intraSiteHref?: (target: CitationTarget) => string
+  /**
+   * Documents whose code spans are not citations, by absolute file path. Defaults to none.
+   *
+   * For pages whose prose was written for another audience and carried in verbatim, so a
+   * `` `file.py:688` `` in it names a line in some other codebase rather than a line in this
+   * repository: the SDK reference quotes binding doc comments that way.
+   */
+  readonly excludeDocument?: (absolutePath: string) => boolean
 }
 
 /** One resolved citation. */
@@ -257,6 +265,13 @@ export const citationLinks = (options: CitationLinksOptions): MdastPluginDefinit
       // A citation already inside a link stays as it is. Nesting an `a` inside an `a` is invalid
       // HTML, and the author's own link is the more specific intent.
       if (ctx.parent(node)?.type === "link") return
+      if (
+        options.excludeDocument !== undefined &&
+        ctx.fileURL !== undefined &&
+        options.excludeDocument(fileURLToPath(ctx.fileURL))
+      ) {
+        return
+      }
 
       const groups = CITATION.exec(node.value)?.groups
       if (groups === undefined) return

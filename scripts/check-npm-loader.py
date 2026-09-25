@@ -6,8 +6,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Assert the npm package ships a loader that can find the addons inside it.
 
-`napi build` generates `microvms-js/index.js` and `index.d.ts`. Both are gitignored, and the
-loader inside `index.js` is written against the package name that was in `package.json` at
+`napi build` generates `microvms-js/index.js` and `index.d.ts`. The loader is gitignored (the
+declarations are committed, and `mise run dts:check` gates them), and the loader inside `index.js`
+is written against the package name that was in `package.json` at
 generation time. Nothing regenerates it when that name changes and nothing compares the two.
 
 Two failures, both measured on `@theagenticguy/microvms@0.1.0-rc.1` rather than imagined:
