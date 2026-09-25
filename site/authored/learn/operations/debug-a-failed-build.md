@@ -36,7 +36,7 @@ Then build the Dockerfile locally under arm64 with `docker buildx build --platfo
 
 A failed build's `stateReason` lives on the build record, and nowhere else. `GetMicrovmImage` reports `CREATE_FAILED` and structurally cannot say why; `ListMicrovmImageVersions` reports `FAILED` with a null reason; `ListMicrovmImageBuilds` carries the sentence. Expect a list: each failed version had two builds, one per chipset generation, with the same reason. `GetMicrovmImage`'s `latestFailedImageVersion` names which version to ask about.
 
-Two observed reasons, worth reading for how much they vary:
+Observed reasons, worth reading for how much they vary:
 
 ```text
 The container image build failed.                 (a RUN exiting non-zero)

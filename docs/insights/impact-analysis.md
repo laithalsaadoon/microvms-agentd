@@ -1,52 +1,53 @@
 # microvms-agentd · Impact analysis
 
 A **high-impact surface** here is a definition with a high inbound reference count measured across
-the whole tree — all seven Rust crates, the Python conformance driver, the two Python gate scripts,
+the whole tree — all the Rust crates, the Python conformance driver, the Python gate scripts,
 the CI workflow, and the committed artifacts. Reference count rather than public-export count,
-because this workspace's public API is small and its couplings are wide: the widest surface below is
-named by 29 files, and the narrowest of the eight by 22.
+because this workspace's public API is small and its couplings are wide.
 
 Two properties of the tree make reference count the right criterion, and the same two explain why a
 `cargo`-only import graph understates the blast radius:
 
-- **Three of the eight surfaces reach a consumer through string matching rather than through the type
+- **Some surfaces reach a consumer through string matching rather than through the type
   system.** `constants::as_json()` is read by a Python script that looks its keys up by name
   (`microvms-core/src/constants.rs:40`); `pinned_rates()`'s decimal literals are parsed out of the
   Rust source by another Python script (`scripts/check-live-rates.py:148`); the conformance oracle
   asserts on `WireKind`'s rendered strings (`conformance/run_rs.py:191`). When one of those couplings
   changes, compilation still succeeds and the corresponding check silently stops comparing.
-- **Two surfaces have a generated artifact downstream.** `docs/schema.json` is generated from the
+- **Some surfaces have a generated artifact downstream.** `docs/schema.json` is generated from the
   protocol types and byte-compared (`agentd/tests/schema_artifact.rs:39`), and the CLI manifest is
   generated from the exit table and the clap tree (`microvms-cli/src/manifest.rs:34`).
 
 Each surface below carries a **Gate** line naming the check that catches a breaking change to it,
-because the gate is what decides whether a mistake is caught in 45 seconds or in production. One
-surface has no gate, and it is called out as such.
+because the gate is what decides whether a mistake is caught in 45 seconds or in production. A
+surface with no gate is called out as such.
 
 The `Touch on change` column answers whether a consumer needs an edit, or at minimum a deliberate
 read, in the same commit. `yes` means an edit is required. `likely` means it compiles but a reviewer
 has to look. `no` means only a behavioral change reaches it.
 
 Where a surface has more consumers than are useful to list, the top rows are the ones with the
-highest reference count and a `(N more …)` row summarizes the rest.
+highest reference count and a `(further …)` row summarizes the rest. The per-file reference counts
+in the tables count the lines that name the symbol, as `git grep -c` does, and were measured at
+`9c462f0` (2026-08-26).
 
 ## Protocol wire types
 
 Defined at: `protocol/src/lib.rs:29`-`:32` (the module list), with the shapes in
 `protocol/src/exec.rs:24` (`Phase`), `protocol/src/fs.rs:18` (`FsQuery`),
-`protocol/src/health.rs:11` (`Health`), `protocol/src/hook.rs:46` (`RunHook`), and the two published
+`protocol/src/health.rs:11` (`Health`), `protocol/src/hook.rs:46` (`RunHook`), and the published
 constants at `protocol/src/lib.rs:58` (`PROTOCOL_VERSION`) and `:66` (`VERSION_HEADER`).
 
-Gate: a shape change is a **compile error in four crates by design** (`microvms-core/Cargo.toml:29`
+Gate: a shape change is a **compile error in every crate that declares the dependency, by design** (`microvms-core/Cargo.toml:29`
 states that a field renamed in `protocol/` must break core's build), and the generated document is
 byte-compared by `agentd/tests/schema_artifact.rs:39`, wired into the unconditional local gate as
 `mise.toml:184 [tasks."schema:check"]`.
 
-29 files reference the crate, 121 references in total. Exactly four crates declare the dependency:
+The crates that declare the dependency:
 `agentd/Cargo.toml:15`, `microvms-core/Cargo.toml:29`, `microvms-js/Cargo.toml:25`,
 `microvms-py/Cargo.toml:32`. `microvms-cli` deliberately declares none — it names the wire types
 through core's re-export (`microvms-cli/Cargo.toml:48`-`:49`, `microvms-core/src/lib.rs:77`), which
-is what keeps the CLI's direct dependency set at six.
+is what keeps `protocol` out of the CLI's direct dependency set.
 
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
@@ -84,8 +85,8 @@ is what keeps the CLI's direct dependency set at six.
 
 ## The Error kind / wire_kind taxonomy
 
-Defined at: `microvms-core/src/error.rs:43` (`Error`), `:127` (`ErrorKind`, 13 variants enumerated at
-`:166`), `:219` (`WireKind`, 13 variants enumerated at `:272`).
+Defined at: `microvms-core/src/error.rs:43` (`Error`), `:127` (`ErrorKind`, variants enumerated at
+`:166`), `:219` (`WireKind`, variants enumerated at `:272`).
 
 Gate: `microvms-core/src/error.rs:433 every_kind_carries_its_python_err_code` — every kind must carry
 an `ERR_*` code — plus `:459 no_two_kinds_share_a_code` and, across the crate boundary,
@@ -101,20 +102,20 @@ follow.
 
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
-| `microvms-cli/src/exit.rs` | direct import | yes | 37 references; `:140 Exit::for_kind` is an exhaustive match over `ErrorKind`, so a 14th kind is a compile error here |
-| `microvms-py/src/errors.rs` | direct import | yes | 18 references; `:129 exception_for` matches every kind onto one of the 13 `create_exception!` classes declared at `:33`-`:117` (one base plus thirteen) |
+| `microvms-cli/src/exit.rs` | direct import | yes | 37 references; `:140 Exit::for_kind` is an exhaustive match over `ErrorKind`, so a new kind is a compile error here |
+| `microvms-py/src/errors.rs` | direct import | yes | 18 references; `:129 exception_for` matches every kind onto one of the `create_exception!` classes declared at `:33`-`:117` (one base plus one per kind) |
 | `microvms-cli/src/envelope.rs` | direct import | yes | 9 references; `:321 error()` emits the failure envelope and `:327` writes `data.kind` from the wire kind |
 | `microvms-js/src/errors.rs` | direct import | yes | `:70 code_chain` is the single conversion out to JS; the module docs at `:35` and `:43` fix the contract as `err.cause.message` for the code and `err.cause.cause.message` for the wire kind |
 | `microvms-core/src/session/http.rs` | direct import | yes | `:126` is the sole non-test caller of `WireKind::from_status`, so the status table's shape is this file's contract |
 | `microvms-core/src/control/transport.rs` | direct import | likely | 29 references; `:38` imports `ErrorKind` and `:130`, `:156`, `:222` are control-plane raise sites; `:306` records that `WireKind` is the daemon's discipline and has no role here |
 | `microvms-core/src/control/image.rs` | direct import | likely | 29 references, all classifying at the point of raise; `:284`-`:285` document `BuildWedged`, `Platform`, and `Timeout` as three distinct build outcomes |
 | `microvms-core/src/control/microvm.rs` | direct import | likely | 23 references; `:303`-`:304` record that a missing proxy-auth key is `ErrorKind::Retryable` via `WireKind::AuthTokenMint` because minting sits inside the retry path |
-| `microvms-core/src/sandbox.rs`, `session/mod.rs`, `control/mod.rs`, `session/proxy.rs`, `control/artifact.rs`, `session/exec.rs`, `cost.rs`, `session/sse.rs`, `session/files.rs` | direct import | likely | (9 more direct imports, 4-17 references each, all raise sites under `microvms-core/src/`) |
+| `microvms-core/src/sandbox.rs`, `session/mod.rs`, `control/mod.rs`, `session/proxy.rs`, `control/artifact.rs`, `session/exec.rs`, `cost.rs`, `session/sse.rs`, `session/files.rs` | direct import | likely | (further direct imports, 4-17 references each, all raise sites under `microvms-core/src/`) |
 | `microvms-cli/src/guards.rs` | test | yes | 23 references; the classification half of the exit catalogue, inducing each failure at the seam (`:71`, `:108`, `:723`) |
 | `conformance/run_rs.py` | test | yes | `:191` documents `data.kind` as a `microvms_core::WireKind` and `:226` asserts `Conflict` and `NotFound` are distinguishable by exception type |
 | `microvms-core/tests/turmoil_client.rs` | test | yes | 7 references; `:452` and `:726` assert `WireKind::Transport`, `:781` and `:1383` assert `WireKind::AuthTokenMint` |
 | `microvms-py/tests/test_smoke.py` | test | yes | `:412` asserts one exception per kind under one shared base; `:275` asserts `wire_kind is None` for a local reject |
-| `microvms-js/__test__/smoke.mjs` | test | yes | `:345` asserts exactly thirteen `ERR_*` codes are enumerable, one per `ErrorKind` (`:347`) |
+| `microvms-js/__test__/smoke.mjs` | test | yes | `:345` asserts the enumerable `ERR_*` codes are exactly one per `ErrorKind` (`:347`) |
 | `microvms-cli/src/seam.rs`, `commands/lifecycle.rs` | direct import | likely | 8 and 5 references on the classify-and-report path — `microvms-cli/src/seam.rs:291`, `:306`, `:316`; `microvms-cli/src/commands/lifecycle.rs:191`, `:729`, `:741` |
 | `agentd/src/fs.rs`, `agentd/src/exec.rs`, `agentd/src/disk.rs`, `agentd/src/identity.rs`, `agentd/tests/turmoil_transport.rs` | indirect | no | these are `std::io::ErrorKind`, not core's — the name collides but the type does not |
 
@@ -144,20 +145,19 @@ Defined at: `microvms-cli/src/exit.rs:78` (`Exit`, `#[repr(u8)]` with explicit d
 Gate: `microvms-cli/tests/exit_codes.rs:29 every_locally_reachable_row_exits_with_its_own_integer_and_code`
 drives real spawned binaries, and `microvms-cli/tests/manifest.rs:161` cross-checks the published
 table against what the binary actually exits. Inside the crate,
-`microvms-cli/src/exit.rs:486` asserts the table and core's `ErrorKind` describe the same thirteen
+`microvms-cli/src/exit.rs:486` asserts the table and core's `ErrorKind` describe the same
 classes, and `:512` asserts the mapping is injective.
 
-The table is append-only. Its 14 rows are the contract three consumers read: a shell reading `$?`, an
-agent reading the `--json` envelope's `code`, and the conformance oracle reading `exitCode`. 34 files
-reference `Exit` or `EXIT_TABLE`, 219 references in total.
+The table is append-only. Its rows are the contract three consumers read: a shell reading `$?`, an
+agent reading the `--json` envelope's `code`, and the conformance oracle reading `exitCode`.
 
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
 | `microvms-cli/src/manifest.rs` | direct import | yes | `:85` publishes every row as `exitCodes`, asserted at `:336 the_manifest_carries_all_fourteen_exit_rows` |
 | `microvms-cli/src/main.rs` | direct import | yes | the process exit path; `Exit::as_u8` (`microvms-cli/src/exit.rs:109`) is what reaches `$?` |
 | `microvms-cli/src/envelope.rs` | direct import | yes | the failure envelope carries `exitCode`, `code`, and `finding` off the row |
-| `microvms-core/src/error.rs` | indirect | yes | `ErrorKind::ALL` (`:166`) and `ErrorKind::code` (`:187`) are the other half; `microvms-cli/src/exit.rs:486` asserts the two describe the same thirteen classes |
-| `microvms-cli/src/commands/lifecycle.rs`, `attached.rs`, `local.rs`, `cost.rs`, `doctor.rs`, `mod.rs` | direct import | likely | (6 more direct imports under `microvms-cli/src/commands/`; every command constructs a `CliError` carrying an `Exit`, the shape declared at `microvms-cli/src/exit.rs:78`) |
+| `microvms-core/src/error.rs` | indirect | yes | `ErrorKind::ALL` (`:166`) and `ErrorKind::code` (`:187`) are the other half; `microvms-cli/src/exit.rs:486` asserts the two describe the same classes |
+| `microvms-cli/src/commands/lifecycle.rs`, `attached.rs`, `local.rs`, `cost.rs`, `doctor.rs`, `mod.rs` | direct import | likely | (further direct imports under `microvms-cli/src/commands/`; every command constructs a `CliError` carrying an `Exit`, the shape declared at `microvms-cli/src/exit.rs:78`) |
 | `microvms-cli/tests/exit_codes.rs` | test | yes | `:29` asserts integer, code, and finding together over every locally reachable row; `:122` pins the shared argument-error code; `:286` pins the streaming exception |
 | `microvms-cli/tests/manifest.rs` | test | yes | `:161 the_published_exit_table_agrees_with_what_the_binary_exits` |
 | `microvms-cli/src/guards.rs` | test | yes | the classification half — induces the rows an invocation cannot reach without an account, asserting the row directly (`:948` `Exit::Interrupted`, `:1183` `Exit::Precondition`) |
@@ -178,7 +178,7 @@ reference `Exit` or `EXIT_TABLE`, 219 references in total.
   `:512 the_kind_to_exit_mapping_is_injective` keeps two kinds from collapsing onto one row — the
   named temptation being `Precondition` and `InvalidArg`, which need separate rows because one is
   fixed by editing a flag and the other by applying a Terraform stack.
-- **Five `WireKind`s collapse onto one exit row on purpose, and `data.kind` preserves the
+- **The protocol `WireKind`s collapse onto one exit row on purpose, and `data.kind` preserves the
   distinction.** `microvms-cli/src/exit.rs:534 the_five_protocol_wire_kinds_collapse_and_the_others_do_not`
   pins the collapsing set. Widening the exit table to split them would break the append-only rule;
   narrowing `data.kind` would leave the conformance oracle unable to tell them apart
@@ -197,8 +197,7 @@ compares every emitted key against the pinned botocore service model. It sits in
 
 Every value here is transcribed from the botocore service model for `lambda-microvms`, API version
 `2025-09-09` (`:57`). The JSON key names are a contract with a Python script, so renaming a key is a
-breaking change the compiler accepts — the module states the coupling at `:40`. 24 files reference
-the module, 182 references in total.
+breaking change the compiler accepts — the module states the coupling at `:40`.
 
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
@@ -223,8 +222,9 @@ the module, 182 references in total.
   `{'required', 'min', 'document', 'union'}`, so `max`, `pattern`, and `enum` violations reach the
   wire. Deleting a guard on the assumption that the SDK validates the model reopens all of them.
 - **`DEAD_STATES` is a strict subset of `TERMINAL_STATES`, and `SUSPENDED` must stay out of it.**
-  `microvms-core/src/constants.rs:448` lists four terminal states including `SUSPENDED`, `:455` lists
-  two dead ones, and `:878 every_dead_state_is_also_a_terminal_state` asserts the containment. `:452`
+  `microvms-core/src/constants.rs:448` lists the terminal states `TERMINATED`, `TERMINATING`,
+  `SUSPENDED`, and `SUSPENDING`, `:455` lists the dead ones, `TERMINATED` and `TERMINATING`, and
+  `:878 every_dead_state_is_also_a_terminal_state` asserts the containment. `:452`
   gives the reason: `SUSPENDED` means death when it occurs before `RUNNING` and is also an ordinary
   waypoint on the resume path, so a resume that failed fast on it would fail on every resume.
 - **The two image-ready sets must stay disjoint, or the gate reports a tolerated spelling as
@@ -246,8 +246,7 @@ rows.
 
 `minimumMemoryInMiB` selects a class whose two numbers differ by 4x; it does not size a VM directly
 (`docs/PLATFORM.md:236`). The table is the only place any of the twenty numbers appears
-(`microvms-core/src/sizing.rs:20`). 35 files reference the surface, 435 references in total —
-`codegraph callers SizeClass` reports 36 inbound callers.
+(`microvms-core/src/sizing.rs:20`).
 
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
@@ -297,8 +296,7 @@ Gate: `scripts/check-model-drift.py:254 PINNED_REGIONS` is the literal twin, com
 hold both ends. No service model states the set — this list is maintained by hand, and the two
 botocore calls that look like substitutes disagree with each other (`microvms-core/src/region.rs:21`).
 
-46 files reference the surface, 388 references in total; `codegraph callers Region` reports 60
-inbound callers, the highest of any surface here.
+`codegraph callers Region` reports more inbound callers than for any other surface here.
 
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
@@ -311,7 +309,7 @@ inbound callers, the highest of any surface here.
 | `scripts/check-model-drift.py` | config | yes | `:254 PINNED_REGIONS`; `:57` explains why the two measurement-backed values each need a second reader |
 | `microvms-cli/src/seam.rs` | direct import | likely | `:341 resolve_region` and the `CoreSeam` methods are region-parameterized |
 | `microvms-core/src/control/mod.rs` | direct import | likely | `:183 ControlPlane::new` takes a `Region` rather than a string |
-| `microvms-core/src/control/connector.rs`, `control/microvm.rs`, `control/artifact.rs`, `control/image.rs`, `sandbox.rs` | direct import | likely | (5 more direct imports under `microvms-core/src/`, 2-8 references each) |
+| `microvms-core/src/control/connector.rs`, `control/microvm.rs`, `control/artifact.rs`, `control/image.rs`, `sandbox.rs` | direct import | likely | (further direct imports under `microvms-core/src/`) |
 | `microvms-js/src/sandbox.rs`, `microvms-py/src/sandbox.rs` | direct import | likely | `create`/`new` takes a `Region` object rather than a string, which is what keeps the closure |
 | `microvms-cli/src/commands/doctor.rs` | direct import | yes | lists the supported names and falls back to `Region::UsEast1` |
 | `microvms-cli/src/guards.rs` | test | likely | the injected seams are region-parameterized (`:82`, `:89`, `:98`) |
@@ -326,7 +324,7 @@ inbound callers, the highest of any surface here.
   extra region reopens the null-message trap for a name nothing will reject
   (`docs/PLATFORM.md:146`), which is why
   `microvms-core/src/region.rs:196 eu_central_one_is_refused_naming_the_null_message_trap`
-  names that specific value and why four separate tests across three languages repeat it.
+  names that specific value and why tests in Rust, Python, and Node each repeat it.
 - **`unlisted()` normalizes a supported name back to its variant, so there is never a second spelling
   of one region.** `microvms-core/src/region.rs:107`, asserted at
   `:243 the_escape_hatch_normalises_a_supported_name_to_its_variant` and mirrored in the Node binding
@@ -340,9 +338,9 @@ inbound callers, the highest of any surface here.
 ## The pinned cost rate table
 
 Defined at: `microvms-core/src/cost.rs:1011` (`pinned_rates`), returning the `RateTable` declared at
-`:849`, with the five decimal literals at `:1016`-`:1023`.
+`:849`, with the decimal literals at `:1016`-`:1023`.
 
-Gate: two, running at different times.
+Gate: an offline check and a live one, running at different times.
 `microvms-core/src/cost.rs:2180 every_rate_byte_matches_the_python_literal` compares each field
 against a literal in the offline tier, and `./scripts/check-live-rates.py --twin-only` cross-checks
 the script's own pinned copy against the Rust source — offline and free, per `mise.toml:563`. The
@@ -350,18 +348,17 @@ billable half, `mise.toml:547 [tasks."live:rates"]`, compares both against the l
 it sits in `live` rather than `check` because it needs network and credentials (`:402`).
 
 The figures were read from the Lambda pricing page on 2026-08-07 in us-east-1
-(`microvms-core/src/cost.rs:992`). One of them, `storage_gb_month`, is derived rather than read. 22
-files reference the surface, 156 references in total.
+(`microvms-core/src/cost.rs:992`). One of them, `storage_gb_month`, is derived rather than read.
 
 | Downstream | Type | Touch on change | Citation |
 | --- | --- | --- | --- |
-| `scripts/check-live-rates.py` | config | yes | `:121 PINNED` restates all five figures; `:133 TWIN_PATH` and `:134 TWIN_FN` point at `pinned_rates`, and `:148 verify_twin` parses the `dec!()` literals out of the Rust source |
+| `scripts/check-live-rates.py` | config | yes | `:121 PINNED` restates every figure; `:133 TWIN_PATH` and `:134 TWIN_FN` point at `pinned_rates`, and `:148 verify_twin` parses the `dec!()` literals out of the Rust source |
 | `microvms-cli/src/commands/cost.rs` | direct import | yes | the `cost` command's table |
 | `microvms-py/src/cost.rs` | direct import | yes | `:576 PyRateTable` and `:590 pinned()` — the only pinned door, with deliberately no rates-taking constructor |
 | `microvms-js/src/cost.rs` | direct import | yes | `:501 RateTable`, `:514 pinned()`; `:908`, `:960`, `:982` default to `cost::pinned_rates` when no table is passed |
 | `microvms-cli/src/commands/lifecycle.rs` | direct import | likely | `:449` imports `pinned_rates` and `run_report`; `:470`-`:473` price a completed run |
 | `microvms-cli/src/render.rs` | direct import | likely | `:399` reads `retrieved()` (`microvms-core/src/cost.rs:878`) for the report header; the remaining uses are under `#[cfg(test)]` from `:394` |
-| `microvms-core/src/cost.rs` (own tests) | test | yes | `:2180` pins all five figures as literals; `:2205` asserts the GB-month derivation as `dec!(0.0001111111) * dec!(730)` |
+| `microvms-core/src/cost.rs` (own tests) | test | yes | `:2180` pins every figure as a literal; `:2205` asserts the GB-month derivation as `dec!(0.0001111111) * dec!(730)` |
 | `conformance/run_rs.py` | test | likely | asserts the `cost` command and the run envelope each report a labelled estimate |
 | `docs/PLATFORM.md` | config | yes | `:293`, `:295`, and `:299` carry the same figures; `:304`-`:306` carry the GB-hour → GB-month derivation. `microvms-core/src/cost.rs:57` and `:992` both point here, so the two change in one commit |
 | `mise.toml` | config | no | `:395` wires `live:rates` to the script; `:411` records that `--twin-only` runs first on that path |
@@ -392,7 +389,7 @@ Defined at: `microvms-cli/src/manifest.rs:34` (`build`), reading `Cli::command()
 `microvms-cli/src/exit.rs:173 EXIT_TABLE`, `microvms-cli/src/commands/mod.rs:104 RESPONSE_TYPES`, and
 `microvms-cli/src/envelope.rs:66 API_VERSION`.
 
-Gate: three independent directions in one file —
+Gate: one file checks it from independent directions —
 `microvms-cli/tests/manifest.rs:46 every_command_the_manifest_lists_is_one_the_binary_routes`,
 `:90 every_published_domain_is_the_domain_the_parser_enforces`, and
 `:161 the_published_exit_table_agrees_with_what_the_binary_exits` — plus
@@ -407,16 +404,16 @@ that guarantee is what makes it useful to an agent.
 | `microvms-cli/src/commands/local.rs` | direct import | yes | `:193` is the `manifest` command handler, calling `crate::manifest::build()` at `:196`; `:186` records that a command added without a `RESPONSE_TYPES` row fails `microvms-cli/tests/manifest.rs` rather than shipping undescribed |
 | `microvms-cli/src/commands/mod.rs` | indirect | yes | `:104 RESPONSE_TYPES` is the one table the manifest reads rather than introspects; `:263 response_type` is called from every command module |
 | `microvms-cli/src/cli.rs` | runtime dispatch | yes | the whole clap tree is the input, so a flag added to any command appears in the manifest without an edit here, and a `--stream` added elsewhere changes `alternateResponse` (`microvms-cli/src/manifest.rs:75`) |
-| `microvms-cli/src/exit.rs` | direct import | yes | `:85` publishes all 14 rows as `exitCodes` |
+| `microvms-cli/src/exit.rs` | direct import | yes | `:85` publishes every row as `exitCodes` |
 | `microvms-cli/src/envelope.rs` | direct import | likely | `:30` imports `API_VERSION`, published as the manifest's `apiVersion` at `:81` and emitted on every envelope (`microvms-cli/src/envelope.rs:314`, `:331`) |
 | `conformance/run_rs.py` | test | yes | `:816` calls `microvm manifest` and `:817`-`:819` assert the suite drives every command it lists; `:751` takes a fixture value out of the manifest rather than writing it down; `:205` reads `apiVersion` back |
 | `microvms-cli/tests/manifest.rs` | test | yes | `:46`, `:90`, `:161` as above; `:195` asserts a bare invocation emits JSON |
 | `microvms-cli/src/manifest.rs` (own tests) | test | yes | `:265` asserts the command list equals the clap tree exactly; `:426` asserts every command declares a response type and its keys; `:450` asserts every command publishes a summary from its doc comment |
-| `docs/reference/cli.md` | config | likely | `:3` states twenty-eight subcommands and cites the clap enum in `microvms-cli/src/cli.rs`, so it restates by hand what the manifest generates |
+| `docs/reference/cli.md` | config | likely | `:3` cites the clap enum in `microvms-cli/src/cli.rs` for the subcommand list, so it restates by hand what the manifest generates |
 
 ### Blast-radius notes
 
-- **The command count is asserted at 17 in three places, so adding a command is a three-file change.**
+- **The command count is asserted in three places, so adding a command is a three-file change.**
   `microvms-cli/src/commands/mod.rs:104` declares `RESPONSE_TYPES: [(&str, &str, &[&str]); 17]`,
   `microvms-cli/src/manifest.rs:280` asserts it, and `microvms-cli/tests/manifest.rs:51` asserts it
   again with the breakdown — "the lifecycle six, the attached five, and the local six". The triple
@@ -425,7 +422,7 @@ that guarantee is what makes it useful to an agent.
 - **`choices: null` and `choices: []` mean different things, and a boolean flag must publish
   neither.** `microvms-cli/src/manifest.rs:401 a_free_text_parameter_reports_a_null_domain` asserts
   free text reports `null` (`:417`), and `:464` records that publishing clap's `["true", "false"]`
-  for a `SetTrue` flag would put a `choices` array on all nineteen flags — making `choices` useless
+  for a `SetTrue` flag would put a `choices` array on every boolean flag — making `choices` useless
   as the field a reviewer scans to find the genuinely closed sets (`:137`).
 - **`exec --stream` is the one documented exception to the one-envelope-per-invocation rule, and it
   is published as a machine-readable fact rather than as prose.** `microvms-cli/src/manifest.rs:75`
@@ -438,7 +435,7 @@ that guarantee is what makes it useful to an agent.
 ## Other notable surfaces
 
 - `agentd/src/routes.rs:371 surface_docs()` — the single route list the router (`:31`), the
-  `/v1/schema` handler (`:346`), the schema binary, and five assertions in
+  `/v1/schema` handler (`:346`), the schema binary, and the assertions in
   `agentd/tests/schema_artifact.rs` all walk
   (`agentd/tests/schema_artifact.rs:149 every_documented_route_is_served_by_the_router`,
   `:207 every_bearer_route_answers_503_before_bootstrap`, `:249`, `:291`, `:349`). A route absent from
@@ -453,9 +450,9 @@ that guarantee is what makes it useful to an agent.
   asserts no shipping source line reaches past it, and `:457 the_scan_cut_cannot_hide_production_code`
   guards the scan itself.
 - `microvms-core/src/control/transport.rs:245 Transport` and `microvms-core/src/control/mod.rs:112
-  Clock` — the two `Send + Sync` trait seams `ControlPlane` is constructed over
+  Clock` — the `Send + Sync` trait seams `ControlPlane` is constructed over
   (`microvms-core/src/control/mod.rs:183`), with `microvms-core/src/control/fake.rs` as the recording implementation.
-- `microvms-cli/Cargo.toml`'s six-name direct dependency set — asserted as an exact equality by
+- `microvms-cli/Cargo.toml`'s direct dependency set — asserted as an exact equality by
   `microvms-cli/tests/thinness.rs:145 the_direct_dependency_set_is_exactly_the_allowed_one` against
   the `ALLOWED` table at `:66`, and the absence of a `lib` target asserted by
   `microvms-cli/tests/dependency_direction.rs:126 the_cli_exports_no_library_target_at_all`. Both are
@@ -472,8 +469,8 @@ that guarantee is what makes it useful to an agent.
 
 ## See also
 
-- [contract map](contract-map.md) — 40 shared source citations
-- [business logic](business-logic.md) — 23 shared source citations
-- [public api](../reference/public-api.md) — 21 shared source citations
-- [debugging guide](debugging-guide.md) — 18 shared source citations
-- [system overview](../architecture/system-overview.md) — 16 shared source citations
+- [contract map](contract-map.md)
+- [business logic](business-logic.md)
+- [public api](../reference/public-api.md)
+- [debugging guide](debugging-guide.md)
+- [system overview](../architecture/system-overview.md)

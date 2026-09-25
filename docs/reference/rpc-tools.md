@@ -2,15 +2,15 @@
 
 The daemon's callable surface is HTTP, not MCP, gRPC, or JSON-RPC: there is no `.proto` file in the tree, and the only production router construction is the pair of `Router::new()` calls in `agentd/src/routes.rs:48-49`. The named unit a caller invokes is therefore a method-and-path pair, and this file has one H2 per pair, alphabetized on that string.
 
-Twenty pairs exist, and the roster is closed by construction rather than by convention. One list, `surface_docs()`, is walked twice: once to build the router and once to serve `GET /v1/schema` (`agentd/src/routes.rs:443-752`, `agentd/src/routes.rs:51-59`, `agentd/src/routes.rs:433-435`). A path absent from that list is unroutable, and a path present in it with no arm in `handler_for` panics at startup rather than answering 404 to a documented route (`agentd/src/routes.rs:140`).
+The roster is closed by construction rather than by convention. One list, `surface_docs()`, is walked twice: once to build the router and once to serve `GET /v1/schema` (`agentd/src/routes.rs:443-752`, `agentd/src/routes.rs:51-59`, `agentd/src/routes.rs:433-435`). A path absent from that list is unroutable, and a path present in it with no arm in `handler_for` panics at startup rather than answering 404 to a documented route (`agentd/src/routes.rs:140`).
 
-**Auth is per endpoint and takes three values.** `Bearer` endpoints sit behind `auth::require_token`, applied with `route_layer` so an unmatched path still falls through to the 404 fallback instead of being answered 401 (`agentd/src/routes.rs:66-69`). `Open` and `PlatformHook` endpoints go on an unguarded router (`agentd/src/routes.rs:53-58`). `PlatformHook` is unauthenticated because the platform holds no credential to present, and its request arrives over loopback indistinguishably from an in-VM process (`agentd/src/routes.rs:39-42`, `agentd/src/routes.rs:168-172`); the defense for `/run` is that it can succeed only once, not that the caller is identified. The auth middleware answers 503 when no token is installed at all, 503 when a token is presented while none is installed, and 401 when a presented token mismatches (`agentd/src/auth.rs:69-80`).
+**Auth is per endpoint.** `Bearer` endpoints sit behind `auth::require_token`, applied with `route_layer` so an unmatched path still falls through to the 404 fallback instead of being answered 401 (`agentd/src/routes.rs:66-69`). `Open` and `PlatformHook` endpoints go on an unguarded router (`agentd/src/routes.rs:53-58`). `PlatformHook` is unauthenticated because the platform holds no credential to present, and its request arrives over loopback indistinguishably from an in-VM process (`agentd/src/routes.rs:39-42`, `agentd/src/routes.rs:168-172`); the defense for `/run` is that it can succeed only once, not that the caller is identified. The auth middleware answers 503 when no token is installed at all, 503 when a token is presented while none is installed, and 401 when a presented token mismatches (`agentd/src/auth.rs:69-80`).
 
 Every response on every endpoint carries the `microvms-agentd-version` header, stamped by a layer applied outside `route_layer` so it also covers the 401, 503, 413, and 404 that no handler produced (`protocol/src/lib.rs:68`, `agentd/src/routes.rs:85`). The protocol version is `1` and tracks the `/v1/` namespace rather than the crate version (`protocol/src/lib.rs:60`).
 
 Failing `exec` endpoints return `ErrorBody { error, detail }`, where `error` is one of a closed set of slugs a client branches on and `detail` is prose for a log (`protocol/src/exec.rs:437-440`, `protocol/src/exec.rs:457-487`). Failing `fs` endpoints answer `text/plain` instead, because their bodies are opaque byte streams and there is no typed body module for them (`protocol/src/fs.rs:4-6`).
 
-One place where `docs/PROTOCOL.md`, the hand-written contract, disagrees with the source and with the generated `docs/schema.json`:
+Where `docs/PROTOCOL.md`, the hand-written contract, disagrees with the source and with the generated `docs/schema.json`:
 
 - It describes `POST HOOKS/resume` as signalling in-memory state loss (`docs/PROTOCOL.md:19`). The source records the opposite as a dated measurement and records that the state-loss claim was inferred rather than measured (`agentd/src/routes.rs:309-323`). This file follows the measurement.
 
@@ -52,7 +52,7 @@ Follows an exec's output as Server-Sent Events, replaying from a byte offset and
 
 **Input:** the `{id}` path segment plus `StreamQuery { offset: Option<u64> }` as `application/x-www-form-urlencoded` query; absent `offset` means 0, that is everything still inside the replay window (`protocol/src/exec.rs:323-328`).
 
-**Output:** `text/event-stream` carrying three typed events, all `data:` JSON — `output` = `OutputEvent { offset: u64, stream: StreamKind, output: String }` with `output` base64-encoded and `stream` one of `stdout` | `stderr`; `gap` = `GapEvent { from: u64, to: u64 }`; `exit` = `ExitEvent { exit_code: Option<i32>, signal: Option<i32>, timed_out: bool, truncated: bool, writers_may_be_alive: bool, offset: u64 }` (`protocol/src/exec.rs:326-360`, `protocol/src/exec.rs:84-87`, event names at `protocol/src/exec.rs:448-450`).
+**Output:** `text/event-stream` carrying typed events, all `data:` JSON — `output` = `OutputEvent { offset: u64, stream: StreamKind, output: String }` with `output` base64-encoded and `stream` one of `stdout` | `stderr`; `gap` = `GapEvent { from: u64, to: u64 }`; `exit` = `ExitEvent { exit_code: Option<i32>, signal: Option<i32>, timed_out: bool, truncated: bool, writers_may_be_alive: bool, offset: u64 }` (`protocol/src/exec.rs:326-360`, `protocol/src/exec.rs:84-87`, event names at `protocol/src/exec.rs:448-450`).
 
 **Statuses:** 200; 400 `malformed_request` when `offset` is not a non-negative integer; 401; 503; 404 `unknown_exec` (`agentd/src/schema.rs:451-466`).
 
@@ -428,14 +428,14 @@ Uploads and extracts an uncompressed tar under `?path=`, confined to that root (
 
 **Statuses:** 204; 400 for a missing or non-absolute `path`, a truncated body, or a member violating the extraction contract — an escaping path, an absolute or out-of-tree link target, or a device or fifo member, with the refused member's name in the body; 401; 503; 413 against `limits.max_body_bytes` on the wire or `limits.max_tar_members` / `limits.max_tar_bytes` once decoded; 507 under disk pressure; 500 on a filesystem failure (`agentd/src/schema.rs:647-671`).
 
-This is the one confined write path in the fs surface, and the reason is that member paths come from the archive rather than from the caller (`agentd/src/fs.rs:1455-1458`). Extraction mirrors the CPython `tarfile` `data` filter: in-tree symlinks preserved, absolute link targets refused, relative targets resolved lexically so a symlink written earlier in the same archive cannot redirect a later member (`agentd/src/routes.rs:710-716`). The confinement is held by four generated properties rather than by an enumeration of known-bad strings, the first being that nothing lands outside the root — asserted by walking the disk afterwards rather than by restating which members were refused (`agentd/tests/proptest_tar.rs:1-20`).
+This is the one confined write path in the fs surface, and the reason is that member paths come from the archive rather than from the caller (`agentd/src/fs.rs:1455-1458`). Extraction mirrors the CPython `tarfile` `data` filter: in-tree symlinks preserved, absolute link targets refused, relative targets resolved lexically so a symlink written earlier in the same archive cannot redirect a later member (`agentd/src/routes.rs:710-716`). The confinement is held by generated properties rather than by an enumeration of known-bad strings, the first being that nothing lands outside the root — asserted by walking the disk afterwards rather than by restating which members were refused (`agentd/tests/proptest_tar.rs:1-20`).
 
 `agentd/src/fs.rs:1459`
 
 ## See also
 
-- [impact analysis](../insights/impact-analysis.md) — 11 shared source citations
-- [contract map](../insights/contract-map.md) — 10 shared source citations
-- [debugging guide](../insights/debugging-guide.md) — 7 shared source citations
-- [business logic](../insights/business-logic.md) — 6 shared source citations
-- [state machines](../behavior/state-machines.md) — 5 shared source citations
+- [impact analysis](../insights/impact-analysis.md)
+- [contract map](../insights/contract-map.md)
+- [debugging guide](../insights/debugging-guide.md)
+- [business logic](../insights/business-logic.md)
+- [state machines](../behavior/state-machines.md)

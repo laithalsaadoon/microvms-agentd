@@ -66,8 +66,8 @@ lands, every control route answers 503. See [Trust](/internals/trust/).
 
 ### Build role and execution role
 
-Two of the three AWS prerequisites an image build needs, beside an S3 bucket for the code artifact.
-The repository's Terraform stack creates exactly those three; the CLI reads them from
+The IAM roles an image build needs, beside an S3 bucket for the code artifact.
+The repository's Terraform stack creates the bucket and both roles; the CLI reads them from
 `MICROVM_BUCKET`, `MICROVM_BUILD_ROLE_ARN`, and `MICROVM_EXECUTION_ROLE_ARN`, and `microvm doctor`
 names whichever is missing. See [Install](/learn/tutorial/install/).
 
@@ -202,8 +202,8 @@ elsewhere is addressed by the explicit triple until it is attached. See [CLI](/r
 
 The launch-time grant that gives a VM a network path, spelled as an ARN of the form
 `arn:aws:lambda:<region>:aws:network-connector:aws-network-connector:<NAME>`, never as the bare name.
-`ALL_INGRESS` and `INTERNET_EGRESS` are the two the client uses; `SHELL_INGRESS` is what `microvm
-shell` requires. See [Platform](/internals/platform/).
+The client requests `ALL_INGRESS` for ingress and `INTERNET_EGRESS` for `--egress`; `SHELL_INGRESS`,
+paired with `HTTP_INGRESS`, is what `microvm shell` requires. See [Platform](/internals/platform/).
 
 ### Profile table
 

@@ -1,6 +1,6 @@
 # Claude Code and Codex CLI in a MicroVM, on Bedrock
 
-This example runs two coding agents headless inside a Lambda MicroVM, with
+This example runs Claude Code and Codex CLI headless inside a Lambda MicroVM, with
 model access through Bedrock and no vendor API key anywhere. `run.sh` is the
 whole thing; this file explains each decision it encodes.
 
@@ -18,14 +18,14 @@ VM. Subsequent runs reuse the image and go straight to launch.
 
 `Dockerfile` starts from the platform's `al2023-1` base pair, carries the
 agentd daemon exactly as the client's default Dockerfile does, then adds
-Node 22, python3, and the two CLIs:
+Node 22, python3, and the Claude Code and Codex CLIs:
 
 ```dockerfile
 RUN dnf install -y nodejs22 npm python3 git tar gzip which findutils procps-ng
 RUN npm install -g @anthropic-ai/claude-code @openai/codex
 ```
 
-Two constraints are load-bearing. The `FROM` must be the registry ref paired
+The `FROM` and `WORKDIR` constraints are load-bearing. The `FROM` must be the registry ref paired
 with the managed base (`microvms-core` refuses a Dockerfile whose `FROM`
 disagrees with the `baseImageArn`; a `@sha256:` digest suffix on that same
 ref is accepted, and this example pins one), and the image must declare a `WORKDIR`
@@ -54,7 +54,7 @@ the 2048 default — and lets the peaks ride the headroom, which bills only by
 what is consumed. A steadier or heavier workload should keep the 2048
 default, whose 8 GiB ceiling survives a real test suite. Both agents would install fine and then
 fail on their first model call. `--keep` leaves the VM running and reports
-the three values every attached command needs (endpoint, agent token,
+the values every attached command needs (endpoint, agent token,
 MicroVM id). The image goes by ARN: `RunMicrovm` answers 400 "Malformed ARN"
 for a bare name, so the script resolves the ARN from the image listing.
 
@@ -74,7 +74,7 @@ agents consume the same token:
   API, and `bedrock-runtime` serves it
   (`base_url = https://bedrock-runtime.<region>.amazonaws.com/openai/v1`).
   A short `config.toml` defines the provider with the bearer token as the
-  API key. Two lines are required on that host: the model is an
+  API key. That host requires these settings: the model is an
   inference-profile id (default `global.openai.gpt-5.6-sol`; the bare id is
   refused with "on-demand throughput isn't supported"), and
   `web_search = "disabled"`, because Codex advertises its hosted web-search

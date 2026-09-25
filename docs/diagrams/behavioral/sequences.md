@@ -1,6 +1,6 @@
 # microvms-agentd · Sequences
 
-Three processes that cross the client/daemon HTTP boundary. Each participant is one module or
+Processes that cross the client/daemon HTTP boundary. Each participant is one module or
 one external actor; each edge is one call site.
 
 ## Exec start, stream, and ack
@@ -235,8 +235,8 @@ Edges in order:
 
 ## See also
 
-- [data flow](../../architecture/data-flow.md) — 11 shared source citations
-- [processes](../../behavior/processes.md) — 11 shared source citations
-- [business logic](../../insights/business-logic.md) — 10 shared source citations
-- [debugging guide](../../insights/debugging-guide.md) — 9 shared source citations
-- [components](../architecture/components.md) — 8 shared source citations
+- [data flow](../../architecture/data-flow.md)
+- [processes](../../behavior/processes.md)
+- [business logic](../../insights/business-logic.md)
+- [debugging guide](../../insights/debugging-guide.md)
+- [components](../architecture/components.md)

@@ -108,8 +108,8 @@ classDiagram
 
 ## See also
 
-- [impact analysis](../../insights/impact-analysis.md) — 10 shared source citations
-- [processes](../../behavior/processes.md) — 9 shared source citations
-- [business logic](../../insights/business-logic.md) — 9 shared source citations
-- [sequences](../behavioral/sequences.md) — 8 shared source citations
-- [data flow](../../architecture/data-flow.md) — 7 shared source citations
+- [impact analysis](../../insights/impact-analysis.md)
+- [processes](../../behavior/processes.md)
+- [business logic](../../insights/business-logic.md)
+- [sequences](../behavioral/sequences.md)
+- [data flow](../../architecture/data-flow.md)

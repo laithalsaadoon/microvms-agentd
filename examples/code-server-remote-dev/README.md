@@ -3,7 +3,7 @@
 This example runs [code-server](https://github.com/coder/code-server) —
 VS Code in a browser — inside a Lambda MicroVM and reaches it through
 `microvm port-forward`. You get a disposable, suspendable dev box whose whole
-lifecycle is four CLI commands, and whose idle time costs roughly snapshot
+lifecycle runs through the CLI, and whose idle time costs roughly snapshot
 storage instead of compute.
 
 ```bash
@@ -37,7 +37,7 @@ microvm run --keep --vm-name code-server-dev --image "$IMAGE_ARN" --config micro
 
 `--vm-name` registers the name in the local registry, so everything after the
 launch addresses the VM as `--name code-server-dev` — no endpoint, token, or
-id to paste. `microvm.toml` carries the four choices that make this a dev box
+id to paste. `microvm.toml` carries the choices that make this a dev box
 rather than a batch runner:
 
 - **`memory = 2048`.** An IDE with language servers is a steadier workload
@@ -84,7 +84,7 @@ microvm cp --tar vm:/workspace ./workspace-backup.tar --name code-server-dev
 
 ## Why `--auth none` is sound here
 
-Three layers already gate the path to the IDE. The local listener binds
+Other layers already gate the path to the IDE. The local listener binds
 `127.0.0.1`, so nothing off your machine reaches the forward. Every request
 the forward relays crosses the endpoint proxy, which requires a JWE auth
 token scoped to this specific MicroVM and port set

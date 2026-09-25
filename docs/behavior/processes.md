@@ -1,13 +1,13 @@
 # microvms-agentd · Processes
 
-Three initiator families drive every process here. The daemon's HTTP surface, assembled by
+These initiator families drive every process here. The daemon's HTTP surface, assembled by
 walking one list so a route cannot be served unless it is documented — `agentd/src/routes.rs:36`,
 dispatched through the exhaustive match at `agentd/src/routes.rs:110`. The client library's public
 lifecycle methods on `Sandbox` — `microvms-core/src/sandbox.rs:870`, `:1010`, `:1465`, `:1549`,
 `:1653`. And the CLI's command handlers, dispatched from `microvms-cli/src/main.rs:73`.
 
-The eight processes below carry the load-bearing behavior. Everything else, including the
-proxy-token mint that runs inside every request and the `microvm run` command that composes four
+The processes below carry the load-bearing behavior. Everything else, including the
+proxy-token mint that runs inside every request and the `microvm run` command that composes several
 of these processes, is listed under `## Minor flows` with its entry point.
 
 ## Image build and the stalled-build probe
@@ -15,7 +15,7 @@ of these processes, is listed under `## Minor flows` with its entry point.
 Entry point: `microvms-core/src/sandbox.rs:870`
 
 1. `Sandbox::build_image` records the requested size class and hands the request to the control plane; the local guards live one level down because the create happens *after* the caller's artifact upload — `microvms-core/src/sandbox.rs:870`.
-2. `ControlPlane::create_image` runs `preflight` before its own wire call, and delegates rather than keeping a second copy of the list, so the two call sites cannot drift — `microvms-core/src/control/image.rs:179`.
+2. `ControlPlane::create_image` runs `preflight` before its own wire call, and delegates rather than keeping a second copy of the list, so the call sites cannot drift — `microvms-core/src/control/image.rs:179`.
 3. `preflight` is the whole guard list and is callable before the upload: image name, `require_workdir` under `inherit_workdir`, and for a supplied Dockerfile the matching `FROM`, the agreeing agentd port, a keepalive under the stream idle timeout, and a `CMD` that runs the daemon — `microvms-core/src/control/image.rs:258`.
 4. The wire body injects the one architecture value and derives the one accepted OS capability from a boolean, mints the `clientToken` from a label rather than accepting one, then goes out through `send_with_retry` — `microvms-core/src/control/image.rs:228`.
 5. `wait_for_image` refuses an empty identifier before the loop — an empty one collapses the URI onto the collection and polls the *listing* until the deadline — then polls `GetMicrovmImage`, returning on `Image::is_ready` and raising through `build_failure` on `Image::is_failed` — `microvms-core/src/control/image.rs:368`.
@@ -213,7 +213,7 @@ Entry point: `agentd/src/fs.rs:1459`
 - CLI attached suspend — entry at `microvms-cli/src/commands/lifecycle.rs:1982`. Spends one `GetMicrovm` to refuse locally from anything but RUNNING, which is how STATE-5's local half holds on a path that did not send the launch.
 - CLI attached resume — entry at `microvms-cli/src/commands/lifecycle.rs:2052`. Skips the suspended-window check, since a process that did not send the launch cannot know `suspendedDurationSeconds`, and relies on `fail_on: DEAD_STATES` instead.
 - CLI attached terminate — entry at `microvms-cli/src/commands/lifecycle.rs:2123`. VM, then image, then the log group last, and never fails on a teardown failure — it reports the identifier, which is the only remedy for a resource that would not delete.
-- CLI exec — entry at `microvms-cli/src/commands/attached.rs:179`. Four shapes over one subcommand — start and wait, `--stream`, `--stdin`, `--poll` — because they are one question asked at different points in an exec's life.
+- CLI exec — entry at `microvms-cli/src/commands/attached.rs:179`. One subcommand covers start and wait, `--stream`, `--stdin`, and `--poll`, because they are one question asked at different points in an exec's life.
 - CLI exec stream — entry at `microvms-cli/src/commands/attached.rs:384`. Drives core's callback loop rather than a `Stream`, so the crate needs no `futures-util` dependency, and reports `nextOffset` from core's own cursor.
 - CLI health — entry at `microvms-cli/src/commands/attached.rs:810`. Warns about a degraded identity and disk pressure on stderr while keeping exit 0, because the daemon's contract is to serve anyway and draining is the operator's decision.
 - CLI ack — entry at `microvms-cli/src/commands/attached.rs:1018`. Issues the ack on its own for a detached caller; both 409 shapes collapse onto `ERR_PROTOCOL` while the daemon's `still_running` or `already_acked` detail rides in the message.
@@ -224,13 +224,13 @@ Entry point: `agentd/src/fs.rs:1459`
 - CLI logs — entry at `microvms-cli/src/commands/local.rs:696`. Derives and names the build log group and exits `ERR_PRECONDITION` with the `aws logs` invocation, because `lines: []` is the wire shape for "the group exists and is empty".
 - CLI manifest — entry at `microvms-cli/src/commands/local.rs:785`. Derived from clap introspection and the exit table, so it cannot drift from what the binary accepts; a command with no response-type row fails `microvms-cli/tests/manifest.rs`.
 - CLI constants — entry at `microvms-cli/src/commands/local.rs:808`. Emits `microvms_core::constants::as_json()` verbatim for comparison against the pinned botocore model, with `--emit-json` writing the bare object the drift gate reads.
-- CLI dockerfile — entry at `microvms-cli/src/commands/local.rs:843`. Emits the stanza with both platform traps as comments — the `FROM` that must pair with `baseImageArn`, and the `WORKDIR` the managed al2023 base does not declare.
+- CLI dockerfile — entry at `microvms-cli/src/commands/local.rs:843`. Emits the stanza with the platform traps as comments — the `FROM` that must pair with `baseImageArn`, and the `WORKDIR` the managed al2023 base does not declare.
 - CLI cost — entry at `microvms-cli/src/commands/cost.rs:27`. Renders a report from pinned rates, optionally beside the residency comparison, with unpriced line items kept distinct from zero.
 
 ## See also
 
-- [debugging guide](../insights/debugging-guide.md) — 15 shared source citations
-- [business logic](../insights/business-logic.md) — 14 shared source citations
-- [impact analysis](../insights/impact-analysis.md) — 14 shared source citations
-- [data flow](../architecture/data-flow.md) — 13 shared source citations
-- [sequences](../diagrams/behavioral/sequences.md) — 11 shared source citations
+- [debugging guide](../insights/debugging-guide.md)
+- [business logic](../insights/business-logic.md)
+- [impact analysis](../insights/impact-analysis.md)
+- [data flow](../architecture/data-flow.md)
+- [sequences](../diagrams/behavioral/sequences.md)

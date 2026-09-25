@@ -24,7 +24,7 @@ access wired, running as a non-root user, and a second call that hands the agent
 Everything L3 does is a composition of L2 calls that `examples/coding-agents-on-bedrock/`
 already performed in a shell script; what L3 adds is that the composition lives in the
 library, so the CLI, the bindings, and a harness call one function instead of
-re-deriving the seven-step recipe and its four measured traps.
+re-deriving the example's recipe and its measured traps.
 
 ## The rule this changes, and how the cost is bounded
 
@@ -35,7 +35,7 @@ classes" as an explicit non-goal, and `docs/STRATEGY.md` says "not an orchestrat
 The reason was churn: an agent CLI's flags, config format, and model ids move on a
 vendor's cadence, and a platform library that hardcodes them decays.
 
-L3 crosses that line on purpose, for two agents, with the churn contained:
+L3 crosses that line on purpose, for Claude Code and Codex, with the churn contained:
 
 1. **Every agent-specific fact is data in one table**, `agents::profile`, not code
    spread across the crate. Each entry carries the date and version it was verified
@@ -45,7 +45,7 @@ L3 crosses that line on purpose, for two agents, with the churn contained:
    install line, the headless command template, and the environment file are each
    parameters with a default; a caller whose vendor moved first passes the new value
    and does not wait for a release.
-3. **The generic layer stays generic.** L1 and L2 gained one read-only accessor for
+3. **The generic layer stays generic.** L1 and L2 gained a read-only accessor for
    L3 (`Sandbox::port`) and nothing else. `agents` depends on `control`, `session`,
    and `sandbox`; nothing depends on `agents`.
 4. **This is still not an orchestrator.** L3 provisions one VM and runs one prompt in
@@ -261,7 +261,7 @@ part of the suite that does; it reports the model ids it used.
 ## The bindings
 
 `microvms-py` and `microvms-js` carry the layer as `AgentVm`, `AgentSpec`, and
-`BearerToken`, plus four module functions for a caller who holds only a session:
+`BearerToken`, plus module functions for a caller who holds only a session:
 `installed_agents`, `install_agent_access`, `prompt_agent`, and `mint_bedrock_token`
 (`installedAgents`, `installAgentAccess`, `promptAgent`, `mintBedrockToken`). The
 sequence is the CLI's, one method per step, and the upload stays the caller's because

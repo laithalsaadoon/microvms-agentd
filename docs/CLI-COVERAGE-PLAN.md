@@ -9,10 +9,11 @@
 > its own coverage line from what ran (`expressed = passed + failed`, denominator
 > plus skips), so no document has to keep a quoted figure in step. As a result,
 > the "38 of 72" below describes the state on the day the plan was written and is
-> no longer accurate. The numerator is now complete. The denominator settled at
-> **75** rather than 72, because two of the original 38 turned out to be weak
+> no longer accurate. Every figure below this note was measured at `83ef41b`, the
+> commit that added this plan. The numerator is now complete. The denominator grew
+> past 72, because some of the original checks turned out to be weak
 > readings off the launch envelope and were split into real checks (see
-> `CHANGELOG.md`); it has since grown to **77** as the suite gained checks,
+> `CHANGELOG.md`), and then as the suite gained checks,
 > which is why the paragraph below says to read the figure off a run.
 >
 > Read this for *why* each surface exists and what the constraints were. For what
