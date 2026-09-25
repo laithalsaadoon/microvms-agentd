@@ -23,12 +23,13 @@ No `.rs` or `.py` file in the workspace carries a `TODO`, `FIXME`, `HACK`, `INCI
 defended against rather than narration. The four sources above are the history.
 
 Two operational facts before you start. `mise run check` is the free offline gate — lint,
-security, all six Rust tiers, schema and stub freshness, model drift, live wiring, and the
-release cross-compile (`mise.toml:290-301`). `mise run live` is BILLABLE, takes about fifteen
-minutes against real AWS, and is never a first debugging step (`mise.toml:428-429`); after any
-live run, teardown is verified separately by `mise run live:verify-clean`
-(`mise.toml:416-426`), because the service creates log groups under
-`/aws/lambda-microvms/` that outlive `terraform destroy` (`docs/PLATFORM.md:195-201`).
+security, all six Rust tiers, schema, manifest, Python stub and TypeScript declaration
+freshness, model drift, publishability, live wiring, the release cross-compile, the background
+example, and the requirement traceability matrix (`mise.toml:417-433`). `mise run live` is
+BILLABLE, takes about fifteen minutes against real AWS, and is never a first debugging step
+(`mise.toml:580-581`); after any live run, teardown is verified separately by
+`mise run live:verify-clean` (`mise.toml:568-578`), because the service creates log groups
+under `/aws/lambda-microvms/` that outlive `terraform destroy` (`docs/PLATFORM.md:100-105`).
 
 ## Failure-mode index
 
@@ -84,7 +85,7 @@ live run, teardown is verified separately by `mise run live:verify-clean`
 | Run ledger on disk | One JSON file per invocation under `$MICROVM_STATE_DIR`, else `~/.microvm/runs`. Written **before** each delete is attempted, and its file is refused deletion while `leaked` is non-empty | `leaked` — the operator's to-do list. For a `CREATING` image and a service-created log group the identifier *is* the remedy, because there is no second way to find them. A write failure is swallowed, so an unwritable state dir costs the `ls` entry and nothing else | `microvms-cli/src/ledger.rs:1-22`, `microvms-cli/src/ledger.rs:37-49`, `microvms-cli/src/seam.rs:450-459` |
 | `microvm ls` | stdout. Rows marked as alarms plus a trailing count | "N run(s), M with something still billing" | `microvms-cli/src/main.rs:209-247` |
 | `microvm doctor` | A **success** envelope with `ok: false` plus exit `ERR_PRECONDITION`, because the check succeeded — it found what was wrong | `checks[]` per named check. Advisory checks do not fail the run; the fatal ones do | `microvms-cli/src/commands/doctor.rs:62-83` |
-| `mise run live:verify-clean` | stdout, exit 0 clean and 1 leaked | Three outcomes, not two: **leak** (still billing and nothing intends to keep it), **standing** (the Terraform stack, possibly on purpose), **pending** (a delete in flight — re-run in a minute) | `scripts/verify-clean.py:7-28`, `mise.toml:416-426` |
+| `mise run live:verify-clean` | stdout, exit 0 clean and 1 leaked | Three outcomes, not two: **leak** (still billing and nothing intends to keep it), **standing** (the Terraform stack, possibly on purpose), **pending** (a delete in flight — re-run in a minute) | `scripts/verify-clean.py:7-28`, `mise.toml:568-578` |
 | Guest OOM counters | In-guest, readable with no extra privileges | `dmesg`, and `/sys/fs/cgroup/memory.events` → `oom`, `oom_kill`, `oom_group_kill`. Poll these rather than discovering a kill after the fact | `docs/PLATFORM.md:375-393` |
 
 ## First-checks ladder
@@ -122,10 +123,12 @@ money.
    delete is attempted, so the identifiers survive a process that died inside the call.
    `microvms-cli/src/ledger.rs:11-22`
 6. **Run `mise run check`.** It is offline, free, and the definition of done: lint, security,
-   all six Rust tiers, `schema:check`, `stubs:check`, `model:check`, `live:check`, and the
-   release cross-compile. A drifted generated artifact — the served schema, the Python stub,
-   a hardcoded API constraint against botocore's model — fails here rather than in
-   production. `mise.toml:290-301`
+   all six Rust tiers, `schema:check`, `manifest:check`, `stubs:check`, `dts:check`,
+   `model:check`, `publish:check`, `live:check`, the release cross-compile,
+   `background:check`, and `trace:check`. A drifted generated artifact — the served schema,
+   the CLI manifest, the Python stub, the TypeScript declarations, the traceability matrix, a
+   hardcoded API constraint against botocore's model — fails here rather than in production.
+   `mise.toml:417-433`
 7. **If the VM is reachable: `GET /v1/health`.** One call answers six questions.
    `bootstrapped` false plus 503s everywhere means the run hook has not landed;
    `disk.under_pressure` means writes are about to be refused with 507; `identity_degraded`
@@ -148,7 +151,7 @@ money.
     fake more forgiving than the real daemon. Teardown reporting success and the account being
     clean are different questions, so the leak check runs independently of the code that did
     the cleanup, and expect to run `--delete` more than once because an image refuses deletion
-    while its VM is still terminating. `mise.toml:428-429`, `scripts/verify-clean.py:7-28`
+    while its VM is still terminating. `mise.toml:580-581`, `scripts/verify-clean.py:7-28`
 
 ## Known incident patterns
 

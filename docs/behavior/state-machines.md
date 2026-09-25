@@ -10,9 +10,10 @@ carries a five-variable state model with a machine-readable transition effect pe
 The models are ordinary `cargo test` targets in the `agentd-model` crate
 (`model/Cargo.toml:2`), driven by `.checker().spawn_bfs().join().assert_properties()`
 (`model/src/lib.rs:528-534`, `model/src/client.rs:710-716`) and run by `cargo test --all`
-(`mise.toml:148`). The Z3 pass over the symspec is a separate task,
-`--reachability-timeout-ms 5000` against the v5 CLI (`mise.toml:227`), with the daemon's own
-requirements gated by `symspec check spec/agentd.symspec.json --strict` (`mise.toml:207`).
+(`mise.toml:164`). The Z3 pass over the symspec is a separate task,
+`spec:core`, run with `--reachability-timeout-ms 5000` through `scripts/check-spec.sh`, which refuses a symspec CLI
+older than 1.0 (`mise.toml:279-292`), with the daemon's own requirements gated by
+`./scripts/check-spec.sh spec/agentd.symspec.json` (`mise.toml:267-277`).
 
 Where a machine is mirrored across crates, the mirror is by convention rather than by a cargo
 dependency — `agentd-model` has no edge to `microvms-core` or to `agentd`

@@ -9,7 +9,7 @@ behavior and [Trust](docs/TRUST.md) before changing authentication or execution.
 ```bash
 mise install
 mise run install       # install git hooks
-mise run check         # code, security, tests, schema, stubs, API drift, packaging, build
+mise run check         # code, security, tests, schema, stubs and declarations, API drift, packaging, build, traceability
 mise tasks             # all available tasks
 ```
 
