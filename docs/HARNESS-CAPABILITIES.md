@@ -94,14 +94,17 @@ providers' hand-rolled daemons did, with proofs behind each behavior:
 Ranked by how many harnesses need it, times how much hand-rolled code it
 deletes, over the cost of building it here.
 
-**1. Expose per-exec env (and user) through the CLI.** The daemon applies
-`env` per request and the bindings expose it; the CLI hardcodes
-`env: HashMap::new()` (`microvms-cli/src/commands/lifecycle.rs:1874-1885`).
-Every harness passes env per exec (Harbor merges three layers of it on
-every call), and the PATH failure the coding-agents example documents is
-this gap biting a real workload. `exec --env KEY=VALUE` (repeatable) plus
-`--user`/`--group` makes the CLI equal to the bindings. Smallest change,
-highest reach.
+**1. Expose per-exec env (and user) through the CLI. Shipped.** The daemon
+applies `env` per request, the bindings expose it, and `microvm exec` now
+takes it too: a repeatable `--env KEY=VALUE`, `--user`/`--group` as a name or
+a numeric id, `--shell`, and `--inherit-image-env`
+(`microvms-cli/src/cli.rs:1132-1171`), all copied into the start request
+(`microvms-cli/src/commands/attached.rs:211-227`). The empty `env` in
+`StartSpec::command` is now only the default a caller overrides
+(`microvms-cli/src/commands/lifecycle.rs:1885-1898`). Every harness passes
+env per exec (Harbor merges three layers of it on every call), and the PATH
+failure the coding-agents example documents was this gap biting a real
+workload.
 
 **2. Ship the platform daemon as the reusable answer to "no exec API".**
 Harbor and Omnigent each carry a several-hundred-line stdlib Python daemon

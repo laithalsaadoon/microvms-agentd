@@ -22,19 +22,19 @@ needs only one, because the missing half is what a client would otherwise hand-w
 `docs/schema.json` is generated from those same attributes under both contracts and byte-compared
 in CI (`protocol/src/lib.rs:23-27`).
 
-- `protocol/src/exec.rs` (504 LOC)
+- `protocol/src/exec.rs` (714 LOC)
 - `protocol/src/lib.rs` (68 LOC)
 - `protocol/src/hook.rs` (380 LOC)
-- `protocol/src/health.rs` (368 LOC)
+- `protocol/src/health.rs` (416 LOC)
 - `protocol/src/fs.rs` (92 LOC)
 
 ## agentd
 
 `agentd` is the in-VM daemon supplying the exec and file-transfer APIs AWS Lambda MicroVMs does
-not have (`agentd/src/lib.rs:4-7`). Its thirteen modules divide by defect class rather than by HTTP
+not have (`agentd/src/lib.rs:4-7`). Its fourteen modules divide by defect class rather than by HTTP
 surface: `state` owns the one-shot bootstrap, `auth` decides authorization before a body byte is
 read, `exec` owns idempotent start with ack-gated release, and `fs` owns streaming tar
-(`agentd/src/lib.rs:31-43`). The trust boundary is the crate's organizing fact — the platform's
+(`agentd/src/lib.rs:31-46`). The trust boundary is the crate's organizing fact — the platform's
 own `/run` hook arrives from `127.0.0.1`, indistinguishable at the socket level from a request
 sent by a process inside the VM, so source-address filtering would reject a legitimate bootstrap
 and the one-shot property is the only defense left (`agentd/src/lib.rs:11-16`). `routes.rs`
@@ -43,14 +43,14 @@ publishes, so a documented route with no handler panics at startup, and each end
 auth mode decides which of the two routers it joins (`agentd/src/routes.rs:31-35`,
 `agentd/src/routes.rs:48-58`, `agentd/src/routes.rs:371`, `docs/schema.json:497-1154`).
 
-- `agentd/src/exec.rs` (3843 LOC)
+- `agentd/src/exec.rs` (4152 LOC)
 - `agentd/src/fs.rs` (2648 LOC)
-- `agentd/src/schema.rs` (929 LOC)
-- `agentd/src/routes.rs` (1139 LOC)
+- `agentd/src/schema.rs` (949 LOC)
+- `agentd/src/routes.rs` (1141 LOC)
 - `agentd/src/identity.rs` (756 LOC)
-- `agentd/src/state.rs` (627 LOC)
+- `agentd/src/state.rs` (670 LOC)
 - `agentd/src/disk.rs` (435 LOC)
-- `agentd/src/config.rs` (214 LOC)
+- `agentd/src/config.rs` (223 LOC)
 
 ## microvms-core
 
@@ -74,14 +74,14 @@ free functions (`image_request_for`, `launch_request_for`, `install_access`, `pr
 the bindings drive, because their sandbox sits behind a lock one `AgentVm` cannot own.
 
 - `microvms-core/src/cost.rs` (4156 LOC)
-- `microvms-core/src/control/image.rs` (3812 LOC)
-- `microvms-core/src/session/exec.rs` (1714 LOC)
-- `microvms-core/src/control/microvm.rs` (2727 LOC)
-- `microvms-core/src/sandbox.rs` (3508 LOC)
-- `microvms-core/src/agents/mod.rs` (1438 LOC)
+- `microvms-core/src/control/image.rs` (3836 LOC)
+- `microvms-core/src/session/exec.rs` (1957 LOC)
+- `microvms-core/src/control/microvm.rs` (2721 LOC)
+- `microvms-core/src/sandbox.rs` (3873 LOC)
+- `microvms-core/src/agents/mod.rs` (1507 LOC)
 - `microvms-core/src/control/ops.rs` (2525 LOC)
-- `microvms-core/src/control/mod.rs` (1752 LOC)
-- `microvms-core/src/session/mod.rs` (1447 LOC)
+- `microvms-core/src/control/mod.rs` (1765 LOC)
+- `microvms-core/src/session/mod.rs` (1509 LOC)
 
 ## microvms-cli
 
@@ -99,14 +99,14 @@ in `main.rs`, and `guards.rs` — the crate's largest file — holds the three g
 inject a refusing seam from inside the crate and so compiles only under `cfg(test)`
 (`microvms-cli/src/main.rs:23-28`, `microvms-cli/src/guards.rs:12-20`).
 
-- `microvms-cli/src/guards.rs` (7508 LOC)
-- `microvms-cli/src/cli.rs` (3177 LOC)
+- `microvms-cli/src/guards.rs` (8020 LOC)
+- `microvms-cli/src/cli.rs` (3231 LOC)
 - `microvms-cli/src/exit.rs` (682 LOC)
-- `microvms-cli/src/commands/attached.rs` (3231 LOC)
-- `microvms-cli/src/commands/lifecycle.rs` (2655 LOC)
-- `microvms-cli/src/render.rs` (1018 LOC)
-- `microvms-cli/src/seam.rs` (617 LOC)
-- `microvms-cli/src/envelope.rs` (593 LOC)
+- `microvms-cli/src/commands/attached.rs` (3270 LOC)
+- `microvms-cli/src/commands/lifecycle.rs` (2687 LOC)
+- `microvms-cli/src/render.rs` (979 LOC)
+- `microvms-cli/src/seam.rs` (607 LOC)
+- `microvms-cli/src/envelope.rs` (637 LOC)
 
 ## microvms-py
 
@@ -127,13 +127,13 @@ it: `AgentVm`, `AgentSpec`, and `BearerToken` over the same `Arc<Mutex<Sandbox>>
 shares, driving the core's free functions with the specs kept beside the lock
 (`microvms-py/src/agents.rs`).
 
-- `microvms-py/src/cost.rs` (1124 LOC)
-- `microvms-py/src/sandbox.rs` (951 LOC)
-- `microvms-py/src/agents.rs` (819 LOC)
-- `microvms-py/src/exec.rs` (650 LOC)
-- `microvms-py/src/session.rs` (964 LOC)
+- `microvms-py/src/cost.rs` (1139 LOC)
+- `microvms-py/src/sandbox.rs` (1263 LOC)
+- `microvms-py/src/agents.rs` (826 LOC)
+- `microvms-py/src/exec.rs` (680 LOC)
+- `microvms-py/src/session.rs` (1155 LOC)
 - `microvms-py/src/errors.rs` (226 LOC)
-- `microvms-py/src/lib.rs` (157 LOC)
+- `microvms-py/src/lib.rs` (166 LOC)
 - `microvms-py/src/hooks.rs` (117 LOC)
 - `microvms-py/src/runtime.rs` (92 LOC)
 
@@ -158,14 +158,14 @@ over tokio's mutex; `BearerToken` is a `#[napi]` class rather than an object bec
 secret, so `JSON.stringify` gives `{}` and a look-alike object is rejected by napi's conversion
 (`microvms-js/src/agents.rs`).
 
-- `microvms-js/src/cost.rs` (1034 LOC)
-- `microvms-js/src/session.rs` (829 LOC)
-- `microvms-js/src/exec.rs` (468 LOC)
-- `microvms-js/src/sandbox.rs` (770 LOC)
-- `microvms-js/src/agents.rs` (745 LOC)
+- `microvms-js/src/cost.rs` (1055 LOC)
+- `microvms-js/src/session.rs` (1025 LOC)
+- `microvms-js/src/exec.rs` (481 LOC)
+- `microvms-js/src/sandbox.rs` (1051 LOC)
+- `microvms-js/src/agents.rs` (753 LOC)
 - `microvms-js/src/process.rs` (550 LOC)
 - `microvms-js/src/region.rs` (139 LOC)
-- `microvms-js/src/lib.rs` (101 LOC)
+- `microvms-js/src/lib.rs` (103 LOC)
 - `microvms-js/src/errors.rs` (158 LOC)
 
 ## model
@@ -185,7 +185,7 @@ property can say no resume ever fires once `was_terminated` holds (`model/src/cl
 `model/src/client.rs:23-30`).
 
 - `model/src/client.rs` (982 LOC)
-- `model/src/lib.rs` (658 LOC)
+- `model/src/lib.rs` (666 LOC)
 - `model/Cargo.toml` (17 LOC)
 
 ## Supporting code
@@ -194,19 +194,19 @@ Verification tooling, generated surfaces, and requirements data. None of it is a
 (`Cargo.toml:2-9`), and none of it is a module under the enumeration rule that skips
 tooling-only paths.
 
-- `conformance/run_rs.py` (5055 LOC)
-- `microvms-py/microvms.pyi` (1759 LOC)
+- `conformance/run_rs.py` (7639 LOC)
+- `microvms-py/microvms.pyi` (2622 LOC)
 - `scripts/check-model-drift.py` (1089 LOC)
-- `spec/core.symspec.json` (1049 LOC)
+- `spec/core.symspec.json` (1642 LOC)
 - `scripts/check-live-rates.py` (625 LOC)
 - `scripts/check-live-wiring.py` (450 LOC)
 - `scripts/generate-py-stubs.py` (345 LOC)
 - `scripts/check-lint-coverage.py` (292 LOC)
 - `conformance/infra/main.tf` (281 LOC)
 - `spec/microvms-core-kickoff.md` (175 LOC)
-- `scripts/verify-clean.py` (589 LOC)
+- `scripts/verify-clean.py` (641 LOC)
 - `examples/coding-agents-on-bedrock/run.sh` (145 LOC)
-- `spec/agentd.symspec.json` (117 LOC)
+- `spec/agentd.symspec.json` (321 LOC)
 - `scripts/check-license-headers.py` (131 LOC)
 - `examples/coding-agents-on-bedrock/Dockerfile` (51 LOC)
 

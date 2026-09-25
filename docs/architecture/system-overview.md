@@ -24,19 +24,20 @@ Seven crates carry that (`Cargo.toml:2-10`), and the seams follow defect classes
 layers. `protocol` is the wire contract as types: pure data, serde plus schemars, no tokio,
 no axum, no base64 (`protocol/src/lib.rs:16-21`, 68 LOC). Both the daemon and the client
 compile against it, so a renamed field fails a build instead of a consumer's runtime
-(`agentd/Cargo.toml:11-15`). `agentd` is the daemon, thirteen modules across 16,868 LOC
-(`agentd/src/lib.rs:31-43`, 46 LOC) — `state` owns the one-shot bootstrap, `auth` decides
+(`agentd/Cargo.toml:11-15`). `agentd` is the daemon, fourteen modules across 18,877 LOC
+(`agentd/src/lib.rs:31-46`, 49 LOC) — `state` owns the one-shot bootstrap, `auth` decides
 before a body byte is read, `exec` and `fs` own idempotent exec and streaming tar. Its
 router is assembled by walking the same endpoint list `/v1/schema` publishes, so a
-documented route with no handler panics at startup (`agentd/src/routes.rs:29-35`, 1,139 LOC);
+documented route with no handler panics at startup (`agentd/src/routes.rs:29-35`, 1,141 LOC);
 there are twenty, split into a Bearer-guarded `control` router and an `open` one
 (`agentd/src/routes.rs:51-59`, `agentd/src/routes.rs:110-140`). It runs as the container
 `CMD` on a current-thread runtime sized for a 512 MiB guest (`agentd/src/main.rs:4-6`,
 `agentd/src/main.rs:24-27`).
 
-`microvms-core` is the client library and the largest crate — 42,588 LOC over 41 files, twelve
+`microvms-core` is the client library and the largest crate — 54,895 LOC over 64 files, fourteen
 modules, nine of which its own doc comment splits into foundation and product surface, with
-`agents` as the one layer above them (`microvms-core/src/lib.rs:61-78`). `control` speaks
+`agents` as the one layer above them and `provision` beside the surface
+(`microvms-core/src/lib.rs:59-87`). `control` speaks
 hand-signed SigV4 rest-json because `lambda-microvms` has no SDK crate
 (`microvms-core/src/control/mod.rs:2-3`); `session` is
 the in-VM client, carrying proxy auth and the byte-offset cursor that makes an interrupted
@@ -46,7 +47,7 @@ field private so the Z3 proofs are proofs about the code
 than zero (`microvms-core/src/cost.rs:22-27`).
 
 `microvms-cli` ships `microvm` with twenty-nine subcommands
-(`microvms-cli/src/cli.rs:95-351`, 3,177 LOC), each invocation writing exactly one JSON
+(`microvms-cli/src/cli.rs:85-362`, 3,231 LOC), each invocation writing exactly one JSON
 envelope to stdout and progress to stderr (`microvms-cli/src/envelope.rs:4-11`). It has no
 lib target (`microvms-cli/Cargo.toml:21-23`) and no second path to AWS: a twelve-crate denylist
 of HTTP clients, signers, and credential chains is asserted against `cargo metadata`
@@ -54,8 +55,8 @@ of HTTP clients, signers, and credential chains is asserted against `cargo metad
 wrap the same core and never the CLI (`microvms-py/Cargo.toml:22-26`,
 `microvms-js/Cargo.toml:20-21`). Verification sits outside the product graph: `model` has
 one dependency and no workspace edge, modelling the protocol rather than importing it
-(`model/Cargo.toml:12-13`), and `conformance/run_rs.py` drives the built CLI through 188 named
-checks against real AWS (`conformance/run_rs.py:9`, 5,055 LOC). Start at
+(`model/Cargo.toml:12-13`), and `conformance/run_rs.py` drives the built CLI through 227 named
+checks against real AWS (`conformance/run_rs.py:9`, 7,639 LOC). Start at
 `agentd/src/lib.rs:9-29` for the trust boundary, then `microvms-core/src/lib.rs:21-40` for
 the trap ladder.
 
