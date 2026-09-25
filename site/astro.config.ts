@@ -61,6 +61,11 @@ const REPO_ROOT = resolve(here, "..")
 const TREE_ROOT = resolve(REPO_ROOT, "docs")
 const MANIFEST = "src/content/docs/.sync-manifest.json"
 
+/** Where `scripts/gen-reference.mjs` writes the two SDK references, as absolute directories. */
+const SDK_REFERENCE_DIRS = ["python", "typescript"].map(
+  (language) => `${resolve(here, "src/content/docs/reference", language)}/`
+)
+
 /**
  * What `scripts/sync-docs.mjs` published, read back rather than restated.
  *
@@ -120,7 +125,10 @@ const llmsDetails = [
   "",
   "The site has three tiers. Learn (`/learn/`) is task-shaped: the tutorials in order, then how-tos.",
   "Reference (`/reference/`) is generated from `microvm manifest`, the binary's own statement of every",
-  "command, exit code, and response type, so a page there is the contract the binary ships. Internals",
+  "command, exit code, and response type, so a page there is the contract the binary ships. The SDK",
+  "references (`/reference/python/`, `/reference/typescript/`) are generated the same way, from the",
+  "type stub and the declaration file each package ships, so a signature there is the one a type",
+  "checker sees. Internals",
   "(`/internals/`) is the reasoning, in two kinds of document that are not equally reliable. The",
   "hand-written documents — Platform, Protocol, Trust, Embedding, Strategy, Harness capabilities —",
   "carry measured findings and design rationale, and they win any disagreement. The generated",
@@ -218,7 +226,14 @@ export default defineConfig({
            */
           intraSiteHref: (target) =>
             (target.treePath === undefined ? undefined : manifest.routes[target.treePath]) ??
-            `/${target.slug}/`
+            `/${target.slug}/`,
+          /*
+           * The SDK reference quotes the bindings' doc comments verbatim, and those were written
+           * for a reader of the Rust crate: a code span like `cli.py:688` there names a line in
+           * another codebase, not a path this repository holds, and failing the build over it
+           * would make a doc comment's wording a docs-site gate.
+           */
+          excludeDocument: (path) => SDK_REFERENCE_DIRS.some((dir) => path.startsWith(dir))
         })
       ],
       /*
@@ -392,6 +407,43 @@ export default defineConfig({
               label: "Commands",
               collapsed: true,
               items: [{ autogenerate: { directory: "reference/commands" } }]
+            },
+            {
+              /*
+               * The two SDKs, written by `scripts/gen-reference.mjs` from the committed declaration
+               * files: Griffe over `microvms-py/microvms.pyi`, TypeDoc over `microvms-js/index.d.ts`.
+               * The class and interface lists autogenerate for the reason the commands do: a class
+               * added to a binding reaches the rail on the run that publishes its page.
+               */
+              label: "Python SDK",
+              collapsed: true,
+              items: [
+                { label: "Overview", link: "/reference/python/" },
+                { label: "Functions and exceptions", link: "/reference/python/module/" },
+                {
+                  label: "Classes",
+                  collapsed: true,
+                  items: [{ autogenerate: { directory: "reference/python/classes" } }]
+                }
+              ]
+            },
+            {
+              label: "TypeScript SDK",
+              collapsed: true,
+              items: [
+                { label: "Overview", link: "/reference/typescript/" },
+                { label: "Functions and enums", link: "/reference/typescript/module/" },
+                {
+                  label: "Classes",
+                  collapsed: true,
+                  items: [{ autogenerate: { directory: "reference/typescript/classes" } }]
+                },
+                {
+                  label: "Interfaces",
+                  collapsed: true,
+                  items: [{ autogenerate: { directory: "reference/typescript/interfaces" } }]
+                }
+              ]
             },
             {
               // ccu's three reference pages: generated too, but from the source tree rather than the

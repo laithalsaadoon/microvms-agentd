@@ -90,6 +90,12 @@ const MANIFEST = ".sync-manifest.json"
  * On a first run against an empty target the reference manifest does not exist yet, so the rows fall
  * back to the CLI's own contract: one command page per `data.commands[].name`, plus the fixed contract
  * pages. The run says which source it used. Absent both, the rows are absent and the run says that.
+ *
+ * That fallback cannot name the SDK pages, which need Griffe and TypeDoc to derive, so the `sync` npm
+ * script runs this script a second time after `gen-reference.mjs`. The second run reads the manifest
+ * the first `gen-reference` just wrote, rewrites the agent page with every row, and finds everything
+ * else unchanged. Without it a fresh checkout, which is every CI run, publishes an agent page that
+ * omits the SDK reference, and `tests/agent-surface.test.ts` says so.
  */
 const REFERENCE_MANIFEST = "reference/.reference-manifest.json"
 const CLI_MANIFEST = "../docs/manifest.json"

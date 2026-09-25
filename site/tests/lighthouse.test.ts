@@ -18,7 +18,7 @@ import {
 import { type StaticSite, serveStatic } from "./static-server.js"
 
 /**
- * The performance budget: Lighthouse over the five audited pages, three runs each, desktop preset,
+ * The performance budget: Lighthouse over the nine audited pages, three runs each, desktop preset,
  * against the same static server and the same Chromium the accessibility tier uses.
  *
  * Lighthouse is called as a library rather than through `@lhci/cli`. lhci's last release pins a

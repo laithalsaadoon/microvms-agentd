@@ -9,7 +9,7 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "sync": "node scripts/sync-docs.mjs && node scripts/gen-reference.mjs",
+    "sync": "node scripts/sync-docs.mjs && node scripts/gen-reference.mjs && node scripts/sync-docs.mjs",
     "braces": "node scripts/brace-gate.mjs src/content/docs",
     "prebuild": "pnpm run sync && pnpm run braces",
     "build": "astro build",
@@ -52,6 +52,8 @@
     "cspell": "10.2.0",
     "lighthouse": "13.4.1",
     "playwright": "1.62.1",
+    "typedoc": "0.28.20",
+    "typedoc-plugin-markdown": "4.13.1",
     "typescript": "5.9.3",
     "vitest": "4.1.11"
   }

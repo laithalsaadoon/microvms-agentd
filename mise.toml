@@ -234,6 +234,36 @@ description = "Fail if the committed Python stub no longer matches the pyo3 surf
 # hierarchy is read out of — and both are incremental builds `test` has already warmed.
 run = "./scripts/generate-py-stubs.py --check"
 
+[tasks.dts]
+description = "Regenerate microvms-js/index.d.ts from the napi-rs surface"
+# `napi build` is the only thing that writes this file: napi-derive records each `#[napi]` item's
+# TypeScript shape at compile time and the CLI stitches them together, with the SPDX header from
+# `microvms-js/package.json`'s `napi.dtsHeader`. It also writes `index.js` and the platform `.node`
+# addon beside it, both gitignored, so this is the same command `ci.yml`'s bindings job runs.
+run = "npx -y -p @napi-rs/cli@3 napi build --manifest-path Cargo.toml --package microvms-js --platform --output-dir . --cwd microvms-js"
+
+[tasks."dts:check"]
+description = "Fail if the committed TypeScript declarations no longer match the napi-rs surface"
+# `stubs:check`'s argument for the other binding. The declarations are committed because the docs
+# site's TypeScript reference is generated from them (`site/scripts/reference/sdk/typescript.mjs`),
+# and before they were, the only copy was whatever a developer's last local build had left behind:
+# measured 2026-09-24, one checkout's `index.d.ts` was 1,966 lines while `main` generated 2,323.
+#
+# Built into a scratch directory rather than over the committed file, so a stale copy is reported
+# as a diff instead of silently repaired. `ci.yml`'s bindings job runs the same comparison with
+# `git diff` after the build it already does for the node tests.
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+out=$(mktemp -d)
+trap 'rm -rf "$out"' EXIT
+npx -y -p @napi-rs/cli@3 napi build --manifest-path Cargo.toml --package microvms-js --platform --output-dir "$out" --cwd microvms-js >/dev/null
+if ! diff -u microvms-js/index.d.ts "$out/index.d.ts"; then
+  echo "microvms-js/index.d.ts is stale: run \`mise run dts\` and commit the result" >&2
+  exit 1
+fi
+'''
+
 [tasks.spec]
 description = "agentd.symspec.json: the daemon's six bootstrap and control-token requirements"
 # Covers `spec/agentd.symspec.json` only (AGENTD-1..6); `spec:core` covers the core document.
@@ -393,6 +423,7 @@ depends = [
   "schema:check",
   "manifest:check",
   "stubs:check",
+  "dts:check",
   "model:check",
   "publish:check",
   "live:check",

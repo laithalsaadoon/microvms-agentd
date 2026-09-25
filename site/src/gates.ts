@@ -84,9 +84,9 @@ export const BASE_SEGMENT = BASE.replace(/\/$/, "")
 /**
  * The pages the browser gates audit, as site-absolute paths including the base.
  *
- * Five, on purpose. The corpus grows with every command the CLI gains and every page the generated tree
+ * Nine, on purpose. The corpus grows with every command the CLI gains and every page the generated tree
  * emits, so a gate that walked it would get slower for the rest of the project's life and be deleted
- * the first time it cost someone ten minutes. These five are the distinct templates; every other page
+ * the first time it cost someone ten minutes. These nine are the distinct templates; every other page
  * is one of them with different prose:
  *
  * - `/` is the cover page, the only one authored as a landing page.
@@ -98,6 +98,12 @@ export const BASE_SEGMENT = BASE.replace(/\/$/, "")
  *   rendered to inline SVG at build time. Measured 2026-09-05: no page among the first four carries
  *   one, and the census in `tests/built-site.test.ts` refused the four-page sample for exactly that
  *   reason, so the diagram template is audited here rather than exempted from the census.
+ * - the two SDK overviews are the widest tables on the site: one row per exported declaration, a
+ *   linked code span in every first cell, written by `scripts/reference/sdk/`.
+ * - the two `Sandbox` class pages are the SDK member template, and the longest instance of it: a
+ *   heading, a signature fence and a docstring per member, dozens of times over. The Python one is
+ *   laid out by this repository's renderer and the TypeScript one by `typedoc-plugin-markdown`, so
+ *   they are two templates rather than one.
  *
  * `tests/built-site.test.ts` proves the sample is representative for the one property where a small
  * sample could silently under-report: every distinct inline `<svg>` shape the whole site emits
@@ -108,7 +114,11 @@ export const AUDITED_PAGES: ReadonlyArray<string> = [
   `${BASE}learn/tutorial/first-run/`,
   `${BASE}reference/commands/run/`,
   `${BASE}internals/platform/`,
-  `${BASE}internals/architecture/system-overview/`
+  `${BASE}internals/architecture/system-overview/`,
+  `${BASE}reference/python/`,
+  `${BASE}reference/python/classes/sandbox/`,
+  `${BASE}reference/typescript/`,
+  `${BASE}reference/typescript/classes/sandbox/`
 ]
 
 /**
@@ -126,7 +136,8 @@ export const AUDITED_PAGES: ReadonlyArray<string> = [
  *
  * Every entry here was MEASURED against `dist/` before it was written down; none is a guess about
  * what Starlight probably does. Measured 2026-09-05 against Starlight 0.41.10 over the five audited
- * pages at 1280x800, light color scheme.
+ * pages at 1280x800, light color scheme. Re-measured 2026-09-25 over nine, with the four SDK reference
+ * pages added: the same one entry, and nothing else.
  */
 export const KNOWN_A11Y_FAILURES: ReadonlyArray<{
   readonly rule: string
@@ -168,6 +179,7 @@ export const LAYOUT_SHIFT_CEILING = 0.1
  *
  * Empty as measured 2026-09-05: five audited pages at 1350x940, zero `layout-shift` entries each,
  * observer installed before the first byte and left running 1.5 s past network idle and fonts ready.
+ * Still empty 2026-09-25 over nine, with the four SDK reference pages added.
  *
  * An entry here is a bound, not a license: `node` has to match the shift's own source element and
  * `most` caps how far it may move, so the same element shifting further fails, and any other element
@@ -197,6 +209,8 @@ export const KNOWN_LAYOUT_SHIFTS: ReadonlyArray<{
  *   /reference/commands/run/                   282293
  *   /internals/platform/                       474253   (the heaviest: the platform document's body)
  *   /internals/architecture/system-overview/   266284
+ *
+ * The four SDK reference pages joined the list 2026-09-25 and fit under the budget unchanged.
  *
  * The budget is the heaviest page plus roughly 20 percent (474253 x 1.2 = 569104, rounded up), so a
  * dependency that ships a new client bundle fails the gate rather than growing quietly inside slack,
