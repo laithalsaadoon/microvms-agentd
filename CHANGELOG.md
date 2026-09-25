@@ -6,6 +6,8 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
 
 ## Unreleased
 
+## [0.10.0] — 2026-09-25
+
 ### Added
 
 - **`Sandbox.ensure_image` goes from build inputs to a usable image in one call (#221,

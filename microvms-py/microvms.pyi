@@ -2539,7 +2539,7 @@ def wrap_dockerfile(task_dockerfile: str, *, port: int |None = None, workdir: st
 # `microvms_core::VERSION`, added by the module's `#[pymodule_init]`. The **core's**
 # version and not this crate's: what a caller needs to know is which client they are
 # talking through.
-__version__: Final[str] = "0.9.0"
+__version__: Final[str] = "0.10.0"
 
 class MicrovmError(Exception):
     """
