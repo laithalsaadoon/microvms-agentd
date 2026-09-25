@@ -460,15 +460,15 @@ wheels = [
 
 [[package]]
 name = "microvms"
-version = "0.9.0"
+version = "0.10.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/d5/b8/fe5e7b1428433e1c2273ae846ef49fd5063fcfe944d8c7175bcf7cd71502/microvms-0.9.0.tar.gz", hash = "sha256:2a14a48140f7ff940efa8a47a56d958ca98104624c3e3cc123b95ffa9f2842f8", size = 703131, upload-time = "2026-09-24T11:43:35.764Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b0/3b/4432815c390f36bd2ffcf380a71b0d851b533f893c6d214456f30c28842c/microvms-0.10.0.tar.gz", hash = "sha256:b1fa5654a217507d05c899de07a1bfa12efb086701575f3bdcaa9b4f0822a669", size = 868392, upload-time = "2026-09-25T02:25:05.337Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bb/eb/d041067dfef2c2a3fa962715b9e09e96e548f4e05ce40197f4d83c127bf0/microvms-0.9.0-cp39-abi3-macosx_10_12_x86_64.whl", hash = "sha256:ec8760817b5cb97a0d5444c7d3d5961bf79621984b9afbf2534869fd156e3571", size = 3152415, upload-time = "2026-09-24T11:43:26.386Z" },
-    { url = "https://files.pythonhosted.org/packages/70/16/06a91aba0f99af49b0580c6f83aa80ab0b19bc9f77cec59aff9da66e09fe/microvms-0.9.0-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:373876c0b5e0f11686a13aa96b96444a1bc8d26c7c9d925521d572528ef64d8a", size = 2977534, upload-time = "2026-09-24T11:43:28.485Z" },
-    { url = "https://files.pythonhosted.org/packages/90/21/125b0379c7481817f373f3f21cd97a7f7c9728507e58bb10a13bf2e90ca3/microvms-0.9.0-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:993cbc5a5c22a9b8e050e14e31f0880e5705e1f1fc8eb26a4d99c26a7ff97ffe", size = 3303843, upload-time = "2026-09-24T11:43:30.074Z" },
-    { url = "https://files.pythonhosted.org/packages/5b/3e/1d3ceaffb507538bf499ccad002b9f9ae0d458b9e9c1d3dd47d00077acbc/microvms-0.9.0-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:09d6475df76facd65642a0a81ad69b9316589aeb7892fd88ac93119d11ca9929", size = 3416675, upload-time = "2026-09-24T11:43:31.733Z" },
-    { url = "https://files.pythonhosted.org/packages/ed/56/4d7cf3a59f15cd11dd4cc8234403ae7e8a24ac6b502a725164382c6073a2/microvms-0.9.0-cp39-abi3-win_amd64.whl", hash = "sha256:e73ae5e23c1602d6ea81ec63ab8be35367e75b55c825683038a353efb6f2b192", size = 3243242, upload-time = "2026-09-24T11:43:33.786Z" },
+    { url = "https://files.pythonhosted.org/packages/e5/8b/bb99a9d503384eff972c14079f92e8574a938f065398dd31b586d52efd4a/microvms-0.10.0-cp39-abi3-macosx_10_12_x86_64.whl", hash = "sha256:a738baa3f6f57ed1939f30f97156828fe5b45a3762e4136034ab3958bee1b4ae", size = 3263069, upload-time = "2026-09-25T02:24:57.371Z" },
+    { url = "https://files.pythonhosted.org/packages/69/eb/fb1858a4dc62cfcc137a33c71741e29154294c8f414816a836f12a989344/microvms-0.10.0-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:7092f9c2d9d422b9bae16072c0ac1b10910a53da223adc257b5b796adbb2dcdc", size = 3087127, upload-time = "2026-09-25T02:24:59.099Z" },
+    { url = "https://files.pythonhosted.org/packages/f3/19/eca735e4887185e9195e1cd7f679eeced0d224850d0c0683e2df4caa2e17/microvms-0.10.0-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:2c590d8f0999cc2b2511be03d31b99e498e2cdff50f59409843b2e5e7b63f28a", size = 3420357, upload-time = "2026-09-25T02:25:00.887Z" },
+    { url = "https://files.pythonhosted.org/packages/b2/7f/3efafb3c5532a8e414656a4d4ffb41cfe7e18c1b140dcbb37ea3bf4435fd/microvms-0.10.0-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:1fec9d17a5a6ebd705d41669340b25035d91ba55e81d067e9e5fdc650b5177dc", size = 3531565, upload-time = "2026-09-25T02:25:02.418Z" },
+    { url = "https://files.pythonhosted.org/packages/f4/d5/cb1ffc645a2bcac2ddb89679247cb8d6cb2f6640b0b57622c94ee64467bf/microvms-0.10.0-cp39-abi3-win_amd64.whl", hash = "sha256:1c1f4b62437e94d1912b32177e8e8234e95ecab3dc4c36723e9a14c8c7ee970b", size = 3366334, upload-time = "2026-09-25T02:25:03.834Z" },
 ]
 
 [[package]]
@@ -497,7 +497,7 @@ requires-dist = [
     { name = "aws-durable-execution-sdk-python", specifier = "==2.0.1" },
     { name = "boto3", specifier = "==1.43.101" },
     { name = "cyclopts", specifier = "==4.25.3" },
-    { name = "microvms", specifier = "==0.9.0" },
+    { name = "microvms", specifier = "==0.10.0" },
     { name = "pygithub", specifier = "==2.10.0" },
     { name = "pynamodb", specifier = "==6.1.0" },
     { name = "requests", specifier = "==2.34.2" },
