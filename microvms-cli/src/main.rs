@@ -30,6 +30,11 @@
 // CLI-7: a print macro panics when its stream's reader has gone (#216). Every write goes
 // through a checked writer instead.
 #![deny(clippy::print_stdout, clippy::print_stderr)]
+// The driving-adapter contract (AGENTS.md, Architecture): no subprocess and no direct read of
+// the process environment in this crate. The banned paths and their reasons are in this
+// crate's `clippy.toml`. `AdapterLintTests` in `scripts/test_ratchet.py` lists each `#[expect]`
+// of these lints, and fails on an `allow` of them anywhere in `src/`.
+#![deny(clippy::disallowed_methods, clippy::disallowed_types)]
 mod cli;
 mod closed_output;
 #[cfg(test)]
@@ -59,7 +64,7 @@ use crate::cli::{Cli, Command};
 use crate::commands::Ctx;
 use crate::envelope::Output;
 use crate::exit::{CliError, Exit};
-use crate::seam::{AwsSeam, Infra, process_env};
+use crate::seam::{AwsSeam, Infra};
 
 /// Parses, dispatches, and exits with a code from the catalog.
 ///
@@ -179,7 +184,14 @@ async fn run<O: std::io::Write, E: std::io::Write>(
     parsed: Cli,
 ) -> ExitCode {
     let seam = AwsSeam;
-    let infra = infra_for(&parsed.command);
+    // The one place this crate holds the process environment. Every handler and resolver gets
+    // it from here, through `ctx.env`, so a test can hand them another.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the composition root hands core's lookup to the resolvers; nothing else calls it"
+    )]
+    let env: &dyn Fn(&str) -> Option<String> = &microvms_core::env::process;
+    let infra = infra_for(&parsed.command, env);
     let dense = out.dense() || out.format().is_json() && parsed.dense;
 
     let result = {
@@ -187,7 +199,7 @@ async fn run<O: std::io::Write, E: std::io::Write>(
             seam: &seam,
             out,
             infra,
-            env: &process_env,
+            env,
             fetch: &provision::SubprocessFetch,
         };
         handle(&mut ctx, &parsed.command, commands::lifecycle::on_ctrl_c()).await
@@ -392,7 +404,7 @@ fn report<O: std::io::Write, E: std::io::Write>(
 }
 
 /// Resolves the three account values for the commands that take them.
-fn infra_for(command: &Command) -> Infra {
+fn infra_for(command: &Command, env: &dyn Fn(&str) -> Option<String>) -> Infra {
     let (bucket, build, execution) = match command {
         Command::Run(args) => (
             args.infra.bucket.clone(),
@@ -421,7 +433,7 @@ fn infra_for(command: &Command) -> Infra {
         ),
         _ => (None, None, None),
     };
-    Infra::resolve(bucket, build, execution, &process_env)
+    Infra::resolve(bucket, build, execution, env)
 }
 
 /// Routes to the handler. One arm per command, exhaustive by the compiler.

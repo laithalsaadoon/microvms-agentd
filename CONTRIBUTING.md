@@ -56,6 +56,19 @@ isn't a fix: re-key its entry in the same change. A re-keyed entry keeps its
 issue and changes its path or its text, not both, so a move and a rename land
 in separate PRs.
 
+Each driving adapter's `clippy.toml` bans a subprocess (`std::process::Command`,
+`tokio::process::Command`) and a direct environment read (`std::env::var`,
+`var_os`, `vars`, `vars_os`, and calling `microvms_core::env::process` by
+name), and its crate root denies both lints. The adapter hands
+`microvms_core::env::process` to core's resolvers once, where it composes them,
+and everything else takes the lookup it's given. An exception is an
+`#[expect(..., reason = "...")]` at the call site plus its line in
+`LINT_EXCEPTIONS` in `scripts/test_ratchet.py`, which fails `ratchet:check` on
+any other `allow`, `warn` or `expect` of those lints in an adapter's `src/`. A
+subprocess exception also needs its entry or decision in `ratchet/drift.json`.
+An environment read has no drift category, so its `reason` and its line in
+that list are the whole record, and review is the check.
+
 ## Generated contracts and API changes
 
 Regenerate affected contracts and include their diffs:

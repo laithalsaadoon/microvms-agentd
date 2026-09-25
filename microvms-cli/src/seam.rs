@@ -277,6 +277,10 @@ impl microvms_core::session::TokenMinter for PlaneMinter {
 /// world-readable temp file holding the thing that will run inside the VM is a worse default
 /// than a pipe. Every failure names the URI and the remedy, because "upload failed" without
 /// the bucket is unactionable.
+#[expect(
+    clippy::disallowed_types,
+    reason = "drift recorded in ratchet/drift.json; #258 moves the upload into core and deletes this"
+)]
 async fn put_via_aws_cli(uri: &str, bytes: Vec<u8>) -> Result<(), Error> {
     use tokio::io::AsyncWriteExt as _;
     use tokio::process::Command;
@@ -430,11 +434,6 @@ fn env_var_for(name: &str) -> &'static str {
         "execution_role_arn" => "MICROVM_EXECUTION_ROLE_ARN",
         _ => "",
     }
-}
-
-/// Reads the process environment. The `&dyn Fn` the resolvers take, in production.
-pub fn process_env(name: &str) -> Option<String> {
-    std::env::var(name).ok()
 }
 
 /// Where the run ledger lives: `$MICROVM_STATE_DIR`, else `~/.microvm/runs`.

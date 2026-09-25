@@ -30,13 +30,46 @@ and setup; do not infer live verification from local test results.
 - `model/`, `spec/`, `conformance/`: portable model tests, formal requirements,
   and live AWS checks.
 
-Dependencies flow from CLI and bindings to core to protocol. The daemon
-depends on protocol. Keep shared validation and AWS behavior in core.
-
 When `.codegraph/` exists, use `codegraph explore` before text searches to
 locate or understand code. Confirm ambiguous cross-crate symbol matches from
 the actual source. The daemon route census is `docs/schema.json` because
 routes are generated from a schema.
+
+## Architecture
+
+Behavior lives once, in Rust, at or below `microvms-core`:
+
+- `microvms-core`: rules and values, use cases, and every call that touches the
+  network, AWS, files, a subprocess, the clock or entropy belong here.
+  `microvms-protocol` holds the wire types it shares with the daemon. The
+  daemon depends on protocol, never on core.
+- `microvms-cli`, `microvms-py`, `microvms-js`: parse input, convert types,
+  bridge to the host runtime, render output. A default, retry, validation rule,
+  wire call, file format or subprocess here belongs in a lower layer.
+
+That's the rule, not a description of today's tree. The CLI still owns file
+formats and file I/O, the run ledger and the sync manifest among them. The
+ratchet doesn't collect that drift yet (#273), and #260 moves directory sync
+into core.
+
+Splitting core into `microvms-domain`, `microvms-app` and `microvms-edges` is
+planned in #286, and this list will name each layer then.
+
+If an adapter needs something private to a lower crate, make it public there or
+move the caller down. Never copy it.
+
+`ratchet/drift.json` is the layering drift count. `mise run ratchet:check`
+fails on new drift and on a fix whose entry is still in the file; `mise run
+ratchet:update` removes fixed entries. A PR can't add an entry: fix the code,
+or record a permanent exception in `decisions` with its reason. The edges
+between the workspace's crates are checked by
+`microvms-cli/tests/dependency_direction.rs`. Each adapter's allowed
+dependencies (`arch/placement.toml`) are checked by the ratchet, and
+`dependency_direction.rs` asserts them exactly for each adapter the ratchet
+holds no placement drift for (the CLI joins when #260 clears its entries).
+Forbidden calls are refused by each adapter's `clippy.toml`, and
+`scripts/test_ratchet.py` lists every site that turns those lints off. Semgrep
+thinness rules (#273) and a surface parity check (#271) are planned.
 
 ## Maintenance rules
 
@@ -58,9 +91,6 @@ routes are generated from a schema.
   explicit statement that they remain unverified against AWS.
 - Rebuild the release CLI before targeted live checks. Verify cleanup of VMs,
   images, and service-created log groups independently.
-- `ratchet/drift.json` is the layering drift count. `mise run ratchet:check`
-  fails on new drift and on an unrecorded fix; `mise run ratchet:update` removes
-  fixed entries. A PR can't add an entry: fix the code or record a decision.
 - `spec:core` references a local symspec checkout; formal requirements are
   separate from `check`. Portable state checks use `cargo test -p agentd-model`.
 

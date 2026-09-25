@@ -52,6 +52,12 @@
 //! [`session`] and [`exec`] are the in-VM surface; [`sandbox`] is the lifecycle; [`agents`]
 //! is the L3 layer over it, one VM with coding agents in it.
 
+// The driving-adapter contract (AGENTS.md, Architecture): no subprocess and no direct read of
+// the process environment in this crate. The banned paths and their reasons are in this
+// crate's `clippy.toml`. `AdapterLintTests` in `scripts/test_ratchet.py` lists each `#[expect]`
+// of these lints, and fails on an `allow` of them anywhere in `src/`.
+#![deny(clippy::disallowed_methods, clippy::disallowed_types)]
+
 mod agents;
 mod control;
 mod cost;

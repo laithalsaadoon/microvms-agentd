@@ -376,6 +376,11 @@ fn check_terraform(infra_dir: std::path::PathBuf) -> Check {
         )
         .advisory();
     }
+    // Recorded as a decision in `ratchet/drift.json`, with the same reason.
+    #[expect(
+        clippy::disallowed_types,
+        reason = "reads the local Terraform stack's outputs; no Rust library reads Terraform state backends"
+    )]
     let output = std::process::Command::new("terraform")
         .arg(format!("-chdir={}", infra_dir.display()))
         .args(["output", "-json"])

@@ -58,9 +58,9 @@
 //!
 //! # Layout
 //!
-//! [`error`], [`region`], [`sizing`], [`hooks`], and [`constants`] are the foundation
-//! every other module builds on. [`cost`], [`control`], [`session`], and [`sandbox`]
-//! are the product surface. [`agents`] is the one layer above them: the coding-agent
+//! [`error`], [`region`], [`sizing`], [`hooks`], [`constants`], and [`env`] are the
+//! foundation every other module builds on. [`cost`], [`control`], [`session`], and
+//! [`sandbox`] are the product surface. [`agents`] is the one layer above them: the coding-agent
 //! helpers `docs/AGENT-VMS.md` specifies, which compose the surface and which nothing
 //! below depends on. [`provision`] stands beside the surface rather than on it: it obtains
 //! the verified `agentd` binary an image is built from, and makes no AWS call.
@@ -73,6 +73,7 @@ pub mod agents;
 pub mod constants;
 pub mod control;
 pub mod cost;
+pub mod env;
 pub mod error;
 pub mod hooks;
 pub mod identity;

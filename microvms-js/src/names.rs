@@ -175,7 +175,13 @@ impl NameRegistry {
     pub fn new(state_dir: Option<String>) -> Self {
         let store = match state_dir {
             Some(dir) => FileNameStore::in_state_root(std::path::Path::new(&dir)),
-            None => FileNameStore::default_location(&|key| std::env::var(key).ok()),
+            // The binding's one environment read: core's resolver takes the lookup, and this is
+            // where the binding composes them.
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "hands core's process lookup to core's resolver; nothing else calls it"
+            )]
+            None => FileNameStore::default_location(&microvms_core::env::process),
         };
         Self { store }
     }

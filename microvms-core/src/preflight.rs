@@ -207,7 +207,7 @@ pub async fn service_check(plane: &ControlPlane) -> Check {
 pub async fn preflight(region: Option<Region>) -> PreflightReport {
     let resolved = match region {
         Some(region) => Ok(region),
-        None => Region::from_env(&|name| std::env::var(name).ok()),
+        None => Region::from_env(&crate::env::process),
     };
     preflight_with(resolved, ControlPlane::new).await
 }
