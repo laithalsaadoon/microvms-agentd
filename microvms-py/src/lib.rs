@@ -99,8 +99,8 @@ fn core_version() -> &'static str {
 // `{"incomplete":true,"members":[]}`, and `maturin generate-stubs` over that blob emits six
 // lines whose entire content is `def __getattr__(name: str) -> Incomplete` — a stub that types
 // every name as `Any`, shipped beside a `py.typed` marker promising a checker the opposite.
-// The declarative form lists its members in the attribute, so the macro knows all 60 of them
-// (44 classes and 16 functions) and the generated stub is the real surface.
+// The declarative form lists its members in the attribute, so the macro knows all 61 of them
+// (44 classes and 17 functions) and the generated stub is the real surface.
 //
 // The cost is that membership is declared in one place instead of in seven `register`
 // functions, which is why those are gone rather than merely unused. The benefit is that
@@ -148,8 +148,7 @@ mod microvms {
     #[pymodule_export]
     use super::sandbox::{
         PyBaseImage, PyDetached, PyEnsuredImage, PyImage, PySandbox, PyTeardownReport,
-        egress_posture_for,
-        wrap_dockerfile,
+        egress_posture_for, wrap_dockerfile,
     };
     #[pymodule_export]
     use super::session::{
