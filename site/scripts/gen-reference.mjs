@@ -8,7 +8,8 @@
  * pages that `scripts/reference/sdk/` derives from the two binding declaration files:
  * `microvms-py/microvms.pyi` through Griffe (run by `uv`) and `microvms-js/index.d.ts` through
  * TypeDoc. Both declaration files are committed and drift-gated against the Rust source, so every
- * page here is a function of a file the build can see. The two share
+ * page here is a function of a file the build can see. It also writes the Architecture drift page,
+ * which `scripts/reference/drift.mjs` derives from the git history of `ratchet/drift.json`. The two share
  * `src/content/docs/reference/`, so ownership has to be explicit:
  *
  * - This script keeps its own manifest, `.reference-manifest.json`, listing every file it wrote. On the
@@ -35,6 +36,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { driftPage, loadDriftHistory } from "./reference/drift.mjs"
 import { loadManifest, loadSchema, SOURCES } from "./reference/manifest.mjs"
 import { referencePages, TIER } from "./reference/pages.mjs"
 import { loadPythonSurface, pythonPages } from "./reference/sdk/python.mjs"
@@ -136,6 +138,9 @@ const ownedIn = (path) => {
  * @param {ReadonlyArray<import("./reference/pages.mjs").ReferencePage>} [options.sdkPages] the
  *   Python and TypeScript SDK pages from `reference/sdk/`, which need uv and TypeDoc to derive and
  *   so arrive already rendered; written and owned exactly as the CLI pages are
+ * @param {ReadonlyArray<import("./reference/pages.mjs").ReferencePage>} [options.historyPages] the
+ *   Architecture drift page from `reference/drift.mjs`, which needs git and uv to derive, so it
+ *   arrives rendered too
  * @returns {{ written: string[], unchanged: string[], removed: string[], pages: ReadonlyArray<import("./reference/pages.mjs").ReferencePage> }}
  */
 export const generate = ({
@@ -144,9 +149,10 @@ export const generate = ({
   schema,
   dryRun = false,
   repoRoot,
-  sdkPages = []
+  sdkPages = [],
+  historyPages = []
 }) => {
-  const pages = [...referencePages(manifest, schema), ...sdkPages]
+  const pages = [...referencePages(manifest, schema), ...sdkPages, ...historyPages]
   const owned = new Set(ownedIn(join(contentDir, OWNERSHIP_MANIFEST)))
   const foreign = new Set(ownedIn(join(contentDir, SYNC_MANIFEST)))
 
@@ -234,13 +240,15 @@ const main = async () => {
     ...pythonPages(loadPythonSurface(REPO_ROOT), { repoRoot: REPO_ROOT }),
     ...(await typescriptPages({ repoRoot: REPO_ROOT }))
   ]
+  const historyPages = [driftPage(loadDriftHistory(REPO_ROOT))]
   const { written, unchanged, removed, pages } = generate({
     contentDir: CONTENT_DIR,
     manifest,
     schema,
     dryRun,
     repoRoot: REPO_ROOT,
-    sdkPages
+    sdkPages,
+    historyPages
   })
   const out = process.stdout
   const label = (path) => relative(process.cwd(), join(CONTENT_DIR, path))

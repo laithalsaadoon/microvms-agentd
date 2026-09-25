@@ -1,0 +1,15 @@
+# A public trait outside test code: in the core crate, that's a port.
+id: port-trait
+language: rust
+severity: info
+message: a public trait
+rule:
+  all:
+    - kind: trait_item
+    - has:
+        kind: visibility_modifier
+    - has:
+        field: name
+        pattern: $NAME
+    - not:
+        matches: test-only

@@ -58,6 +58,9 @@ routes are generated from a schema.
   explicit statement that they remain unverified against AWS.
 - Rebuild the release CLI before targeted live checks. Verify cleanup of VMs,
   images, and service-created log groups independently.
+- `ratchet/drift.json` is the layering drift count. `mise run ratchet:check`
+  fails on new drift and on an unrecorded fix; `mise run ratchet:update` removes
+  fixed entries. A PR can't add an entry: fix the code or record a decision.
 - `spec:core` references a local symspec checkout; formal requirements are
   separate from `check`. Portable state checks use `cargo test -p agentd-model`.
 

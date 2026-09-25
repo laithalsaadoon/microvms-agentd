@@ -1,0 +1,19 @@
+# Each driving adapter's allowed direct dependencies, normal and build (#285). Dev dependencies
+# are out of scope: they never ship.
+#
+# Every name is a parsing, rendering, or host-bridge crate, or the one edge onto core. A direct
+# dependency outside its crate's set is placement drift: `mise run ratchet:check` reports it,
+# and `ratchet/drift.json` records it with the issue that removes it. A set can shrink, but the
+# check refuses a crate added to a set the base branch already has, since that would clear a
+# finding without a reason: move the work below the adapter, or record a decision with its
+# reason. A new table for a crate the base has no set for is fine.
+
+[microvms-cli]
+normal = ["microvms-core", "clap", "ratatui", "serde", "serde_json", "tokio", "toml", "unicode-width"]
+
+[microvms-py]
+normal = ["microvms-core", "microvms-protocol", "serde_json", "pyo3", "tokio"]
+
+[microvms-js]
+normal = ["microvms-core", "microvms-protocol", "napi", "napi-derive", "serde_json", "tokio"]
+build = ["napi-build"]

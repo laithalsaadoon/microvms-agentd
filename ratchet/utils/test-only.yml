@@ -1,0 +1,11 @@
+# A node that is a test-only item or sits anywhere inside one. Whole files compiled only for tests
+# (`#![cfg(test)]`, or declared by `#[cfg(test)] mod x;` in their parent) are a cross-file fact
+# ast-grep can't see; `test-file` and `test-mod-decl` report them and the script drops those files.
+id: test-only
+language: rust
+rule:
+  any:
+    - matches: test-item
+    - inside:
+        stopBy: end
+        matches: test-item

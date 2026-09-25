@@ -1,0 +1,10 @@
+# The ratchet's sentinel: a workspace that must produce known findings in every collected
+# category, so a collector that breaks can't report zero drift. Its own workspace, so the real
+# one never builds it; `cargo metadata --no-deps --offline` reads it without resolving anything.
+[workspace]
+members = ["adapter", "kernel"]
+resolver = "3"
+
+# CI's license-consistency step asks every tracked Cargo.toml to declare a license.
+[workspace.package]
+license = "Apache-2.0"

@@ -1,0 +1,9 @@
+# ast-grep's project file for the ratchet's Rust collectors (`scripts/ratchet.py`).
+#
+# ast-grep rather than semgrep, measured on semgrep 1.176.1 OSS: `impl TokenMinter for $T { ... }`
+# matched every impl block, inherent ones included, and its Rust matcher ignored `#[cfg(test)]` on
+# items and on any module not literally named `tests`. The tree-sitter rules here can say "not
+# inside an item that follows a `#[cfg(test)]` attribute", which is the exclusion both collectors
+# need.
+ruleDirs: [rules]
+utilDirs: [utils]

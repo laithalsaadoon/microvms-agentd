@@ -84,9 +84,9 @@ export const BASE_SEGMENT = BASE.replace(/\/$/, "")
 /**
  * The pages the browser gates audit, as site-absolute paths including the base.
  *
- * Nine, on purpose. The corpus grows with every command the CLI gains and every page the generated tree
+ * A fixed sample, on purpose. The corpus grows with every command the CLI gains and every page the generated tree
  * emits, so a gate that walked it would get slower for the rest of the project's life and be deleted
- * the first time it cost someone ten minutes. These nine are the distinct templates; every other page
+ * the first time it cost someone ten minutes. These are the distinct templates; every other page
  * is one of them with different prose:
  *
  * - `/` is the cover page, the only one authored as a landing page.
@@ -104,6 +104,9 @@ export const BASE_SEGMENT = BASE.replace(/\/$/, "")
  *   heading, a signature fence and a docstring per member, dozens of times over. The Python one is
  *   laid out by this repository's renderer and the TypeScript one by `typedoc-plugin-markdown`, so
  *   they are two templates rather than one.
+ * - the Architecture drift page is the one `xychart-beta` figure: a line chart of the count in
+ *   `ratchet/drift.json`, written by `scripts/reference/drift.mjs`. Its inline SVG is a different
+ *   shape from every flowchart's, so the census below refused the sample without it (2026-09-25).
  *
  * `tests/built-site.test.ts` proves the sample is representative for the one property where a small
  * sample could silently under-report: every distinct inline `<svg>` shape the whole site emits
@@ -118,7 +121,8 @@ export const AUDITED_PAGES: ReadonlyArray<string> = [
   `${BASE}reference/python/`,
   `${BASE}reference/python/classes/sandbox/`,
   `${BASE}reference/typescript/`,
-  `${BASE}reference/typescript/classes/sandbox/`
+  `${BASE}reference/typescript/classes/sandbox/`,
+  `${BASE}reference/architecture-drift/`
 ]
 
 /**
@@ -137,7 +141,8 @@ export const AUDITED_PAGES: ReadonlyArray<string> = [
  * Every entry here was MEASURED against `dist/` before it was written down; none is a guess about
  * what Starlight probably does. Measured 2026-09-05 against Starlight 0.41.10 over the five audited
  * pages at 1280x800, light color scheme. Re-measured 2026-09-25 over nine, with the four SDK reference
- * pages added: the same one entry, and nothing else.
+ * pages added: the same one entry, and nothing else. The Architecture drift page joined later that
+ * day and added nothing.
  */
 export const KNOWN_A11Y_FAILURES: ReadonlyArray<{
   readonly rule: string
@@ -179,7 +184,8 @@ export const LAYOUT_SHIFT_CEILING = 0.1
  *
  * Empty as measured 2026-09-05: five audited pages at 1350x940, zero `layout-shift` entries each,
  * observer installed before the first byte and left running 1.5 s past network idle and fonts ready.
- * Still empty 2026-09-25 over nine, with the four SDK reference pages added.
+ * Still empty 2026-09-25 over nine, with the four SDK reference pages added, and after the
+ * Architecture drift page joined the same day.
  *
  * An entry here is a bound, not a license: `node` has to match the shift's own source element and
  * `most` caps how far it may move, so the same element shifting further fails, and any other element
@@ -210,7 +216,8 @@ export const KNOWN_LAYOUT_SHIFTS: ReadonlyArray<{
  *   /internals/platform/                       474253   (the heaviest: the platform document's body)
  *   /internals/architecture/system-overview/   266284
  *
- * The four SDK reference pages joined the list 2026-09-25 and fit under the budget unchanged.
+ * The four SDK reference pages joined the list 2026-09-25 and fit under the budget unchanged, and so
+ * did the Architecture drift page the same day.
  *
  * The budget is the heaviest page plus roughly 20 percent (474253 x 1.2 = 569104, rounded up), so a
  * dependency that ships a new client bundle fails the gate rather than growing quietly inside slack,

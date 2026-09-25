@@ -398,6 +398,8 @@ export default defineConfig({
             { label: "Exit codes", link: "/reference/exit-codes/" },
             { label: "Response types", link: "/reference/response-types/" },
             { label: "Wire schema", link: "/reference/wire-schema/" },
+            // Generated from the git history of `ratchet/drift.json` (`scripts/reference/drift.mjs`).
+            { label: "Architecture drift", link: "/reference/architecture-drift/" },
             {
               /*
                * One page per `microvm` subcommand, written by `scripts/gen-reference.mjs` from the CLI's
