@@ -61,7 +61,7 @@ contains.** It accrued 70 file-touches, 8% of all churn, and then left:
 the discovery instrument becomes git history". 28 files lived under `clients/python/`,
 12 of them under `tests/` and 10 of those test modules covering SSE reconnect, proxy auth,
 pricing, sizing, and cost.
-`mise.toml:150-153` records what that suite was worth: 83 client-library tests against a fake
+`mise.toml:166-169` records what that suite was worth: 83 client-library tests against a fake
 daemon over a real loopback socket, and both suites passing against real AWS on the same
 commit — Python oracle 56/56, Rust CLI 38/38 — is what ended the oracle's job. Recovering any
 of it requires `git show`, and nothing in the tree points a reader at that commit.
@@ -119,11 +119,11 @@ has two clocks and a spawned child obeys the wrong one.
 **Executable gates.** `mise.toml:292-301` defines `check`, the stated definition of done, as
 exactly eight tasks: `lint`, `security`, `test`, `schema:check`, `stubs:check`, `model:check`,
 `live:check`, `build`. Four of those are drift gates that keep a hand-maintained value honest
-against an independent source: `schema:check` (`mise.toml:173`) asserts `docs/schema.json`
-still describes what the daemon serves, `stubs:check` (`mise.toml:195`) asserts
+against an independent source: `schema:check` (`mise.toml:189`) asserts `docs/schema.json`
+still describes what the daemon serves, `stubs:check` (`mise.toml:235`) asserts
 `microvms-py/microvms.pyi` still describes the pyo3 surface, `model:check` (`mise.toml:257`)
 asserts `microvms-core`'s hardcoded constants still match the pinned botocore service model,
-and `live:check` (`mise.toml:288`) asserts the live tier's own wiring, including `mise.toml`
+and `live:check` (`mise.toml:415`) asserts the live tier's own wiring, including `mise.toml`
 itself. A gate is stronger than a document because it fails rather than being unread.
 
 ### What that coverage does not reach
