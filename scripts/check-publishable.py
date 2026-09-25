@@ -67,7 +67,7 @@ MAX_CATEGORIES = 5
 #:
 #: Executable surfaces only. A workflow or a task that selects a missing package fails with
 #: `package ID specification ... did not match any packages` and takes the build with it. A
-#: markdown file showing the same string is prose, and `CLAUDE.md` deliberately quotes
+#: markdown file showing the same string is prose, and `AGENTS.md` deliberately quotes
 #: `cargo test -p protocol` as the example of what *does not* work — so scanning docs here
 #: would fail the gate on its own documentation.
 SELECTOR_FILES = (
