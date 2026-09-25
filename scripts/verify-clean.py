@@ -67,8 +67,10 @@ REGION = os.environ.get("AWS_REGION", "us-east-1")
 # scripts used.
 # `agent-vm-` is the stem `microvm agent-up` names its images by (docs/AGENT-VMS.md,
 # AGENT-3); the live suite's `drive_agent_vm` builds one, so a leak of it must be visible.
+# `conformance-ensure` is the stem `drive_ensure_image` (#221) names its images by.
 NAME_PREFIXES = (
     "agentd-conformance",
+    "conformance-ensure",
     "agentd-probe",
     "microvm-cli",
     "microvm-",
