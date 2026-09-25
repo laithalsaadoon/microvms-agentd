@@ -605,7 +605,9 @@ class LambdaMicrovmEnvironment:  # the harness's environment base class
     def __init__(self, task, region, bucket, build_role_arn, connectors=()):
         # Constructor: reject what the platform cannot satisfy, before any build.
         self.size = microvms.SizeClass.from_request(task.cpus, task.memory_mib)
-        posture = microvms.egress_posture_for(False, list(connectors), False, region=region)
+        posture = microvms.egress_posture_for(
+            False, list(connectors), False, region=region
+        )
         if task.no_network and posture != "sealed":
             raise ValueError(f"no-network needs a sealed launch; this one is {posture}")
         self.task, self.region, self.connectors = task, region, list(connectors)
