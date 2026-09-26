@@ -17,8 +17,12 @@ mise run live:verify-clean
 
 `check` does not create AWS resources. Some tools need network access for
 installation or advisory/rule updates. It does not run the documentation,
-formal requirements, or live AWS tiers. See CONTRIBUTING.md for targeted tests
-and setup; do not infer live verification from local test results.
+formal requirements, or live AWS tiers, and it doesn't build or test the Python
+and Node bindings. When a change reaches behavior a binding exposes, build each
+binding and run its suite the way CI's `python and node bindings` job does
+(`pytest microvms-py/tests`, `node --test "microvms-js/__test__/*.mjs"`). See
+CONTRIBUTING.md for targeted tests and setup; do not infer live verification
+from local test results.
 
 ## Code map
 
@@ -26,12 +30,20 @@ and setup; do not infer live verification from local test results.
 - `agentd/`: lifecycle hooks, authenticated execution, files, tunnels.
 - `microvms-domain/`: rules and values with no I/O: sizing, cost, regions,
   names, service constraints, error kinds.
-- `microvms-core/`: AWS control plane, sessions, lifecycle, agent helpers;
-  re-exports the domain.
+- `microvms-app/`: use cases over ports: the control-plane client, sandboxes,
+  sessions, image builds, agent recipes, and the daemon release's verification
+  policy.
+- `microvms-edges/`: the production port implementations: SigV4 transport,
+  sockets, the name registry on disk, the release fetch and Sigstore check,
+  clock and entropy.
+- `microvms-core/`: the composition root the CLI and bindings depend on; wires
+  the edges into the app and re-exports every layer.
 - `microvms-cli/`: `microvm` commands and JSON envelopes.
 - `microvms-py/`, `microvms-js/`: thin PyO3 and napi-rs bindings.
 - `model/`, `spec/`, `conformance/`: portable model tests, formal requirements,
   and live AWS checks.
+- `arch/placement.toml`, `ratchet/`: each crate's allowed dependencies and the
+  layering drift count (see Architecture).
 
 When `.codegraph/` exists, use `codegraph explore` before text searches to
 locate or understand code. Confirm ambiguous cross-crate symbol matches from
@@ -52,9 +64,10 @@ first:
   dependency's features are asserted exactly. A rule that needs one of those
   inputs takes it as a parameter, the way `Region::from_env` takes a lookup.
 - `microvms-app`: use cases (the control-plane client, `Sandbox`, `Session`,
-  `ensure_image`, the agent recipes), written only against ports it declares:
-  `Transport`, `BuildServices`, `HttpBackend`, `TokenMinter`, `NameStore`,
-  `Clock`, `Entropy` and `Adapters`. It depends on no crate or tokio feature that
+  `ensure_image`, the agent recipes, the daemon release's verification policy),
+  written only against ports it declares: `Transport`, `BuildServices`,
+  `HttpBackend`, `TokenMinter`, `NameStore`, `Clock`, `Entropy`, `Adapters`,
+  `ReleaseSource` and `AttestationVerifier`. It depends on no crate or tokio feature that
   does network, AWS, filesystem, subprocess or entropy I/O (ARCH-7), and its
   `clippy.toml` refuses the std and tokio I/O items under a crate-root `forbid`.
   The shared test doubles are its `testing` module, behind `test-support`.
