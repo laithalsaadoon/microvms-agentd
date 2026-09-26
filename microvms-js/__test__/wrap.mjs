@@ -23,7 +23,7 @@ test('a bare FROM wraps to the default stanza', () => {
   assert.ok(!wrapped.includes('USER'), wrapped);
 });
 
-test('the options reach the stanza', () => {
+test('IMAGE-5: the options reach the stanza', () => {
   const wrapped = wrapDockerfile('FROM python:3.12-slim\nUSER app', {
     port: 8080,
     workdir: '/srv/task',
@@ -43,7 +43,7 @@ for (const [task, options, cause] of [
   ['FROM x\n', { port: 0 }, /port/],
   ['FROM x\n', { inheritWorkdir: true }, /nothing to inherit/],
 ]) {
-  test(`core refuses ${JSON.stringify(task)} ${JSON.stringify(options)} as ERR_INVALID_ARG`, () => {
+  test(`IMAGE-5: core refuses ${JSON.stringify(task)} ${JSON.stringify(options)} as ERR_INVALID_ARG`, () => {
     assert.throws(
       () => wrapDockerfile(task, options),
       (error) => {
@@ -55,7 +55,7 @@ for (const [task, options, cause] of [
   });
 }
 
-test('a derived base keeps the managed name and takes the FROM', () => {
+test('IMAGE-5: a derived base keeps the managed name and takes the FROM', () => {
   const digest = 'c439fb4994ea7ca529233d6256446d3f8b7b4efb58956073e015303a170011de';
   const base = baseImageFromDockerfile(wrapDockerfile(`FROM python:3.12-slim@sha256:${digest}\n`));
   assert.equal(base.name, defaultBaseImage().name);
@@ -63,7 +63,7 @@ test('a derived base keeps the managed name and takes the FROM', () => {
   assert.equal(base.workingDir, '');
 });
 
-test('a Dockerfile with no FROM has no base', () => {
+test('IMAGE-5: a Dockerfile with no FROM has no base', () => {
   assert.throws(
     () => baseImageFromDockerfile('RUN echo hello\n'),
     (error) => {

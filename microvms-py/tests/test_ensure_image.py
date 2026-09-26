@@ -59,11 +59,13 @@ def ensure(**overrides: object) -> microvms.EnsuredImage:
 def test_core_refuses_locally_before_any_call(
     overrides: dict[str, object], cause: str
 ) -> None:
+    """IMAGE-12: core's local refusals raise `InvalidArgError` before any AWS call."""
     with pytest.raises(microvms.InvalidArgError, match=cause):
         ensure(**overrides)
 
 
 def test_a_context_directory_is_read_by_core(tmp_path: Path) -> None:
+    """IMAGE-12: the context directory reaches core, which reads it and refuses it."""
     with pytest.raises(microvms.InvalidArgError, match="not a directory"):
         ensure(context_dir=tmp_path / "missing")
     (tmp_path / "agentd").write_bytes(b"not the daemon")
@@ -72,6 +74,7 @@ def test_a_context_directory_is_read_by_core(tmp_path: Path) -> None:
 
 
 def test_the_result_class_is_built_by_the_binding_only() -> None:
+    """IMAGE-12: the result has core's fields, the reused flag and warnings among them."""
     with pytest.raises(TypeError):
         microvms.EnsuredImage()  # type: ignore[call-arg]
     for field in ("image", "reused", "artifact_uri", "uploaded", "warnings"):

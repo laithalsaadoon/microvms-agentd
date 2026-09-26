@@ -473,9 +473,16 @@ description = "Delete the entries ratchet/drift.json holds for drift that's gone
 run = "./scripts/ratchet.py update"
 
 [tasks."trace:check"]
-description = "Every traced requirement appears in the model, a Gherkin tag, a fuzz harness, a test, and the code; docs/TRACEABILITY.md is current"
-# Offline and dependency-free. `./scripts/check-trace.py --write` regenerates the matrix.
-run = "./scripts/check-trace.py --check"
+description = "Every traced requirement appears in the model, a Gherkin tag, a fuzz harness and a test that name it, and the code; docs/TRACEABILITY.md is current"
+# Offline: ast-grep from `[tools]` reads the Rust and Node tests, stdlib `ast` the Python ones,
+# and nothing comes from PyPI. `./scripts/check-trace.py --write` regenerates the matrix.
+#
+# The unit tests run first: they build throwaway trees and run the real parsers over them, so a
+# rule that stopped telling a test's doc from a comment fails there before it reads this tree.
+run = [
+  "uv run python -m unittest discover -s scripts -p 'test_check_trace.py'",
+  "./scripts/check-trace.py --check",
+]
 
 [tasks."background:check"]
 description = "Check the background coding example"

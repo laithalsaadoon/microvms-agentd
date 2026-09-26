@@ -26,6 +26,7 @@ def test_a_bare_from_wraps_to_the_default_stanza() -> None:
 
 
 def test_the_options_reach_the_stanza() -> None:
+    """IMAGE-5: the port and the workdir reach core's stanza unchanged."""
     wrapped = microvms.wrap_dockerfile(
         "FROM python:3.12-slim\nUSER app", port=8080, workdir="/srv/task"
     )
@@ -52,11 +53,13 @@ def test_the_options_reach_the_stanza() -> None:
 def test_core_refusals_raise_invalid_arg(
     task: str, kwargs: dict[str, object], cause: str
 ) -> None:
+    """IMAGE-5: each of core's refusals raises `InvalidArgError` with core's message."""
     with pytest.raises(microvms.InvalidArgError, match=cause):
         microvms.wrap_dockerfile(task, **kwargs)  # type: ignore[arg-type]
 
 
 def test_a_derived_base_keeps_the_managed_name_and_takes_the_from() -> None:
+    """IMAGE-5: `BaseImage.from_dockerfile` returns core's derived base."""
     digest = "c439fb4994ea7ca529233d6256446d3f8b7b4efb58956073e015303a170011de"
     wrapped = microvms.wrap_dockerfile(f"FROM python:3.12-slim@sha256:{digest}\n")
     base = microvms.BaseImage.from_dockerfile(wrapped)
@@ -66,5 +69,6 @@ def test_a_derived_base_keeps_the_managed_name_and_takes_the_from() -> None:
 
 
 def test_a_dockerfile_with_no_from_has_no_base() -> None:
+    """IMAGE-5: core's refusal of a task with no `FROM` raises `InvalidArgError`."""
     with pytest.raises(microvms.InvalidArgError, match="no FROM"):
         microvms.BaseImage.from_dockerfile("RUN echo hello\n")

@@ -181,6 +181,9 @@ fn drive(plan: &Plan) -> Run {
     }
 }
 
+/// **CLI-7, CLI-8 and CLI-9.** The real [`Output`] against readers that leave at an arbitrary
+/// byte: nothing panics, stdout stops at the failing write, and a closed reader never changes
+/// the exit code.
 #[test]
 fn output_plan() {
     bolero::check!().with_type::<Plan>().for_each(|plan| {

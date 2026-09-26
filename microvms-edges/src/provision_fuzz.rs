@@ -35,6 +35,8 @@ use microvms_app::ErrorKind;
 /// The characters a hostile or mistyped version is made of.
 const VERSION_ALPHABET: &[u8] = b"v09.+-/\\ a\n*";
 
+/// **BIND-17.** A version is refused as `ERR_INVALID_ARG` or becomes one plain path
+/// component under the state directory.
 #[test]
 fn version() {
     bolero::check!().with_type::<Vec<u8>>().for_each(|picks| {
@@ -81,6 +83,8 @@ struct Line {
     tab: bool,
 }
 
+/// **BIND-18.** A `SHA256SUMS` body passes the bytes only when its first `agentd` entry is
+/// exactly their digest.
 #[test]
 fn sums() {
     bolero::check!()
@@ -117,6 +121,8 @@ fn sums() {
         });
 }
 
+/// **BIND-19.** A digest record vouches for a cache entry only when it names exactly the
+/// entry's version and digest, and the record an install writes parses back.
 #[test]
 fn record() {
     bolero::check!()
@@ -176,6 +182,8 @@ struct Binary {
     tail: Vec<u8>,
 }
 
+/// **BIND-20.** A binary is accepted as aarch64 exactly when its ELF header, read in its own
+/// byte order, says so.
 #[test]
 fn elf() {
     bolero::check!().with_type::<Binary>().for_each(|binary| {

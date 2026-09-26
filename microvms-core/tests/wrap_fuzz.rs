@@ -283,6 +283,8 @@ fn check(case: &Case) {
     require_matching_from(&base, &out).expect("IMAGE-4: the FROM guard accepts the pair");
 }
 
+/// **IMAGE-1, IMAGE-2, IMAGE-3 and IMAGE-4.** Arbitrary task Dockerfile text either wraps to
+/// the task followed by the default stanza, or is refused as an invalid argument.
 #[test]
 fn wrap_case() {
     bolero::check!().with_type::<Case>().for_each(check);

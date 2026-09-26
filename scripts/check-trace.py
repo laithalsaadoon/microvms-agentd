@@ -12,25 +12,37 @@ in six places, and this script reports where:
 
   model    a Stateright property whose name starts with the key (`model/src/`)
   gherkin  a tag `@KEY` on a scenario (`<crate>/tests/features/*.feature`)
-  fuzz     a mention in a fuzz harness (a Rust file calling `bolero::check!` or
-           `fuzz_target!`)
-  test     a mention in a test: a file under a Rust crate's `tests/`, a source
-           file's test module, `microvms-cli/src/guards.rs`, or a binding test under
-           `microvms-py/tests/` or `microvms-js/__test__/`
+  fuzz     a harness the key names: the name or the `///` doc of the `#[test]` function
+           that calls `bolero::check!`, or the doc above a top-level `fuzz_target!`
+  test     a test the key names, in a file under a Rust crate's `tests/`, a source
+           file, `microvms-cli/src/guards.rs`, or a binding test under
+           `microvms-py/tests/` or `microvms-js/__test__/`. In Rust that's a name that
+           starts with the key (`fn image_5_...`) or the `///` doc of a `#[test]` item,
+           `proptest!` bodies included; in Python the `def test_image_5_...` name, a
+           `@pytest.mark.req("IMAGE-5")` marker, or the function's own docstring; in Node
+           the title of a `test`, `it`, `describe` or `suite` call that has a body. A
+           test that never runs doesn't count: `#[ignore]` outside the live tier's
+           `live_*.rs` files, a `cfg` that isn't a platform, pytest's `skip`, and Node's
+           `.skip`, `.todo` or `{ skip: true }`
   impl     a mention in production Rust source of the CLI, core, the domain, the app,
            the edges, the daemon, protocol, or either binding
   live     a live conformance check whose name starts with the key
            (`conformance/run_rs.py`, run against AWS by `mise run live`)
 
+A `//` or `//!` comment, a module docstring, a header comment and an assertion message don't
+count for the test or fuzz layer: a file that mentioned a key and tested nothing would score
+the same as one that tests it. ast-grep (pinned in `mise.toml`) and stdlib `ast` tell them
+apart, so the script needs ast-grep on PATH and nothing from PyPI.
+
 A traced key may waive a layer with a reason, for example the live layer of a pure
 function that makes no AWS call. The waiver and its reason are rendered in the matrix,
 so an absent layer is a stated decision rather than a gap.
 
-It also refuses a mention of an unknown key, so a typo such as `CLI-10` for `CLI-9`
-cannot pass as coverage. Keys are recognized by the prefixes the two specs define. And
-it refuses to pass on input it didn't read: every directory it lists must yield a file and,
-unless KEYLESS says why not, a key; every layer's collector must find a key; and the
-sentinel key must still be in TRACED.
+It also refuses a mention of an unknown key anywhere in a file it reads, comments included,
+so a typo such as `CLI-10` for `CLI-9` cannot pass as coverage. Keys are recognized by the
+prefixes the two specs define. And it refuses to pass on input it didn't read: every
+directory it lists must yield a file and, unless KEYLESS says why not, a key; every layer's
+collector must find a key; and the sentinel key must still be in TRACED.
 `docs/TRACEABILITY.md` is the rendered matrix:
 
   ./scripts/check-trace.py           print the matrix; fail if a layer is missing
@@ -41,9 +53,13 @@ sentinel key must still be in TRACED.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
+import subprocess
 import sys
+import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -243,8 +259,209 @@ KEYLESS = {
 # pass that loop vacuously; this is what notices.
 SENTINEL = "CLI-7"
 
-FUZZ_MARKER = re.compile(r"bolero::check!|fuzz_target!")
 TEST_MODULE = re.compile(r"^#\[cfg\(test\)\]\s*$", re.MULTILINE)
+
+# The ast-grep rules that find what names a test or a harness, written as JSON (which is YAML)
+# so the fragments below can be shared between rules. ast-grep is pinned in mise.toml and
+# installed by checksum in CI; tree-sitter underneath it is what tells a doc comment from a
+# line comment and a test title from an assertion message.
+#
+# Attributes and comments are siblings of the item they sit on, so "on a test" means: in the
+# run of attributes and comments that ends at the item, and the run carries a test attribute.
+_RUN_ENDS = {
+    "not": {
+        "any": [
+            {"kind": "attribute_item"},
+            {"kind": "line_comment"},
+            {"kind": "block_comment"},
+        ]
+    }
+}
+
+
+def _in_run(attribute: dict) -> dict:
+    return {"follows": {"kind": "attribute_item", **attribute, "stopBy": _RUN_ENDS}}
+
+
+# `bolero::check!`, `::bolero::check!`, or a bare `check!`. A bare one must be bolero's, imported
+# by a `use`; `named_keys` refuses a file where it isn't, rather than guess which layer it is.
+_BOLERO = {
+    "kind": "macro_invocation",
+    "has": {"field": "macro", "regex": r"^(?:(?:::\s*)?bolero\s*::\s*)?check$"},
+}
+_BARE_CHECK = {
+    "kind": "macro_invocation",
+    "has": {"field": "macro", "regex": r"^check$"},
+}
+_BOLERO_IMPORT = {
+    "kind": "use_declaration",
+    "regex": r"\bbolero\s*::\s*(?:check\b|\{[^}]*\bcheck\b|\*)",
+}
+_CALLS_BOLERO = {"has": {**_BOLERO, "stopBy": "end"}}
+_FUZZ_TARGET = {
+    "kind": "macro_invocation",
+    "has": {"field": "macro", "regex": r"^(?:[A-Za-z_]\w*\s*::\s*)*fuzz_target$"},
+}
+# A test counts only if something runs it. `#[ignore]` runs only under `--ignored`, which the
+# live tier passes for the `live_*.rs` files and nothing passes for any other file. A `cfg` on
+# a test counts when it picks a platform CI runs; any other predicate (`any()`, a feature)
+# could leave the test compiled out everywhere, so it doesn't.
+_PLATFORM_CFG = (
+    r"^#\[\s*cfg\s*\(\s*(?:not\s*\(\s*)?(?:unix|windows|test)\s*\)?\s*\)\s*\]$"
+)
+_OFF = [_in_run({"regex": r"^#\[\s*cfg\s*\(", "not": {"regex": _PLATFORM_CFG}})]
+_IGNORED = [_in_run({"regex": r"^#\[\s*ignore\b"})]
+
+
+def _runs(*off: dict) -> dict:
+    return {
+        "kind": "function_item",
+        **_in_run({"regex": r"^#\[\s*(?:[A-Za-z_][A-Za-z0-9_]*\s*::\s*)*test\b"}),
+        "not": {"any": list(off)},
+    }
+
+
+# A function that calls bolero is a harness, which counts for the fuzz layer and not the test
+# layer, so one harness can't stand in for a test.
+_TEST_FN = {"all": [_runs(*_OFF, *_IGNORED), {"not": _CALLS_BOLERO}]}
+_LIVE_TEST_FN = {"all": [_runs(*_OFF), {"not": _CALLS_BOLERO}]}
+_HARNESS_FN = {"all": [_runs(*_OFF, *_IGNORED), _CALLS_BOLERO]}
+_LIVE = ["**/tests/live_*.rs"]
+# `///`, `/** */` and `#[doc = ...]` are the item's documentation; `//`, `////`, `//!` and
+# `/*! */` aren't.
+_DOC = {
+    "any": [
+        {"kind": "line_comment", "regex": r"^///([^/]|$)"},
+        {"kind": "block_comment", "regex": r"^/\*\*[^*/]"},
+        {"kind": "attribute_item", "regex": r"^#\[\s*doc\s*="},
+    ]
+}
+_NAME = {"has": {"field": "name", "pattern": "$NAME"}}
+# `test`, `it`, `describe` and `suite`, or their `.only` forms. Only the bare call is a title:
+# `re.test('IMAGE-5')` in a test body is an assertion, and `t.test` subtests aren't used here.
+_JS_CALLEE = r"^(?:test|it|describe|suite)(?:\.only)?$"
+# `.skip` and `.todo`, or `{ skip: true }` and `{ todo: 'why' }`, never run the body. A skip
+# whose value is an expression (`process.platform === 'win32'`) runs somewhere, so it counts.
+_JS_OFF = {
+    "kind": "call_expression",
+    "any": [
+        {
+            "has": {
+                "field": "function",
+                "regex": r"^(?:test|it|describe|suite)\.(?:skip|todo)$",
+            }
+        },
+        {
+            "all": [
+                {"has": {"field": "function", "regex": _JS_CALLEE}},
+                {
+                    "has": {
+                        "field": "arguments",
+                        "has": {
+                            "kind": "object",
+                            "has": {
+                                "kind": "pair",
+                                "all": [
+                                    {
+                                        "has": {
+                                            "field": "key",
+                                            "regex": r"""^['"]?(?:skip|todo)['"]?$""",
+                                        }
+                                    },
+                                    {
+                                        "has": {
+                                            "field": "value",
+                                            "any": [
+                                                {"kind": "true"},
+                                                {"kind": "string"},
+                                                {"kind": "template_string"},
+                                            ],
+                                        }
+                                    },
+                                ],
+                            },
+                        },
+                    }
+                },
+            ]
+        },
+    ],
+}
+RULES = {
+    "rust-test-name": ("Rust", {"all": [_TEST_FN, _NAME]}),
+    "rust-test-doc": ("Rust", {**_DOC, "precedes": {**_TEST_FN, "stopBy": _RUN_ENDS}}),
+    "rust-live-test-name": ("Rust", {"all": [_LIVE_TEST_FN, _NAME]}, _LIVE),
+    "rust-live-test-doc": (
+        "Rust",
+        {**_DOC, "precedes": {**_LIVE_TEST_FN, "stopBy": _RUN_ENDS}},
+        _LIVE,
+    ),
+    "rust-harness-name": ("Rust", {"all": [_HARNESS_FN, _NAME]}),
+    # A top-level `fuzz_target!` has no function to name, so its own doc comment counts.
+    "rust-harness-doc": (
+        "Rust",
+        {
+            **_DOC,
+            "precedes": {
+                "any": [
+                    _HARNESS_FN,
+                    _FUZZ_TARGET,
+                    {"kind": "expression_statement", "has": _FUZZ_TARGET},
+                ],
+                "stopBy": _RUN_ENDS,
+            },
+        },
+    ),
+    # A file with one of these is a fuzz file, whatever its comments say.
+    "rust-fuzz-call": ("Rust", {"any": [_BOLERO, _FUZZ_TARGET]}),
+    "rust-bare-check": ("Rust", _BARE_CHECK),
+    "rust-bolero-import": ("Rust", _BOLERO_IMPORT),
+    # tree-sitter leaves a macro's body as unparsed tokens, so a `proptest! {}` body is
+    # parsed again on its own to find the tests inside it.
+    "rust-proptest": (
+        "Rust",
+        {
+            "kind": "macro_invocation",
+            "has": {"field": "macro", "regex": r"^(?:[A-Za-z_]\w*\s*::\s*)*proptest$"},
+        },
+    ),
+    "js-test-title": (
+        "JavaScript",
+        {
+            "kind": "call_expression",
+            "all": [
+                {"has": {"field": "function", "regex": _JS_CALLEE}},
+                {
+                    "has": {
+                        "field": "arguments",
+                        "has": {
+                            "nthChild": {
+                                "position": 1,
+                                "ofRule": {"not": {"kind": "comment"}},
+                            },
+                            "any": [{"kind": "string"}, {"kind": "template_string"}],
+                            "pattern": "$TITLE",
+                        },
+                    }
+                },
+                # A test has a body; a call with a title and no function is something else.
+                {
+                    "has": {
+                        "field": "arguments",
+                        "has": {
+                            "any": [
+                                {"kind": "arrow_function"},
+                                {"kind": "function_expression"},
+                            ]
+                        },
+                    }
+                },
+                {"not": _JS_OFF},
+                {"not": {"inside": {**_JS_OFF, "stopBy": "end"}}},
+            ],
+        },
+    ),
+}
 
 
 def spec_keys() -> dict[str, str]:
@@ -269,28 +486,38 @@ class Patterns:
             rf'Property::(?:<\w+>::)?(?:always|sometimes|eventually)\(\s*"({key})\b'
         )
         self.tag = re.compile(rf"@({key})\b")
+        # A key that starts a name: `fn image_5_...`, `def test_image_5_...`. Only the start
+        # counts, because the prefixes are words: `fn builds_image_2_times` names no key.
+        lowered = "|".join(re.escape(prefix.lower()) for prefix in prefixes)
+        self.ident = re.compile(rf"^(?:test_)?({lowered})_(\d+)(?=_|$)")
         # A live conformance check whose name starts with the requirement key.
         self.live = re.compile(rf'results\.(?:check|eq|absent)\(\s*f?"({key})\b')
 
+    def in_name(self, name: str) -> set[str]:
+        return {
+            f"{prefix.upper()}-{number}"
+            for prefix, number in self.ident.findall(name.lower())
+        }
 
-def waivers(key: str) -> dict[str, str]:
+
+def waivers(key: str, traced=None) -> dict[str, str]:
     """The layers a traced key waives, each with its reason."""
-    entry = TRACED[key]
+    entry = (TRACED if traced is None else traced)[key]
     return entry[1] if isinstance(entry, tuple) else {}
 
 
-def rel(path: Path) -> str:
-    return path.relative_to(ROOT).as_posix()
+def rel(path: Path, root: Path = ROOT) -> str:
+    return path.relative_to(root).as_posix()
 
 
-def rust_files(*directories: str) -> list[Path]:
+def rust_files(*directories: str, root: Path = ROOT) -> list[Path]:
     files: list[Path] = []
     for directory in directories:
-        files.extend(sorted((ROOT / directory).rglob("*.rs")))
-    return [path for path in files if "target" not in path.parts]
+        files.extend(sorted((root / directory).rglob("*.rs")))
+    return [path for path in files if "target" not in path.relative_to(root).parts]
 
 
-def enumerator_floors() -> list[str]:
+def enumerator_floors(root: Path = ROOT) -> list[str]:
     """A listed directory that yields no file, which would drop its layer silently.
 
     A renamed `microvms-js/__test__` would take every Node test out of the matrix, and
@@ -302,15 +529,16 @@ def enumerator_floors() -> list[str]:
         ("RUST_TEST_DIRS", RUST_TEST_DIRS),
     ):
         for directory in directories:
-            if not rust_files(directory):
+            if not rust_files(directory, root=root):
                 problems.append(f"{table} entry {directory!r} yields no .rs file")
     for directory, pattern in BINDING_TESTS:
-        if not sorted((ROOT / directory).glob(pattern)):
+        if not sorted((root / directory).glob(pattern)):
             problems.append(
                 f"BINDING_TESTS entry ({directory!r}, {pattern!r}) yields no file"
             )
-    if not LIVE.is_file():
-        problems.append(f"the live suite {rel(LIVE)} doesn't exist")
+    live = root / LIVE.relative_to(ROOT)
+    if not live.is_file():
+        problems.append(f"the live suite {rel(live, root)} doesn't exist")
     return problems
 
 
@@ -352,47 +580,272 @@ def split_test_region(text: str) -> tuple[str, str]:
     return text, ""
 
 
-def collect(patterns: Patterns) -> dict[str, dict[str, set[str]]]:
-    """For every key found anywhere, the files each layer found it in."""
+def ast_grep(files: list[Path], root: Path) -> list[dict]:
+    """Every match of `RULES` in `files`, which are under `root`."""
+    if not files:
+        return []
+    # ast-grep honors a suppression comment even for inline rules, and no flag turns that
+    # off, so one `// ast-grep-ignore` line could hide a harness or move a key between layers.
+    for path in files:
+        if "ast-grep-ignore" in path.read_text(encoding="utf-8"):
+            raise SystemExit(
+                f"trace: {rel(path, root)} has an ast-grep-ignore comment, which would hide "
+                "it from the rules that find tests"
+            )
+    inline = "\n---\n".join(
+        json.dumps(
+            {"id": rule, "language": language, "rule": body}
+            | ({"files": globs[0]} if globs else {})
+        )
+        for rule, (language, body, *globs) in RULES.items()
+    )
+    try:
+        out = subprocess.run(
+            ["ast-grep", "scan", "--inline-rules", inline, "--json=stream"]
+            + [rel(path, root) for path in files],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        raise SystemExit(
+            "trace: ast-grep isn't on PATH; run this through `mise run trace:check`"
+        ) from None
+    if out.returncode != 0:
+        raise SystemExit(f"trace: ast-grep failed in {root}:\n{out.stderr}")
+    return [json.loads(line) for line in out.stdout.splitlines() if line.strip()]
+
+
+@dataclass
+class Named:
+    """The keys that name a file's tests and its fuzz harnesses.
+
+    A harness never counts as a test, so a fuzz file's other `#[test]`s land in `test` and
+    its harnesses in `fuzz`.
+    """
+
+    test: set[str] = field(default_factory=set)
+    fuzz: set[str] = field(default_factory=set)
+    #: The file calls bolero or `fuzz_target!`.
+    fuzz_file: bool = False
+
+
+def named_keys(patterns: Patterns, files: list[Path], root: Path) -> dict[Path, Named]:
+    """For each Rust or Node file, the keys that name its tests and its fuzz harnesses."""
+    named = {path: Named() for path in files}
+    bodies: list[tuple[Path, str]] = []
+    bare: set[Path] = set()
+    imports: set[Path] = set()
+    for match in ast_grep(files, root):
+        path = root / match["file"]
+        rule = match["ruleId"]
+        name = match.get("metaVariables", {}).get("single", {})
+        if rule == "rust-bare-check":
+            bare.add(path)
+        elif rule == "rust-bolero-import":
+            imports.add(path)
+        elif rule == "rust-fuzz-call":
+            named[path].fuzz_file = True
+        elif rule == "rust-proptest":
+            text = match["text"]
+            bodies.append((path, text[text.index("!") + 1 :].strip()[1:-1]))
+        elif rule in ("rust-test-name", "rust-live-test-name"):
+            named[path].test |= patterns.in_name(name["NAME"]["text"])
+        elif rule == "rust-harness-name":
+            named[path].fuzz |= patterns.in_name(name["NAME"]["text"])
+        elif rule in ("rust-test-doc", "rust-live-test-doc"):
+            named[path].test |= set(patterns.key.findall(match["text"]))
+        elif rule == "rust-harness-doc":
+            named[path].fuzz |= set(patterns.key.findall(match["text"]))
+        elif rule == "js-test-title":
+            named[path].test |= set(patterns.key.findall(name["TITLE"]["text"]))
+    if stray := sorted(bare - imports):
+        raise SystemExit(
+            f"trace: {rel(stray[0], root)} calls a bare check! without importing bolero's; "
+            "spell it bolero::check! so the file is read as a fuzz harness"
+        )
+    if bodies:
+        with tempfile.TemporaryDirectory() as scratch:
+            origin: dict[Path, Path] = {}
+            for index, (path, body) in enumerate(bodies):
+                copy = Path(scratch) / f"proptest_{index}.rs"
+                copy.write_text(body, encoding="utf-8")
+                origin[copy] = path
+            for copy, keys in named_keys(patterns, list(origin), Path(scratch)).items():
+                named[origin[copy]].test |= keys.test
+    return named
+
+
+def _dotted(node: ast.expr) -> str:
+    """`pytest.mark.skip` for the decorator `@pytest.mark.skip(reason=...)`."""
+    if isinstance(node, ast.Call):
+        node = node.func
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+    return ".".join(reversed(parts))
+
+
+def _marker(node: ast.expr, name: str) -> bool:
+    """Whether `node` is the pytest marker `name`, spelled `pytest.mark.x` or `mark.x`."""
+    return _dotted(node) in (f"pytest.mark.{name}", f"mark.{name}")
+
+
+def _skipped(decorators: list[ast.expr]) -> bool:
+    # `skipif` and `xfail` still run on some platform or report a result; `skip` never runs.
+    return any(_marker(decorator, "skip") for decorator in decorators)
+
+
+def python_test_keys(patterns: Patterns, text: str, path: str) -> set[str]:
+    """The keys naming a pytest test: its name, a `req` marker, or its own docstring.
+
+    A test is what pytest collects by default: a module-level `test*` function, or a `test*`
+    method of a `Test*` class without `__init__`. One marked `skip`, on itself, its class or
+    the module's `pytestmark`, never runs, so it doesn't count. Only the `req` marker names a
+    key: a `parametrize` case or a `skipif` reason is a literal like any other.
+    """
+    try:
+        module = ast.parse(text, filename=path)
+    except SyntaxError as err:
+        raise SystemExit(f"trace: {path} doesn't parse: {err}") from None
+
+    def is_test(node: ast.stmt) -> bool:
+        return isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
+            node.name.startswith("test")
+        )
+
+    for node in module.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "pytestmark"
+            for target in node.targets
+        ):
+            marks = (
+                node.value.elts
+                if isinstance(node.value, (ast.List, ast.Tuple))
+                else [node.value]
+            )
+            if _skipped(marks):
+                return set()
+    tests: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
+    for node in module.body:
+        if is_test(node):
+            tests.append(node)
+        elif (
+            isinstance(node, ast.ClassDef)
+            and node.name.startswith("Test")
+            and not _skipped(node.decorator_list)
+            and not any(
+                isinstance(member, ast.FunctionDef) and member.name == "__init__"
+                for member in node.body
+            )
+        ):
+            tests += [member for member in node.body if is_test(member)]
+    keys: set[str] = set()
+    for test in tests:
+        if _skipped(test.decorator_list):
+            continue
+        keys |= patterns.in_name(test.name)
+        for decorator in test.decorator_list:
+            if isinstance(decorator, ast.Call) and _marker(decorator, "req"):
+                for argument in decorator.args:
+                    if isinstance(argument, ast.Constant) and isinstance(
+                        argument.value, str
+                    ):
+                        keys |= set(patterns.key.findall(argument.value))
+        keys |= set(patterns.key.findall(ast.get_docstring(test) or ""))
+    return keys
+
+
+def collect(patterns: Patterns, root: Path = ROOT) -> dict[str, dict[str, set[str]]]:
+    """For every key found anywhere, the files each layer found it in.
+
+    The test and fuzz layers count a key only where it names a test or a harness. The impl
+    layer counts any mention in production code: there a key is a pointer for readers, not
+    a claim that something checks it.
+    """
     found: dict[str, dict[str, set[str]]] = {}
 
     def note(key: str, layer: str, path: Path) -> None:
-        found.setdefault(key, {layer: set() for layer in LAYERS})[layer].add(rel(path))
+        found.setdefault(key, {layer: set() for layer in LAYERS})[layer].add(
+            rel(path, root)
+        )
 
-    for path in rust_files("model/src"):
+    for path in rust_files("model/src", root=root):
         for key in patterns.property.findall(path.read_text()):
             note(key, "model", path)
 
-    for path in sorted(ROOT.glob("*/tests/features/*.feature")):
+    for path in sorted(root.glob("*/tests/features/*.feature")):
         for key in patterns.tag.findall(path.read_text()):
             note(key, "gherkin", path)
 
-    rust_tests = rust_files(*RUST_TEST_DIRS)
-    for path in rust_files(*IMPL_DIRS) + rust_tests:
-        text = path.read_text()
-        if FUZZ_MARKER.search(text):
-            for key in patterns.key.findall(text):
-                note(key, "fuzz", path)
+    rust_tests = rust_files(*RUST_TEST_DIRS, root=root)
+    rust = rust_files(*IMPL_DIRS, root=root) + rust_tests
+    bindings = [
+        path
+        for directory, pattern in BINDING_TESTS
+        for path in sorted((root / directory).glob(pattern))
+    ]
+    named = named_keys(
+        patterns, rust + [p for p in bindings if p.suffix == ".mjs"], root
+    )
+
+    for path in rust:
+        for key in named[path].test:
+            note(key, "test", path)
+        for key in named[path].fuzz:
+            note(key, "fuzz", path)
+        # A fuzz file is test scaffolding, even under `src/`, so it isn't production code.
+        if named[path].fuzz_file or path in rust_tests or path.name == "guards.rs":
             continue
-        if path in rust_tests or path.name == "guards.rs":
-            for key in patterns.key.findall(text):
-                note(key, "test", path)
-            continue
-        production, tests = split_test_region(text)
+        production, _ = split_test_region(path.read_text())
         for key in patterns.key.findall(production):
             note(key, "impl", path)
-        for key in patterns.key.findall(tests):
+
+    for path in bindings:
+        if path.suffix == ".py":
+            keys = python_test_keys(patterns, path.read_text(), rel(path, root))
+        else:
+            keys = named[path].test
+        for key in keys:
             note(key, "test", path)
 
-    for directory, pattern in BINDING_TESTS:
-        for path in sorted((ROOT / directory).glob(pattern)):
-            for key in patterns.key.findall(path.read_text()):
-                note(key, "test", path)
-
-    if LIVE.is_file():
-        for key in patterns.live.findall(LIVE.read_text()):
-            note(key, "live", LIVE)
+    live = root / LIVE.relative_to(ROOT)
+    if live.is_file():
+        for key in patterns.live.findall(live.read_text()):
+            note(key, "live", live)
     return found
+
+
+def mentions(patterns: Patterns, root: Path = ROOT) -> dict[str, set[str]]:
+    """Every key written anywhere in a file a layer reads, comments included.
+
+    Only for refusing unknown keys: a typo in a comment is still a typo.
+    """
+    files = rust_files(*IMPL_DIRS, *RUST_TEST_DIRS, root=root)
+    files += [
+        path
+        for directory, pattern in BINDING_TESTS
+        for path in sorted((root / directory).glob(pattern))
+    ]
+    seen: dict[str, set[str]] = {}
+    for path in files:
+        for key in patterns.key.findall(path.read_text()):
+            seen.setdefault(key, set()).add(rel(path, root))
+    return seen
+
+
+def gaps(found: dict[str, dict[str, set[str]]], traced=None) -> list[str]:
+    """Each layer a traced key neither covers nor waives."""
+    traced = TRACED if traced is None else traced
+    return [
+        f"{key} has no {layer} layer"
+        for key in traced
+        for layer in LAYERS
+        if layer not in waivers(key, traced) and not found.get(key, {}).get(layer)
+    ]
 
 
 def cell(found: dict[str, dict[str, set[str]]], key: str, layer: str) -> str:
@@ -437,7 +890,8 @@ def main() -> int:
     args = parser.parse_args()
 
     sentences = spec_keys()
-    found = collect(Patterns(sentences))
+    patterns = Patterns(sentences)
+    found = collect(patterns)
     problems = enumerator_floors() + layer_floors(found)
 
     for key in TRACED:
@@ -448,16 +902,16 @@ def main() -> int:
                 problems.append(
                     f"{key} waives {layer!r} without a known layer and reason"
                 )
-    for key, layers in sorted(found.items()):
+    written = mentions(patterns)
+    for key, layers in found.items():
+        written.setdefault(key, set()).update(*layers.values())
+    for key, where in sorted(written.items()):
         if key not in sentences:
-            where = sorted({path for paths in layers.values() for path in paths})
+            where = sorted(where)
             problems.append(
                 f"{key} is mentioned but not defined in the spec: {', '.join(where)}"
             )
-    for key in TRACED:
-        for layer in LAYERS:
-            if layer not in waivers(key) and not found.get(key, {}).get(layer):
-                problems.append(f"{key} has no {layer} layer")
+    problems += gaps(found)
 
     width = max(len(layer) for layer in LAYERS)
     print("requirement  " + "  ".join(layer.ljust(width) for layer in LAYERS))
