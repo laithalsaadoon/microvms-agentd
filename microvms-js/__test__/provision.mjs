@@ -2,7 +2,7 @@
 // Daemon provisioning through the binding (BIND-17 through BIND-20), without GitHub.
 //
 // Every case is answered before a download: a caller-supplied binary, the cache, a refusal,
-// or a fetch whose tools are not on PATH. The fake-release scenarios that drive the
+// or a fetch that can't reach GitHub. The fake-release scenarios that drive the
 // verification policy are `microvms-core/tests/features/provision.feature`.
 
 import assert from 'node:assert/strict';
@@ -35,13 +35,24 @@ async function withDir(body) {
   }
 }
 
-async function withoutTools(dir, body) {
-  const path = process.env.PATH;
-  process.env.PATH = join(dir, 'no-tools');
+// Sends the in-process fetch through a proxy on a closed local port, so it can't reach
+// GitHub. reqwest reads the proxy variables when the fetch builds its client.
+const PROXY_VARIABLES = ['HTTPS_PROXY', 'https_proxy', 'ALL_PROXY', 'all_proxy'];
+const NO_PROXY_VARIABLES = ['NO_PROXY', 'no_proxy'];
+
+async function withoutGitHub(body) {
+  const saved = Object.fromEntries(
+    [...PROXY_VARIABLES, ...NO_PROXY_VARIABLES].map((name) => [name, process.env[name]]),
+  );
+  for (const name of PROXY_VARIABLES) process.env[name] = 'http://127.0.0.1:9';
+  for (const name of NO_PROXY_VARIABLES) delete process.env[name];
   try {
     return await body();
   } finally {
-    process.env.PATH = path;
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
   }
 }
 
@@ -96,10 +107,10 @@ test('BIND-19 a recorded cache entry is served and a changed one is fetched agai
     assert.equal(report.verification, 'attestation');
 
     writeFileSync(join(entry, 'agentd'), elf(0xb7, 'changed'));
-    await withoutTools(dir, () =>
+    await withoutGitHub(() =>
       assert.rejects(provisionAgentd({ version, stateDir: dir }), (error) => {
         assert.equal(codeOf(error), 'ERR_PRECONDITION');
-        assert.match(error.message, /neither tool could download/);
+        assert.match(error.message, /could not download agentd/);
         return true;
       }),
     );
@@ -108,7 +119,7 @@ test('BIND-19 a recorded cache entry is served and a changed one is fetched agai
 
 test('BIND-18 a fetch that cannot run rejects naming the tag and every way out', () =>
   withDir((dir) =>
-    withoutTools(dir, () =>
+    withoutGitHub(() =>
       assert.rejects(provisionAgentd({ stateDir: dir }), (error) => {
         assert.equal(codeOf(error), 'ERR_PRECONDITION');
         assert.match(error.message, new RegExp(`v${coreVersion().replaceAll('.', '\\.')}`));

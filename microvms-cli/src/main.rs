@@ -192,6 +192,7 @@ async fn run<O: std::io::Write, E: std::io::Write>(
     )]
     let env: &dyn Fn(&str) -> Option<String> = &microvms_core::env::process;
     let infra = infra_for(&parsed.command, env);
+    let fetch = provision::HttpsFetch::from_env(env);
     let dense = out.dense() || out.format().is_json() && parsed.dense;
 
     let result = {
@@ -200,7 +201,7 @@ async fn run<O: std::io::Write, E: std::io::Write>(
             out,
             infra,
             env,
-            fetch: &provision::SubprocessFetch,
+            fetch: &fetch,
         };
         handle(&mut ctx, &parsed.command, commands::lifecycle::on_ctrl_c()).await
     };

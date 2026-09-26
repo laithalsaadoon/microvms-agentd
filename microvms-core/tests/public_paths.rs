@@ -10,6 +10,9 @@
 //!
 //! The methods a type lost to `microvms_core::prelude` (the ones that read the clock or the
 //! random pool) resolve here through the prelude import, which is how a caller keeps them.
+//!
+//! The generator's `REMOVED` lists the paths a later change removed on purpose, each with
+//! the issue that removed it.
 
 #![allow(unused_imports)]
 
@@ -530,15 +533,11 @@ use microvms_core::provision::ProvisionError as _;
 use microvms_core::provision::Provisioned as _;
 use microvms_core::provision::RELEASE_REPO as _;
 use microvms_core::provision::REQUIRED_ELF_MACHINE as _;
-use microvms_core::provision::ReleaseFetch as _;
 use microvms_core::provision::Request as _;
-use microvms_core::provision::Runner as _;
 use microvms_core::provision::Source as _;
 use microvms_core::provision::Source::Cache as _;
 use microvms_core::provision::Source::CallerSupplied as _;
 use microvms_core::provision::Source::Fetched as _;
-use microvms_core::provision::Subprocess as _;
-use microvms_core::provision::SubprocessFetch as _;
 use microvms_core::provision::Supplier as _;
 use microvms_core::provision::Supplier::Argument as _;
 use microvms_core::provision::Supplier::Env as _;

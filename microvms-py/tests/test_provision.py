@@ -2,7 +2,7 @@
 """Daemon provisioning through the binding (BIND-17 through BIND-20), without GitHub.
 
 Every case here is answered before a download: a caller-supplied binary, the cache, a
-refusal, or a fetch whose tools are not on `PATH`. The fake-release scenarios that drive
+refusal, or a fetch that can't reach GitHub. The fake-release scenarios that drive
 the verification policy are `microvms-core/tests/features/provision.feature`; the real
 fetch from the published release is recorded in the PR that added this, and the live
 suite's `drive_provisioned_quickstart` runs it through the CLI.
@@ -31,6 +31,15 @@ def elf(machine: int, tail: bytes = b"") -> bytes:
 @pytest.fixture(autouse=True)
 def no_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MICROVM_AGENTD", raising=False)
+
+
+def unreachable_release(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Send the in-process fetch through a proxy on a closed local port, so it can't
+    reach GitHub. reqwest reads the proxy variables when the fetch builds its client."""
+    for name in ("NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    for name in ("HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.setenv(name, "http://127.0.0.1:9")
 
 
 def test_bind17_a_caller_supplied_binary_is_returned_without_a_fetch(
@@ -89,11 +98,11 @@ def test_bind19_a_recorded_cache_entry_is_served_and_a_changed_one_is_not(
     assert report.verification == "checksum"
     assert report.data == data
 
-    # Changed after it was recorded: discarded and fetched again, and with no tools on
-    # PATH the fetch fails closed rather than serving the changed bytes.
+    # Changed after it was recorded: discarded and fetched again, and with GitHub out of
+    # reach the fetch fails closed rather than serving the changed bytes.
     (entry / "agentd").write_bytes(elf(0xB7, b"changed"))
-    monkeypatch.setenv("PATH", str(tmp_path / "no-tools"))
-    with pytest.raises(microvms.PreconditionError, match="neither tool could download"):
+    unreachable_release(monkeypatch)
+    with pytest.raises(microvms.PreconditionError, match="could not download agentd"):
         microvms.provision_agentd(version=version, state_dir=tmp_path)
     assert not (entry / "agentd").exists()
 
@@ -101,7 +110,7 @@ def test_bind19_a_recorded_cache_entry_is_served_and_a_changed_one_is_not(
 def test_bind18_a_fetch_that_cannot_run_is_an_error_naming_every_way_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("PATH", str(tmp_path / "no-tools"))
+    unreachable_release(monkeypatch)
     with pytest.raises(microvms.PreconditionError) as caught:
         microvms.provision_agentd(state_dir=tmp_path)
     message = str(caught.value)

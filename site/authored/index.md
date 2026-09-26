@@ -31,7 +31,7 @@ token minted from your AWS credentials. Replace `claude-code` with `codex` in bo
 to use Codex CLI.
 
 **First time here?** [Install the CLI](/learn/tutorial/install/), then
-[configure AWS](/learn/tutorial/first-run/). You need AWS CLI v2, `gh` or `curl`, AWS credentials,
+[configure AWS](/learn/tutorial/first-run/). You need AWS CLI v2, AWS credentials,
 Lambda MicroVMs access, an artifact bucket, and build/execution roles.
 The first image build takes several minutes; 90 seconds is the path to
 starting the workflow, not a promise that AWS setup or the build has finished.

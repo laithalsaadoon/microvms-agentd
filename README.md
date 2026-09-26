@@ -85,7 +85,7 @@ With the CLI installed and AWS resources ready, copy the configuration below
 and start a sandbox. **The first image build takes several minutes; the
 90-second path gets the workflow started, not AWS provisioning completed.**
 
-You need AWS CLI v2, `gh` or `curl` for the daemon download, configured AWS
+You need AWS CLI v2, configured AWS
 credentials, Lambda MicroVMs access, an
 S3 artifact bucket, and build/execution IAM roles. Replace these example values:
 

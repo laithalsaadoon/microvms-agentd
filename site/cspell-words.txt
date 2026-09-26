@@ -18,6 +18,7 @@
 # Shell vocabulary: `set -o pipefail`, zsh's `setopt`, the `openat` syscall, subshells.
 # SigV4 query presigning, the mechanism behind the Bedrock bearer token the agent-VM page describes.
 # Signal vocabulary: `SIGPIPE`, which the CLI leaves ignored so a closed pipe cannot kill a teardown.
+# Sigstore, whose attestations the release carries and the daemon fetch verifies in-process.
 # The AWS CLI package name as `dnf` spells it.
 # The GitHub owner since the 2026-09-09 account rename, quoted in clone URLs and `gh --repo` lines.
 # The `microvm` binary's subcommands and flags that are words cspell does not know.
@@ -55,6 +56,7 @@ Omnigent
 PIPESTATUS
 PyO3
 SIGPIPE
+Sigstore
 aarch64
 acked
 acking

@@ -205,7 +205,7 @@ deterministically by a `turmoil` tier that controls virtual time only. Since #28
 is in `microvms-core/src/prelude.rs:26` and the floor is the pure
 `CalendarDate::from_unix_secs` (`microvms-domain/src/cost.rs:255`), which takes the time.
 Second, `RateTable::retrieved` (`microvms-domain/src/cost.rs:856`) makes rate freshness a data property, which the separate
-`scripts/check-live-rates.py --twin-only` cross-check exists to verify (`mise.toml:564-566`)
+`scripts/check-live-rates.py --twin-only` cross-check exists to verify (`mise.toml:575-577`)
 rather than any Rust test tier.
 
 ### 5. `microvms-py/src/exec.rs`

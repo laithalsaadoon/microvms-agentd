@@ -1942,10 +1942,11 @@ export interface PromptOptions {
  * The `agentd` daemon binary for `options.version` (default: this client's own).
  *
  * Answered from `options.binary` or `$MICROVM_AGENTD` when either names a file, else the
- * version's cache entry, else the GitHub release asset, verified by `gh attestation
- * verify` or, when `gh` cannot download, by the release's `SHA256SUMS`. A fetch that
- * cannot be verified rejects with `ERR_PRECONDITION` (on `err.cause.message`), and so does
- * any binary that is not an aarch64 ELF.
+ * version's cache entry, else the GitHub release asset, verified in-process against the
+ * release workflow's Sigstore attestation or, only when GitHub can't be reached for one, the
+ * release's `SHA256SUMS`. A fetch that cannot be verified rejects with `ERR_PRECONDITION`
+ * (on `err.cause.message`), and so does any binary that is not an aarch64 ELF. Neither
+ * `gh` nor `curl` is needed.
  */
 export declare function provisionAgentd(options?: ProvisionOptions | undefined | null): Promise<Buffer>
 
@@ -1966,9 +1967,9 @@ export interface ProvisionedAgentd {
    */
   suppliedBy?: string
   /**
-   * `"attestation"` (`gh attestation verify`, provenance) or `"checksum"` (the release's
-   * `SHA256SUMS`, integrity), when fetched or when the cache entry was installed. Absent
-   * for a caller-supplied binary.
+   * `"attestation"` (the release workflow's Sigstore attestation, provenance) or
+   * `"checksum"` (the release's `SHA256SUMS`, integrity), when fetched or when the cache
+   * entry was installed. Absent for a caller-supplied binary.
    */
   verification?: string
   /** The release version provisioned for, without a leading `v`. */

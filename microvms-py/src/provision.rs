@@ -3,7 +3,7 @@
 //!
 //! A thin wrapper over `microvms_core::provision` (BIND-17 through BIND-20). The chain,
 //! the verification, the cache, and every refusal are core's; this file converts
-//! arguments and releases the GIL while `gh` or `curl` runs.
+//! arguments and releases the GIL while a fetch downloads and verifies.
 
 use std::path::PathBuf;
 
@@ -55,8 +55,9 @@ impl PyProvisionedAgentd {
     }
 
     /// How the bytes were proven, when fetched or when the cache entry was installed:
-    /// `"attestation"` (`gh attestation verify`, provenance) or `"checksum"` (the release's
-    /// `SHA256SUMS`, integrity). `None` for a caller-supplied binary.
+    /// `"attestation"` (the release workflow's Sigstore attestation, provenance) or
+    /// `"checksum"` (the release's `SHA256SUMS`, integrity). `None` for a caller-supplied
+    /// binary.
     #[getter]
     fn verification(&self) -> Option<&'static str> {
         self.inner
@@ -113,10 +114,12 @@ fn provision(
 ///
 /// Answered from `binary` or `$MICROVM_AGENTD` when either names a file, else the
 /// version's cache entry under `state_dir` (default: the CLI's, so both share one cache),
-/// else the GitHub release asset, verified by `gh attestation verify` or, when `gh` cannot
-/// download, by the release's `SHA256SUMS`. A fetch that cannot be verified raises
-/// `PreconditionError`, and so does any binary that is not an aarch64 ELF. Blocking: a
-/// fetch runs `gh` or `curl` and can take seconds.
+/// else the GitHub release asset, verified in-process against the release workflow's
+/// Sigstore attestation or, only when GitHub can't be reached for one, the release's
+/// `SHA256SUMS`.
+/// A fetch that cannot be verified raises `PreconditionError`, and so does any binary that
+/// is not an aarch64 ELF. Neither `gh` nor `curl` is needed. Blocking: a fetch downloads a
+/// few MiB and can take seconds.
 #[pyfunction]
 #[pyo3(signature = (version=None, state_dir=None, binary=None))]
 pub fn provision_agentd<'py>(

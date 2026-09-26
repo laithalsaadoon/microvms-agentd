@@ -27,8 +27,8 @@ security, every Rust tier, schema, manifest, Python stub and TypeScript declarat
 freshness, model drift, publishability, live wiring, the release cross-compile, the background
 example, and the requirement traceability matrix (`mise.toml:417-433`). `mise run live` is
 BILLABLE, takes about fifteen minutes against real AWS, and is never a first debugging step
-(`mise.toml:580-581`); after any live run, teardown is verified separately by
-`mise run live:verify-clean` (`mise.toml:568-578`), because the service creates log groups
+(`mise.toml:591-592`); after any live run, teardown is verified separately by
+`mise run live:verify-clean` (`mise.toml:579-589`), because the service creates log groups
 under `/aws/lambda-microvms/` that outlive `terraform destroy` (`docs/PLATFORM.md:100-105`).
 
 ## Failure-mode index
@@ -61,7 +61,7 @@ under `/aws/lambda-microvms/` that outlive `terraform destroy` (`docs/PLATFORM.m
 | A connection is refused a second or two after the VM reaches `RUNNING` | Expected. The endpoint proxy path is not wired up the instant the state flips. Classified `Transport`, retryable because it says nothing about the daemon's state | Retry. If it persists past a few attempts, go to the terminal-state row and read `stateReason` | `microvms-domain/src/error.rs:251-256` |
 | `resume` returns 200 but the control API stays closed | The VM resumed without an installed token, which contradicts the measured suspend/resume behavior — the in-memory token, the filesystem, exec records, and backgrounded processes all survive a normal cycle | Grep the daemon log for `resumed WITHOUT an installed token`. That line means the resume behaved like a cold start and every in-flight exec record is gone | `agentd/src/routes.rs:276-290`, `docs/PLATFORM.md:418-451` |
 | A Node caller reads `err.code` and gets `GenericFailure` | napi-rs types the async path over its own closed `Status` enum, so a custom code survives a synchronous throw and is collapsed on a Promise rejection. Nearly every binding method is async | Read `err.cause.message` for the `ERR_*` code and `err.cause.cause.message` for the fine-grained wire kind | `.erpaval/solutions/api-patterns/napi-async-collapses-error-codes.md:11-19` |
-| `terraform destroy` reports success and the account is still billing | The service creates `/aws/lambda-microvms/<image-name>` itself, so Terraform never owns it. Separately, an image refuses deletion while its VM is still terminating, so one teardown pass is not enough | `mise run live:verify-clean` asks the account directly and separates leak / standing / pending. `microvm ls` alarms on every run whose ledger has a non-empty `leaked` list | `docs/PLATFORM.md:195-201`, `scripts/verify-clean.py:7-28`, `microvms-cli/src/main.rs:222-246` |
+| `terraform destroy` reports success and the account is still billing | The service creates `/aws/lambda-microvms/<image-name>` itself, so Terraform never owns it. Separately, an image refuses deletion while its VM is still terminating, so one teardown pass is not enough | `mise run live:verify-clean` asks the account directly and separates leak / standing / pending. `microvm ls` alarms on every run whose ledger has a non-empty `leaked` list | `docs/PLATFORM.md:195-201`, `scripts/verify-clean.py:7-28`, `microvms-cli/src/main.rs:223-247` |
 
 ## Log and error surfaces
 
@@ -83,9 +83,9 @@ under `/aws/lambda-microvms/` that outlive `terraform destroy` (`docs/PLATFORM.m
 | `exec --stream` NDJSON | The one invocation allowed more than one object on stdout: every line before the last is an event, the last is the envelope, under its own discriminant `microvm.exec.stream` | Branch on `type`. A streamed exec that fails before any event writes exactly one document | `microvms-cli/tests/exit_codes.rs:232-278` |
 | Exit code in `$?` | The process. Append-only, `#[repr(u8)]` with explicit discriminants so a variant inserted in the middle cannot silently renumber the contract | The integer, then `Exit::row()`'s `meaning` and `finding`. Every non-zero code is distinct; no two rows share one | `microvms-cli/src/exit.rs:78-102`, `microvms-cli/src/exit.rs:173-258` |
 | Run ledger on disk | One JSON file per invocation under `$MICROVM_STATE_DIR`, else `~/.microvm/runs`. Written **before** each delete is attempted, and its file is refused deletion while `leaked` is non-empty | `leaked` — the operator's to-do list. For a `CREATING` image and a service-created log group the identifier *is* the remedy, because there is no second way to find them. A write failure is swallowed, so an unwritable state dir costs the `ls` entry and nothing else | `microvms-cli/src/ledger.rs:1-22`, `microvms-cli/src/ledger.rs:37-49`, `microvms-cli/src/seam.rs:450-459` |
-| `microvm ls` | stdout. Rows marked as alarms plus a trailing count | "N run(s), M with something still billing" | `microvms-cli/src/main.rs:209-247` |
+| `microvm ls` | stdout. Rows marked as alarms plus a trailing count | "N run(s), M with something still billing" | `microvms-cli/src/main.rs:210-248` |
 | `microvm doctor` | A **success** envelope with `ok: false` plus exit `ERR_PRECONDITION`, because the check succeeded — it found what was wrong | `checks[]` per named check. Advisory checks do not fail the run; the fatal ones do | `microvms-cli/src/commands/doctor.rs:62-83` |
-| `mise run live:verify-clean` | stdout, exit 0 clean and 1 leaked | Three outcomes, not two: **leak** (still billing and nothing intends to keep it), **standing** (the Terraform stack, possibly on purpose), **pending** (a delete in flight — re-run in a minute) | `scripts/verify-clean.py:7-28`, `mise.toml:568-578` |
+| `mise run live:verify-clean` | stdout, exit 0 clean and 1 leaked | Three outcomes, not two: **leak** (still billing and nothing intends to keep it), **standing** (the Terraform stack, possibly on purpose), **pending** (a delete in flight — re-run in a minute) | `scripts/verify-clean.py:7-28`, `mise.toml:579-589` |
 | Guest OOM counters | In-guest, readable with no extra privileges | `dmesg`, and `/sys/fs/cgroup/memory.events` → `oom`, `oom_kill`, `oom_group_kill`. Poll these rather than discovering a kill after the fact | `docs/PLATFORM.md:375-393` |
 
 ## First-checks ladder
@@ -151,7 +151,7 @@ money.
     fake more forgiving than the real daemon. Teardown reporting success and the account being
     clean are different questions, so the leak check runs independently of the code that did
     the cleanup, and expect to run `--delete` more than once because an image refuses deletion
-    while its VM is still terminating. `mise.toml:580-581`, `scripts/verify-clean.py:7-28`
+    while its VM is still terminating. `mise.toml:591-592`, `scripts/verify-clean.py:7-28`
 
 ## Known incident patterns
 

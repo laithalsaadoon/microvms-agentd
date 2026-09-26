@@ -8,6 +8,14 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
 
 ### Added
 
+- **The daemon release's verification policy and its ports (#284).**
+  `microvms_app::provision` holds `fetch_release`, the order a fetch is proven in, written
+  against a `ReleaseSource` (the asset, `SHA256SUMS`, and the attestation bundles for a
+  digest, as `Bundles`: published, absent, or unreachable) and an `AttestationVerifier`, with `Signer::release` naming who must have signed.
+  `microvms_core::provision` re-exports them beside the edges' implementations:
+  `GitHubRelease` (reqwest), `SigstoreVerifier` (`sigstore-verify` 0.13 with its embedded
+  public-good trusted root), `PolicyFetch`, which runs the policy over any source and
+  verifier, and `HttpsFetch`, the shipped fetch over those two.
 - **`microvms_core::env::process`, the process-environment lookup (#285).** The lookup
   `Region::from_env`, `FileNameStore::default_location` and the other resolvers take, in
   production. The CLI and both bindings pass it instead of each wrapping `std::env::var`,
@@ -75,6 +83,30 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
 
 ### Changed
 
+- **The daemon fetch no longer runs `gh` or `curl` (#284).** When `run`, `build`,
+  `quickstart`, `agent-up` or a binding provisions `agentd`, it downloads the release asset
+  over HTTPS and checks the release workflow's Sigstore attestation in-process: the
+  certificate chain, the transparency log evidence, the signature over the asset's digest,
+  the workflow identity at exactly the requested tag, and the SLSA provenance predicate. A
+  machine without a `gh` login used to get only the checksum; it gets `attestation` now.
+  The bundle comes from the release's `agentd.sigstore.json` asset, and from GitHub's
+  attestations API when that asset can't be fetched, with `GITHUB_TOKEN` sent to the API
+  when it's set. A bundle that doesn't verify still stops the fetch, and so does a release
+  that answers it has none for the downloaded bytes (the bundle asset is a 404 and the API
+  has no bundle, or the API says it has no attestation for the digest): every release that
+  ships `SHA256SUMS` ships its bundle too, so a missing one means a replaced asset.
+  `SHA256SUMS` is the proof only when no answer can be had at all (a connection failure, a
+  rate limit, a server error). The release workflow now verifies the bundle it produced with
+  the same verifier before it publishes the release, so a Sigstore change the embedded
+  trusted root doesn't know stops the release rather than every client. v0.5.0 and v0.6.0
+  are refused without `gh` too now: their attestations name the repository's former owner,
+  which `gh attestation verify --repo` refuses as well.
+- **`provision::ReleaseFetch`, `Runner`, `Subprocess` and `SubprocessFetch` are gone (#284).
+  A Rust source break, part of the same 0.11.0.** They were the `gh` and `curl` fetch. Use
+  `HttpsFetch` for the shipped fetch, or `PolicyFetch` over your own `ReleaseSource` and
+  `AttestationVerifier` where a test scripted a `Runner`. `microvms-core/tests/public_paths.rs`
+  stops naming the four, and `scripts/generate-public-paths.py` lists them as removed. The
+  Python and TypeScript APIs don't change.
 - **One `Clock` trait (#283). A Rust source break for anyone who implements it.** The
   control plane's `Clock` and the session's `Clock` are one trait, `microvms_core::clock::Clock`,
   still reachable at `control::Clock` and `session::Clock`. It carries `elapsed`, `sleep`,

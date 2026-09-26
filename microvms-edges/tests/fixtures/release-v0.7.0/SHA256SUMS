@@ -1,0 +1,6 @@
+b281856000f58e6306bcaca73362e4d77260324a51f9b7ba3de563cf102dbe76  agentd
+266970eccaf978363ec51429696f81ebbee1ff07534790eeb7743f36782f168e  microvm-aarch64-apple-darwin.tar.gz
+f6e78591d1783fbfe3077fe88ec6647f03d0c60239c5c4b55bf379da6a7f3edc  microvm-aarch64-unknown-linux-gnu.tar.gz
+83cf21629c9c22d1e86446f4808bf5b6faf6370a88178bf47f10b4363ffc6b2f  microvm-x86_64-apple-darwin.tar.gz
+76b947e35635175b95806fdcd7655d5b17c7d2749c64c3b79a92bdc9b12aed52  microvm-x86_64-pc-windows-msvc.zip
+b638190bf8447232d4ee88bfc35f91923cdb470f621e1baa31e13a0e2a740551  microvm-x86_64-unknown-linux-gnu.tar.gz

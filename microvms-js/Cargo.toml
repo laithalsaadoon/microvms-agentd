@@ -51,7 +51,7 @@ napi-derive = "3"
 serde_json = "1"
 # The core's own poll and deadline paths need a runtime with `time`; napi
 # provides the runtime, and this names the features the futures require. `rt` is
-# `spawn_blocking`, which keeps daemon provisioning's `gh`/`curl` subprocesses off the
+# `spawn_blocking`, which keeps daemon provisioning's blocking fetch and verify off the
 # runtime's workers (`src/provision.rs`). No `rt-multi-thread` — napi owns the runtime,
 # and a library does not choose it.
 tokio = { version = "1.53", features = ["time", "sync", "rt"] }

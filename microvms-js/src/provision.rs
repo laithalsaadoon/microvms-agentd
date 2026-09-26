@@ -3,8 +3,8 @@
 //!
 //! A thin wrapper over `microvms_core::provision` (BIND-17 through BIND-20). The chain,
 //! the verification, the cache, and every refusal are core's; this file converts the
-//! options object and runs the blocking call off the event loop, since a fetch runs `gh` or
-//! `curl` and can take seconds.
+//! options object and runs the blocking call off the event loop, since a fetch downloads a
+//! few MiB and can take seconds.
 
 use std::path::PathBuf;
 
@@ -39,9 +39,9 @@ pub struct ProvisionedAgentd {
     /// For a caller-supplied binary, `"argument"` (the `binary` option) or `"env"`
     /// (`$MICROVM_AGENTD`).
     pub supplied_by: Option<String>,
-    /// `"attestation"` (`gh attestation verify`, provenance) or `"checksum"` (the release's
-    /// `SHA256SUMS`, integrity), when fetched or when the cache entry was installed. Absent
-    /// for a caller-supplied binary.
+    /// `"attestation"` (the release workflow's Sigstore attestation, provenance) or
+    /// `"checksum"` (the release's `SHA256SUMS`, integrity), when fetched or when the cache
+    /// entry was installed. Absent for a caller-supplied binary.
     pub verification: Option<String>,
     /// The release version provisioned for, without a leading `v`.
     pub version: String,
@@ -73,10 +73,11 @@ async fn provisioned(options: Option<ProvisionOptions>) -> Result<Provisioned, A
 /// The `agentd` daemon binary for `options.version` (default: this client's own).
 ///
 /// Answered from `options.binary` or `$MICROVM_AGENTD` when either names a file, else the
-/// version's cache entry, else the GitHub release asset, verified by `gh attestation
-/// verify` or, when `gh` cannot download, by the release's `SHA256SUMS`. A fetch that
-/// cannot be verified rejects with `ERR_PRECONDITION` (on `err.cause.message`), and so does
-/// any binary that is not an aarch64 ELF.
+/// version's cache entry, else the GitHub release asset, verified in-process against the
+/// release workflow's Sigstore attestation or, only when GitHub can't be reached for one, the
+/// release's `SHA256SUMS`. A fetch that cannot be verified rejects with `ERR_PRECONDITION`
+/// (on `err.cause.message`), and so does any binary that is not an aarch64 ELF. Neither
+/// `gh` nor `curl` is needed.
 #[napi]
 pub async fn provision_agentd(options: Option<ProvisionOptions>) -> Result<Buffer, AsyncError> {
     Ok(provisioned(options).await?.bytes.into())

@@ -7,7 +7,6 @@
     { "category": "placement", "key": "microvms-cli -> sha2", "issue": 260 },
     { "category": "placement", "key": "microvms-cli -> tar", "issue": 260 },
     { "category": "subprocess", "key": "microvms-cli/src/seam.rs: Command::new(\"aws\")", "issue": 258 },
-    { "category": "subprocess", "key": "microvms-edges/src/provision.rs: std::process::Command::new(&argv[0])", "issue": 284 },
     { "category": "port-impl", "key": "microvms-cli/src/seam.rs: TokenMinter for PlaneMinter", "issue": 270 }
   ],
   "decisions": [

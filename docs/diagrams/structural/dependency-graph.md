@@ -77,16 +77,16 @@ manifest lines that declare it.
 
 | Elided dependency | Declared by |
 | --- | --- |
-| aws-config 1.10 | `microvms-edges/Cargo.toml:36-41` |
-| aws-credential-types 1.3 | `microvms-edges/Cargo.toml:42` |
-| backon 1.6 | `microvms-app/Cargo.toml:37`, `microvms-edges/Cargo.toml:61` |
-| base64 0.23 | `agentd/Cargo.toml:69`, `microvms-app/Cargo.toml:46`, `microvms-domain/Cargo.toml:48`, `microvms-edges/Cargo.toml:83` |
+| aws-config 1.10 | `microvms-edges/Cargo.toml:41-46` |
+| aws-credential-types 1.3 | `microvms-edges/Cargo.toml:47` |
+| backon 1.6 | `microvms-app/Cargo.toml:37`, `microvms-edges/Cargo.toml:66` |
+| base64 0.23 | `agentd/Cargo.toml:69`, `microvms-app/Cargo.toml:46`, `microvms-domain/Cargo.toml:48`, `microvms-edges/Cargo.toml:102` |
 | bytes 1 | `agentd/Cargo.toml:47` |
-| const-hex 1.19 | `agentd/Cargo.toml:72`, `microvms-app/Cargo.toml:48`, `microvms-cli/Cargo.toml:99`, `microvms-domain/Cargo.toml:50`, `microvms-edges/Cargo.toml:84` |
-| futures-util 0.3 | `agentd/Cargo.toml:63`, `microvms-app/Cargo.toml:34`, `microvms-edges/Cargo.toml:70` |
-| getrandom 0.4 | `agentd/Cargo.toml:76`, `microvms-edges/Cargo.toml:88` |
+| const-hex 1.19 | `agentd/Cargo.toml:72`, `microvms-app/Cargo.toml:48`, `microvms-cli/Cargo.toml:99`, `microvms-domain/Cargo.toml:50`, `microvms-edges/Cargo.toml:103` |
+| futures-util 0.3 | `agentd/Cargo.toml:63`, `microvms-app/Cargo.toml:34`, `microvms-edges/Cargo.toml:89` |
+| getrandom 0.4 | `agentd/Cargo.toml:76`, `microvms-edges/Cargo.toml:107` |
 | globset 0.4 | `microvms-cli/Cargo.toml:81` |
-| http 1.5 | `microvms-edges/Cargo.toml:59` |
+| http 1.5 | `microvms-edges/Cargo.toml:64` |
 | http-body-util 0.1 | `agentd/Cargo.toml:46` |
 | jiff 0.2 | `microvms-domain/Cargo.toml:41` |
 | napi-build 2 | `microvms-js/Cargo.toml:70`, build-dependency |
@@ -95,13 +95,13 @@ manifest lines that declare it.
 | percent-encoding 2.3 | `microvms-app/Cargo.toml:50` |
 | rust_decimal 1.42 | `microvms-domain/Cargo.toml:38` |
 | rust_decimal_macros 1.40 | `microvms-domain/Cargo.toml:42` |
-| sha2 0.11 | `microvms-app/Cargo.toml:43`, `microvms-cli/Cargo.toml:98`, `microvms-edges/Cargo.toml:63` |
-| snow 0.10 | `agentd/Cargo.toml:100-107`, `microvms-edges/Cargo.toml:95-102` |
+| sha2 0.11 | `microvms-app/Cargo.toml:43`, `microvms-cli/Cargo.toml:98`, `microvms-edges/Cargo.toml:68` |
+| snow 0.10 | `agentd/Cargo.toml:100-107`, `microvms-edges/Cargo.toml:114-121` |
 | subtle 2.6 | `agentd/Cargo.toml:53` |
 | tar 0.4.46 | `agentd/Cargo.toml:52`, `microvms-cli/Cargo.toml:87` |
 | tempfile 3 | `agentd/Cargo.toml:60` |
 | thiserror 2.0.19 | `microvms-domain/Cargo.toml:24` |
-| tokio-tungstenite 0.30 | `microvms-edges/Cargo.toml:78-82` |
+| tokio-tungstenite 0.30 | `microvms-edges/Cargo.toml:97-101` |
 | tokio-util 0.7 | `agentd/Cargo.toml:64` |
 | toml 1 | `microvms-cli/Cargo.toml:76` |
 | tower-http 0.7 | `agentd/Cargo.toml:34` |
@@ -184,7 +184,7 @@ CLI-2 names, that every AWS call goes through `microvms-core`.
 - **`agentd` reaches no AWS crate and no HTTP client.** Its direct dependencies
   (`agentd/Cargo.toml:10-70`) contain no `reqwest` and no `aws-*`; it is a server, and the crate
   that talks to AWS is `microvms-edges`, which runs on the developer host rather than in the
-  MicroVM image (`microvms-edges/Cargo.toml:33-35`).
+  MicroVM image (`microvms-edges/Cargo.toml:38-40`).
 - **`agentd` does not declare `http` either**, though it uses those types constantly. Every one
   of its `http::` references is qualified through axum's re-export — `axum::http::StatusCode`
   (`agentd/src/routes.rs:6`), `axum::http::HeaderMap` (`agentd/src/auth.rs:40`),
@@ -215,7 +215,7 @@ The feature sets differ where the role differs, and the manifests say why. `micr
 runtime; `microvms-app` takes `rt` only to spawn its keep-awake task onto the caller's runtime
 and never builds one, and `microvms-edges` takes no runtime feature at all, because a library
 does not choose its caller's (`microvms-cli/Cargo.toml:64-70`, `microvms-app/Cargo.toml:28-33`,
-`microvms-edges/Cargo.toml:69`).
+`microvms-edges/Cargo.toml:88`).
 `microvms-js` takes only `time` and `sync` because napi owns the runtime
 (`microvms-js/Cargo.toml:50-53`), while `microvms-py` takes `rt-multi-thread` for one runtime
 blocked on with the GIL released (`microvms-py/Cargo.toml:39-42`).
@@ -246,14 +246,14 @@ Several externals carry a version floor with a defect behind it rather than a pr
 - `aws-config` keeps `default-https-client` **on** — the credential chain does its own HTTP for
   IMDS, SSO, and STS through smithy's client and panics at `load()` without one. The price is
   two HTTP stacks, smithy for credentials and reqwest for service calls; both sit on rustls, so
-  it is one TLS implementation (`microvms-edges/Cargo.toml:26-41`).
+  it is one TLS implementation (`microvms-edges/Cargo.toml:31-46`).
 - `aws-sigv4` rather than a generated SDK — `lambda-microvms` has no aws-sdk-rust crate, so the
   choice was between vendoring smithy codegen and signing its rest-json operations by hand
-  (`microvms-edges/Cargo.toml:27-29`).
+  (`microvms-edges/Cargo.toml:32-34`).
 - `reqwest` with `rustls` and not `default-tls`, because the daemon ships to an aarch64 musl
   target where a native-tls build needs an OpenSSL the image does not carry. `json` is off
   deliberately, so the error path can read a raw body and see an `AccessDeniedException` whose
-  message field is null (`microvms-edges/Cargo.toml:48-58`).
+  message field is null (`microvms-edges/Cargo.toml:53-63`).
 - `zip = "8.6"` with `deflate` only — 9.0 exists only as `9.0.0-pre2`, and a pre-release in a
   shipping manifest is a version that can change under you; the other compressors are C
   libraries that would otherwise have to build for the musl target

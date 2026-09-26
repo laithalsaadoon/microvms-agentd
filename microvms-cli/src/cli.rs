@@ -695,10 +695,10 @@ pub struct RunArgs {
     /// A directory to sync (issue #72), or an agentd binary to bake in.
     ///
     /// **Omitted while building** (no --image), the CLI provisions the daemon itself: its
-    /// own version's release asset, provenance-verified through `gh attestation verify`
-    /// when `gh` is on PATH (the release's SHA256SUMS otherwise), cached under the state
-    /// directory. `microvm run --exec "…"` on a fresh machine is the headline spelling,
-    /// and no caller should need to hold a path to this product's own component.
+    /// own version's release asset, verified in-process against the release workflow's
+    /// Sigstore attestation (SHA256SUMS only when GitHub can't be reached for one), cached
+    /// under the state directory; neither `gh` nor `curl` is needed. `microvm run --exec "…"`
+    /// on a fresh machine is the headline spelling: no caller should need a path to the daemon.
     ///
     /// A positional that names a *directory* switches run into sync mode: the tree is
     /// packed (skipping `.git`, symlinks preserved), uploaded to /workspace in the VM,
@@ -991,11 +991,11 @@ pub struct QuickstartArgs {
 pub struct BuildArgs {
     /// The aarch64 agentd binary to bake in as the image CMD.
     ///
-    /// Omitted, the CLI provisions its own version's release asset — verified provenance
-    /// through `gh attestation verify` when `gh` is on PATH, the release's SHA256SUMS
-    /// otherwise — and caches it under the state directory. Pass a path for a daemon you
-    /// built or manage yourself; $MICROVM_AGENTD does the same without touching the
-    /// command line.
+    /// Omitted, the CLI provisions its own version's release asset, verified in-process
+    /// against the release workflow's Sigstore attestation (the release's SHA256SUMS only
+    /// when GitHub can't be reached for one), and caches it under the state directory. Pass
+    /// a path for a daemon you built or manage yourself; $MICROVM_AGENTD does the same
+    /// without touching the command line.
     #[arg(value_name = "BINARY")]
     pub binary: Option<PathBuf>,
 

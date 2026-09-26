@@ -7,6 +7,11 @@ repository.workspace = true
 publish = true
 description = "The MicroVMs client's production port implementations: SigV4 over reqwest, the tunnel, the name registry, the clock and entropy"
 readme = "README.md"
+# The committed daemon release the attestation tests verify is a megabyte of test-only gzip.
+# The tests reach it through `include_bytes!` in test code, which the publish verify build
+# never compiles, so the crate ships without it, and without the integration test that
+# would then fail to build from the package.
+exclude = ["tests/"]
 keywords = ["microvms", "lambda", "aws", "sandbox", "microvm"]
 categories = ["api-bindings", "virtualization"]
 
@@ -62,11 +67,25 @@ backon = { version = "1.6", features = ["tokio-sleep"] }
 # The daemon binary's checksum in `provision`.
 sha2 = "0.11"
 
+# ── the daemon release's attestation (#284) ─────────────────────────────────
+# `sigstore-verify` rather than `sigstore` 0.14, measured 2026-09-25: 0.14's bundle verifier
+# never checks the Rekor inclusion proof, checkpoint or SET, so it accepted eight tampered
+# bundles `gh attestation verify` refuses, and it brings in `rsa` with RUSTSEC-2023-0071. This
+# crate refused every one. Pinned exactly: it's pre-1.0 and ships minors often, so each bump is a
+# reviewed change. Default features off and never `tuf`: the trusted root is the one embedded in
+# `sigstore-trust-root`, so verifying needs no network, and `tuf` brings in an MPL-2.0 crate
+# `deny.toml` doesn't allow. A Sigstore key rotation reaches this crate as a version bump, and
+# `tests/release_bundle.rs`, run by `release.yml` before it publishes, is what says one is due.
+sigstore-verify = { version = "=0.13.0", default-features = false }
+sigstore-trust-root = { version = "=0.13.0", default-features = false }
+sigstore-types = "=0.13.0"
+
 # ── the in-VM session (T-W2-5) ──────────────────────────────────────────────
 # `net` is the port forwarder's listener (`session::forward`) and the tunnel's socket. It lives
 # here rather than in the CLI because `microvms-cli/tests/thinness.rs` forbids an HTTP stack
-# there, and a forwarder is an HTTP server.
-tokio = { version = "1.53", features = ["time", "sync", "io-util", "macros", "net"] }
+# there, and a forwarder is an HTTP server. `rt` is the runtime the daemon release fetch builds
+# for its requests, on a thread of its own, because its callers are synchronous (`provision`).
+tokio = { version = "1.53", features = ["time", "sync", "io-util", "macros", "net", "rt"] }
 futures-util = "0.3"
 # The WebSocket client behind `session::tunnel`. Required rather than convenient: the
 # endpoint proxy takes a WebSocket's credential as `Sec-WebSocket-Protocol` values and has
@@ -110,6 +129,9 @@ bolero = "0.13"
 tokio = { version = "1.53", features = ["rt", "macros", "test-util"] }
 # Temp state directories for the provisioning tests: random names, cleanup on drop.
 tempfile = "3"
+# The committed daemon release is gzipped so the tree holds no ELF file (see the fixture's
+# loader in `src/provision/release.rs`). Already in the lock through `zip`.
+flate2 = "1"
 
 [lints.rust]
 # No hand-written `unsafe` in this crate; a future one is a build error, not a scan finding.

@@ -12,7 +12,7 @@ Two properties of the tree make reference count the right criterion, and the sam
   system.** `constants::as_json()` is read by a Python script that looks its keys up by name
   (`microvms-domain/src/constants.rs:40`); `pinned_rates()`'s decimal literals are parsed out of the
   Rust source by another Python script (`scripts/check-live-rates.py:148`); the conformance oracle
-  asserts on `WireKind`'s rendered strings (`conformance/run_rs.py:191`). When one of those couplings
+  asserts on `WireKind`'s rendered strings (`conformance/run_rs.py:190`). When one of those couplings
   changes, compilation still succeeds and the corresponding check silently stops comparing.
 - **Some surfaces have a generated artifact downstream.** `docs/schema.json` is generated from the
   protocol types and byte-compared (`agentd/tests/schema_artifact.rs:39`), and the CLI manifest is
@@ -182,7 +182,7 @@ agent reading the `--json` envelope's `code`, and the conformance oracle reading
   distinction.** `microvms-cli/src/exit.rs:534 the_five_protocol_wire_kinds_collapse_and_the_others_do_not`
   pins the collapsing set. Widening the exit table to split them would break the append-only rule;
   narrowing `data.kind` would leave the conformance oracle unable to tell them apart
-  (`conformance/run_rs.py:191`).
+  (`conformance/run_rs.py:190`).
 
 ## constants.rs and its JSON emission
 
@@ -343,7 +343,7 @@ Defined at: `microvms-domain/src/cost.rs:1018` (`pinned_rates`), returning the `
 Gate: an offline check and a live one, running at different times.
 `microvms-domain/src/cost.rs:2223 every_rate_byte_matches_the_python_literal` compares each field
 against a literal in the offline tier, and `./scripts/check-live-rates.py --twin-only` cross-checks
-the script's own pinned copy against the Rust source — offline and free, per `mise.toml:563`. The
+the script's own pinned copy against the Rust source — offline and free, per `mise.toml:574`. The
 billable half, `mise.toml:547 [tasks."live:rates"]`, compares both against the live AWS Pricing API;
 it sits in `live` rather than `check` because it needs network and credentials (`:402`).
 
@@ -369,7 +369,7 @@ The figures were read from the Lambda pricing page on 2026-08-07 in us-east-1
   `scripts/check-live-rates.py:134` finds the function by the literal string
   `"pub fn pinned_rates()"`, and `:180` is the error raised when it cannot — an error that explicitly
   instructs the reader to repoint `TWIN_FN` rather than delete the check. The script's pinned figures
-  are a deliberate second copy (`mise.toml:563`), because a drift check that imported the values it
+  are a deliberate second copy (`mise.toml:574`), because a drift check that imported the values it
   checks would compare a table against itself.
 - **Money is always a `Decimal`, and the pinned figures carry ten significant digits.**
   The literals at `microvms-domain/src/cost.rs:1023`-`:1033` are `dec!()` values, not floats. Summing a

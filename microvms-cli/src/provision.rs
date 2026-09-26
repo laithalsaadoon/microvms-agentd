@@ -18,18 +18,17 @@
 //! what is refused. This module keeps what is the CLI's own: the envelope's source labels
 //! (`env`, `cache`, `fetched`) and the exit-code row and remedies of each refusal.
 //!
-//! # The fetch goes through a subprocess, and CLI-2 is why
+//! # The fetch is core's, and CLI-2 is why
 //!
-//! `tests/thinness.rs` forbids this crate every HTTP client by name, and core's fetcher
-//! downloads through `gh` or `curl` subprocesses, never a client of its own. The seam is
-//! core's [`Fetch`]: the shipped binary carries [`SubprocessFetch`], and the guards script
-//! it, so no test can open a socket to GitHub — the same arrangement that keeps them off
-//! AWS.
+//! `tests/thinness.rs` forbids this crate every HTTP client by name, so the download and its
+//! attestation check are core's. The seam is core's [`Fetch`]: the shipped binary carries
+//! [`HttpsFetch`], and the guards script it, so no test can open a socket to GitHub, the same
+//! arrangement that keeps them off AWS.
 
 use std::path::{Path, PathBuf};
 
 use microvms_core::provision::{self as core, Failure, ProvisionError, Request};
-pub use microvms_core::provision::{Fetch, SubprocessFetch, Verification};
+pub use microvms_core::provision::{Fetch, HttpsFetch, Verification};
 
 use crate::exit::{CliError, Exit};
 

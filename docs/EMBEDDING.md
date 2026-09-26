@@ -102,10 +102,10 @@ const { source, verification } = await provisionAgentdReport();
 The call answers from, in order, a `binary` you pass (or `$MICROVM_AGENTD`),
 the cache entry for the version, and a fetch of the GitHub release asset. The
 version defaults to `core_version()`, so the daemon you bake always speaks the
-protocol of the client that drives it. A fetch is verified by
-`gh attestation verify` (the release workflow's Sigstore attestation) or, when
-`gh` cannot download, by the release's `SHA256SUMS`; one that cannot be
-verified raises `PreconditionError` rather than warning. Every binary it
+protocol of the client that drives it. A fetch is verified in-process against
+the release workflow's Sigstore attestation or, only when GitHub can't be
+reached for one, the release's `SHA256SUMS`, so it needs neither `gh` nor `curl`; one
+that cannot be verified raises `PreconditionError` rather than warning. Every binary it
 returns, including one you supplied, is checked for an aarch64 ELF header
 first, because a wrong-architecture daemon fails 45 minutes later as a run-hook
 timeout. A cache entry is served only while it still matches the digest

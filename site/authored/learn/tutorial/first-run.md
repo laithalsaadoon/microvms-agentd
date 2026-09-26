@@ -20,7 +20,6 @@ create billable AWS resources.
 You need AWS CLI v2, your normal AWS credential configuration, and a region
 where your account can use Lambda MicroVMs. Supported region names are
 `us-east-1`, `us-east-2`, `us-west-2`, `eu-west-1`, and `ap-northeast-1`.
-Use `gh` or `curl` for the CLI's automatic daemon download.
 
 Image builds need an S3 artifact bucket, a build role, and an execution
 role in your account. Your caller needs permission to manage MicroVMs,

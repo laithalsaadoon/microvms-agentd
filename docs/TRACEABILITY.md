@@ -35,7 +35,7 @@ defined in `spec/core.symspec.json` and `spec/agentd.symspec.json`.
 | BIND-12 | 1 | 1 | 1 | 6 | 3 | 1 |
 | BIND-13 | 1 | 1 | 1 | 4 | 3 | waived |
 | BIND-17 | 1 | 1 | 1 | 4 | 4 | 1 |
-| BIND-18 | 1 | 1 | 1 | 2 | 1 | 1 |
+| BIND-18 | 1 | 1 | 1 | 5 | 3 | 1 |
 | BIND-19 | 1 | 1 | 1 | 2 | 1 | 1 |
 | BIND-20 | 1 | 1 | 1 | 4 | 3 | 1 |
 | BIND-6 | 1 | 1 | 1 | 5 | 6 | 1 |
@@ -376,8 +376,8 @@ If a fetched agentd release asset fails its attestation or SHA256SUMS verificati
 - **model:** `model/src/provision.rs`
 - **gherkin:** `microvms-core/tests/features/provision.feature`
 - **fuzz:** `microvms-edges/src/provision_fuzz.rs`
-- **test:** `microvms-edges/src/provision.rs`, `microvms-js/__test__/provision.mjs`
-- **impl:** `microvms-edges/src/provision.rs`
+- **test:** `microvms-app/src/provision.rs`, `microvms-core/tests/live_release.rs`, `microvms-edges/src/provision.rs`, `microvms-edges/src/provision/release.rs`, `microvms-js/__test__/provision.mjs`
+- **impl:** `microvms-app/src/provision.rs`, `microvms-edges/src/provision.rs`, `microvms-edges/src/provision/release.rs`
 - **live:** `conformance/run_rs.py`
 
 ## BIND-19

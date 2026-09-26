@@ -102,8 +102,7 @@ the CLI's terminate derives only the default group name and cannot know to name 
 chain and issue #75 — one `microvm quickstart` on a fresh state directory, which is the
 one section with its own build because provisioning fires only when building. Live
 because the local guards script the fetch: nothing local proves the real release carries
-the asset, that `gh attestation verify` accepts it, or that the fetched bytes boot a real
-VM. Version-coupled on purpose (the fetch targets `v{CLI version}`), so between a version
+the asset, that its attestation verifies, or that the fetched bytes boot a real VM. Version-coupled on purpose (the fetch targets `v{CLI version}`), so between a version
 bump on main and that version's release publishing, this section fails naming the missing
 tag — the calendar, not the code.
 
@@ -214,7 +213,12 @@ Two more in `drive_provisioned_quickstart` for issue #219, which moved provision
 CLI's own version, and the digest record written beside it after verification names the
 bytes' SHA-256, the proof the envelope reported, and that version. The section's two
 existing checks now carry the BIND-18 and BIND-20 keys. Live because the only verified
-fetch is from the real release, through the real `gh` or `curl` on this machine.
+fetch is from the real release.
+
+Issue #284 moved that fetch in-process, so `drive_provisioned_quickstart` now runs with `gh`
+logged out and asserts the proof was the attestation, and that nothing ran a `gh` it put first
+on `PATH`. Live because only the real release's bundle, checked against Sigstore's real
+trusted root, can say a machine with no `gh` login gets provenance.
 
 A hybrid driver, and both lanes are deliberate
 ----------------------------------------------
@@ -582,11 +586,16 @@ class Cli:
 
     @staticmethod
     def run_process(
-        argv: list[str], timeout: float
+        argv: list[str], timeout: float, env: dict[str, str] | None = None
     ) -> subprocess.CompletedProcess[str]:
         try:
             return subprocess.run(
-                argv, capture_output=True, text=True, check=False, timeout=timeout
+                argv,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout,
+                env=env,
             )
         except subprocess.TimeoutExpired as error:
             # TimeoutExpired repr includes cmd, and captured streams may be agent output.
@@ -594,8 +603,11 @@ class Cli:
                 redacted_argv(argv), error.timeout
             ) from None
 
-    def call(self, *args: str, timeout: float = 900.0) -> Envelope:
-        """One invocation. Raises `KindError` on a failure envelope.
+    def call(
+        self, *args: str, timeout: float = 900.0, env: dict[str, str] | None = None
+    ) -> Envelope:
+        """One invocation. Raises `KindError` on a failure envelope. `env` replaces the
+        process environment for this invocation only.
 
         The exit code is cross-checked against the envelope's own `exitCode` rather
         than trusted from either side alone. They are two independent renderings of
@@ -604,7 +616,7 @@ class Cli:
         """
         argv = self.argv(*args)
         self.log.append(command_for_log(argv))
-        proc = self.run_process(argv, timeout)
+        proc = self.run_process(argv, timeout, env)
         envelope = replace(
             self.parse_stdout(proc.stdout, argv), process_exit_code=proc.returncode
         )
@@ -4048,6 +4060,47 @@ def drive_config_and_sync(
     # itself part of what this section exercises — the teardown path after a download.
 
 
+#: The variables `gh` reads a login from. Unset, with an empty config directory, `gh` is
+#: logged out.
+GH_TOKEN_VARIABLES = (
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_ENTERPRISE_TOKEN",
+    "GITHUB_ENTERPRISE_TOKEN",
+)
+
+#: A `gh` that records its argv and refuses the way a logged-out `gh` does.
+GH_SHIM = """#!/bin/sh
+printf '%s\\n' "$*" >> "$(dirname "$0")/gh.ran"
+echo 'To get started with GitHub CLI, please run:  gh auth login' >&2
+exit 4
+"""
+
+
+def gh_logged_out(root: Path, base: dict[str, str]) -> tuple[dict[str, str], Path]:
+    """`base` as a machine where `gh` is logged out, and the file that records each run.
+
+    Three things, so the proof doesn't rest on any one: every variable `gh` reads a token
+    from is unset (so is the `GITHUB_TOKEN` the fetch itself would send), `GH_CONFIG_DIR`
+    names an empty directory, and a shim `gh` first on `PATH` appends its argv to the
+    returned file and exits 4 with the logged-out message. A real `gh` later on `PATH` is
+    logged out by the first two; the third says whether anything tried it.
+    """
+    shim = root / "gh-shim"
+    config = root / "gh-config"
+    shim.mkdir(parents=True, exist_ok=True)
+    config.mkdir(parents=True, exist_ok=True)
+    gh = shim / "gh"
+    gh.write_text(GH_SHIM)
+    gh.chmod(0o755)
+    env = {
+        name: value for name, value in base.items() if name not in GH_TOKEN_VARIABLES
+    }
+    env["GH_CONFIG_DIR"] = str(config)
+    env["PATH"] = os.pathsep.join([str(shim), base.get("PATH", "")])
+    return env, shim / "gh.ran"
+
+
 def drive_provisioned_quickstart(
     cli: Cli, state: Path, logs: Any, results: Results
 ) -> None:
@@ -4057,9 +4110,14 @@ def drive_provisioned_quickstart(
     with no binary fetches this CLI's own version's release asset, verifies it, caches
     it under the state directory) and `quickstart` itself (issue #75). Live rather
     than only scripted for the id-prefix lesson's reason: the local guards script the
-    fetch, so nothing local ever proves the real release carries the asset, that `gh`
-    or the SHA256SUMS path verifies it, or that the fetched bytes boot a real VM. This
-    is the one place the whole chain runs against the things it actually talks to.
+    fetch, so nothing local ever proves the real release carries the asset, that its
+    attestation verifies in-process, or that the fetched bytes boot a real VM. This is
+    the one place the whole chain runs against the things it actually talks to.
+
+    It runs with `gh` logged out (`gh_logged_out`), which is the machine #284 is for:
+    the fetch used to need a `gh` login for an attestation check, and a machine without
+    one got the checksum. So the proof asserted here is `attestation`, not either proof,
+    and a `gh` shim first on `PATH` records whether anything tried the tool.
 
     The fetch targets `v{CLI version}`, so between a version bump landing on main and
     that version's release publishing, this section fails with the fetch error naming
@@ -4070,7 +4128,8 @@ def drive_provisioned_quickstart(
     from the suite's image can carry it. Teardown is quickstart's default, and the
     teardown-left-nothing check is asserted off the same envelope.
     """
-    print("\n== quickstart (self-provisioned daemon, own build) ==")
+    print("\n== quickstart (self-provisioned daemon, own build, gh logged out) ==")
+    env, gh_ran = gh_logged_out(state.parent / "gh-logged-out", dict(os.environ))
     envelope = cli.call(
         "quickstart",
         "--state-dir",
@@ -4078,6 +4137,7 @@ def drive_provisioned_quickstart(
         "--region",
         cli.region,
         timeout=50 * 60,
+        env=env,
     )
     results.eq(
         "quickstart emitted the run envelope shape", envelope.type, "microvm.run"
@@ -4089,6 +4149,16 @@ def drive_provisioned_quickstart(
         agentd.get("source") == "fetched"
         and agentd.get("verified") in ("attestation", "checksum"),
         f"source={agentd.get('source')!r} verified={agentd.get('verified')!r}",
+    )
+    results.check(
+        "BIND-18 with gh logged out, the provisioned daemon was verified by its attestation",
+        agentd.get("verified") == "attestation",
+        f"verified={agentd.get('verified')!r}",
+    )
+    results.check(
+        "BIND-18 provisioning the daemon ran no gh",
+        not gh_ran.exists(),
+        gh_ran.read_text() if gh_ran.exists() else "",
     )
 
     # The cached install, read off this machine rather than trusted from the envelope:
@@ -6672,6 +6742,52 @@ def check_ensure_image_section(results: "Results") -> None:
     )
 
 
+def check_gh_logged_out(results: "Results") -> None:
+    """`gh_logged_out` strips every token, empties the config, and puts a recording shim
+    first; the run file stays absent until something runs `gh`, then names what it ran."""
+    with tempfile.TemporaryDirectory() as tmp:
+        base = {name: "a-token" for name in GH_TOKEN_VARIABLES}
+        base["PATH"] = "/usr/bin:/bin"
+        base["HOME"] = tmp
+        env, ran = gh_logged_out(Path(tmp), base)
+        config = Path(env["GH_CONFIG_DIR"])
+        results.check(
+            "the gh-logged-out environment carries no token and an empty gh config",
+            not any(name in env for name in GH_TOKEN_VARIABLES)
+            and config.is_dir()
+            and not any(config.iterdir())
+            and env["HOME"] == tmp,
+            f"{sorted(env)} config={sorted(config.iterdir())}",
+        )
+        results.check(
+            "the gh shim is first on PATH and nothing has run it yet",
+            env["PATH"].split(os.pathsep)[0] == str(ran.parent)
+            and env["PATH"].endswith("/usr/bin:/bin")
+            and not ran.exists(),
+            env["PATH"],
+        )
+        try:
+            proc = subprocess.run(
+                ["gh", "release", "download", "v0.10.0"],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            exit_code, stderr = proc.returncode, proc.stderr
+        except OSError as exc:
+            exit_code, stderr = None, str(exc)
+        results.check(
+            "a gh run under it refuses as logged out and is recorded",
+            exit_code == 4
+            and "gh auth login" in stderr
+            and ran.exists()
+            and ran.read_text() == "release download v0.10.0\n",
+            f"exit={exit_code} stderr={stderr!r} "
+            f"ran={ran.read_text() if ran.exists() else None!r}",
+        )
+
+
 def check_bdd_outcome(results: "Results") -> None:
     """The JUnit reader tells a passed scenario from a failed, skipped, or absent one."""
     name = BDD_LIVE_SCENARIO
@@ -6718,6 +6834,7 @@ def self_test() -> int:
         check_posture_lines(results)
         check_preflight_lines(results)
         check_ensure_image_section(results)
+        check_gh_logged_out(results)
 
         # -- the success side -------------------------------------------------
         ok = cli.call("ok")
