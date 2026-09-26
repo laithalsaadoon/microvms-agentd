@@ -74,7 +74,7 @@ const REGION: Region = Region::UsEast1;
 /// `{"message":null}`** — a blank parse failure on page two of a listing whose page one
 /// worked, with nothing in it naming a cursor.
 ///
-/// # Falsification, run 2026-08-15
+/// # **Falsification**, run 2026-08-15
 ///
 /// Two ways, both run. Sending a real `=`-bearing cursor raw through a hand-signed request
 /// answered 400 `{"message":null}` where the encoded form answered 200 — that is the

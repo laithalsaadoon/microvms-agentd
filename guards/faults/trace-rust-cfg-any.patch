@@ -1,0 +1,18 @@
+--- a/microvms-cli/tests/dependency_direction.rs
++++ b/microvms-cli/tests/dependency_direction.rs
+@@ -256,6 +256,7 @@
+ /// **Falsification**: add `microvms-edges = { path = "../microvms-edges" }` to the app's
+ /// `[dev-dependencies]` and this goes red naming the edge. (A normal dependency is a cycle,
+ /// which fails `cargo metadata` before any test runs.)
++#[cfg(any())]
+ #[test]
+ fn each_member_depends_on_exactly_the_crates_of_ours_its_layer_allows() {
+     let metadata = metadata();
+@@ -539,6 +540,7 @@
+ /// **Falsification**: add `tokio = "1"` to the domain's `[dependencies]` and this goes red
+ /// naming it. Delete `jiff` from `arch/placement.toml`'s domain set and it goes red on the crate
+ /// outside the set.
++#[cfg(any())]
+ #[test]
+ fn each_layer_depends_on_exactly_its_allowed_set() {
+     let records: Vec<String> = placement_records("entries")

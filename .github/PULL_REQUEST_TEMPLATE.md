@@ -22,13 +22,17 @@ message here: name what was measured, and admit what is unverified. -->
 
 ## Guards
 
-**If this adds a guard, state which deliberate break proved it fires.** For each
-new test: what you broke, that the test failed, and that it passed again after
-you restored the code. A test that passes either way is a false answer, not a
-passing test — see `CONTRIBUTING.md` for the two that did exactly that here.
+**If this adds a guard, register the deliberate break that proves it fires.** Add its
+entry to `guards/faults.toml` (the schema is in `scripts/check-guards-fire.py`) and paste
+the line `mise run guards:fire -- --only <id>` printed for it. A test that passes either
+way is a false answer, not a passing test; see `CONTRIBUTING.md` for the two that did
+exactly that here.
 
-<!-- e.g. "tar_member_verdict: removed the `?` from parts.pop() so ../x became x;
-test failed as expected, restored, green." -->
+For a guard no fault can be seeded for mechanically, such as a live check: what you broke,
+that the check failed, and that it passed again after you restored the code.
+
+<!-- e.g. "agentd-fs-pop: removed the `?` from `parts.pop()?` in agentd/src/fs.rs so ../x
+became x; `guards:fire -- --only agentd-fs-pop` printed `fired: agentd-fs-pop`." -->
 
 ## Platform claims
 

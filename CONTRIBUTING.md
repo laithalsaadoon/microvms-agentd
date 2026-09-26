@@ -10,7 +10,7 @@ behavior and [Trust](docs/TRUST.md) before changing authentication or execution.
 ```bash
 mise install
 mise run install       # install git hooks
-mise run check         # code, security, tests, schema, stubs and declarations, API drift, packaging, build, traceability, layering drift
+mise run check         # code, security, tests, schema, stubs and declarations, API drift, packaging, build, traceability, layering drift, seeded-fault registry
 mise tasks             # all available tasks
 ```
 
@@ -44,10 +44,17 @@ Use `-p microvms-protocol` for the protocol package; its Rust import is
 Python builds with maturin and tests under `microvms-py/tests/`. Node builds
 with `npm run build` and tests with `npm test` in `microvms-js/`.
 
-For a new invariant guard, demonstrate that the test catches the intended
-failure, restore the implementation, and record the result in the PR. In
-network simulation tests, coordinate child processes through stdin rather than
-wall-clock sleeps: child processes and the simulator use different clocks.
+For a new invariant guard, register the fault that proves it catches its
+failure in `guards/faults.toml`, and show `mise run guards:fire -- --only <id>`
+printing `fired` for it. `check` runs `guards:list`, which fails when an entry's
+anchor or patch no longer matches the tree, and when a test gains a
+`**Falsification**` note with no entry (`guards/unregistered.txt` lists the
+older ones and only shrinks). CI's `guards` job seeds every fault. A guard no
+fault can be seeded for, such as a live check, is still broken by hand, restored,
+and recorded in the PR.
+
+In network simulation tests, coordinate child processes through stdin rather
+than wall-clock sleeps: child processes and the simulator use different clocks.
 
 `mise run ratchet:check` holds `ratchet/drift.json` equal to the layering drift
 its collectors find, such as an adapter dependency outside `arch/placement.toml`

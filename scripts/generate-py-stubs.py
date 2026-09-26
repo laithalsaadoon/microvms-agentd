@@ -148,7 +148,18 @@ def build_extension(out_dir: Path) -> Path:
         ],
         cwd=REPO,
     )
-    built = REPO / "target" / "debug" / "libmicrovms.so"
+    # Ask cargo where it put it: `guards:fire` builds a scratch worktree into the caller's
+    # CARGO_TARGET_DIR, so `REPO / "target"` would read nothing there, and cargo metadata
+    # also honors CARGO_BUILD_TARGET_DIR and `build.target-dir`.
+    metadata = subprocess.run(
+        ["cargo", "metadata", "--no-deps", "--offline", "--format-version", "1"],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    target = Path(json.loads(metadata.stdout)["target_directory"])
+    built = target / "debug" / "libmicrovms.so"
     if not built.is_file():
         raise SystemExit(f"cargo produced no cdylib at {built}")
     importable = out_dir / "microvms.so"

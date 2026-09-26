@@ -571,7 +571,7 @@ test('a stream survives more events than the channel can hold', async () => {
   // available send would have parked the runtime thread the driver runs on. Sixty-four frames is
   // comfortably more than the bound; every one arrives, in order, with the terminal event last.
   //
-  // Falsification: this is the test that goes red if the drive is ever changed to drop events
+  // **Falsification**: this is the test that goes red if the drive is ever changed to drop events
   // under a full channel (a `try_send` in place of the awaited `send`) — the count and the offsets
   // both break.
   const frames = [];

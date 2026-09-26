@@ -1,0 +1,568 @@
+# The seeded-fault registry (#274): each entry is a deliberate break and the guard that has to
+# catch it. `mise run guards:list` (in `check`) holds every anchor and patch to the tree and
+# every Falsification note to an entry or to guards/unregistered.txt; `mise run guards:fire`
+# seeds each fault in a scratch worktree and requires its guard to fail for the named reason.
+# The schema is in scripts/check-guards-fire.py's docstring.
+#
+# A new guard gets its entry in the PR that adds it, and `guards:fire -- --only <id>` must
+# print `fired` for it. An entry goes when its guard is deleted on purpose, in the same PR.
+
+# ── agentd ───────────────────────────────────────────────────────────────────
+
+[[fault]]
+id = "agentd-fs-pop"
+guard = "fs::tests::normalize_rejects_escapes_and_absorbs_benign_traversal"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "fs::tests::normalize_rejects_escapes_and_absorbs_benign_traversal"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "agentd/src/fs.rs", replace = "parts.pop()?;", with = "parts.pop();" }
+
+# ── the CLI's thinness scans and seam guards ────────────────────────────────
+
+[[fault]]
+id = "thinness-print-macro"
+guard = "no_production_code_writes_with_a_print_macro"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "thinness", "--", "--exact", "no_production_code_writes_with_a_print_macro"]
+expect = "test-failed"
+suite = "rust"
+note = "microvms-cli/tests/thinness.rs::no_production_code_writes_with_a_print_macro"
+transform = { file = "microvms-cli/src/main.rs", replace = "out.raw(&error.to_string());", with = "print!(\"{error}\");" }
+
+# The issue's one-line form matches twice (suspend and terminate) and, once narrowed, doesn't
+# compile: `ControlPlane::new` is a `ControlPlaneExt` method since #283, so the import comes too.
+[[fault]]
+id = "thinness-operation-scan"
+guard = "no_shipping_source_line_names_an_operation_or_reaches_past_the_seam"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "thinness", "--", "--exact", "no_shipping_source_line_names_an_operation_or_reaches_past_the_seam"]
+expect = "test-failed"
+suite = "rust"
+note = "microvms-cli/tests/thinness.rs::no_shipping_source_line_names_an_operation_or_reaches_past_the_seam"
+message = "lifecycle.rs names ControlPlane::new"
+transform = [
+  { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let plane = ControlPlane::new(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" },
+  { file = "microvms-cli/src/commands/lifecycle.rs", replace = "use std::time::Duration;\n", with = "use std::time::Duration;\n\nuse microvms_core::prelude::ControlPlaneExt as _;\n" },
+]
+
+[[fault]]
+id = "guards-seam-door"
+guard = "guards::every_aws_command_fails_through_the_seam_and_names_the_door_it_entered"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::every_aws_command_fails_through_the_seam_and_names_the_door_it_entered"]
+expect = "test-failed"
+suite = "rust"
+note = "microvms-cli/src/guards.rs::every_aws_command_fails_through_the_seam_and_names_the_door_it_entered"
+transform = [
+  { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let plane = ControlPlane::new(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" },
+  { file = "microvms-cli/src/commands/lifecycle.rs", replace = "use std::time::Duration;\n", with = "use std::time::Duration;\n\nuse microvms_core::prelude::ControlPlaneExt as _;\n" },
+]
+
+# #277's falsifier: a char literal holding a quote used to blank the rest of the line.
+[[fault]]
+id = "thinness-char-literal"
+guard = "no_shipping_source_line_names_an_operation_or_reaches_past_the_seam"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "thinness", "--", "--exact", "no_shipping_source_line_names_an_operation_or_reaches_past_the_seam"]
+expect = "test-failed"
+suite = "rust"
+message = "lifecycle.rs names ControlPlane::new"
+transform = [
+  { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _quote = '\"'; let plane = ControlPlane::new(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" },
+  { file = "microvms-cli/src/commands/lifecycle.rs", replace = "use std::time::Duration;\n", with = "use std::time::Duration;\n\nuse microvms_core::prelude::ControlPlaneExt as _;\n" },
+]
+
+# #277's sentinel: a stripper that writes nothing reads every file as blanks.
+[[fault]]
+id = "thinness-seam-sentinel"
+guard = "no_shipping_source_line_names_an_operation_or_reaches_past_the_seam"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "thinness", "--", "--exact", "no_shipping_source_line_names_an_operation_or_reaches_past_the_seam"]
+expect = "test-failed"
+suite = "rust"
+message = "the sentinel failed: src/seam.rs"
+transform = { file = "microvms-cli/tests/thinness.rs", replace = "fn place(lines: &mut [Vec<char>], at: proc_macro2::LineColumn, token: &str) {\n", with = "fn place(lines: &mut [Vec<char>], at: proc_macro2::LineColumn, token: &str) {\n    if !token.is_empty() {\n        return;\n    }\n" }
+
+# `default-features = false`, so the lock gains an edge and no package (the default features
+# add six crates and rewrite the lock). Retire this entry with the test, when #260's change
+# clears the CLI's placement drift.
+[[fault]]
+id = "thinness-dependency"
+guard = "no_direct_dependency_is_a_second_path_to_aws"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "thinness", "--", "--exact", "no_direct_dependency_is_a_second_path_to_aws"]
+expect = "test-failed"
+suite = "rust"
+note = "microvms-cli/tests/thinness.rs::no_direct_dependency_is_a_second_path_to_aws"
+transform = { file = "microvms-cli/Cargo.toml", replace = "[dependencies]\n", with = "[dependencies]\nreqwest = { version = \"0.13\", default-features = false }\n" }
+
+# ── dependency_direction.rs: the crate graph and arch/placement.toml ─────────
+
+[[fault]]
+id = "deps-py-globset"
+guard = "each_exact_adapter_depends_on_exactly_its_allowed_set"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_exact_adapter_depends_on_exactly_its_allowed_set"]
+expect = "test-failed"
+suite = "rust"
+note = "microvms-cli/tests/dependency_direction.rs::each_exact_adapter_depends_on_exactly_its_allowed_set"
+message = "Outside the set: [\"globset\"]"
+transform = { file = "microvms-py/Cargo.toml", replace = "[dependencies]\n", with = "[dependencies]\nglobset = \"0.4\"\n" }
+
+[[fault]]
+id = "deps-domain-tokio"
+guard = "each_layer_depends_on_exactly_its_allowed_set"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_layer_depends_on_exactly_its_allowed_set"]
+expect = "test-failed"
+suite = "rust"
+note = "microvms-cli/tests/dependency_direction.rs::each_layer_depends_on_exactly_its_allowed_set"
+message = "Outside the set: [\"tokio\"]"
+transform = { file = "microvms-domain/Cargo.toml", replace = "[dependencies]\n", with = "[dependencies]\ntokio = \"1\"\n" }
+
+# A dev edge, because the normal edge is a cargo cycle that fails every command.
+[[fault]]
+id = "deps-app-edges"
+guard = "each_member_depends_on_exactly_the_crates_of_ours_its_layer_allows"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_member_depends_on_exactly_the_crates_of_ours_its_layer_allows"]
+expect = "test-failed"
+suite = "rust"
+note = "microvms-cli/tests/dependency_direction.rs::each_member_depends_on_exactly_the_crates_of_ours_its_layer_allows"
+message = "left: {\"microvms-domain\", \"microvms-edges\", \"microvms-protocol\"}"
+transform = { file = "microvms-app/Cargo.toml", replace = "[dev-dependencies]\n", with = "[dev-dependencies]\nmicrovms-edges = { path = \"../microvms-edges\" }\n" }
+
+[[fault]]
+id = "deps-cli-lib"
+guard = "the_cli_exports_no_library_target_at_all"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "the_cli_exports_no_library_target_at_all"]
+expect = "test-failed"
+suite = "rust"
+note = "microvms-cli/tests/dependency_direction.rs::the_cli_exports_no_library_target_at_all"
+patch = "guards/faults/deps-cli-lib.patch"
+
+# ── clippy bans (#282, #285) ─────────────────────────────────────────────────
+
+[[fault]]
+id = "clippy-domain-fs"
+guard = "microvms-domain clippy.toml: std::fs::read"
+run = ["cargo", "clippy", "-p", "microvms-domain", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `std::fs::read`"
+transform = { file = "microvms-domain/src/sizing.rs", replace = "    pub fn baseline_mib(self) -> u32 {\n", with = "    pub fn baseline_mib(self) -> u32 {\n        let _ = std::fs::read(\"x\");\n" }
+
+[[fault]]
+id = "clippy-js-subprocess"
+guard = "microvms-js clippy.toml: std::process::Command"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed type `std::process::Command`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = std::process::Command::new(\"aws\");\n" }
+
+# ── the v0.10.0 public-path witness (#282) ───────────────────────────────────
+
+[[fault]]
+id = "public-paths-reexport"
+guard = "microvms-core/tests/public_paths.rs"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "public_paths", "--no-run"]
+expect = "compile-error"
+suite = "rust"
+code = "E0432"
+message = "unresolved import `microvms_core::SizeClass`"
+transform = { file = "microvms-core/src/lib.rs", replace = "pub use sizing::SizeClass;\n", with = "" }
+
+# ── the release's Sigstore check (#284) ──────────────────────────────────────
+
+[[fault]]
+id = "release-signer-identity"
+guard = "provision::release::tests::another_signer_identity_is_refused"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "provision::release::tests::another_signer_identity_is_refused"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "microvms-edges/src/provision/release.rs", replace = "sigstore_verify::VerificationPolicy::new(&signer.identity, &signer.issuer)", with = "sigstore_verify::VerificationPolicy::with_issuer(&signer.issuer)" }
+
+# ── agentd-model: each spec function's note names the property test ──────────
+
+[[fault]]
+id = "model-image-force"
+guard = "image::tests::the_specified_ensure_satisfies_every_property"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "image::tests::the_specified_ensure_satisfies_every_property"]
+expect = "test-failed"
+suite = "rust"
+note = "model/src/image.rs::plan"
+transform = { file = "model/src/image.rs", replace = "        (Platform::Ready, true) | (Platform::Failed, _) => Plan::Delete,\n", with = "        (Platform::Ready, true) => Plan::Reuse,\n        (Platform::Failed, _) => Plan::Delete,\n" }
+
+[[fault]]
+id = "model-provision-launder"
+guard = "provision::tests::the_specified_policy_satisfies_every_property"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "provision::tests::the_specified_policy_satisfies_every_property"]
+expect = "test-failed"
+suite = "rust"
+note = "model/src/provision.rs::verify"
+transform = { file = "model/src/provision.rs", replace = "        Gh::Unattested => Verdict::Refused,\n", with = "        Gh::Unattested => verify(\n            Behavior::Specified,\n            Release {\n                gh: Gh::Unavailable,\n                ..release\n            },\n        ),\n" }
+
+[[fault]]
+id = "model-wrap-tail"
+guard = "wrap::tests::the_specified_wrap_satisfies_every_property"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "wrap::tests::the_specified_wrap_satisfies_every_property"]
+expect = "test-failed"
+suite = "rust"
+note = "model/src/wrap.rs::specified"
+transform = { file = "model/src/wrap.rs", replace = "    if task.tail != Tail::Complete {\n        return Wrap::Refused(Refusal::Unfinished);\n    }\n", with = "" }
+
+[[fault]]
+id = "model-output-continue"
+guard = "output::tests::the_specified_cli_satisfies_every_property"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "output::tests::the_specified_cli_satisfies_every_property"]
+expect = "test-failed"
+suite = "rust"
+note = "model/src/output.rs::specified"
+transform = { file = "model/src/output.rs", replace = "            stream_event: true,\n        } => Decision::StopStream,\n", with = "            stream_event: true,\n        } => Decision::Continue,\n" }
+
+[[fault]]
+id = "model-exec-start-layers"
+guard = "exec_start::tests::the_specified_daemon_satisfies_every_property"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "exec_start::tests::the_specified_daemon_satisfies_every_property"]
+expect = "test-failed"
+suite = "rust"
+note = "model/src/exec_start.rs::specified"
+transform = { file = "model/src/exec_start.rs", replace = "Layering::Specified => [image, identity, world.launch, request.env()],", with = "Layering::Specified => [image, world.launch, identity, request.env()]," }
+
+# ── generated artifacts ──────────────────────────────────────────────────────
+
+# `mise run manifest:check`'s script, spelled out: CI runs this without mise.
+[[fault]]
+id = "manifest-help-string"
+guard = "manifest:check"
+run = ["bash", "-c", "set -eu; tmp=$(mktemp); trap 'rm -f \"$tmp\"' EXIT; cargo run -q -p microvms-cli -- manifest > \"$tmp\"; diff -u docs/manifest.json \"$tmp\""]
+expect = "exit-nonzero"
+suite = "rust"
+message = "+        \"help\": \"Emit the typed JSON envelope on stdout instead of plain output\""
+transform = { file = "microvms-cli/src/cli.rs", replace = "    /// Emit the typed JSON envelope on stdout instead of human output.\n", with = "    /// Emit the typed JSON envelope on stdout instead of plain output.\n" }
+
+# ── script gates ─────────────────────────────────────────────────────────────
+
+[[fault]]
+id = "lint-coverage-empty-root"
+guard = "scripts/check-lint-coverage.py"
+run = ["./scripts/check-lint-coverage.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "lint coverage: FAILED"
+argv_fault = ["--root", "{empty_dir}"]
+
+[[fault]]
+id = "license-headers-missing"
+guard = "scripts/check-license-headers.py"
+run = ["./scripts/check-license-headers.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "1 files are missing"
+transform = { file = "agentd/src/fs.rs", replace = "// SPDX-License-Identifier: Apache-2.0\n", with = "" }
+
+[[fault]]
+id = "license-headers-floor"
+guard = "scripts/check-license-headers.py"
+run = ["./scripts/check-license-headers.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "returned no tracked source files"
+transform = { file = "scripts/check-license-headers.py", replace = "for line in out.stdout.splitlines() if line]", with = "for line in out.stdout.splitlines() if line and False]" }
+
+[[fault]]
+id = "license-headers-sentinel"
+guard = "scripts/check-license-headers.py"
+run = ["./scripts/check-license-headers.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "microvms-core/src/lib.rs, which this repo always tracks"
+transform = { file = "scripts/check-license-headers.py", replace = "[\"git\", \"ls-files\", *(f\"*{ext}\" for ext in COMMENT)]", with = "[\"git\", \"ls-files\", *(f\"*{ext}\" for ext in COMMENT if ext != \".rs\")]" }
+
+[[fault]]
+id = "license-headers-extension-floor"
+guard = "scripts/check-license-headers.py"
+run = ["./scripts/check-license-headers.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "but none ending in .mjs, .sh"
+transform = { file = "scripts/check-license-headers.py", replace = "[\"git\", \"ls-files\", *(f\"*{ext}\" for ext in COMMENT)]", with = "[\"git\", \"ls-files\", *(f\"*{ext}\" for ext in COMMENT if ext not in (\".mjs\", \".sh\"))]" }
+
+[[fault]]
+id = "license-unit-git-env"
+guard = "test_license_headers.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_license_headers.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_inherited_git_dir_leaves_that_repo_alone ("
+transform = { file = "scripts/test_license_headers.py", replace = "if k not in GIT_ENV_LEAKS}", with = "if k not in ()}" }
+
+[[fault]]
+id = "publishable-selector-floor"
+guard = "scripts/check-publishable.py"
+run = ["./scripts/check-publishable.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "found no `-p` selector"
+transform = { file = "scripts/check-publishable.py", replace = "SELECTOR = re.compile(r\"(?:-p|--package)[ =]+([A-Za-z0-9_-]+)\")", with = "SELECTOR = re.compile(r\"(?:-P|--pakage)[ =]+([A-Za-z0-9_-]+)\")" }
+
+[[fault]]
+id = "publishable-selector-sentinel"
+guard = "scripts/check-publishable.py"
+run = ["./scripts/check-publishable.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "but not `-p microvms-cli` in .github/workflows/ci.yml"
+transform = { file = "scripts/check-publishable.py", replace = "SELECTOR = re.compile(r\"(?:-p|--package)[ =]+([A-Za-z0-9_-]+)\")", with = "SELECTOR = re.compile(r\"(?:-p|--package)[ =]+([A-Za-z0-9_]+)\")" }
+
+[[fault]]
+id = "publishable-listing"
+guard = "scripts/check-publishable.py"
+run = ["./scripts/check-publishable.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "mise.toml runs cargo with a `-p` selector but isn't in SELECTOR_FILES"
+transform = { file = "scripts/check-publishable.py", replace = "    \".github/workflows/release.yml\",\n    \"mise.toml\",\n)", with = "    \".github/workflows/release.yml\",\n)" }
+
+[[fault]]
+id = "publishable-reach-floor"
+guard = "scripts/check-publishable.py"
+run = ["./scripts/check-publishable.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "SELECTOR_SURFACES doesn't reach"
+transform = { file = "scripts/check-publishable.py", replace = "SELECTOR_SURFACES = (\".github/workflows/*.yml\", \"mise.toml\")", with = "SELECTOR_SURFACES = ()" }
+
+# ── the live suite's own helpers (#277), against a stub CLI ──────────────────
+
+[[fault]]
+id = "conformance-eq-refuses-none"
+guard = "conformance/run_rs.py --self-test"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  eq() fails when either side is None"
+transform = { file = "conformance/run_rs.py", replace = "        if actual is None or expected is None:\n", with = "        if False:\n" }
+
+[[fault]]
+id = "conformance-eq-positive-controls"
+guard = "conformance/run_rs.py --self-test"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  eq() still compares empty strings"
+transform = { file = "conformance/run_rs.py", replace = "        if actual is None or expected is None:\n", with = "        if not actual or not expected:\n" }
+
+[[fault]]
+id = "conformance-absent"
+guard = "conformance/run_rs.py --self-test"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  absent() fails on any value that isn't None"
+transform = { file = "conformance/run_rs.py", replace = "return self.check(name, value is None, f\"expected nothing, got {value!r}\")", with = "return self.check(name, True, f\"expected nothing, got {value!r}\")" }
+
+[[fault]]
+id = "conformance-bind19-record"
+guard = "conformance/run_rs.py --self-test"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  the digest record check refuses a proof absent from both sides"
+transform = { file = "conformance/run_rs.py", replace = "        and record.get(\"verification\") is not None\n", with = "" }
+
+# ── this registry's own gate ─────────────────────────────────────────────────
+
+[[fault]]
+id = "guards-list-new-note"
+guard = "scripts/check-guards-fire.py list"
+run = ["./scripts/check-guards-fire.py", "list"]
+expect = "exit-nonzero"
+suite = "script"
+message = "fs.rs::normalize_rejects_escapes_and_absorbs_benign_traversal ("
+transform = { file = "agentd/src/fs.rs", replace = "    #[test]\n    fn normalize_rejects_escapes_and_absorbs_benign_traversal() {", with = "    /// **Falsification**: drop the `?` from `parts.pop()?` and this fails.\n    #[test]\n    fn normalize_rejects_escapes_and_absorbs_benign_traversal() {" }
+
+# ── trace:check (#276, #277) ─────────────────────────────────────────────────
+
+[[fault]]
+id = "trace-cli9-gherkin"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: CLI-9 has no gherkin layer"
+transform = { file = "microvms-cli/tests/features/closed_output.feature", replace = "@CLI-9 @live", with = "@live" }
+
+[[fault]]
+id = "trace-rust-cfg-any"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: ARCH-8 has no test layer"
+patch = "guards/faults/trace-rust-cfg-any.patch"
+
+[[fault]]
+id = "trace-node-regex-in-body"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: docs/TRACEABILITY.md is stale"
+patch = "guards/faults/trace-node-regex-in-body.patch"
+
+[[fault]]
+id = "trace-python-parametrize"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: docs/TRACEABILITY.md is stale"
+patch = "guards/faults/trace-python-parametrize.patch"
+
+# #276's H10: with the literal key off every title and docstring, a Node `test.todo` and a
+# Python test under `@pytest.mark.skip` still spell IMAGE-5. Neither runs, so neither counts.
+[[fault]]
+id = "trace-never-runs"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: IMAGE-5 has no test layer"
+patch = "guards/faults/trace-never-runs.patch"
+
+[[fault]]
+id = "trace-fuzz-file-test-doc"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: docs/TRACEABILITY.md is stale"
+transform = { file = "microvms-cli/src/closed_output_fuzz.rs", replace = "/// CLI-7, CLI-8, CLI-9: the CLI's", with = "// CLI-7, CLI-8, CLI-9: the CLI's" }
+
+[[fault]]
+id = "trace-binding-floor"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "BINDING_TESTS entry ('microvms-js/__tests__', '*.mjs') yields no file"
+transform = { file = "scripts/check-trace.py", replace = "    (\"microvms-js/__test__\", \"*.mjs\"),\n", with = "    (\"microvms-js/__tests__\", \"*.mjs\"),\n" }
+
+[[fault]]
+id = "trace-layer-floor"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "the live collector found no requirement key"
+transform = { file = "scripts/check-trace.py", replace = "results\\.(?:check|eq|absent)\\(", with = "results\\.(?:never)\\(" }
+
+[[fault]]
+id = "trace-sentinel"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "the sentinel CLI-7 is not in TRACED"
+transform = { file = "scripts/check-trace.py", replace = "    \"CLI-7\": \"#216\",\n", with = "" }
+
+[[fault]]
+id = "trace-keyless-shrinks"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "drop it from KEYLESS"
+transform = { file = "microvms-edges/tests/release_bundle.rs", replace = "#[test]\nfn the_release_bundle_verifies_under_the_embedded_trusted_root() {", with = "/// CLI-7\n#[test]\nfn the_release_bundle_verifies_under_the_embedded_trusted_root() {" }
+
+# The unit suite's own breaks, one per rule branch #276 added (its report's B rows).
+[[fault]]
+id = "trace-unit-js-member-callee"
+guard = "test_check_trace.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_trace.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_node_assertion_that_calls_a_test_method_does_not_count ("
+transform = { file = "scripts/check-trace.py", replace = "_JS_CALLEE = r\"^(?:test|it|describe|suite)(?:\\.only)?$\"", with = "_JS_CALLEE = r\"^(?:[A-Za-z_$][\\w$]*\\.)*(?:test|it|describe|suite)(?:\\.only)?$\"" }
+
+[[fault]]
+id = "trace-unit-js-skip-todo"
+guard = "test_check_trace.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_trace.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_node_test_that_never_runs_does_not_count ("
+transform = { file = "scripts/check-trace.py", replace = "                {\"not\": _JS_OFF},\n                {\"not\": {\"inside\": {**_JS_OFF, \"stopBy\": \"end\"}}},\n", with = "" }
+
+[[fault]]
+id = "trace-unit-rust-cfg-off"
+guard = "test_check_trace.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_trace.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_rust_test_that_never_runs_does_not_count ("
+transform = { file = "scripts/check-trace.py", replace = "_OFF = [_in_run({\"regex\": r\"^#\\[\\s*cfg\\s*\\(\", \"not\": {\"regex\": _PLATFORM_CFG}})]", with = "_OFF = []" }
+
+[[fault]]
+id = "trace-unit-rust-ignored"
+guard = "test_check_trace.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_trace.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_rust_test_that_never_runs_does_not_count ("
+transform = { file = "scripts/check-trace.py", replace = "_TEST_FN = {\"all\": [_runs(*_OFF, *_IGNORED)", with = "_TEST_FN = {\"all\": [_runs(*_OFF)" }
+
+[[fault]]
+id = "trace-unit-python-decorators"
+guard = "test_check_trace.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_trace.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_python_literal_in_a_decorator_does_not_count ("
+transform = { file = "scripts/check-trace.py", replace = "            if isinstance(decorator, ast.Call) and _marker(decorator, \"req\"):\n                for argument in decorator.args:\n                    if isinstance(argument, ast.Constant) and isinstance(\n                        argument.value, str\n                    ):\n                        keys |= set(patterns.key.findall(argument.value))\n", with = "            keys |= set(patterns.key.findall(ast.unparse(decorator)))\n" }
+
+[[fault]]
+id = "trace-unit-harness-as-test"
+guard = "test_check_trace.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_trace.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_harness_does_not_also_count_for_the_test_layer ("
+transform = { file = "scripts/check-trace.py", replace = "_TEST_FN = {\"all\": [_runs(*_OFF, *_IGNORED), {\"not\": _CALLS_BOLERO}]}", with = "_TEST_FN = {\"all\": [_runs(*_OFF, *_IGNORED)]}" }
+
+[[fault]]
+id = "trace-unit-bolero-spelling"
+guard = "test_check_trace.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_trace.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_spelling_of_the_bolero_call_is_a_harness ("
+transform = { file = "scripts/check-trace.py", replace = "r\"^(?:(?:::\\s*)?bolero\\s*::\\s*)?check$\"", with = "r\"^bolero\\s*::\\s*check$\"" }
+
+# ── the bindings, rebuilt before each run (CI's bindings job) ────────────────
+
+[[fault]]
+id = "py-unpriced-usd"
+guard = "microvms-py/tests/test_smoke.py::test_an_unpriced_line_omits_the_usd_key_entirely"
+run = [
+  ["uvx", "maturin@1.14", "develop", "-q", "-m", "microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "microvms-py/tests/test_smoke.py::test_an_unpriced_line_omits_the_usd_key_entirely"],
+]
+expect = "test-failed"
+suite = "bindings"
+note = "microvms-py/tests/test_smoke.py::test_an_unpriced_line_omits_the_usd_key_entirely"
+transform = { file = "microvms-py/src/cost.rs", replace = "        (None, Some(reason)) => amount.set_item(\"reason\", reason)?,\n", with = "        (None, Some(reason)) => {\n            amount.set_item(\"usd\", py.None())?;\n            amount.set_item(\"reason\", reason)?\n        }\n" }
+
+[[fault]]
+id = "py-stub-stale"
+guard = "scripts/generate-py-stubs.py --check"
+run = ["./scripts/generate-py-stubs.py", "--check"]
+expect = "exit-nonzero"
+suite = "bindings"
+message = "microvms-py/microvms.pyi is stale"
+transform = { file = "microvms-py/src/keepalive.rs", replace = "/// What a finished keepalive did.\n", with = "/// What a finished keepalive reported.\n" }
+
+[[fault]]
+id = "js-backpressure"
+guard = "a stream survives more events than the channel can hold"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "microvms-js/__test__/exec.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+note = "microvms-js/__test__/exec.mjs::a stream survives more events than the channel can hold"
+transform = { file = "microvms-js/src/exec.rs", replace = "match sender.send(Ok(event)).await {", with = "match sender.try_send(Ok(event)) {" }

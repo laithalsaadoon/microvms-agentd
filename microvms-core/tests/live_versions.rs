@@ -317,7 +317,7 @@ async fn the_managed_base_answers_its_versions_and_a_bare_name_is_refused_locall
 /// is refused and creates nothing. That asymmetry is not a flaw in the test, it *is* the
 /// measurement — one VM's worth of seconds is what the whole feature costs to verify.
 ///
-/// # Falsification
+/// # **Falsification**
 ///
 /// Run 2026-08-16. With the version INACTIVE, `RunMicrovm` answers **`ResourceNotFoundException:
 /// No active version found for MicroVM image <arn> and version 1.0`**; with it ACTIVE the same
