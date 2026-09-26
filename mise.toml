@@ -446,7 +446,36 @@ depends = [
   "background:check",
   "trace:check",
   "ratchet:check",
+  "guards:list",
 ]
+
+[tasks."guards:list"]
+description = "Every seeded fault in guards/faults.toml still applies, and every Falsification note has an entry or is listed. No builds"
+# The cheap half of #274, and the half that runs on every push: it reads the registry, checks
+# each transform anchor and patch against the tree, and holds the Falsification notes in the
+# tests to guards/faults.toml or guards/unregistered.txt, which only shrinks from the merge
+# base with origin/main (CI passes the PR's base, as for the ratchet). The script's docstring
+# has the rules. ast-grep from `[tools]` reads the Rust and JS tests, stdlib `ast` the Python
+# ones, and the base is a local ref, so it's offline.
+#
+# The unit tests run first, for `trace:check`'s reason: they build throwaway repos with a fake
+# runner and drive every verdict through the real script, `fire` included.
+run = [
+  "uv run python -m unittest discover -s scripts -p 'test_check_guards_fire.py'",
+  "./scripts/check-guards-fire.py list",
+]
+
+[tasks."guards:fire"]
+description = "Seed each registered fault in a scratch worktree and require its guard to catch it"
+# Not in `check`: every entry is one more build with its fault in, and the pre-push hook runs
+# `check` on every push. CI's `guards` job runs the rust and script suites, and the bindings job
+# runs `--suite bindings --venv .venv-bindings` after its own builds. Extra arguments pass
+# through: `mise run guards:fire -- --only agentd-fs-pop`. Bindings entries are skipped without
+# `--venv`, because `maturin develop` installs into whatever environment is active. It builds
+# into target/guards-fire, not target/, so a later narrow cargo run never picks up a scratch
+# build (the script's docstring has the two ways that went wrong); that's a second build's
+# worth of disk.
+run = "./scripts/check-guards-fire.py fire"
 
 [tasks."ratchet:check"]
 description = "Fail on new layering drift, and on a fix ratchet/drift.json doesn't record yet"

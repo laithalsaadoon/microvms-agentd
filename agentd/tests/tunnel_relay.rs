@@ -291,7 +291,7 @@ async fn port_zero_closes_with_the_bad_port_code() {
 /// would let the workload inside the VM open connections through the daemon's identity —
 /// which is the confusion `docs/TRUST.md` exists to prevent.
 ///
-/// **Falsification:** move `/v1/tcp` from `Auth::Bearer` to `Auth::Open` in `surface_docs`
+/// **Falsification**: move `/v1/tcp` from `Auth::Bearer` to `Auth::Open` in `surface_docs`
 /// and this handshake succeeds.
 #[tokio::test]
 async fn the_relay_refuses_an_unauthenticated_upgrade() {

@@ -327,7 +327,7 @@ async fn the_handshake_offers_the_platform_values_and_the_agent_token() {
 /// proxy's refusal is close code 1006 with no reason, indistinguishable from a dead server.
 /// That ambiguity is exactly why this needs a test rather than a comment.
 ///
-/// **Falsification:** change `auth.subprotocols(auth.port())` back to
+/// **Falsification**: change `auth.subprotocols(auth.port())` back to
 /// `auth.subprotocols(guest_port)` in `session::tunnel` and the scope assertion below fails.
 #[tokio::test]
 async fn the_token_is_scoped_to_the_daemon_port_not_the_guest_port() {

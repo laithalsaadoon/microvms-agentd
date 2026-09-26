@@ -842,11 +842,11 @@ mod tests {
         );
     }
 
+    /// **Falsification**: drop the `forwards_request_header` filter in `serve_connection` and
+    /// the forged value arrives beside the minted one, which is a request whose credential
+    /// the caller chose.
     #[tokio::test]
     async fn the_caller_cannot_smuggle_its_own_proxy_headers_upstream() {
-        // Falsification: drop the `forwards_request_header` filter in `serve_connection` and
-        // the forged value arrives beside the minted one, which is a request whose credential
-        // the caller chose.
         let (endpoint, upstream_saw) =
             upstream("HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok").await;
         let (auth, _minter) = auth_pair();
