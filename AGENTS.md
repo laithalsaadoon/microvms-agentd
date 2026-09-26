@@ -40,20 +40,31 @@ routes are generated from a schema.
 
 ## Architecture
 
-Behavior lives once, in Rust, at or below `microvms-core`:
+Behavior lives once, in Rust, at or below `microvms-core`. The layers, lowest
+first:
 
+- `microvms-protocol`: the wire types the client shares with the daemon
+  (ARCH-2). The daemon, `agentd`, depends on protocol and never on the client.
 - `microvms-domain`: rules and values. It performs no network, filesystem,
   subprocess, environment, clock or entropy access (ARCH-6): its `clippy.toml`
   refuses those std calls and its dependencies' clock and entropy calls under a
   crate-root `forbid`, and its dependency set in `arch/placement.toml` and each
-  dependency's features are asserted exactly. A rule that needs one of those inputs takes it as a
-  parameter, the way `Region::from_env` takes a lookup.
-- `microvms-core`: use cases, and every call that touches the network, AWS,
-  files, a subprocess, the clock or entropy. It re-exports the domain at the
-  paths core always had (ARCH-1), and `microvms_core::prelude` holds the
-  methods the domain's types gave up because they read the clock or the random
-  pool. `microvms-protocol` holds the wire types core and the domain share with
-  the daemon. The daemon depends on protocol, never on core.
+  dependency's features are asserted exactly. A rule that needs one of those
+  inputs takes it as a parameter, the way `Region::from_env` takes a lookup.
+- `microvms-app`: use cases (the control-plane client, `Sandbox`, `Session`,
+  `ensure_image`, the agent recipes), written only against ports it declares:
+  `Transport`, `BuildServices`, `HttpBackend`, `TokenMinter`, `NameStore`,
+  `Clock`, `Entropy` and `Adapters`. It depends on no crate or tokio feature that
+  does network, AWS, filesystem, subprocess or entropy I/O (ARCH-7), and its
+  `clippy.toml` refuses the std and tokio I/O items under a crate-root `forbid`.
+  The shared test doubles are its `testing` module, behind `test-support`.
+- `microvms-edges`: the production port implementations: SigV4 over reqwest,
+  the sockets, the name registry on disk, the daemon fetch, tokio's clock and
+  the OS random pool. It's the one library crate the I/O crates belong in.
+- `microvms-core`: the composition root (ARCH-8). It wires the edges into the
+  app, keeps the 0.10 constructors in `microvms_core::prelude`, and re-exports
+  every layer at the paths core always had (ARCH-1). The CLI and the bindings
+  depend on it and on nothing below it but protocol.
 - `microvms-cli`, `microvms-py`, `microvms-js`: parse input, convert types,
   bridge to the host runtime, render output. A default, retry, validation rule,
   wire call, file format or subprocess here belongs in a lower layer.
@@ -61,10 +72,8 @@ Behavior lives once, in Rust, at or below `microvms-core`:
 That's the rule, not a description of today's tree. The CLI still owns file
 formats and file I/O, the run ledger and the sync manifest among them. The
 ratchet doesn't collect that drift yet (#273), and #260 moves directory sync
-into core.
-
-Splitting the rest of core into `microvms-app` and `microvms-edges` is planned
-in #283, and this list will name each layer then.
+into core. The daemon fetch still runs `gh` and `curl` in the edges until #284
+fetches and verifies it in Rust.
 
 If an adapter needs something private to a lower crate, make it public there or
 move the caller down. Never copy it.
@@ -78,10 +87,13 @@ between the workspace's crates are checked by
 dependencies (`arch/placement.toml`) are checked by the ratchet, and
 `dependency_direction.rs` asserts them exactly for each adapter the ratchet
 holds no placement drift for (the CLI joins when #260 clears its entries). The
-domain's set is there too, asserted exactly, and it never carries drift.
-Forbidden calls are refused by each adapter's `clippy.toml`, and
-`scripts/test_ratchet.py` lists every site that turns those lints off. Semgrep
-thinness rules (#273) and a surface parity check (#271) are planned.
+domain's, the app's and core's sets are there too, asserted exactly, and they
+never carry drift. The ratchet's port-impl collector reads the app and core as
+well as the adapters, so a port implemented anywhere but the edges is drift or
+a recorded decision. Forbidden calls are refused by each adapter's
+`clippy.toml`, and `scripts/test_ratchet.py` lists every site that turns those
+lints off. Semgrep thinness rules (#273) and a surface parity check (#271) are
+planned.
 
 ## Maintenance rules
 

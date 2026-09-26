@@ -28,6 +28,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use microvms_core::prelude::*;
 use microvms_core::sandbox::Sandbox as CoreSandbox;
 use microvms_core::session::{
     CompletionOptions, CompletionPlan, DEFAULT_CLIENT_GRACE, OutputFlow, OutputSink,
@@ -433,7 +434,7 @@ impl SpawnOptions {
 
 /// Where a session lives, which decides how it is reached. See the module docs.
 pub(crate) enum Held {
-    /// A session this object owns, from [`Session::direct`].
+    /// A session this object owns, from `Session::direct`.
     Owned(CoreSession),
     /// A session inside a sandbox, reached under the sandbox's lock.
     InSandbox(Arc<Mutex<CoreSandbox>>),

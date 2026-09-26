@@ -12,7 +12,7 @@
 // Two things are deliberately *not* proven here and are stated rather than implied:
 //
 // * **The daemon's framing.** `support/sse.mjs` is this suite's transcription of what
-//   `microvms-core/src/session/sse.rs` parses. If the daemon changed its frames these tests
+//   `microvms-app/src/session/sse.rs` parses. If the daemon changed its frames these tests
 //   would stay green and the conformance suite would go red. Same boundary `exec.mjs` states.
 // * **A real suspend/resume.** The cut modelled below is a response body that ends without an
 //   `exit` frame, which is exactly the condition the core's reconnect keys on — but a genuine

@@ -10,128 +10,49 @@ readme = "README.md"
 keywords = ["microvms", "lambda", "aws", "sandbox", "microvm"]
 categories = ["api-bindings", "virtualization"]
 
-# Dependencies are welcome here: a maintained, memory-safe crate beats hand-rolled
-# code, and nothing about this manifest is frozen. (An earlier phase pinned this set
-# up front so four parallel lanes could merge without manifest conflicts; that
-# constraint ended with the lanes. Comments elsewhere that cite "the frozen set" or
-# "T-W2-2 froze" describe that retired process, not a live rule.)
-#
-# Versions are checked with `cargo info` against the registry at the time of adding.
+# The composition root (ARCH-8): the crates below, and nothing else. `arch/placement.toml`
+# records this set, and `microvms-cli/tests/dependency_direction.rs` fails on a crate added
+# here. A dependency that does work belongs in the crate that does it: a rule in
+# `microvms-domain`, a use case in `microvms-app`, an I/O implementation in `microvms-edges`.
 [dependencies]
-# The wire contract, shared with the daemon rather than mirrored (ARCH-2). This is
-# not optional: the
-# alternative is a client that redefines `Phase`, `Outcome`, and the SSE event
-# payloads locally, which is precisely the drift the protocol crate was extracted to
-# make impossible. A field renamed in `protocol/` must break this crate's build.
+# The wire contract, shared with the daemon rather than mirrored (ARCH-2), and re-exported so
+# a consumer names wire types through this crate.
 protocol = { package = "microvms-protocol", version = "0.10.0", path = "../protocol" }
-# The rules and values, which do no I/O (ARCH-6). This crate re-exports every item at its
-# old `microvms_core::` path and supplies the clock, entropy and file reads they leave out
-# through `prelude` (ARCH-1).
+# The rules and values, which do no I/O (ARCH-6).
 microvms-domain = { version = "0.10.0", path = "../microvms-domain" }
-# The control plane's rest-json bodies and the session's wire payloads.
+# The use cases, written against ports (ARCH-7).
+microvms-app = { version = "0.10.0", path = "../microvms-app" }
+# The production port implementations, which `prelude` wires into the use cases.
+microvms-edges = { version = "0.10.0", path = "../microvms-edges" }
+
+[features]
+# The shared test doubles in `microvms_core::testing`, for a dependent's `[dev-dependencies]`
+# only. Resolver 3 keeps a dev-only feature out of a normal build, so nothing shipped carries
+# them.
+test-support = ["microvms-app/test-support"]
+
+[dev-dependencies]
+# The shared test doubles, named as `microvms_app::testing` in this crate's own tests. Not a
+# dependency on this crate with `test-support`: `cargo publish` resolves a versioned
+# self-dependency against the registry, where the feature doesn't exist yet, and
+# `scripts/check-publishable.py` refuses one.
+microvms-app = { version = "0.10.0", path = "../microvms-app", features = ["test-support"] }
+# What the integration tests build their fixtures from: the daemon's wire payloads, the tunnel's
+# WebSocket and Noise handshake, a context's zip and hash, and the scratch directories' names.
+# Test-only, so outside the placement set, which covers what ships.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-
-# ── the control plane (T-W2-4) ──────────────────────────────────────────────
-# Hand-signed rather than a generated SDK: `lambda-microvms` has no aws-sdk-rust
-# crate, so the choice is between vendoring smithy codegen and signing 24
-# rest-json operations by hand. `default-https-client` stays ON: the credential
-# chain does its own HTTP (IMDS, SSO, STS) through smithy's client and panics at
-# load() without one — every ControlPlane::new in the wild hit that before this
-# feature returned. Two HTTP stacks (smithy for credentials, reqwest for the
-# service calls) is the price; both sit on rustls, so it is one TLS
-# implementation, and this crate runs on the developer host or harness — agentd
-# is what ships into the MicroVM image, not this.
-aws-config = { version = "1.10", default-features = false, features = [
-    "default-https-client",
-    "rt-tokio",
-    "credentials-process",
-    "sso",
-] }
-aws-credential-types = "1.3"
-# Default features are `sign-http` + `http1`, which is the http-1.x path:
-# `apply_to_request_http1x` mutates an `http::Request` that reqwest 0.13 consumes
-# through `TryFrom`. Anything else means converting between two http versions on
-# every call.
-aws-sigv4 = "1.5"
-# `rustls` rather than `default-tls`: the daemon ships to an aarch64 musl target
-# and a native-tls build there needs an OpenSSL the image does not carry. `json`
-# off deliberately — the control plane's rest-json bodies go through serde_json
-# directly so the error path can read a raw body, which is the only way to see an
-# AccessDeniedException whose message field is null (TRAP-6).
-reqwest = { version = "0.13", default-features = false, features = [
-    "rustls",
-    "http2",
-    "charset",
-    "stream",
-] }
-http = "1.5"
-# Retry with jitter for throttles and 5xx. aws-smithy-runtime has the same thing
-# behind its `client` feature, but taking it would mean taking the smithy client
-# that `default-features = false` above just declined.
-backon = { version = "1.6", features = ["tokio-sleep"] }
-# The image build takes a zip of the daemon binary plus a Dockerfile
-# (sandbox.py:523 `build_artifact`). Pinned to the 8.x line: 9.0 exists only as
-# `9.0.0-pre2`, and a pre-release in a shipping manifest is a version that can
-# change under you. Only `deflate` — the artifact is one binary and one text file,
-# so aes/bzip2/lzma/ppmd/xz/zstd are compressors this crate will never select and
-# C libraries it would otherwise have to build for the musl target.
-zip = { version = "8.6", default-features = false, features = ["deflate"] }
-# `build --reuse` keys an image name to a content hash of the artifact bytes, so an
-# unchanged binary+Dockerfile reuses its image and a changed one gets a fresh name —
-# which is the fix for the stale-snapshot-on-name-reuse hazard. sha2 is already in
-# the tree transitively through aws-sigv4; this makes the edge direct and versioned.
-sha2 = "0.11"
-
-# ── the in-VM session (T-W2-5) ──────────────────────────────────────────────
-# Same pin as the daemon carries. `time` for the poll and deadline paths, `sync`
-# for the proxy-token refresh, `io-util` for the SSE reader; no `rt-multi-thread`,
-# because a library does not choose the caller's runtime. `net` is the port
-# forwarder's listener (`session::forward`) — it lives here rather than in the CLI
-# because `microvms-cli/tests/thinness.rs` forbids an HTTP stack there, and a
-# forwarder is an HTTP server.
-tokio = { version = "1.53", features = [
-    "time",
-    "sync",
-    "io-util",
-    "macros",
-    "net",
-] }
 futures-util = "0.3"
-# The WebSocket client behind `session::tunnel`. Required rather than convenient: the
-# endpoint proxy takes a WebSocket's credential as `Sec-WebSocket-Protocol` values and has
-# no CONNECT method, so an upgrade replayed over the HTTPS path is answered 400 by the proxy
-# (measured 2026-08-29, docs/PLATFORM.md). Carrying TCP therefore needs a real handshake,
-# which reqwest's client cannot perform. `rustls-tls-webpki-roots` matches the one TLS
-# implementation already in the tree — a native-tls build would need an OpenSSL the guest
-# image does not carry.
+base64 = "0.23"
+const-hex = "1.19"
+sha2 = "0.11"
+getrandom = "0.4"
+zip = { version = "8.6", default-features = false, features = ["deflate"] }
 tokio-tungstenite = { version = "0.30", default-features = false, features = [
     "connect",
     "handshake",
     "rustls-tls-webpki-roots",
 ] }
-# Exec output and stdin are arbitrary bytes and a JSON string cannot hold
-# arbitrary bytes, so both sides of the wire carry base64. 0.23 to match agentd:
-# one version in the tree means the client and the daemon cannot disagree about
-# padding or alphabet.
-base64 = "0.23"
-# Hex rendering for tokens and the artifact content hash. Encode-only.
-const-hex = "1.19"
-# The kernel CSPRNG behind one call, for the agent token and idempotency nonces.
-# Replaces two hand-rolled /dev/urandom reads and their clock-mixing fallbacks —
-# getrandom's own failure story (it aborts only if the OS pool is truly unavailable,
-# which on Linux means the kernel is broken) is stronger than the fallback was.
-getrandom = "0.4"
-# RFC 3986 percent-encoding for query values and path segments. Replaces two
-# hand-rolled encoders; the AsciiSets keep their exact behavior (everything outside
-# the unreserved set is escaped, including `/` and `:` in path segments).
-percent-encoding = "2.3"
-# The initiator half of the tunnel identity proof (#70 layer 3): Noise KK against
-# the per-VM key the launch delivered, so `--verify-identity` proves the far end is
-# the VM this host launched without trusting the endpoint proxy. The same feature
-# selection as agentd's, for the same measured reason (see agentd/Cargo.toml): the
-# `std` feature force-enables `ring`, whose build script needs a musl cross C
-# compiler this repo's targets do not assume.
 snow = { version = "0.10", default-features = false, features = [
     "default-resolver",
     "use-curve25519",
@@ -140,10 +61,6 @@ snow = { version = "0.10", default-features = false, features = [
     "use-sha2",
     "use-getrandom",
 ] }
-[dev-dependencies]
-# The token guards are table-shaped, which is exactly where a hand-picked example set
-# passes over the gap it was written to find.
-proptest = "1.11"
 # Deterministic network simulation for the reconnect-at-cursor tests, mirroring
 # the daemon's dev-dependencies so both sides of the protocol are exercised under
 # the same simulated clock.
@@ -165,9 +82,18 @@ cucumber = { version = "0.23", features = ["output-junit"] }
 # `bolero::check!` runs as an ordinary `#[test]` on stable and as a coverage-guided target
 # under `cargo bolero test`.
 bolero = "0.13"
-# The same tokio with a runtime, for the Gherkin runners' `main`: the library itself does not
-# choose a runtime, so `rt` is a test-only feature here.
-tokio = { version = "1.53", features = ["rt", "macros"] }
+# The same tokio with a runtime, for the Gherkin runners' `main` and the README's
+# `#[tokio::main]` doctest: the library itself does not choose a runtime, so `rt` and
+# `rt-multi-thread` are test-only features here.
+tokio = { version = "1.53", features = [
+    "rt",
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "time",
+    "sync",
+    "io-util",
+] }
 # Temp state directories for the provisioning tests: random names, cleanup on drop.
 tempfile = "3"
 

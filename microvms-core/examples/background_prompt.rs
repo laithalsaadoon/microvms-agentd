@@ -6,6 +6,7 @@
 use std::time::Duration;
 
 use microvms_core::agents::{self, Agent, AgentPermissionMode, AgentSpec, PromptOptions};
+use microvms_core::prelude::*;
 use microvms_core::{Region, session::Session};
 
 #[tokio::main]

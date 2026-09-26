@@ -699,7 +699,7 @@ package with a native arm64 executable) took 13.0 s; every later run took 0.1 s.
 under 10 s, so the delay varies from launch to launch. Consistent with AWS's statement that a
 MicroVM's disk is paged in on demand after launch (grade: measured; the mechanism is
 inferred). Budget the first exec of any large executable accordingly: the agent version
-probe allows 60 s (`microvms-core/src/agents/mod.rs`, `VERSION_PROBE_TIMEOUT`).
+probe allows 60 s (`microvms-app/src/agents/mod.rs`, `VERSION_PROBE_TIMEOUT`).
 
 ## The daemon's own environment holds the image `ENV` plus four platform variables
 

@@ -39,6 +39,7 @@
 
 use std::sync::Arc;
 
+use microvms_core::prelude::*;
 use microvms_core::sandbox::Sandbox;
 use microvms_core::session::{
     CompletionOptions, CompletionPlan, DEFAULT_CLIENT_GRACE, OutputFlow, OutputSink, Session,

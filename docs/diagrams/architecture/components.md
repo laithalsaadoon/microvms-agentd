@@ -14,7 +14,7 @@ classDiagram
         }
     }
 
-    namespace microvms-core {
+    namespace microvms-app {
         class Sandbox {
             +build_image(request)
             +run(request)
@@ -86,24 +86,24 @@ classDiagram
 | Node or edge | Citations |
 | --- | --- |
 | `CoreSeam` | trait `microvms-cli/src/seam.rs:136`; methods `microvms-cli/src/seam.rs:138`, `:141`, `:148`, `:172`; `AwsSeam` impl `:179`, `:183`, `:201`, `:225` |
-| `Sandbox` | struct `microvms-core/src/sandbox.rs:582`; methods `:870`, `:1010`, `:1465`, `:1549`, `:1653` |
-| `ControlPlane` | struct `microvms-core/src/control/mod.rs:160`; methods `microvms-core/src/control/image.rs:157`, `microvms-core/src/control/microvm.rs:356`, `:435`, `:563`, `:581` |
-| `Session` | struct `microvms-core/src/session/mod.rs:184`; methods `:329`, `:342`, `:380`, `:408`, `:444` |
-| `ExecHandle` | struct `microvms-core/src/session/exec.rs:213`; methods `:228`, `:248`, `:285`, `:624`, `:654` |
+| `Sandbox` | struct `microvms-app/src/sandbox.rs:602`; methods `:884`, `:1026`, `:1445`, `:1529`, `:1633` |
+| `ControlPlane` | struct `microvms-app/src/control/mod.rs:130`; methods `microvms-app/src/control/image.rs:157`, `microvms-app/src/control/microvm.rs:356`, `:435`, `:563`, `:583` |
+| `Session` | struct `microvms-app/src/session/mod.rs:174`; methods `:270`, `:283`, `:321`, `:349`, `:385` |
+| `ExecHandle` | struct `microvms-app/src/session/exec.rs:213`; methods `:228`, `:248`, `:285`, `:627`, `:657` |
 | `Routes` | module of free functions, not a type: `agentd/src/routes.rs:36`, `:110`, `:371`, `:178`, `:314` |
 | `AppState` | struct `agentd/src/state.rs:110`; methods `:202`, `:245`, `:257`, `:176`, `:183` |
 | `Confined` | struct `agentd/src/fs.rs:297`; methods `:350`, `:416`, `:428`, `:448`, `:535` |
 | `CoreSeam --> ControlPlane` | `microvms-cli/src/seam.rs:138`, impl `:179` |
 | `CoreSeam --> Sandbox` | `microvms-cli/src/seam.rs:141`, impl `:183` |
 | `CoreSeam --> Session` | `microvms-cli/src/seam.rs:148`, impl `:201` |
-| `Sandbox --> ControlPlane` | `microvms-core/src/sandbox.rs:65-67`, `:872`, `:1095`, `:1484`, `:1572`, `:1676` |
-| `Sandbox --> Session` | `microvms-core/src/sandbox.rs:70`, `:806`, `:1010` |
-| `Session --> ExecHandle` | `microvms-core/src/session/mod.rs:380`, `:403` |
-| `Session ..> Routes` | `microvms-core/src/session/mod.rs:331`, `:382`; `microvms-core/src/session/files.rs:45`, `:52` |
-| `ExecHandle ..> Routes` | `microvms-core/src/session/exec.rs:233`, `:592`, `:659` |
+| `Sandbox --> ControlPlane` | `microvms-app/src/sandbox.rs:65-67`, `:886`, `:1114`, `:1464`, `:1552`, `:1656` |
+| `Sandbox --> Session` | `microvms-app/src/sandbox.rs:69`, `:820`, `:1026` |
+| `Session --> ExecHandle` | `microvms-app/src/session/mod.rs:321`, `:344` |
+| `Session ..> Routes` | `microvms-app/src/session/mod.rs:272`, `:323`; `microvms-app/src/session/files.rs:45`, `:52` |
+| `ExecHandle ..> Routes` | `microvms-app/src/session/exec.rs:233`, `:595`, `:662` |
 | `Routes --> AppState` | `agentd/src/routes.rs:36` |
 | `Routes --> Confined` | `agentd/src/routes.rs:132-135`, `agentd/src/fs.rs:1433`, `:1480`, `:631` |
-| `..>` dashed | the HTTP wire, not a crate dependency: the shared contract is the `protocol` crate, re-exported at `microvms-core/src/lib.rs:77` and `agentd/src/routes.rs:18-20`, and the permitted directions are asserted by `microvms-cli/tests/dependency_direction.rs` |
+| `..>` dashed | the HTTP wire, not a crate dependency: the shared contract is the `protocol` crate, re-exported at `microvms-core/src/lib.rs:100` and `agentd/src/routes.rs:18-20`, and the permitted directions are asserted by `microvms-cli/tests/dependency_direction.rs` |
 | `+` prefix | the class-diagram marker for a listed member, not a Rust visibility claim: `Confined` and its methods are crate-private (`agentd/src/fs.rs:297`, `:350`), as are `routes::run_hook` and `routes::health` (`agentd/src/routes.rs:178`, `:314`) |
 
 ## See also

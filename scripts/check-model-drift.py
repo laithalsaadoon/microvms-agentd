@@ -871,7 +871,7 @@ def check(src: Source, model: dict[str, Any]) -> Checker:
         )
 
     # The tokens this client mints against that ceiling are NOT checked here, and that
-    # is not a gap. `microvms-core/src/control/token.rs` asserts the property in-crate —
+    # is not a gap. `microvms-app/src/control/token.rs` asserts the property in-crate —
     # `the_worst_legal_scope_fits_the_hundred_twenty_eight_character_ceiling` mints
     # against the worst legal 64-character-image-name ARN in the longest-named region —
     # and it does it better, because it can also pin the arithmetic behind the cap. This

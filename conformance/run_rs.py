@@ -1535,7 +1535,7 @@ PACKAGE_REGISTRY = "https://pypi.org"
 #: reach check above is what earns the flip.
 CONNECTORLESS_POSTURE = "unsealed"
 #: The advisory deny's black hole, as `--deny-egress` sets it
-#: (`microvms-core/src/sandbox.rs`, `DENY_EGRESS_PROXY_URL`). Loopback port 1, privileged,
+#: (`microvms-app/src/sandbox.rs`, `DENY_EGRESS_PROXY_URL`). Loopback port 1, privileged,
 #: nothing serving it.
 DENY_EGRESS_PROXY_URL = "http://127.0.0.1:1"
 #: The one API family the conformance execution role may grant (`conformance/infra/main.tf`,
@@ -3369,7 +3369,7 @@ def drive_token_rotation(cli: Cli, launched: Envelope, results: Results) -> None
     The rotation is real, not simulated: each `Cli.call` is a separate process, so the
     start, the polls, and the ack below run under *different* proxy tokens by construction.
     What a 60-minute wait would add is only the proof that an **expired** token is refused,
-    which is the platform's property (`microvms-core/src/session/proxy.rs:63`), not the
+    which is the platform's property (`microvms-app/src/session/proxy.rs:63`), not the
     daemon's or this client's.
 
     The output produced *before* the reattach is the assertion that matters: bytes buffered

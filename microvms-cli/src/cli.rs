@@ -1554,7 +1554,7 @@ pub struct CpArgs {
     /// out.tar --tar` archives a tree, and `cp out.tar vm:/restored --tar` recreates it.
     ///
     /// The **local** side is a `.tar` **file**, and that asymmetry is a real limitation rather
-    /// than a choice: `microvms-core/src/session/files.rs:112` declines to add a tar library
+    /// than a choice: `microvms-app/src/session/files.rs:112` declines to add a tar library
     /// because Rust's standard library has no equivalent of Python tarfile's `data` filter,
     /// and "an extraction that looked safe and was not is worse than none". This binary
     /// declines for the same reason plus a stronger one — the daemon's extractor is currently

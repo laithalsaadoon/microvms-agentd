@@ -59,13 +59,19 @@ thinness guard pushed an upload into an `aws s3 cp` subprocess it couldn't see.
   a macro invocation such as `tokio::select!` or `vec![...]`. The shipping crates are the
   workspace's members minus the ones `Scope.non_shipping` names, so a crate added to the
   workspace is scanned from the commit that adds it, and moving a call into it isn't a fix.
-- port-impl: every impl in a driving adapter's `src/` of a trait that a crate below it declares
-  `pub`. "Below" is every workspace crate an adapter reaches through its dependencies, so a port
-  trait that moves from `microvms-core` into a crate core depends on is still a port.
+- port-impl: every impl of a port in the `src/` of a driving adapter, of the use cases
+  (`microvms-app`), or of the composition root (`microvms-core`). A port is a trait that a crate
+  below the adapters declares `pub`. "Below" is every workspace crate an adapter reaches through
+  its dependencies, so a port trait that moves between those crates is still a port. The
+  composition root's own public traits are the prelude's extension traits, not ports. Only
+  `microvms-edges`, where the production implementations belong, isn't read.
 
 The two Rust collectors are ast-grep rules under `ratchet/`, and test code is out of both: an
-item after `#[cfg(test)]`, a `#[test]` function, anything inside either, and whole files that
-mark themselves `#![cfg(test)]` or that a parent declares with `#[cfg(test)] mod x;`.
+item after `#[cfg(test)]`, `#[cfg(feature = "test-support")]` or
+`#[cfg(any(test, feature = "test-support"))]`, a `#[test]` function, anything inside any of
+them, and whole files that mark themselves with one of those `cfg`s or that a parent declares
+with one (`#[cfg(test)] mod x;`). The `test-support` feature is the shared test doubles, which a
+dependent turns on in its `[dev-dependencies]` only, so nothing behind it ships.
 
 What they can't see, none of which the tree does today:
 
@@ -74,8 +80,8 @@ What they can't see, none of which the tree does today:
 - `build.rs`. A build script runs on the machine that compiles the crate, not in anything that
   ships, so its subprocesses aren't layering drift.
 
-They over-report `#[cfg(any(test, ...))]` items, which aren't recognized as test code. That's
-visible in the key, not silent.
+They over-report any other `#[cfg(any(test, ...))]` form, which isn't recognized as test code.
+That's visible in the key, not silent.
 
 Each collector first runs against `ratchet/fixtures/sentinel/`, which must produce exactly the
 findings its `expected.json` lists. A collector that finds nothing there fails the check, so a
@@ -120,10 +126,17 @@ class Scope(NamedTuple):
     #: The allowed dependency sets, one table per crate.
     placement: Path
     #: The driving adapters, by package name. Each needs a set in `placement`, and the
-    #: port-impl collector reads only their code.
+    #: port-impl collector reads their code.
     adapters: tuple[str, ...]
     #: Workspace members that never ship, by package name. Every other member is scanned.
     non_shipping: frozenset[str] = frozenset()
+    #: Crates below the adapters whose code the port-impl collector reads too: the use
+    #: cases, which implement a port only where a decision says why.
+    composed: tuple[str, ...] = ()
+    #: The composition root, by package name, which the port-impl collector also reads: it
+    #: wires implementations in and may hold none itself (ARCH-8). Its own public traits are
+    #: the extension traits that keep old call syntax on the types below it, not ports.
+    composition_root: str | None = None
 
 
 REPO = Scope(
@@ -132,6 +145,10 @@ REPO = Scope(
     adapters=("microvms-cli", "microvms-py", "microvms-js"),
     # `model/` is a proof harness: nothing depends on it and it's never published.
     non_shipping=frozenset({"agentd-model"}),
+    # `microvms-edges` is the one crate the collector doesn't read below the adapters: it's
+    # where port implementations belong.
+    composed=("microvms-app",),
+    composition_root="microvms-core",
 )
 
 SENTINEL_ROOT = ROOT / "ratchet" / "fixtures" / "sentinel"
@@ -139,6 +156,8 @@ SENTINEL = Scope(
     root=SENTINEL_ROOT,
     placement=SENTINEL_ROOT / "placement.toml",
     adapters=("adapter",),
+    composed=("kernel",),
+    composition_root="root",
 )
 
 COLLECTED = ("placement", "subprocess", "port-impl")
@@ -396,7 +415,7 @@ def grown_sets(sets: dict, base_sets: dict | None, base_label: str) -> list[str]
                 failures.append(
                     f"set grew: {PLACEMENT} adds {dependency} to [{crate}] {kind}, which "
                     f"{base_label}'s copy doesn't allow. A set can only shrink: move the "
-                    "work below the adapter, or add a decision for "
+                    "work to the layer whose job it is, or add a decision for "
                     f"`{crate} -> {dependency}` with its reason."
                 )
     return failures
@@ -417,8 +436,9 @@ def compare(
         for key in sorted(found.keys() | listed.keys()):
             if found.get(key, 0) > listed.get(key, 0):
                 failures.append(
-                    f"new drift: {describe(category, key)}. Move it below the adapter, "
-                    "or add a decision with its reason."
+                    f"new drift: {describe(category, key)}. Move the work to the layer "
+                    "whose job it is (I/O belongs in microvms-edges, behind a port in "
+                    "microvms-app), or add a decision with its reason."
                 )
             elif listed.get(key, 0) > found.get(key, 0):
                 failures.append(
@@ -582,8 +602,10 @@ class Crates(NamedTuple):
 
     #: Every member except `Scope.non_shipping`: the subprocess collector reads them all.
     shipping: dict[str, str]
-    #: The driving adapters: the port-impl collector reads only these.
+    #: The driving adapters.
     adapters: dict[str, str]
+    #: What the port-impl collector reads: the adapters, the composed crates and the root.
+    readers: dict[str, str]
     #: The shipping crates the adapters reach through their dependencies: the ports live here.
     below: dict[str, str]
 
@@ -619,14 +641,20 @@ def crates(scope: Scope, metadata: dict, sets: dict) -> Crates:
             if dependency["kind"] != "dev" and name in members and name not in reached:
                 reached.add(name)
                 todo.append(name)
+    below = {
+        n: d for n, d in shipping.items() if n in reached and n not in scope.adapters
+    }
+    inner = [*scope.composed, *filter(None, [scope.composition_root])]
+    for crate in inner:
+        if crate not in below:
+            raise SystemExit(
+                f"{crate} is read for port impls but isn't a shipping crate below the adapters"
+            )
     return Crates(
         shipping=shipping,
         adapters={n: shipping[n] for n in scope.adapters},
-        below={
-            n: d
-            for n, d in shipping.items()
-            if n in reached and n not in scope.adapters
-        },
+        readers={n: shipping[n] for n in [*scope.adapters, *inner]},
+        below=below,
     )
 
 
@@ -763,10 +791,11 @@ def rust(scope: Scope, found: Crates, require_ports: bool) -> Counter:
         return any(match["file"].startswith(f"{d}/src/") for d in crate_dirs)
 
     matches = [m for m in matches if shipped(m)]
+    declaring = [d for n, d in found.below.items() if n != scope.composition_root]
     ports = {
         variables(m)["NAME"]
         for m in matches
-        if m["ruleId"] == "port-trait" and under(m, found.below.values())
+        if m["ruleId"] == "port-trait" and under(m, declaring)
     }
     # The sentinel proves the rule matches; this proves the tree still has ports to match, so
     # moving them somewhere the collector doesn't read can't empty the category.
@@ -785,7 +814,7 @@ def rust(scope: Scope, found: Crates, require_ports: bool) -> Counter:
         elif match["ruleId"] == "subprocess-in-macro":
             for function, arguments in macro_calls(match["text"]):
                 findings[subprocess_key(match["file"], function, arguments)] += 1
-        elif match["ruleId"] == "port-impl" and under(match, found.adapters.values()):
+        elif match["ruleId"] == "port-impl" and under(match, found.readers.values()):
             trait = squash(trait_name(mv["TRAIT"]))
             name = re.match(r"[A-Za-z_][A-Za-z0-9_]*", trait)
             if name is not None and name.group() in ports:

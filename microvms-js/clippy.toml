@@ -16,8 +16,8 @@
 # enables it.
 
 disallowed-types = [
-  { path = "std::process::Command", reason = "a subprocess belongs below the adapter: put it behind a port in microvms-core" },
-  { path = "tokio::process::Command", reason = "a subprocess belongs below the adapter: put it behind a port in microvms-core" },
+  { path = "std::process::Command", reason = "a subprocess belongs below the adapter: behind a port in microvms-app, implemented in microvms-edges" },
+  { path = "tokio::process::Command", reason = "a subprocess belongs below the adapter: behind a port in microvms-app, implemented in microvms-edges" },
 ]
 
 disallowed-methods = [

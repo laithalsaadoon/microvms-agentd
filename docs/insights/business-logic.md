@@ -83,24 +83,24 @@ what a caller cannot write rather than what they are told.
 
 ### Control-plane request shapes
 
-The `require_*` functions in `microvms-core/src/control/mod.rs`, each guarding a member the
+The `require_*` functions in `microvms-app/src/control/mod.rs`, each guarding a member the
 pinned service model constrains and the SDK does not check.
 
 | Rule | Domain | Citation | Failure mode |
 | --- | --- | --- | --- |
-| `maximumDurationInSeconds` outside `1..=28800` is refused | Launch | `microvms-core/src/control/mod.rs:477-494`, constant at `microvms-domain/src/constants.rs:263` | `ERR_INVALID_ARG` saying a longer session needs a second VM, not a larger number. 28800 is eight hours and the hard ceiling on any one VM's life |
-| `idlePolicy.maxIdleDurationSeconds` under 60 is refused | Launch | `microvms-core/src/control/mod.rs:748-778`, constant at `microvms-domain/src/constants.rs:241-258` | `ERR_INVALID_ARG`. The model states no maximum and the client adds none; the bound that ends a VM's life is `maximumDurationInSeconds` |
-| A `Version` value that is empty, over 2048 characters, or carries whitespace anywhere is refused | Image build, Launch | `microvms-core/src/control/mod.rs:496-542`, constants at `microvms-domain/src/constants.rs:121`, `:128` | Three separate `ERR_INVALID_ARG` messages. The pattern is `[^\s]+`, so a version pasted with a trailing newline satisfies "non-empty" and fails; the message names the character it found |
-| A `NonBlankString` member (`codeArtifact.uri`, `baseImageArn`, `nameFilter`, `imageVersion`, `buildId`) that is empty, over 2048 characters, or carries whitespace is refused | Image build | `microvms-core/src/control/mod.rs:544-596`, constants at `microvms-domain/src/constants.rs:141`, `:145` | `ERR_INVALID_ARG` naming the character. A blank `nameFilter` rides in the query string, where it either 400s or filters differently from what was meant |
-| An identifier that is empty or over 256 characters is refused | Every operation | `microvms-core/src/control/mod.rs:598-651`, constants at `microvms-domain/src/constants.rs:174`, `:183` | `ERR_INVALID_ARG`. An empty identifier is the case that pays for this guard: where the member is a URI parameter, an empty one collapses `/microvms/<id>` onto the listing and a `DELETE` on a collapsed path is worse |
-| A `RoleArn` under 20 characters, over 2048, or off-pattern is refused | Image build, Launch | `microvms-core/src/control/mod.rs:653-708`, constants at `microvms-domain/src/constants.rs:209`, `:212`, `:225` | Three messages. The short case says a value that short is almost always a role *name*; the pattern case names the twelve account digits |
-| A port of 0 is refused; there is no ceiling branch | Image build, Session | `microvms-core/src/control/mod.rs:710-746`, constants at `microvms-domain/src/constants.rs:232`, `:239` | `ERR_INVALID_ARG`. Zero means "let the kernel choose" to a listener and is not a port the platform can forward to. `PortNumber.max` equals `u16::MAX`, so a ceiling branch would be unreachable — pinned instead by `microvms-domain/src/constants.rs:1240` |
-| A tag key that is empty, over 128 characters, or off-pattern is refused; a tag value over 256 or off-pattern is refused | Image build | `microvms-core/src/control/mod.rs:780-846`, constants at `microvms-domain/src/constants.rs:186`, `:189`, `:206` | `ERR_INVALID_ARG` naming the offending key. An empty tag *value* is legal and an empty key is not, and the two ceilings differ by 2x |
-| An image name that is empty, over 64 characters, or outside `[a-zA-Z0-9-_]+` is refused | Image build | `microvms-core/src/control/mod.rs:848-878`, constants at `microvms-domain/src/constants.rs:104`, `:112` | Three messages, because the pattern message ("no dots, no slashes") misleads for a 70-character name containing neither |
-| More than 10 network connectors on a launch is refused | Networking | `microvms-core/src/control/microvm.rs:391-399`, constant at `microvms-domain/src/constants.rs:290` | `ERR_INVALID_ARG`. The image-level egress list caps at **1**, not 10 (`microvms-domain/src/constants.rs:292-304`), pinned by `microvms-domain/src/constants.rs:897` |
+| `maximumDurationInSeconds` outside `1..=28800` is refused | Launch | `microvms-app/src/control/mod.rs:449-466`, constant at `microvms-domain/src/constants.rs:263` | `ERR_INVALID_ARG` saying a longer session needs a second VM, not a larger number. 28800 is eight hours and the hard ceiling on any one VM's life |
+| `idlePolicy.maxIdleDurationSeconds` under 60 is refused | Launch | `microvms-app/src/control/mod.rs:720-750`, constant at `microvms-domain/src/constants.rs:241-258` | `ERR_INVALID_ARG`. The model states no maximum and the client adds none; the bound that ends a VM's life is `maximumDurationInSeconds` |
+| A `Version` value that is empty, over 2048 characters, or carries whitespace anywhere is refused | Image build, Launch | `microvms-app/src/control/mod.rs:468-514`, constants at `microvms-domain/src/constants.rs:121`, `:128` | Three separate `ERR_INVALID_ARG` messages. The pattern is `[^\s]+`, so a version pasted with a trailing newline satisfies "non-empty" and fails; the message names the character it found |
+| A `NonBlankString` member (`codeArtifact.uri`, `baseImageArn`, `nameFilter`, `imageVersion`, `buildId`) that is empty, over 2048 characters, or carries whitespace is refused | Image build | `microvms-app/src/control/mod.rs:516-568`, constants at `microvms-domain/src/constants.rs:141`, `:145` | `ERR_INVALID_ARG` naming the character. A blank `nameFilter` rides in the query string, where it either 400s or filters differently from what was meant |
+| An identifier that is empty or over 256 characters is refused | Every operation | `microvms-app/src/control/mod.rs:570-623`, constants at `microvms-domain/src/constants.rs:174`, `:183` | `ERR_INVALID_ARG`. An empty identifier is the case that pays for this guard: where the member is a URI parameter, an empty one collapses `/microvms/<id>` onto the listing and a `DELETE` on a collapsed path is worse |
+| A `RoleArn` under 20 characters, over 2048, or off-pattern is refused | Image build, Launch | `microvms-app/src/control/mod.rs:625-680`, constants at `microvms-domain/src/constants.rs:209`, `:212`, `:225` | Three messages. The short case says a value that short is almost always a role *name*; the pattern case names the twelve account digits |
+| A port of 0 is refused; there is no ceiling branch | Image build, Session | `microvms-app/src/control/mod.rs:682-718`, constants at `microvms-domain/src/constants.rs:232`, `:239` | `ERR_INVALID_ARG`. Zero means "let the kernel choose" to a listener and is not a port the platform can forward to. `PortNumber.max` equals `u16::MAX`, so a ceiling branch would be unreachable — pinned instead by `microvms-domain/src/constants.rs:1240` |
+| A tag key that is empty, over 128 characters, or off-pattern is refused; a tag value over 256 or off-pattern is refused | Image build | `microvms-app/src/control/mod.rs:752-818`, constants at `microvms-domain/src/constants.rs:186`, `:189`, `:206` | `ERR_INVALID_ARG` naming the offending key. An empty tag *value* is legal and an empty key is not, and the two ceilings differ by 2x |
+| An image name that is empty, over 64 characters, or outside `[a-zA-Z0-9-_]+` is refused | Image build | `microvms-app/src/control/mod.rs:820-850`, constants at `microvms-domain/src/constants.rs:104`, `:112` | Three messages, because the pattern message ("no dots, no slashes") misleads for a 70-character name containing neither |
+| More than 10 network connectors on a launch is refused | Networking | `microvms-app/src/control/microvm.rs:391-399`, constant at `microvms-domain/src/constants.rs:290` | `ERR_INVALID_ARG`. The image-level egress list caps at **1**, not 10 (`microvms-domain/src/constants.rs:292-304`), pinned by `microvms-domain/src/constants.rs:897` |
 
 `ControlPlane::run_microvm` runs the identifier, duration, idle-duration, version, and role-ARN
-guards before it builds a wire body (`microvms-core/src/control/microvm.rs:356-374`).
+guards before it builds a wire body (`microvms-app/src/control/microvm.rs:356-374`).
 
 ### Image build and Dockerfile agreement
 
@@ -110,43 +110,43 @@ that it started, and an image that still lands in `CREATE_FAILED` naming nothing
 
 | Rule | Domain | Citation | Failure mode |
 | --- | --- | --- | --- |
-| `inherit_workdir` against a base that declares no `WorkingDir` and a Dockerfile that sets none is refused | Image build | `microvms-core/src/control/artifact.rs:234-262` | `ERR_INVALID_ARG`. Measured 2026-08-05: `al2023-minimal`, `python:3.12-slim`, and `node:20-slim` all leave `WorkingDir` empty, so inheritance inherits `/` and every relative path resolves somewhere the caller did not mean |
-| A Dockerfile whose `FROM` is not the selected base image's `docker_ref` is refused | Image build | `microvms-core/src/control/artifact.rs:524-548` | `ERR_INVALID_ARG`. The build runs the Dockerfile on top of `baseImageArn`, so a mismatch builds against a base none of the measured platform behavior describes |
-| A Dockerfile whose `AGENTD_PORT` disagrees with the `hooks.port` this client sends is refused; an absent variable is checked against the daemon's own default of 9000 | Image build | `microvms-core/src/control/artifact.rs:305-348` | `ERR_INVALID_ARG`. Silence is not neutral: the daemon keeps its default for an unset variable, so the absent variable produces the failure for a caller who never typed a port |
-| A Dockerfile `AGENTD_SSE_KEEPALIVE_SECS` at or above the client's stream idle timeout is refused | Image build | `microvms-core/src/control/artifact.rs:405-445` | `ERR_INVALID_ARG`. Equality is refused too, since an interval equal to the timeout races. The failure it prevents reports the client's own 60s as though it were the keepalive interval |
-| A Dockerfile with no `CMD`, or with a non-empty `ENTRYPOINT`, is refused | Image build | `microvms-core/src/control/artifact.rs:483-522` | `ERR_INVALID_ARG`. Weak-form on purpose: it does not check that the `CMD` names a copied path. The unenforceable half — a base image starting its own process before bootstrap — stays with whoever builds the image |
-| The daemon entry in the build artifact carries mode `0o755` explicitly | Image build | `microvms-core/src/control/artifact.rs:1-13`, `:36-39` | Structural. A non-executable binary produces an image whose `CMD` fails, and the symptom is a run-hook timeout that says nothing about permissions |
-| The agent token has no path into the build artifact | Image build | `microvms-core/src/control/artifact.rs:15-23` | Unwritable (S1). `build_artifact` has no parameter that could carry one. The artifact becomes a shared image snapshot, so a per-VM secret in it is a secret shared with every VM; a test scans the produced zip's raw bytes rather than reviewing the API |
+| `inherit_workdir` against a base that declares no `WorkingDir` and a Dockerfile that sets none is refused | Image build | `microvms-app/src/control/artifact.rs:234-262` | `ERR_INVALID_ARG`. Measured 2026-08-05: `al2023-minimal`, `python:3.12-slim`, and `node:20-slim` all leave `WorkingDir` empty, so inheritance inherits `/` and every relative path resolves somewhere the caller did not mean |
+| A Dockerfile whose `FROM` is not the selected base image's `docker_ref` is refused | Image build | `microvms-app/src/control/artifact.rs:524-548` | `ERR_INVALID_ARG`. The build runs the Dockerfile on top of `baseImageArn`, so a mismatch builds against a base none of the measured platform behavior describes |
+| A Dockerfile whose `AGENTD_PORT` disagrees with the `hooks.port` this client sends is refused; an absent variable is checked against the daemon's own default of 9000 | Image build | `microvms-app/src/control/artifact.rs:305-348` | `ERR_INVALID_ARG`. Silence is not neutral: the daemon keeps its default for an unset variable, so the absent variable produces the failure for a caller who never typed a port |
+| A Dockerfile `AGENTD_SSE_KEEPALIVE_SECS` at or above the client's stream idle timeout is refused | Image build | `microvms-app/src/control/artifact.rs:405-445` | `ERR_INVALID_ARG`. Equality is refused too, since an interval equal to the timeout races. The failure it prevents reports the client's own 60s as though it were the keepalive interval |
+| A Dockerfile with no `CMD`, or with a non-empty `ENTRYPOINT`, is refused | Image build | `microvms-app/src/control/artifact.rs:483-522` | `ERR_INVALID_ARG`. Weak-form on purpose: it does not check that the `CMD` names a copied path. The unenforceable half — a base image starting its own process before bootstrap — stays with whoever builds the image |
+| The daemon entry in the build artifact carries mode `0o755` explicitly | Image build | `microvms-app/src/control/artifact.rs:1-13`, `:36-39` | Structural. A non-executable binary produces an image whose `CMD` fails, and the symptom is a run-hook timeout that says nothing about permissions |
+| The agent token has no path into the build artifact | Image build | `microvms-app/src/control/artifact.rs:15-23` | Unwritable (S1). `build_artifact` has no parameter that could carry one. The artifact becomes a shared image snapshot, so a per-VM secret in it is a secret shared with every VM; a test scans the produced zip's raw bytes rather than reviewing the API |
 
 ### Trap closures — control plane
 
 | Rule | Domain | Citation | Failure mode |
 | --- | --- | --- | --- |
-| TRAP-1: an image-create or run token is derived from a per-attempt nonce; there is no caller-supplied token parameter | Idempotency | `microvms-core/src/control/token.rs:101`, `:111`, `:120-148` | Unwritable (S1). The parameter does not exist. Minted at `microvms-core/src/control/image.rs:187-190` and `microvms-core/src/control/microvm.rs:415` |
-| TRAP-1: the scope label is truncated at its **tail**, never its head, and the nonce is never truncated | Idempotency | `microvms-core/src/control/token.rs:55-71`, `:150` | Silent truncation of the label only. 64-byte scope plus an 8-byte hex nonce stays under the 128-character `clientToken` ceiling (`microvms-domain/src/constants.rs:423`) |
-| TRAP-2: an image in `CREATING` past the stall grace with builds listed, non-empty, and **every** build still `PENDING` fails the wait | Image build | `microvms-core/src/control/image.rs:318-324`, `:338-390` | `ERR_BUILD_WEDGED`, naming the `clientToken` replay signature. A `clientToken` is a permanent idempotency key, so a replayed create is a no-op: the image sits in `CREATING`, cannot be deleted, and its only version cannot be dropped. Two images were wedged this way for ~15 hours |
-| TRAP-3: guest identity repair is a `bool` intent; the client injects the one accepted enum value `["ALL"]` | Image build | `microvms-core/src/control/image.rs:181-185`, `microvms-domain/src/constants.rs:276-280` | Unwritable (S1). There is no capability list a caller can populate, and no way to ask for `CAP_SYS_ADMIN` alone |
-| TRAP-4: a connector is an enumerated intent that derives a fully-qualified ARN for the request region | Networking | `microvms-core/src/control/connector.rs:39-47`, `:60-83` | Unwritable (S1). Enumerated intents (`AllIngress`, `HttpIngress`, `ShellIngress`, `Egress`), no free-form string. `ConnectorIntent::ALL` at `:54` is the complete set a test can enumerate |
-| TRAP-5: a `runHookPayload` over 4096 bytes is refused locally before any control-plane call | Launch | `microvms-core/src/control/microvm.rs:161-185`, constant at `microvms-domain/src/constants.rs:83` | `ERR_INVALID_ARG` naming the service-model ceiling. Inclusive, measured 2026-08-07: 4096 passes, 4097 fails. Bytes, not characters. `docs/STRATEGY.md`, `docs/TRUST.md`, and the model's own documentation string all claim 16 KB (`microvms-domain/src/constants.rs:97`), which is wrong by 4x in the dangerous direction — the shape `RunMicrovmRequestRunHookPayloadString` is the authority |
+| TRAP-1: an image-create or run token is derived from a per-attempt nonce; there is no caller-supplied token parameter | Idempotency | `microvms-app/src/control/token.rs:105`, `:116`, `:125-153` | Unwritable (S1). The parameter does not exist. Minted at `microvms-app/src/control/image.rs:187-194` and `microvms-app/src/control/microvm.rs:415` |
+| TRAP-1: the scope label is truncated at its **tail**, never its head, and the nonce is never truncated | Idempotency | `microvms-app/src/control/token.rs:57-73`, `:155` | Silent truncation of the label only. 64-byte scope plus an 8-byte hex nonce stays under the 128-character `clientToken` ceiling (`microvms-domain/src/constants.rs:423`) |
+| TRAP-2: an image in `CREATING` past the stall grace with builds listed, non-empty, and **every** build still `PENDING` fails the wait | Image build | `microvms-app/src/control/image.rs:323-329`, `:343-395` | `ERR_BUILD_WEDGED`, naming the `clientToken` replay signature. A `clientToken` is a permanent idempotency key, so a replayed create is a no-op: the image sits in `CREATING`, cannot be deleted, and its only version cannot be dropped. Two images were wedged this way for ~15 hours |
+| TRAP-3: guest identity repair is a `bool` intent; the client injects the one accepted enum value `["ALL"]` | Image build | `microvms-app/src/control/image.rs:181-185`, `microvms-domain/src/constants.rs:276-280` | Unwritable (S1). There is no capability list a caller can populate, and no way to ask for `CAP_SYS_ADMIN` alone |
+| TRAP-4: a connector is an enumerated intent that derives a fully-qualified ARN for the request region | Networking | `microvms-app/src/control/connector.rs:39-47`, `:60-83` | Unwritable (S1). Enumerated intents (`AllIngress`, `HttpIngress`, `ShellIngress`, `Egress`), no free-form string. `ConnectorIntent::ALL` at `:54` is the complete set a test can enumerate |
+| TRAP-5: a `runHookPayload` over 4096 bytes is refused locally before any control-plane call | Launch | `microvms-app/src/control/microvm.rs:161-185`, constant at `microvms-domain/src/constants.rs:83` | `ERR_INVALID_ARG` naming the service-model ceiling. Inclusive, measured 2026-08-07: 4096 passes, 4097 fails. Bytes, not characters. `docs/STRATEGY.md`, `docs/TRUST.md`, and the model's own documentation string all claim 16 KB (`microvms-domain/src/constants.rs:97`), which is wrong by 4x in the dangerous direction — the shape `RunMicrovmRequestRunHookPayloadString` is the authority |
 | TRAP-6: a region outside the five that carry MicroVMs is refused before the first control-plane call | Region | `microvms-domain/src/region.rs:38-63`, `:137-164` | S1 for a held `Region`, S2 at the `FromStr` boundary. `ERR_INVALID_ARG` naming the null-message `AccessDeniedException` finding |
-| TRAP-8: a VM reaching a state in `fail_on` before the wanted one fails the wait with state **and** `stateReason` attached | Launch | `microvms-core/src/control/microvm.rs:461-466`, `:482-500` | `ERR_LAUNCH_DIED`. Fails fast rather than polling to the deadline. Both facts, because either alone is unactionable: the state says the VM is gone, the reason is the only evidence that survives it |
+| TRAP-8: a VM reaching a state in `fail_on` before the wanted one fails the wait with state **and** `stateReason` attached | Launch | `microvms-app/src/control/microvm.rs:461-466`, `:482-500` | `ERR_LAUNCH_DIED`. Fails fast rather than polling to the deadline. Both facts, because either alone is unactionable: the state says the VM is gone, the reason is the only evidence that survives it |
 | TRAP-10: a `minimumMemoryInMiB` that is not one of the five documented baselines is refused locally | Sizing | `microvms-domain/src/sizing.rs:25-31`, `:146-161` | S1 for a held `SizeClass`, S2 at `from_baseline_mib`. Refused, never snapped to a neighbour: the two plausible service behaviors for 1500 differ in both the memory the guest gets and the rate it is billed at |
-| TRAP-11: `CreateMicrovmShellAuthToken` is never called and `SHELL_INGRESS` is never requested | Networking | `microvms-core/src/control/connector.rs:16-28`, `microvms-core/src/control/mod.rs:27-31` | Unwritable (S1). No enum variant renders it and no method on `ControlPlane` calls it. The test counts the calls a full lifecycle makes rather than asserting a refusal |
+| TRAP-11: `CreateMicrovmShellAuthToken` is never called and `SHELL_INGRESS` is never requested | Networking | `microvms-app/src/control/connector.rs:16-28`, `microvms-app/src/control/mod.rs:27-31` | Unwritable (S1). No enum variant renders it and no method on `ControlPlane` calls it. The test counts the calls a full lifecycle makes rather than asserting a refusal |
 | Two hook-timeout families cannot be interchanged: run/resume/suspend/terminate cap at 60s, ready/validate at 3600s | Hooks | `microvms-domain/src/hooks.rs:56-82`, `:84-105`, constants at `microvms-domain/src/constants.rs:268`, `:271` | Unwritable across families (S1) — no `From`, no shared trait. S2 within a family: `ERR_INVALID_ARG` naming **both** ceilings, because the caller who hits it nearly always picked a build-hook number |
 | A hook port outside `1..=65535` is refused | Hooks | `microvms-domain/src/hooks.rs:141-149` | `ERR_INVALID_ARG` naming the model range and version |
-| An architecture other than `ARM_64` cannot be requested | Image build | `microvms-core/src/control/image.rs:168-172`, `microvms-domain/src/constants.rs:282-287` | Unwritable (S1). The enum has one value, so the field is injected rather than accepted — a field could only ever express a request AWS rejects, after the upload |
-| `ENABLED` on all six hooks is a typed enum value, not a `&str` literal | Image build | `microvms-core/src/control/mod.rs:880-909` | Compile error. The literal appeared six times with no constant naming either value, so a typo in one was a `ValidationException` on a call made after the artifact upload |
+| An architecture other than `ARM_64` cannot be requested | Image build | `microvms-app/src/control/image.rs:168-172`, `microvms-domain/src/constants.rs:282-287` | Unwritable (S1). The enum has one value, so the field is injected rather than accepted — a field could only ever express a request AWS rejects, after the upload |
+| `ENABLED` on all six hooks is a typed enum value, not a `&str` literal | Image build | `microvms-app/src/control/mod.rs:852-881` | Compile error. The literal appeared six times with no constant naming either value, so a typo in one was a `ValidationException` on a call made after the artifact upload |
 
 ### Trap closures — in-VM session
 
 | Rule | Domain | Citation | Failure mode |
 | --- | --- | --- | --- |
-| TRAP-7: the proxy token is read out of the `authToken` **map**, never as a string | Session | `microvms-core/src/control/microvm.rs:268-283`, `:300-326`, `microvms-core/src/session/proxy.rs:14-19` | S1: `ProxyToken` exposes no `as_str`, no `Display`, no `Deref`; the auth value comes out through `auth_value()`, which names the header it reads (`microvms-core/src/session/proxy.rs:177`). A missing key is `WireKind::AuthTokenMint`, which is retryable |
-| TRAP-7: every endpoint request sends **both** `X-aws-proxy-auth` and `X-aws-proxy-port` | Session | `microvms-core/src/control/microvm.rs:328-337`, `microvms-core/src/session/proxy.rs:428-434`, `:436-461` | Structural: `headers()` returns a two-element array. One without the other is rejected indistinguishably from a bad token, so the header that is wrong is not the header the error mentions |
-| A WebSocket handshake carries the same two facts as three subprotocols, minted through the same cache | Session | `microvms-core/src/session/proxy.rs:39-52`, `:463-496` | Structural. The browser `WebSocket` constructor cannot set a header, so the platform moves both facts into `Sec-WebSocket-Protocol` and strips all three before forwarding. A second token path would be a second place TRAP-9 has to be got right |
-| TRAP-9: the token is minted inside the request path, through exactly one mint function | Session | `microvms-core/src/session/proxy.rs:498-506`, `:508-560` | Structural: `headers`, `headers_for_port`, and `subprotocols` all reach the control plane through `token_for`. A cache miss is two conditions — stale, or out of scope for the requested port |
-| A refresh interval at or above the 60-minute ceiling is refused at construction | Session | `microvms-core/src/session/proxy.rs:356-375`, constants at `:107`, `:109-111` | S2, `ERR_INVALID_ARG`. `DEFAULT_REFRESH_AFTER` is 30 minutes — **half** the ceiling, not just under it, because refreshing at fifty-nine minutes puts the expiry inside the window between building the headers and the proxy validating them |
-| A mint asks for every port already cached plus the new one | Session | `microvms-core/src/session/proxy.rs:532-545` | A superset rather than a replacement. Measured 2026-08-15: a token minted for the agent port does not authorize 8080, and reusing it produces `403 Access to port denied` — whose WebSocket form is an unreasoned 1006 |
+| TRAP-7: the proxy token is read out of the `authToken` **map**, never as a string | Session | `microvms-app/src/control/microvm.rs:268-283`, `:300-326`, `microvms-app/src/session/proxy.rs:14-19` | S1: `ProxyToken` exposes no `as_str`, no `Display`, no `Deref`; the auth value comes out through `auth_value()`, which names the header it reads (`microvms-app/src/session/proxy.rs:177`). A missing key is `WireKind::AuthTokenMint`, which is retryable |
+| TRAP-7: every endpoint request sends **both** `X-aws-proxy-auth` and `X-aws-proxy-port` | Session | `microvms-app/src/control/microvm.rs:328-337`, `microvms-app/src/session/proxy.rs:401-407`, `:409-434` | Structural: `headers()` returns a two-element array. One without the other is rejected indistinguishably from a bad token, so the header that is wrong is not the header the error mentions |
+| A WebSocket handshake carries the same two facts as three subprotocols, minted through the same cache | Session | `microvms-app/src/session/proxy.rs:39-52`, `:436-469` | Structural. The browser `WebSocket` constructor cannot set a header, so the platform moves both facts into `Sec-WebSocket-Protocol` and strips all three before forwarding. A second token path would be a second place TRAP-9 has to be got right |
+| TRAP-9: the token is minted inside the request path, through exactly one mint function | Session | `microvms-app/src/session/proxy.rs:471-479`, `:481-533` | Structural: `headers`, `headers_for_port`, and `subprotocols` all reach the control plane through `token_for`. A cache miss is two conditions — stale, or out of scope for the requested port |
+| A refresh interval at or above the 60-minute ceiling is refused at construction | Session | `microvms-app/src/session/proxy.rs:329-348`, constants at `:107`, `:109-111` | S2, `ERR_INVALID_ARG`. `DEFAULT_REFRESH_AFTER` is 30 minutes — **half** the ceiling, not just under it, because refreshing at fifty-nine minutes puts the expiry inside the window between building the headers and the proxy validating them |
+| A mint asks for every port already cached plus the new one | Session | `microvms-app/src/session/proxy.rs:505-518` | A superset rather than a replacement. Measured 2026-08-15: a token minted for the agent port does not authorize 8080, and reusing it produces `403 Access to port denied` — whose WebSocket form is an unreasoned 1006 |
 
 ### Cost inputs
 
@@ -214,27 +214,27 @@ class lives.
 
 ### VM lifecycle (the STATE requirements)
 
-Enforced in `microvms-core/src/sandbox.rs`, whose `Lifecycle` enum is the spec's `vm_state`
+Enforced in `microvms-app/src/sandbox.rs`, whose `Lifecycle` enum is the spec's `vm_state`
 verbatim and which carries the other spec variables beside it. Every one of those fields is
 private and every mutation happens in one of the lifecycle methods, which is what makes the
 Z3 and `stateright` proofs proofs about *this struct's* reachable states
-(`microvms-core/src/sandbox.rs:9-17`, `:120-134`, `:775-791`).
+(`microvms-app/src/sandbox.rs:9-17`, `:119-133`, `:789-805`).
 
 | Invariant | Where enforced | Citation |
 | --- | --- | --- |
-| STATE-1: an accepted launch moves the lifecycle to PENDING and records the image as existing | Application, `Sandbox::run`, after the wire call | `microvms-core/src/sandbox.rs:1102-1110` |
-| STATE-2: the platform reporting a successful run hook is what marks the lifecycle RUNNING and the token installed — not the launch call | Application, `Sandbox::run`, after the wait | `microvms-core/src/sandbox.rs:1174-1178` |
-| STATE-3: the agent token is installed at most once per VM lifetime | Application, both sides | `microvms-core/src/sandbox.rs:1012-1024` (a second `run` on one sandbox is refused); `agentd/src/state.rs:202-221` (the daemon's one-shot bootstrap) |
-| STATE-4: a suspend accepted from RUNNING moves the lifecycle to SUSPENDING before the wait, and after the call | Application, `Sandbox::suspend` | `microvms-core/src/sandbox.rs:1480-1489` |
-| STATE-5: no suspend call is issued while the lifecycle is not RUNNING | Application, before the wire | `microvms-core/src/sandbox.rs:1469-1478` |
-| STATE-6: the platform reporting suspension complete marks the lifecycle SUSPENDED; a VM that dies while suspending is recorded as terminated instead | Application, `Sandbox::suspend` | `microvms-core/src/sandbox.rs:1501-1521`, wanted set at `microvms-core/src/control/microvm.rs:650` |
-| STATE-7: a resume is issued only from SUSPENDED, reuses the installed token, and re-delivers **no** run-hook payload | Application, `Sandbox::resume` | `microvms-core/src/sandbox.rs:1562-1567`, `:1572` |
-| STATE-8: a completed resume invalidates the cached proxy token, through the endpoint the service just reported | Application, `Session::rebind` | `microvms-core/src/sandbox.rs:1588-1596`, `microvms-core/src/session/mod.rs:314-320` |
-| STATE-9: an accepted terminate moves the lifecycle to TERMINATING and records the VM as terminated — **before** the call | Application, `Sandbox::terminate` | `microvms-core/src/sandbox.rs:1670-1674` |
-| STATE-10: the platform reporting termination complete marks the lifecycle TERMINATED | Application, `Sandbox::terminate`, only when a wait was asked for | `microvms-core/src/sandbox.rs:1697-1701` |
-| STATE-11: a terminated VM never returns to RUNNING, checked before the window check and before any call | Application, `Sandbox::resume` | `microvms-core/src/sandbox.rs:1553-1561` |
-| STATE-12: a resume past the launch-time suspended window is refused with the elapsed window named | Application, before `ResumeMicrovm` | `microvms-core/src/sandbox.rs:1569-1570`, `:1611-1644` |
-| The suspended-window clock is stamped after the suspend call and before the wait, and cleared on a successful resume | Application, `Sandbox` | `microvms-core/src/sandbox.rs:1486-1489`, `:1597-1600` |
+| STATE-1: an accepted launch moves the lifecycle to PENDING and records the image as existing | Application, `Sandbox::run`, after the wire call | `microvms-app/src/sandbox.rs:1121-1129` |
+| STATE-2: the platform reporting a successful run hook is what marks the lifecycle RUNNING and the token installed — not the launch call | Application, `Sandbox::run`, after the wait | `microvms-app/src/sandbox.rs:1196-1200` |
+| STATE-3: the agent token is installed at most once per VM lifetime | Application, both sides | `microvms-app/src/sandbox.rs:1028-1040` (a second `run` on one sandbox is refused); `agentd/src/state.rs:202-221` (the daemon's one-shot bootstrap) |
+| STATE-4: a suspend accepted from RUNNING moves the lifecycle to SUSPENDING before the wait, and after the call | Application, `Sandbox::suspend` | `microvms-app/src/sandbox.rs:1460-1469` |
+| STATE-5: no suspend call is issued while the lifecycle is not RUNNING | Application, before the wire | `microvms-app/src/sandbox.rs:1449-1458` |
+| STATE-6: the platform reporting suspension complete marks the lifecycle SUSPENDED; a VM that dies while suspending is recorded as terminated instead | Application, `Sandbox::suspend` | `microvms-app/src/sandbox.rs:1481-1501`, wanted set at `microvms-app/src/control/microvm.rs:652` |
+| STATE-7: a resume is issued only from SUSPENDED, reuses the installed token, and re-delivers **no** run-hook payload | Application, `Sandbox::resume` | `microvms-app/src/sandbox.rs:1542-1547`, `:1552` |
+| STATE-8: a completed resume invalidates the cached proxy token, through the endpoint the service just reported | Application, `Session::rebind` | `microvms-app/src/sandbox.rs:1568-1576`, `microvms-app/src/session/mod.rs:250-261` |
+| STATE-9: an accepted terminate moves the lifecycle to TERMINATING and records the VM as terminated — **before** the call | Application, `Sandbox::terminate` | `microvms-app/src/sandbox.rs:1650-1654` |
+| STATE-10: the platform reporting termination complete marks the lifecycle TERMINATED | Application, `Sandbox::terminate`, only when a wait was asked for | `microvms-app/src/sandbox.rs:1677-1681` |
+| STATE-11: a terminated VM never returns to RUNNING, checked before the window check and before any call | Application, `Sandbox::resume` | `microvms-app/src/sandbox.rs:1533-1541` |
+| STATE-12: a resume past the launch-time suspended window is refused with the elapsed window named | Application, before `ResumeMicrovm` | `microvms-app/src/sandbox.rs:1549-1550`, `:1591-1624` |
+| The suspended-window clock is stamped after the suspend call and before the wait, and cleared on a successful resume | Application, `Sandbox` | `microvms-app/src/sandbox.rs:1466-1469`, `:1577-1580` |
 | The Z3-proved invariants hold over every interleaving: bootstrap at most once, no suspend outside RUNNING, a terminated VM never reaches RUNNING | `stateright` model | `model/src/client.rs:554-569` |
 | A locally refused call costs **zero** wire calls — resume after terminate, resume with the window closed, and the payload count matching the launch count are all checked as counters, not as end states | `stateright` model | `model/src/client.rs:584-598`, `:623-640` |
 | The installed token is never replaced and survives a suspend/resume cycle | `stateright` model | `model/src/client.rs:599-616` |
@@ -280,7 +280,7 @@ Z3 and `stateright` proofs proofs about *this struct's* reachable states
 | Retryability is derived from the error kind rather than stored, so the two cannot drift | Application, one `matches!` | `microvms-domain/src/error.rs:111-118`, mapping at `:358-397` |
 
 The lifecycle is deliberately **runtime-checked rather than typestate**
-(`microvms-core/src/sandbox.rs:19-32`). A `Sandbox<Running>` returning a `Suspended` handle
+(`microvms-app/src/sandbox.rs:19-32`). A `Sandbox<Running>` returning a `Suspended` handle
 would make STATE-5's wrong call a compile error, which is strictly stronger on the ladder. But a
 type whose Rust identity changes on every transition cannot be one `#[pyclass]`, so it would be
 re-erased into a runtime-checked enum at the binding boundary — and the binding's copy is the one
@@ -303,8 +303,8 @@ observable that distinguishes the two designs.
 | Rate table age and staleness verdict | retrieval date, today | days, bool, optional warning text | `microvms-domain/src/cost.rs:968-994` |
 | Proleptic-Gregorian day number, for date subtraction without a date crate | year, month, day | `i64` days since 1970-01-01 | `microvms-domain/src/cost.rs:282-285` |
 | Exact seconds from a `Duration`, without a lossy float step | `std::time::Duration` | `Decimal` seconds | `microvms-domain/src/cost.rs:120-124` |
-| Idempotency token assembly | verb, scope label, 8 random bytes | `<verb>-<tail-64-of-label>-<16 hex>` | `microvms-core/src/control/token.rs:120-148` |
-| Connector ARN | intent, region | fully-qualified ARN string | `microvms-core/src/control/connector.rs:60-83` |
+| Idempotency token assembly | verb, scope label, 8 random bytes | `<verb>-<tail-64-of-label>-<16 hex>` | `microvms-app/src/control/token.rs:125-153` |
+| Connector ARN | intent, region | fully-qualified ARN string | `microvms-app/src/control/connector.rs:60-83` |
 | Available bytes on a write target's filesystem | path | `u64` bytes | `agentd/src/disk.rs:66-80` |
 
 ### Compute cost per phase
@@ -410,7 +410,7 @@ be March-based, which puts February's variable length last; `719468` is the day 
 
 - **Local refusal before the wire, always.** Every S2 guard fires before the first control-plane
   call, and where the distinction is observable the test asserts the control-plane **call count**
-  rather than just the error. `microvms-core/src/sandbox.rs:29-32`; `model/src/client.rs:584-589`
+  rather than just the error. `microvms-app/src/sandbox.rs:29-32`; `model/src/client.rs:584-589`
   states it as a model property.
 
 - **One guard list, runnable before the artifact upload.** `create_image` runs after the caller
@@ -418,7 +418,7 @@ be March-based, which puts February's variable length last; `719468` is the day 
   cost the caller the S3 PUT. `ControlPlane::preflight` is that same list extracted as a pure
   function of the request, and `create_image` delegates to it rather than keeping a copy, so the
   two cannot drift. A caller who skips preflight loses only the upload.
-  `microvms-core/src/control/image.rs:144-158`, `:206-266`; asserted with a zero-call count at
+  `microvms-app/src/control/image.rs:144-158`, `:210-271`; asserted with a zero-call count at
   `microvms-cli/src/guards.rs:1468`.
 
 - **Every refusal names its measurement.** A guard's error message cites the `docs/PLATFORM.md`
@@ -448,22 +448,22 @@ be March-based, which puts February's variable length last; `719468` is the day 
   build is `PENDING`. A listing failure returns `Ok(())`, so the wait continues and the caller gets
   a plain timeout. Unknown is not empty, and a wedge claim made on a throttled API call sends the
   reader after the wrong cause. The state field read is `buildState`, not `state`, and the
-  deserializer refuses the other spelling. `microvms-core/src/control/image.rs:338-390`.
+  deserializer refuses the other spelling. `microvms-app/src/control/image.rs:343-395`.
 
 - **Fail-fast state sets are per-call-site, not global.** `wait_for_state` takes `fail_on` as a
   parameter because different callers fail on different states. Suspend *wants* `SUSPENDED` and
   tolerates `TERMINATED`; resume must pass the *dead* states only, because failing on `SUSPENDED`
   would fail every resume — that is the state the call is made from. This is why `constants.rs`
   carries both `TERMINAL_STATES` and `DEAD_STATES`.
-  `microvms-core/src/control/microvm.rs:440-456`, `microvms-core/src/sandbox.rs:1573-1586`.
+  `microvms-app/src/control/microvm.rs:440-456`, `microvms-app/src/sandbox.rs:1553-1566`.
 
 - **Token minting lives inside the retry path, and a mint failure is retryable.** A proxy token
   capped at sixty minutes and minted once at construction expires mid-trial, and the rejection is
   indistinguishable from a dead daemon. Refresh is at **half** the ceiling rather than just under
   it, because refreshing at fifty-nine minutes puts the expiry inside the window between building
   the headers and the proxy validating them. A control-plane throttle at minute thirty must not
-  kill a trial that is otherwise healthy. `microvms-core/src/session/proxy.rs:21-37`, `:107-111`,
-  `:547-560`.
+  kill a trial that is otherwise healthy. `microvms-app/src/session/proxy.rs:21-37`, `:107-111`,
+  `:520-533`.
 
 - **Credentials never reach a log line, by construction rather than by care.** `RunHookPayload`
   and both `ProxyToken` types have hand-written `Debug` impls that print the byte count or the
@@ -472,8 +472,8 @@ be March-based, which puts February's variable length last; `719468` is the day 
   header pairs and the subprotocol strings — are returned to a caller and stored on nothing, so
   there is no type whose `Debug` could leak one; a caller that logs what it was handed is outside
   what the module can prevent, and both accessors say so.
-  `microvms-core/src/control/microvm.rs:70-82`, `:285-298`,
-  `microvms-core/src/session/proxy.rs:54-60`. The daemon logs the launch-env variable **count**,
+  `microvms-app/src/control/microvm.rs:70-82`, `:285-298`,
+  `microvms-app/src/session/proxy.rs:54-60`. The daemon logs the launch-env variable **count**,
   never the keys or values (`agentd/src/routes.rs:214-221`).
 
 - **Each authorization failure has its own status code.** The daemon answers 503 while no token is
@@ -493,7 +493,7 @@ be March-based, which puts February's variable length last; `719468` is the day 
 - **Build hooks are ungated on purpose.** `ready` and `validate` are image-*build* hooks called
   before any instance exists and therefore before any token has been delivered. Gating them on
   bootstrap state fails the build rather than the run, which is a confusing place to discover the
-  mistake. `agentd/src/routes.rs:237-258`, `microvms-core/src/control/mod.rs:880-886`.
+  mistake. `agentd/src/routes.rs:237-258`, `microvms-app/src/control/mod.rs:852-858`.
 
 - **Health is reachable before bootstrap, and `busy` is the orchestrator's signal rather than a
   keepalive.** A client needs the contract before it holds a token. And the platform measures
@@ -544,13 +544,13 @@ be March-based, which puts February's variable length last; `719468` is the day 
   (retrying, because an image in `CREATING` refuses deletion), then the log group **last**, because
   the service can recreate a group deleted before its image. The log group is *named* rather than
   deleted: CloudWatch Logs is not in this crate's dependency set.
-  `microvms-core/src/sandbox.rs:45-53`, `:1650-1653`, `:1711-1735`.
+  `microvms-app/src/sandbox.rs:45-53`, `:1630-1633`, `:1691-1715`.
 
 - **There is no `Drop` that tears down.** Rust has no context manager and `Drop` cannot await. A
   blocking `Drop` would deadlock inside a runtime and a spawning one would race process exit. So
   `Drop` only warns, naming the id, and the rule is that a caller calls `terminate` explicitly,
   or `detach` when another process takes the VM over; a detached sandbox drops without the
-  warning. `microvms-core/src/sandbox.rs:55-60`, `:1792-1799`, `:1808-1809`.
+  warning. `microvms-app/src/sandbox.rs:55-60`, `:1772-1779`, `:1788-1789`.
 
 - **Leaked identifiers are recorded before the delete is attempted, not after.** Recording after
   loses the identifier when the process dies inside the call, which is exactly the interrupt case

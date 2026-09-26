@@ -10,7 +10,7 @@
 # moves (resolved 2026-08-30).
 #
 # The agentd COPY/CMD lines mirror the client's default Dockerfile
-# (microvms-core/src/control/artifact.rs::default_dockerfile) — when you pass
+# (microvms-app/src/control/artifact.rs::default_dockerfile) — when you pass
 # --dockerfile, you are replacing that default, so you carry its daemon lines
 # yourself.
 FROM public.ecr.aws/amazonlinux/amazonlinux:2023-minimal@sha256:c439fb4994ea7ca529233d6256446d3f8b7b4efb58956073e015303a170011de

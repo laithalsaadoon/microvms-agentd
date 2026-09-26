@@ -14,25 +14,13 @@
 use std::sync::Arc;
 
 use cucumber::{World, WriterExt, gherkin::Step, given, then, when, writer};
+use microvms_app::testing::FakeControlPlane;
 use microvms_core::control::artifact::{
     BaseImage, WrapOptions, default_dockerfile, wrap_dockerfile,
 };
-use microvms_core::control::transport::{Call, Reply, Transport};
 use microvms_core::control::{ControlPlane, CreateImageRequest, DEFAULT_AGENT_PORT, SystemClock};
+use microvms_core::prelude::*;
 use microvms_core::{Error, ErrorKind, Region};
-
-/// A transport for a preflight, which makes no call.
-struct NoCalls;
-
-impl Transport for NoCalls {
-    fn send(
-        &self,
-        call: Call,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Reply, Error>> + Send + '_>>
-    {
-        panic!("a preflight makes no call, but {} was sent", call.operation)
-    }
-}
 
 #[derive(Debug, Default, World)]
 struct Wrap {
@@ -65,8 +53,9 @@ impl Wrap {
 }
 
 fn preflight(dockerfile: &str, base: BaseImage) -> Result<(), Error> {
+    // A preflight makes no call, and the fake has none queued: one would panic naming it.
     let plane = ControlPlane::with_transport(
-        Arc::new(NoCalls),
+        Arc::new(FakeControlPlane::new()),
         Region::UsEast1,
         Arc::new(SystemClock::new()),
     );

@@ -1,7 +1,8 @@
 # Contributing
 
-The shared implementation lives in `microvms-core` and the `microvms-domain`
-crate it re-exports; the CLI and bindings adapt that implementation. Read [Protocol](docs/PROTOCOL.md) before changing wire
+The shared implementation lives in `microvms-core` and the crates it composes
+and re-exports: `microvms-domain`, `microvms-app` and `microvms-edges`. The CLI
+and bindings adapt that implementation. Read [Protocol](docs/PROTOCOL.md) before changing wire
 behavior and [Trust](docs/TRUST.md) before changing authentication or execution.
 
 ## Setup and checks
@@ -24,6 +25,8 @@ Useful checks while iterating:
 cargo test -p agentd --lib
 cargo test -p agentd-model
 cargo test -p microvms-domain
+cargo test -p microvms-app
+cargo test -p microvms-edges
 cargo test -p microvms-core
 cargo test -p microvms-cli
 cargo test --test proptest_tar
@@ -51,7 +54,7 @@ its collectors find, such as an adapter dependency outside `arch/placement.toml`
 or a subprocess in a shipping crate. A new finding fails, and so does a fix the
 file still lists: run `mise run ratchet:update` and commit the file. The check
 refuses an entry the base branch doesn't have, and a crate added to a set the
-base already has, so new drift moves below the adapter or goes under
+base already has, so new drift moves to the layer whose job it is or goes under
 `decisions` with its reason. Moving recorded drift to another file or crate
 isn't a fix: re-key its entry in the same change. A re-keyed entry keeps its
 issue and changes its path or its text, not both, so a move and a rename land
@@ -83,6 +86,21 @@ methods its types had in 0.10 (`CalendarDate::today_utc`, `NameRecord::new`,
 `microvms-core/tests/public_paths.rs` names every public path core had at
 v0.10.0; regenerate it with `scripts/generate-public-paths.py` only when a
 release changes the API on purpose.
+
+`microvms-app` holds the use cases and reaches the outside only through the
+ports it declares (ARCH-7). Its `clippy.toml` bans the std file, process,
+network, environment and clock calls and tokio's `net`, `fs` and `process`
+items, under a crate-root `forbid`, and `dependency_direction.rs` pins its
+dependency set and each dependency's features, tokio's among them. A use case
+that needs I/O gets a port in the app and an implementation in `microvms-edges`,
+the one library crate allowed the I/O crates. `microvms-core` is the
+composition root (ARCH-8): the prelude's constructors wire the edges into the
+app's port-taking ones (`ControlPlane::from_ports`, `SessionBuilder::try_build`),
+and every item below it is re-exported at its 0.10 path. The shared test
+doubles are `microvms_core::testing`, behind the `test-support` feature; a
+crate's `[dev-dependencies]` turns it on. The ratchet's port-impl collector reads
+the app and core as well as the adapters, so a port implementation there needs a
+decision in `ratchet/drift.json`.
 
 ## Generated contracts and API changes
 
@@ -151,15 +169,16 @@ cleanup; Terraform does not own every resource the service creates.
 ## Releases and reviews
 
 The release workflow publishes `microvms-protocol`, `microvms-domain`,
-`microvms-core`, and `microvms-cli` to crates.io, `microvms` to PyPI, and
+`microvms-app`, `microvms-edges`, `microvms-core`, and `microvms-cli` to crates.io, `microvms` to PyPI, and
 `@theagenticguy/microvms` to npm. `agentd` ships as a GitHub release binary.
 
 crates.io trusted publishing can't create a crate, so a crate that's new to the
 publish set needs one manual publish before the first release tag that includes
-it. `microvms-domain` is one until that's done. From a clean checkout of main,
-before the release's version bump lands, run `cargo publish -p <crate> --locked`
-with a crates.io API token scoped to publishing new crates, then add the trusted
-publisher on crates.io (this repository, workflow `release.yml`, environment
+it. `microvms-domain`, `microvms-app` and `microvms-edges` are each one until
+that's done. From a clean checkout of main, before the release's version bump
+lands, run `cargo publish -p <crate> --locked` for each, in dependency order
+(the domain, then the app, then the edges), with a crates.io API token scoped to
+publishing new crates, then add each trusted publisher on crates.io (this repository, workflow `release.yml`, environment
 `release`). Without it, the release publishes the crates below it and fails at
 the new one. Publishing after the bump is the same failure the other way round:
 the release's version already exists, and `cargo publish --workspace` has no

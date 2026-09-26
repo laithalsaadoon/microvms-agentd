@@ -72,9 +72,9 @@ of it requires `git show`, and nothing in the tree points a reader at that commi
 **The densest files are also the most-churned files.** `microvms-domain/src/cost.rs` holds 242
 symbols, the highest in the repository, and 7 commits. `agentd/src/exec.rs` 147, `agentd/src/fs.rs`
 137, `microvms-cli/src/guards.rs` 123 with 13 commits, `microvms-py/src/cost.rs` 117,
-`microvms-js/src/cost.rs` 106, `microvms-core/src/sandbox.rs` 105 with 11 commits,
-`microvms-core/src/control/image.rs` 99 with 11, `microvms-core/src/control/ops.rs` 96 with 9,
-`microvms-core/src/session/mod.rs` 94. Six of those ten are in both the churn top-20 and the
+`microvms-js/src/cost.rs` 106, `microvms-app/src/sandbox.rs` 105 with 11 commits,
+`microvms-app/src/control/image.rs` 99 with 11, `microvms-app/src/control/ops.rs` 96 with 9,
+`microvms-app/src/session/mod.rs` 94. Six of those ten are in both the churn top-20 and the
 density top-10. A change to any of them is a change to a file that is simultaneously the
 largest and the least settled thing in its crate.
 
@@ -203,17 +203,17 @@ the bullets name the count. Shares are computed with
   definition is the CLI's contract with every consumer, so changes here belong behind the
   `microvms-cli/tests/manifest.rs` and `thinness.rs` assertions rather than behind review
   alone.
-- `microvms-core/src/control/image.rs` — sole human author (82% of 11 commits). 99 symbols
+- `microvms-app/src/control/image.rs` — sole human author (82% of 11 commits). 99 symbols
   covering image and version creation, an area where `docs/PLATFORM.md:725` and
   `docs/PLATFORM.md:747` record two service refusals; keep those two sections and this file
   under one change.
-- `microvms-core/src/control/ops.rs` — sole human author (78% of 9 commits). Cross-train a
+- `microvms-app/src/control/ops.rs` — sole human author (78% of 9 commits). Cross-train a
   second reader here before the control-plane call surface grows again, since 96 symbols in
   one file is where a control-plane behavior change hides.
 - `microvms-cli/src/commands/lifecycle.rs` — sole human author (75% of 12 commits). The
   lifecycle commands are the operator's path to spending money, so every change here should
   cite the `docs/PLATFORM.md` section whose behavior it depends on.
-- `microvms-core/src/sandbox.rs` — sole human author (73% of 11 commits). 105 symbols
+- `microvms-app/src/sandbox.rs` — sole human author (73% of 11 commits). 105 symbols
   implementing the single-writer state machine that the `model/` crate's stateright model also
   encodes; change the model in the same commit so the two descriptions cannot drift.
 - `microvms-domain/src/cost.rs` — `bgagent` automated identity (71% of 7 commits). The densest

@@ -21,7 +21,7 @@ alone. The tests below fall into three groups:
   pass" is not a statement about this path.
 
 **The boundary, stated honestly.** The SSE server is this suite's own transcription of the frame
-shapes `microvms-core/src/session/sse.rs` parses. It is not `agentd`. So nothing here proves the
+shapes `microvms-app/src/session/sse.rs` parses. It is not `agentd`. So nothing here proves the
 daemon emits those frames — if the daemon's framing changed, these tests would stay green while
 the conformance suite went red. What they do prove is that this client parses, orders, and
 resumes correctly given the framing, which is the half that lives in this repository's bindings.

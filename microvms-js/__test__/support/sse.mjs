@@ -14,7 +14,7 @@
 // task, its capacity-1 channel, its `AsyncGenerator` — which is the thing under test here.
 //
 // It is not `agentd`. The frame shapes below are this suite's transcription of what
-// `microvms-core/src/session/sse.rs` parses, so nothing here proves the daemon emits them; if the
+// `microvms-app/src/session/sse.rs` parses, so nothing here proves the daemon emits them; if the
 // daemon's framing changed, these tests would stay green while the conformance suite went red.
 // That boundary is stated rather than papered over.
 

@@ -18,7 +18,7 @@ capacity-1 channel, and its iterator.
 It does not cover the daemon: nothing here starts `agentd`, so nothing here asserts that the
 daemon emits these frames in the first place. That is the conformance suite's job, and the
 boundary is honest rather than papered over — a script below is a transcription of the frame
-shapes `microvms-core/src/session/sse.rs` parses, and if the daemon's framing changed, these
+shapes `microvms-app/src/session/sse.rs` parses, and if the daemon's framing changed, these
 tests would keep passing while the conformance suite went red.
 """
 

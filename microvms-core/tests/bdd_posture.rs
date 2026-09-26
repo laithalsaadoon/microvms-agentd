@@ -5,19 +5,19 @@
 //! each one verifies; this file is their step definitions and runner. It is a `harness = false`
 //! test, so `cargo test` runs it on every CI system.
 //!
-//! The launches go through [`ControlPlane::with_transport`] and a scripted transport that
+//! The launches go through `ControlPlane::with_transport` and a scripted transport that
 //! answers a launch to RUNNING, so a scenario can assert what a launched session reports
 //! without an AWS account. The bindings expose exactly these core values
 //! (`microvms-cli/tests/thinness.rs` keeps them thin), and `microvms-cli/src/guards.rs` holds
 //! the parity guard against the CLI envelope.
 
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use cucumber::{World, cli, given, then, when};
-use microvms_core::control::transport::{Call, Reply, Transport};
+use microvms_app::testing::{Answer, FakeControlPlane};
+use microvms_core::control::transport::Transport;
 use microvms_core::control::{ControlPlane, EgressPosture, SystemClock, egress_posture_for};
+use microvms_core::prelude::*;
 use microvms_core::sandbox::{RunRequest, Sandbox};
 use microvms_core::session::Session;
 use microvms_core::{Error, ErrorKind, Region};
@@ -40,52 +40,46 @@ fn microvm_body(state: &str) -> String {
     )
 }
 
-/// Answers a launch to RUNNING and records every operation it was asked for.
-#[derive(Debug, Default)]
-struct Scripted {
-    calls: Mutex<Vec<String>>,
+/// A control plane that answers a launch to RUNNING and records every operation.
+fn scripted() -> Arc<FakeControlPlane> {
+    let fake = Arc::new(FakeControlPlane::new());
+    fake.answer("RunMicrovm", Answer::ok(microvm_body("PENDING")))
+        .answer("GetMicrovm", Answer::ok(microvm_body("RUNNING")))
+        .answer(
+            "CreateMicrovmAuthToken",
+            Answer::ok(r#"{"authToken": {"X-aws-proxy-auth": "proxy"}}"#),
+        )
+        .answer("TerminateMicrovm", Answer::ok(microvm_body("TERMINATING")));
+    fake
 }
 
-impl Transport for Scripted {
-    fn send(&self, call: Call) -> Pin<Box<dyn Future<Output = Result<Reply, Error>> + Send + '_>> {
-        self.calls
-            .lock()
-            .expect("not poisoned")
-            .push(call.operation.to_string());
-        let body = match call.operation {
-            "RunMicrovm" => microvm_body("PENDING"),
-            "GetMicrovm" => microvm_body("RUNNING"),
-            "CreateMicrovmAuthToken" => r#"{"authToken": {"X-aws-proxy-auth": "proxy"}}"#.into(),
-            "TerminateMicrovm" => microvm_body("TERMINATING"),
-            other => format!(r#"{{"message": "the scenario does not script {other}"}}"#),
-        };
-        let status = if body.starts_with(r#"{"message""#) {
-            400
-        } else {
-            200
-        };
-        Box::pin(async move {
-            Ok(Reply {
-                status,
-                body: body.into_bytes(),
-            })
-        })
-    }
-}
-
-#[derive(Debug, Default, World)]
+#[derive(Debug, World)]
+#[world(init = Self::new)]
 struct Harness {
     egress: bool,
     connectors: Vec<String>,
     deny: bool,
     region: Option<Region>,
-    transport: Arc<Scripted>,
+    transport: Arc<FakeControlPlane>,
     answer: Option<Result<EgressPosture, Error>>,
     session: Option<EgressPosture>,
     adopted: Option<EgressPosture>,
 }
 
 impl Harness {
+    fn new() -> Self {
+        Self {
+            egress: false,
+            connectors: Vec::new(),
+            deny: false,
+            region: None,
+            transport: scripted(),
+            answer: None,
+            session: None,
+            adopted: None,
+        }
+    }
+
     fn plane(&self) -> ControlPlane {
         ControlPlane::with_transport(
             Arc::clone(&self.transport) as Arc<dyn Transport>,
@@ -103,7 +97,11 @@ impl Harness {
     }
 
     fn calls(&self) -> Vec<String> {
-        self.transport.calls.lock().expect("not poisoned").clone()
+        self.transport
+            .operations()
+            .into_iter()
+            .map(String::from)
+            .collect()
     }
 }
 

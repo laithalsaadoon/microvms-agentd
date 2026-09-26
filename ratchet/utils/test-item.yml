@@ -1,7 +1,9 @@
-# An item compiled only for tests: one that follows `#[cfg(test)]`, or a function that follows
-# `#[test]` or `#[tokio::test(...)]`. The walk back over siblings passes other attributes and doc
-# comments, and it stops at the first sibling that is neither, so an item after a test-only item
-# isn't mistaken for one.
+# An item compiled only for tests: one that follows `#[cfg(test)]`,
+# `#[cfg(feature = "test-support")]` or `#[cfg(any(test, feature = "test-support"))]`, or a
+# function that follows `#[test]` or `#[tokio::test(...)]`. `test-support` is the shared test
+# doubles' feature, which a dependent turns on in its `[dev-dependencies]` only. The walk back
+# over siblings passes other attributes and doc comments, and it stops at the first sibling that
+# is neither, so an item after a test-only item isn't mistaken for one.
 id: test-item
 language: rust
 rule:
@@ -20,7 +22,7 @@ rule:
           not:
             any: [kind: attribute_item, kind: line_comment, kind: block_comment]
         kind: attribute_item
-        regex: '^#\[cfg\(test\)\]$'
+        regex: '^#\[cfg\((test|feature\s*=\s*"test-support"|any\(\s*test\s*,\s*feature\s*=\s*"test-support"\s*,?\s*\))\)\]$'
     - kind: function_item
       follows:
         stopBy:

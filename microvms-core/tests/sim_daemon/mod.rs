@@ -23,6 +23,7 @@ use std::time::Duration;
 use base64::Engine as _;
 use futures_util::future::BoxFuture;
 use microvms_core::error::{Error, WireKind};
+use microvms_core::prelude::*;
 use microvms_core::protocol::exec as wire;
 use microvms_core::session::{
     ChunkSource, HttpBackend, HttpRequest, HttpResponse, OpenStream, Session,

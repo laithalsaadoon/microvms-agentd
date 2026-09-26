@@ -24,8 +24,10 @@ use std::time::Duration;
 
 use microvms_core::control::transport::{Call, Reply, Transport};
 use microvms_core::control::{Clock, ControlPlane};
+use microvms_core::prelude::*;
 use microvms_core::sandbox::Sandbox;
 use microvms_core::session::Session;
+use microvms_core::testing::YieldingClock;
 use microvms_core::{Error, ErrorKind, Region};
 
 use crate::cli::{
@@ -1292,32 +1294,6 @@ impl Transport for ScriptedTransport {
                 body: answer.1.into_bytes(),
             })
         })
-    }
-}
-
-/// A clock whose `sleep` advances instantly **and yields**.
-///
-/// The yield is what makes the interrupt guard deterministic rather than a race. A `sleep` that
-/// only advanced would let the launch's poll loop run all sixty iterations inside one `poll` of
-/// the select's body arm, so the select would never get to look at the interrupt and the run would
-/// end in `ERR_TIMEOUT` instead. Yielding returns `Pending` once, which is the select's chance to
-/// see that the other arm is ready.
-#[derive(Debug, Default)]
-struct YieldingClock {
-    elapsed: Mutex<Duration>,
-}
-
-impl Clock for YieldingClock {
-    fn elapsed(&self) -> Duration {
-        *self.elapsed.lock().expect("not poisoned")
-    }
-
-    fn sleep(
-        &self,
-        duration: Duration,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
-        *self.elapsed.lock().expect("not poisoned") += duration;
-        Box::pin(tokio::task::yield_now())
     }
 }
 
@@ -6713,8 +6689,6 @@ async fn verify_identity_without_the_pair_is_refused_before_any_door_and_writes_
 /// on the refusal).
 #[tokio::test]
 async fn verify_identity_with_the_pair_probes_first_then_reaches_the_handshake_before_any_write() {
-    use microvms_core::prelude::*;
-
     let identity = microvms_core::identity::LaunchIdentity::generate()
         .expect("keys")
         .keep();

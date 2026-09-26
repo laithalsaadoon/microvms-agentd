@@ -36,9 +36,9 @@ Participants:
   (`microvms-cli/src/commands/attached.rs:103`, `microvms-cli/src/commands/attached.rs:240`,
   `microvms-cli/src/commands/attached.rs:609`).
 - `core session` — `Session` plus `ExecHandle`, banded because they share one module
-  (`microvms-core/src/session/mod.rs:380`, `microvms-core/src/session/exec.rs:213`).
+  (`microvms-app/src/session/mod.rs:321`, `microvms-app/src/session/exec.rs:213`).
 - `ProxyAuth` — the proxy-token cache whose mint sits inside the request path
-  (`microvms-core/src/session/proxy.rs:432`, `microvms-core/src/session/mod.rs:88`).
+  (`microvms-app/src/session/proxy.rs:405`, `microvms-app/src/session/mod.rs:78`).
 - `agentd exec routes` — `start`, `stream`, `ack` (`agentd/src/exec.rs:331`,
   `agentd/src/exec.rs:455`, `agentd/src/exec.rs:831`).
 - `Shared ring` — the replay ring plus the broadcast channel, keyed by exec id
@@ -49,9 +49,9 @@ Edges in order:
 
 1. `run(argv)` — `microvms-cli/src/commands/attached.rs:152`.
 2. `headers()` — the mint runs inside `Transport::headers`, so every request re-checks freshness
-   (`microvms-core/src/session/mod.rs:92`, `microvms-core/src/session/mod.rs:115`).
-3. `POST exec/start` — `microvms-core/src/session/mod.rs:382`; the handle is built from the id the
-   daemon confirmed (`microvms-core/src/session/mod.rs:394`).
+   (`microvms-app/src/session/mod.rs:82`, `microvms-app/src/session/mod.rs:105`).
+3. `POST exec/start` — `microvms-app/src/session/mod.rs:323`; the handle is built from the id the
+   daemon confirmed (`microvms-app/src/session/mod.rs:335`).
 4. `spawn pgid` — the pgid is captured while `Child::id()` still answers
    (`agentd/src/exec.rs:1113`, `agentd/src/exec.rs:1119`).
 5. `register entry` — the registry insert makes the id addressable (`agentd/src/exec.rs:1141`).
@@ -61,27 +61,27 @@ Edges in order:
    live under one lock (`agentd/src/exec.rs:1366`, `agentd/src/exec.rs:255`).
 8. `GET ?offset=N` — `ExecHandle::attach` builds `/v1/exec/{id}/stream?offset=`, mints its own
    headers because the streaming path bypasses `Transport::request`, and is re-entered per
-   reconnect (`microvms-core/src/session/exec.rs:592`,
-   `microvms-core/src/session/exec.rs:600`, `microvms-core/src/session/exec.rs:491`).
+   reconnect (`microvms-app/src/session/exec.rs:595`,
+   `microvms-app/src/session/exec.rs:603`, `microvms-app/src/session/exec.rs:494`).
 9. `attach(offset)` — subscribe-before-snapshot, enforced by one lock so the unsafe order is not
    expressible from the handler (`agentd/src/exec.rs:474`, `agentd/src/exec.rs:293`).
 10. `output events` — base64 `output` frames carrying the offset of their first byte
     (`agentd/src/exec.rs:642`); a lagged or evicted range comes through as a typed `gap`
     (`agentd/src/exec.rs:656`).
 11. `bytes + cursor` — the cursor advances only past bytes handed over, and past a gap's `to`
-    (`microvms-core/src/session/exec.rs:526`, `microvms-core/src/session/exec.rs:543`);
+    (`microvms-app/src/session/exec.rs:529`, `microvms-app/src/session/exec.rs:546`);
     the CLI writes an NDJSON line plus the raw bytes
     (`microvms-cli/src/commands/attached.rs:268`).
 12. `exit event` — the terminal marker is written before the result slot, so a stream that sees
     `Finished` always finds an exit event (`agentd/src/exec.rs:535`,
     `agentd/src/exec.rs:1182`).
-13. `POST exec/ack` — `microvms-core/src/session/exec.rs:654`; `wait_and_ack` returns the ack's
-    result rather than a post-ack poll (`microvms-core/src/session/exec.rs:687`).
+13. `POST exec/ack` — `microvms-app/src/session/exec.rs:657`; `wait_and_ack` returns the ack's
+    result rather than a post-ack poll (`microvms-app/src/session/exec.rs:690`).
 14. `released output` — the result slot is taken once and `acked_at` is set while the slot lock is
     still held (`agentd/src/exec.rs:863`, `agentd/src/exec.rs:867`).
 
 Stdin is a separate request, never multiplexed onto this connection
-(`microvms-core/src/session/exec.rs:624`, `agentd/src/exec.rs:682`).
+(`microvms-app/src/session/exec.rs:627`, `agentd/src/exec.rs:682`).
 
 ## Tar upload and extraction
 
@@ -115,7 +115,7 @@ Participants:
 - `microvm cp --tar` — resolves direction from the `vm:` prefix and inspects no archive
   (`microvms-cli/src/commands/attached.rs:805`, `microvms-cli/src/commands/attached.rs:809`).
 - `Transport` — `files::upload_tar` plus the shared send path
-  (`microvms-core/src/session/files.rs:98`, `microvms-core/src/session/mod.rs:106`).
+  (`microvms-app/src/session/files.rs:98`, `microvms-app/src/session/mod.rs:96`).
 - `agentd fs routes` — `write_tar` (`agentd/src/fs.rs:1433`).
 - `disk Guard` — the reserve-aware probe, the body spool, and the pacer
   (`agentd/src/fs.rs:1454`, `agentd/src/fs.rs:872`, `agentd/src/disk.rs:170`).
@@ -128,7 +128,7 @@ Edges in order:
 1. `upload_tar()` — `microvms-cli/src/commands/attached.rs:829`.
 2. `PUT /v1/fs/tar` — content type `application/x-tar`; the client does not inspect the archive,
    so the daemon's extractor stays the only implementation of the member rules
-   (`microvms-core/src/session/files.rs:103`, `microvms-core/src/session/files.rs:94`).
+   (`microvms-app/src/session/files.rs:103`, `microvms-app/src/session/files.rs:94`).
 3. `preflight(root)` — run against the extraction root before the body is spooled, so an upload
    aimed at a full filesystem is refused without spending the wire time
    (`agentd/src/fs.rs:1459`).
@@ -186,8 +186,8 @@ sequenceDiagram
 Participants:
 
 - `Sandbox` — the client lifecycle object outside the VM
-  (`microvms-core/src/sandbox.rs:1056`).
-- `ControlPlane` — the signed AWS client (`microvms-core/src/control/microvm.rs:356`).
+  (`microvms-app/src/sandbox.rs:1072`).
+- `ControlPlane` — the signed AWS client (`microvms-app/src/control/microvm.rs:356`).
 - `AWS lambda-microvms` — the service, which calls the hook over loopback inside the VM
   (`agentd/src/routes.rs:168`).
 - `agentd open router` — the unauthenticated half of the router, holding the lifecycle hooks
@@ -195,19 +195,19 @@ Participants:
 - `AppState` — the one-shot token slot and the launch-environment map
   (`agentd/src/state.rs:202`).
 - `Session` — the client bound to the reported endpoint with the same token
-  (`microvms-core/src/sandbox.rs:1138`).
+  (`microvms-app/src/sandbox.rs:1160`).
 - `agentd auth guard` — `require_token`, applied as a `route_layer` over every control route
   (`agentd/src/auth.rs:62`, `agentd/src/routes.rs:66`).
 
 Edges in order:
 
 1. `mint 32 bytes` — 32 bytes of `/dev/urandom` rendered as 64 hex characters, unless the caller
-   supplied a token (`microvms-core/src/sandbox.rs:1056`,
-   `microvms-core/src/sandbox.rs:1824`).
+   supplied a token (`microvms-app/src/sandbox.rs:1072`,
+   `microvms-app/src/sandbox.rs:1803`).
 2. `run_microvm()` — the payload is validated before the launch, so an over-ceiling one fails with
    a byte count rather than as a service `ValidationException`
-   (`microvms-core/src/sandbox.rs:1071`, `microvms-core/src/sandbox.rs:1095`).
-3. `RunMicrovm` — `microvms-core/src/control/microvm.rs:423`.
+   (`microvms-app/src/sandbox.rs:1090`, `microvms-app/src/sandbox.rs:1114`).
+3. `RunMicrovm` — `microvms-app/src/control/microvm.rs:423`.
 4. `POST run hook` — unauthenticated by necessity: the platform has no credential to present, and
    its request arrives over loopback indistinguishably from an in-VM process
    (`agentd/src/routes.rs:168`, `agentd/src/routes.rs:178`). A body that is not JSON is 400,
@@ -218,14 +218,14 @@ Edges in order:
    first caller (`agentd/src/state.rs:210`).
 6. `200 installed` — an identical replay is also 200, because the platform may retry its own hook;
    a different token is 409 (`agentd/src/routes.rs:224`, `agentd/src/routes.rs:230`).
-7. `wait RUNNING` — `microvms-core/src/sandbox.rs:1168`.
+7. `wait RUNNING` — `microvms-app/src/sandbox.rs:1190`.
 8. `GetMicrovm` — polled until RUNNING, failing fast on a terminal state
-   (`microvms-core/src/control/microvm.rs:459`, `microvms-core/src/control/microvm.rs:465`,
-   `microvms-core/src/control/microvm.rs:510`).
+   (`microvms-app/src/control/microvm.rs:459`, `microvms-app/src/control/microvm.rs:465`,
+   `microvms-app/src/control/microvm.rs:510`).
 9. `RUNNING + url` — RUNNING is what reports the hook succeeded, so this is where
-   `token_installed` and `bootstrap_count` move (`microvms-core/src/sandbox.rs:1176`).
+   `token_installed` and `bootstrap_count` move (`microvms-app/src/sandbox.rs:1198`).
 10. `builder(token)` — the same minted token becomes the session bearer
-    (`microvms-core/src/sandbox.rs:1138`).
+    (`microvms-app/src/sandbox.rs:1160`).
 11. `Bearer request` — the guard runs before the body is polled, and drains a bounded prefix on
     rejection (`agentd/src/auth.rs:62`, `agentd/src/auth.rs:87`).
 12. `token_matches()` — constant-time comparison against the installed slot

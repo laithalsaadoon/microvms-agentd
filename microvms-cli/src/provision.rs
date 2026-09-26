@@ -120,7 +120,7 @@ fn refusal(error: ProvisionError) -> CliError {
 
 #[cfg(test)]
 mod tests {
-    //! The policy's own tests moved to `microvms-core/src/provision.rs` with the policy;
+    //! The policy's own tests moved to `microvms-edges/src/provision.rs` with the policy;
     //! these pin what this module adds: the envelope's labels and the exit-code rows.
     use super::*;
     use std::cell::Cell;

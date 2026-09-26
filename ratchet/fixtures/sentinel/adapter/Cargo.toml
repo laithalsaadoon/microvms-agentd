@@ -7,6 +7,7 @@ publish = false
 
 [dependencies]
 kernel = { path = "../kernel" }
+root = { path = "../root" }
 serde = "1"
 tar = "0.4"
 

@@ -1,0 +1,116 @@
+[package]
+name = "microvms-edges"
+version = "0.10.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = true
+description = "The MicroVMs client's production port implementations: SigV4 over reqwest, the tunnel, the name registry, the clock and entropy"
+readme = "README.md"
+keywords = ["microvms", "lambda", "aws", "sandbox", "microvm"]
+categories = ["api-bindings", "virtualization"]
+
+# The one library crate in the workspace that may depend on a crate doing network, AWS,
+# filesystem, subprocess, clock or entropy I/O (ARCH-7). It has no set in
+# `arch/placement.toml`: this is where those crates belong. Each one implements a port that
+# `microvms-app` declares, and `microvms-core` wires them in.
+[dependencies]
+microvms-app = { version = "0.10.0", path = "../microvms-app" }
+# The rules the fetch checks a binary against (`provision`'s ELF machine), which the app has no
+# use for and so doesn't re-export.
+microvms-domain = { version = "0.10.0", path = "../microvms-domain" }
+protocol = { package = "microvms-protocol", version = "0.10.0", path = "../protocol" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# ── the control plane (T-W2-4) ──────────────────────────────────────────────
+# Hand-signed rather than a generated SDK: `lambda-microvms` has no aws-sdk-rust
+# crate, so the choice is between vendoring smithy codegen and signing 24
+# rest-json operations by hand. `default-https-client` stays ON: the credential
+# chain does its own HTTP (IMDS, SSO, STS) through smithy's client and panics at
+# load() without one — every ControlPlane::new in the wild hit that before this
+# feature returned. Two HTTP stacks (smithy for credentials, reqwest for the
+# service calls) is the price; both sit on rustls, so it is one TLS
+# implementation, and this crate runs on the developer host or harness — agentd
+# is what ships into the MicroVM image, not this.
+aws-config = { version = "1.10", default-features = false, features = [
+    "default-https-client",
+    "rt-tokio",
+    "credentials-process",
+    "sso",
+] }
+aws-credential-types = "1.3"
+# Default features are `sign-http` + `http1`, which is the http-1.x path:
+# `apply_to_request_http1x` mutates an `http::Request` that reqwest 0.13 consumes
+# through `TryFrom`. Anything else means converting between two http versions on
+# every call.
+aws-sigv4 = "1.5"
+# `rustls` rather than `default-tls`: the daemon ships to an aarch64 musl target
+# and a native-tls build there needs an OpenSSL the image does not carry. `json`
+# off deliberately — the control plane's rest-json bodies go through serde_json
+# directly so the error path can read a raw body, which is the only way to see an
+# AccessDeniedException whose message field is null (TRAP-6).
+reqwest = { version = "0.13", default-features = false, features = [
+    "rustls",
+    "http2",
+    "charset",
+    "stream",
+] }
+http = "1.5"
+# Retry with jitter for the STS and S3 calls, as the control plane retries its own.
+backon = { version = "1.6", features = ["tokio-sleep"] }
+# The daemon binary's checksum in `provision`.
+sha2 = "0.11"
+
+# ── the in-VM session (T-W2-5) ──────────────────────────────────────────────
+# `net` is the port forwarder's listener (`session::forward`) and the tunnel's socket. It lives
+# here rather than in the CLI because `microvms-cli/tests/thinness.rs` forbids an HTTP stack
+# there, and a forwarder is an HTTP server.
+tokio = { version = "1.53", features = ["time", "sync", "io-util", "macros", "net"] }
+futures-util = "0.3"
+# The WebSocket client behind `session::tunnel`. Required rather than convenient: the
+# endpoint proxy takes a WebSocket's credential as `Sec-WebSocket-Protocol` values and has
+# no CONNECT method, so an upgrade replayed over the HTTPS path is answered 400 by the proxy
+# (measured 2026-08-29, docs/PLATFORM.md). Carrying TCP therefore needs a real handshake,
+# which reqwest's client cannot perform. `rustls-tls-webpki-roots` matches the one TLS
+# implementation already in the tree — a native-tls build would need an OpenSSL the guest
+# image does not carry.
+tokio-tungstenite = { version = "0.30", default-features = false, features = [
+    "connect",
+    "handshake",
+    "rustls-tls-webpki-roots",
+] }
+base64 = "0.23"
+const-hex = "1.19"
+# The kernel CSPRNG behind one call, for `OsEntropy`: the agent token, idempotency nonces and
+# identity seeds. getrandom fails only if the OS pool is truly unavailable, which on Linux
+# means the kernel is broken.
+getrandom = "0.4"
+# The initiator half of the tunnel identity proof (#70 layer 3): Noise KK against
+# the per-VM key the launch delivered, so `--verify-identity` proves the far end is
+# the VM this host launched without trusting the endpoint proxy. The same feature
+# selection as agentd's, for the same measured reason (see agentd/Cargo.toml): the
+# `std` feature force-enables `ring`, whose build script needs a musl cross C
+# compiler this repo's targets do not assume.
+snow = { version = "0.10", default-features = false, features = [
+    "default-resolver",
+    "use-curve25519",
+    "use-chacha20poly1305",
+    "use-blake2",
+    "use-sha2",
+    "use-getrandom",
+] }
+
+[dev-dependencies]
+# The app's shared test doubles, for the forwarder's and tunnel's tests.
+microvms-app = { version = "0.10.0", path = "../microvms-app", features = ["test-support"] }
+# `provision_fuzz`: `bolero::check!` runs as an ordinary `#[test]` on stable and as a
+# coverage-guided target under `cargo bolero test`.
+bolero = "0.13"
+tokio = { version = "1.53", features = ["rt", "macros", "test-util"] }
+# Temp state directories for the provisioning tests: random names, cleanup on drop.
+tempfile = "3"
+
+[lints.rust]
+# No hand-written `unsafe` in this crate; a future one is a build error, not a scan finding.
+unsafe_code = "forbid"

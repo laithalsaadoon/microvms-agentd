@@ -60,7 +60,12 @@ use std::time::Duration;
 use base64::Engine as _;
 use futures_util::StreamExt as _;
 use futures_util::future::BoxFuture;
-use microvms_core::error::{Error, WireKind};
+use microvms_app::testing::{Answer, FakeControlPlane, microvm_response};
+use microvms_core::control::transport::Transport;
+use microvms_core::control::{ControlPlane, SystemClock, WaitOpts};
+use microvms_core::error::{Error, ErrorKind, WireKind};
+use microvms_core::prelude::*;
+use microvms_core::region::Region;
 use microvms_core::session::{
     ChunkSource, DEFAULT_AGENT_PORT, DEFAULT_REFRESH_AFTER, ExecEvent, HttpBackend, HttpRequest,
     HttpResponse, OpenStream, PROXY_AUTH_HEADER, PROXY_PORT_HEADER, ProxyAuth, ProxyToken, Session,
@@ -1449,6 +1454,68 @@ fn a_rebind_after_resume_sends_a_freshly_minted_token() -> turmoil::Result {
         Some("jwe-scoped-1"),
         "the request after a resume carried the pre-suspend token, whose rejection \
          reads exactly like a dead daemon"
+    );
+    Ok(())
+}
+
+/// The control plane's wait reaches its deadline in simulated time.
+///
+/// The production clock has to be the simulator's clock, and this is the control-plane half
+/// of the argument the session's token scenarios make. The plane's clock used to read
+/// `std::time::Instant`: under the simulator its sleeps advanced virtual time while its
+/// elapsed reading moved only with the host's real time, so a half-hour deadline never
+/// arrived and the simulation ran out of time first. A launch wait tested that way measures
+/// nothing about the deadline, however long the simulation.
+///
+/// The poll count pins the clock the deadline was measured on: a deadline read from a
+/// clock that runs faster or slower than the sleeps ends after a different number of polls.
+/// The control plane is the shared fake, in memory rather than behind the simulated network,
+/// because what's under test is the wait loop's clock, not a transport.
+#[test]
+fn a_control_plane_wait_reaches_its_deadline_in_simulated_time() -> turmoil::Result {
+    const TIMEOUT: Duration = Duration::from_secs(30 * 60);
+    const POLL: Duration = Duration::from_secs(5);
+
+    let mut sim = sim_for(0x5EED_0283, Duration::from_secs(60 * 60));
+    let transport = Arc::new(FakeControlPlane::new());
+    transport.answer("GetMicrovm", Answer::ok(microvm_response("PENDING", None)));
+    let observed = Arc::clone(&transport);
+    sim.client("harness", async move {
+        let plane = ControlPlane::with_transport(
+            transport as Arc<dyn Transport>,
+            Region::UsEast1,
+            Arc::new(SystemClock::new()),
+        );
+        let started = tokio::time::Instant::now();
+        let err = plane
+            .wait_for_running(
+                "mvm-abc123",
+                WaitOpts {
+                    timeout: TIMEOUT,
+                    poll_interval: POLL,
+                    ..WaitOpts::for_launch()
+                },
+            )
+            .await
+            .expect_err("a VM that never leaves PENDING can't be waited into RUNNING");
+        assert_eq!(err.kind(), ErrorKind::Timeout, "{err}");
+        assert_eq!(
+            started.elapsed(),
+            TIMEOUT,
+            "the deadline fired at a different simulated instant than the timeout"
+        );
+        Ok(())
+    });
+
+    sim.run()?;
+
+    // One poll at the start, then one after each sleep until the deadline.
+    let expected = (TIMEOUT.as_secs() / POLL.as_secs()) as usize + 1;
+    assert_eq!(observed.call_count("GetMicrovm"), expected);
+    assert_eq!(
+        observed.calls().len(),
+        expected,
+        "the wait asked for an operation it never needs"
     );
     Ok(())
 }

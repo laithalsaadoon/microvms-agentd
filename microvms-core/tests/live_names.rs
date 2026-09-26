@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use microvms_core::control::{ControlPlane, WaitOpts};
 use microvms_core::names::{FileNameStore, NameStore as _};
+use microvms_core::prelude::*;
 use microvms_core::region::Region;
 use microvms_core::sandbox::{Lifecycle, Sandbox, TeardownOpts};
 

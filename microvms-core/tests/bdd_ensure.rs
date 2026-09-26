@@ -18,14 +18,15 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use cucumber::{World, WriterExt, given, then, when, writer};
 use futures_util::future::BoxFuture;
+use microvms_app::testing::YieldingClock;
 use microvms_core::control::artifact::{WrapOptions, wrap_dockerfile};
 use microvms_core::control::ensure::{EnsureImageRequest, EnsuredImage, prepare};
 use microvms_core::control::transport::{Call, Reply, Transport};
-use microvms_core::control::{BuildContext, BuildServices, Clock, ControlPlane};
+use microvms_core::control::{BuildContext, BuildServices, ControlPlane};
+use microvms_core::prelude::*;
 use microvms_core::sandbox::Sandbox;
 use microvms_core::{Error, Region, SizeClass};
 
@@ -283,24 +284,6 @@ impl Transport for Platform {
     }
 }
 
-/// Time that passes only when slept through, and lets the other caller run meanwhile.
-#[derive(Debug, Default)]
-struct InstantClock(Mutex<Duration>);
-
-impl Clock for InstantClock {
-    fn elapsed(&self) -> Duration {
-        *self.0.lock().expect("not poisoned")
-    }
-
-    fn sleep(
-        &self,
-        duration: Duration,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
-        *self.0.lock().expect("not poisoned") += duration;
-        Box::pin(tokio::task::yield_now())
-    }
-}
-
 // ── STS and S3 ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Default)]
@@ -392,7 +375,8 @@ impl Ensure {
         ControlPlane::with_transport(
             self.platform.clone(),
             Region::UsEast1,
-            Arc::new(InstantClock::default()),
+            // Time that passes only when slept through, and lets the other caller run meanwhile.
+            Arc::new(YieldingClock::new()),
         )
     }
 

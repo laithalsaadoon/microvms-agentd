@@ -68,8 +68,8 @@ the client's stream idle timeout, a port of 0, a workdir that isn't one absolute
 path, and `inherit_workdir` with no `WORKDIR` anywhere.
 `BaseImage::from_dockerfile` pairs the managed base's `name` with the Dockerfile's
 own first `FROM`, so the create call's `FROM` guard passes by construction. Both are
-local and make no AWS call. `microvms-core/src/control/artifact.rs:562-611`,
-`microvms-core/src/control/artifact.rs:375-408`, `microvms-core/src/control/artifact.rs:536-550`.
+local and make no AWS call. `microvms-app/src/control/artifact.rs:562-611`,
+`microvms-app/src/control/artifact.rs:375-408`, `microvms-app/src/control/artifact.rs:536-550`.
 
 ### provision::agentd
 
@@ -80,8 +80,8 @@ this repository's release asset, proven with `gh attestation verify` when `gh`
 can run, else checked against the release's `SHA256SUMS`; a fetch it can't verify
 is an error. Every binary it returns is checked to be an aarch64 ELF, and the
 version defaults to the core's own, never "latest". It blocks, because a fetch runs
-subprocesses. `microvms-core/src/provision.rs:1-51`, `microvms-core/src/provision.rs:179-190`,
-`microvms-core/src/provision.rs:880-890`.
+subprocesses. `microvms-edges/src/provision.rs:1-51`, `microvms-edges/src/provision.rs:179-190`,
+`microvms-edges/src/provision.rs:880-890`.
 
 ### Sandbox::ensure_image
 
@@ -92,9 +92,9 @@ one image. It reuses a ready image, waits out one a sibling is building, deletes
 failed one (any one under `force`), or builds, uploading the artifact only when a
 build is needed. Everything local runs before the first call, so a request the
 client refuses costs nothing. It returns `EnsuredImage { image, reused,
-artifact_uri, uploaded, warnings }`. `microvms-core/src/sandbox.rs:891-924`,
-`microvms-core/src/control/ensure.rs:1-40`, `microvms-core/src/control/ensure.rs:240-268`,
-`microvms-core/src/control/ensure.rs:297-311`.
+artifact_uri, uploaded, warnings }`. `microvms-app/src/sandbox.rs:905-940`,
+`microvms-app/src/control/ensure.rs:1-40`, `microvms-app/src/control/ensure.rs:240-268`,
+`microvms-app/src/control/ensure.rs:297-311`.
 
 ### Session::run_to_completion
 
@@ -104,8 +104,8 @@ stream that ends without its `exit` event falls back to wait-and-ack, and on the
 client deadline (the request's `timeout_sec` plus `client_grace`, 60 seconds by
 default) it kills the process group, acks within the grace, and synthesizes exit
 code 124 when even that fails. A callback that answers `Break` stops delivery, and
-the exec is still waited for and acked. `microvms-core/src/session/complete.rs:1-58`,
-`microvms-core/src/session/complete.rs:261-272`.
+the exec is still waited for and acked. `microvms-app/src/session/complete.rs:1-58`,
+`microvms-app/src/session/complete.rs:261-272`.
 
 ### Sandbox::detach
 
@@ -114,8 +114,8 @@ endpoint, region, port }` plus the agent token through `agent_token()`, which
 `Debug` redacts. The VM keeps running and nothing is sent to AWS; the sandbox that
 detached refuses every later lifecycle call, and it drops without the leak warning.
 It's refused (`Precondition`) when there's no live VM to hand off. The adopting
-process passes those fields to `Sandbox::adopt`. `microvms-core/src/sandbox.rs:662-679`,
-`microvms-core/src/sandbox.rs:1368-1424`.
+process passes those fields to `Sandbox::adopt`. `microvms-app/src/sandbox.rs:682-699`,
+`microvms-app/src/sandbox.rs:1348-1404`.
 
 ### Egress posture
 
@@ -125,8 +125,8 @@ the refusal it would raise. The posture is `Open` (`INTERNET_EGRESS` requested),
 `Unsealed` (the default), or `BestEffort` (the advisory in-guest deny); it never
 answers `Sealed`, because no launch option proves VPC routing without an internet or
 NAT gateway. `Session::egress_posture` carries the launched session's answer, which
-is also the CLI envelope's `egressPosture`. `microvms-core/src/control/connector.rs:119-143`,
-`microvms-core/src/control/connector.rs:180-196`, `microvms-core/src/session/mod.rs:326-328`.
+is also the CLI envelope's `egressPosture`. `microvms-app/src/control/connector.rs:119-143`,
+`microvms-app/src/control/connector.rs:180-196`, `microvms-app/src/session/mod.rs:267-269`.
 
 ### preflight and SizeClass::from_request
 
@@ -138,8 +138,8 @@ true exactly when no fatal check failed or was skipped. It doesn't check roles,
 buckets, quotas, or connectors. `SizeClass::from_request(cpus, memory_mib)` returns
 the smallest class whose baseline covers the request, `SizeClass::DEFAULT` when
 neither axis asks for anything, and an invalid-argument refusal naming the largest
-class when no class covers it. `microvms-core/src/preflight.rs:1-32`,
-`microvms-core/src/preflight.rs:105-123`, `microvms-core/src/preflight.rs:203-213`,
+class when no class covers it. `microvms-app/src/preflight.rs:1-32`,
+`microvms-app/src/preflight.rs:93-111`, `microvms-app/src/preflight.rs:191-201`,
 `microvms-domain/src/sizing.rs:170-212`.
 
 ## microvms-core
@@ -203,7 +203,7 @@ pub struct Session {
 
 The control API of one running MicroVM.
 
-`microvms-core/src/session/mod.rs:219`
+`microvms-app/src/session/mod.rs:209`
 
 ### ControlPlane
 
@@ -213,7 +213,7 @@ pub struct ControlPlane {
 
 The control-plane client, holding its transport and clock behind `Arc` so a caller keeping one across tasks does not need a second credential chain.
 
-`microvms-core/src/control/mod.rs:181`
+`microvms-app/src/control/mod.rs:130`
 
 ### Sandbox
 
@@ -223,7 +223,7 @@ pub struct Sandbox {
 
 One MicroVM's whole life: the state machine, the suspended window, and explicit teardown.
 
-`microvms-core/src/sandbox.rs:582`
+`microvms-app/src/sandbox.rs:602`
 
 ### RunRequest
 
@@ -261,7 +261,7 @@ pub struct AgentVm {
 
 One VM with coding agents in it: the `Sandbox` plus the `AgentSpec`s it was built for, with `image_request`, `build`, `launch_request`, `launch`, `install_access`, `prompt`, and `terminate` as the L3 steps over the lifecycle. The free functions beside it (`image_request_for`, `launch_request_for`, `install_access`, `prompt`, `installed_agents`, `spec_for`) are the same steps for a caller holding the sandbox and the specs separately, which is how the bindings drive it; `agents::bedrock::mint` is the in-process Bedrock bearer token.
 
-`microvms-core/src/agents/mod.rs`
+`microvms-app/src/agents/mod.rs`
 
 ### WireKind
 
@@ -293,7 +293,7 @@ pub struct Transport {
 
 A backend, the agent token, and the proxy auth every request needs, kept separate from `Session` because `ExecHandle` needs it and holding a whole session would make the two mutually recursive.
 
-`microvms-core/src/session/mod.rs:84`
+`microvms-app/src/session/mod.rs:74`
 
 ### BuildHookTimeout
 
@@ -325,7 +325,7 @@ pub struct ExecHandle {
 
 One exec addressed by its caller-minted id, which is also the idempotency key, so rebuilding a handle with the same id after a process restart still addresses the same server-side exec.
 
-`microvms-core/src/session/exec.rs:329`
+`microvms-app/src/session/exec.rs:332`
 
 ### RateTable
 
@@ -362,9 +362,9 @@ pub struct ExecResult {
 }
 ```
 
-An exec's phase and, once it has one, its outcome — a thin wrapper over the daemon's `PollResponse` rather than a re-modelling of it, so the two cannot disagree. `client_deadline` is the one field the wire doesn't carry: what the client did when its own deadline expired, set only on a result `Session::run_to_completion` returned after one. `posix_exit_code()` is the code a POSIX shell would report (124 for any timeout, the daemon's or the client's; 128 plus the signal for another signal death; otherwise the exit code), and `notes()` lists one line per condition worth telling a reader (truncated output, the daemon's deadline, writers still alive, the client deadline). The bindings carry both, plus `synthesized`. `microvms-core/src/session/exec.rs:124-156`, `microvms-core/src/session/exec.rs:158-209`.
+An exec's phase and, once it has one, its outcome — a thin wrapper over the daemon's `PollResponse` rather than a re-modelling of it, so the two cannot disagree. `client_deadline` is the one field the wire doesn't carry: what the client did when its own deadline expired, set only on a result `Session::run_to_completion` returned after one. `posix_exit_code()` is the code a POSIX shell would report (124 for any timeout, the daemon's or the client's; 128 plus the signal for another signal death; otherwise the exit code), and `notes()` lists one line per condition worth telling a reader (truncated output, the daemon's deadline, writers still alive, the client deadline). The bindings carry both, plus `synthesized`. `microvms-app/src/session/exec.rs:124-156`, `microvms-app/src/session/exec.rs:158-209`.
 
-`microvms-core/src/session/exec.rs:66-77`
+`microvms-app/src/session/exec.rs:66-77`
 
 ### Image
 
@@ -375,7 +375,7 @@ pub struct Image {
 
 A built image, and the log group the service created alongside it.
 
-`microvms-core/src/control/image.rs:58-59`
+`microvms-app/src/control/image.rs:58-59`
 
 ## protocol
 

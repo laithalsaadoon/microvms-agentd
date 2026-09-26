@@ -1,16 +1,26 @@
-# Each driving adapter's allowed direct dependencies, normal and build (#285), and the domain's
-# (#282). Dev dependencies are out of scope: they never ship.
+# Each driving adapter's allowed direct dependencies, normal and build (#285), and those of the
+# layers below them that have a set: the domain (#282), the app and core (#283). Dev dependencies
+# are out of scope: they never ship.
 #
 # Every adapter name is a parsing, rendering, or host-bridge crate, or the one edge onto core. A
 # direct dependency outside its crate's set is placement drift: `mise run ratchet:check` reports
 # it, and `ratchet/drift.json` records it with the issue that removes it. A set can shrink, but
 # the check refuses a crate added to a set the base branch already has, since that would clear a
-# finding without a reason: move the work below the adapter, or record a decision with its
+# finding without a reason: move the work to the layer whose job it is, or record a decision with its
 # reason. A new table for a crate the base has no set for is fine.
 #
-# The domain's set is every crate it may use, and each one computes or encodes: no network,
-# files, subprocess, environment, clock, or entropy (ARCH-6). It never carries drift or a
-# decision. `microvms-cli/tests/dependency_direction.rs` asserts it exactly.
+# A layer's set is every crate it may use, and it never carries drift or a decision.
+# `microvms-cli/tests/dependency_direction.rs` asserts each one exactly, and the domain's and the
+# app's declared features too.
+#
+# - The domain's crates compute or encode: no network, files, subprocess, environment, clock, or
+#   entropy (ARCH-6).
+# - The app's add scheduling (tokio without `net`, `fs` or `process`, and backon's retry) to
+#   that. None of them reaches the network, AWS, files, a subprocess, the wall clock, or the OS
+#   random pool (ARCH-7).
+# - Core's are the layers themselves, since it only composes them (ARCH-8).
+#
+# `microvms-edges` has no set: it's the one library crate where the I/O crates belong.
 
 [microvms-cli]
 normal = ["microvms-core", "clap", "ratatui", "serde", "serde_json", "tokio", "toml", "unicode-width"]
@@ -24,3 +34,9 @@ build = ["napi-build"]
 
 [microvms-domain]
 normal = ["microvms-protocol", "base64", "const-hex", "jiff", "rust_decimal", "rust_decimal_macros", "serde", "serde_json", "thiserror", "x25519-dalek"]
+
+[microvms-app]
+normal = ["microvms-domain", "microvms-protocol", "backon", "base64", "const-hex", "futures-util", "percent-encoding", "serde", "serde_json", "sha2", "tokio", "zip"]
+
+[microvms-core]
+normal = ["microvms-app", "microvms-domain", "microvms-edges", "microvms-protocol"]

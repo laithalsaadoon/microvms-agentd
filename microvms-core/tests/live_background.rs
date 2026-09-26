@@ -7,6 +7,7 @@ use std::io::Write;
 use std::time::Duration;
 
 use microvms_core::control::{ControlPlane, RunHookPayload, RunMicrovmRequest, WaitOpts, token};
+use microvms_core::prelude::*;
 use microvms_core::region::Region;
 
 #[tokio::test]

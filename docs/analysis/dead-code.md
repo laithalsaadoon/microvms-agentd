@@ -41,24 +41,24 @@ trait methods but not associated types. No dead-code analyzer is integrated in t
 
 | Symbol | Path | Last modified |
 | --- | --- | --- |
-| `SessionBuilder::with_timeout` | `microvms-core/src/session/mod.rs:508` | 2026-08-15 |
+| `SessionBuilder::with_timeout` | `microvms-app/src/session/mod.rs:449` | 2026-08-15 |
 
 **Confidence: high.** `git grep -n "with_timeout\|withTimeout" -- .` over the whole
 git-tracked tree returns exactly one line — the declaration. Every sibling on the same
-builder has a caller: `with_minter` (`microvms-core/src/session/mod.rs:479`) from
-`microvms-cli/src/seam.rs`, `microvms-core/src/sandbox.rs`, and
+builder has a caller: `with_minter` (`microvms-app/src/session/mod.rs:420`) from
+`microvms-cli/src/seam.rs`, `microvms-app/src/sandbox.rs`, and
 `microvms-core/tests/turmoil_client.rs`; `with_proxy_auth`
-(`microvms-core/src/session/mod.rs:487`) from `microvms-core/tests/turmoil_client.rs`;
-`with_backend` (`microvms-core/src/session/mod.rs:494`) from `microvms-cli/src/guards.rs`
+(`microvms-app/src/session/mod.rs:428`) from `microvms-core/tests/turmoil_client.rs`;
+`with_backend` (`microvms-app/src/session/mod.rs:435`) from `microvms-cli/src/guards.rs`
 and `microvms-core/tests/turmoil_client.rs`; `with_port`
-(`microvms-core/src/session/mod.rs:501`) from `microvms-cli/src/seam.rs` and
-`microvms-core/src/sandbox.rs`.
+(`microvms-app/src/session/mod.rs:442`) from `microvms-cli/src/seam.rs` and
+`microvms-app/src/sandbox.rs`.
 
 The field it writes is live — only the setter is unreached. `SessionBuilder::build` reads
-`self.timeout` at `microvms-core/src/session/mod.rs:517` and `:529`, and `Session::run`
-back-fills a per-request `None` from it at `microvms-core/src/session/mod.rs:119-120`.
-`Session::builder` is the sole constructor (`microvms-core/src/session/mod.rs:230-231`) and
-seeds every path with `DEFAULT_REQUEST_TIMEOUT` (`microvms-core/src/session/mod.rs:237`).
+`self.timeout` at `microvms-app/src/session/mod.rs:458` and `:470`, and `Session::run`
+back-fills a per-request `None` from it at `microvms-app/src/session/mod.rs:109-110`.
+`Session::builder` is the sole constructor (`microvms-app/src/session/mod.rs:223-224`) and
+seeds every path with `DEFAULT_REQUEST_TIMEOUT` (`microvms-app/src/session/mod.rs:230`).
 
 **What would falsify this.** Three conditions hold; any one of them failing moves this row
 out of the table.
@@ -73,7 +73,7 @@ out of the table.
    no `#[pymethods]`.
 
 **Related defect in the same construct.** The builder's doc comment at
-`microvms-core/src/session/mod.rs:229` reads "A builder, for the cases that need a port, a
+`microvms-app/src/session/mod.rs:222` reads "A builder, for the cases that need a port, a
 timeout, or a custom backend." The port case and the backend case each have callers; the
 timeout case has none. The comment asserts a motivating case that does not exist in the tree.
 
@@ -96,8 +96,8 @@ files that a basename search calls orphans, each cleared against its real invoca
 Two files are compiled only under `cfg(test)` and are live test code, not dead source:
 `microvms-cli/src/guards.rs` (inner `#![cfg(test)]` at `microvms-cli/src/guards.rs:20`, plus
 `#[cfg(test)] mod guards;` at `microvms-cli/src/main.rs:36-37`) and
-`microvms-core/src/control/fake.rs` (`#[cfg(test)] pub(crate) mod fake;` at
-`microvms-core/src/control/mod.rs:928-929`).
+`microvms-app/src/control/fake.rs` (`#[cfg(test)] pub(crate) mod fake;` at
+`microvms-app/src/control/mod.rs:900-901`).
 
 ## Dead imports
 

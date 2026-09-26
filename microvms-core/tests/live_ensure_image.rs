@@ -31,6 +31,7 @@ use microvms_core::control::artifact::{WrapOptions, wrap_dockerfile};
 use microvms_core::control::{
     BuildContext, BuildServices, ControlPlane, EnsureImageRequest, SignedBuildServices,
 };
+use microvms_core::prelude::*;
 use microvms_core::region::Region;
 use microvms_core::sandbox::{RunRequest, Sandbox, TeardownOpts};
 use serde_json::{Value, json};

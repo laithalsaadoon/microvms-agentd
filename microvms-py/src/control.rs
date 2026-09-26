@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
 use microvms_core::control::{ControlPlane, Microvm, MicrovmFilter, WaitOpts};
+use microvms_core::prelude::*;
 use pyo3::prelude::*;
 
 use crate::errors::PyCoreResult;

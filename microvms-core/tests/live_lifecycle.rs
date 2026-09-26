@@ -6,6 +6,7 @@
 use std::time::Duration;
 
 use microvms_core::control::{ControlPlane, MicrovmFilter, WaitOpts, token};
+use microvms_core::prelude::*;
 use microvms_core::region::Region;
 use microvms_core::sandbox::{RunRequest, Sandbox, TeardownOpts};
 

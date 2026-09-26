@@ -126,6 +126,10 @@ pkg-fmt = "tgz"
 pkg-fmt = "zip"
 
 [dev-dependencies]
+# The same core, with the shared test doubles (`microvms_core::testing`) the guards script it
+# through. The version is here because `check-publishable.py` refuses a versionless path
+# dependency of any kind, and resolver 3 keeps the feature out of a normal build.
+microvms-core = { version = "0.10.0", path = "../microvms-core", features = ["test-support"] }
 # Temp files/dirs for the test suites: random names with O_EXCL creation and
 # guaranteed cleanup on drop. Replaces eight hand-rolled pid+thread-id helpers
 # that deleted-then-created by fixed name.

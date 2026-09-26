@@ -22,17 +22,19 @@ on:
       - 'agentd/src/fs.rs'
       - 'microvms-cli/src/envelope.rs'
       - 'microvms-cli/src/closed_output*.rs'
-      - 'microvms-core/src/provision*.rs'
+      # The fetch and its parsers moved to the edges and the use cases to the app in #283.
+      - 'microvms-edges/src/provision*.rs'
       # `elf_machine`, which `provision_fuzz::elf` drives, lives in the domain since #282.
       - 'microvms-domain/src/provision.rs'
-      - 'microvms-core/src/control/artifact.rs'
+      - 'microvms-app/src/control/artifact.rs'
       - 'microvms-core/tests/wrap_fuzz.rs'
-      - 'microvms-core/src/control/context.rs'
+      - 'microvms-app/src/control/context.rs'
+      - 'microvms-edges/src/control/context.rs'
       - 'microvms-core/tests/context_fuzz.rs'
       - 'agentd/src/exec_start*.rs'
       - 'protocol/src/exec.rs'
-      - 'microvms-core/src/control/connector.rs'
-      - 'microvms-core/src/control/posture_fuzz.rs'
+      - 'microvms-app/src/control/connector.rs'
+      - 'microvms-app/src/control/posture_fuzz.rs'
       - '.github/workflows/fuzz.yml'
 
 permissions:
@@ -160,16 +162,16 @@ jobs:
       - name: fuzz the provisioning parsers
         run: |
           for target in version sums record elf; do
-            cargo +nightly bolero test "provision_fuzz::$target" -p microvms-core -T 30s
+            cargo +nightly bolero test "provision_fuzz::$target" -p microvms-edges -T 30s
           done
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: failure()
         with:
           name: provision-fuzz-crashes
-          path: microvms-core/src/__fuzz__/
+          path: microvms-edges/src/__fuzz__/
           if-no-files-found: ignore
 
-  # The core's egress-posture harness (BIND-11..13; #227): the request-side answer against the
+  # The app's egress-posture harness (BIND-11..13; #227): the request-side answer against the
   # launch over arbitrary options. Same shape as the closed-output job.
   egress-posture:
     name: fuzz (control::posture_fuzz::posture_matches_the_launch, bounded)
@@ -184,12 +186,12 @@ jobs:
       - name: install cargo-bolero
         run: cargo install cargo-bolero --version 0.13.4 --locked
       - name: fuzz the egress-posture harness for two minutes
-        run: cargo +nightly bolero test control::posture_fuzz::posture_matches_the_launch -p microvms-core -T 120s
+        run: cargo +nightly bolero test control::posture_fuzz::posture_matches_the_launch -p microvms-app -T 120s
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: failure()
         with:
           name: egress-posture-fuzz-crashes
-          path: microvms-core/src/control/__fuzz__/
+          path: microvms-app/src/control/__fuzz__/
           if-no-files-found: ignore
 
   # The build context, the context hash and the artifact key (IMAGE-6..IMAGE-8; #221),
