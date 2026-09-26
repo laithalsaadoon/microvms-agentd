@@ -1,8 +1,8 @@
 # Agent VMs: the L3 helpers over the primitives
 
 Status: specified and built 2026-09-10. This document is the specification the code in
-`microvms-core/src/agents/` and the `agent-up` / `agent-prompt` commands implement, and
-the record of the scope decision it changed.
+`microvms-app/src/agents/`, `microvms-edges/src/agents/` and the `agent-up` / `agent-prompt`
+commands implement, and the record of the scope decision it changed.
 
 ## The three layers, named
 

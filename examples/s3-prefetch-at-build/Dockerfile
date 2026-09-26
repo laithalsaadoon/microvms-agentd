@@ -32,7 +32,7 @@ ENV PREFETCH_NO_SIGN="0"
 # The start wrapper is materialized here with printf because it cannot be
 # COPY'd: the build context `microvm build` uploads carries exactly two
 # members — this Dockerfile and the agentd binary
-# (microvms-core/src/control/artifact.rs) — so there is no file beside them
+# (microvms-app/src/control/artifact.rs) — so there is no file beside them
 # to copy. Issue #74 tracks widening that context; when it lands, this
 # becomes a COPY of a script shellcheck can see.
 #

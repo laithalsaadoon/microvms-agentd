@@ -79,6 +79,8 @@ pre-push:
       # the newest code. The Python client's path came off the list with the client.
       # `microvms-domain` joined when the service constraints and trap rules moved into it
       # (#282): it makes no call, but a changed constraint changes what core sends.
+      # `microvms-app` and `microvms-edges` joined when the use cases and the AWS path moved
+      # out of core (#283): the edges now hold every call the live tier makes.
       #
       # `git rev-parse --git-path` rather than the literal `.git/`, matching the writer in
       # `mise.toml`. In a worktree `.git` is a file, so the literal names a path inside a
@@ -93,7 +95,7 @@ pre-push:
           echo "      platform boundary — hooks, bootstrap, image build, identity."
           exit 0
         fi
-        changed=$(git diff --name-only "$(cat "$marker")" HEAD -- agentd/src microvms-domain/src microvms-core/src microvms-cli/src conformance 2>/dev/null | head -5)
+        changed=$(git diff --name-only "$(cat "$marker")" HEAD -- agentd/src microvms-domain/src microvms-app/src microvms-edges/src microvms-core/src microvms-cli/src conformance 2>/dev/null | head -5)
         if [ -n "$changed" ]; then
           echo "note: the daemon or its clients changed since the last live run:"
           echo "$changed" | sed 's/^/        /'

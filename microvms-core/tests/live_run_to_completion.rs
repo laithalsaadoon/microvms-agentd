@@ -13,6 +13,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use microvms_core::prelude::*;
 use microvms_core::protocol::exec::StartRequest;
 use microvms_core::region::Region;
 use microvms_core::session::{

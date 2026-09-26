@@ -39,11 +39,11 @@ of its modules into a foundation and a product surface, with
 `agents` as the one layer above them and `provision` beside the surface
 (`microvms-core/src/lib.rs:59-87`). `control` speaks
 hand-signed SigV4 rest-json because `lambda-microvms` has no SDK crate
-(`microvms-core/src/control/mod.rs:2-3`); `session` is
+(`microvms-app/src/control/mod.rs:2-3`); `session` is
 the in-VM client, carrying proxy auth and the byte-offset cursor that makes an interrupted
-stream resumable (`microvms-core/src/session/mod.rs:4-7`); `sandbox` keeps every lifecycle
+stream resumable (`microvms-app/src/session/mod.rs:4-7`); `sandbox` keeps every lifecycle
 field private so the Z3 proofs are proofs about the code
-(`microvms-core/src/sandbox.rs:11-17`); `cost` treats unpriced as a distinct variant rather
+(`microvms-app/src/sandbox.rs:11-17`); `cost` treats unpriced as a distinct variant rather
 than zero (`microvms-domain/src/cost.rs:22-27`).
 
 `microvms-cli` ships `microvm` and its subcommands
@@ -68,10 +68,10 @@ the trap ladder.
 | Toolchain and targets | `channel = "stable"`, `targets = ["aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl"]` | `rust-toolchain.toml:13-16` |
 | Shipping artifact | `lto`, `codegen-units = 1`, `panic = "unwind"`, `strip`, `opt-level = "z"` | `Cargo.toml:36-59` |
 | Daemon HTTP | `axum = "0.8.9"`; `tower-http` `"0.6"` with `limit` + `catch-panic` | `agentd/Cargo.toml:16`, `agentd/Cargo.toml:25` |
-| Async runtime | `tokio = "1.53"`, no `rt-multi-thread` in the daemon or the library | `agentd/Cargo.toml:26`, `microvms-core/Cargo.toml:104` |
-| AWS control plane | `reqwest = "0.13"` on `rustls`, `aws-sigv4 = "1.5"`, `aws-config = "1.10"` | `microvms-core/Cargo.toml:76`, `microvms-core/Cargo.toml:70`, `microvms-core/Cargo.toml:59` |
+| Async runtime | `tokio = "1.53"`, no `rt-multi-thread` in the daemon or the library | `agentd/Cargo.toml:35-45`, `microvms-app/Cargo.toml:33`, `microvms-edges/Cargo.toml:69` |
+| AWS control plane | `reqwest = "0.13"` on `rustls`, `aws-sigv4 = "1.5"`, `aws-config = "1.10"` | `microvms-edges/Cargo.toml:53-58`, `microvms-edges/Cargo.toml:47`, `microvms-edges/Cargo.toml:36-41` |
 | Wire schema | `schemars = "1.2.2"`, `default-features = false`, `derive` + `std` only | `protocol/Cargo.toml:16` |
-| Money | `rust_decimal = "1.42"` with `serde-with-str` | `microvms-core/Cargo.toml:46` |
+| Money | `rust_decimal = "1.42"` with `serde-with-str` | `microvms-domain/Cargo.toml:38` |
 | CLI surface | `clap = "4.6.6"` with `derive`; `ratatui = "0.30.2"` | `microvms-cli/Cargo.toml:55`, `microvms-cli/Cargo.toml:59` |
 | Bindings | `pyo3 = "0.29"` with `abi3-py39`; `napi = "3"` with `napi5` + `async` + `web_stream` | `microvms-py/Cargo.toml:38`, `microvms-js/Cargo.toml:44-48` |
 | Verification tiers | `stateright = "0.31"`, `turmoil = "0.7.2"`, `proptest = "1.11"` | `model/Cargo.toml:10`, `agentd/Cargo.toml:76`, `agentd/Cargo.toml:73` |
@@ -84,7 +84,10 @@ the trap ladder.
 flowchart LR
   protocol[protocol wire types]
   agentd[agentd daemon]
-  core[microvms-core]
+  domain[microvms-domain rules]
+  app[microvms-app use cases]
+  edges[microvms-edges port impls]
+  core[microvms-core composition root]
   cli[microvm binary]
   py[microvms-py PyO3]
   js[microvms-js napi]
@@ -92,6 +95,12 @@ flowchart LR
   conf[conformance suite]
 
   agentd --> protocol
+  domain --> protocol
+  app --> domain
+  edges --> app
+  core --> app
+  core --> edges
+  core --> domain
   core --> protocol
   cli --> core
   py --> core

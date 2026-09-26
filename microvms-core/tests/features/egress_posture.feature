@@ -2,7 +2,7 @@
 #
 # The behavior spec for BIND-11, BIND-12, and BIND-13 in spec/core.symspec.json (issue #227).
 # `model/src/posture.rs` checks the same requirements as a Stateright model, and the bolero
-# harness in `microvms-core/src/control/posture_fuzz.rs` fuzzes the decision against the launch.
+# harness in `microvms-app/src/control/posture_fuzz.rs` fuzzes the decision against the launch.
 # Run by `microvms-core/tests/bdd_posture.rs` against the core the bindings wrap; the launches
 # go through a scripted control plane, so no scenario makes an AWS call.
 #

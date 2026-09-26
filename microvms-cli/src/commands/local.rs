@@ -649,7 +649,7 @@ fn joined(value: &Value) -> String {
 /// # Adding a reader to core was assessed and refused, and not on grounds of size
 ///
 /// The mechanics are genuinely cheap. `FilterLogEvents` is one signed POST to
-/// `logs.<region>.amazonaws.com` and `microvms-core/src/control/transport.rs` already signs
+/// `logs.<region>.amazonaws.com` and `microvms-edges/src/control/transport.rs` already signs
 /// SigV4 over an arbitrary method, path, and JSON body. It looks like well under a hundred
 /// lines plus a recorder fake. Three things say no anyway, and the third is decisive.
 ///
@@ -823,7 +823,7 @@ pub fn constants<O: std::io::Write, E: std::io::Write>(
 /// # Reused, never duplicated
 ///
 /// The stanza comes from [`microvms_core::control::default_dockerfile`] — the same function
-/// `microvm build` bakes when no `--dockerfile` is given (`microvms-core/src/control/image.rs`,
+/// `microvm build` bakes when no `--dockerfile` is given (`microvms-app/src/control/image.rs`,
 /// `build_artifact_for`). A copy here would be a second Dockerfile that could drift from the
 /// one the default build produces, and the whole point of this command is that appending your
 /// own `RUN` layers to its output *is* the default build plus your layers.

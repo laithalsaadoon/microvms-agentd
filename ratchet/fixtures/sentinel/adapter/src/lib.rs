@@ -63,6 +63,15 @@ async fn an_async_test() {
 #[cfg(test)]
 impl Fetch for OnlyInTests {}
 
+// A feature that isn't the test doubles' ships, so this one is reported.
+#[cfg(feature = "tls")]
+impl kernel::Fetch for Tls {}
+
+#[cfg(feature = "test-support")]
+fn feature_only() {
+    std::process::Command::new("feature-only");
+}
+
 #[cfg(test)]
 mod helpers;
 mod session;

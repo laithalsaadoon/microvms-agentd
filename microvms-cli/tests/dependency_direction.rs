@@ -2,17 +2,17 @@
 //! **ARCH-1, ARCH-3, ARCH-4, ARCH-5, ARCH-6, and BIND-1**: the workspace's dependency edges,
 //! asserted exactly.
 //!
-//! Four requirements that are all the same claim from different sides — the CLI depends on core,
-//! core depends on neither the CLI nor the bindings, the bindings depend on core and not on the
-//! CLI, and nothing a binding needs lives in the CLI. Written as one file because they share a
-//! source: `cargo metadata`'s resolved graph.
+//! Requirements that are all the same claim from different sides: the CLI depends on core, core
+//! depends on neither the CLI nor the bindings, the bindings depend on core and not on the CLI,
+//! nothing a binding needs lives in the CLI, and each layer depends only on the layers below it.
+//! Written as one file because they share a source: `cargo metadata`'s resolved graph.
 //!
 //! # An exact edge set, not a set of absences
 //!
 //! `assert!(no edge from A to B)` passes when A has no dependencies at all — which is what a stub
-//! crate looks like. So the assertions below are equalities over the edges *between the four
-//! crates in question*, which is what makes them fail if `microvms-py` never grows its dependency
-//! on core as well as if it grows one on the CLI.
+//! crate looks like. So the assertions below are equalities over the edges *between our crates*,
+//! which is what makes them fail if `microvms-py` never grows its dependency on core as well as
+//! if it grows one on the CLI.
 //!
 //! # ARCH-5's witness is an absence, and the absence is checkable
 //!
@@ -23,17 +23,22 @@
 //!
 //! # The layers below the adapters
 //!
-//! `microvms-domain` holds the rules and does no I/O (ARCH-6), and core re-exports it (ARCH-1).
-//! Its edges among the workspace's crates are asserted the same way: exactly protocol, and
-//! core's include it.
+//! `microvms-domain` holds the rules and does no I/O (ARCH-6). `microvms-app` holds the use
+//! cases, written against ports, and `microvms-edges` holds the production port
+//! implementations, the one library crate allowed the I/O crates (ARCH-7). `microvms-core` is
+//! the composition root: it depends on the three and re-exports them (ARCH-1, ARCH-8). The edges
+//! among every workspace crate are asserted exactly, one row per member, so an edge that points
+//! the wrong way (the app onto the edges, the domain onto anything but protocol) fails naming
+//! both crates.
 //!
 //! # Each crate's allowed set
 //!
 //! The last tests go past the edges between our crates to every direct dependency of a driving
-//! adapter and of the domain, against its set in `arch/placement.toml` (#285). They read the
-//! ratchet's files rather than a copy of them. The adapter test covers each adapter the ratchet
-//! holds no placement drift for; the domain can't hold any. The domain's dependencies' declared
-//! features are asserted too, since a feature can add I/O to a crate the set already allows.
+//! adapter and of each layer with a set, against its set in `arch/placement.toml` (#285). They
+//! read the ratchet's files rather than a copy of them. The adapter test covers each adapter the
+//! ratchet holds no placement drift for; a layer can't hold any. The domain's and the app's
+//! dependencies' declared features are asserted too, since a feature can add I/O to a crate the
+//! set already allows: tokio's `net`, `fs` and `process` are the edges' and never the app's.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -209,31 +214,75 @@ fn edges_among_members(metadata: &cargo_metadata::Metadata, name: &str) -> BTree
         .collect()
 }
 
-/// **ARCH-1 and ARCH-6.** The domain depends on protocol and on no other crate of ours, and
-/// core depends on the domain.
+/// Every workspace member's edges onto the others, of every kind (dev included), by layer.
 ///
-/// The domain's half is what keeps it below everything: an edge onto core would hand it the
-/// control plane, the clock and the random pool through core's own dependencies. The core half
-/// is ARCH-1's re-export: a core that stopped depending on the domain would have copied it.
+/// Read top to bottom, each crate depends only on crates above it in this list. A dev edge
+/// counts: a test-only edge from the app onto the edges would let the app's tests lean on I/O
+/// the app itself refuses, and a dev edge upward is the one cycle cargo allows. The edges' dev
+/// edge onto the app turns on the app's `test-support` feature; it isn't a new direction.
+const MEMBER_EDGES: [(&str, &[&str]); 10] = [
+    ("microvms-protocol", &[]),
+    ("agentd-model", &[]),
+    ("agentd", &["microvms-protocol"]),
+    ("microvms-domain", &["microvms-protocol"]),
+    ("microvms-app", &["microvms-domain", "microvms-protocol"]),
+    (
+        "microvms-edges",
+        &["microvms-app", "microvms-domain", "microvms-protocol"],
+    ),
+    (
+        "microvms-core",
+        &[
+            "microvms-app",
+            "microvms-domain",
+            "microvms-edges",
+            "microvms-protocol",
+        ],
+    ),
+    ("microvms-cli", &["microvms-core"]),
+    ("microvms-py", &["microvms-core", "microvms-protocol"]),
+    ("microvms-js", &["microvms-core", "microvms-protocol"]),
+];
+
+/// **ARCH-1, ARCH-6, ARCH-7 and ARCH-8.** Each workspace member depends on exactly the crates
+/// of ours [`MEMBER_EDGES`] records for it.
 ///
-/// **Falsification**: add `microvms-core = { path = "../microvms-core" }` to the domain's
+/// The domain's row is what keeps it below everything: an edge onto the app or core would hand
+/// it the control plane, and one onto the edges the clock and the random pool. The app's row
+/// keeps the use cases off the production implementations, so they can't reach reqwest through
+/// the edges' types. Core's row is ARCH-1's re-export: a core that stopped depending on a layer
+/// would have copied it.
+///
+/// **Falsification**: add `microvms-edges = { path = "../microvms-edges" }` to the app's
 /// `[dev-dependencies]` and this goes red naming the edge. (A normal dependency is a cycle,
 /// which fails `cargo metadata` before any test runs.)
 #[test]
-fn the_domain_depends_only_on_protocol_and_core_depends_on_the_domain() {
+fn each_member_depends_on_exactly_the_crates_of_ours_its_layer_allows() {
     let metadata = metadata();
+    let members: BTreeSet<String> = metadata
+        .workspace_members
+        .iter()
+        .filter_map(|id| metadata.packages.iter().find(|package| package.id == *id))
+        .map(|package| package.name.to_string())
+        .collect();
+    let recorded: BTreeSet<String> = MEMBER_EDGES
+        .iter()
+        .map(|(name, _)| (*name).to_string())
+        .collect();
     assert_eq!(
-        edges_among_members(&metadata, "microvms-domain"),
-        set(&["microvms-protocol"]),
-        "microvms-domain must depend on microvms-protocol and on no other crate of ours. It \
-         performs no I/O (ARCH-6), and every other crate here does some or reaches one that does."
+        recorded, members,
+        "MEMBER_EDGES must have one row per workspace member"
     );
-    let core = edges_among_members(&metadata, "microvms-core");
-    assert!(
-        core.contains("microvms-domain"),
-        "microvms-core must depend on microvms-domain and re-export it (ARCH-1); its edges are \
-         {core:?}"
-    );
+    for (name, allowed) in MEMBER_EDGES {
+        assert_eq!(
+            edges_among_members(&metadata, name),
+            set(allowed),
+            "{name}'s dependencies among the workspace's crates. Each layer depends only on the \
+             ones below it: protocol, then the domain (no I/O, ARCH-6), then the app (use cases \
+             over ports, ARCH-7), then the edges (the ports' production implementations), then \
+             core (the composition root, ARCH-8), then the adapters."
+        );
+    }
 }
 
 /// The workspace's member list is the crates the architecture describes.
@@ -263,9 +312,11 @@ fn the_workspace_members_are_the_crates_the_architecture_names() {
             // `model/`'s *package* is `agentd-model`; the directory name is not the crate name,
             // which is exactly why this list is read out of the metadata rather than off `ls`.
             "agentd-model",
+            "microvms-app",
             "microvms-cli",
             "microvms-core",
             "microvms-domain",
+            "microvms-edges",
             "microvms-js",
             // `protocol/`'s *package* is `microvms-protocol` — the bare name is taken on
             // crates.io. Dependents rename it back to `protocol`, so this is the one place in
@@ -471,62 +522,76 @@ fn each_exact_adapter_depends_on_exactly_its_allowed_set() {
     }
 }
 
-/// **ARCH-6.** The domain depends directly on exactly its set in `arch/placement.toml`, normal
-/// and build, and `ratchet/drift.json` holds nothing for it.
+/// The layers below the adapters with an exact set in `arch/placement.toml`. None of them may
+/// carry placement drift or a decision: a layer that needs a crate outside its set needs a port,
+/// or the crate belongs in another layer.
+const LAYERS: [&str; 3] = ["microvms-domain", "microvms-app", "microvms-core"];
+
+/// **ARCH-6, ARCH-7 and ARCH-8.** Each layer below the adapters depends directly on exactly its
+/// set in `arch/placement.toml`, normal and build, and `ratchet/drift.json` holds nothing for it.
 ///
-/// The set is how the domain's I/O ban reaches past `std`: tokio, getrandom and reqwest can't be
-/// named in its clippy.toml one method at a time, and they don't need to be when they can't be
-/// dependencies. Exact both ways, like the adapters' sets: a crate added fails, and so does a
-/// listed crate the domain no longer uses. The ratchet reads the same table, so a crate added
-/// here is new placement drift there too, but the domain gets no entry and no decision: a
-/// domain that needs I/O needs a port.
+/// The set is how a layer's I/O ban reaches past `std`: tokio's `net`, getrandom and reqwest
+/// can't be named in a clippy.toml one method at a time, and they don't need to be when they
+/// can't be dependencies. Exact both ways, like the adapters' sets: a crate added fails, and so
+/// does a listed crate the layer no longer uses. The ratchet reads the same table, so a crate
+/// added here is new placement drift there too, but a layer gets no entry and no decision.
 ///
 /// **Falsification**: add `tokio = "1"` to the domain's `[dependencies]` and this goes red
 /// naming it. Delete `jiff` from `arch/placement.toml`'s domain set and it goes red on the crate
 /// outside the set.
 #[test]
-fn the_domain_depends_on_exactly_its_allowed_set() {
+fn each_layer_depends_on_exactly_its_allowed_set() {
     let records: Vec<String> = placement_records("entries")
         .into_iter()
         .chain(placement_records("decisions"))
-        .filter(|key| key.starts_with("microvms-domain -> "))
+        .filter(|key| {
+            LAYERS
+                .iter()
+                .any(|layer| key.starts_with(&format!("{layer} -> ")))
+        })
         .collect();
     assert!(
         records.is_empty(),
-        "ratchet/drift.json records placement for microvms-domain: {records:?}. The domain does \
-         no I/O (ARCH-6), so a dependency outside its set isn't drift to count; it's a port to \
-         add in microvms-core."
+        "ratchet/drift.json records placement for a layer below the adapters: {records:?}. A \
+         dependency outside a layer's set isn't drift to count; it's a port to add, or work that \
+         belongs in microvms-edges."
     );
 
     let metadata = metadata();
-    for (kind, cargo_kind) in [
-        ("normal", cargo_metadata::DependencyKind::Normal),
-        ("build", cargo_metadata::DependencyKind::Build),
-    ] {
-        let actual = direct(&metadata, "microvms-domain", cargo_kind);
-        let allowed = allowed("microvms-domain", kind);
-        let added: Vec<&String> = actual.difference(&allowed).collect();
-        let stale: Vec<&String> = allowed.difference(&actual).collect();
-        assert!(
-            added.is_empty() && stale.is_empty(),
-            "microvms-domain's direct {kind} dependencies differ from its set in \
-             arch/placement.toml. Outside the set: {added:?}. Listed but unused: {stale:?}. The \
-             domain computes and encodes and does no I/O (ARCH-6): a crate that reaches the \
-             network, files, a subprocess, the clock or entropy belongs in microvms-core behind \
-             a port. A crate listed but unused comes out of the set."
-        );
+    for layer in LAYERS {
+        for (kind, cargo_kind) in [
+            ("normal", cargo_metadata::DependencyKind::Normal),
+            ("build", cargo_metadata::DependencyKind::Build),
+        ] {
+            let actual = direct(&metadata, layer, cargo_kind);
+            let allowed = allowed(layer, kind);
+            let added: Vec<&String> = actual.difference(&allowed).collect();
+            let stale: Vec<&String> = allowed.difference(&actual).collect();
+            assert!(
+                added.is_empty() && stale.is_empty(),
+                "{layer}'s direct {kind} dependencies differ from its set in \
+                 arch/placement.toml. Outside the set: {added:?}. Listed but unused: {stale:?}. \
+                 Only microvms-edges may depend on a crate that reaches the network, AWS, files, \
+                 a subprocess, the clock or entropy (ARCH-7); the domain computes and encodes \
+                 (ARCH-6), and core composes the other layers (ARCH-8). A crate listed but \
+                 unused comes out of the set."
+            );
+        }
     }
 }
 
-/// What each of the domain's normal dependencies declares: whether it takes the crate's default
-/// features, and exactly which others it turns on.
+/// What each normal dependency of a layer with a feature table declares: whether it takes the
+/// crate's default features, and exactly which others it turns on.
 ///
 /// Listed here rather than in `arch/placement.toml` because the ratchet counts crates, not
 /// features, and its schema takes only the two name lists. The allowed set is by name, and a
 /// name says nothing about features: x25519-dalek's `getrandom` adds `StaticSecret::random`,
-/// and jiff's defaults add `tz-system`, which reads `TZ` and `/etc/localtime`. Neither changes
-/// a crate name, so neither would fail the set above.
-const DOMAIN_FEATURES: [(&str, bool, &[&str]); 10] = [
+/// jiff's defaults add `tz-system`, which reads `TZ` and `/etc/localtime`, and tokio's `net`,
+/// `fs` and `process` are sockets, files and subprocesses. None of them changes a crate name,
+/// so none would fail the set above.
+type Declared = (&'static str, bool, &'static [&'static str]);
+
+const DOMAIN_FEATURES: [Declared; 10] = [
     ("base64", true, &[]),
     ("const-hex", true, &[]),
     ("jiff", false, &["std"]),
@@ -539,75 +604,102 @@ const DOMAIN_FEATURES: [(&str, bool, &[&str]); 10] = [
     ("x25519-dalek", false, &["static_secrets"]),
 ];
 
-/// **ARCH-6.** Each of the domain's normal dependencies declares exactly the features
-/// [`DOMAIN_FEATURES`] records for it, in every table it appears in.
+/// The app's. tokio's row is the one ARCH-7 turns on: `time`, `sync`, `io-util`, `macros`, and
+/// `rt` for spawning onto the caller's runtime, never `net`, `fs` or `process`.
+const APP_FEATURES: [Declared; 12] = [
+    ("backon", true, &["tokio-sleep"]),
+    ("base64", true, &[]),
+    ("const-hex", true, &[]),
+    ("futures-util", true, &[]),
+    ("microvms-domain", true, &[]),
+    ("microvms-protocol", true, &[]),
+    ("percent-encoding", true, &[]),
+    ("serde", true, &["derive"]),
+    ("serde_json", true, &[]),
+    ("sha2", true, &[]),
+    ("tokio", true, &["io-util", "macros", "rt", "sync", "time"]),
+    ("zip", false, &["deflate"]),
+];
+
+/// The layers whose features are pinned, each with its table.
+const LAYER_FEATURES: [(&str, &[Declared]); 2] = [
+    ("microvms-domain", &DOMAIN_FEATURES),
+    ("microvms-app", &APP_FEATURES),
+];
+
+/// **ARCH-6 and ARCH-7.** Each normal dependency of the domain and of the app declares exactly
+/// the features [`LAYER_FEATURES`] records for it, in every table it appears in.
 ///
 /// Every declaration is read, not one per name, so a second entry under
-/// `[target.'cfg(unix)'.dependencies]` that turns a feature on fails too. This covers what the
-/// domain's own manifest asks for. Another member can still turn a feature on through
-/// workspace unification (agentd also depends on x25519-dalek 3), which is why the domain's
-/// `clippy.toml` bans the methods those features add as well.
+/// `[target.'cfg(unix)'.dependencies]` that turns a feature on fails too. This covers what each
+/// crate's own manifest asks for. Another member can still turn a feature on through workspace
+/// unification (agentd also depends on x25519-dalek 3, and the edges turn on tokio's `net`),
+/// which is why each crate's `clippy.toml` bans the items those features add as well.
 ///
-/// **Falsification**: set x25519-dalek's features to `["static_secrets", "getrandom"]`, or
-/// drop jiff's `default-features = false`, and this goes red naming the crate.
+/// **Falsification**: set x25519-dalek's features to `["static_secrets", "getrandom"]`, drop
+/// jiff's `default-features = false`, or add `"net"` to the app's tokio features, and this
+/// goes red naming the crate.
 #[test]
-fn the_domain_declares_exactly_the_features_it_is_allowed() {
+fn each_layer_declares_exactly_the_features_it_is_allowed() {
     let metadata = metadata();
-    let package = metadata
-        .packages
-        .iter()
-        .find(|package| package.name.as_str() == "microvms-domain")
-        .expect("a workspace member");
-    let recorded: std::collections::BTreeMap<&str, (bool, BTreeSet<String>)> = DOMAIN_FEATURES
-        .iter()
-        .map(|(name, defaults, features)| (*name, (*defaults, set(features))))
-        .collect();
-    let normal: Vec<&cargo_metadata::Dependency> = package
-        .dependencies
-        .iter()
-        .filter(|dependency| dependency.kind == cargo_metadata::DependencyKind::Normal)
-        .collect();
-    for dependency in &normal {
-        let declared = (
-            dependency.uses_default_features,
-            dependency
-                .features
-                .iter()
-                .cloned()
-                .collect::<BTreeSet<String>>(),
-        );
-        let target = dependency.target.as_ref().map_or_else(
-            || "[dependencies]".to_string(),
-            |target| format!("{target}"),
-        );
-        let Some(allowed) = recorded.get(dependency.name.as_str()) else {
-            panic!(
-                "microvms-domain depends on {} (in {target}), which DOMAIN_FEATURES doesn't \
-                 record. Record its default-features setting and features once it's in the \
-                 domain's set in arch/placement.toml.",
-                dependency.name
+    for (layer, table) in LAYER_FEATURES {
+        let package = metadata
+            .packages
+            .iter()
+            .find(|package| package.name.as_str() == layer)
+            .expect("a workspace member");
+        let recorded: std::collections::BTreeMap<&str, (bool, BTreeSet<String>)> = table
+            .iter()
+            .map(|(name, defaults, features)| (*name, (*defaults, set(features))))
+            .collect();
+        let normal: Vec<&cargo_metadata::Dependency> = package
+            .dependencies
+            .iter()
+            .filter(|dependency| dependency.kind == cargo_metadata::DependencyKind::Normal)
+            .collect();
+        for dependency in &normal {
+            let declared = (
+                dependency.uses_default_features,
+                dependency
+                    .features
+                    .iter()
+                    .cloned()
+                    .collect::<BTreeSet<String>>(),
             );
-        };
-        assert_eq!(
-            &declared, allowed,
-            "microvms-domain's {} (in {target}) declares default features {} and features {:?}; \
-             DOMAIN_FEATURES allows default features {} and {:?}. A feature can bring the clock, \
-             the filesystem or the OS random pool into a crate the set already allows (ARCH-6). \
-             If the new feature does no I/O, record it here with the reason.",
-            dependency.name, declared.0, declared.1, allowed.0, allowed.1
+            let target = dependency.target.as_ref().map_or_else(
+                || "[dependencies]".to_string(),
+                |target| format!("{target}"),
+            );
+            let Some(allowed) = recorded.get(dependency.name.as_str()) else {
+                panic!(
+                    "{layer} depends on {} (in {target}), which its feature table doesn't \
+                     record. Record its default-features setting and features once it's in \
+                     {layer}'s set in arch/placement.toml.",
+                    dependency.name
+                );
+            };
+            assert_eq!(
+                &declared, allowed,
+                "{layer}'s {} (in {target}) declares default features {} and features {:?}; \
+                 its feature table allows default features {} and {:?}. A feature can bring \
+                 the network, the clock, the filesystem or the OS random pool into a crate the \
+                 set already allows (ARCH-6, ARCH-7). If the new feature does no I/O, record it \
+                 here with the reason.",
+                dependency.name, declared.0, declared.1, allowed.0, allowed.1
+            );
+        }
+        let names: BTreeSet<&str> = normal
+            .iter()
+            .map(|dependency| dependency.name.as_str())
+            .collect();
+        let stale: Vec<&&str> = recorded
+            .keys()
+            .filter(|name| !names.contains(**name))
+            .collect();
+        assert!(
+            stale.is_empty(),
+            "{layer}'s feature table records {stale:?}, which it no longer depends on. Take \
+             the row out."
         );
     }
-    let names: BTreeSet<&str> = normal
-        .iter()
-        .map(|dependency| dependency.name.as_str())
-        .collect();
-    let stale: Vec<&&str> = recorded
-        .keys()
-        .filter(|name| !names.contains(**name))
-        .collect();
-    assert!(
-        stale.is_empty(),
-        "DOMAIN_FEATURES records {stale:?}, which microvms-domain no longer depends on. Take \
-         the row out."
-    );
 }

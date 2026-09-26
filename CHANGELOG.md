@@ -26,8 +26,75 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
   9999-12-31, such as a millisecond count), `NameRecord::new_at`,
   `LaunchIdentity::from_seeds` (public now, and it validates), and
   `names::resolve_record`. No behavior changes, and no AWS call changed.
+- **`microvms_core::entropy`, the port every random value a launch mints comes from
+  (#283).** Client-token nonces, log-stream discriminators, agent tokens and identity seeds
+  are drawn from the control plane's `Entropy`, which is `OsEntropy` (the kernel pool)
+  unless `ControlPlane::with_entropy` swaps it. An unavailable pool now refuses the create or
+  the launch with an error instead of panicking. `control::token::create_token_with` and
+  `run_token_with` take the source; `create_token` and `run_token` keep drawing from the OS
+  pool. `session::exec_id_at` mints an exec id for a given wall time, and
+  `SessionBuilder::with_clock` sets the clock a session's exec ids and default proxy auth
+  read.
+- **`microvms_core::adapters`, and a port-taking constructor for each type (#283).**
+  `ControlPlane::from_ports` takes the transport, clock, entropy and an `Adapters`, the port a
+  sandbox builds its session backend and its STS and S3 client through; `SystemAdapters` is
+  the production one. `SessionBuilder::try_build` builds from exactly what was set and
+  refuses a builder with no backend or clock, and `SessionBuilder::build_with` fills those
+  from an `Adapters`. `ProxyAuth::with_clock` is the default refresh interval on a given
+  clock. `control::context::from_dir` is the directory read behind `BuildContext::from_dir`.
+  `sandbox::ControlPlaneMinter` is public, with `ControlPlaneMinter::new`, so an adapter that
+  builds its own session doesn't need a copy of it. A sandbox's session now reads the plane's
+  clock, which in production is the same tokio clock it read before.
+- **The `test-support` feature and `microvms_core::testing` (#283).** The test doubles
+  core's own tests use, for a dependent's `[dev-dependencies]`: `FakeControlPlane` and its
+  response bodies, `TestClock`, `YieldingClock`, `SequenceEntropy`, `CountingMinter`, the
+  recording HTTP backend `Recorder`, `TestAdapters`, and `testing::control_plane`.
+  `FakeControlPlane::fail_credentials` scripts a credential chain that resolves nothing. The
+  CLI's guards and core's integration tests use them in place of their own copies.
+- **`microvms-app` and `microvms-edges`, and core as the composition root (#283, ARCH-1,
+  ARCH-7, ARCH-8).** The use cases (the control-plane client, `Sandbox`, `Session`, the
+  agent helpers, preflight, names and the ports) moved into `microvms-app`, which depends
+  on no crate that performs network, AWS, filesystem, subprocess or entropy I/O. Its
+  `clippy.toml` forbids the std and tokio file, network, process and stream calls and types,
+  tokio's signals, the environment reads, the `SystemTime::now`, `SystemTime::elapsed` and
+  `Instant::now` clock reads, and `std::thread::sleep`. The production
+  port implementations (SigV4 over reqwest, the tunnel, the OS entropy pool, the tokio
+  clock, the name file, the environment lookup and provisioning) moved into
+  `microvms-edges`. `microvms-core` now holds only the prelude and re-exports, and every
+  v0.10.0 path still resolves. `arch/placement.toml` and
+  `microvms-cli/tests/dependency_direction.rs` pin each layer's dependencies and
+  features exactly. Both new crates join the release's publish set, and their first publish
+  is by hand, in dependency order after `microvms-domain`. No behavior changes.
+- **Accessors the split needed (#283).** `ControlPlane::entropy` is public.
+  `agents::prompt_request_with` takes the exec-id minter, `bedrock::BearerToken::new`
+  wraps a key, `BuildContext::with_warnings` and `IgnoreRules::has_exceptions` are new,
+  and `control::context::DAEMON_ENTRY`, `DOCKERFILE_ENTRY`, `IGNORE_FILES`,
+  `control::transport::SIGNING_NAME` and `Call::body_bytes` are public. `Adapters::warn`
+  reports a warning no caller is left to receive: a `Sandbox` dropped with its VM live warns
+  through it, and `SystemAdapters` writes that to stderr as before.
 
 ### Changed
+
+- **One `Clock` trait (#283). A Rust source break for anyone who implements it.** The
+  control plane's `Clock` and the session's `Clock` are one trait, `microvms_core::clock::Clock`,
+  still reachable at `control::Clock` and `session::Clock`. It carries `elapsed`, `sleep`,
+  `unix_now` and a provided `today_utc`, and requires `Debug`. `control::SystemClock` is now
+  a name for `session::TokioClock`, so the control plane's waits measure their deadlines on
+  tokio's clock: the same monotonic time in production, and the simulated time under a
+  deterministic simulator, where a wait over `std::time::Instant` never reached its deadline.
+  `NameRecord` stamps and the prelude's `CalendarDate::today_utc` read the same clock.
+- **The constructors that wire production I/O moved to `microvms_core::prelude` (#283). A
+  Rust source break, part of the same 0.11.0.** `ControlPlane::new` and
+  `ControlPlane::with_transport` (`ControlPlaneExt`), `Sandbox::new`, `Sandbox::adopt_in` and
+  `Sandbox::from_name` (`SandboxExt`), `AgentVm::from_name` and `AgentVm::adopt_in`
+  (`AgentVmExt`), `Session::connect`, `Session::attach` and `Session::direct`
+  (`SessionExt`), `SessionBuilder::build` (`SessionBuilderExt`), `ProxyAuth::new`
+  (`ProxyAuthExt`) and `BuildContext::from_dir` (`BuildContextExt`). Each wires the
+  production transport, backend, clock, entropy or filesystem read into the type's
+  port-taking constructor, with the same behavior as before. The async ones still return
+  `Send` futures. `use microvms_core::prelude::*;` keeps every call compiling, and
+  `microvms-core/tests/public_paths.rs` checks each still resolves. The Python and
+  TypeScript APIs don't change.
 
 - **Four methods moved to `microvms_core::prelude` (#282). A Rust source break, so the next
   release is 0.11.0.** `CalendarDate::today_utc`, `NameRecord::new`,

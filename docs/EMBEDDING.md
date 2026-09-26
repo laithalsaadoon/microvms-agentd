@@ -40,7 +40,7 @@ image = sandbox.build_image(
 The Node binding is the same pair: `wrapDockerfile(task, { workdir })` and
 `baseImageFromDockerfile(dockerfile)`, passed as `buildImage({ dockerfile,
 baseImage, … })`. Both are pure functions in
-`microvms-core/src/control/artifact.rs` and make no AWS call.
+`microvms-app/src/control/artifact.rs` and make no AWS call.
 
 `wrap_dockerfile` keeps the task text verbatim and appends the stanza the
 default `microvm build` bakes, rendered by the same function, so the two cannot
@@ -88,7 +88,7 @@ microvm build --dockerfile Dockerfile --name my-task-image
 With no binary, `build` provisions the daemon itself: the release asset for
 the CLI's own version, verified and cached under the state directory. The
 `agentd_bytes` above come from the same chain through the bindings
-(`microvms-core/src/provision.rs`). `provision_agentd_report()` returns the
+(`microvms-edges/src/provision.rs`). `provision_agentd_report()` returns the
 bytes together with `.source`, `.verification`, `.path`, and `.sha256`, and
 Node has the same pair:
 
@@ -128,7 +128,7 @@ and enforcing it belongs to whoever builds the image — the daemon cannot.
 One thing never goes in the image: a secret. The image becomes a shared
 snapshot, so every VM launched from it sees the same bytes; per-VM credentials
 travel through `runHookPayload` at launch instead (the module docs of
-`microvms-core/src/control/artifact.rs`).
+`microvms-app/src/control/artifact.rs`).
 
 ### From build inputs to an image ARN: `ensure_image`
 
@@ -256,7 +256,7 @@ the stream is cut, kill the process group when the harness's own deadline
 passes, and turn what came back into a shell exit code. The bindings provide
 it as one call, `Session.run_to_completion` in Python and
 `Session.runToCompletion` in Node, over `Session::run_to_completion` in
-`microvms-core` (`microvms-core/src/session/complete.rs`). The behavior is
+`microvms-core` (`microvms-app/src/session/complete.rs`). The behavior is
 specified as BIND-6 through BIND-10 in `spec/core.symspec.json` and checked by
 the Stateright model in `model/src/run.rs`.
 
@@ -337,18 +337,18 @@ The daemon's endpoint sits behind the platform's proxy, and the proxy wants two
 headers on every request: `X-aws-proxy-auth` carrying a minted JWE, and
 `X-aws-proxy-port` naming which allowed port this request targets — omitting
 the second is rejected in a way that reads like a bad token
-(`microvms-core/src/session/proxy.rs:5-13`). The token comes from
+(`microvms-app/src/session/proxy.rs:5-13`). The token comes from
 `CreateMicrovmAuthToken`, and the response's `authToken` is a **map of header
 name to value**, not a string; read it as a string and every request fails.
 
 The service caps a token at sixty minutes
-(`microvms-core/src/session/proxy.rs:63`). That is not a choice, and it is
+(`microvms-app/src/session/proxy.rs:63`). That is not a choice, and it is
 shorter than a long agent run, so a client that mints once at construction
 expires mid-run with a rejection indistinguishable from a dead daemon. The
 pattern that works is minting inside the request path with a refresh interval
 well under the ceiling — this repo's clients refresh at half of it, thirty
 minutes, so a request in flight across the rollover still holds a token with
-about thirty minutes of life (`microvms-core/src/session/proxy.rs:29-37`). A
+about thirty minutes of life (`microvms-app/src/session/proxy.rs:29-37`). A
 mint failure is retryable; treat it that way, because a control-plane throttle
 at minute thirty must not kill a healthy run.
 

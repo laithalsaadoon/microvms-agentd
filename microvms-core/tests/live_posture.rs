@@ -12,6 +12,7 @@
 use std::time::Duration;
 
 use microvms_core::control::{ControlPlane, EgressPosture, WaitOpts, egress_posture_for, token};
+use microvms_core::prelude::*;
 use microvms_core::region::Region;
 use microvms_core::sandbox::{RunRequest, Sandbox, TeardownOpts};
 

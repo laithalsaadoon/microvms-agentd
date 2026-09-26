@@ -6,7 +6,10 @@
     "kernel/src/lib.rs: std::process::Command::new(&argv[0])"
   ],
   "port-impl": [
+    "adapter/src/lib.rs: Fetch for Tls",
     "adapter/src/lib.rs: TokenMinter for Minter",
-    "adapter/src/session.rs: Fetch for Session"
+    "adapter/src/session.rs: Fetch for Session",
+    "kernel/src/lib.rs: Fetch for Local",
+    "root/src/lib.rs: Fetch for Wired"
   ]
 }

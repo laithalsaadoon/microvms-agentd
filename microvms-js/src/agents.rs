@@ -32,6 +32,7 @@ use microvms_core::agents::{
     DEFAULT_PROMPT_TIMEOUT, DEFAULT_SIZE, PromptOptions as CorePromptOptions, WORKDIR, profile,
 };
 use microvms_core::control::{BaseImage, CreateImageRequest};
+use microvms_core::prelude::*;
 use microvms_core::sandbox::Sandbox as CoreSandbox;
 use microvms_core::{Error, ErrorKind, Region as CoreRegion};
 use napi_derive::napi;

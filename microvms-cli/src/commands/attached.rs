@@ -11,7 +11,7 @@
 //! # A session holds no state, which is what makes these commands possible at all
 //!
 //! Every exec record, every file, and the bootstrap token live *in the VM*
-//! (`microvms-core/src/session/mod.rs:9`). So `microvm ack x-1` a week later, from a different
+//! (`microvms-app/src/session/mod.rs:9`). So `microvm ack x-1` a week later, from a different
 //! machine, addresses the same server-side exec as the process that started it — reattaching is
 //! just naming the thing. That is a property of the protocol rather than of any type here, and it
 //! is why `--exec-id` is worth having: the id *is* the handle.
@@ -19,7 +19,7 @@
 //! # What none of these commands do
 //!
 //! **No archive is inspected.** `cp --tar` hands core's `upload_tar` the bytes it was given, and
-//! `microvms-core/src/session/files.rs:92` says why: the daemon enforces the member rules, and "a
+//! `microvms-app/src/session/files.rs:92` says why: the daemon enforces the member rules, and "a
 //! second check on this side would be a second thing to keep in step with them, which is how the
 //! two come to disagree". The four hostile-archive conformance checks assert the *daemon's*
 //! refusal surfacing as `data.kind`, so a pre-validation here would test this file's copy of the
@@ -357,7 +357,7 @@ async fn poll_existing<O: std::io::Write, E: std::io::Write>(
 /// # The cursor arithmetic is core's, and this function must not have its own
 ///
 /// Every offset here comes from core rather than being counted locally.
-/// `microvms-core/src/session/exec.rs:16` states the two rules — advance only past bytes actually
+/// `microvms-app/src/session/exec.rs:16` states the two rules — advance only past bytes actually
 /// handed over, and advance past a `gap` too — and core's state machine already obeys them across
 /// reconnects. A second cursor maintained in this file would be a second implementation of the
 /// property under test, and the two would disagree exactly when a reconnect happened, which is the

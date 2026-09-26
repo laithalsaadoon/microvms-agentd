@@ -7,10 +7,15 @@
     { "category": "placement", "key": "microvms-cli -> sha2", "issue": 260 },
     { "category": "placement", "key": "microvms-cli -> tar", "issue": 260 },
     { "category": "subprocess", "key": "microvms-cli/src/seam.rs: Command::new(\"aws\")", "issue": 258 },
-    { "category": "subprocess", "key": "microvms-core/src/provision.rs: std::process::Command::new(&argv[0])", "issue": 284 },
+    { "category": "subprocess", "key": "microvms-edges/src/provision.rs: std::process::Command::new(&argv[0])", "issue": 284 },
     { "category": "port-impl", "key": "microvms-cli/src/seam.rs: TokenMinter for PlaneMinter", "issue": 270 }
   ],
   "decisions": [
+    {
+      "category": "port-impl",
+      "key": "microvms-app/src/sandbox.rs: TokenMinter for ControlPlaneMinter",
+      "reason": "an adapter between two application ports that performs no I/O: it mints a session's proxy tokens through the control plane's own transport, and the app's sandbox and its tests build one without the edges"
+    },
     {
       "category": "placement",
       "key": "microvms-cli -> notify",

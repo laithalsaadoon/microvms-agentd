@@ -41,6 +41,7 @@ use std::sync::Arc;
 
 use futures_util_shim::BoxFuture;
 use microvms_core::control::ControlPlane;
+use microvms_core::prelude::*;
 use microvms_core::sandbox::Sandbox;
 use microvms_core::session::Session;
 use microvms_core::{Error, ErrorKind, Region};

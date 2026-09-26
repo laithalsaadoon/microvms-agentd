@@ -1,9 +1,10 @@
 # microvms-agentd · Module map
 
-The workspace declares its members (`Cargo.toml:2-9`), and the sections below run in the
+The workspace declares its members (`Cargo.toml:2-13`), and the sections below run in the
 dependency order of the `system-overview.md` flowchart, bottom-up: the wire contract first,
-then `agentd` and `microvms-core`, which compile against it, then the CLI and the bindings over
-the client, then the checked model (`docs/architecture/system-overview.md:79-97`). Each crate's
+then `agentd` and the client's layers (`microvms-domain`, `microvms-app`, `microvms-edges`, and
+`microvms-core` over them), which compile against it, then the CLI and the bindings over the
+client, then the checked model (`docs/architecture/system-overview.md:83-112`). Each crate's
 file list names its main `src/` files, and the `agentd` list is every module `agentd/src/lib.rs`
 declares; a crate's `tests/` tier is excluded so the source files a reader is looking for are
 not crowded out by large test files such as `agentd/tests/turmoil_transport.rs`. Files
@@ -59,36 +60,76 @@ auth mode decides which of the two routers it joins (`agentd/src/routes.rs:31-35
 - `agentd/src/tunnel_identity.rs`
 - `agentd/src/exec_start_fuzz.rs` (private, compiled only under `#[cfg(test)]`)
 
-## microvms-core
+## microvms-domain
 
-`microvms-core` is the client library and the workspace's largest crate, holding the control
-plane, the in-VM session client, the cost engine, and every trap closure
-(`microvms-core/src/lib.rs:2-3`). Its own doc comment splits it in two: `error`, `region`,
-`sizing`, `hooks`, and `constants` are the foundation, while `cost`, `control`, `session`, and
-`sandbox` are the product surface (`microvms-core/src/lib.rs:59-65`). Each measured platform
-finding is spent once here so no caller has to measure it again, and every closure is ranked
-on a strength ladder where S1 means the mistake cannot be written down at all
-(`microvms-core/src/lib.rs:7-14`, `microvms-core/src/lib.rs:23-40`). `cost.rs` carries the rule
-that makes the rest of it legible — unknown is not zero, so `Amount::Unpriced` is a distinct
-variant a consumer has to match on rather than a $0.00
-line (`microvms-domain/src/cost.rs:22-27`) — and the crate re-exports `protocol` so consumers name
-wire types through here instead of depending on the contract crate
-(`microvms-core/src/lib.rs:79-81`). The `agents` module sits deliberately above the generic
-lifecycle: it is the L3 layer, a dated profile table (Claude Code, Codex), an `AgentVm` that
-derives an image, launches with egress, and provisions Bedrock access, and `agents::bedrock`, which
-mints the bearer token in process (`microvms-core/src/agents/mod.rs`, `docs/AGENT-VMS.md`). Its
-free functions (`image_request_for`, `launch_request_for`, `install_access`, `prompt`) are what
-the bindings drive, because their sandbox sits behind a lock one `AgentVm` cannot own.
+`microvms-domain` holds the rules and values every surface has to agree on: the size classes,
+the cost engine and its rate table, region parsing, the service constraints, name validation,
+the error kinds and the tunnel identity's derivation (`microvms-domain/src/lib.rs:4-6`). It
+reads no ambient state, so each input a rule needs is a parameter
+(`microvms-domain/src/lib.rs:6-11`). `cost.rs` carries the rule that makes the rest of the client
+legible: unknown is not zero, so `Amount::Unpriced` is a distinct variant a consumer has to
+match on rather than a $0.00 line (`microvms-domain/src/cost.rs:22-27`).
 
 - `microvms-domain/src/cost.rs`
-- `microvms-core/src/control/image.rs`
-- `microvms-core/src/session/exec.rs`
-- `microvms-core/src/control/microvm.rs`
-- `microvms-core/src/sandbox.rs`
-- `microvms-core/src/agents/mod.rs`
-- `microvms-core/src/control/ops.rs`
-- `microvms-core/src/control/mod.rs`
-- `microvms-core/src/session/mod.rs`
+- `microvms-domain/src/sizing.rs`
+- `microvms-domain/src/region.rs`
+- `microvms-domain/src/error.rs`
+- `microvms-domain/src/identity.rs`
+
+## microvms-app
+
+`microvms-app` holds the use cases: the control-plane client, `Sandbox`, `Session`,
+`ensure_image` and the agent recipes (`microvms-app/src/lib.rs:4-5`). Everything they do outside
+the process goes through a trait this crate declares, from the control-plane `Transport` to the
+`Clock` and the `Entropy` source (`microvms-app/src/lib.rs:5-10`). It can't reach the network,
+AWS, the filesystem, a subprocess, the wall clock or the OS random pool, and its dependency set,
+its `clippy.toml` and its crate root hold that (`microvms-app/src/lib.rs:12-25`). The `agents`
+module sits deliberately above the generic lifecycle: it is the L3 layer, a dated profile table
+(Claude Code, Codex), and an `AgentVm` that derives an image, launches with egress, and
+provisions Bedrock access (`microvms-app/src/agents/mod.rs`, `docs/AGENT-VMS.md`). Its free
+functions (`image_request_for`, `launch_request_for`, `install_access`, `prompt`) are what the
+bindings drive, because their sandbox sits behind a lock one `AgentVm` cannot own.
+
+- `microvms-app/src/control/image.rs`
+- `microvms-app/src/session/exec.rs`
+- `microvms-app/src/control/microvm.rs`
+- `microvms-app/src/sandbox.rs`
+- `microvms-app/src/agents/mod.rs`
+- `microvms-app/src/control/ops.rs`
+- `microvms-app/src/control/mod.rs`
+- `microvms-app/src/session/mod.rs`
+
+## microvms-edges
+
+`microvms-edges` implements those ports over the real thing: the signed transport and build
+services over the default credential chain, SigV4 and reqwest, the daemon's HTTP backend, the
+port forwarder, the tunnel and the shell, the name registry on disk, the Bedrock token mint, the
+verified `agentd` fetch, and the tokio clock and OS entropy (`microvms-edges/src/lib.rs:4-16`).
+It's the one library crate that may depend on a crate doing I/O
+(`microvms-edges/src/lib.rs:18-21`).
+
+- `microvms-edges/src/control/transport.rs`
+- `microvms-edges/src/control/services.rs`
+- `microvms-edges/src/session/http.rs`
+- `microvms-edges/src/session/tunnel.rs`
+- `microvms-edges/src/session/forward.rs`
+- `microvms-edges/src/provision.rs`
+
+## microvms-core
+
+`microvms-core` is the library crate the CLI and the bindings depend on, and it's the
+composition root: it holds no logic of its own beyond wiring and re-exports
+(`microvms-core/src/lib.rs:62-73`). Each measured platform finding is spent once in the client
+so no caller has to measure it again, and every closure is ranked on a strength ladder where S1
+means the mistake cannot be written down at all (`microvms-core/src/lib.rs:8-15`,
+`microvms-core/src/lib.rs:22-41`). Its `prelude` puts the production transport, clock, entropy
+and adapters into each type's port-taking constructor, so a 0.10 call still compiles
+(`microvms-core/src/lib.rs:76-81`), and it re-exports `protocol` so consumers name wire types
+through here instead of depending on the contract crate (`microvms-core/src/lib.rs:98-100`).
+
+- `microvms-core/src/lib.rs`
+- `microvms-core/src/prelude.rs`
+- `microvms-core/src/identity.rs`
 
 ## microvms-cli
 

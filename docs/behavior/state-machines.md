@@ -159,11 +159,11 @@ Defined at: `model/src/lib.rs:74-81`
 
 One MicroVM's whole life, as the client tracks it. A closed set of states, which is the point
 of the enum: a lifecycle held as a `String` would let `"RUNNING "` and `"Running"` both exist,
-and every guard would have to decide which it meant (`microvms-core/src/sandbox.rs:115-119`). The
-state is a private field written only through `set_lifecycle` (`microvms-core/src/sandbox.rs:825-828`), which
+and every guard would have to decide which it meant (`microvms-app/src/sandbox.rs:114-118`). The
+state is a private field written only through `set_lifecycle` (`microvms-app/src/sandbox.rs:839-842`), which
 `run`, `wait_until_running`, `adopt`, `suspend`, `resume`, and `terminate` call.
 
-Entry is `Lifecycle::Pending` (`microvms-core/src/sandbox.rs:727`), matching the symspec's
+Entry is `Lifecycle::Pending` (`microvms-app/src/sandbox.rs:741`), matching the symspec's
 `initial` (`spec/core.symspec.json:996`) and the model's sole init state
 (`model/src/client.rs:287`).
 
@@ -173,46 +173,46 @@ one vocabulary the declarations share. Each row gives the symspec key, the symsp
 
 - `LaunchAccepted` · `Pending --> Pending` · STATE-1 (`spec/core.symspec.json:690`),
   `when vm_state = PENDING: image_exists := true` (`:698`) · `model/src/client.rs:374-384` ·
-  `microvms-core/src/sandbox.rs:1095-1110`. The lifecycle is set after the wire call returns,
+  `microvms-app/src/sandbox.rs:1114-1129`. The lifecycle is set after the wire call returns,
   because acceptance *is* the call succeeding.
-- `HookSucceeded` · `Pending --> Running` · STATE-2 (`:371`),
+- `HookSucceeded` · `Pending --> Running` · STATE-2 (`:370`),
   `... vm_state := RUNNING, token_installed := true, bootstrap_count := bootstrap_count + 1`
-  (`:379`) · `model/src/client.rs:388-409` · `microvms-core/src/sandbox.rs:1163-1179`. This is the
-  one place `bootstrap_count` increments (STATE-3, `:881`).
-- `SuspendRequested` · `Running --> Suspending` · STATE-4 (`:103`),
-  `when vm_state = RUNNING: vm_state := SUSPENDING` (`:112`) · `model/src/client.rs:427-443` ·
-  `microvms-core/src/sandbox.rs:1480-1489`. The assignment follows the call for the same reason:
+  (`:378`) · `model/src/client.rs:388-409` · `microvms-app/src/sandbox.rs:1185-1201`. This is the
+  one place `bootstrap_count` increments (STATE-3, `:895`).
+- `SuspendRequested` · `Running --> Suspending` · STATE-4 (`:102`),
+  `when vm_state = RUNNING: vm_state := SUSPENDING` (`:111`) · `model/src/client.rs:427-443` ·
+  `microvms-app/src/sandbox.rs:1460-1469`. The assignment follows the call for the same reason:
   moving first would leave a throttled call stuck in a state neither suspend nor resume accepts,
   bricking the handle over one bad request.
-- `SuspendComplete` · `Suspending --> Suspended` · STATE-6 (`:550`),
-  `when vm_state = SUSPENDING: vm_state := SUSPENDED` (`:558`) · `model/src/client.rs:446-453` ·
-  `microvms-core/src/sandbox.rs:1505-1506`.
-- `ResumeRequested` + `ResumeComplete` · `Suspended --> Running` · STATE-7 (`:668`),
-  `when vm_state = SUSPENDED: vm_state := RUNNING` (`:677`) · `model/src/client.rs:456-501` ·
-  `microvms-core/src/sandbox.rs:1572-1596`. Nothing is re-delivered: no payload, no token, no
+- `SuspendComplete` · `Suspending --> Suspended` · STATE-6 (`:570`),
+  `when vm_state = SUSPENDING: vm_state := SUSPENDED` (`:578`) · `model/src/client.rs:446-453` ·
+  `microvms-app/src/sandbox.rs:1485-1486`.
+- `ResumeRequested` + `ResumeComplete` · `Suspended --> Running` · STATE-7 (`:688`),
+  `when vm_state = SUSPENDED: vm_state := RUNNING` (`:697`) · `model/src/client.rs:456-501` ·
+  `microvms-app/src/sandbox.rs:1552-1576`. Nothing is re-delivered: no payload, no token, no
   bootstrap, because the in-memory token survived the freeze and re-delivering it would hit the
-  daemon's one-shot bootstrap and be refused (`microvms-core/src/sandbox.rs:1530-1534`). The
+  daemon's one-shot bootstrap and be refused (`microvms-app/src/sandbox.rs:1510-1514`). The
   session rebinds to the endpoint the service just reported, which drops the cached proxy token
-  (STATE-8, `:199`).
-- `TerminateRequested` · `Pending`/`Running`/`Suspended` `--> Terminating` · STATE-9 (`:571`),
+  (STATE-8, `:198`).
+- `TerminateRequested` · `Pending`/`Running`/`Suspended` `--> Terminating` · STATE-9 (`:591`),
   `when vm_state = PENDING or vm_state = RUNNING or vm_state = SUSPENDED: vm_state :=
   TERMINATING, was_terminated := true` (`:579`) · `model/src/client.rs:504-511` ·
-  `microvms-core/src/sandbox.rs:1669-1674`. Recorded before the call, so a terminate whose call
+  `microvms-app/src/sandbox.rs:1649-1654`. Recorded before the call, so a terminate whose call
   fails still marks the VM as one this client asked to destroy.
-- `TerminateComplete` · `Terminating --> Terminated` · STATE-10 (`:803`),
-  `when vm_state = TERMINATING: vm_state := TERMINATED` (`:811`) ·
-  `model/src/client.rs:514-521` · `microvms-core/src/sandbox.rs:1692-1701`. Reached only when the
+- `TerminateComplete` · `Terminating --> Terminated` · STATE-10 (`:817`),
+  `when vm_state = TERMINATING: vm_state := TERMINATED` (`:825`) ·
+  `model/src/client.rs:514-521` · `microvms-app/src/sandbox.rs:1672-1681`. Reached only when the
   optional `wait_for_state(&["TERMINATED"])` succeeds; when the wait fails the lifecycle stays at
   `Terminating` honestly, because the platform accepted the terminate and the VM is on its way
-  out (`microvms-core/src/sandbox.rs:1702-1707`).
+  out (`microvms-app/src/sandbox.rs:1682-1687`).
 
 One edge exists in the client with no matching `stateEffect`: the suspend wait settles on
 `SUSPENDED` **or** `TERMINATED`, and both are states this client asked for. A VM the launch-time
 `idlePolicy` killed mid-suspension lands directly in `Terminated` and also sets `was_terminated`,
-which is what then stops a resume from being offered — `microvms-core/src/sandbox.rs:1501-1521`.
+which is what then stops a resume from being offered — `microvms-app/src/sandbox.rs:1481-1501`.
 The symspec omits `SUSPENDING` as a terminate source, and that omission is correct rather than a
-gap: `suspend(&mut self)` (`microvms-core/src/sandbox.rs:1465`) holds the exclusive borrow across
-its own wait, so no caller can invoke `terminate(&mut self)` (`:1653`) while the lifecycle sits in
+gap: `suspend(&mut self)` (`microvms-app/src/sandbox.rs:1445`) holds the exclusive borrow across
+its own wait, so no caller can invoke `terminate(&mut self)` (`:1633`) while the lifecycle sits in
 `Suspending`. `Suspending` is transient within one call, never a resting state a caller can act
 from.
 
@@ -220,38 +220,38 @@ Every guard refuses before any control-plane call is made, and the zero-call ref
 assertion rather than the resulting state:
 
 - `run` twice is refused on `bootstrap_count > 0 || microvm.is_some()` (STATE-3) —
-  `microvms-core/src/sandbox.rs:1012-1024`.
+  `microvms-app/src/sandbox.rs:1028-1040`.
 - `suspend` is refused unless the lifecycle is `Running` (STATE-5, `spec/core.symspec.json:294`,
-  constraint at `:302`) — `microvms-core/src/sandbox.rs:1469-1478`.
-- `resume` is refused when `was_terminated` or the lifecycle is `Terminated` (STATE-11, `:448`,
-  constraint at `:456`) — `microvms-core/src/sandbox.rs:1553-1561` — and unless the lifecycle is
-  `Suspended` (STATE-7) — `:1562-1567`.
+  constraint at `:301`) — `microvms-app/src/sandbox.rs:1449-1458`.
+- `resume` is refused when `was_terminated` or the lifecycle is `Terminated` (STATE-11, `:447`,
+  constraint at `:455`) — `microvms-app/src/sandbox.rs:1533-1541` — and unless the lifecycle is
+  `Suspended` (STATE-7) — `:1542-1547`.
 - `resume` past the launch-time `suspendedDurationSeconds` window is refused with
-  `ErrorKind::WindowClosed` (STATE-12, `:487`) — `microvms-core/src/sandbox.rs:1570`,
-  `:1615-1644`. An absent window is *not* a closed one: the window is our own `RunMicrovm` request's,
+  `ErrorKind::WindowClosed` (STATE-12, `:486`) — `microvms-app/src/sandbox.rs:1550`,
+  `:1595-1624`. An absent window is *not* a closed one: the window is our own `RunMicrovm` request's,
   falling back to the `idlePolicy` that `GetMicrovm` reported, and with no window from either
   source, or with the suspend stamp missing, the check passes, because this sandbox cannot know
   how long the VM has been suspended and guessing would refuse a resume the service would honour
-  (`microvms-core/src/sandbox.rs:1616-1626`; see
+  (`microvms-app/src/sandbox.rs:1596-1606`; see
   `.erpaval/solutions/architecture-patterns/an-absent-value-is-not-a-neutral-one.md`).
 - `suspended_at` is cleared on a successful resume, so the next cycle's window is measured from
   the next suspend rather than accumulating every suspension into one total —
-  `microvms-core/src/sandbox.rs:1597-1600`.
+  `microvms-app/src/sandbox.rs:1577-1580`.
 
 `Lifecycle::as_str` maps each state to the uppercase name the service uses, which is also what an
-error message prints — `microvms-core/src/sandbox.rs:136-147`. `Lifecycle::is_live` is true for
+error message prints — `microvms-app/src/sandbox.rs:135-146`. `Lifecycle::is_live` is true for
 `Pending`, `Running`, `Suspending`, `Suspended`. These places read it: `Sandbox::adopt`, to decide
-whether an adopted VM gets a session (`microvms-core/src/sandbox.rs:1275`); `Sandbox::detach`,
-which refuses to hand off a VM that is not live (`microvms-core/src/sandbox.rs:1388`); and the
+whether an adopted VM gets a session (`microvms-app/src/sandbox.rs:1297`); `Sandbox::detach`,
+which refuses to hand off a VM that is not live (`microvms-app/src/sandbox.rs:1368`); and the
 `Drop` warning about a VM still billing, which stays silent for a detached or adopted sandbox —
-`microvms-core/src/sandbox.rs:163-169`, `microvms-core/src/sandbox.rs:1787-1815`.
+`microvms-app/src/sandbox.rs:162-168`, `microvms-app/src/sandbox.rs:1767-1795`.
 
 Mirrors:
 
 - `spec/core.symspec.json:1004-1011` — `vm_state`, an enum whose domain is exactly `PENDING`,
   `RUNNING`, `SUSPENDING`, `SUSPENDED`, `TERMINATING`, `TERMINATED`, beside the other
   variables the `Sandbox` carries: `token_installed`, `image_exists`, `was_terminated`,
-  `bootstrap_count` (`:1012-1040`). The `STATE-1`..`STATE-12` keys cited above are EARS
+  `bootstrap_count` (`:1028-1056`). The `STATE-1`..`STATE-12` keys cited above are EARS
   sentences in the same document.
 - `model/src/client.rs:61-74` — `VmState`, "Mirrors `microvms_core::sandbox::Lifecycle` by
   convention rather than by dependency" (`:58-59`). Its transitions are driven by
@@ -302,7 +302,7 @@ stateDiagram-v2
     Terminating --> Terminated: TerminateComplete
 ```
 
-Defined at: `microvms-core/src/sandbox.rs:121-134`
+Defined at: `microvms-app/src/sandbox.rs:120-133`
 
 ## StreamState
 
@@ -311,60 +311,60 @@ dropped, and the byte offset a resume would ask for. Written as a generator over
 state machine rather than a hand-rolled `Stream` impl, because the reconnect logic is a loop with
 an `await` in the middle and expressing that as a `poll_next` would mean storing the in-flight
 attach as a pinned field — where a self-referential-future bug lives
-(`microvms-core/src/session/exec.rs:290-294`). The enum is private, so it has no mirror.
+(`microvms-app/src/session/exec.rs:290-294`). The enum is private, so it has no mirror.
 
 Entry is `Reconnect { cursor: options.offset, attempts: 0 }`, seeded identically by both drivers:
-`stream_with` at `microvms-core/src/session/exec.rs:299-303` and `for_each_event_async` at
-`:412-415`. `for_each_event` (`:347`) delegates to the async form (`:359`), so both consumers run
-one step function, `advance` — `microvms-core/src/session/exec.rs:460-588`. `attempts` is zero
+`stream_with` at `microvms-app/src/session/exec.rs:419-422` and `for_each_event_async` at
+`:531-534`. `for_each_event` (`:466`) delegates to the async form (`:478`), so both consumers run
+one step function, `advance` — `microvms-app/src/session/exec.rs:463-591`. `attempts` is zero
 for the first attach, which is why the backoff and the max-reconnect check are both skipped there
-(`:739-740`).
+(`:742-743`).
 
 Out of `Reconnect`:
 
-- a successful `attach` moves to `Attached` carrying the same cursor and attempt count — `:491-498`.
+- a successful `attach` moves to `Attached` carrying the same cursor and attempt count — `:494-501`.
 - a retryable `attach` failure re-enters `Reconnect` with `attempts + 1`. A cut connection or a
-  failed token mint says nothing about the exec, which is still running server-side — `:499-507`.
+  failed token mint says nothing about the exec, which is still running server-side — `:502-510`.
 - a fatal failure goes to `Done` with the error, because reconnecting can never succeed. A 404 on
-  a collected entry is the case that matters — `:508-511`.
+  a collected entry is the case that matters — `:511-514`.
 - `attempts > options.max_reconnects` goes to `Done` with a retryable error naming the last good
-  offset — `:474-486`.
-- `attempts > 0` with `reconnect` off ends the stream without stepping the machine — `:470-473`.
+  offset — `:477-489`.
+- `attempts > 0` with `reconnect` off ends the stream without stepping the machine — `:473-476`.
 
 Out of `Attached`, on the next decoded `ExecEvent`:
 
 - `Output` stays `Attached` and advances the cursor to `offset + data.len()`, only past bytes
-  actually handed over — `:519-539`.
+  actually handed over — `:522-542`.
 - `Gap` advances the cursor to `to` unconditionally, so a reconnect does not ask for the evicted
   range again and receive the same gap forever. It then stays `Attached`, or goes to `Done` with
-  a `WireKind::OutputGap` error when `options.error_on_gap` is set — `:540-561`. `from` is
+  a `WireKind::OutputGap` error when `options.error_on_gap` is set — `:543-564`. `from` is
   inclusive and `to` exclusive, which is why `to` is where a cursor resumes
-  (`microvms-core/src/session/sse.rs:248-252`).
+  (`microvms-app/src/session/sse.rs:248-252`).
 - `Exit` goes to `Done`. A finished command always delivers this event, and its absence is the
   only thing distinguishing a cut connection from a finished command — the byte sequences are
-  otherwise identical — `:563-567`, `microvms-core/src/session/sse.rs:253-255`.
+  otherwise identical — `:563-567`, `microvms-app/src/session/sse.rs:253-255`.
 - a body that ends with no `Exit` event re-enters `Reconnect` with `attempts + 1`, or ends the
   stream when `reconnect` is off — `:568-577`.
 - a retryable read error re-enters `Reconnect`; a fatal one goes to `Done` — `:578-584`. A parse
   failure is `ErrorKind::Protocol`, and `Error::retryable` is true only for
   `ErrorKind::Retryable` (`microvms-domain/src/error.rs:116-118`), so a proxy answering an error
   page is not retried `max_reconnects` times, refilling the buffer each pass —
-  `microvms-core/src/session/exec.rs:726-731`.
+  `microvms-app/src/session/exec.rs:729-734`.
 
-`Done` yields nothing and ends the stream — `:468`. `StreamState::cursor()` returns `None` for
+`Done` yields nothing and ends the stream — `:471`. `StreamState::cursor()` returns `None` for
 `Done` rather than a number: `Done` is reached from more than one place, so any value invented
-there could shadow the last real cursor the caller already holds — `:753-767`.
+there could shadow the last real cursor the caller already holds — `:756-770`.
 
 `for_each_event_async` reports which `Done` path was taken as `EndReason`
-(`microvms-core/src/session/exec.rs:143-154`). `EndReason` is a return classification, not a
+(`microvms-app/src/session/exec.rs:143-154`). `EndReason` is a return classification, not a
 state the machine occupies, so it gets no diagram of its own. It is `Exited` when the terminal
-`Exit` event was delivered (`:448-452`), `Stopped` when the callback answered
-`ControlFlow::Break` (`:442-447`), and `Cut` when the body ended with no `Exit` event and
-reconnecting was refused (`:420-428`) — where the command's outcome is unknown rather than zero,
+`Exit` event was delivered (`:451-455`), `Stopped` when the callback answered
+`ControlFlow::Break` (`:445-450`), and `Cut` when the body ended with no `Exit` event and
+reconnecting was refused (`:423-431`) — where the command's outcome is unknown rather than zero,
 and a caller reporting success would pass a CI step on evidence it never received (`:150-153`).
 The returned cursor is read off the machine through `next.cursor()` rather than recomputed from
 the events, so a caller that resumes holds one cursor and not a second one that would agree until
-a gap arrived — `:429-434`.
+a gap arrived — `:432-437`.
 
 ```mermaid
 stateDiagram-v2
@@ -383,7 +383,7 @@ stateDiagram-v2
     Done --> [*]
 ```
 
-Defined at: `microvms-core/src/session/exec.rs:738-751`
+Defined at: `microvms-app/src/session/exec.rs:741-754`
 
 ## See also
 

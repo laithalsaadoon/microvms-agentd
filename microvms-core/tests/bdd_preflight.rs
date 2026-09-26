@@ -8,67 +8,15 @@
 //! without an AWS account. The bindings' `preflight` is [`microvms_core::preflight::preflight`],
 //! which is `preflight_with` over the real control plane.
 
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use cucumber::{World, cli, given, then, when};
-use microvms_core::control::transport::{Call, Reply, Transport};
+use microvms_app::testing::{Answer, FakeControlPlane};
+use microvms_core::control::transport::Transport;
 use microvms_core::control::{ControlPlane, SystemClock};
 use microvms_core::preflight::{PreflightReport, preflight_with};
+use microvms_core::prelude::*;
 use microvms_core::{Error, ErrorKind, Region, SizeClass};
-
-/// Scripts the credential chain and the listing, and records every operation sent.
-#[derive(Debug, Default)]
-struct Scripted {
-    credentials_fail: bool,
-    listing_denied: bool,
-    calls: Mutex<Vec<String>>,
-}
-
-impl Transport for Scripted {
-    fn send(&self, call: Call) -> Pin<Box<dyn Future<Output = Result<Reply, Error>> + Send + '_>> {
-        self.calls
-            .lock()
-            .expect("not poisoned")
-            .push(call.operation.to_string());
-        let (status, body) = match (call.operation, self.listing_denied) {
-            ("ListManagedMicrovmImages", false) => (
-                200,
-                r#"{"items": [{"imageArn": "arn:aws:lambda:us-east-1:aws:microvm-image:al2023",
-                               "createdAt": 1750000000, "updatedAt": 1753000000}]}"#,
-            ),
-            ("ListManagedMicrovmImages", true) => (
-                403,
-                r#"{"__type": "AccessDeniedException", "message": null}"#,
-            ),
-            _ => (
-                400,
-                r#"{"message": "the scenario scripts only the listing"}"#,
-            ),
-        };
-        Box::pin(async move {
-            Ok(Reply {
-                status,
-                body: body.as_bytes().to_vec(),
-            })
-        })
-    }
-
-    fn resolve_credentials(&self) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + '_>> {
-        let fail = self.credentials_fail;
-        Box::pin(async move {
-            if fail {
-                Err(Error::new(
-                    ErrorKind::Credentials,
-                    "the scenario's credential chain resolves nothing",
-                ))
-            } else {
-                Ok(())
-            }
-        })
-    }
-}
 
 #[derive(Debug, Default, World)]
 struct Harness {
@@ -77,7 +25,7 @@ struct Harness {
     env_region: Option<String>,
     credentials_fail: bool,
     listing_denied: bool,
-    transport: Option<Arc<Scripted>>,
+    transport: Option<Arc<FakeControlPlane>>,
     report: Option<PreflightReport>,
 }
 
@@ -151,11 +99,25 @@ fn service_denies(world: &mut Harness) {
 }
 
 async fn run(world: &mut Harness, resolved: Result<Region, Error>) {
-    let transport = Arc::new(Scripted {
-        credentials_fail: world.credentials_fail,
-        listing_denied: world.listing_denied,
-        calls: Mutex::new(Vec::new()),
-    });
+    let transport = Arc::new(FakeControlPlane::new());
+    if world.credentials_fail {
+        transport.fail_credentials("the scenario's credential chain resolves nothing");
+    }
+    transport.answer(
+        "ListManagedMicrovmImages",
+        if world.listing_denied {
+            // The null-message denial, which is also what a region without MicroVMs answers.
+            Answer {
+                status: 403,
+                body: r#"{"__type": "AccessDeniedException", "message": null}"#.to_string(),
+            }
+        } else {
+            Answer::ok(
+                r#"{"items": [{"imageArn": "arn:aws:lambda:us-east-1:aws:microvm-image:al2023",
+                               "createdAt": 1750000000, "updatedAt": 1753000000}]}"#,
+            )
+        },
+    );
     world.transport = Some(Arc::clone(&transport));
     let report = preflight_with(resolved, move |region| async move {
         Ok(ControlPlane::with_transport(
@@ -189,7 +151,13 @@ fn calls(world: &Harness) -> Vec<String> {
     world
         .transport
         .as_ref()
-        .map(|transport| transport.calls.lock().expect("not poisoned").clone())
+        .map(|transport| {
+            transport
+                .operations()
+                .into_iter()
+                .map(String::from)
+                .collect()
+        })
         .unwrap_or_default()
 }
 

@@ -10,6 +10,7 @@
 
 use microvms_core::control::ControlPlane;
 use microvms_core::preflight::{PreflightReport, preflight};
+use microvms_core::prelude::*;
 use microvms_core::region::Region;
 
 fn region() -> Region {

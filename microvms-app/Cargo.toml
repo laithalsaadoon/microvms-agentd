@@ -1,0 +1,70 @@
+[package]
+name = "microvms-app"
+version = "0.10.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = true
+description = "The MicroVMs client's use cases, written against ports: the control plane, sandboxes, sessions, agents"
+readme = "README.md"
+keywords = ["microvms", "lambda", "aws", "sandbox", "microvm"]
+categories = ["virtualization"]
+
+# The set is exact: `arch/placement.toml` records it, and
+# `microvms-cli/tests/dependency_direction.rs` fails on a crate added here, on one listed there
+# that this crate no longer uses, and on a feature the table beside that test doesn't record
+# (ARCH-7). Every crate here computes, encodes, or schedules. A crate that reaches the network,
+# AWS, the filesystem, a subprocess, the clock or the OS random pool belongs in
+# `microvms-edges`, behind a port this crate declares.
+[dependencies]
+# The wire contract, shared with the daemon (ARCH-2). A field renamed in `protocol/` must break
+# this crate's build.
+protocol = { package = "microvms-protocol", version = "0.10.0", path = "../protocol" }
+# The rules and values, which do no I/O (ARCH-6).
+microvms-domain = { version = "0.10.0", path = "../microvms-domain" }
+# The control plane's rest-json bodies and the session's wire payloads.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# `time` for the poll and deadline paths, `sync` for the proxy-token refresh, `io-util` for the
+# SSE reader, `macros` for `select!`, and `rt` for the keep-awake task, which it spawns onto the
+# caller's runtime (it never builds one). No `net`, `fs` or `process`: those are I/O, and
+# they're `microvms-edges`'s. tokio's features unify across the workspace, so the edges' `net`
+# still compiles here; `clippy.toml` beside this manifest is what refuses it.
+tokio = { version = "1.53", features = ["time", "sync", "io-util", "macros", "rt"] }
+futures-util = "0.3"
+# Retry with jitter for throttles and 5xx (`send_with_retry`). Its `tokio-sleep` feature sleeps
+# on tokio's timer, the same one the waits use.
+backon = { version = "1.6", features = ["tokio-sleep"] }
+# The image build takes a zip of the daemon binary plus a Dockerfile, built in memory. Pinned
+# to the 8.x line: 9.0 exists only as `9.0.0-pre2`. Only `deflate`, since the artifact is one
+# binary and one text file.
+zip = { version = "8.6", default-features = false, features = ["deflate"] }
+# `build --reuse` keys an image name to a content hash of the artifact bytes.
+sha2 = "0.11"
+# Exec output and stdin are arbitrary bytes, so both sides of the wire carry base64. 0.23 to
+# match agentd.
+base64 = "0.23"
+# Hex rendering for tokens and the artifact content hash. Encode-only.
+const-hex = "1.19"
+# RFC 3986 percent-encoding for query values and path segments.
+percent-encoding = "2.3"
+
+[features]
+# The shared test doubles in `microvms_app::testing` (re-exported as `microvms_core::testing`),
+# for a dependent's `[dev-dependencies]` only. Resolver 3 keeps a dev-only feature out of a
+# normal build, so nothing shipped carries them.
+test-support = []
+
+[dev-dependencies]
+# The token guards are table-shaped, which is exactly where a hand-picked example set passes
+# over the gap it was written to find.
+proptest = "1.11"
+# `control::posture_fuzz`: `bolero::check!` runs as an ordinary `#[test]` on stable and as a
+# coverage-guided target under `cargo bolero test`.
+bolero = "0.13"
+# A runtime for the async tests, and `test-util` for the ones that pause tokio's clock.
+tokio = { version = "1.53", features = ["rt", "macros", "test-util"] }
+
+[lints.rust]
+# No hand-written `unsafe` in this crate; a future one is a build error, not a scan finding.
+unsafe_code = "forbid"

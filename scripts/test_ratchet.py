@@ -114,7 +114,7 @@ class Workspace:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text)
 
-    def scope(self, adapters=None, non_shipping=()):
+    def scope(self, adapters=None, non_shipping=(), composed=(), composition_root=None):
         """The workspace as a scope. By default every crate with a set is an adapter."""
         members = ", ".join(f'"{name}"' for name in self.crates)
         self.write(
@@ -128,6 +128,8 @@ class Workspace:
             placement=placement,
             adapters=tuple(adapters),
             non_shipping=frozenset(non_shipping),
+            composed=tuple(composed),
+            composition_root=composition_root,
         )
 
 
@@ -150,8 +152,9 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(
             compare(now, ratchet(BASELINE), ratchet(BASELINE), "main"),
             [
-                "new drift: [placement] microvms-cli -> globset. Move it below the adapter, "
-                "or add a decision with its reason."
+                "new drift: [placement] microvms-cli -> globset. Move the work to the layer "
+                "whose job it is (I/O belongs in microvms-edges, behind a port in "
+                "microvms-app), or add a decision with its reason."
             ],
         )
 
@@ -635,6 +638,43 @@ class RustCollectorTests(unittest.TestCase):
             keys(collect(ws.scope()), "port-impl"),
         )
 
+    def test_test_support_items_are_test_code(self):
+        # The shared doubles' feature (#283) is dev-only, so an item behind it never ships. A
+        # feature with another name does ship.
+        ws = self.workspace()
+        ws.write(
+            "adapter/src/doubles.rs",
+            textwrap.dedent("""\
+                #[cfg(feature = "test-support")]
+                impl Fetch for FeatureOnly {}
+                #[cfg(any(test, feature = "test-support"))]
+                pub mod testing {
+                    impl super::Fetch for Fake {}
+                    fn f() { std::process::Command::new("fake"); }
+                }
+                #[cfg(any(test, feature = "test-support"))]
+                pub mod scripted;
+                #[cfg(feature = "tls")]
+                impl Fetch for Tls {}
+            """),
+        )
+        ws.write(
+            "adapter/src/doubles/scripted.rs", "impl crate::Fetch for Scripted {}\n"
+        )
+        ws.write(
+            "adapter/src/marked.rs",
+            '#![cfg(feature = "test-support")]\nimpl Fetch for Marked {}\n',
+        )
+        now = collect(ws.scope())
+        self.assertEqual(
+            [k for k in keys(now, "port-impl") if "doubles" in k or "marked" in k],
+            ["adapter/src/doubles.rs: Fetch for Tls"],
+        )
+        self.assertNotIn(
+            'adapter/src/doubles.rs: std::process::Command::new("fake")',
+            keys(now, "subprocess"),
+        )
+
     def test_two_identical_calls_in_one_file_count_twice(self):
         ws = (
             Workspace(self)
@@ -724,6 +764,39 @@ class ScopeTests(unittest.TestCase):
                 "microvms-cli/src/lib.rs: TokenMinter for PlaneMinter",
             ],
         )
+
+    def test_the_composed_crates_and_the_root_are_read_for_port_impls(self):
+        # #283: a use case implements a port only where a decision says why, and the composition
+        # root implements none (ARCH-8). The root's own public traits are the prelude's
+        # extension traits, so they aren't ports: the CLI's `Fetch for Session` drops out, and so
+        # does the root's `PlaneExt` impl.
+        ws = self.workspace()
+        ws.write(
+            "microvms-app/src/lib.rs",
+            "pub trait TokenMinter {}\npub struct Minter;\nimpl TokenMinter for Minter {}\n",
+        )
+        ws.write(
+            "microvms-core/src/lib.rs",
+            textwrap.dedent("""\
+                pub trait Fetch {}
+                pub trait PlaneExt {}
+                impl PlaneExt for microvms_app::Minter {}
+                impl microvms_app::TokenMinter for Wired {}
+            """),
+        )
+        scope = ws.scope(composed=["microvms-app"], composition_root="microvms-core")
+        self.assertEqual(
+            keys(collect(scope), "port-impl"),
+            [
+                "microvms-app/src/lib.rs: TokenMinter for Minter",
+                "microvms-cli/src/lib.rs: TokenMinter for PlaneMinter",
+                "microvms-core/src/lib.rs: TokenMinter for Wired",
+            ],
+        )
+
+    def test_a_composed_crate_that_is_not_below_the_adapters_is_refused(self):
+        with self.assertRaisesRegex(SystemExit, "guest is read for port impls"):
+            collect(self.workspace().scope(composed=["guest"]))
 
     def test_a_tree_with_no_ports_below_the_adapters_is_refused(self):
         ws = (
@@ -826,10 +899,15 @@ class SeededFaultTests(unittest.TestCase):
     """The faults #281 and #285 name. Each also fired once by hand in the real tree (see the PR)."""
 
     def real_placement(self, ws):
-        # The real file has a set for the domain (#282), and the ratchet refuses a set for a
-        # crate the workspace doesn't have. An empty domain uses nothing outside its set.
-        shutil.copy(ROOT / "arch" / "placement.toml", ws.root / "placement.toml")
-        return ws.crate("microvms-domain")
+        # The real file has sets for the layers below the adapters (#282, #283), and the ratchet
+        # refuses a set for a crate the workspace doesn't have. An empty layer uses nothing
+        # outside its set.
+        placement = ROOT / "arch" / "placement.toml"
+        shutil.copy(placement, ws.root / "placement.toml")
+        for crate in sets_from(placement.read_text(), str(placement)):
+            if crate not in ws.crates:
+                ws.crate(crate)
+        return ws
 
     def test_a_reqwest_in_microvms_py_fails_with_a_placement_key(self):
         ws = self.real_placement(
@@ -846,8 +924,34 @@ class SeededFaultTests(unittest.TestCase):
         self.assertEqual(keys(now, "placement"), ["microvms-py -> reqwest"])
         failures = compare(now, ratchet(), None, "main")
         self.assertIn(
-            "new drift: [placement] microvms-py -> reqwest. Move it below the adapter, "
-            "or add a decision with its reason.",
+            "new drift: [placement] microvms-py -> reqwest. Move the work to the layer "
+            "whose job it is (I/O belongs in microvms-edges, behind a port in "
+            "microvms-app), or add a decision with its reason.",
+            failures,
+        )
+
+    def test_a_reqwest_in_microvms_app_fails_with_a_placement_key(self):
+        # #283's fault: the use cases dialing the network themselves. The app's exact-set test
+        # in `dependency_direction.rs` fails on it too; this is the ratchet's half.
+        ws = self.real_placement(
+            Workspace(self)
+            .crate(
+                "microvms-app",
+                deps='microvms-domain = { path = "../microvms-domain" }\nreqwest = "0.12"',
+            )
+            .crate("microvms-domain")
+            .crate("microvms-core")
+            .crate("microvms-cli")
+            .crate("microvms-py")
+            .crate("microvms-js")
+        )
+        now = collect(ws.scope())
+        self.assertEqual(keys(now, "placement"), ["microvms-app -> reqwest"])
+        failures = compare(now, ratchet(), None, "main")
+        self.assertIn(
+            "new drift: [placement] microvms-app -> reqwest. Move the work to the layer "
+            "whose job it is (I/O belongs in microvms-edges, behind a port in "
+            "microvms-app), or add a decision with its reason.",
             failures,
         )
 
@@ -867,8 +971,9 @@ class SeededFaultTests(unittest.TestCase):
         now = collect(ws.scope())
         self.assertEqual(keys(now, "placement"), ["microvms-py -> globset"])
         self.assertIn(
-            "new drift: [placement] microvms-py -> globset. Move it below the adapter, "
-            "or add a decision with its reason.",
+            "new drift: [placement] microvms-py -> globset. Move the work to the layer "
+            "whose job it is (I/O belongs in microvms-edges, behind a port in "
+            "microvms-app), or add a decision with its reason.",
             compare(now, ratchet(), None, "main"),
         )
 
@@ -893,8 +998,9 @@ class SeededFaultTests(unittest.TestCase):
         key = 'microvms-js/src/session.rs: std::process::Command::new("aws")'
         self.assertEqual(keys(now, "subprocess"), [key])
         self.assertIn(
-            f"new drift: [subprocess] {key}. Move it below the adapter, "
-            "or add a decision with its reason.",
+            f"new drift: [subprocess] {key}. Move the work to the layer "
+            "whose job it is (I/O belongs in microvms-edges, behind a port in "
+            "microvms-app), or add a decision with its reason.",
             compare(now, ratchet(), None, "main"),
         )
 
@@ -1217,9 +1323,9 @@ class AdapterLintTests(unittest.TestCase):
         )
 
 
-# The domain's crate-root attribute (ARCH-6). `forbid`, not the adapters' `deny`: under
-# `forbid` an inner `#[allow]` or `#[expect]` is itself an error, so the domain needs no
-# exception list for a scan to check against.
+# The domain's crate-root attribute (ARCH-6), and the app's (ARCH-7). `forbid`, not the
+# adapters' `deny`: under `forbid` an inner `#[allow]` or `#[expect]` is itself an error, so
+# neither crate needs an exception list for a scan to check against.
 FORBID = "#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]"
 
 # Stand-ins for the domain's dependencies whose clock and entropy methods its `clippy.toml`
@@ -1467,6 +1573,353 @@ class DomainLintTests(unittest.TestCase):
         self.assertNotEqual(out.returncode, 0, out.stderr)
         self.assertIn(
             "allow(clippy::disallowed_methods) incompatible with previous forbid",
+            out.stderr,
+        )
+
+
+# A stand-in for tokio carrying the `net`, `fs` and `process` items the app's `clippy.toml`
+# bans, at their real paths. The app's own tokio doesn't enable those features; another member
+# can turn them on through unification, and this is what the app would see then.
+APP_STAND_INS = {
+    "tokio": """\
+        pub mod net {
+            pub struct TcpStream;
+            impl TcpStream {
+                pub async fn connect(_addr: &str) -> Result<TcpStream, ()> { Ok(TcpStream) }
+            }
+            pub async fn lookup_host(_host: &str) -> Result<(), ()> { Ok(()) }
+        }
+        pub mod fs {
+            pub async fn read(_path: &str) -> Result<Vec<u8>, ()> { Ok(Vec::new()) }
+        }
+        pub mod process {
+            pub struct Command;
+            impl Command {
+                pub fn new(_program: &str) -> Command { Command }
+            }
+        }
+        pub mod io {
+            pub struct Stderr;
+            pub fn stderr() -> Stderr { Stderr }
+            pub fn stdout() -> Stderr { Stderr }
+        }
+        pub mod signal {
+            pub async fn ctrl_c() -> Result<(), ()> { Ok(()) }
+        }
+    """,
+}
+
+
+class AppLintTests(unittest.TestCase):
+    """`microvms-app`'s `clippy.toml` and crate root refuse I/O, and nothing turns them off.
+
+    The same shape as `DomainLintTests`: the fault cases run real clippy over a throwaway crate
+    carrying the app's real `clippy.toml`, with a tokio stand-in whose `net`, `fs`, `process`,
+    `io` and `signal` items are what feature unification would hand the app. Two of them are
+    #283's seeded faults: a `tokio::net::TcpStream::connect` in a use case, and a `Clock` over
+    `std::time::Instant`.
+    """
+
+    APP = ROOT / "microvms-app"
+
+    def clippy(self, lib):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        deps = []
+        for name, text in APP_STAND_INS.items():
+            stand_in = Path(tmp.name) / name
+            (stand_in / "src").mkdir(parents=True)
+            (stand_in / "Cargo.toml").write_text(
+                f'[package]\nname = "{name}"\nversion = "0.0.0"\nedition = "2024"\n'
+                "publish = false\n\n[workspace]\n"
+            )
+            (stand_in / "src" / "lib.rs").write_text(textwrap.dedent(text))
+            deps.append(f'{name} = {{ path = "../{name}" }}\n')
+        crate = Path(tmp.name) / "microvms-app"
+        (crate / "src").mkdir(parents=True)
+        (crate / "Cargo.toml").write_text(
+            '[package]\nname = "microvms-app"\nversion = "0.0.0"\nedition = "2024"\n'
+            "publish = false\n\n[workspace]\n\n[dependencies]\n" + "".join(deps)
+        )
+        shutil.copy(self.APP / "clippy.toml", crate / "clippy.toml")
+        (crate / "src" / "lib.rs").write_text(textwrap.dedent(lib))
+        env = {k: v for k, v in os.environ.items() if k != "CLIPPY_CONF_DIR"}
+        env["CARGO_TARGET_DIR"] = str(Path(tmp.name) / "target")
+        return subprocess.run(
+            [
+                "cargo",
+                "clippy",
+                "--offline",
+                "--quiet",
+                "--manifest-path",
+                str(crate / "Cargo.toml"),
+            ],
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_the_app_root_forbids_the_disallowed_lints(self):
+        lib = self.APP / "src" / "lib.rs"
+        self.assertIn(FORBID, lib.read_text(encoding="utf-8").splitlines())
+
+    def test_no_app_source_names_the_lints_except_the_root(self):
+        # `forbid` already makes an inner `allow` or `expect` a compile error. This catches the
+        # edit that would make one compile: the root weakened to `deny`, or a `cfg_attr` level.
+        lib = (self.APP / "src" / "lib.rs").resolve()
+        for path in sorted((self.APP / "src").rglob("*.rs")):
+            rel = path.relative_to(ROOT).as_posix()
+            for level, lint, line in lint_levels(path.read_text(encoding="utf-8")):
+                if level == "forbid" and path.resolve() == lib and "disallowed" in lint:
+                    continue
+                self.fail(
+                    f"{rel}:{line}: {level}({lint}). The app has no exceptions: put the I/O "
+                    "behind a port and implement it in microvms-edges."
+                )
+
+    def test_the_app_bans_each_io_route(self):
+        config = tomllib.loads((self.APP / "clippy.toml").read_text())
+        paths = {
+            key: sorted(item["path"] for item in config[key])
+            for key in ("disallowed-types", "disallowed-methods")
+        }
+        self.assertEqual(
+            paths["disallowed-types"],
+            sorted(
+                [
+                    "std::fs::DirBuilder",
+                    "std::fs::File",
+                    "std::fs::OpenOptions",
+                    "std::fs::ReadDir",
+                    "std::net::TcpListener",
+                    "std::net::TcpStream",
+                    "std::net::UdpSocket",
+                    "std::os::unix::net::UnixDatagram",
+                    "std::os::unix::net::UnixListener",
+                    "std::os::unix::net::UnixStream",
+                    "std::process::Command",
+                    "std::time::Instant",
+                    "tokio::fs::DirBuilder",
+                    "tokio::fs::File",
+                    "tokio::fs::OpenOptions",
+                    "tokio::fs::ReadDir",
+                    "tokio::net::TcpListener",
+                    "tokio::net::TcpSocket",
+                    "tokio::net::TcpStream",
+                    "tokio::net::UdpSocket",
+                    "tokio::net::UnixDatagram",
+                    "tokio::net::UnixListener",
+                    "tokio::net::UnixStream",
+                    "tokio::process::Child",
+                    "tokio::process::Command",
+                ]
+            ),
+        )
+        fs_functions = [
+            "canonicalize",
+            "copy",
+            "create_dir",
+            "create_dir_all",
+            "hard_link",
+            "metadata",
+            "read",
+            "read_dir",
+            "read_link",
+            "read_to_string",
+            "remove_dir",
+            "remove_dir_all",
+            "remove_file",
+            "rename",
+            "set_permissions",
+            "symlink_metadata",
+            "write",
+        ]
+        path_methods = [
+            "canonicalize",
+            "exists",
+            "is_dir",
+            "is_file",
+            "is_symlink",
+            "metadata",
+            "read_dir",
+            "read_link",
+            "symlink_metadata",
+            "try_exists",
+        ]
+        self.assertEqual(
+            paths["disallowed-methods"],
+            sorted(
+                [
+                    "std::env::args",
+                    "std::env::args_os",
+                    "std::env::current_dir",
+                    "std::env::current_exe",
+                    "std::env::home_dir",
+                    "std::env::set_current_dir",
+                    "std::env::temp_dir",
+                    "std::env::var",
+                    "std::env::var_os",
+                    "std::env::vars",
+                    "std::env::vars_os",
+                    "std::fs::exists",
+                    "std::io::stderr",
+                    "std::io::stdin",
+                    "std::io::stdout",
+                    "std::net::ToSocketAddrs::to_socket_addrs",
+                    "std::os::unix::fs::symlink",
+                    "std::thread::sleep",
+                    "std::time::Instant::now",
+                    "std::time::SystemTime::elapsed",
+                    "std::time::SystemTime::now",
+                    "tokio::fs::try_exists",
+                    "tokio::io::stderr",
+                    "tokio::io::stdin",
+                    "tokio::io::stdout",
+                    "tokio::net::lookup_host",
+                    "tokio::signal::ctrl_c",
+                    "tokio::signal::unix::signal",
+                ]
+                + [f"std::fs::{name}" for name in fs_functions]
+                + [f"tokio::fs::{name}" for name in fs_functions]
+                + [f"std::path::Path::{method}" for method in path_methods]
+            ),
+        )
+        for item in config["disallowed-types"] + config["disallowed-methods"]:
+            self.assertTrue(item.get("reason"), item)
+            # A tokio item exists only when some member turns its feature on, so each needs
+            # `allow-invalid` or the app's own build warns that the path doesn't resolve.
+            if item["path"].startswith("tokio::"):
+                self.assertTrue(item.get("allow-invalid"), item)
+
+    def test_the_app_refuses_a_call_from_each_group(self):
+        out = self.clippy(
+            f"""\
+            {FORBID}
+            pub fn file() -> bool {{
+                std::fs::read("x").is_ok() && std::path::Path::new("x").exists()
+            }}
+            pub fn subprocess() {{
+                let _ = std::process::Command::new("aws");
+                let _ = tokio::process::Command::new("gh");
+            }}
+            pub fn network() -> bool {{
+                std::net::ToSocketAddrs::to_socket_addrs("localhost:80").is_ok()
+            }}
+            pub async fn tokio_io() {{
+                let _ = tokio::fs::read("x").await;
+                let _ = tokio::net::lookup_host("localhost:80").await;
+            }}
+            pub fn environment() -> bool {{
+                std::env::var("AWS_REGION").is_ok()
+            }}
+            pub fn stream() {{
+                let _ = std::io::stdin();
+            }}
+            pub fn wall_clock() {{
+                let _ = std::time::SystemTime::now();
+            }}
+            """
+        )
+        self.assertNotEqual(out.returncode, 0, out.stderr)
+        for message in [
+            "disallowed method `std::fs::read`",
+            "disallowed method `std::path::Path::exists`",
+            "disallowed type `std::process::Command`",
+            "disallowed type `tokio::process::Command`",
+            "disallowed method `std::net::ToSocketAddrs::to_socket_addrs`",
+            "disallowed method `tokio::fs::read`",
+            "disallowed method `tokio::net::lookup_host`",
+            "disallowed method `std::env::var`",
+            "disallowed method `std::io::stdin`",
+            "disallowed method `std::time::SystemTime::now`",
+        ]:
+            self.assertIn(message, out.stderr)
+
+    def test_a_tokio_connect_in_a_use_case_fails_clippy(self):
+        # #283's seeded fault: a use case that dials the network itself instead of through its
+        # transport or backend port.
+        out = self.clippy(
+            f"""\
+            {FORBID}
+            pub async fn health(endpoint: &str) -> bool {{
+                tokio::net::TcpStream::connect(endpoint).await.is_ok()
+            }}
+            """
+        )
+        self.assertNotEqual(out.returncode, 0, out.stderr)
+        self.assertIn("disallowed type `tokio::net::TcpStream`", out.stderr)
+
+    def test_a_clock_over_std_instant_fails_clippy(self):
+        # #283's seeded fault: the control plane's old clock, which a simulator can't move.
+        out = self.clippy(
+            f"""\
+            {FORBID}
+            pub trait Clock {{
+                fn elapsed(&self) -> std::time::Duration;
+            }}
+            pub struct StdClock {{
+                base: std::time::Instant,
+            }}
+            impl StdClock {{
+                pub fn new() -> Self {{
+                    Self {{ base: std::time::Instant::now() }}
+                }}
+            }}
+            impl Clock for StdClock {{
+                fn elapsed(&self) -> std::time::Duration {{
+                    self.base.elapsed()
+                }}
+            }}
+            """
+        )
+        self.assertNotEqual(out.returncode, 0, out.stderr)
+        self.assertIn("disallowed type `std::time::Instant`", out.stderr)
+        self.assertIn("disallowed method `std::time::Instant::now`", out.stderr)
+
+    def test_a_clock_read_or_a_stream_that_skips_its_port_fails_clippy(self):
+        # The routes past `SystemTime::now` and `std::io`: a wall reading from the epoch, a
+        # sleep the simulator can't see, and tokio's streams and signals, which the CLI's and
+        # agentd's features hand the app through unification.
+        out = self.clippy(
+            f"""\
+            {FORBID}
+            pub fn unix_now() -> std::time::Duration {{
+                std::time::UNIX_EPOCH.elapsed().unwrap_or_default()
+            }}
+            pub fn pause() {{
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }}
+            pub fn warn() {{
+                let _ = tokio::io::stderr();
+            }}
+            pub async fn interrupted() -> bool {{
+                tokio::signal::ctrl_c().await.is_ok()
+            }}
+            """
+        )
+        self.assertNotEqual(out.returncode, 0, out.stderr)
+        for message in [
+            "disallowed method `std::time::SystemTime::elapsed`",
+            "disallowed method `std::thread::sleep`",
+            "disallowed method `tokio::io::stderr`",
+            "disallowed method `tokio::signal::ctrl_c`",
+        ]:
+            self.assertIn(message, out.stderr)
+
+    def test_an_allow_under_the_app_root_does_not_compile(self):
+        out = self.clippy(
+            f"""\
+            {FORBID}
+            #[allow(clippy::disallowed_types)]
+            pub fn quiet() {{
+                let _ = std::process::Command::new("aws");
+            }}
+            """
+        )
+        self.assertNotEqual(out.returncode, 0, out.stderr)
+        self.assertIn(
+            "allow(clippy::disallowed_types) incompatible with previous forbid",
             out.stderr,
         )
 

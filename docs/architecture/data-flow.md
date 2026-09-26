@@ -31,26 +31,26 @@ control plane together with its endpoint proxy.
    recovery at `microvms-cli/src/commands/lifecycle.rs:724-731`).
 3. `launch_and_exec` preflights the build request, uploads the artifact, then `Sandbox::build_image`
    issues `CreateMicrovmImage` and waits for the image to become usable
-   (`microvms-cli/src/commands/lifecycle.rs:1048-1053`, `microvms-core/src/sandbox.rs:870`).
+   (`microvms-cli/src/commands/lifecycle.rs:1048-1053`, `microvms-app/src/sandbox.rs:884`).
 4. `Sandbox::run` refuses a second bootstrap on the same sandbox, mints the agent token, and
    wraps it with the launch env in a typed `RunHookPayload` that checks its 4096-byte budget
-   before any call (`microvms-core/src/sandbox.rs:1010`, refusal at
-   `microvms-core/src/sandbox.rs:1015`, payload at `microvms-core/src/sandbox.rs:1071`).
+   before any call (`microvms-app/src/sandbox.rs:1026`, refusal at
+   `microvms-app/src/sandbox.rs:1031`, payload at `microvms-app/src/sandbox.rs:1090`).
 5. `ControlPlane::run_microvm` validates the identifier, the duration range, and the role ARN,
    splits ingress and egress connectors by intent, and puts the payload on the wire
-   (`microvms-core/src/control/microvm.rs:356`).
+   (`microvms-app/src/control/microvm.rs:356`).
 6. The platform calls the daemon's run hook over loopback; `run_hook` unwraps the envelope,
    parses the inner payload, and installs the token once — an identical replay is 200 and a
    different token is 409 (`agentd/src/routes.rs:178`, verdicts at
    `agentd/src/routes.rs:213-234`).
 7. `ControlPlane::wait_for_running` polls to RUNNING and fails fast on any terminal state; the
    client then polls unauthenticated `/v1/health` until `bootstrapped`
-   (`microvms-core/src/control/microvm.rs:435`, `microvms-core/src/session/mod.rs:342`). The
+   (`microvms-app/src/control/microvm.rs:435`, `microvms-app/src/session/mod.rs:283`). The
    sandbox marks the token installed only after RUNNING is observed
-   (`microvms-core/src/sandbox.rs:1176-1178`).
+   (`microvms-app/src/sandbox.rs:1198-1200`).
 8. The optional workload runs through `Session::run_sync` — start, wait, ack — and `tear_down`
    plus `attach_cost` then run however the select ended
-   (`microvms-core/src/session/mod.rs:408`, `microvms-cli/src/commands/lifecycle.rs:1237`,
+   (`microvms-app/src/session/mod.rs:349`, `microvms-cli/src/commands/lifecycle.rs:1237`,
    `microvms-cli/src/commands/lifecycle.rs:1287`).
 
 ```mermaid
@@ -85,20 +85,20 @@ sequenceDiagram
    read at `microvms-cli/src/commands/attached.rs:281`).
 3. `for_each_event` delegates to `for_each_event_async`, whose loop steps the `advance` state
    machine, reads the cursor off the machine, and reports `EndReason::Cut` when a body ends with
-   no `exit` event (`microvms-core/src/session/exec.rs:347`, loop at
-   `microvms-core/src/session/exec.rs:419-428`).
+   no `exit` event (`microvms-app/src/session/exec.rs:350`, loop at
+   `microvms-app/src/session/exec.rs:422-431`).
 4. `advance` re-attaches at the last good cursor with a fixed backoff on a retryable failure,
    and errors out past `max_reconnects` instead of looping forever
-   (`microvms-core/src/session/exec.rs:460`, backoff and re-attach at
-   `microvms-core/src/session/exec.rs:487-491`).
+   (`microvms-app/src/session/exec.rs:463`, backoff and re-attach at
+   `microvms-app/src/session/exec.rs:490-494`).
 5. `ExecHandle::attach` issues `GET /v1/exec/{id}/stream?offset=N` with
    `accept: text/event-stream`, building its headers inside the request path so a mid-stream
-   reconnect re-mints an expired token (`microvms-core/src/session/exec.rs:591`, mint at
-   `microvms-core/src/session/exec.rs:600`).
+   reconnect re-mints an expired token (`microvms-app/src/session/exec.rs:594`, mint at
+   `microvms-app/src/session/exec.rs:603`).
 6. `ProxyAuth::headers` serves the cached proxy token, or takes the mint lock and re-checks
    freshness under it so two racing tasks do not burn two control-plane calls
-   (`microvms-core/src/session/proxy.rs:432`, double check at
-   `microvms-core/src/session/proxy.rs:521-530`).
+   (`microvms-app/src/session/proxy.rs:405`, double check at
+   `microvms-app/src/session/proxy.rs:494-503`).
 7. The daemon's `stream` handler snapshots the replay ring, reads the terminal marker after the
    snapshot, and sends the SSE body with a keepalive plus `x-accel-buffering: no` so a buffering
    proxy cannot batch a live stream into one delivery at exit (`agentd/src/exec.rs:455`,
@@ -141,11 +141,11 @@ sequenceDiagram
    `microvms-cli/src/commands/attached.rs:798-804`).
 4. `Session::upload_tar` delegates to `files::upload_tar`, which builds
    `PUT /v1/fs/tar?path=...` with `content-type: application/x-tar` and the archive bytes as the
-   body (`microvms-core/src/session/mod.rs:444`, `microvms-core/src/session/files.rs:98`).
+   body (`microvms-app/src/session/mod.rs:385`, `microvms-app/src/session/files.rs:98`).
 5. `Transport::request` prepends the proxy headers and the session's bearer token to the
    caller's own headers rather than replacing them, which is what keeps the content type on the
-   request (`microvms-core/src/session/mod.rs:106`, header assembly at
-   `microvms-core/src/session/mod.rs:88`).
+   request (`microvms-app/src/session/mod.rs:96`, header assembly at
+   `microvms-app/src/session/mod.rs:78`).
 6. `auth::require_token` guards the control router before the body is polled, answering 503
    when no token is installed and 401 on a mismatch, then draining a bounded prefix of the
    rejected body so the client sees the status rather than a TCP reset

@@ -55,6 +55,8 @@ from pathlib import Path
 PUBLISHED = {
     "microvms-protocol",
     "microvms-domain",
+    "microvms-app",
+    "microvms-edges",
     "microvms-core",
     "microvms-cli",
 }
@@ -384,6 +386,17 @@ def main() -> int:
         # upload. cargo-deny's `wildcards = "deny"` covers the same ground from the other
         # side; this names the crate and the dependency instead of reporting a `*`.
         for dependency in package["dependencies"]:
+            # A crate naming itself (a dev-dependency that turns on its own test feature) is
+            # the one path dependency the dry run's workspace overlay doesn't cover: cargo
+            # resolves it against the registry, where the release's version doesn't exist yet
+            # and an older one may lack the feature. Offline, so `mise run check` sees it.
+            if dependency["name"] == package["name"]:
+                failures.append(
+                    f"{package['name']} depends on itself. `cargo publish` resolves that "
+                    f"against crates.io and fails: depend on the crate that owns the feature "
+                    f"instead (core's tests take `microvms-app` with `test-support`)."
+                )
+                continue
             if dependency.get("path") and dependency["req"] == "*":
                 failures.append(
                     f"{package['name']} depends on {dependency['name']} by path with no "

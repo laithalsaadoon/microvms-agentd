@@ -34,6 +34,7 @@
 //! ```
 
 use microvms_core::control::{ControlPlane, ops};
+use microvms_core::prelude::*;
 use microvms_core::region::Region;
 
 /// The region every check runs in, for the reason `live_pagination.rs` gives: these assertions

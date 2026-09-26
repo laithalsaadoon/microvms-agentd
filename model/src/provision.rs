@@ -22,7 +22,7 @@
 //!
 //! # The policy the checker compares against five others
 //!
-//! [`Behavior::Specified`] is the policy `microvms-core/src/provision.rs` implements. The
+//! [`Behavior::Specified`] is the policy `microvms-edges/src/provision.rs` implements. The
 //! others are the ways it could plausibly be written instead, and each breaks a property
 //! the checker names:
 //!
@@ -229,7 +229,7 @@ pub enum Phase {
 /// The provisioning policy the model runs.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Behavior {
-    /// `microvms-core/src/provision.rs`.
+    /// `microvms-edges/src/provision.rs`.
     Specified,
     /// The CLI when #219 was filed.
     Today,
@@ -244,7 +244,7 @@ pub enum Behavior {
 }
 
 /// **The specification of a fetch's verification.** One pure function over what the
-/// release does, mirrored by the table test in `microvms-core/src/provision.rs`.
+/// release does, mirrored by the table test in `microvms-edges/src/provision.rs`.
 ///
 /// * `gh` downloads and attestation passes: [`Verdict::Attestation`].
 /// * `gh` downloads and attestation fails: [`Verdict::Refused`], without trying `curl`.

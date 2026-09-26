@@ -39,6 +39,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use microvms_core::SizeClass;
 use microvms_core::control::{BaseImage, CreateImageRequest};
+use microvms_core::prelude::*;
 use microvms_core::sandbox::{Detached, RunRequest, Sandbox, TeardownOpts, TeardownReport};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};

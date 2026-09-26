@@ -34,6 +34,7 @@ use microvms_core::agents::{
     DEFAULT_SIZE, PromptOptions, WORKDIR, profile,
 };
 use microvms_core::control::BaseImage;
+use microvms_core::prelude::*;
 use microvms_core::sandbox::Sandbox;
 use microvms_core::{Error, ErrorKind, Region};
 use pyo3::prelude::*;

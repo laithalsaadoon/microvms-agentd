@@ -10,6 +10,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use microvms_core::control::{ControlPlane as CoreControlPlane, Microvm as CoreMicrovm};
 use microvms_core::control::{MicrovmFilter, WaitOpts};
+use microvms_core::prelude::*;
 use napi_derive::napi;
 
 use crate::errors::{AsyncError, js_async};

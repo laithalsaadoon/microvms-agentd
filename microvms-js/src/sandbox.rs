@@ -46,6 +46,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use microvms_core::control::{BaseImage as CoreBaseImage, CreateImageRequest};
+use microvms_core::prelude::*;
 use microvms_core::sandbox::{
     Detached as CoreDetached, RunRequest, Sandbox as CoreSandbox, TeardownOpts,
     TeardownReport as CoreTeardownReport,

@@ -33,15 +33,16 @@ Replace the empty `[dependencies]` section in `Cargo.toml` with:
 
 ```toml
 [dependencies]
-microvms-core = "0.8"
+microvms-core = "0.11"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
 Replace `src/main.rs` with:
 
-```rust
+```rust,no_run
 use std::time::Duration;
-use microvms_core::{Region, protocol::exec::StartRequest};
+use microvms_core::prelude::*;
+use microvms_core::{Region, protocol::exec::{Shell, StartRequest}};
 use microvms_core::sandbox::{RunRequest, Sandbox, TeardownOpts};
 use microvms_core::session::{DEFAULT_READY_TIMEOUT, mint_exec_id};
 
@@ -58,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         session.run_sync(StartRequest {
             exec_id: mint_exec_id(),
             command: vec!["printf 'hello from a sandbox\\n'".into()],
-            shell: true,
+            shell: Shell::Flag(true),
             cwd: None,
             env: Default::default(),
             user: None,
@@ -66,6 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             timeout_sec: Some(30.0),
             stdin: false,
             reap_group_on_exit: true,
+            inherit_image_env: false,
         }, Duration::from_secs(35)).await
     }.await;
 
@@ -96,6 +98,8 @@ cargo run
 ```
 
 Expected output includes `hello from a sandbox` and `exit: Some(0)`.
+`use microvms_core::prelude::*;` brings the constructors that wire in AWS, such as
+`Sandbox::new`, into scope.
 `cwd: None` uses the image's working directory. Set a different directory only
 after creating it or uploading files there; a generic image need not contain
 `/workspace`.

@@ -27,7 +27,7 @@ Second, the covering-test relation counts test *files*, and Rust's dominant unit
 here is an in-file `#[cfg(test)] mod tests`; 770 such tests exist across
 `microvms-core` (436), `microvms-cli` (172), `agentd` (130), `protocol` (17) and `model` (15),
 and none of them can satisfy a cross-file rule. A `warn` count is therefore a statement about
-tier reach, not about absence of testing — `microvms-core/src/sandbox.rs` returns an empty
+tier reach, not about absence of testing — `microvms-app/src/sandbox.rs` returns an empty
 `codegraph affected -d 1` result while holding 27 unit tests of its own. Third, and most
 consequential for reading the table: **no source-level edge can cross the PyO3 or napi-rs FFI
 boundary**, so the 159 pytest functions in `microvms-py/tests/` and the 168 `test(` calls in
@@ -49,8 +49,8 @@ file has one or two distinct authors, and a `bgagent` top-owner share marks a fi
 arrived inside a large squashed commit rather than one with a second maintainer. Two files
 are excluded from scoring because they are test code that lives under `src/`:
 `microvms-cli/src/guards.rs` (`#![cfg(test)]` at `microvms-cli/src/guards.rs:20`, declared at
-`microvms-cli/src/main.rs:36-37`) and `microvms-core/src/control/fake.rs` (declared at
-`microvms-core/src/control/mod.rs:928-929`). That exclusion matters: `guards.rs` is the
+`microvms-cli/src/main.rs:36-37`) and `microvms-app/src/control/fake.rs` (declared at
+`microvms-app/src/control/mod.rs:900-901`). That exclusion matters: `guards.rs` is the
 joint-highest-churn source file in the repository at 13 commits, so a churn-only ranking puts
 a file that never ships in a binary at the top.
 
@@ -65,7 +65,7 @@ a file that never ships in a binary at the top.
 | `microvms-js/src/sandbox.rs` | → flat | 0 warn, 16 error | Laith Al-Saadoon 60% | `microvms-js/src/sandbox.rs` (623 LOC) |
 | `microvms-js/src/process.rs` | ↓ falling | 0 warn, 12 error | Laith Al-Saadoon 100% | `microvms-js/src/process.rs` (541 LOC) |
 | `microvms-py/src/session.rs` | → flat | 0 warn, 11 error | Laith Al-Saadoon 67% | `microvms-py/src/session.rs` (605 LOC) |
-| `microvms-core/src/sandbox.rs` | ↑ rising | 40 warn, 0 error | Laith Al-Saadoon 73% | `microvms-core/src/sandbox.rs` (2,371 LOC) |
+| `microvms-app/src/sandbox.rs` | ↑ rising | 40 warn, 0 error | Laith Al-Saadoon 73% | `microvms-app/src/sandbox.rs` (2,371 LOC) |
 | `agentd/src/fs.rs` | ↑ rising | 38 warn, 0 error | bgagent 57% | `agentd/src/fs.rs` (2,628 LOC) |
 | `microvms-py/src/sandbox.rs` | → flat | 0 warn, 10 error | Laith Al-Saadoon 67% | `microvms-py/src/sandbox.rs` (780 LOC) |
 
@@ -74,7 +74,7 @@ reason is structural rather than per-file: all 18 files under `microvms-py/src/`
 `microvms-js/src/` — 3,856 and 3,760 LOC respectively — contain zero `#[cfg(test)]` modules
 and zero `#[test]` functions, while the other five crates hold 770 between them — an average
 of 19 per file in `microvms-core`, 11 in `microvms-cli`, 10 in `agentd`. The three
-non-binding rows (`microvms-domain/src/cost.rs`, `microvms-core/src/sandbox.rs`,
+non-binding rows (`microvms-domain/src/cost.rs`, `microvms-app/src/sandbox.rs`,
 `agentd/src/fs.rs`) are the opposite case: heavily unit-tested files whose churn is rising
 and whose public surface no cross-file tier reaches.
 

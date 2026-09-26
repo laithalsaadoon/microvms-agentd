@@ -2711,6 +2711,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "microvms-app"
+version = "0.10.0"
+dependencies = [
+ "backon",
+ "base64 0.23.1",
+ "bolero",
+ "const-hex",
+ "futures-util",
+ "microvms-domain",
+ "microvms-protocol",
+ "percent-encoding",
+ "proptest",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tokio",
+ "zip",
+]
+
+[[package]]
 name = "microvms-cli"
 version = "0.10.0"
 dependencies = [
@@ -2737,25 +2757,19 @@ dependencies = [
 name = "microvms-core"
 version = "0.10.0"
 dependencies = [
- "aws-config",
- "aws-credential-types",
- "aws-sigv4",
- "backon",
  "base64 0.23.1",
  "bolero",
  "const-hex",
  "cucumber",
  "futures-util",
  "getrandom 0.4.3",
- "http",
  "hyper",
  "hyper-util",
+ "microvms-app",
  "microvms-domain",
+ "microvms-edges",
  "microvms-protocol",
- "percent-encoding",
- "proptest",
  "regex",
- "reqwest",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -2783,6 +2797,33 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "x25519-dalek",
+]
+
+[[package]]
+name = "microvms-edges"
+version = "0.10.0"
+dependencies = [
+ "aws-config",
+ "aws-credential-types",
+ "aws-sigv4",
+ "backon",
+ "base64 0.23.1",
+ "bolero",
+ "const-hex",
+ "futures-util",
+ "getrandom 0.4.3",
+ "http",
+ "microvms-app",
+ "microvms-domain",
+ "microvms-protocol",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "snow",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite 0.30.0",
 ]
 
 [[package]]

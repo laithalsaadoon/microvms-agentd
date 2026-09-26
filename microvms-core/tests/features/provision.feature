@@ -2,7 +2,7 @@
 #
 # The behavior spec for BIND-17, BIND-18, BIND-19, and BIND-20 in spec/core.symspec.json
 # (issue #219). `model/src/provision.rs` checks the same requirements as a Stateright
-# model, and the bolero harness in `microvms-core/src/provision_fuzz.rs` fuzzes the
+# model, and the bolero harness in `microvms-edges/src/provision_fuzz.rs` fuzzes the
 # parsers they rest on. Each scenario's tags name the requirements it verifies.
 #
 # "The release" is a fake at the subprocess seam: it answers the exact `gh` and `curl`

@@ -55,9 +55,9 @@ is what keeps `protocol` out of the CLI's direct dependency set.
 | `agentd/src/schema.rs` | direct import | yes | `:51` re-exports `PROTOCOL_VERSION`; `:286` merges the `$defs` rendered from these types |
 | `agentd/src/exec.rs` | direct import | yes | `:73` imports the `ERROR_*` and `EVENT_*` names; `:87` re-exports the exec types |
 | `microvms-cli/src/commands/attached.rs` | indirect | yes | 22 `protocol::` references through core's re-export, e.g. `:178` `Phase::Running`, `:253` `ExitEvent`, `:442` `phase_name` |
-| `microvms-core/src/session/exec.rs` | direct import | yes | 16 references; `:69` and `:71` are public struct fields of `protocol::exec::Phase` / `Outcome`; `:118` aliases `StdinResponse` |
-| `microvms-core/src/session/sse.rs` | direct import | yes | `:272`, `:295`, `:304` dispatch on `EVENT_OUTPUT` / `EVENT_GAP` / `EVENT_EXIT`; `:255` wraps `ExitEvent` |
-| `microvms-core/src/session/mod.rs` | direct import | yes | `:329` and `:345` return `protocol::health::Health`; `:380` takes `protocol::exec::StartRequest` |
+| `microvms-app/src/session/exec.rs` | direct import | yes | 16 references; `:69` and `:71` are public struct fields of `protocol::exec::Phase` / `Outcome`; `:118` aliases `StdinResponse` |
+| `microvms-app/src/session/sse.rs` | direct import | yes | `:272`, `:295`, `:304` dispatch on `EVENT_OUTPUT` / `EVENT_GAP` / `EVENT_EXIT`; `:255` wraps `ExitEvent` |
+| `microvms-app/src/session/mod.rs` | direct import | yes | `:270` and `:286` return `protocol::health::Health`; `:321` takes `protocol::exec::StartRequest` |
 | `agentd/src/routes.rs` | direct import | yes | `:18`-`:20` re-export `VERSION_HEADER`, `Health`/`DiskHealth`, and `HOOK_PREFIX`/`RunHook`/`RunHookEnvelope`/`RunHookError` |
 | `microvms-js/src/session.rs` | direct import | yes | `:142` builds a `protocol::exec::StartRequest`; `:577` enumerates `Phase::ALL` so a new phase appears without an edit |
 | `microvms-py/src/session.rs` | direct import | yes | `:338` and `:400` build `StartRequest`; `:598` maps `Phase::ALL` through `Phase::as_str` |
@@ -106,11 +106,11 @@ follow.
 | `microvms-py/src/errors.rs` | direct import | yes | 18 references; `:129 exception_for` matches every kind onto one of the `create_exception!` classes declared at `:33`-`:117` (one base plus one per kind) |
 | `microvms-cli/src/envelope.rs` | direct import | yes | 9 references; `:321 error()` emits the failure envelope and `:327` writes `data.kind` from the wire kind |
 | `microvms-js/src/errors.rs` | direct import | yes | `:70 code_chain` is the single conversion out to JS; the module docs at `:35` and `:43` fix the contract as `err.cause.message` for the code and `err.cause.cause.message` for the wire kind |
-| `microvms-core/src/session/http.rs` | direct import | yes | `:126` is the sole non-test caller of `WireKind::from_status`, so the status table's shape is this file's contract |
-| `microvms-core/src/control/transport.rs` | direct import | likely | 29 references; `:38` imports `ErrorKind` and `:130`, `:156`, `:222` are control-plane raise sites; `:306` records that `WireKind` is the daemon's discipline and has no role here |
-| `microvms-core/src/control/image.rs` | direct import | likely | 29 references, all classifying at the point of raise; `:284`-`:285` document `BuildWedged`, `Platform`, and `Timeout` as three distinct build outcomes |
-| `microvms-core/src/control/microvm.rs` | direct import | likely | 23 references; `:303`-`:304` record that a missing proxy-auth key is `ErrorKind::Retryable` via `WireKind::AuthTokenMint` because minting sits inside the retry path |
-| `microvms-core/src/sandbox.rs`, `session/mod.rs`, `control/mod.rs`, `session/proxy.rs`, `control/artifact.rs`, `session/exec.rs`, `cost.rs`, `session/sse.rs`, `session/files.rs` | direct import | likely | (further direct imports, 4-17 references each, all raise sites under `microvms-core/src/`) |
+| `microvms-app/src/session/http.rs` | direct import | yes | `:127` is the sole non-test caller of `WireKind::from_status`, so the status table's shape is this file's contract |
+| `microvms-app/src/control/transport.rs` | direct import | likely | 29 references; `:36` imports `ErrorKind` and `:128`, `:154`, `:220` are control-plane raise sites; `:304` records that `WireKind` is the daemon's discipline and has no role here |
+| `microvms-app/src/control/image.rs` | direct import | likely | 29 references, all classifying at the point of raise; `:289`-`:290` document `BuildWedged`, `Platform`, and `Timeout` as three distinct build outcomes |
+| `microvms-app/src/control/microvm.rs` | direct import | likely | 23 references; `:303`-`:304` record that a missing proxy-auth key is `ErrorKind::Retryable` via `WireKind::AuthTokenMint` because minting sits inside the retry path |
+| `microvms-app/src/sandbox.rs`, `session/mod.rs`, `control/mod.rs`, `session/proxy.rs`, `control/artifact.rs`, `session/exec.rs`, `cost.rs`, `session/sse.rs`, `session/files.rs` | direct import | likely | (further direct imports, 4-17 references each, all raise sites under `microvms-core/src/`) |
 | `microvms-cli/src/guards.rs` | test | yes | 23 references; the classification half of the exit catalogue, inducing each failure at the seam (`:71`, `:108`, `:723`) |
 | `conformance/run_rs.py` | test | yes | `:191` documents `data.kind` as a `microvms_core::WireKind` and `:226` asserts `Conflict` and `NotFound` are distinguishable by exception type |
 | `microvms-core/tests/turmoil_client.rs` | test | yes | 7 references; `:452` and `:726` assert `WireKind::Transport`, `:781` and `:1383` assert `WireKind::AuthTokenMint` |
@@ -203,13 +203,13 @@ breaking change the compiler accepts — the module states the coupling at `:40`
 | --- | --- | --- | --- |
 | `scripts/check-model-drift.py` | config | yes | `:95 RUST_SOURCE_ARGV` reads the object through `microvm constants --emit-json` (`:103`), which `:45` names as the only client; `:149` is the key list, spelled as `as_json()`'s keys |
 | `microvms-cli/src/commands/local.rs` | direct import | yes | `:219` calls `as_json()`; `:223` prints the bare object as the one non-envelope stdout write in the binary, and `:206` records that the keys are the gate's contract |
-| `microvms-core/src/control/mod.rs` | direct import | yes | `:483` checks `MAX_DURATION_SEC`; `:491` and `:518` name `MODEL_API_VERSION` in the refusal text |
-| `microvms-core/src/control/token.rs` | direct import | yes | `:47` imports `MAX_CLIENT_TOKEN_LEN` and `:139` enforces it; `:69` records that the ceiling is measured against the worst legal scope because the run token folds a full ARN in |
-| `microvms-core/src/control/image.rs` | direct import | yes | `:91`-`:92` read both ready-state sets; `:171` and `:185` read `ARCHITECTURES[0]` and `CAPABILITIES[0]` |
+| `microvms-app/src/control/mod.rs` | direct import | yes | `:455` checks `MAX_DURATION_SEC`; `:463` and `:490` name `MODEL_API_VERSION` in the refusal text |
+| `microvms-app/src/control/token.rs` | direct import | yes | `:49` imports `MAX_CLIENT_TOKEN_LEN` and `:144` enforces it; `:71` records that the ceiling is measured against the worst legal scope because the run token folds a full ARN in |
+| `microvms-app/src/control/image.rs` | direct import | yes | `:91`-`:92` read both ready-state sets; `:171` and `:185` read `ARCHITECTURES[0]` and `CAPABILITIES[0]` |
 | `microvms-domain/src/hooks.rs` | direct import | yes | `:40` imports both hook-timeout ceilings; `:58` and `:86` are the two newtypes' `MAX_SECS` |
-| `microvms-core/src/control/transport.rs` | direct import | yes | `:47 const API_PATH_VERSION = crate::constants::MODEL_API_VERSION` — the request path is built from it, and `:43` says it is read rather than written again |
+| `microvms-app/src/control/transport.rs` | direct import | yes | `:45 const API_PATH_VERSION = crate::constants::MODEL_API_VERSION` — the request path is built from it, and `:41` says it is read rather than written again |
 | `microvms-domain/src/sizing.rs`, `microvms-domain/src/region.rs` | indirect | yes | `as_json` reaches into `crate::sizing::SIZE_CLASSES` at `microvms-domain/src/constants.rs:660` and `MICROVM_REGIONS` at `microvms-domain/src/constants.rs:651`, so editing either table changes the gate's payload |
-| `microvms-core/src/sandbox.rs` | direct import | likely | `:870` reads `DEAD_STATES` on the launch guard |
+| `microvms-app/src/sandbox.rs` | direct import | likely | `:884` reads `DEAD_STATES` on the launch guard |
 | `microvms-cli/src/commands/lifecycle.rs` | direct import | likely | `:988` reads `DEAD_STATES`; `:974` records that failing fast on it beats burning the poll budget |
 | `microvms-cli/tests/manifest.rs` | test | yes | `:229 constants_emit_json_writes_the_bare_object_the_drift_gate_reads`; `:297` asserts the command is listed rather than hidden |
 | `microvms-cli/src/commands/local.rs` (own tests) | test | yes | `:399` asserts the parsed output equals `microvms_core::constants::as_json()` |
@@ -253,10 +253,10 @@ rows.
 | `microvms-domain/src/cost.rs` | direct import | yes | the rate arithmetic multiplies `baseline_gb()` (`microvms-domain/src/sizing.rs:195`) and never the peak |
 | `microvms-cli/src/cli.rs` | direct import | yes | `:240 MemoryMib` is the clap `ValueEnum` mirror and `:255 size_class()` the exhaustive mapping; `:1034` asserts the flag domain is exactly the documented table |
 | `microvms-py/src/cost.rs`, `microvms-js/src/cost.rs` | direct import | yes | `microvms-py/src/cost.rs:488 PySizeClass` and `microvms-js/src/cost.rs:422 SizeClass` each wrap the core type (`microvms-js/src/cost.rs:41`) over the same five rows |
-| `microvms-core/src/control/image.rs` | direct import | yes | the `resources` list on the build request |
+| `microvms-app/src/control/image.rs` | direct import | yes | the `resources` list on the build request |
 | `microvms-domain/src/constants.rs` | direct import | yes | `:660` flattens every row into the drift gate's JSON payload |
 | `scripts/check-model-drift.py` | config | yes | `:266 PINNED_SIZE_CLASSES`; `:247` records that a value compared only against itself passes by construction |
-| `microvms-core/src/control/mod.rs` | direct import | likely | the request builders take a `SizeClass` rather than an integer |
+| `microvms-app/src/control/mod.rs` | direct import | likely | the request builders take a `SizeClass` rather than an integer |
 | `microvms-cli/src/commands/lifecycle.rs`, `microvms-cli/src/commands/cost.rs` | direct import | likely | each converts the `--memory` flag to a class and keeps it a class all the way down |
 | `microvms-js/src/sandbox.rs`, `microvms-py/src/sandbox.rs` | direct import | likely | the build entry points take an `Option` size (`microvms-js/src/sandbox.rs:244`, `microvms-py/src/sandbox.rs:464`); `microvms-js/src/sandbox.rs:233` records that an off-table baseline stays refused because the only way to hold a `SizeClass` is to have parsed one |
 | `microvms-cli/src/render.rs` | direct import | no | the rendering takes a report, not a class; the references are under `#[cfg(test)]` from `:394` |
@@ -304,12 +304,12 @@ botocore calls that look like substitutes disagree with each other (`microvms-do
 | `microvms-js/src/region.rs` | direct import | yes | `:35 Region` with a factory per region and deliberately no constructor, asserted by `microvms-js/__test__/smoke.mjs:267` |
 | `microvms-cli/src/cli.rs` | direct import | yes | `:273 RegionArg` is the clap mirror and `:287 region()` the exhaustive mapping |
 | `microvms-domain/src/cost.rs` | direct import | yes | a `RateTable` is region-scoped (`:849`), and the region is what a caller reads back (`microvms-js/__test__/smoke.mjs:331`) |
-| `microvms-core/src/control/transport.rs` | direct import | yes | `:432` and `:480` build the AWS config and the endpoint host from `region.as_str()` (`microvms-domain/src/region.rs:83`) |
+| `microvms-app/src/control/transport.rs` | direct import | yes | `:430` and `microvms-edges/src/control/transport.rs:47` build the AWS config and the endpoint host from `region.as_str()` (`microvms-domain/src/region.rs:83`) |
 | `microvms-domain/src/constants.rs` | direct import | yes | `:50` imports `MICROVM_REGIONS`; `:651` publishes it in the gate's payload; `:575` records that it is explicitly not model-backed |
 | `scripts/check-model-drift.py` | config | yes | `:254 PINNED_REGIONS`; `:57` explains why the two measurement-backed values each need a second reader |
 | `microvms-cli/src/seam.rs` | direct import | likely | `:341 resolve_region` and the `CoreSeam` methods are region-parameterized |
-| `microvms-core/src/control/mod.rs` | direct import | likely | `:183 ControlPlane::new` takes a `Region` rather than a string |
-| `microvms-core/src/control/connector.rs`, `control/microvm.rs`, `control/artifact.rs`, `control/image.rs`, `sandbox.rs` | direct import | likely | (further direct imports under `microvms-core/src/`) |
+| `microvms-app/src/control/mod.rs` | direct import | likely | `:132 ControlPlane::new` takes a `Region` rather than a string |
+| `microvms-app/src/control/connector.rs`, `control/microvm.rs`, `control/artifact.rs`, `control/image.rs`, `sandbox.rs` | direct import | likely | (further direct imports under `microvms-core/src/`) |
 | `microvms-js/src/sandbox.rs`, `microvms-py/src/sandbox.rs` | direct import | likely | `create`/`new` takes a `Region` object rather than a string, which is what keeps the closure |
 | `microvms-cli/src/commands/doctor.rs` | direct import | yes | lists the supported names and falls back to `Region::UsEast1` |
 | `microvms-cli/src/guards.rs` | test | likely | the injected seams are region-parameterized (`:82`, `:89`, `:98`) |
@@ -449,9 +449,9 @@ that guarantee is what makes it useful to an agent.
   `microvms-cli/tests/thinness.rs:426 no_shipping_source_line_names_an_operation_or_reaches_past_the_seam`
   asserts no shipping source line reaches past it, and `:457 the_scan_cut_cannot_hide_production_code`
   guards the scan itself.
-- `microvms-core/src/control/transport.rs:245 Transport` and `microvms-core/src/control/mod.rs:112
+- `microvms-app/src/control/transport.rs:243 Transport` and `microvms-app/src/clock.rs:42
   Clock` — the `Send + Sync` trait seams `ControlPlane` is constructed over
-  (`microvms-core/src/control/mod.rs:183`), with `microvms-core/src/control/fake.rs` as the recording implementation.
+  (`microvms-app/src/control/mod.rs:132`), with `microvms-app/src/control/fake.rs` as the recording implementation.
 - `microvms-cli/Cargo.toml`'s direct dependency set — asserted as an exact equality by
   `microvms-cli/tests/thinness.rs:145 the_direct_dependency_set_is_exactly_the_allowed_one` against
   the `ALLOWED` table at `:66`, and the absence of a `lib` target asserted by

@@ -1,0 +1,128 @@
+# ARCH-7: the use cases do no I/O of their own. Each thing they need from outside the process
+# comes through a port this crate declares, and `microvms-edges` implements it. The crate root
+# forbids both lints, so a hit fails the build and an inner `#[allow]` or `#[expect]` is itself
+# an error: there's no exception list, because a use case that needs one of these needs a port.
+#
+# Clippy takes fully qualified paths and no wildcards, so each item is named. Crates that do I/O
+# (reqwest, the AWS crates, getrandom, tokio-tungstenite) never get this far: the dependency set
+# in `arch/placement.toml` keeps them out, and `microvms-cli/tests/dependency_direction.rs`
+# asserts it and each dependency's declared features. This file covers what `std` can do without
+# a dependency, and tokio's `net`, `fs`, `process`, `io-std` and `signal` items, which this crate
+# doesn't enable but can still name once another member turns them on through feature
+# unification (the CLI and agentd turn on all five).
+#
+# `std::time::SystemTime` stays usable as a data type (`Microvm::started_at` and
+# `Minted::expires_at` are values, not clock reads), so only its `now` and `elapsed` are banned:
+# `UNIX_EPOCH.elapsed()` is a wall-clock read too. tokio's
+# `Instant` stays too: a deadline measured on it is virtual under a simulator, which is the
+# property the clock port exists for.
+#
+# `allow-invalid = true` marks a path that doesn't exist in every build: a tokio feature this
+# crate doesn't enable, or a Unix-only std item on the Windows leg. Without it clippy warns that
+# the path doesn't refer to a reachable item.
+#
+# `scripts/test_ratchet.py`'s `AppLintTests` pins this list and runs real clippy over a call from
+# each group, so a deleted line fails there.
+
+disallowed-types = [
+  { path = "std::fs::File", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::fs::OpenOptions", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::fs::ReadDir", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::fs::DirBuilder", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::process::Command", reason = "a subprocess belongs behind a port in microvms-edges" },
+  { path = "std::net::TcpStream", reason = "network access goes through a port: control::transport::Transport, session::HttpBackend, or the sockets in microvms-edges" },
+  { path = "std::net::TcpListener", reason = "network access goes through a port: control::transport::Transport, session::HttpBackend, or the sockets in microvms-edges" },
+  { path = "std::net::UdpSocket", reason = "network access goes through a port: control::transport::Transport, session::HttpBackend, or the sockets in microvms-edges" },
+  { path = "std::os::unix::net::UnixStream", reason = "network access goes through a port: control::transport::Transport, session::HttpBackend, or the sockets in microvms-edges", allow-invalid = true },
+  { path = "std::os::unix::net::UnixListener", reason = "network access goes through a port: control::transport::Transport, session::HttpBackend, or the sockets in microvms-edges", allow-invalid = true },
+  { path = "std::os::unix::net::UnixDatagram", reason = "network access goes through a port: control::transport::Transport, session::HttpBackend, or the sockets in microvms-edges", allow-invalid = true },
+  { path = "std::time::Instant", reason = "read time through the Clock port (clock::Clock), so a simulated test controls it" },
+  { path = "tokio::net::TcpStream", reason = "network access goes through a port: control::transport::Transport, session::HttpBackend, or the sockets in microvms-edges", allow-invalid = true },
+  { path = "tokio::net::TcpListener", reason = "network access goes through a port: control::transport::Transport, session::HttpBackend, or the sockets in microvms-edges", allow-invalid = true },
+  { path = "tokio::net::TcpSocket", reason = "network access goes through a port: control::transport::Transport, session::HttpBackend, or the sockets in microvms-edges", allow-invalid = true },
+  { path = "tokio::net::UdpSocket", reason = "network access goes through a port: control::transport::Transport, session::HttpBackend, or the sockets in microvms-edges", allow-invalid = true },
+  { path = "tokio::net::UnixStream", reason = "network access goes through a port: control::transport::Transport, session::HttpBackend, or the sockets in microvms-edges", allow-invalid = true },
+  { path = "tokio::net::UnixListener", reason = "network access goes through a port: control::transport::Transport, session::HttpBackend, or the sockets in microvms-edges", allow-invalid = true },
+  { path = "tokio::net::UnixDatagram", reason = "network access goes through a port: control::transport::Transport, session::HttpBackend, or the sockets in microvms-edges", allow-invalid = true },
+  { path = "tokio::fs::File", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)", allow-invalid = true },
+  { path = "tokio::fs::OpenOptions", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)", allow-invalid = true },
+  { path = "tokio::fs::ReadDir", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)", allow-invalid = true },
+  { path = "tokio::fs::DirBuilder", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)", allow-invalid = true },
+  { path = "tokio::process::Command", reason = "a subprocess belongs behind a port in microvms-edges", allow-invalid = true },
+  { path = "tokio::process::Child", reason = "a subprocess belongs behind a port in microvms-edges", allow-invalid = true },
+]
+
+disallowed-methods = [
+  { path = "std::fs::read", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::fs::read_to_string", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::fs::write", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::fs::read_dir", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::fs::create_dir_all", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::fs::remove_file", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::fs::remove_dir_all", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::fs::rename", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::fs::copy", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::fs::metadata", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::fs::symlink_metadata", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::fs::exists", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::fs::canonicalize", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::fs::read_link", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::fs::create_dir", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::fs::remove_dir", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::fs::hard_link", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::fs::set_permissions", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::os::unix::fs::symlink", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)", allow-invalid = true },
+  { path = "std::path::Path::exists", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::path::Path::try_exists", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::path::Path::is_file", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::path::Path::is_dir", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::path::Path::is_symlink", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::path::Path::metadata", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::path::Path::symlink_metadata", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::path::Path::read_dir", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::path::Path::read_link", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::path::Path::canonicalize", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)" },
+  { path = "std::env::var", reason = "take a lookup function, the way Region::from_env does; microvms_edges::env::process is the production one" },
+  { path = "std::env::var_os", reason = "take a lookup function, the way Region::from_env does; microvms_edges::env::process is the production one" },
+  { path = "std::env::vars", reason = "take a lookup function, the way Region::from_env does; microvms_edges::env::process is the production one" },
+  { path = "std::env::vars_os", reason = "take a lookup function, the way Region::from_env does; microvms_edges::env::process is the production one" },
+  { path = "std::env::temp_dir", reason = "take the directory as a parameter; the caller reads the environment" },
+  { path = "std::env::current_dir", reason = "take the directory as a parameter; the caller reads the process state" },
+  { path = "std::env::home_dir", reason = "take a lookup, the way names::default_state_root does; the caller reads the environment" },
+  { path = "std::env::current_exe", reason = "take the path as a parameter; the caller reads the process state" },
+  { path = "std::env::set_current_dir", reason = "the caller changes the process state" },
+  { path = "std::env::args", reason = "take the arguments as a parameter; the driving adapter parses them" },
+  { path = "std::env::args_os", reason = "take the arguments as a parameter; the driving adapter parses them" },
+  { path = "std::io::stdin", reason = "a use case takes its input and returns its output; the driving adapter owns the streams" },
+  { path = "std::io::stdout", reason = "a use case takes its input and returns its output; the driving adapter owns the streams" },
+  { path = "std::io::stderr", reason = "a use case takes its input and returns its output; the driving adapter owns the streams" },
+  { path = "std::net::ToSocketAddrs::to_socket_addrs", reason = "a name lookup is network access, which goes through a port in microvms-edges" },
+  { path = "std::time::SystemTime::now", reason = "read time through the Clock port (clock::Clock), so a simulated test controls it; Clock::unix_now is the wall reading" },
+  { path = "std::time::Instant::now", reason = "read time through the Clock port (clock::Clock), so a simulated test controls it; Clock::elapsed is the monotonic reading" },
+  { path = "std::time::SystemTime::elapsed", reason = "read time through the Clock port (clock::Clock), so a simulated test controls it; Clock::unix_now is the wall reading" },
+  { path = "std::thread::sleep", reason = "wait through the Clock port (Clock::sleep), so a simulated test controls it and the runtime isn't blocked" },
+  { path = "tokio::io::stdin", reason = "a use case takes its input and returns its output; the driving adapter owns the streams", allow-invalid = true },
+  { path = "tokio::io::stdout", reason = "a use case takes its input and returns its output; the driving adapter owns the streams", allow-invalid = true },
+  { path = "tokio::io::stderr", reason = "a use case takes its input and returns its output; the driving adapter owns the streams", allow-invalid = true },
+  { path = "tokio::signal::ctrl_c", reason = "the driving adapter owns the process's signals and hands a use case a future to stop on", allow-invalid = true },
+  { path = "tokio::signal::unix::signal", reason = "the driving adapter owns the process's signals and hands a use case a future to stop on", allow-invalid = true },
+  { path = "tokio::net::lookup_host", reason = "a name lookup is network access, which goes through a port in microvms-edges", allow-invalid = true },
+  { path = "tokio::fs::read", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)", allow-invalid = true },
+  { path = "tokio::fs::read_to_string", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)", allow-invalid = true },
+  { path = "tokio::fs::write", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)", allow-invalid = true },
+  { path = "tokio::fs::read_dir", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)", allow-invalid = true },
+  { path = "tokio::fs::create_dir_all", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)", allow-invalid = true },
+  { path = "tokio::fs::create_dir", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)", allow-invalid = true },
+  { path = "tokio::fs::remove_file", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)", allow-invalid = true },
+  { path = "tokio::fs::remove_dir", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)", allow-invalid = true },
+  { path = "tokio::fs::remove_dir_all", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)", allow-invalid = true },
+  { path = "tokio::fs::rename", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)", allow-invalid = true },
+  { path = "tokio::fs::copy", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)", allow-invalid = true },
+  { path = "tokio::fs::metadata", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)", allow-invalid = true },
+  { path = "tokio::fs::symlink_metadata", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)", allow-invalid = true },
+  { path = "tokio::fs::canonicalize", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)", allow-invalid = true },
+  { path = "tokio::fs::read_link", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)", allow-invalid = true },
+  { path = "tokio::fs::hard_link", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)", allow-invalid = true },
+  { path = "tokio::fs::set_permissions", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)", allow-invalid = true },
+  { path = "tokio::fs::try_exists", reason = "a file read or write belongs behind a port in microvms-edges (the build context read is control::context::from_dir there)", allow-invalid = true },
+]

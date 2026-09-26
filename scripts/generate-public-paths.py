@@ -56,6 +56,42 @@ NAMED = {
 }
 
 
+# The baseline constructors that moved to `microvms_core::prelude` and are generic, so `members`
+# skips them. A call is the only way to name one, and the JSON can't produce a call, so they're
+# listed by hand against the baseline's signatures.
+MOVED_GENERIC_CALLS = """
+/// The baseline constructors that moved to `microvms_core::prelude` and take an `impl Into<_>`
+/// or `impl AsRef<Path>` argument, which the list above can't name without arguments. Each is
+/// called inside a closure that's never run, so the call type-checks against the prelude and
+/// nothing reaches AWS. Hand-listed in the generator, because the JSON names a method's
+/// generics but can't produce a call.
+#[test]
+fn every_moved_generic_constructor_still_resolves() {
+    use microvms_core::prelude::*;
+    use std::sync::Arc;
+
+    let _ = |minter: Arc<dyn microvms_core::session::TokenMinter>| async move {
+        let region = microvms_core::Region::UsEast1;
+        let _ = microvms_core::session::Session::connect("endpoint", "token", minter).await;
+        let _ = microvms_core::session::Session::attach(
+            region.clone(), "id", "endpoint", "token", None, None,
+        )
+        .await;
+        let _ = microvms_core::session::Session::direct("endpoint", "token");
+        let _ = microvms_core::sandbox::Sandbox::adopt_in(
+            region.clone(), "id", "endpoint", "token", None,
+        )
+        .await;
+        let _ = microvms_core::agents::AgentVm::adopt_in(
+            region, Vec::new(), "id", "endpoint", "token", None,
+        )
+        .await;
+        let _ = microvms_core::control::BuildContext::from_dir("dir");
+    };
+}
+"""
+
+
 def kind(item: dict) -> str:
     return next(iter(item["inner"]))
 
@@ -159,6 +195,8 @@ def main() -> int:
     ]
     lines += [f"    let _ = {member};" for member in sorted(members)]
     lines += ["}", ""]
+    lines += MOVED_GENERIC_CALLS.splitlines()
+    lines += [""]
     OUT.write_text("\n".join(lines), encoding="utf-8")
     # rustfmt's version sort orders imports differently from Python's (`Mib512` before
     # `Mib1024`), so let it have the last word rather than reimplementing it.

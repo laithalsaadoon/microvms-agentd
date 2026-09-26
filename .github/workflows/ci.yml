@@ -111,14 +111,14 @@ jobs:
             # Not the binding crates: pyo3 wants a Python to link against on
             # Windows and napi wants its build tooling; both get their real
             # coverage in the `bindings` job, under the toolchains that ship them.
-            cargo clippy -p microvms-protocol -p microvms-domain -p microvms-core -p microvms-cli -p agentd-model --all-targets -- -D warnings
+            cargo clippy -p microvms-protocol -p microvms-domain -p microvms-app -p microvms-edges -p microvms-core -p microvms-cli -p agentd-model --all-targets -- -D warnings
           fi
       # Linux: one command covers all six tiers — the daemon's unit tests, the
       # stateright model over every reachable state, the proptest tar-confinement
       # properties, the turmoil transport-fault simulation, the panic guard, and
       # the schema artifact's staleness and route-coverage checks.
-      # macOS/Windows: the client crates only — protocol, the domain, core (incl.
-      # its turmoil tier), the CLI's five test targets, and the model. agentd
+      # macOS/Windows: the client crates only — protocol, the domain, the app, the
+      # edges, core (incl. its turmoil tier), the CLI's five test targets, and the model. agentd
       # stays behind: it is guest software, and nix/sethostname/bind-mounts do
       # not exist to test on a laptop OS.
       - name: test
@@ -127,7 +127,7 @@ jobs:
           if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
             cargo test --all
           else
-            cargo test -p microvms-protocol -p microvms-domain -p microvms-core -p microvms-cli -p agentd-model
+            cargo test -p microvms-protocol -p microvms-domain -p microvms-app -p microvms-edges -p microvms-core -p microvms-cli -p agentd-model
           fi
       # Belt to the test suite's braces, and not redundant: this runs the real
       # generator against the real path and fails with the regenerate command in
@@ -186,7 +186,7 @@ jobs:
         run: |
           uvx semgrep scan --config p/rust --config p/secrets \
             --severity WARNING --severity ERROR --error --quiet --metrics=off \
-            protocol/src agentd/src model/src microvms-domain/src microvms-core/src microvms-cli/src microvms-py/src microvms-js/src
+            protocol/src agentd/src model/src microvms-domain/src microvms-app/src microvms-edges/src microvms-core/src microvms-cli/src microvms-py/src microvms-js/src
       # The whole history, not the tree: a secret committed and later deleted is
       # published the moment the repo is public.
       - name: betterleaks over full history (pinned, checksummed)

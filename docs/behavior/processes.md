@@ -3,8 +3,8 @@
 These initiator families drive every process here. The daemon's HTTP surface, assembled by
 walking one list so a route cannot be served unless it is documented — `agentd/src/routes.rs:36`,
 dispatched through the exhaustive match at `agentd/src/routes.rs:110`. The client library's public
-lifecycle methods on `Sandbox` — `microvms-core/src/sandbox.rs:870`, `:1010`, `:1465`, `:1549`,
-`:1653`. And the CLI's command handlers, dispatched from `microvms-cli/src/main.rs:73`.
+lifecycle methods on `Sandbox` — `microvms-app/src/sandbox.rs:884`, `:1026`, `:1445`, `:1529`,
+`:1633`. And the CLI's command handlers, dispatched from `microvms-cli/src/main.rs:73`.
 
 The processes below carry the load-bearing behavior. Everything else, including the
 proxy-token mint that runs inside every request and the `microvm run` command that composes several
@@ -12,89 +12,89 @@ of these processes, is listed under `## Minor flows` with its entry point.
 
 ## Image build and the stalled-build probe
 
-Entry point: `microvms-core/src/sandbox.rs:870`
+Entry point: `microvms-app/src/sandbox.rs:884`
 
-1. `Sandbox::build_image` records the requested size class and hands the request to the control plane; the local guards live one level down because the create happens *after* the caller's artifact upload — `microvms-core/src/sandbox.rs:870`.
-2. `ControlPlane::create_image` runs `preflight` before its own wire call, and delegates rather than keeping a second copy of the list, so the call sites cannot drift — `microvms-core/src/control/image.rs:179`.
-3. `preflight` is the whole guard list and is callable before the upload: image name, `require_workdir` under `inherit_workdir`, and for a supplied Dockerfile the matching `FROM`, the agreeing agentd port, a keepalive under the stream idle timeout, and a `CMD` that runs the daemon — `microvms-core/src/control/image.rs:258`.
-4. The wire body injects the one architecture value and derives the one accepted OS capability from a boolean, mints the `clientToken` from a label rather than accepting one, then goes out through `send_with_retry` — `microvms-core/src/control/image.rs:228`.
-5. `wait_for_image` refuses an empty identifier before the loop — an empty one collapses the URI onto the collection and polls the *listing* until the deadline — then polls `GetMicrovmImage`, returning on `Image::is_ready` and raising through `build_failure` on `Image::is_failed` — `microvms-core/src/control/image.rs:368`.
-6. Once elapsed time passes `WaitOpts::stall_grace` — `DEFAULT_STALL_GRACE` is 240s at `microvms-core/src/control/image.rs:37` — the wait probes exactly once, tracked by a `probed` flag rather than re-armed — `microvms-core/src/control/image.rs:397`.
-7. `probe_stalled_build` returns `Ok` for an unreadable build list and `Ok` for an empty one, because neither is evidence; only an all-`PENDING` list raises `ErrorKind::BuildWedged` naming the `clientToken` replay signature — `microvms-core/src/control/image.rs:431`.
-8. Back in `build_image`, `image_exists` is set before anything is launched, so a teardown can name the image whether or not a VM ever ran from it — `microvms-core/src/sandbox.rs:886`.
+1. `Sandbox::build_image` records the requested size class and hands the request to the control plane; the local guards live one level down because the create happens *after* the caller's artifact upload — `microvms-app/src/sandbox.rs:884`.
+2. `ControlPlane::create_image` runs `preflight` before its own wire call, and delegates rather than keeping a second copy of the list, so the call sites cannot drift — `microvms-app/src/control/image.rs:179`.
+3. `preflight` is the whole guard list and is callable before the upload: image name, `require_workdir` under `inherit_workdir`, and for a supplied Dockerfile the matching `FROM`, the agreeing agentd port, a keepalive under the stream idle timeout, and a `CMD` that runs the daemon — `microvms-app/src/control/image.rs:263`.
+4. The wire body injects the one architecture value and derives the one accepted OS capability from a boolean, mints the `clientToken` from a label rather than accepting one, then goes out through `send_with_retry` — `microvms-app/src/control/image.rs:233`.
+5. `wait_for_image` refuses an empty identifier before the loop — an empty one collapses the URI onto the collection and polls the *listing* until the deadline — then polls `GetMicrovmImage`, returning on `Image::is_ready` and raising through `build_failure` on `Image::is_failed` — `microvms-app/src/control/image.rs:373`.
+6. Once elapsed time passes `WaitOpts::stall_grace` — `DEFAULT_STALL_GRACE` is 240s at `microvms-app/src/control/image.rs:37` — the wait probes exactly once, tracked by a `probed` flag rather than re-armed — `microvms-app/src/control/image.rs:402`.
+7. `probe_stalled_build` returns `Ok` for an unreadable build list and `Ok` for an empty one, because neither is evidence; only an all-`PENDING` list raises `ErrorKind::BuildWedged` naming the `clientToken` replay signature — `microvms-app/src/control/image.rs:436`.
+8. Back in `build_image`, `image_exists` is set before anything is launched, so a teardown can name the image whether or not a VM ever ran from it — `microvms-app/src/sandbox.rs:900`.
 
 ### Related
 
-- `microvms-core/src/control/image.rs:484`
-- `microvms-core/src/control/image.rs:567`
-- `microvms-core/src/control/artifact.rs:1102`
-- `microvms-core/src/control/token.rs:98`
-- `microvms-core/src/control/mod.rs:1082`
-- `microvms-core/src/control/transport.rs:287`
+- `microvms-app/src/control/image.rs:489`
+- `microvms-app/src/control/image.rs:572`
+- `microvms-app/src/control/artifact.rs:1102`
+- `microvms-core/src/lib.rs:222`
+- `microvms-app/src/control/mod.rs:1054`
+- `microvms-app/src/control/transport.rs:285`
 
 ## Launch and the RUNNING wait
 
-Entry point: `microvms-core/src/sandbox.rs:1010`
+Entry point: `microvms-app/src/sandbox.rs:1026`
 
-1. `Sandbox::run` refuses a second launch on the same sandbox before any call. This is STATE-3's local half, and the refusal is here because a retry loop around a timed-out launch is the plausible mistake — `microvms-core/src/sandbox.rs:1015`.
-2. The image identifier comes from the request or from a previously built image; neither is a `Precondition` error naming both remedies — `microvms-core/src/sandbox.rs:1039`.
-3. An agent token is minted unless the caller supplied one, then `RunHookPayload::for_launch` re-checks the 4096-byte budget even though this code built the JSON, because neither the token nor the launch env is this crate's — `microvms-core/src/sandbox.rs:1071`.
-4. `ControlPlane::run_microvm` closes the local guards: identifier, duration range, idle duration, pinned version, and the execution role ARN — `microvms-core/src/control/microvm.rs:433`.
-5. Connector intents are split into separate ingress and egress members rather than concatenated, the combined count is checked against the `NetworkConnectorList` ceiling, and `RunMicrovm` goes out with a `clientToken` minted from a scope label — `microvms-core/src/control/microvm.rs:509`.
-6. On acceptance the lifecycle moves to `Pending`, `image_exists` is set, and `suspended_window` is recorded from *this* request — the only place the value is knowable, since `GetMicrovm` does not return it — `microvms-core/src/sandbox.rs:1103`.
-7. `wait_for_running` delegates to `wait_for_state` with the terminal set as `fail_on`, so a VM that dies during startup raises through `reached_terminal_state` with both the state and `stateReason` — `microvms-core/src/control/microvm.rs:590`.
-8. Reaching RUNNING sets `token_installed` and increments `bootstrap_count` (STATE-2, STATE-3), then a `ControlPlaneMinter` goes behind an `Arc` into `Session::builder` so minting happens inside every later request — `microvms-core/src/sandbox.rs:1176`.
+1. `Sandbox::run` refuses a second launch on the same sandbox before any call. This is STATE-3's local half, and the refusal is here because a retry loop around a timed-out launch is the plausible mistake — `microvms-app/src/sandbox.rs:1031`.
+2. The image identifier comes from the request or from a previously built image; neither is a `Precondition` error naming both remedies — `microvms-app/src/sandbox.rs:1055`.
+3. An agent token is minted unless the caller supplied one, then `RunHookPayload::for_launch` re-checks the 4096-byte budget even though this code built the JSON, because neither the token nor the launch env is this crate's — `microvms-app/src/sandbox.rs:1090`.
+4. `ControlPlane::run_microvm` closes the local guards: identifier, duration range, idle duration, pinned version, and the execution role ARN — `microvms-app/src/control/microvm.rs:433`.
+5. Connector intents are split into separate ingress and egress members rather than concatenated, the combined count is checked against the `NetworkConnectorList` ceiling, and `RunMicrovm` goes out with a `clientToken` minted from a scope label — `microvms-app/src/control/microvm.rs:509`.
+6. On acceptance the lifecycle moves to `Pending`, `image_exists` is set, and `suspended_window` is recorded from *this* request — the only place the value is knowable, since `GetMicrovm` does not return it — `microvms-app/src/sandbox.rs:1122`.
+7. `wait_for_running` delegates to `wait_for_state` with the terminal set as `fail_on`, so a VM that dies during startup raises through `reached_terminal_state` with both the state and `stateReason` — `microvms-app/src/control/microvm.rs:592`.
+8. Reaching RUNNING sets `token_installed` and increments `bootstrap_count` (STATE-2, STATE-3), then a `ControlPlaneMinter` goes behind an `Arc` into `Session::builder` so minting happens inside every later request — `microvms-app/src/sandbox.rs:1198`.
 
 ### Related
 
-- `microvms-core/src/control/microvm.rs:646`
-- `microvms-core/src/control/microvm.rs:682`
-- `microvms-core/src/control/microvm.rs:201`
-- `microvms-core/src/sandbox.rs:1823`
-- `microvms-core/src/session/mod.rs:301`
-- `microvms-core/src/sandbox.rs:545`
+- `microvms-app/src/control/microvm.rs:648`
+- `microvms-app/src/control/microvm.rs:684`
+- `microvms-app/src/control/microvm.rs:201`
+- `microvms-app/src/sandbox.rs:1803`
+- `microvms-app/src/session/mod.rs:236`
+- `microvms-app/src/sandbox.rs:565`
 
 ## Suspend and resume with the launch-time window
 
-Entry point: `microvms-core/src/sandbox.rs:1465`
+Entry point: `microvms-app/src/sandbox.rs:1445`
 
-1. `Sandbox::suspend` resolves the VM id through `require_microvm`, then refuses any lifecycle but RUNNING (STATE-5). Zero control-plane calls on the refusal is the observable a test asserts on — `microvms-core/src/sandbox.rs:1470`.
-2. `SuspendMicrovm` goes out **first**, and only then does the lifecycle move to `Suspending` — moving before the call would leave a throttled or dropped request stuck in a state neither suspend nor resume accepts, bricking the handle over one bad request — `microvms-core/src/sandbox.rs:1484`.
-3. `suspended_at` is stamped from the control plane's own clock after the call and before the wait, because the `idlePolicy` window starts when the platform begins suspending — `microvms-core/src/sandbox.rs:1489`.
-4. `wait_for_state` is called with `SUSPEND_WANTED`, so TERMINATED is a wanted outcome that sets `was_terminated` rather than an error raised out of the middle of a teardown; anything else is `ErrorKind::Platform` — `microvms-core/src/sandbox.rs:1505`.
-5. `Sandbox::resume` refuses a terminated VM first (STATE-11), then any lifecycle but SUSPENDED (STATE-7) — `microvms-core/src/sandbox.rs:1555`.
-6. `require_open_suspended_window` compares elapsed time against the recorded window and refuses locally once it has passed; with no window recorded — the attach path — it returns `Ok`, because no default would be reliable — `microvms-core/src/sandbox.rs:1615`.
-7. `ResumeMicrovm` goes out, then `wait_for_state` waits for RUNNING with `DEAD_STATES` as `fail_on`. The terminal set is wrong here because SUSPENDED, the state the call was made from, is in it — `microvms-core/src/sandbox.rs:1578`.
-8. `Session::rebind` takes the endpoint the service just reported, invalidating the cached proxy token (STATE-8), and `suspended_at` is cleared so the next cycle measures its own window — `microvms-core/src/sandbox.rs:1594`.
+1. `Sandbox::suspend` resolves the VM id through `require_microvm`, then refuses any lifecycle but RUNNING (STATE-5). Zero control-plane calls on the refusal is the observable a test asserts on — `microvms-app/src/sandbox.rs:1450`.
+2. `SuspendMicrovm` goes out **first**, and only then does the lifecycle move to `Suspending` — moving before the call would leave a throttled or dropped request stuck in a state neither suspend nor resume accepts, bricking the handle over one bad request — `microvms-app/src/sandbox.rs:1464`.
+3. `suspended_at` is stamped from the control plane's own clock after the call and before the wait, because the `idlePolicy` window starts when the platform begins suspending — `microvms-app/src/sandbox.rs:1469`.
+4. `wait_for_state` is called with `SUSPEND_WANTED`, so TERMINATED is a wanted outcome that sets `was_terminated` rather than an error raised out of the middle of a teardown; anything else is `ErrorKind::Platform` — `microvms-app/src/sandbox.rs:1485`.
+5. `Sandbox::resume` refuses a terminated VM first (STATE-11), then any lifecycle but SUSPENDED (STATE-7) — `microvms-app/src/sandbox.rs:1535`.
+6. `require_open_suspended_window` compares elapsed time against the recorded window and refuses locally once it has passed; with no window recorded — the attach path — it returns `Ok`, because no default would be reliable — `microvms-app/src/sandbox.rs:1595`.
+7. `ResumeMicrovm` goes out, then `wait_for_state` waits for RUNNING with `DEAD_STATES` as `fail_on`. The terminal set is wrong here because SUSPENDED, the state the call was made from, is in it — `microvms-app/src/sandbox.rs:1558`.
+8. `Session::rebind` takes the endpoint the service just reported, invalidating the cached proxy token (STATE-8), and `suspended_at` is cleared so the next cycle measures its own window — `microvms-app/src/sandbox.rs:1574`.
 
 ### Related
 
-- `microvms-core/src/control/microvm.rs:758`
-- `microvms-core/src/control/microvm.rs:766`
-- `microvms-core/src/session/mod.rs:415`
-- `microvms-core/src/session/proxy.rs:417`
-- `microvms-core/src/sandbox.rs:1768`
+- `microvms-app/src/control/microvm.rs:760`
+- `microvms-app/src/control/microvm.rs:768`
+- `microvms-app/src/session/mod.rs:356`
+- `microvms-app/src/session/proxy.rs:390`
+- `microvms-app/src/sandbox.rs:1748`
 - `agentd/src/routes.rs:328`
 
 ## Teardown
 
-Entry point: `microvms-core/src/sandbox.rs:1653`
+Entry point: `microvms-app/src/sandbox.rs:1633`
 
-1. `Sandbox::terminate` returns a `TeardownReport` rather than a `Result` and marks the sandbox torn down. It runs where a caller's `finally` would, and an error raised from there would replace the real failure — `microvms-core/src/sandbox.rs:1654`.
-2. The session is dropped first, because its only remaining asset is a cached proxy token for a VM that is going away — `microvms-core/src/sandbox.rs:1666`.
-3. The lifecycle moves to `Terminating` and `was_terminated` is set **before** the call, so a terminate whose call fails still blocks a later resume instead of leaving the sandbox looking resumable — `microvms-core/src/sandbox.rs:1673`.
-4. `TerminateMicrovm` goes out; a failure is pushed onto both `failures` and `undeleted` rather than raised — `microvms-core/src/sandbox.rs:1676`.
-5. When `wait_for_terminated` was requested, `wait_for_state(["TERMINATED"])` runs. A timeout there is recorded as a failure but **not** a leak, because the platform accepted the terminate — `microvms-core/src/sandbox.rs:1692`.
-6. The image goes second, through `delete_image`'s retry loop; the identifier is checked before the loop so an invalid one costs one comparison rather than nineteen backoff sleeps, and the refusal is `false` rather than an error because this path must not raise — `microvms-core/src/control/image.rs:1189`.
-7. `try_delete_image` collects **every** page of versions before the first delete, drops all but the first version, deletes the image, and parses the readback for a failure spelling — a one-page read would leave an image nothing can delete — `microvms-core/src/control/image.rs:1219`.
-8. The build log group is handled **last**, and named rather than deleted: CloudWatch Logs is not in the crate's dependency set, so the group lands in `undeleted` with a failure line saying why — `microvms-core/src/sandbox.rs:1736`.
+1. `Sandbox::terminate` returns a `TeardownReport` rather than a `Result` and marks the sandbox torn down. It runs where a caller's `finally` would, and an error raised from there would replace the real failure — `microvms-app/src/sandbox.rs:1634`.
+2. The session is dropped first, because its only remaining asset is a cached proxy token for a VM that is going away — `microvms-app/src/sandbox.rs:1646`.
+3. The lifecycle moves to `Terminating` and `was_terminated` is set **before** the call, so a terminate whose call fails still blocks a later resume instead of leaving the sandbox looking resumable — `microvms-app/src/sandbox.rs:1653`.
+4. `TerminateMicrovm` goes out; a failure is pushed onto both `failures` and `undeleted` rather than raised — `microvms-app/src/sandbox.rs:1656`.
+5. When `wait_for_terminated` was requested, `wait_for_state(["TERMINATED"])` runs. A timeout there is recorded as a failure but **not** a leak, because the platform accepted the terminate — `microvms-app/src/sandbox.rs:1672`.
+6. The image goes second, through `delete_image`'s retry loop; the identifier is checked before the loop so an invalid one costs one comparison rather than nineteen backoff sleeps, and the refusal is `false` rather than an error because this path must not raise — `microvms-app/src/control/image.rs:1194`.
+7. `try_delete_image` collects **every** page of versions before the first delete, drops all but the first version, deletes the image, and parses the readback for a failure spelling — a one-page read would leave an image nothing can delete — `microvms-app/src/control/image.rs:1224`.
+8. The build log group is handled **last**, and named rather than deleted: CloudWatch Logs is not in the crate's dependency set, so the group lands in `undeleted` with a failure line saying why — `microvms-app/src/sandbox.rs:1716`.
 
 ### Related
 
-- `microvms-core/src/control/image.rs:99`
-- `microvms-core/src/control/microvm.rs:780`
-- `microvms-core/src/sandbox.rs:455`
-- `microvms-core/src/sandbox.rs:524`
+- `microvms-app/src/control/image.rs:99`
+- `microvms-app/src/control/microvm.rs:782`
+- `microvms-app/src/sandbox.rs:454`
+- `microvms-app/src/sandbox.rs:523`
 - `microvms-cli/src/commands/lifecycle.rs:1237`
 - `microvms-cli/src/ledger.rs:172`
 
@@ -152,17 +152,17 @@ Entry point: `agentd/src/exec.rs:477`
 4. The terminal marker is read **after** the snapshot, so an exec that finishes between the two is observed as finished rather than waiting forever on a `Finished` that was sent before the subscribe — `agentd/src/exec.rs:501`.
 5. `Attach::take_chunk` drops the prefix already delivered, and emits a `gap` event when a live chunk lands past the cursor rather than a chunk at a discontinuous offset the client cannot reconcile — `agentd/src/exec.rs:537`.
 6. The response carries `x-accel-buffering: no`, because a buffering proxy otherwise holds events until its own buffer fills, turning a live stream into a batch delivered at exit — `agentd/src/exec.rs:511`.
-7. On the client, `ExecHandle::advance` advances its cursor only past bytes it handed to the consumer, and past a gap's `to` — otherwise a reconnect asks for the evicted range again and is told about the same gap forever — `microvms-core/src/session/exec.rs:642`.
-8. A body that ends with no exit event becomes `Reconnect` with `attempts + 1`, backed off from a fixed table and re-attached at the cursor; because the streaming path builds its own headers, that reconnect also re-mints an expired proxy token — `microvms-core/src/session/exec.rs:685`. The cursor is the whole mechanism: `.erpaval/solutions/architecture-patterns/byte-offset-cursor-is-what-makes-reconnect-work.md`.
+7. On the client, `ExecHandle::advance` advances its cursor only past bytes it handed to the consumer, and past a gap's `to` — otherwise a reconnect asks for the evicted range again and is told about the same gap forever — `microvms-app/src/session/exec.rs:645`.
+8. A body that ends with no exit event becomes `Reconnect` with `attempts + 1`, backed off from a fixed table and re-attached at the cursor; because the streaming path builds its own headers, that reconnect also re-mints an expired proxy token — `microvms-app/src/session/exec.rs:688`. The cursor is the whole mechanism: `.erpaval/solutions/architecture-patterns/byte-offset-cursor-is-what-makes-reconnect-work.md`.
 
 ### Related
 
 - `agentd/src/exec.rs:265`
 - `agentd/src/exec.rs:584`
 - `agentd/src/exec.rs:557`
-- `microvms-core/src/session/exec.rs:707`
-- `microvms-core/src/session/exec.rs:832`
-- `microvms-core/src/session/exec.rs:463`
+- `microvms-app/src/session/exec.rs:710`
+- `microvms-app/src/session/exec.rs:835`
+- `microvms-app/src/session/exec.rs:466`
 
 ## Tar upload and confined extraction
 
@@ -203,10 +203,10 @@ Entry point: `agentd/src/fs.rs:1459`
 - File read — entry at `agentd/src/fs.rs:1118`. Streams the bytes, or a 1-based inclusive line range with an `end_line` past EOF reading through rather than erroring; 404 only when the path is genuinely absent.
 - File write — entry at `agentd/src/fs.rs:1208`. Not confined to a root, since the path is the caller's; the mode is parsed before a single byte lands, because validating after writing left a file behind with the wrong permissions.
 - Tar download — entry at `agentd/src/fs.rs:1396`. Refuses a non-directory with 400 and an absent one with 404, estimates the tree against both caps, then packs with symlinks preserved into a rewound spool.
-- Proxy-token mint in the request path — entry at `microvms-core/src/session/mod.rs:127`. `Transport::request` mints inside the path every request takes, because a token minted once at construction expires mid-run and the resulting rejection looks like a dead daemon.
-- Control-plane send with retry — entry at `microvms-core/src/control/transport.rs:287`. Exponential backoff with jitter over five attempts, gated on `Error::retryable`; mutating calls are safe to retry because each carries a `clientToken`.
-- Session readiness wait — entry at `microvms-core/src/session/mod.rs:457`. Polls unauthenticated health through connection errors, returns at once on a fatal one, and names the last retryable error in the timeout.
-- Client-side wait-then-ack — entry at `microvms-core/src/session/exec.rs:803`. Returns the ack's own result rather than a post-ack poll, because the poll reports `acked` with no output.
+- Proxy-token mint in the request path — entry at `microvms-app/src/session/mod.rs:117`. `Transport::request` mints inside the path every request takes, because a token minted once at construction expires mid-run and the resulting rejection looks like a dead daemon.
+- Control-plane send with retry — entry at `microvms-app/src/control/transport.rs:285`. Exponential backoff with jitter over five attempts, gated on `Error::retryable`; mutating calls are safe to retry because each carries a `clientToken`.
+- Session readiness wait — entry at `microvms-app/src/session/mod.rs:398`. Polls unauthenticated health through connection errors, returns at once on a fatal one, and names the last retryable error in the timeout.
+- Client-side wait-then-ack — entry at `microvms-app/src/session/exec.rs:806`. Returns the ack's own result rather than a post-ack poll, because the poll reports `acked` with no output.
 - CLI dispatch — entry at `microvms-cli/src/main.rs:73`. Reads `--json` and `--dense` off the raw tokens before the parse so an argument error still produces an envelope, and returns `ExitCode` rather than calling `exit` so `Sandbox`'s drop warning still runs.
 - CLI run — entry at `microvms-cli/src/commands/lifecycle.rs:489`. Build, launch, exec, report, tear down in one invocation, with the interrupt future passed in so the teardown guard is testable.
 - CLI build — entry at `microvms-cli/src/commands/lifecycle.rs:1359`. Builds without launching; `--reuse` content-keys the image name by hash, because recreating an image under a previously-used fixed name can serve a stale snapshot.

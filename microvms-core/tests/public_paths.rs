@@ -1321,3 +1321,47 @@ fn every_baseline_method_and_associated_constant_still_resolves() {
     let _ = <microvms_core::sizing::SizeClass>::peak_vcpu;
     let _ = <microvms_core::sizing::SizeClass>::row;
 }
+
+/// The baseline constructors that moved to `microvms_core::prelude` and take an `impl Into<_>`
+/// or `impl AsRef<Path>` argument, which the list above can't name without arguments. Each is
+/// called inside a closure that's never run, so the call type-checks against the prelude and
+/// nothing reaches AWS. Hand-listed in the generator, because the JSON names a method's
+/// generics but can't produce a call.
+#[test]
+fn every_moved_generic_constructor_still_resolves() {
+    use microvms_core::prelude::*;
+    use std::sync::Arc;
+
+    let _ = |minter: Arc<dyn microvms_core::session::TokenMinter>| async move {
+        let region = microvms_core::Region::UsEast1;
+        let _ = microvms_core::session::Session::connect("endpoint", "token", minter).await;
+        let _ = microvms_core::session::Session::attach(
+            region.clone(),
+            "id",
+            "endpoint",
+            "token",
+            None,
+            None,
+        )
+        .await;
+        let _ = microvms_core::session::Session::direct("endpoint", "token");
+        let _ = microvms_core::sandbox::Sandbox::adopt_in(
+            region.clone(),
+            "id",
+            "endpoint",
+            "token",
+            None,
+        )
+        .await;
+        let _ = microvms_core::agents::AgentVm::adopt_in(
+            region,
+            Vec::new(),
+            "id",
+            "endpoint",
+            "token",
+            None,
+        )
+        .await;
+        let _ = microvms_core::control::BuildContext::from_dir("dir");
+    };
+}
