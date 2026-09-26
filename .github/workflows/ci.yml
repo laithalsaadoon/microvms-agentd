@@ -195,8 +195,20 @@ jobs:
           echo "9d2ed6fc387bc1c3f95557d5539077b1ce422f0db5ec38db5f14a141ad2947bf  bl.tgz" | sha256sum -c -
           tar -xzf bl.tgz betterleaks
           ./betterleaks git .
+      # The unit tests first: they run the header check in throwaway repos and prove it fails on
+      # an empty file set, so a pass on the next step means it read this tree.
+      - name: license header unit tests
+        run: uv run python -m unittest discover -s scripts -p 'test_license_headers.py'
       - name: license headers
         run: ./scripts/check-license-headers.py
+      # The live suite's own helpers and their negative twins, against a stub CLI (#277). Here
+      # because this job has uv and is required; it makes no AWS call.
+      - name: conformance self-test
+        run: uv run --script conformance/run_rs.py --self-test
+      # `mise run check` and the pre-commit hook ran this, and CI didn't, so a PR shipped
+      # without local hooks could empty a layer's enumerator and merge green. Stdlib only.
+      - name: requirement traceability
+        run: ./scripts/check-trace.py --check
       # The LICENSE file itself, and the crate manifests agreeing with it. The
       # dependency-license audit is cargo-deny, two steps down; this asserts the
       # repo's own claim is consistent.

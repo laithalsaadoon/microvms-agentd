@@ -63,7 +63,7 @@ conformance/run_rs.py \
 
 `mise run live:release` isn't part of `live`. It fetches a published daemon release from GitHub and verifies its attestation the way a client does, with no `gh` and no token, and it needs no AWS account. It defaults to the core's own version, so before that version is tagged, name an earlier one with `MICROVM_RELEASE_VERSION`.
 
-`./conformance/run_rs.py --self-test` is the offline half. It drives the envelope-to-exception mapping against a stub `microvm`, touches no account, and belongs in any change to `conformance/`.
+`./conformance/run_rs.py --self-test` is the offline half. It drives the envelope-to-exception mapping and the suite's own helpers against a stub `microvm`, with a negative twin for each, and touches no account. `mise run check` runs it as `conformance:self-test`, and so does CI.
 
 ## 5. What it costs
 

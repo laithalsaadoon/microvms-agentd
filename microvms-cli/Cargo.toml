@@ -164,6 +164,12 @@ cucumber = { version = "0.23", features = ["output-junit"] }
 # what this crate needs: it has no lib target (ARCH-5), so a separate fuzz crate could not
 # link the `Output` type it exercises.
 bolero = "0.13"
+# The Rust lexer the thinness scan reads source through (#277), already in the graph under the
+# derive macros. A hand-rolled quote tracker took a `'"'` char literal for a string delimiter
+# and read the rest of the file inside out, which hid a real seam bypass. A lexer that follows
+# the language's token rules can't make that mistake. `span-locations` gives each token its line
+# and column, so a failure still names a line.
+proc-macro2 = { version = "1.0.107", features = ["span-locations"] }
 
 [[test]]
 name = "bdd"
