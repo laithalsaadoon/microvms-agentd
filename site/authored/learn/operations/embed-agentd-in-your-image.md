@@ -51,7 +51,7 @@ import { provisionAgentd } from '@theagenticguy/microvms';
 const agentd = await provisionAgentd(); // Buffer, for this client's version
 ```
 
-The call uses a `binary` you pass or `$MICROVM_AGENTD` first, then the cached asset for the version, then a fetch of the GitHub release. `gh attestation verify` or the release's `SHA256SUMS` verifies the fetch, and a fetch that cannot be verified raises `PreconditionError`. Any binary that is not an ARM64 ELF is refused, including one you supply. `provision_agentd_report()` (`provisionAgentdReport()` in Node) also returns the source, verification, path, and SHA-256.
+The call uses a `binary` you pass or `$MICROVM_AGENTD` first, then the cached asset for the version, then a fetch of the GitHub release. The client checks the release workflow's Sigstore attestation in-process, or the release's `SHA256SUMS` only when GitHub can't be reached for one, so it needs neither `gh` nor `curl`. A fetch that cannot be verified raises `PreconditionError`. Any binary that is not an ARM64 ELF is refused, including one you supply. `provision_agentd_report()` (`provisionAgentdReport()` in Node) also returns the source, verification, path, and SHA-256.
 
 To manage the binary yourself, download and verify it by hand:
 

@@ -320,8 +320,8 @@ either preserved or lost:
   and `OutputGap` deliberately have no status (`:326-329`).
 - **The `as_str` strings are Python exception class names, not a re-spelling.**
   `microvms-domain/src/error.rs:288-291` — the conformance oracle compares against them, and
-  `conformance/run_rs.py:187-196` reads them out of `data.kind`.
-- **`None` is information.** `conformance/run_rs.py:189-193` states that an absent
+  `conformance/run_rs.py:186-195` reads them out of `data.kind`.
+- **`None` is information.** `conformance/run_rs.py:188-192` states that an absent
   `data.kind` means the client refused before any call. The CLI preserves that by inserting
   the key only when a wire kind exists (`microvms-cli/src/envelope.rs:326-328`), and
   `microvms-domain/src/error.rs:562-567` asserts a local reject carries none.
@@ -926,11 +926,11 @@ name.
 - `conformance/run_rs.py:164-219` — the `Envelope` dataclass, which reads every failure field
   directly so a missing key is a `KeyError` rather than a `None` that flows into a passing
   assertion (`:168-172`).
-- `conformance/run_rs.py:222-249` — `KindError`, carrying kind, code, and exit code so a check
+- `conformance/run_rs.py:226-253` — `KindError`, carrying kind, code, and exit code so a check
   can assert at whichever granularity it means.
-- `conformance/run_rs.py:284-302` — cross-checks the process exit code against the envelope's
+- `conformance/run_rs.py:288-306` — cross-checks the process exit code against the envelope's
   own `exitCode`, because they are two independent renderings of one decision.
-- `conformance/run_rs.py:1685-1710` — the offline self-test's frozen envelope fixtures.
+- `conformance/run_rs.py:1697-1722` — the offline self-test's frozen envelope fixtures.
 - `microvms-cli/tests/exit_codes.rs:96`, `microvms-cli/tests/manifest.rs:205`.
 
 **Shape:**
@@ -973,12 +973,12 @@ pub fn error(failure: &CliError) -> Value {
 - **Every failure key is unconditional.** `microvms-cli/src/envelope.rs:20-25` — `finding` is
   present and empty when no measured finding applies, `suggestions` is an empty array and
   `data` an empty object rather than absent, because "the consumer that forgets reads
-  `undefined` as 'no finding' for a failure that had one". `conformance/run_rs.py:168-172`
+  `undefined` as 'no finding' for a failure that had one". `conformance/run_rs.py:167-171`
   takes the CLI at its word and reads them directly.
 - **Exactly one JSON object reaches stdout, except on the streaming path.**
   `microvms-cli/src/envelope.rs:4-11` — progress goes to stderr always, and
   `microvms-cli/tests/thinness.rs:503` asserts no module but `envelope` and named `main`
-  exceptions writes to stdout. `conformance/run_rs.py:252-258` types a second document as an
+  exceptions writes to stdout. `conformance/run_rs.py:256-262` types a second document as an
   `EnvelopeError`, deliberately distinct from a protocol result, because it means the binary
   is wrong.
 - **The streaming exception is a different discriminant, not a relaxed rule.**
@@ -988,7 +988,7 @@ pub fn error(failure: &CliError) -> Value {
   line.
 - **`--quiet` cannot buy silence about a leak.** `microvms-cli/src/envelope.rs:13-18` — only
   `progress` is suppressed; a stale rate table and a leaked resource still reach `warn`.
-  `conformance/run_rs.py:268-271` relies on this to pass `--quiet` on every invocation.
+  `conformance/run_rs.py:272-275` relies on this to pass `--quiet` on every invocation.
 - **`data.kind` is the only place the daemon's fine status survives.**
   `microvms-cli/src/envelope.rs:27-31` names `conformance/run_rs.py` as the consumer that
   needs it, because `ERR_PROTOCOL` covers several `WireKind`s.
@@ -997,7 +997,7 @@ pub fn error(failure: &CliError) -> Value {
 
 **Drift risk:** the envelope is hand-built with `json!` and has no generated schema, so a
 renamed key breaks the Python oracle at runtime rather than at build time — and the offline
-half of that suite (`conformance/run_rs.py:1685-1710`) carries frozen fixtures that would
+half of that suite (`conformance/run_rs.py:1697-1722`) carries frozen fixtures that would
 need the same edit. Mitigation: `./conformance/run_rs.py --self-test` is free and offline and
 is already in `mise run check`'s neighbourhood; keep the fixtures and the `json!` literals
 edited in one commit.

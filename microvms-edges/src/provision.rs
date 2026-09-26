@@ -26,22 +26,26 @@
 //!
 //! # What proves a fetch
 //!
-//! The download goes through a subprocess the caller can see in `ps`, and the CLI's
-//! `tests/thinness.rs` is why the policy was written that way: that crate may hold no HTTP
-//! client, and the policy moved here unchanged. [`ReleaseFetch`] runs two tools, in
-//! preference order:
+//! The policy is `microvms_app::provision::fetch_release`, re-exported here as
+//! [`fetch_release`], and the shipped [`Fetch`] is [`HttpsFetch`]: reqwest for the release's
+//! files and `sigstore-verify` for its attestation, both in-process. In order:
 //!
-//! - **`gh`**, because `gh attestation verify` checks the Sigstore attestation the release
-//!   workflow published for the asset: provenance, not just integrity. A verification
-//!   failure after a successful download is a **hard stop**, never a fall-through: bytes
-//!   that exist but do not verify are the one state a fallback must not launder.
-//! - **`curl`**, because `gh` refuses to run unauthenticated even against a public
-//!   repository. This path checks the download against the release's `SHA256SUMS` asset,
-//!   hashed in-process: integrity against corruption, weaker than provenance, and
-//!   [`Verification`] says which of the two the caller got. A release with no
-//!   `SHA256SUMS` (every tag before v0.5.0) fails closed.
+//! - **Provenance**, from the Sigstore bundle the release workflow published for the asset,
+//!   verified against that workflow's identity at the requested tag. A bundle that doesn't
+//!   verify is a **hard stop**, never a fall-through: bytes that exist but don't verify are the
+//!   one state a fallback must not launder. So is a release that answers it has no bundle for
+//!   the bytes, which is what a replaced asset with its bundle deleted looks like.
+//! - **Integrity**, only when no answer about a bundle can be had at all (a transport failure,
+//!   a rate limit, a server error): the release's `SHA256SUMS` entry,
+//!   hashed in-process. That guards against corruption, which is weaker than provenance, and
+//!   [`Verification`] says which of the two the caller got. A release with no `SHA256SUMS`
+//!   (every tag before v0.5.0) fails closed.
 //!
-//! A fetch that cannot be verified is an error (BIND-18), never a warning.
+//! A fetch that can't be verified is an error (BIND-18), never a warning.
+//!
+//! Nothing here spawns a tool. Until #284 this fetch ran `gh release download` and
+//! `gh attestation verify`, then `curl` and `SHA256SUMS` when `gh` couldn't download, so a
+//! machine without a `gh` login never got an attestation check.
 //!
 //! # What is checked no matter where the bytes came from
 //!
@@ -61,13 +65,16 @@
 //! who replaces both; such a writer could replace a caller-supplied binary just as well.
 //!
 //! `model/src/provision.rs` checks this policy against the ways it could be written
-//! instead, and `tests/features/provision.feature` drives it through a fake release.
+//! instead, and `microvms-core/tests/features/provision.feature` drives it through a fake
+//! release.
 //!
 //! # The seams
 //!
-//! [`Fetch`] is the download-and-prove seam the CLI's guards script, and [`Runner`] is the
-//! subprocess seam under [`ReleaseFetch`], which the Gherkin runner answers with a fake
-//! release. Neither lets a test open a socket to GitHub.
+//! [`Fetch`] is the download-and-prove seam the CLI's guards script. Under it, the app's
+//! [`ReleaseSource`] and [`AttestationVerifier`] are the seams [`PolicyFetch`] runs the policy
+//! over: [`HttpsFetch`] is that over GitHub and the public-good Sigstore root, the edges tests
+//! answer them with a committed release, and the Gherkin runner with a fake one. None of them
+//! lets a test open a socket to GitHub.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -78,12 +85,17 @@ pub use microvms_domain::provision::{REQUIRED_ELF_MACHINE, elf_machine, not_aarc
 
 use microvms_app::error::{Error, ErrorKind};
 
-/// The repository whose releases carry the daemon asset.
-pub const RELEASE_REPO: &str = "laithalsaadoon/microvms-agentd";
+// The verification policy and its ports are the app's (#284); this module has always been
+// where a caller found them.
+pub use microvms_app::provision::{
+    ASSET, AttestationVerifier, Bundles, Fetched, RELEASE_REPO, ReleaseSource, Signer,
+    Verification, fetch_release, sha256_hex, verify_sha256,
+};
 
-/// The release asset's name: a literal, because the README's `--pattern agentd` and the
-/// checksum lookup both match it exactly.
-pub const ASSET: &str = "agentd";
+mod release;
+pub use release::{
+    BUNDLE_ASSET, GitHubRelease, HttpsFetch, PolicyFetch, SigstoreVerifier, TOKEN_VARIABLE,
+};
 
 /// The environment variable naming a caller-managed binary, used when a request carries
 /// no [`Request::binary`].
@@ -95,34 +107,6 @@ const RECORD: &str = "agentd.verified.json";
 /// The longest version string accepted. Release tags are short; a bound keeps a hostile
 /// value from becoming a long path component.
 const MAX_VERSION_LEN: usize = 64;
-
-/// How a fetched binary's bytes were proven.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Verification {
-    /// `gh attestation verify`: the bytes carry the release workflow's Sigstore
-    /// attestation for this repository.
-    Attestation,
-    /// The release's `SHA256SUMS` entry matched, hashed in-process: integrity against a
-    /// corrupted or truncated download, not provenance.
-    Checksum,
-}
-
-impl Verification {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Verification::Attestation => "attestation",
-            Verification::Checksum => "checksum",
-        }
-    }
-
-    fn parse(text: &str) -> Option<Self> {
-        match text {
-            "attestation" => Some(Verification::Attestation),
-            "checksum" => Some(Verification::Checksum),
-            _ => None,
-        }
-    }
-}
 
 /// How a caller supplied a binary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -291,7 +275,7 @@ impl From<ProvisionError> for Error {
     }
 }
 
-/// The download-and-prove seam. The shipped client carries [`SubprocessFetch`]; the CLI's
+/// The download-and-prove seam. The shipped client carries [`HttpsFetch`]; the CLI's
 /// guards script this, which keeps `cargo test` off the network the way its `CoreSeam`
 /// keeps it off AWS.
 pub trait Fetch {
@@ -305,231 +289,11 @@ pub trait Fetch {
     ) -> Result<Verification, String>;
 }
 
-/// The subprocess seam under [`ReleaseFetch`]: run an argv, folding a spawn failure and a
-/// non-zero exit into one prose reason.
-pub trait Runner {
-    fn run(&self, argv: &[String]) -> Result<(), String>;
-}
-
-/// A borrowed runner runs the same way, so a caller can keep and inspect its own.
-impl<R: Runner + ?Sized> Runner for &R {
-    fn run(&self, argv: &[String]) -> Result<(), String> {
-        (**self).run(argv)
-    }
-}
-
-/// The shipped [`Runner`]: `std::process::Command`.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Subprocess;
-
-impl Runner for Subprocess {
-    fn run(&self, argv: &[String]) -> Result<(), String> {
-        let output = std::process::Command::new(&argv[0])
-            .args(&argv[1..])
-            .stdin(std::process::Stdio::null())
-            .output()
-            .map_err(|error| format!("`{}` did not run: {error}", argv[0]))?;
-        if output.status.success() {
-            return Ok(());
-        }
-        let detail = String::from_utf8_lossy(&output.stderr);
-        let detail = detail.trim();
-        Err(format!(
-            "`{}` exited {}: {}",
-            argv.join(" "),
-            output.status.code().unwrap_or(-1),
-            if detail.is_empty() {
-                "(no stderr)"
-            } else {
-                detail
-            },
-        ))
-    }
-}
-
-/// The verification policy over a [`Runner`]: `gh` for provenance, `curl` and
-/// `SHA256SUMS` for integrity when `gh` cannot download. See the module docs.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct ReleaseFetch<R>(pub R);
-
-impl<R: Runner> Fetch for ReleaseFetch<R> {
-    fn fetch(
-        &self,
-        tag: &str,
-        dest: &Path,
-        progress: &mut dyn FnMut(&str),
-    ) -> Result<Verification, String> {
-        let runner = &self.0;
-        // `gh` first. Any failure to *download* falls through to curl: `gh` refuses to run
-        // unauthenticated even against a public repository, and that refusal must not cost
-        // an unauthenticated machine the feature.
-        match runner.run(&gh_download_args(tag, dest)) {
-            Ok(()) => {
-                progress(&format!(
-                    "downloaded {ASSET} {tag} via gh; verifying provenance"
-                ));
-                // A verification failure after a successful download is the one hard stop:
-                // falling through to curl here would launder bytes that failed provenance
-                // into a weaker check that cannot see what was wrong with them.
-                return match runner.run(&gh_verify_args(dest)) {
-                    Ok(()) => Ok(Verification::Attestation),
-                    Err(reason) => {
-                        let _ = std::fs::remove_file(dest);
-                        Err(format!(
-                            "`gh attestation verify` refused the downloaded asset: {reason}. \
-                             The bytes were discarded; do not retry with verification off."
-                        ))
-                    }
-                };
-            }
-            Err(gh_reason) => {
-                progress(&format!("gh could not download ({gh_reason}); trying curl"));
-            }
-        }
-
-        runner
-            .run(&curl_args(&asset_url(tag, ASSET), dest))
-            .map_err(|curl_reason| {
-                format!(
-                    "neither tool could download {ASSET} {tag} from {RELEASE_REPO}: gh and \
-                     curl both failed, most recently: {curl_reason}"
-                )
-            })?;
-        // Integrity, fail-closed: a release without SHA256SUMS (every tag before v0.5.0)
-        // refuses rather than trusting TLS alone.
-        let sums_dest = dest.with_extension("sums");
-        let sums = runner
-            .run(&curl_args(&asset_url(tag, "SHA256SUMS"), &sums_dest))
-            .and_then(|()| std::fs::read_to_string(&sums_dest).map_err(|error| error.to_string()));
-        let _ = std::fs::remove_file(&sums_dest);
-        let sums = sums.map_err(|reason| {
-            let _ = std::fs::remove_file(dest);
-            format!(
-                "downloaded {ASSET} {tag} via curl, but could not fetch the release's \
-                 SHA256SUMS to verify it ({reason}). curl alone proves nothing about the \
-                 bytes, so this fails closed. Releases before v0.5.0 ship no SHA256SUMS; \
-                 for those, authenticate `gh` and retry, or download and verify manually."
-            )
-        })?;
-        let bytes = std::fs::read(dest).map_err(|error| error.to_string())?;
-        if let Err(reason) = verify_sha256(&sums, ASSET, &bytes) {
-            let _ = std::fs::remove_file(dest);
-            return Err(reason);
-        }
-        progress(&format!(
-            "downloaded {ASSET} {tag} via curl; SHA256SUMS entry matched"
-        ));
-        Ok(Verification::Checksum)
-    }
-}
-
-/// The shipped fetcher: [`ReleaseFetch`] over real subprocesses.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct SubprocessFetch;
-
-impl Fetch for SubprocessFetch {
-    fn fetch(
-        &self,
-        tag: &str,
-        dest: &Path,
-        progress: &mut dyn FnMut(&str),
-    ) -> Result<Verification, String> {
-        ReleaseFetch(Subprocess).fetch(tag, dest, progress)
-    }
-}
-
-/// The public download URL for `asset` on release `tag`: what curl gets, since it cannot
-/// speak the release API without a token.
-fn asset_url(tag: &str, asset: &str) -> String {
-    format!("https://github.com/{RELEASE_REPO}/releases/download/{tag}/{asset}")
-}
-
-/// `gh release download` argv, spelled as the README's manual command.
-fn gh_download_args(tag: &str, dest: &Path) -> Vec<String> {
-    vec![
-        "gh".into(),
-        "release".into(),
-        "download".into(),
-        tag.into(),
-        "--repo".into(),
-        RELEASE_REPO.into(),
-        "--pattern".into(),
-        ASSET.into(),
-        "--output".into(),
-        dest.display().to_string(),
-        "--clobber".into(),
-    ]
-}
-
-/// `gh attestation verify` argv: the provenance check the install docs tell people to run.
-fn gh_verify_args(dest: &Path) -> Vec<String> {
-    vec![
-        "gh".into(),
-        "attestation".into(),
-        "verify".into(),
-        dest.display().to_string(),
-        "--repo".into(),
-        RELEASE_REPO.into(),
-    ]
-}
-
-/// curl argv: fail on HTTP errors, follow the release redirect to the CDN, HTTPS only, and
-/// a ceiling so a stalled transfer is an error rather than a hang.
-fn curl_args(url: &str, dest: &Path) -> Vec<String> {
-    vec![
-        "curl".into(),
-        "-sSfL".into(),
-        "--proto".into(),
-        "=https".into(),
-        "--max-time".into(),
-        "300".into(),
-        "--output".into(),
-        dest.display().to_string(),
-        url.into(),
-    ]
-}
-
-/// Checks `bytes` against `asset`'s entry in a `SHA256SUMS` body (`<64 hex>  <name>` per
-/// line, sha256sum's own format). In-process, because `sha256sum` the tool does not exist
-/// on Windows.
-pub fn verify_sha256(sums: &str, asset: &str, bytes: &[u8]) -> Result<(), String> {
-    let expected = sums
-        .lines()
-        .filter_map(|line| {
-            let mut parts = line.split_whitespace();
-            let digest = parts.next()?;
-            let name = parts.next()?;
-            // sha256sum marks a binary-mode entry with a leading `*`.
-            (name.trim_start_matches('*') == asset).then(|| digest.to_ascii_lowercase())
-        })
-        .next()
-        .ok_or_else(|| {
-            format!(
-                "the release's SHA256SUMS has no entry for {asset}, so nothing to verify against"
-            )
-        })?;
-    let actual = sha256_hex(bytes);
-    if actual == expected {
-        return Ok(());
-    }
-    Err(format!(
-        "SHA256 mismatch for {asset}: the release says {expected}, the download hashed to \
-         {actual}. The bytes were not installed; retry, and if it repeats, treat the \
-         mismatch as the finding rather than the obstacle."
-    ))
-}
-
-/// The lowercase hex SHA-256 of `bytes`.
-pub fn sha256_hex(bytes: &[u8]) -> String {
-    use sha2::{Digest as _, Sha256};
-    const_hex::encode(Sha256::digest(bytes))
-}
-
 /// A version as a release tag spells it, without the leading `v`, or a refusal.
 ///
-/// The version becomes a path component of the cache and an argument to `gh` and a URL, so
-/// it must be a plain tag: ASCII letters, digits, `.`, `+`, `-`, starting with a letter or
-/// digit, with no `..`. That rules out every traversal and every flag.
+/// The version becomes a path component of the cache and part of a URL, so it must be a
+/// plain tag: ASCII letters, digits, `.`, `+`, `-`, starting with a letter or digit, with no
+/// `..`. That rules out every traversal and every flag.
 pub fn normalize_version(version: &str) -> Result<String, ProvisionError> {
     let bare = version.strip_prefix('v').unwrap_or(version);
     let plain = !bare.is_empty()
@@ -596,9 +360,10 @@ pub(crate) fn parse_record(text: &str, version: &str, sha256: &str) -> Option<Ve
     let record: serde_json::Value = serde_json::from_str(text).ok()?;
     let matches =
         record["version"].as_str() == Some(version) && record["sha256"].as_str() == Some(sha256);
-    matches
-        .then(|| Verification::parse(record["verification"].as_str()?))
-        .flatten()
+    let written = record["verification"].as_str()?;
+    [Verification::Attestation, Verification::Checksum]
+        .into_iter()
+        .find(|verification| matches && verification.as_str() == written)
 }
 
 /// A filesystem failure under the state directory.
@@ -844,9 +609,9 @@ fn fetched(
 
 /// **The one call.** The daemon binary for `version` (default: [`crate::VERSION`]) under
 /// `state_dir` (default: the CLI's), from `$MICROVM_AGENTD`, the cache, or a verified fetch
-/// through `gh` or `curl`.
+/// over HTTPS ([`HttpsFetch`], with `$GITHUB_TOKEN` when it's set).
 ///
-/// Blocking: a fetch runs subprocesses and can take seconds.
+/// Blocking: a fetch downloads a few MiB and can take seconds.
 pub fn agentd(version: Option<&str>, state_dir: Option<&Path>) -> Result<Provisioned, Error> {
     agentd_with(&Request {
         version,
@@ -857,13 +622,14 @@ pub fn agentd(version: Option<&str>, state_dir: Option<&Path>) -> Result<Provisi
 
 /// [`agentd`] with a caller-supplied binary as well: the bindings' entry point.
 pub fn agentd_with(request: &Request<'_>) -> Result<Provisioned, Error> {
-    resolve(request, &crate::env::process, &SubprocessFetch, &mut |_| {}).map_err(Error::from)
+    let env = &crate::env::process;
+    resolve(request, env, &HttpsFetch::from_env(env), &mut |_| {}).map_err(Error::from)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::{Cell, RefCell};
+    use std::cell::Cell;
 
     /// A scripted fetch: writes `bytes` to the destination and counts invocations.
     struct Scripted {
@@ -1200,148 +966,5 @@ mod tests {
             normalize_version("1.2.3-rc.1+build").unwrap(),
             "1.2.3-rc.1+build"
         );
-    }
-
-    /// The SHA256SUMS check: a matching entry passes, a mismatch refuses with both digests,
-    /// and a missing entry refuses rather than passing vacuously.
-    #[test]
-    fn the_checksum_verification_matches_mismatches_and_refuses_a_missing_entry() {
-        let digest = sha256_hex(b"agentd-bytes");
-        let sums = format!("{digest}  agentd\nother  microvm-x86_64.tar.gz\n");
-        assert!(verify_sha256(&sums, "agentd", b"agentd-bytes").is_ok());
-        let starred = format!("{digest} *agentd\n");
-        assert!(verify_sha256(&starred, "agentd", b"agentd-bytes").is_ok());
-
-        let mismatch = verify_sha256(&sums, "agentd", b"tampered").expect_err("must refuse");
-        assert!(mismatch.contains(&digest), "{mismatch}");
-        assert!(mismatch.contains("not installed"), "{mismatch}");
-
-        let missing =
-            verify_sha256("abc  something-else\n", "agentd", b"x").expect_err("must refuse");
-        assert!(missing.contains("no entry"), "{missing}");
-    }
-
-    /// The argv builders spell the exact commands the docs teach, so the two cannot drift.
-    #[test]
-    fn the_subprocess_argv_matches_the_documented_manual_commands() {
-        let dest = Path::new("/tmp/agentd");
-        assert_eq!(
-            gh_download_args("v0.5.0", dest).join(" "),
-            "gh release download v0.5.0 --repo laithalsaadoon/microvms-agentd \
-             --pattern agentd --output /tmp/agentd --clobber"
-        );
-        assert_eq!(
-            gh_verify_args(dest).join(" "),
-            "gh attestation verify /tmp/agentd --repo laithalsaadoon/microvms-agentd"
-        );
-        let curl = curl_args(&asset_url("v0.5.0", ASSET), dest).join(" ");
-        assert!(
-            curl.starts_with("curl -sSfL --proto =https --max-time 300"),
-            "{curl}"
-        );
-        assert!(
-            curl.ends_with(
-                "https://github.com/laithalsaadoon/microvms-agentd/releases/download/v0.5.0/agentd"
-            ),
-            "{curl}"
-        );
-    }
-
-    /// A [`Runner`] that plays the release from a table: which tools download, whether the
-    /// attestation passes, and what `SHA256SUMS` says.
-    struct Table {
-        gh: bool,
-        attested: bool,
-        curl: bool,
-        /// `None`: no SHA256SUMS on the release; `Some(true)`: matching; `Some(false)`: not.
-        sums: Option<bool>,
-        asset: Vec<u8>,
-        ran: RefCell<Vec<String>>,
-    }
-
-    impl Runner for Table {
-        fn run(&self, argv: &[String]) -> Result<(), String> {
-            self.ran.borrow_mut().push(argv[..2].join(" "));
-            let output = || {
-                let at = argv.iter().position(|a| a == "--output").expect("--output");
-                PathBuf::from(&argv[at + 1])
-            };
-            match (argv[0].as_str(), argv[1].as_str()) {
-                ("gh", "release") if self.gh => {
-                    std::fs::write(output(), &self.asset).map_err(|e| e.to_string())
-                }
-                ("gh", "attestation") if self.attested => Ok(()),
-                ("curl", _) if self.curl => {
-                    let url = argv.last().expect("a url");
-                    if url.ends_with("/agentd") {
-                        return std::fs::write(output(), &self.asset).map_err(|e| e.to_string());
-                    }
-                    let digest = match self.sums {
-                        None => return Err("404".into()),
-                        Some(true) => sha256_hex(&self.asset),
-                        Some(false) => sha256_hex(b"other"),
-                    };
-                    std::fs::write(output(), format!("{digest}  agentd\n"))
-                        .map_err(|e| e.to_string())
-                }
-                _ => Err(format!("{} refused", argv[0])),
-            }
-        }
-    }
-
-    /// **The verification table** — the literal mirror of `the_verification_table` in
-    /// `model/src/provision.rs` (BIND-18): attestation when `gh` downloads and attests,
-    /// refusal without `curl` when it downloads and does not, and otherwise `curl` with
-    /// only a matching `SHA256SUMS` passing. A refused fetch leaves no file behind.
-    #[test]
-    fn the_verification_table_matches_the_model() {
-        // (gh downloads, attested, curl downloads, sums) → verdict; `None` is refused.
-        type Row = (bool, bool, bool, Option<bool>, Option<Verification>);
-        let rows: [Row; 10] = [
-            (
-                true,
-                true,
-                true,
-                Some(true),
-                Some(Verification::Attestation),
-            ),
-            (true, true, false, None, Some(Verification::Attestation)),
-            (true, false, true, Some(true), None),
-            (true, false, false, None, None),
-            (false, false, true, Some(true), Some(Verification::Checksum)),
-            (false, false, true, Some(false), None),
-            (false, false, true, None, None),
-            (false, false, false, Some(true), None),
-            (false, true, true, Some(true), Some(Verification::Checksum)),
-            (false, true, true, None, None),
-        ];
-        let dir = tempfile::tempdir().expect("a temp dir");
-        for (gh, attested, curl, sums, expected) in rows {
-            let table = Table {
-                gh,
-                attested,
-                curl,
-                sums,
-                asset: elf_header(REQUIRED_ELF_MACHINE),
-                ran: RefCell::new(Vec::new()),
-            };
-            let dest = dir.path().join("partial");
-            let verdict = ReleaseFetch(&table)
-                .fetch("v9.9.9", &dest, &mut |_| {})
-                .ok();
-            let row = (gh, attested, curl, sums);
-            assert_eq!(verdict, expected, "{row:?}");
-            if verdict.is_none() {
-                assert!(!dest.exists(), "a refused fetch left bytes behind: {row:?}");
-            }
-            if gh && !attested {
-                let ran = table.ran.borrow();
-                assert!(
-                    ran.iter().all(|tool| !tool.starts_with("curl")),
-                    "a refused attestation must not fall through to curl: {ran:?}"
-                );
-            }
-            let _ = std::fs::remove_file(&dest);
-        }
     }
 }

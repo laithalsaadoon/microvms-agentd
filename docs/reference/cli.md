@@ -723,7 +723,7 @@ The events are the command's output, not progress about it, so they cannot go to
 
 The non-JSON formats emit no NDJSON at all. The raw child bytes go to stdout untouched, with no lossy string conversion applied. `microvms-cli/src/envelope.rs:274-288`.
 
-A stream that fails part-way through has already written events and no envelope. On the JSON path the failure envelope becomes the stream's compact last line, because an NDJSON consumer reading line by line needs a terminating record saying why the events stopped. On the human paths the same failure goes to stderr instead, because appending an error message to the child's raw output would corrupt the file a caller was redirecting into. `microvms-cli/src/main.rs:370-384`.
+A stream that fails part-way through has already written events and no envelope. On the JSON path the failure envelope becomes the stream's compact last line, because an NDJSON consumer reading line by line needs a terminating record saying why the events stopped. On the human paths the same failure goes to stderr instead, because appending an error message to the child's raw output would corrupt the file a caller was redirecting into. `microvms-cli/src/main.rs:371-385`.
 
 A stream that ended without an exit event was cut. `exitCode` is reported as `null` rather than `0`, because reporting zero would turn a truncated stream into a passing build. The command exits `ERR_EXEC_FAILED`, unless the stream stopped because the reader of stdout went away: then it exits `ERR_INTERRUPTED`, and the exec keeps running in the VM. `microvms-cli/src/commands/attached.rs:491-527`.
 

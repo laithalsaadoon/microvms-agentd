@@ -1469,8 +1469,9 @@ class ProvisionedAgentd:
     def verification(self, /) -> str |None:
         """
         How the bytes were proven, when fetched or when the cache entry was installed:
-        `"attestation"` (`gh attestation verify`, provenance) or `"checksum"` (the release's
-        `SHA256SUMS`, integrity). `None` for a caller-supplied binary.
+        `"attestation"` (the release workflow's Sigstore attestation, provenance) or
+        `"checksum"` (the release's `SHA256SUMS`, integrity). `None` for a caller-supplied
+        binary.
         """
     @property
     def version(self, /) -> str:
@@ -2486,10 +2487,12 @@ def provision_agentd(version: str |None = None, state_dir: str |PathLike[str] |N
     
     Answered from `binary` or `$MICROVM_AGENTD` when either names a file, else the
     version's cache entry under `state_dir` (default: the CLI's, so both share one cache),
-    else the GitHub release asset, verified by `gh attestation verify` or, when `gh` cannot
-    download, by the release's `SHA256SUMS`. A fetch that cannot be verified raises
-    `PreconditionError`, and so does any binary that is not an aarch64 ELF. Blocking: a
-    fetch runs `gh` or `curl` and can take seconds.
+    else the GitHub release asset, verified in-process against the release workflow's
+    Sigstore attestation or, only when GitHub can't be reached for one, the release's
+    `SHA256SUMS`.
+    A fetch that cannot be verified raises `PreconditionError`, and so does any binary that
+    is not an aarch64 ELF. Neither `gh` nor `curl` is needed. Blocking: a fetch downloads a
+    few MiB and can take seconds.
     """
 
 def provision_agentd_report(version: str |None = None, state_dir: str |PathLike[str] |None = None, binary: str |PathLike[str] |None = None) -> ProvisionedAgentd:

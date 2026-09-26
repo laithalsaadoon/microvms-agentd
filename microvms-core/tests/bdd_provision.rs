@@ -7,15 +7,15 @@
 //! `harness = false` test, so `cargo test` runs it on every CI system, and it writes a JUnit
 //! report when `CUCUMBER_JUNIT` names a file (give that path absolutely).
 //!
-//! # The fake release sits at the subprocess seam
+//! # The fake release sits at the release seam
 //!
-//! [`provision::ReleaseFetch`] is the shipped verification policy: `gh release download`,
-//! then `gh attestation verify`, or `curl` and the release's `SHA256SUMS` when `gh` cannot
-//! download. It runs those tools through a [`provision::Runner`], and [`FakeRelease`] is a
-//! runner that answers the same argv from memory: it writes the asset where `--output`
-//! says, accepts or refuses the attestation, and serves, omits, or corrupts `SHA256SUMS`.
-//! So a scenario exercises the real policy, including which tool runs after which failure,
-//! and nothing opens a socket to GitHub.
+//! [`provision::PolicyFetch`] runs the shipped verification policy,
+//! [`provision::fetch_release`], over a [`provision::ReleaseSource`] and a
+//! [`provision::AttestationVerifier`]; the shipped fetch is the same over GitHub and
+//! `sigstore-verify`. [`FakeRelease`] is both ports from memory: it serves the asset or
+//! refuses it, publishes an attestation bundle that verifies or one that doesn't, answers that
+//! it has none, or can't be reached for one, and serves, omits, or corrupts `SHA256SUMS`. So a scenario exercises the real policy,
+//! including which step runs after which failure, and nothing opens a socket to GitHub.
 //!
 //! Only `provision.feature` runs here, named by file rather than by directory, so another
 //! feature file added under `tests/features/` never runs against these step definitions.
@@ -25,7 +25,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use cucumber::{World, WriterExt, cli, given, then, when, writer};
-use microvms_core::provision::{self, ReleaseFetch, Request, Runner};
+use microvms_core::provision::{
+    self, AttestationVerifier, Bundles, PolicyFetch, ReleaseSource, Request, Signer,
+};
 
 /// The e_machine of an aarch64 ELF.
 const AARCH64: u16 = 0xB7;
@@ -47,7 +49,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
     const_hex::encode(Sha256::digest(bytes))
 }
 
-/// What the release's `SHA256SUMS` asset holds for `curl`.
+/// What the release's `SHA256SUMS` asset holds.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 enum Sums {
     /// A matching entry for `agentd`.
@@ -61,78 +63,97 @@ enum Sums {
     WithoutAgentd,
 }
 
-/// The fake release's behavior, and a log of every argv it was asked to run.
+/// What an attestation lookup for the asset's digest finds.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+enum Bundle {
+    /// A bundle the release workflow signed for these bytes.
+    #[default]
+    Verifying,
+    /// A bundle that doesn't verify for these bytes.
+    Refused,
+    /// Neither the release asset nor the attestations API answers.
+    Unavailable,
+    /// The release answers that it publishes no bundle for these bytes.
+    Absent,
+}
+
+/// The fake release's behavior, and a log of every operation it was asked for, with its tag.
 #[derive(Debug, Default)]
 struct ReleaseState {
     asset: Vec<u8>,
-    /// `gh` can download (installed and authenticated).
-    gh_downloads: bool,
-    /// `gh attestation verify` accepts the download.
-    attested: bool,
-    /// `curl` can download.
-    curl_downloads: bool,
+    /// The asset downloads.
+    downloads: bool,
+    bundle: Bundle,
     sums: Sums,
-    calls: Vec<Vec<String>>,
+    calls: Vec<(&'static str, String)>,
 }
 
-/// A [`Runner`] that answers `gh` and `curl` argv from a [`ReleaseState`].
+/// A [`ReleaseSource`] and an [`AttestationVerifier`] answered from a [`ReleaseState`].
 #[derive(Clone, Debug, Default)]
 struct FakeRelease(Arc<Mutex<ReleaseState>>);
 
-fn flag<'a>(argv: &'a [String], name: &str) -> &'a str {
-    let at = argv
-        .iter()
-        .position(|arg| arg == name)
-        .unwrap_or_else(|| panic!("{name} in {argv:?}"));
-    &argv[at + 1]
+impl FakeRelease {
+    fn state(&self) -> std::sync::MutexGuard<'_, ReleaseState> {
+        self.0.lock().expect("the release lock")
+    }
 }
 
-impl Runner for FakeRelease {
-    fn run(&self, argv: &[String]) -> Result<(), String> {
-        let mut state = self.0.lock().expect("the release lock");
-        state.calls.push(argv.to_vec());
-        let words: Vec<&str> = argv.iter().map(String::as_str).collect();
-        match words.as_slice() {
-            ["gh", "release", "download", ..] => {
-                if !state.gh_downloads {
-                    return Err(
-                        "`gh` exited 4: To get started with GitHub CLI, please run: gh auth login"
-                            .into(),
-                    );
-                }
-                std::fs::write(flag(argv, "--output"), &state.asset).map_err(|e| e.to_string())
+/// The bundle text the fake publishes for a digest, so the verifier can tell whether it was
+/// handed the bundle for the bytes it's checking.
+fn bundle_for(sha256: &str) -> String {
+    format!("{{\"bundle for\": \"{sha256}\"}}")
+}
+
+impl ReleaseSource for FakeRelease {
+    fn asset(&self, tag: &str, name: &str) -> Result<Vec<u8>, String> {
+        let mut state = self.state();
+        state.calls.push(("asset", tag.to_string()));
+        assert_eq!(name, provision::ASSET);
+        if !state.downloads {
+            return Err("GET https://github.com/...: error sending request: dns error".into());
+        }
+        Ok(state.asset.clone())
+    }
+
+    fn checksums(&self, tag: &str) -> Result<String, String> {
+        let mut state = self.state();
+        state.calls.push(("checksums", tag.to_string()));
+        Ok(match state.sums {
+            Sums::Missing => return Err("HTTP 404".into()),
+            Sums::Matching => format!("{}  agentd\n", sha256_hex(&state.asset)),
+            Sums::Mismatched => format!("{}  agentd\n", sha256_hex(b"something else")),
+            Sums::WithoutAgentd => format!("{}  microvm-x86_64.tar.gz\n", sha256_hex(b"x")),
+        })
+    }
+
+    fn attestations(&self, tag: &str, sha256: &str) -> Bundles {
+        let mut state = self.state();
+        state.calls.push(("attestations", tag.to_string()));
+        match state.bundle {
+            Bundle::Unavailable => {
+                Bundles::Unreachable("HTTP 403 (the unauthenticated rate limit)".into())
             }
-            ["gh", "attestation", "verify", ..] => {
-                if state.attested {
-                    Ok(())
-                } else {
-                    Err("`gh` exited 1: no matching attestations found".into())
-                }
-            }
-            ["curl", .., url] => {
-                if !state.curl_downloads {
-                    return Err("`curl` exited 6: Could not resolve host: github.com".into());
-                }
-                let dest = flag(argv, "--output");
-                if url.ends_with("/agentd") {
-                    return std::fs::write(dest, &state.asset).map_err(|e| e.to_string());
-                }
-                assert!(url.ends_with("/SHA256SUMS"), "unexpected curl {url}");
-                let body = match state.sums {
-                    Sums::Missing => {
-                        return Err(
-                            "`curl` exited 22: The requested URL returned error: 404".into()
-                        );
-                    }
-                    Sums::Matching => format!("{}  agentd\n", sha256_hex(&state.asset)),
-                    Sums::Mismatched => format!("{}  agentd\n", sha256_hex(b"something else")),
-                    Sums::WithoutAgentd => {
-                        format!("{}  microvm-x86_64.tar.gz\n", sha256_hex(b"x"))
-                    }
-                };
-                std::fs::write(dest, body).map_err(|e| e.to_string())
-            }
-            other => panic!("the fake release does not run {other:?}"),
+            Bundle::Absent => Bundles::Absent("HTTP 404; the attestations API: HTTP 404".into()),
+            Bundle::Verifying | Bundle::Refused => Bundles::Published(vec![bundle_for(sha256)]),
+        }
+    }
+}
+
+impl AttestationVerifier for FakeRelease {
+    fn verify(&self, bundle: &str, artifact: &[u8], signer: &Signer) -> Result<(), String> {
+        let state = self.state();
+        let (_, tag) = state
+            .calls
+            .iter()
+            .rev()
+            .find(|(operation, _)| *operation == "asset")
+            .expect("the asset was asked for");
+        // The policy must ask for the release workflow at the tag it downloaded.
+        assert_eq!(signer, &Signer::release(tag));
+        if state.bundle == Bundle::Verifying && bundle == bundle_for(&sha256_hex(artifact)) {
+            Ok(())
+        } else {
+            Err("certificate identity mismatch".into())
         }
     }
 }
@@ -160,13 +181,16 @@ impl Provisioning {
     }
 
     fn state(&self) -> std::sync::MutexGuard<'_, ReleaseState> {
-        self.release.0.lock().expect("the release lock")
+        self.release.state()
     }
 
     fn provision(&mut self, version: Option<&str>, binary: Option<&Path>) {
         let env = self.env.clone();
         let lookup = move |name: &str| env.get(name).cloned();
-        let fetch = ReleaseFetch(self.release.clone());
+        let fetch = PolicyFetch {
+            source: self.release.clone(),
+            verifier: self.release.clone(),
+        };
         let request = Request {
             version,
             state_dir: Some(self.state_dir.path()),
@@ -197,11 +221,7 @@ impl Provisioning {
         self.state()
             .calls
             .iter()
-            .filter(|argv| {
-                (argv[0] == "gh" && argv[1] == "release")
-                    || (argv[0] == "curl"
-                        && argv.last().is_some_and(|url| url.ends_with("/agentd")))
-            })
+            .filter(|(operation, _)| *operation == "asset")
             .count()
     }
 
@@ -216,78 +236,58 @@ impl Provisioning {
 fn configure(
     world: &mut Provisioning,
     asset: Vec<u8>,
-    gh: bool,
-    attested: bool,
-    curl: bool,
+    downloads: bool,
+    bundle: Bundle,
     sums: Sums,
 ) {
     let mut state = world.state();
     state.asset = asset;
-    state.gh_downloads = gh;
-    state.attested = attested;
-    state.curl_downloads = curl;
+    state.downloads = downloads;
+    state.bundle = bundle;
     state.sums = sums;
 }
 
-#[given("a release whose agentd is an aarch64 ELF that gh can attest")]
+#[given("a release whose agentd is an aarch64 ELF with a verifying attestation")]
 fn arm_attested(world: &mut Provisioning) {
-    configure(
-        world,
-        elf(AARCH64, b"release"),
-        true,
-        true,
-        true,
-        Sums::Matching,
-    );
+    let asset = elf(AARCH64, b"release");
+    configure(world, asset, true, Bundle::Verifying, Sums::Matching);
 }
 
-#[given("a release whose agentd is an x86_64 ELF that gh can attest")]
+#[given("a release whose agentd is an x86_64 ELF with a verifying attestation")]
 fn x86_attested(world: &mut Provisioning) {
-    configure(
-        world,
-        elf(X86_64, b"release"),
-        true,
-        true,
-        true,
-        Sums::Matching,
-    );
+    let asset = elf(X86_64, b"release");
+    configure(world, asset, true, Bundle::Verifying, Sums::Matching);
 }
 
 #[given(
-    "a release whose agentd is an aarch64 ELF that only curl can fetch, with a matching SHA256SUMS"
+    "a release whose agentd is an aarch64 ELF with no attestation to fetch, and a matching SHA256SUMS"
 )]
-fn arm_curl_only(world: &mut Provisioning) {
-    configure(
-        world,
-        elf(AARCH64, b"release"),
-        false,
-        false,
-        true,
-        Sums::Matching,
-    );
+fn arm_checksum_only(world: &mut Provisioning) {
+    let asset = elf(AARCH64, b"release");
+    configure(world, asset, true, Bundle::Unavailable, Sums::Matching);
 }
 
 #[given(regex = r"^a release where (.+)$")]
 fn broken_release(world: &mut Provisioning, what: String) {
     let asset = elf(AARCH64, b"release");
-    match what.as_str() {
-        "gh downloads bytes its attestation refuses" => {
-            configure(world, asset, true, false, true, Sums::Matching)
+    let (downloads, bundle, sums) = match what.as_str() {
+        "the attestation refuses the downloaded bytes" => (true, Bundle::Refused, Sums::Matching),
+        "the release publishes no attestation for the downloaded bytes" => {
+            (true, Bundle::Absent, Sums::Matching)
         }
-        "only curl can fetch and SHA256SUMS is gone" => {
-            configure(world, asset, false, false, true, Sums::Missing)
+        "no attestation can be fetched and SHA256SUMS is gone" => {
+            (true, Bundle::Unavailable, Sums::Missing)
         }
-        "only curl can fetch and SHA256SUMS differs" => {
-            configure(world, asset, false, false, true, Sums::Mismatched)
+        "no attestation can be fetched and SHA256SUMS differs" => {
+            (true, Bundle::Unavailable, Sums::Mismatched)
         }
-        "only curl can fetch and SHA256SUMS omits it" => {
-            configure(world, asset, false, false, true, Sums::WithoutAgentd)
+        "no attestation can be fetched and SHA256SUMS omits it" => {
+            (true, Bundle::Unavailable, Sums::WithoutAgentd)
         }
-        "neither gh nor curl can download" => {
-            configure(world, asset, false, false, false, Sums::Matching)
-        }
+        "the asset cannot be downloaded" => (false, Bundle::Verifying, Sums::Matching),
         other => panic!("no release behaves as {other:?}"),
-    }
+    };
+    configure(world, asset, downloads, bundle, sums);
 }
 
 #[given("the cache already holds the core's own version")]
@@ -380,7 +380,7 @@ fn core_version(world: &mut Provisioning) {
     let served = world.served();
     assert_eq!(served.version, microvms_core::VERSION);
     let tag = format!("v{}", microvms_core::VERSION);
-    let asked = world.state().calls.iter().any(|argv| argv.contains(&tag));
+    let asked = world.state().calls.iter().any(|(_, asked)| *asked == tag);
     assert!(asked, "the release was never asked for {tag}");
 }
 
@@ -405,7 +405,7 @@ fn downloaded(world: &mut Provisioning, times: usize) {
 
 #[then(expr = "the release was asked for tag {string}")]
 fn asked_for(world: &mut Provisioning, tag: String) {
-    let asked = world.state().calls.iter().any(|argv| argv.contains(&tag));
+    let asked = world.state().calls.iter().any(|(_, asked)| *asked == tag);
     assert!(asked, "{:#?}", world.state().calls);
     assert_eq!(world.served().version, tag.trim_start_matches('v'));
 }
@@ -446,10 +446,13 @@ fn walk(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
-#[then("curl was never run")]
-fn no_curl(world: &mut Provisioning) {
+#[then("SHA256SUMS was never fetched")]
+fn no_checksums(world: &mut Provisioning) {
     let calls = world.state().calls.clone();
-    assert!(calls.iter().all(|argv| argv[0] != "curl"), "{calls:#?}");
+    assert!(
+        calls.iter().all(|(operation, _)| *operation != "checksums"),
+        "{calls:#?}"
+    );
 }
 
 /// libtest flags `cargo test` may pass, which cucumber's own CLI would refuse.

@@ -72,8 +72,7 @@ first:
 That's the rule, not a description of today's tree. The CLI still owns file
 formats and file I/O, the run ledger and the sync manifest among them. The
 ratchet doesn't collect that drift yet (#273), and #260 moves directory sync
-into core. The daemon fetch still runs `gh` and `curl` in the edges until #284
-fetches and verifies it in Rust.
+into core.
 
 If an adapter needs something private to a lower crate, make it public there or
 move the caller down. Never copy it.

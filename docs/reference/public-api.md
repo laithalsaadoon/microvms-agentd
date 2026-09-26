@@ -76,12 +76,14 @@ local and make no AWS call. `microvms-app/src/control/artifact.rs:562-611`,
 `provision::agentd(version, state_dir)` returns verified aarch64 `agentd` bytes as
 `Provisioned { bytes, path, source, version, sha256 }`. It answers from a caller's
 path (`$MICROVM_AGENTD`), then the cache under the state directory, then a fetch of
-this repository's release asset, proven with `gh attestation verify` when `gh`
-can run, else checked against the release's `SHA256SUMS`; a fetch it can't verify
-is an error. Every binary it returns is checked to be an aarch64 ELF, and the
-version defaults to the core's own, never "latest". It blocks, because a fetch runs
-subprocesses. `microvms-edges/src/provision.rs:1-51`, `microvms-edges/src/provision.rs:179-190`,
-`microvms-edges/src/provision.rs:880-890`.
+this repository's release asset, proven in-process against the release workflow's
+Sigstore attestation, else checked against the release's `SHA256SUMS` only when
+GitHub can't be reached for one; a fetch it can't verify is an error. Every binary it
+returns is checked to be an aarch64 ELF, and the version defaults to the core's own,
+never "latest". It blocks, because a fetch downloads a few MiB. The policy is
+`microvms-app/src/provision.rs:156-221`, the fetch around it
+`microvms-edges/src/provision.rs:1-77`, the result `microvms-edges/src/provision.rs:162-175`,
+and the call `microvms-edges/src/provision.rs:610-627`.
 
 ### Sandbox::ensure_image
 

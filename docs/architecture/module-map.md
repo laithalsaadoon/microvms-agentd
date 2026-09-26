@@ -79,11 +79,12 @@ match on rather than a $0.00 line (`microvms-domain/src/cost.rs:22-27`).
 ## microvms-app
 
 `microvms-app` holds the use cases: the control-plane client, `Sandbox`, `Session`,
-`ensure_image` and the agent recipes (`microvms-app/src/lib.rs:4-5`). Everything they do outside
-the process goes through a trait this crate declares, from the control-plane `Transport` to the
-`Clock` and the `Entropy` source (`microvms-app/src/lib.rs:5-10`). It can't reach the network,
-AWS, the filesystem, a subprocess, the wall clock or the OS random pool, and its dependency set,
-its `clippy.toml` and its crate root hold that (`microvms-app/src/lib.rs:12-25`). The `agents`
+`ensure_image`, the agent recipes and the daemon release's verification policy
+(`microvms-app/src/lib.rs:4-6`). Everything they do outside the process goes through a trait this
+crate declares, from the control-plane `Transport` to the `Clock`, the `Entropy` source and the
+`ReleaseSource` (`microvms-app/src/lib.rs:5-12`). It can't reach the network, AWS, the
+filesystem, a subprocess, the wall clock or the OS random pool, and its dependency set, its
+`clippy.toml` and its crate root hold that (`microvms-app/src/lib.rs:14-27`). The `agents`
 module sits deliberately above the generic lifecycle: it is the L3 layer, a dated profile table
 (Claude Code, Codex), and an `AgentVm` that derives an image, launches with egress, and
 provisions Bedrock access (`microvms-app/src/agents/mod.rs`, `docs/AGENT-VMS.md`). Its free
@@ -98,6 +99,7 @@ bindings drive, because their sandbox sits behind a lock one `AgentVm` cannot ow
 - `microvms-app/src/control/ops.rs`
 - `microvms-app/src/control/mod.rs`
 - `microvms-app/src/session/mod.rs`
+- `microvms-app/src/provision.rs`
 
 ## microvms-edges
 
@@ -114,6 +116,7 @@ It's the one library crate that may depend on a crate doing I/O
 - `microvms-edges/src/session/tunnel.rs`
 - `microvms-edges/src/session/forward.rs`
 - `microvms-edges/src/provision.rs`
+- `microvms-edges/src/provision/release.rs`
 
 ## microvms-core
 

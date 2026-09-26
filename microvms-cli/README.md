@@ -18,7 +18,7 @@ microvm --version
 
 Or compile from crates.io with `cargo install microvms-cli --locked`.
 The CLI downloads and verifies the matching `agentd` binary automatically
-when it builds an image; have `gh` or `curl` available for that download.
+when it builds an image, checking its Sigstore attestation in-process.
 
 ## Start an agent in 90 seconds
 

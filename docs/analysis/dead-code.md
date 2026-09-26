@@ -91,7 +91,7 @@ files that a basename search calls orphans, each cleared against its real invoca
 | `microvms-py/tests/test_stubs.py` | `pytest microvms-py/tests -q` at `.github/workflows/ci.yml:308`; pytest auto-discovers `test_*.py`, so no file names it |
 | `microvms-js/__test__/support/decimal.mjs` | `microvms-js/__test__/cost.mjs:40` |
 | `microvms-js/__test__/support/sse.mjs` | `microvms-js/__test__/cost.mjs:41`, `microvms-js/__test__/errors.mjs:40`, `microvms-js/__test__/exec.mjs:44`, `microvms-js/__test__/process.mjs:31`, `microvms-js/__test__/session.mjs:33` |
-| `conformance/infra/main.tf` | `terraform -chdir=conformance/infra` at `mise.toml:54`, `mise.toml:95`, `mise.toml:459`, `mise.toml:690` |
+| `conformance/infra/main.tf` | `terraform -chdir=conformance/infra` at `mise.toml:54`, `mise.toml:95`, `mise.toml:459`, `mise.toml:701` |
 
 Two files are compiled only under `cfg(test)` and are live test code, not dead source:
 `microvms-cli/src/guards.rs` (inner `#![cfg(test)]` at `microvms-cli/src/guards.rs:20`, plus

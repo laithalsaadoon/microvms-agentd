@@ -545,6 +545,17 @@ description = "The cursor encoding and the colon image ARN, against the real sig
 # `cargo test --workspace` stays green; this task is how they run.
 run = "cargo test -p microvms-core --test live_pagination -- --ignored --nocapture"
 
+[tasks."live:release"]
+description = "Fetch and verify a published daemon release with no gh and no token. Free."
+# No AWS and no credentials: it downloads a public GitHub release and verifies its attestation
+# the way a client does (#284). The version defaults to the core's own, which exists only once
+# it's tagged, so before a tag pass an earlier one: `MICROVM_RELEASE_VERSION=0.10.0 mise run
+# live:release`. It isn't in `live`'s sequence because the conformance quickstart already
+# provisions the daemon the same way with `gh` logged out. The check before a release is
+# published is `microvms-edges/tests/release_bundle.rs`, which `release.yml` runs over the
+# bundle it just produced.
+run = 'env -u GITHUB_TOKEN -u GH_TOKEN GH_CONFIG_DIR="$(mktemp -d)" cargo test -p microvms-core --test live_release -- --ignored --nocapture'
+
 [tasks."live:versions"]
 description = "The four version/build operations against the real service. Costs one short VM."
 # Same argument `live:paths` makes, plus two things a fake structurally cannot hold.

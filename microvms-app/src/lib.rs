@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 //! The MicroVMs client's use cases, written only against ports (ARCH-7).
 //!
-//! The control-plane client, [`sandbox::Sandbox`], [`session::Session`], `ensure_image` and
-//! the agent recipes are here. Everything they do outside the process goes through a trait
-//! this crate declares: [`control::transport::Transport`] for the control plane,
-//! [`control::BuildServices`] for STS and S3, [`session::HttpBackend`] for the daemon,
-//! [`session::TokenMinter`] for proxy tokens, [`names::NameStore`] for the name registry,
-//! [`clock::Clock`] for time, [`entropy::Entropy`] for randomness, and [`adapters::Adapters`]
-//! for the pieces a use case builds partway through.
+//! The control-plane client, [`sandbox::Sandbox`], [`session::Session`], `ensure_image`, the
+//! agent recipes and the daemon release's verification policy are here. Everything they do
+//! outside the process goes through a trait this crate declares:
+//! [`control::transport::Transport`] for the control plane, [`control::BuildServices`] for STS
+//! and S3, [`session::HttpBackend`] for the daemon, [`session::TokenMinter`] for proxy tokens,
+//! [`names::NameStore`] for the name registry, [`clock::Clock`] for time, [`entropy::Entropy`]
+//! for randomness, [`adapters::Adapters`] for the pieces a use case builds partway through, and
+//! [`provision::ReleaseSource`] and [`provision::AttestationVerifier`] for the daemon release a
+//! fetch proves.
 //!
 //! # What this crate can't do
 //!
@@ -47,6 +49,7 @@ pub mod control;
 pub mod entropy;
 pub mod names;
 pub mod preflight;
+pub mod provision;
 pub mod sandbox;
 pub mod session;
 #[cfg(any(test, feature = "test-support"))]

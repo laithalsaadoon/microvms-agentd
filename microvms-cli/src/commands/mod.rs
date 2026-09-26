@@ -94,7 +94,7 @@ pub struct Ctx<'a, O: Write, E: Write> {
     /// which under a parallel test runner means one test's region leaking into another's.
     pub env: &'a dyn Fn(&str) -> Option<String>,
     /// The agentd-provisioning seam, injected for the reason `seam` is: the shipped binary
-    /// carries [`crate::provision::SubprocessFetch`], and the guards script it, so no test
+    /// carries [`crate::provision::HttpsFetch`], and the guards script it, so no test
     /// can open a socket to GitHub the way none can open one to AWS.
     pub fetch: &'a dyn crate::provision::Fetch,
 }

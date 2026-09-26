@@ -536,28 +536,50 @@ jobs:
         with:
           subject-path: target/aarch64-unknown-linux-musl/release/agentd
       # The attestation the step above produces lives in the repository's
-      # attestation store, which `gh attestation verify` reads and nothing on
-      # the release page shows. These two assets are the same material, on the
-      # release itself: the Sigstore bundle whole, and the DSSE envelope from
-      # inside it — which IS the signed in-toto SLSA provenance statement, in
-      # the `.intoto.jsonl` spelling provenance tooling (and Scorecard's
-      # Signed-Releases check) looks for beside an artifact. `agentd` keeps its
-      # bare asset name because the README's `--pattern agentd` download is a
-      # literal glob that must keep matching exactly one asset.
+      # attestation store, which the attestations API serves by digest. These
+      # two assets are the same material, on the release itself: the Sigstore
+      # bundle whole, and the DSSE envelope from inside it, which IS the signed
+      # in-toto SLSA provenance statement, in the `.intoto.jsonl` spelling
+      # provenance tooling (and Scorecard's Signed-Releases check) looks for
+      # beside an artifact. `agentd.sigstore.json` is also the first place
+      # every client's daemon fetch reads its bundle from
+      # (`GitHubRelease::attestations` in microvms-edges): a release download
+      # isn't rate limited the way the API is. Dropping it would push every
+      # client onto the API, and a client that finds neither refuses the
+      # daemon. `agentd` keeps its bare asset name because the README's
+      # `--pattern agentd` download is a literal glob that must keep matching
+      # exactly one asset.
       - name: put the signature and provenance beside the binary
         run: |
           set -euo pipefail
           cp "${{ steps.attest.outputs.bundle-path }}" agentd.sigstore.json
           jq -c .dsseEnvelope agentd.sigstore.json > agentd.intoto.jsonl
+      # Before anything is published: the bundle just produced must verify
+      # under the Sigstore trusted root the CLI built from this commit embeds,
+      # because that CLI fetches exactly this release's daemon and nothing
+      # refreshes its root. A refusal here (a Rekor shard or key the pinned
+      # `sigstore-trust-root` predates) means bumping that pin and tagging
+      # again, never skipping this step. It stops the GitHub release only:
+      # the registry jobs don't wait for this one, so a refusal here after
+      # they've run still leaves that version's registry packages without a
+      # daemon to fetch. Absolute paths, because cargo runs the test from the
+      # crate's directory.
+      - name: verify the bundle the way every client will
+        env:
+          MICROVM_RELEASE_ASSET: ${{ github.workspace }}/target/aarch64-unknown-linux-musl/release/agentd
+          MICROVM_RELEASE_BUNDLE: ${{ github.workspace }}/agentd.sigstore.json
+          MICROVM_RELEASE_TAG: ${{ github.ref_name }}
+        run: cargo test -p microvms-edges --test release_bundle --locked
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: cli-*
           merge-multiple: true
           path: cli-dist
       # One SHA256SUMS over every binary asset, bare basenames, sha256sum's own format.
-      # This file is what `microvm`'s curl fallback verifies a provisioned agentd against
-      # (`provision.rs::verify_sha256` looks up the literal `agentd` entry), so its absence
-      # on a release makes that path fail closed — it exists from v0.5.0 on.
+      # A client's daemon fetch checks agentd against it when GitHub can't be reached for
+      # the attestation bundle (`verify_sha256` in microvms-app/src/provision.rs looks up
+      # the literal `agentd` entry), and fails closed on a release without it. It exists
+      # from v0.5.0 on, the same releases that carry `agentd.sigstore.json`.
       - name: write SHA256SUMS over every asset
         run: |
           set -euo pipefail

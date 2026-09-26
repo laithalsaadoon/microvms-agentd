@@ -68,8 +68,8 @@ the trap ladder.
 | Toolchain and targets | `channel = "stable"`, `targets = ["aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl"]` | `rust-toolchain.toml:13-16` |
 | Shipping artifact | `lto`, `codegen-units = 1`, `panic = "unwind"`, `strip`, `opt-level = "z"` | `Cargo.toml:36-59` |
 | Daemon HTTP | `axum = "0.8.9"`; `tower-http` `"0.6"` with `limit` + `catch-panic` | `agentd/Cargo.toml:16`, `agentd/Cargo.toml:25` |
-| Async runtime | `tokio = "1.53"`, no `rt-multi-thread` in the daemon or the library | `agentd/Cargo.toml:35-45`, `microvms-app/Cargo.toml:33`, `microvms-edges/Cargo.toml:69` |
-| AWS control plane | `reqwest = "0.13"` on `rustls`, `aws-sigv4 = "1.5"`, `aws-config = "1.10"` | `microvms-edges/Cargo.toml:53-58`, `microvms-edges/Cargo.toml:47`, `microvms-edges/Cargo.toml:36-41` |
+| Async runtime | `tokio = "1.53"`, no `rt-multi-thread` in the daemon or the library | `agentd/Cargo.toml:35-45`, `microvms-app/Cargo.toml:33`, `microvms-edges/Cargo.toml:88` |
+| AWS control plane | `reqwest = "0.13"` on `rustls`, `aws-sigv4 = "1.5"`, `aws-config = "1.10"` | `microvms-edges/Cargo.toml:58-63`, `microvms-edges/Cargo.toml:52`, `microvms-edges/Cargo.toml:41-46` |
 | Wire schema | `schemars = "1.2.2"`, `default-features = false`, `derive` + `std` only | `protocol/Cargo.toml:16` |
 | Money | `rust_decimal = "1.42"` with `serde-with-str` | `microvms-domain/Cargo.toml:38` |
 | CLI surface | `clap = "4.6.6"` with `derive`; `ratatui = "0.30.2"` | `microvms-cli/Cargo.toml:55`, `microvms-cli/Cargo.toml:59` |

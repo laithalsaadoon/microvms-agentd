@@ -16,9 +16,23 @@
 //!    never falls through to the cache or a fetch when it is refused (BIND-17);
 //! 2. the cache entry for exactly the requested version, served only when its bytes still
 //!    match the digest recorded when they were verified (BIND-19);
-//! 3. a fetch of the release asset for that version, verified by `gh attestation verify`
-//!    or, when `gh` cannot download, by the release's `SHA256SUMS` entry (BIND-18), and
-//!    checked for aarch64 before it is installed (BIND-20).
+//! 3. a fetch of the release asset for that version, verified by the release workflow's
+//!    attestation or, when no attestation can be had, by the release's `SHA256SUMS` entry
+//!    (BIND-18), and checked for aarch64 before it is installed (BIND-20).
+//!
+//! # The tools in the names are the fetch this model was written against
+//!
+//! [`Gh`] and [`Curl`] name the tools the fetch spawned when #219 wrote this model. Since
+//! #284 the fetch runs in-process (`microvms-app/src/provision.rs`), and the model reads the
+//! same with one substitution. [`Gh::Attested`] is "an attestation bundle arrived and it
+//! verified". [`Gh::Unattested`] is "one arrived and it didn't, or the release answered that
+//! it publishes none for these bytes", which is what `gh attestation verify` reported for an
+//! unattested download too (its 404 was a refusal). [`Gh::Unavailable`] is "no answer about a
+//! bundle could be had": a transport failure, a rate limit, a server error. It stays a
+//! property of the machine and the network, as a missing `gh` login was, and never of what
+//! the release's assets say. [`Curl`] is the download checked against `SHA256SUMS`. The app's
+//! `the_verification_table_matches_the_model` is the literal mirror of the table below under
+//! that reading.
 //!
 //! # The policy the checker compares against five others
 //!

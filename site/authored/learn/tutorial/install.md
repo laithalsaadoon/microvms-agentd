@@ -53,9 +53,13 @@ AWS service as the CLI.
 ## The guest daemon is automatic
 
 `agent-up`, `run`, `build`, and `quickstart` download the matching `agentd`
-release binary when needed and cache it locally. Keep `gh` or `curl` on
-your `PATH`. A successful `gh` download uses `gh attestation verify` for
-provenance; the `curl` fallback verifies the release's SHA256 checksum.
+release binary when needed and cache it locally. The CLI checks the release
+workflow's Sigstore attestation itself, so it needs neither `gh` nor `curl`.
+A release that says it has no attestation for the download is refused. Only
+when GitHub can't be reached for one at all (neither the release's bundle
+asset nor the attestations API answers) does it check the release's SHA256
+checksum instead. When the progress line blames the API's rate limit, set
+`GITHUB_TOKEN` to raise it.
 The guest daemon is a static ARM64 Linux binary on every host platform.
 
 For a daemon you build or manage yourself, set `MICROVM_AGENTD` to its

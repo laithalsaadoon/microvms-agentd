@@ -26,6 +26,10 @@ It walks the module tree from the crate root, so it sees what a consumer can nam
 public item and re-export, each enum variant, and each inherent method or associated constant
 of a non-generic type. A method with a type parameter (an `impl Into<String>` argument is one)
 can't be named without its arguments, so the in-repo callers compiling is its check instead.
+
+A path removed on purpose goes in `REMOVED` with the issue that removed it, and the release's
+CHANGELOG entry names the break. The script refuses a `REMOVED` entry the baseline never had, so
+a typo can't hide a path that still needs naming.
 """
 
 from __future__ import annotations
@@ -53,6 +57,17 @@ NAMED = {
     "type_alias",
     "macro",
     "trait_alias",
+}
+
+
+# Baseline paths a later change removed on purpose, each with the issue that removed it. The
+# witness stops naming them; the CHANGELOG is where a consumer reads the break.
+REMOVED = {
+    # The release fetch no longer spawns `gh` and `curl`, so its subprocess seam went with them.
+    "microvms_core::provision::ReleaseFetch": 284,
+    "microvms_core::provision::Runner": 284,
+    "microvms_core::provision::Subprocess": 284,
+    "microvms_core::provision::SubprocessFetch": 284,
 }
 
 
@@ -168,6 +183,16 @@ def main() -> int:
                     members.add(f"<{path}>::{member['name']}")
 
     walk(index[str(doc["root"])], crate)
+    unknown = sorted(set(REMOVED) - paths)
+    if unknown:
+        print(f"public_paths: REMOVED names paths {baseline} never had: {unknown}")
+        return 1
+    paths -= set(REMOVED)
+    members = {
+        member
+        for member in members
+        if not any(member.startswith(f"<{path}>::") for path in REMOVED)
+    }
     lines = [
         "// SPDX-License-Identifier: Apache-2.0",
         f"//! Every public path `microvms-core` {baseline} had, named so this file compiles only while",
@@ -181,6 +206,9 @@ def main() -> int:
         "//!",
         "//! The methods a type lost to `microvms_core::prelude` (the ones that read the clock or the",
         "//! random pool) resolve here through the prelude import, which is how a caller keeps them.",
+        "//!",
+        "//! The generator's `REMOVED` lists the paths a later change removed on purpose, each with",
+        "//! the issue that removed it.",
         "",
         "#![allow(unused_imports)]",
         "",

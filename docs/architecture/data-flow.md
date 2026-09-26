@@ -1,7 +1,7 @@
 # microvms-agentd · Data flow
 
 Two surfaces trigger work in this system and nothing else does: a CLI invocation, dispatched
-through an exhaustive match (`microvms-cli/src/main.rs:382-403`), and a daemon HTTP
+through an exhaustive match (`microvms-cli/src/main.rs:383-404`), and a daemon HTTP
 request, dispatched through a handler table walked from the same list `/v1/schema` publishes
 (`agentd/src/routes.rs:110`). The bindings re-enter the same `microvms-core` surfaces the CLI
 uses, so they add no distinct flow, and the daemon's only recurring job is a 30-second

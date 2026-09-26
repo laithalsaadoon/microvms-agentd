@@ -5,9 +5,10 @@
 # model, and the bolero harness in `microvms-edges/src/provision_fuzz.rs` fuzzes the
 # parsers they rest on. Each scenario's tags name the requirements it verifies.
 #
-# "The release" is a fake at the subprocess seam: it answers the exact `gh` and `curl`
-# argv `microvms_core::provision::ReleaseFetch` runs, so every scenario exercises the real
-# verification policy and nothing opens a socket to GitHub.
+# "The release" is a fake at the release seam: it answers the three operations
+# `microvms_core::provision::fetch_release` asks of a release (the asset, an attestation
+# bundle for its digest, `SHA256SUMS`) and plays the attestation check, so every scenario
+# exercises the real verification policy and nothing opens a socket to GitHub.
 
 Feature: The agentd daemon binary is provisioned by microvms-core, verified or refused
 
@@ -15,7 +16,7 @@ Feature: The agentd daemon binary is provisioned by microvms-core, verified or r
 
     @BIND-17
     Scenario: the first request fetches the core's own version and the second reads the cache
-      Given a release whose agentd is an aarch64 ELF that gh can attest
+      Given a release whose agentd is an aarch64 ELF with a verifying attestation
       When I provision agentd with no version
       Then the binary came from "fetched", verified by "attestation"
       And the binary is the core's own version
@@ -26,7 +27,7 @@ Feature: The agentd daemon binary is provisioned by microvms-core, verified or r
 
     @BIND-17 @BIND-20
     Scenario: a caller-supplied aarch64 binary outranks a populated cache and never fetches
-      Given a release whose agentd is an aarch64 ELF that gh can attest
+      Given a release whose agentd is an aarch64 ELF with a verifying attestation
       And the cache already holds the core's own version
       And the caller supplies an aarch64 ELF binary
       When I provision agentd with the caller's binary
@@ -36,7 +37,7 @@ Feature: The agentd daemon binary is provisioned by microvms-core, verified or r
 
     @BIND-17
     Scenario: MICROVM_AGENTD supplies the binary when the call does not
-      Given a release whose agentd is an aarch64 ELF that gh can attest
+      Given a release whose agentd is an aarch64 ELF with a verifying attestation
       And MICROVM_AGENTD names an aarch64 ELF binary
       When I provision agentd with no version
       Then the binary came from "caller-supplied", with no verification
@@ -44,7 +45,7 @@ Feature: The agentd daemon binary is provisioned by microvms-core, verified or r
 
     @BIND-17
     Scenario: another version's cache entry is never served
-      Given a release whose agentd is an aarch64 ELF that gh can attest
+      Given a release whose agentd is an aarch64 ELF with a verifying attestation
       And the cache already holds the core's own version
       When I provision agentd version "9.9.9"
       Then the binary came from "fetched", verified by "attestation"
@@ -52,7 +53,7 @@ Feature: The agentd daemon binary is provisioned by microvms-core, verified or r
 
     @BIND-17
     Scenario Outline: a version that is not a release tag is refused before anything runs
-      Given a release whose agentd is an aarch64 ELF that gh can attest
+      Given a release whose agentd is an aarch64 ELF with a verifying attestation
       When I provision agentd version "<version>"
       Then provisioning failed with "ERR_INVALID_ARG"
       And the release was downloaded 0 times
@@ -67,8 +68,8 @@ Feature: The agentd daemon binary is provisioned by microvms-core, verified or r
   Rule: BIND-18 — a fetch that cannot be verified is an error, never a warning
 
     @BIND-18
-    Scenario: gh cannot download, and the SHA256SUMS entry verifies the curl download
-      Given a release whose agentd is an aarch64 ELF that only curl can fetch, with a matching SHA256SUMS
+    Scenario: no attestation can be fetched, and the SHA256SUMS entry verifies the download
+      Given a release whose agentd is an aarch64 ELF with no attestation to fetch, and a matching SHA256SUMS
       When I provision agentd with no version
       Then the binary came from "fetched", verified by "checksum"
 
@@ -81,24 +82,35 @@ Feature: The agentd daemon binary is provisioned by microvms-core, verified or r
       And nothing is cached
 
       Examples:
-        | what goes wrong                           | detail                      |
-        | gh downloads bytes its attestation refuses | gh attestation verify       |
-        | only curl can fetch and SHA256SUMS is gone | SHA256SUMS                  |
-        | only curl can fetch and SHA256SUMS differs | SHA256 mismatch             |
-        | only curl can fetch and SHA256SUMS omits it | no entry for agentd        |
-        | neither gh nor curl can download           | neither tool could download |
+        | what goes wrong                                               | detail                   |
+        | the attestation refuses the downloaded bytes                  | did not verify           |
+        | the release publishes no attestation for the downloaded bytes | publishes no attestation |
+        | no attestation can be fetched and SHA256SUMS is gone          | SHA256SUMS               |
+        | no attestation can be fetched and SHA256SUMS differs          | SHA256 mismatch          |
+        | no attestation can be fetched and SHA256SUMS omits it         | no entry for agentd      |
+        | the asset cannot be downloaded                                | could not download       |
 
     @BIND-18
-    Scenario: a refused attestation is never retried through curl
-      Given a release where gh downloads bytes its attestation refuses
+    Scenario: a refused attestation never falls through to SHA256SUMS
+      Given a release where the attestation refuses the downloaded bytes
       When I provision agentd with no version
-      Then curl was never run
+      Then SHA256SUMS was never fetched
+
+    # What a replaced asset looks like: its bundle deleted and SHA256SUMS rewritten to match.
+    # Every release that ships SHA256SUMS also ships its bundle, so "none" is a finding.
+    @BIND-18
+    Scenario: a release that says it has no attestation never falls through to SHA256SUMS
+      Given a release where the release publishes no attestation for the downloaded bytes
+      When I provision agentd with no version
+      Then provisioning failed with "ERR_PRECONDITION"
+      And SHA256SUMS was never fetched
+      And nothing is cached
 
   Rule: BIND-19 — a cache entry that no longer matches its digest record is fetched again
 
     @BIND-19
     Scenario: a cache entry changed after it was verified is discarded and fetched again
-      Given a release whose agentd is an aarch64 ELF that gh can attest
+      Given a release whose agentd is an aarch64 ELF with a verifying attestation
       And the cache already holds the core's own version
       And the cached binary is overwritten with other bytes
       When I provision agentd with no version
@@ -108,7 +120,7 @@ Feature: The agentd daemon binary is provisioned by microvms-core, verified or r
 
     @BIND-19
     Scenario: a cache entry with no digest record is fetched again
-      Given a release whose agentd is an aarch64 ELF that gh can attest
+      Given a release whose agentd is an aarch64 ELF with a verifying attestation
       And the cache holds a binary for the core's own version with no digest record
       When I provision agentd with no version
       Then the binary came from "fetched", verified by "attestation"
@@ -118,7 +130,7 @@ Feature: The agentd daemon binary is provisioned by microvms-core, verified or r
 
     @BIND-20
     Scenario Outline: a caller-supplied binary that is not an aarch64 ELF is refused
-      Given a release whose agentd is an aarch64 ELF that gh can attest
+      Given a release whose agentd is an aarch64 ELF with a verifying attestation
       And the caller supplies <binary>
       When I provision agentd with the caller's binary
       Then provisioning failed with "ERR_PRECONDITION"
@@ -133,7 +145,7 @@ Feature: The agentd daemon binary is provisioned by microvms-core, verified or r
 
     @BIND-20
     Scenario: a MICROVM_AGENTD binary that is not an aarch64 ELF is refused
-      Given a release whose agentd is an aarch64 ELF that gh can attest
+      Given a release whose agentd is an aarch64 ELF with a verifying attestation
       And MICROVM_AGENTD names an x86_64 ELF binary
       When I provision agentd with no version
       Then provisioning failed with "ERR_PRECONDITION"
@@ -142,7 +154,7 @@ Feature: The agentd daemon binary is provisioned by microvms-core, verified or r
 
     @BIND-20
     Scenario: a fetched asset that is not an aarch64 ELF is refused and not cached
-      Given a release whose agentd is an x86_64 ELF that gh can attest
+      Given a release whose agentd is an x86_64 ELF with a verifying attestation
       When I provision agentd with no version
       Then provisioning failed with "ERR_PRECONDITION"
       And the failure mentions "ELF machine 0x3e"

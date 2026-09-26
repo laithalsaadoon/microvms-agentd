@@ -61,6 +61,8 @@ conformance/run_rs.py \
 
 `--binary` is the aarch64 daemon baked into the image, and `--microvm-binary` is the host CLI under test. Read the check count off the run's summary block rather than from any prose. `--keep` skips teardown and leaks everything, so use it only while debugging a failure you cannot reproduce otherwise.
 
+`mise run live:release` isn't part of `live`. It fetches a published daemon release from GitHub and verifies its attestation the way a client does, with no `gh` and no token, and it needs no AWS account. It defaults to the core's own version, so before that version is tagged, name an earlier one with `MICROVM_RELEASE_VERSION`.
+
 `./conformance/run_rs.py --self-test` is the offline half. It drives the envelope-to-exception mapping against a stub `microvm`, touches no account, and belongs in any change to `conformance/`.
 
 ## 5. What it costs
