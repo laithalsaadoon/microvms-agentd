@@ -44,12 +44,12 @@ for (const [overrides, cause] of [
   [{ s3KeyPrefix: 'a\nb' }, /key prefix/],
   [{ dockerfile: 'FROM x\nENTRYPOINT ["/bin/sh"]\nCMD ["/agentd"]\n' }, /ENTRYPOINT/],
 ]) {
-  test(`core refuses ${JSON.stringify(overrides)} before any call`, async () => {
+  test(`IMAGE-12: core refuses ${JSON.stringify(overrides)} before any call`, async () => {
     await refused(overrides, cause);
   });
 }
 
-test('a context directory is read by core', async () => {
+test('IMAGE-12: a context directory is read by core', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'microvms-ensure-'));
   await refused({ contextDir: join(dir, 'missing') }, /not a directory/);
   writeFileSync(join(dir, 'agentd'), 'not the daemon');

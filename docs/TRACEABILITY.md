@@ -6,22 +6,22 @@ defined in `spec/core.symspec.json` and `spec/agentd.symspec.json`.
 
 | Requirement | model | gherkin | fuzz | test | impl | live |
 |---|---|---|---|---|---|---|
-| CLI-7 | 1 | 1 | 1 | 4 | 8 | 1 |
+| CLI-7 | 1 | 1 | 1 | 3 | 8 | 1 |
 | CLI-8 | 1 | 1 | 1 | 2 | 3 | 1 |
 | CLI-9 | 1 | 1 | 1 | 2 | 3 | 1 |
-| IMAGE-1 | 1 | 1 | 1 | 4 | 1 | waived |
-| IMAGE-2 | 1 | 1 | 1 | 2 | 1 | 1 |
+| IMAGE-1 | 1 | 1 | 1 | 1 | 1 | waived |
+| IMAGE-2 | 1 | 1 | 1 | 1 | 1 | 1 |
 | IMAGE-3 | 1 | 1 | 1 | 1 | 1 | waived |
-| IMAGE-4 | 1 | 1 | 1 | 4 | 1 | 1 |
+| IMAGE-4 | 1 | 1 | 1 | 1 | 1 | 1 |
 | IMAGE-5 | waived | waived | waived | 2 | 2 | waived |
-| IMAGE-6 | waived | 1 | 1 | 5 | 2 | 1 |
-| IMAGE-7 | waived | 1 | 1 | 6 | 5 | 1 |
-| IMAGE-8 | 1 | 1 | 1 | 4 | 4 | 1 |
-| IMAGE-9 | 1 | 1 | waived | 3 | 1 | 1 |
-| IMAGE-10 | 1 | 1 | waived | 3 | 1 | 1 |
-| IMAGE-11 | 1 | 1 | waived | 5 | 1 | 1 |
+| IMAGE-6 | waived | 1 | 1 | 2 | 2 | 1 |
+| IMAGE-7 | waived | 1 | 1 | 3 | 5 | 1 |
+| IMAGE-8 | 1 | 1 | 1 | 2 | 4 | 1 |
+| IMAGE-9 | 1 | 1 | waived | 1 | 1 | 1 |
+| IMAGE-10 | 1 | 1 | waived | 1 | 1 | 1 |
+| IMAGE-11 | 1 | 1 | waived | 1 | 1 | 1 |
 | IMAGE-12 | waived | waived | waived | 2 | 2 | waived |
-| AGENTD-7 | 1 | 1 | 1 | 6 | 4 | 1 |
+| AGENTD-7 | 1 | 1 | 1 | 4 | 4 | 1 |
 | AGENTD-8 | 1 | 1 | 1 | 4 | 2 | 1 |
 | AGENTD-9 | 1 | 1 | 1 | 2 | 1 | 1 |
 | AGENTD-10 | 1 | 1 | 1 | 2 | 1 | 1 |
@@ -30,24 +30,24 @@ defined in `spec/core.symspec.json` and `spec/agentd.symspec.json`.
 | AGENTD-13 | 1 | 1 | 1 | 3 | 1 | 1 |
 | AGENTD-14 | 1 | 1 | 1 | 4 | 3 | 1 |
 | AGENTD-15 | 1 | 1 | 1 | 2 | 2 | 1 |
-| AGENTD-16 | 1 | 1 | 1 | 5 | 4 | 1 |
-| BIND-11 | 1 | 1 | 1 | 4 | 1 | 1 |
-| BIND-12 | 1 | 1 | 1 | 6 | 3 | 1 |
-| BIND-13 | 1 | 1 | 1 | 4 | 3 | waived |
-| BIND-17 | 1 | 1 | 1 | 4 | 4 | 1 |
-| BIND-18 | 1 | 1 | 1 | 5 | 3 | 1 |
+| AGENTD-16 | 1 | 1 | 1 | 4 | 4 | 1 |
+| BIND-11 | 1 | 1 | 1 | 3 | 1 | 1 |
+| BIND-12 | 1 | 1 | 1 | 5 | 3 | 1 |
+| BIND-13 | 1 | 1 | 1 | 3 | 3 | waived |
+| BIND-17 | 1 | 1 | 1 | 2 | 4 | 1 |
+| BIND-18 | 1 | 1 | 1 | 4 | 3 | 1 |
 | BIND-19 | 1 | 1 | 1 | 2 | 1 | 1 |
-| BIND-20 | 1 | 1 | 1 | 4 | 3 | 1 |
-| BIND-6 | 1 | 1 | 1 | 5 | 6 | 1 |
+| BIND-20 | 1 | 1 | 1 | 2 | 3 | 1 |
+| BIND-6 | 1 | 1 | 1 | 4 | 6 | 1 |
 | BIND-7 | 1 | 1 | 1 | 4 | 3 | 1 |
 | BIND-8 | 1 | 1 | 1 | 4 | 1 | 1 |
 | BIND-9 | 1 | 1 | 1 | 4 | 2 | 1 |
-| BIND-10 | 1 | 1 | 1 | 5 | 4 | 1 |
-| BIND-14 | waived | 1 | 1 | 4 | 3 | waived |
-| BIND-15 | 1 | 1 | waived | 6 | 6 | 1 |
-| BIND-16 | 1 | 1 | waived | 5 | 5 | 1 |
+| BIND-10 | 1 | 1 | 1 | 4 | 4 | 1 |
+| BIND-14 | waived | 1 | 1 | 3 | 3 | waived |
+| BIND-15 | 1 | 1 | waived | 5 | 6 | 1 |
+| BIND-16 | 1 | 1 | waived | 4 | 5 | 1 |
 | ARCH-6 | waived | waived | waived | 1 | 6 | waived |
-| ARCH-7 | waived | waived | waived | 4 | 3 | waived |
+| ARCH-7 | waived | waived | waived | 2 | 3 | waived |
 | ARCH-8 | waived | waived | waived | 1 | 1 | waived |
 
 ## CLI-7
@@ -57,7 +57,7 @@ If a reader closes the CLI's stdout or stderr, then the CLI crate shall exit wit
 - **model:** `model/src/output.rs`
 - **gherkin:** `microvms-cli/tests/features/closed_output.feature`
 - **fuzz:** `microvms-cli/src/closed_output_fuzz.rs`
-- **test:** `microvms-cli/src/closed_output.rs`, `microvms-cli/src/guards.rs`, `microvms-cli/tests/bdd.rs`, `microvms-cli/tests/thinness.rs`
+- **test:** `microvms-cli/src/closed_output.rs`, `microvms-cli/src/closed_output_fuzz.rs`, `microvms-cli/tests/thinness.rs`
 - **impl:** `microvms-app/src/lib.rs`, `microvms-cli/src/closed_output.rs`, `microvms-cli/src/envelope.rs`, `microvms-cli/src/main.rs`, `microvms-core/src/lib.rs`, `microvms-domain/src/lib.rs`, `microvms-edges/src/adapters.rs`, `microvms-edges/src/lib.rs`
 - **live:** `conformance/run_rs.py`
 
@@ -68,7 +68,7 @@ If the reader of stdout or stderr closes after a command has started, then the C
 - **model:** `model/src/output.rs`
 - **gherkin:** `microvms-cli/tests/features/closed_output.feature`
 - **fuzz:** `microvms-cli/src/closed_output_fuzz.rs`
-- **test:** `microvms-cli/src/guards.rs`, `microvms-cli/tests/bdd.rs`
+- **test:** `microvms-cli/src/closed_output_fuzz.rs`, `microvms-cli/src/guards.rs`
 - **impl:** `microvms-cli/src/closed_output.rs`, `microvms-cli/src/envelope.rs`, `microvms-cli/src/main.rs`
 - **live:** `conformance/run_rs.py`
 
@@ -79,7 +79,7 @@ If the stdout reader of a streaming command closes, then the CLI crate shall sto
 - **model:** `model/src/output.rs`
 - **gherkin:** `microvms-cli/tests/features/closed_output.feature`
 - **fuzz:** `microvms-cli/src/closed_output_fuzz.rs`
-- **test:** `microvms-cli/src/guards.rs`, `microvms-cli/tests/bdd.rs`
+- **test:** `microvms-cli/src/closed_output_fuzz.rs`, `microvms-cli/src/guards.rs`
 - **impl:** `microvms-cli/src/closed_output.rs`, `microvms-cli/src/commands/attached.rs`, `microvms-cli/src/envelope.rs`
 - **live:** `conformance/run_rs.py`
 
@@ -90,7 +90,7 @@ The microvms-core shall emit the agentd stanza of a wrapped task Dockerfile and 
 - **model:** `model/src/wrap.rs`
 - **gherkin:** `microvms-core/tests/features/wrap_dockerfile.feature`
 - **fuzz:** `microvms-core/tests/wrap_fuzz.rs`
-- **test:** `microvms-app/src/control/artifact.rs`, `microvms-core/tests/bdd_wrap.rs`, `microvms-js/__test__/wrap.mjs`, `microvms-py/tests/test_wrap_dockerfile.py`
+- **test:** `microvms-app/src/control/artifact.rs`
 - **impl:** `microvms-app/src/control/artifact.rs`
 - **live:** waived: a pure function of Dockerfile text; it makes no AWS call
 
@@ -101,7 +101,7 @@ When a caller wraps a task Dockerfile, the microvms-core shall end the result wi
 - **model:** `model/src/wrap.rs`
 - **gherkin:** `microvms-core/tests/features/wrap_dockerfile.feature`
 - **fuzz:** `microvms-core/tests/wrap_fuzz.rs`
-- **test:** `microvms-app/src/control/artifact.rs`, `microvms-core/tests/live_ensure_image.rs`
+- **test:** `microvms-app/src/control/artifact.rs`
 - **impl:** `microvms-app/src/control/artifact.rs`
 - **live:** `conformance/run_rs.py`
 
@@ -123,7 +123,7 @@ When a caller derives a base image from a Dockerfile, the microvms-core shall ta
 - **model:** `model/src/wrap.rs`
 - **gherkin:** `microvms-core/tests/features/wrap_dockerfile.feature`
 - **fuzz:** `microvms-core/tests/wrap_fuzz.rs`
-- **test:** `microvms-app/src/control/artifact.rs`, `microvms-core/tests/bdd_wrap.rs`, `microvms-js/__test__/wrap.mjs`, `microvms-py/tests/test_wrap_dockerfile.py`
+- **test:** `microvms-app/src/control/artifact.rs`
 - **impl:** `microvms-app/src/control/artifact.rs`
 - **live:** `conformance/run_rs.py`
 
@@ -145,7 +145,7 @@ The microvms-core shall name an ensured image by its prefix and twelve hex chara
 - **model:** waived: a pure function of the build inputs; the name has no states to explore
 - **gherkin:** `microvms-core/tests/features/ensure_image.feature`
 - **fuzz:** `microvms-core/tests/context_fuzz.rs`
-- **test:** `microvms-app/src/control/artifact.rs`, `microvms-app/src/control/ensure.rs`, `microvms-core/tests/bdd_ensure.rs`, `microvms-js/__test__/ensure.mjs`, `microvms-py/tests/test_ensure_image.py`
+- **test:** `microvms-app/src/control/artifact.rs`, `microvms-app/src/control/ensure.rs`
 - **impl:** `microvms-app/src/control/artifact.rs`, `microvms-app/src/control/ensure.rs`
 - **live:** `conformance/run_rs.py`
 
@@ -156,7 +156,7 @@ When a caller supplies a build context directory, the microvms-core shall add ea
 - **model:** waived: reading a directory has no states; the ignore rules are fuzzed against moby's own regex translation instead
 - **gherkin:** `microvms-core/tests/features/ensure_image.feature`
 - **fuzz:** `microvms-core/tests/context_fuzz.rs`
-- **test:** `microvms-app/src/control/artifact.rs`, `microvms-app/src/control/context.rs`, `microvms-core/tests/artifact_across_seconds.rs`, `microvms-core/tests/bdd_ensure.rs`, `microvms-core/tests/live_ensure_image.rs`, `microvms-edges/src/control/context.rs`
+- **test:** `microvms-app/src/control/artifact.rs`, `microvms-app/src/control/context.rs`, `microvms-edges/src/control/context.rs`
 - **impl:** `microvms-app/src/control/artifact.rs`, `microvms-app/src/control/context.rs`, `microvms-app/src/control/ensure.rs`, `microvms-core/src/lib.rs`, `microvms-edges/src/control/context.rs`
 - **live:** `conformance/run_rs.py`
 
@@ -167,7 +167,7 @@ When the microvms-core ensures an image, the microvms-core shall resolve the ima
 - **model:** `model/src/image.rs`
 - **gherkin:** `microvms-core/tests/features/ensure_image.feature`
 - **fuzz:** `microvms-core/tests/context_fuzz.rs`
-- **test:** `microvms-app/src/control/ensure.rs`, `microvms-core/tests/bdd_ensure.rs`, `microvms-core/tests/live_ensure_image.rs`, `microvms-edges/src/control/services.rs`
+- **test:** `microvms-app/src/control/ensure.rs`, `microvms-edges/src/control/services.rs`
 - **impl:** `microvms-app/src/control/ensure.rs`, `microvms-app/src/control/services.rs`, `microvms-app/src/sandbox.rs`, `microvms-edges/src/control/services.rs`
 - **live:** `conformance/run_rs.py`
 
@@ -178,7 +178,7 @@ When a describe finds the ensured image ready or building and the caller has not
 - **model:** `model/src/image.rs`
 - **gherkin:** `microvms-core/tests/features/ensure_image.feature`
 - **fuzz:** waived: the input space is two callers interleaved against the platform, which model/src/image.rs checks exhaustively; the decision table is ten rows, all pinned by the_plan_table
-- **test:** `microvms-app/src/control/ensure.rs`, `microvms-core/tests/bdd_ensure.rs`, `microvms-core/tests/live_ensure_image.rs`
+- **test:** `microvms-app/src/control/ensure.rs`
 - **impl:** `microvms-app/src/control/ensure.rs`
 - **live:** `conformance/run_rs.py`
 
@@ -189,7 +189,7 @@ If the ensured image has failed or the caller forces a rebuild, then the microvm
 - **model:** `model/src/image.rs`
 - **gherkin:** `microvms-core/tests/features/ensure_image.feature`
 - **fuzz:** waived: the input space is two callers interleaved against the platform, which model/src/image.rs checks exhaustively; the decision table is ten rows, all pinned by the_plan_table
-- **test:** `microvms-app/src/control/ensure.rs`, `microvms-core/tests/bdd_ensure.rs`, `microvms-core/tests/live_ensure_image.rs`
+- **test:** `microvms-app/src/control/ensure.rs`
 - **impl:** `microvms-app/src/control/ensure.rs`
 - **live:** `conformance/run_rs.py`
 
@@ -200,7 +200,7 @@ If the create of an ensured image is refused because another caller created the 
 - **model:** `model/src/image.rs`
 - **gherkin:** `microvms-core/tests/features/ensure_image.feature`
 - **fuzz:** waived: the input space is two callers interleaved against the platform, which model/src/image.rs checks exhaustively; the decision table is ten rows, all pinned by the_plan_table
-- **test:** `microvms-app/src/control/ensure.rs`, `microvms-core/tests/bdd_ensure.rs`, `microvms-core/tests/live_ensure_image.rs`, `microvms-js/__test__/ensure.mjs`, `microvms-py/tests/test_ensure_image.py`
+- **test:** `microvms-app/src/control/ensure.rs`
 - **impl:** `microvms-app/src/control/ensure.rs`
 - **live:** `conformance/run_rs.py`
 
@@ -222,7 +222,7 @@ When a start request names its user or its group with a JSON string, the agentd 
 - **model:** `model/src/exec_start.rs`
 - **gherkin:** `agentd/tests/features/exec_start.feature`
 - **fuzz:** `agentd/src/exec_start_fuzz.rs`
-- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `agentd/tests/bdd_exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
+- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
 - **impl:** `agentd/src/exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-js/src/session.rs`, `microvms-py/src/session.rs`
 - **live:** `conformance/run_rs.py`
 
@@ -321,7 +321,7 @@ When a start request carries its user and group as integers and its shell as a b
 - **model:** `model/src/exec_start.rs`
 - **gherkin:** `agentd/tests/features/exec_start.feature`
 - **fuzz:** `agentd/src/exec_start_fuzz.rs`
-- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `agentd/tests/bdd_exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
+- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
 - **impl:** `agentd/src/exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-js/src/session.rs`, `microvms-py/src/session.rs`
 - **live:** `conformance/run_rs.py`
 
@@ -332,7 +332,7 @@ The microvms-core shall derive a launch's egress posture from its launch options
 - **model:** `model/src/posture.rs`
 - **gherkin:** `microvms-core/tests/features/egress_posture.feature`
 - **fuzz:** `microvms-app/src/control/posture_fuzz.rs`
-- **test:** `microvms-app/src/control/connector.rs`, `microvms-core/tests/bdd_posture.rs`, `microvms-js/__test__/egress_posture.mjs`, `microvms-py/tests/test_egress_posture.py`
+- **test:** `microvms-app/src/control/connector.rs`, `microvms-js/__test__/egress_posture.mjs`, `microvms-py/tests/test_egress_posture.py`
 - **impl:** `microvms-app/src/control/connector.rs`
 - **live:** `conformance/run_rs.py`
 
@@ -343,7 +343,7 @@ The language bindings layer shall expose on each session the egress posture the 
 - **model:** `model/src/posture.rs`
 - **gherkin:** `microvms-core/tests/features/egress_posture.feature`
 - **fuzz:** `microvms-app/src/control/posture_fuzz.rs`
-- **test:** `microvms-app/src/sandbox.rs`, `microvms-cli/src/guards.rs`, `microvms-core/tests/bdd_posture.rs`, `microvms-core/tests/live_posture.rs`, `microvms-js/__test__/egress_posture.mjs`, `microvms-py/tests/test_egress_posture.py`
+- **test:** `microvms-app/src/sandbox.rs`, `microvms-cli/src/guards.rs`, `microvms-core/tests/live_posture.rs`, `microvms-js/__test__/egress_posture.mjs`, `microvms-py/tests/test_egress_posture.py`
 - **impl:** `microvms-app/src/sandbox.rs`, `microvms-app/src/session/mod.rs`, `microvms-cli/src/commands/lifecycle.rs`
 - **live:** `conformance/run_rs.py`
 
@@ -354,7 +354,7 @@ When a caller asks for the egress posture of a set of launch options, the microv
 - **model:** `model/src/posture.rs`
 - **gherkin:** `microvms-core/tests/features/egress_posture.feature`
 - **fuzz:** `microvms-app/src/control/posture_fuzz.rs`
-- **test:** `microvms-app/src/control/connector.rs`, `microvms-core/tests/bdd_posture.rs`, `microvms-js/__test__/egress_posture.mjs`, `microvms-py/tests/test_egress_posture.py`
+- **test:** `microvms-app/src/control/connector.rs`, `microvms-js/__test__/egress_posture.mjs`, `microvms-py/tests/test_egress_posture.py`
 - **impl:** `microvms-app/src/control/connector.rs`, `microvms-app/src/sandbox.rs`, `microvms-cli/src/commands/lifecycle.rs`
 - **live:** waived: a pure function that makes no AWS call; its refusals precede any call, so the service never sees them (zero calls asserted by the Gherkin scenarios and the fuzz harness)
 
@@ -365,7 +365,7 @@ When a caller requests the agentd daemon binary, the language bindings layer sha
 - **model:** `model/src/provision.rs`
 - **gherkin:** `microvms-core/tests/features/provision.feature`
 - **fuzz:** `microvms-edges/src/provision_fuzz.rs`
-- **test:** `microvms-core/tests/bdd_provision.rs`, `microvms-edges/src/provision.rs`, `microvms-js/__test__/provision.mjs`, `microvms-py/tests/test_provision.py`
+- **test:** `microvms-edges/src/provision.rs`, `microvms-js/__test__/provision.mjs`
 - **impl:** `microvms-edges/src/lib.rs`, `microvms-edges/src/provision.rs`, `microvms-js/src/provision.rs`, `microvms-py/src/provision.rs`
 - **live:** `conformance/run_rs.py`
 
@@ -376,7 +376,7 @@ If a fetched agentd release asset fails its attestation or SHA256SUMS verificati
 - **model:** `model/src/provision.rs`
 - **gherkin:** `microvms-core/tests/features/provision.feature`
 - **fuzz:** `microvms-edges/src/provision_fuzz.rs`
-- **test:** `microvms-app/src/provision.rs`, `microvms-core/tests/live_release.rs`, `microvms-edges/src/provision.rs`, `microvms-edges/src/provision/release.rs`, `microvms-js/__test__/provision.mjs`
+- **test:** `microvms-app/src/provision.rs`, `microvms-edges/src/provision.rs`, `microvms-edges/src/provision/release.rs`, `microvms-js/__test__/provision.mjs`
 - **impl:** `microvms-app/src/provision.rs`, `microvms-edges/src/provision.rs`, `microvms-edges/src/provision/release.rs`
 - **live:** `conformance/run_rs.py`
 
@@ -398,7 +398,7 @@ If a caller-supplied or fetched agentd binary is not an aarch64 ELF executable, 
 - **model:** `model/src/provision.rs`
 - **gherkin:** `microvms-core/tests/features/provision.feature`
 - **fuzz:** `microvms-edges/src/provision_fuzz.rs`
-- **test:** `microvms-core/tests/bdd_provision.rs`, `microvms-edges/src/provision.rs`, `microvms-js/__test__/provision.mjs`, `microvms-py/tests/test_provision.py`
+- **test:** `microvms-edges/src/provision.rs`, `microvms-js/__test__/provision.mjs`
 - **impl:** `microvms-edges/src/provision.rs`, `microvms-js/src/provision.rs`, `microvms-py/src/provision.rs`
 - **live:** `conformance/run_rs.py`
 
@@ -409,7 +409,7 @@ The microvms-core shall report a finished exec's POSIX exit code as 124 when a d
 - **model:** `model/src/run.rs`
 - **gherkin:** `microvms-core/tests/features/run_to_completion.feature`
 - **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
-- **test:** `microvms-app/src/session/exec.rs`, `microvms-core/tests/bdd_run_to_completion.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
+- **test:** `microvms-app/src/session/exec.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
 - **impl:** `microvms-app/src/session/complete.rs`, `microvms-app/src/session/exec.rs`, `microvms-js/src/exec.rs`, `microvms-js/src/session.rs`, `microvms-py/src/exec.rs`, `microvms-py/src/session.rs`
 - **live:** `conformance/run_rs.py`
 
@@ -453,7 +453,7 @@ If the acknowledgement that follows a client-deadline kill fails, then the micro
 - **model:** `model/src/run.rs`
 - **gherkin:** `microvms-core/tests/features/run_to_completion.feature`
 - **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
-- **test:** `microvms-app/src/session/complete.rs`, `microvms-core/tests/bdd_run_to_completion.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
+- **test:** `microvms-app/src/session/complete.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
 - **impl:** `microvms-app/src/session/complete.rs`, `microvms-app/src/session/exec.rs`, `microvms-js/src/exec.rs`, `microvms-py/src/exec.rs`
 - **live:** `conformance/run_rs.py`
 
@@ -464,7 +464,7 @@ The sizing model shall select for a resource request the smallest size class who
 - **model:** waived: a stateless selection over the five-row size table; the bolero harness checks minimality and coverage over arbitrary requests instead
 - **gherkin:** `microvms-core/tests/features/request_and_preflight.feature`
 - **fuzz:** `microvms-domain/src/sizing_fuzz.rs`
-- **test:** `microvms-core/tests/bdd_preflight.rs`, `microvms-domain/src/sizing.rs`, `microvms-js/__test__/request_and_preflight.mjs`, `microvms-py/tests/test_request_and_preflight.py`
+- **test:** `microvms-domain/src/sizing.rs`, `microvms-js/__test__/request_and_preflight.mjs`, `microvms-py/tests/test_request_and_preflight.py`
 - **impl:** `microvms-domain/src/sizing.rs`, `microvms-js/src/cost.rs`, `microvms-py/src/cost.rs`
 - **live:** waived: a pure function of the request and the documented table; it makes no AWS call
 
@@ -475,7 +475,7 @@ When a caller asks for a preflight, the microvms-core shall report whether the r
 - **model:** `model/src/preflight.rs`
 - **gherkin:** `microvms-core/tests/features/request_and_preflight.feature`
 - **fuzz:** waived: the outcome space (3 region x 2 credential x 3 service worlds) is enumerated exhaustively by the Stateright model; there is no input stream to fuzz
-- **test:** `microvms-app/src/preflight.rs`, `microvms-cli/src/guards.rs`, `microvms-core/tests/bdd_preflight.rs`, `microvms-core/tests/live_preflight.rs`, `microvms-js/__test__/request_and_preflight.mjs`, `microvms-py/tests/test_request_and_preflight.py`
+- **test:** `microvms-app/src/preflight.rs`, `microvms-cli/src/guards.rs`, `microvms-core/tests/live_preflight.rs`, `microvms-js/__test__/request_and_preflight.mjs`, `microvms-py/tests/test_request_and_preflight.py`
 - **impl:** `microvms-app/src/control/image.rs`, `microvms-app/src/control/transport.rs`, `microvms-app/src/preflight.rs`, `microvms-domain/src/preflight.rs`, `microvms-js/src/preflight.rs`, `microvms-py/src/preflight.rs`
 - **live:** `conformance/run_rs.py`
 
@@ -486,7 +486,7 @@ The microvms-core shall not make a billable or mutating AWS call during a prefli
 - **model:** `model/src/preflight.rs`
 - **gherkin:** `microvms-core/tests/features/request_and_preflight.feature`
 - **fuzz:** waived: the outcome space (3 region x 2 credential x 3 service worlds) is enumerated exhaustively by the Stateright model; there is no input stream to fuzz
-- **test:** `microvms-app/src/preflight.rs`, `microvms-core/tests/bdd_preflight.rs`, `microvms-core/tests/live_preflight.rs`, `microvms-js/__test__/request_and_preflight.mjs`, `microvms-py/tests/test_request_and_preflight.py`
+- **test:** `microvms-app/src/preflight.rs`, `microvms-core/tests/live_preflight.rs`, `microvms-js/__test__/request_and_preflight.mjs`, `microvms-py/tests/test_request_and_preflight.py`
 - **impl:** `microvms-app/src/control/image.rs`, `microvms-app/src/preflight.rs`, `microvms-domain/src/preflight.rs`, `microvms-js/src/preflight.rs`, `microvms-py/src/preflight.rs`
 - **live:** `conformance/run_rs.py`
 
@@ -508,7 +508,7 @@ The microvms-app shall not depend directly on a crate or a tokio feature that pe
 - **model:** waived: a property of a crate's code and dependencies, not of a state
 - **gherkin:** waived: no behavior to script: clippy and the dependency set enforce it at build time
 - **fuzz:** waived: there is no input stream; the rule is over source and manifests
-- **test:** `microvms-app/src/sandbox.rs`, `microvms-cli/tests/dependency_direction.rs`, `microvms-core/tests/agent_shell_quoting.rs`, `microvms-core/tests/artifact_across_seconds.rs`
+- **test:** `microvms-app/src/sandbox.rs`, `microvms-cli/tests/dependency_direction.rs`
 - **impl:** `microvms-app/src/lib.rs`, `microvms-core/src/lib.rs`, `microvms-edges/src/lib.rs`
 - **live:** waived: the app's AWS calls all go through ports, so the live tier exercises the edges' implementations, not this rule
 

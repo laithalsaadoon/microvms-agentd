@@ -172,6 +172,8 @@ fn drive(plan: &Plan) -> (ExecResult, Vec<String>, bool) {
     })
 }
 
+/// **BIND-6, BIND-7, BIND-8, BIND-9 and BIND-10.** Every scripted plan returns one result,
+/// and its exit code, notes, kill and ack are the ones the model specifies.
 #[test]
 fn run_to_completion_plan() {
     bolero::check!().with_type::<Plan>().for_each(|plan| {

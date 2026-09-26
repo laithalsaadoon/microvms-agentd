@@ -22,6 +22,8 @@ fn covers(class: SizeClass, cpus: Option<f64>, memory_mib: Option<u32>) -> bool 
         && memory_mib.is_none_or(|mib| class.baseline_mib() >= mib)
 }
 
+/// **BIND-14.** An answered class is the smallest that covers the request, and a refusal
+/// means no class does.
 #[test]
 fn from_request_is_minimal_and_covering() {
     bolero::check!()

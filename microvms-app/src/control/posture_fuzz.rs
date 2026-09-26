@@ -111,6 +111,8 @@ fn launch(
     (posture, recorder.calls().len())
 }
 
+/// **BIND-11, BIND-12 and BIND-13.** The request-side answer is the decision table's row, a
+/// refused answer is the launch's own refusal, and the session reports the answered posture.
 #[test]
 fn posture_matches_the_launch() {
     let runtime = tokio::runtime::Builder::new_current_thread()

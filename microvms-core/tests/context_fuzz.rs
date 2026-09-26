@@ -237,6 +237,7 @@ fn literalize(pattern: &str) -> String {
     }
 }
 
+/// **IMAGE-7.** The `.dockerignore` matcher agrees with moby's own regex translation.
 #[test]
 fn ignore_rules_agree_with_mobys_regex_translation() {
     bolero::check!()
@@ -342,6 +343,8 @@ fn project_of(project: &Option<(u8, Vec<u8>, Vec<u8>)>) -> Option<ProjectFiles> 
         })
 }
 
+/// **IMAGE-6 and IMAGE-7.** The context hash extends the legacy one and follows every entry,
+/// and equal inputs zip to equal bytes.
 #[test]
 fn the_context_hash_extends_the_legacy_one_and_follows_every_entry() {
     bolero::check!()
@@ -450,6 +453,7 @@ struct KeyCase {
     name: Vec<u8>,
 }
 
+/// **IMAGE-8.** The artifact key is the caller's prefix, the image name and `artifact.zip`.
 #[test]
 fn the_artifact_key_is_the_prefix_the_name_and_artifact_zip() {
     bolero::check!()

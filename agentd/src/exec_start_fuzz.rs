@@ -175,6 +175,9 @@ fn digits(raw: &str) -> Option<u32> {
         .flatten()
 }
 
+/// **AGENTD-7, AGENTD-8, AGENTD-9, AGENTD-10, AGENTD-11, AGENTD-12, AGENTD-13, AGENTD-14,
+/// AGENTD-15 and AGENTD-16.** A fuzzed start request resolved against a fuzzed guest keeps
+/// each of the model's properties; the module docs say which assertion is which.
 #[test]
 fn start_resolution() {
     bolero::check!().with_type::<Case>().for_each(|case| {

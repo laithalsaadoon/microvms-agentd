@@ -205,10 +205,6 @@ jobs:
       # because this job has uv and is required; it makes no AWS call.
       - name: conformance self-test
         run: uv run --script conformance/run_rs.py --self-test
-      # `mise run check` and the pre-commit hook ran this, and CI didn't, so a PR shipped
-      # without local hooks could empty a layer's enumerator and merge green. Stdlib only.
-      - name: requirement traceability
-        run: ./scripts/check-trace.py --check
       # The LICENSE file itself, and the crate manifests agreeing with it. The
       # dependency-license audit is cargo-deny, two steps down; this asserts the
       # repo's own claim is consistent.
@@ -258,6 +254,13 @@ jobs:
           echo "$RUNNER_TEMP/ast-grep" >> "$GITHUB_PATH"
       - name: ratchet unit tests
         run: uv run python -m unittest discover -s scripts -p 'test_ratchet.py'
+      # `mise run check` and the pre-commit hook ran this, and CI didn't, so a PR shipped
+      # without local hooks could empty a layer's enumerator and merge green. After the
+      # ast-grep install because the test and fuzz layers parse with it (#276).
+      - name: traceability unit tests
+        run: uv run python -m unittest discover -s scripts -p 'test_check_trace.py'
+      - name: requirement traceability
+        run: ./scripts/check-trace.py --check
       # A pull request compares with its base branch. A push to main compares with the commit
       # before it: the merge base of main and itself is itself, and rule 3 would pass vacuously.
       # The script appends the per-category counts and their change to the job summary.
