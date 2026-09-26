@@ -48,9 +48,11 @@ See [Trust](docs/TRUST.md) for measured behavior and limitations.
 
 The project distributes crates, Python wheels, a Node package, and release
 binaries. Release workflows use OIDC publishing and attestations where
-supported. Automatic daemon provisioning verifies provenance through `gh`
-when available and release checksums otherwise; these provide different
-assurance levels.
+supported. Automatic daemon provisioning verifies the release workflow's
+Sigstore attestation in-process and refuses a release that answers it has
+none; it falls back to the release's `SHA256SUMS` only when GitHub can't be
+reached at all. The two give different assurance levels, and the provisioning
+report names which one a daemon got.
 
 `mise run security` checks shipped source, secrets, license headers,
 dependencies, and workflows. CI also produces SBOMs and runs vulnerability
