@@ -368,7 +368,9 @@ transform = { file = "conformance/run_rs.py", replace = "        and record.get(
 [[fault]]
 id = "guards-list-new-note"
 guard = "scripts/check-guards-fire.py list"
-run = ["./scripts/check-guards-fire.py", "list"]
+# `--base HEAD`: the new-note rule needs no base, and the `guards` job's shallow checkout has no
+# origin/main, so the default merge-base lookup fails there before any fault is seeded.
+run = ["./scripts/check-guards-fire.py", "list", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
 message = "fs.rs::normalize_rejects_escapes_and_absorbs_benign_traversal ("
