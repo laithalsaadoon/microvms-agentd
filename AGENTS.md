@@ -45,6 +45,12 @@ from local test results.
 - `arch/placement.toml`, `ratchet/`: each crate's allowed dependencies and the
   layering drift count (see Architecture).
 
+`microvms-domain`, `microvms-app`, `microvms-edges`, `microvms-cli`, both bindings,
+`agentd` and `conformance/` each carry an `AGENTS.md` with the rules and commands for
+working in that directory. Claude Code loads one when it reads a file there; Codex loads
+only the files between the repository root and the directory it starts in, so read the
+crate's file before editing it.
+
 When `.codegraph/` exists, use `codegraph explore` before text searches to
 locate or understand code. Confirm ambiguous cross-crate symbol matches from
 the actual source. The daemon route census is `docs/schema.json` because
