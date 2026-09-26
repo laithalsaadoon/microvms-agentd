@@ -102,7 +102,7 @@ run = [
 
 [tasks.security]
 description = "Semgrep + secrets + license headers + dependency licenses + workflow lint"
-# Five checks, one exit. Semgrep runs the public rust and secrets rulesets over
+# Every check here, one exit. Semgrep runs the public rust and secrets rulesets over
 # shipped source only (test fixtures plant fake tokens on purpose). betterleaks
 # scans the whole git history, not just the tree — a secret that was committed
 # and then deleted is published the moment the repo is. The header check is a
@@ -118,6 +118,8 @@ run = [
   # wolf gets --no-verify'd. WARNING and ERROR still fail the run.
   "semgrep scan --config p/rust --config p/secrets --severity WARNING --severity ERROR --error --quiet --metrics=off protocol/src agentd/src model/src microvms-domain/src microvms-app/src microvms-edges/src microvms-core/src microvms-cli/src microvms-py/src microvms-js/src",
   "betterleaks git .",
+  # The header check's own floor, in throwaway repos: an empty `git ls-files` must fail.
+  "uv run python -m unittest discover -s scripts -p 'test_license_headers.py'",
   "./scripts/check-license-headers.py",
   "cargo deny check",
   "actionlint",
@@ -418,6 +420,14 @@ description = "Fail if the live tier's own wiring is wrong. Offline and free"
 # which runs when someone decides to spend money.
 run = "./scripts/check-live-wiring.py"
 
+[tasks."conformance:self-test"]
+description = "The live suite's own helpers and their negative twins, against a stub CLI. Offline"
+# In `check` for `live:check`'s reason: the helpers decide what a live run reports, and a live
+# run is the one tier nobody runs every time. A twin such as "eq(None, None) must fail" only
+# guards anything if something runs it, and before this task nothing did. uv supplies the
+# script's own pinned dependencies; it makes no AWS call.
+run = "uv run --script conformance/run_rs.py --self-test"
+
 [tasks.check]
 description = "The full local gate — the definition of done"
 depends = [
@@ -431,6 +441,7 @@ depends = [
   "model:check",
   "publish:check",
   "live:check",
+  "conformance:self-test",
   "build",
   "background:check",
   "trace:check",

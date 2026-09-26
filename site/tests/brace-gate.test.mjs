@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
-import { describe, expect, it } from "vitest"
+import { spawnSync } from "node:child_process"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
+
+import { afterEach, describe, expect, it } from "vitest"
 
 import { braceOffenders, maskedBody } from "../scripts/brace-gate.mjs"
+
+const GATE = join(dirname(fileURLToPath(import.meta.url)), "..", "scripts", "brace-gate.mjs")
 
 /**
  * The negative controls for the brace gate.
@@ -52,5 +60,58 @@ describe("the brace gate", () => {
 
   it("ignores frontmatter, which reaches a different parser entirely", () => {
     expect(braceOffenders('---\ntitle: "a {brace} in a title"\n---\n\nProse.\n')).toEqual([])
+  })
+})
+
+/**
+ * The same controls one level up: the pure function can be right while the walk hands it nothing. These
+ * run the gate as a process over a throwaway directory, because the floor and the sentinel live in
+ * `main`, where the file set is.
+ */
+describe("the brace gate's file set", () => {
+  const made = []
+  afterEach(() => {
+    for (const directory of made.splice(0)) rmSync(directory, { recursive: true, force: true })
+  })
+
+  const corpus = (pages) => {
+    const root = mkdtempSync(join(tmpdir(), "brace-gate-"))
+    made.push(root)
+    for (const [path, body] of Object.entries(pages)) {
+      mkdirSync(dirname(join(root, path)), { recursive: true })
+      writeFileSync(join(root, path), body)
+    }
+    return root
+  }
+
+  const gate = (root) => spawnSync(process.execPath, [GATE, root], { encoding: "utf8" })
+
+  it("fails on an empty directory instead of reporting a clean scan of nothing", () => {
+    const run = gate(corpus({}))
+    expect(run.status).toBe(1)
+    expect(run.stderr).toContain("found no .md or .mdx files")
+  })
+
+  it("fails on pages that don't include the index, which every docs tree has", () => {
+    const run = gate(corpus({ "learn/page.md": "# Page\n" }))
+    expect(run.status).toBe(1)
+    expect(run.stderr).toContain("index.md")
+  })
+
+  it("reads pages two directories down, where most of the real tree lives", () => {
+    // The floor and the index sentinel both hold for a walk that stops at the first level, and a
+    // walk like that passed the real corpus while skipping most of it (#277 review). A bare brace
+    // this deep must still be found.
+    const run = gate(
+      corpus({ "index.md": "# Home\n", "learn/operations/deep.md": "GET /v1/{id}\n" })
+    )
+    expect(run.status).toBe(1)
+    expect(run.stdout).toContain("deep.md:1:")
+  })
+
+  it("passes a clean tree that includes the index", () => {
+    const run = gate(corpus({ "index.mdx": "# Home\n", "learn/page.md": "# Page\n" }))
+    expect(run.stderr).toBe("")
+    expect(run.status).toBe(0)
   })
 })
