@@ -2,7 +2,7 @@
 #
 # The behavior spec for BIND-14, BIND-15, and BIND-16 in spec/core.symspec.json (issue #223).
 # `model/src/preflight.rs` checks the preflight's aggregation and calls as a Stateright model;
-# `microvms-core/src/sizing_fuzz.rs` fuzzes the size-class selection for minimality and
+# `microvms-domain/src/sizing_fuzz.rs` fuzzes the size-class selection for minimality and
 # coverage. Run by `microvms-core/tests/bdd_preflight.rs`; the preflights go through a scripted
 # control plane, so no scenario makes an AWS call.
 

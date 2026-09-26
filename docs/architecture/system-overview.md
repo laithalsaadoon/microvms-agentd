@@ -44,7 +44,7 @@ the in-VM client, carrying proxy auth and the byte-offset cursor that makes an i
 stream resumable (`microvms-core/src/session/mod.rs:4-7`); `sandbox` keeps every lifecycle
 field private so the Z3 proofs are proofs about the code
 (`microvms-core/src/sandbox.rs:11-17`); `cost` treats unpriced as a distinct variant rather
-than zero (`microvms-core/src/cost.rs:22-27`).
+than zero (`microvms-domain/src/cost.rs:22-27`).
 
 `microvms-cli` ships `microvm` and its subcommands
 (`microvms-cli/src/cli.rs:85-362`), each invocation writing exactly one JSON

@@ -111,23 +111,23 @@ jobs:
             # Not the binding crates: pyo3 wants a Python to link against on
             # Windows and napi wants its build tooling; both get their real
             # coverage in the `bindings` job, under the toolchains that ship them.
-            cargo clippy -p microvms-protocol -p microvms-core -p microvms-cli -p agentd-model --all-targets -- -D warnings
+            cargo clippy -p microvms-protocol -p microvms-domain -p microvms-core -p microvms-cli -p agentd-model --all-targets -- -D warnings
           fi
       # Linux: one command covers all six tiers — the daemon's unit tests, the
       # stateright model over every reachable state, the proptest tar-confinement
       # properties, the turmoil transport-fault simulation, the panic guard, and
       # the schema artifact's staleness and route-coverage checks.
-      # macOS/Windows: the client crates only — protocol, core (incl. its turmoil
-      # tier), the CLI's five test targets, and the model. agentd stays behind:
-      # it is guest software, and nix/sethostname/bind-mounts do not exist to
-      # test on a laptop OS.
+      # macOS/Windows: the client crates only — protocol, the domain, core (incl.
+      # its turmoil tier), the CLI's five test targets, and the model. agentd
+      # stays behind: it is guest software, and nix/sethostname/bind-mounts do
+      # not exist to test on a laptop OS.
       - name: test
         shell: bash
         run: |
           if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
             cargo test --all
           else
-            cargo test -p microvms-protocol -p microvms-core -p microvms-cli -p agentd-model
+            cargo test -p microvms-protocol -p microvms-domain -p microvms-core -p microvms-cli -p agentd-model
           fi
       # Belt to the test suite's braces, and not redundant: this runs the real
       # generator against the real path and fails with the regenerate command in
@@ -147,11 +147,11 @@ jobs:
       # "attempting to make an HTTP request" and `check` is offline by contract. Here
       # instead, where the network already is.
       #
-      # It packages and verifies `microvms-protocol`, `microvms-core`, and `microvms-cli`
-      # as if each were already released, which is the only place the
-      # `core -> protocol` edge is resolved the way a consumer will resolve it rather
-      # than through the path dependency that shadows it in every other build. The
-      # offline half of the same script runs in `check` and asserts the publish set.
+      # It packages and verifies every published crate as if each were already released,
+      # which is the only place the `core -> domain -> protocol` edges are resolved the
+      # way a consumer will resolve them rather than through the path dependencies that
+      # shadow them in every other build. The offline half of the same script runs in
+      # `check` and asserts the publish set.
       - name: every publishable crate can actually publish
         if: matrix.os == 'ubuntu-latest'
         run: ./scripts/check-publishable.py --dry-run
@@ -186,7 +186,7 @@ jobs:
         run: |
           uvx semgrep scan --config p/rust --config p/secrets \
             --severity WARNING --severity ERROR --error --quiet --metrics=off \
-            protocol/src agentd/src model/src microvms-core/src microvms-cli/src microvms-py/src microvms-js/src
+            protocol/src agentd/src model/src microvms-domain/src microvms-core/src microvms-cli/src microvms-py/src microvms-js/src
       # The whole history, not the tree: a secret committed and later deleted is
       # published the moment the repo is public.
       - name: betterleaks over full history (pinned, checksummed)

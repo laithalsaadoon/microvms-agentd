@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! The MicroVMs client: the control plane, the in-VM daemon, the cost engine, and
-//! every trap closure, in one library crate (ARCH-1).
+//! every trap closure, behind the one library crate the CLI and the bindings depend on
+//! (ARCH-1).
 //!
 //! # What this crate is for
 //!
@@ -58,37 +59,39 @@
 //!
 //! # Layout
 //!
-//! [`error`], [`region`], [`sizing`], [`hooks`], [`constants`], and [`env`] are the
+//! [`error`], [`region`], [`sizing`], [`hooks`], [`constants`], and [`env`](mod@env) are the
 //! foundation every other module builds on. [`cost`], [`control`], [`session`], and
 //! [`sandbox`] are the product surface. [`agents`] is the one layer above them: the coding-agent
 //! helpers `docs/AGENT-VMS.md` specifies, which compose the surface and which nothing
 //! below depends on. [`provision`] stands beside the surface rather than on it: it obtains
 //! the verified `agentd` binary an image is built from, and makes no AWS call.
+//!
+//! The foundation except [`env`](mod@env) lives in `microvms-domain`, with [`cost`] and the pure
+//! halves of [`names`], [`preflight`], [`identity`] and [`provision`], and is re-exported
+//! here at its old paths. The domain does no I/O (ARCH-6), so the methods its types had
+//! that read the clock or the random pool are in [`prelude`]: `use
+//! microvms_core::prelude::*;` keeps a 0.10 call compiling.
 
 // CLI-7: a print macro panics when its stream's reader has gone (#216). Every write goes
 // through a checked writer instead.
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
 pub mod agents;
-pub mod constants;
 pub mod control;
-pub mod cost;
 pub mod env;
-pub mod error;
-pub mod hooks;
 pub mod identity;
 pub mod names;
 pub mod preflight;
+pub mod prelude;
 pub mod provision;
 #[cfg(test)]
 mod provision_fuzz;
-pub mod region;
 pub mod sandbox;
 pub mod session;
-pub mod sizing;
 
-#[cfg(test)]
-mod sizing_fuzz;
+// The rules and values live in `microvms-domain`, which can't do I/O (ARCH-6). Re-exported
+// whole, so every `microvms_core::` path they had still resolves (ARCH-1).
+pub use microvms_domain::{constants, cost, error, hooks, region, sizing};
 
 // Re-exported so consumers name wire types through this crate rather than
 // depending on `protocol` directly — the CLI's thinness guard counts on that.

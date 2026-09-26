@@ -1,0 +1,94 @@
+# ARCH-6: this crate performs no I/O. A rule that reads ambient state gives different answers
+# on different machines, and it can't be tested without faking that state globally, so each
+# input a rule needs arrives as a parameter. The crate root denies both lints, so a hit fails
+# the build.
+#
+# Clippy takes fully qualified paths and no wildcards, so each item is named. Crates that do
+# I/O (tokio, getrandom, reqwest) never get this far: the dependency set in
+# `arch/placement.toml` keeps them out, and `microvms-cli/tests/dependency_direction.rs`
+# asserts it and each dependency's declared features. This file covers what `std` can do
+# without a dependency, and the clock, time zone and entropy reads that the allowed crates
+# carry: jiff's `std` feature, which the domain needs, also brings `Timestamp::now`.
+#
+# `allow-invalid = true` marks a path that doesn't exist in every build: a feature this crate
+# doesn't enable (another member can still turn it on through feature unification), or a
+# Unix-only std item on the Windows leg. Without it clippy warns that the path doesn't refer
+# to a reachable item, and the ban would lapse the day the item appears.
+#
+# `scripts/test_ratchet.py`'s `DomainLintTests` pins this list and runs real clippy over a
+# call from each group, so a deleted line fails there.
+
+disallowed-types = [
+  { path = "std::fs::File", reason = "take the bytes as a parameter: the caller reads the file (microvms-core)" },
+  { path = "std::fs::OpenOptions", reason = "return the bytes: the caller writes the file (microvms-core)" },
+  { path = "std::fs::ReadDir", reason = "take the entries as a parameter: the caller lists the directory (microvms-core)" },
+  { path = "std::process::Command", reason = "a subprocess belongs in microvms-core, behind a port" },
+  { path = "std::net::TcpStream", reason = "network access belongs in microvms-core, behind a port" },
+  { path = "std::net::TcpListener", reason = "network access belongs in microvms-core, behind a port" },
+  { path = "std::net::UdpSocket", reason = "network access belongs in microvms-core, behind a port" },
+  { path = "std::time::SystemTime", reason = "take the time as a parameter, as CalendarDate::from_unix_secs does; the caller reads the clock (microvms_core::prelude)" },
+  { path = "std::time::Instant", reason = "take the time as a parameter; the caller reads the clock (microvms_core::prelude)" },
+  { path = "std::fs::DirBuilder", reason = "return the path: the caller creates the directory (microvms-core)" },
+  { path = "std::os::unix::net::UnixStream", reason = "network access belongs in microvms-core, behind a port", allow-invalid = true },
+  { path = "std::os::unix::net::UnixListener", reason = "network access belongs in microvms-core, behind a port", allow-invalid = true },
+  { path = "std::os::unix::net::UnixDatagram", reason = "network access belongs in microvms-core, behind a port", allow-invalid = true },
+]
+
+disallowed-methods = [
+  { path = "std::fs::read", reason = "take the bytes as a parameter: the caller reads the file (microvms-core)" },
+  { path = "std::fs::read_to_string", reason = "take the text as a parameter: the caller reads the file (microvms-core)" },
+  { path = "std::fs::write", reason = "return the bytes: the caller writes the file (microvms-core)" },
+  { path = "std::fs::read_dir", reason = "take the entries as a parameter: the caller lists the directory (microvms-core)" },
+  { path = "std::fs::create_dir_all", reason = "return the path: the caller creates the directory (microvms-core)" },
+  { path = "std::fs::remove_file", reason = "the caller changes the filesystem (microvms-core)" },
+  { path = "std::fs::remove_dir_all", reason = "the caller changes the filesystem (microvms-core)" },
+  { path = "std::fs::rename", reason = "the caller changes the filesystem (microvms-core)" },
+  { path = "std::fs::copy", reason = "the caller changes the filesystem (microvms-core)" },
+  { path = "std::fs::metadata", reason = "take what the rule needs to know about the file as a parameter (microvms-core)" },
+  { path = "std::fs::symlink_metadata", reason = "take what the rule needs to know about the file as a parameter (microvms-core)" },
+  { path = "std::fs::exists", reason = "take what the rule needs to know about the file as a parameter (microvms-core)" },
+  { path = "std::fs::canonicalize", reason = "take what the rule needs to know about the file as a parameter (microvms-core)" },
+  { path = "std::fs::read_link", reason = "take what the rule needs to know about the file as a parameter (microvms-core)" },
+  { path = "std::fs::create_dir", reason = "the caller changes the filesystem (microvms-core)" },
+  { path = "std::fs::remove_dir", reason = "the caller changes the filesystem (microvms-core)" },
+  { path = "std::fs::hard_link", reason = "the caller changes the filesystem (microvms-core)" },
+  { path = "std::fs::set_permissions", reason = "the caller changes the filesystem (microvms-core)" },
+  { path = "std::os::unix::fs::symlink", reason = "the caller changes the filesystem (microvms-core)", allow-invalid = true },
+  { path = "std::path::Path::exists", reason = "take what the rule needs to know about the file as a parameter (microvms-core)" },
+  { path = "std::path::Path::try_exists", reason = "take what the rule needs to know about the file as a parameter (microvms-core)" },
+  { path = "std::path::Path::is_file", reason = "take what the rule needs to know about the file as a parameter (microvms-core)" },
+  { path = "std::path::Path::is_dir", reason = "take what the rule needs to know about the file as a parameter (microvms-core)" },
+  { path = "std::path::Path::is_symlink", reason = "take what the rule needs to know about the file as a parameter (microvms-core)" },
+  { path = "std::path::Path::metadata", reason = "take what the rule needs to know about the file as a parameter (microvms-core)" },
+  { path = "std::path::Path::symlink_metadata", reason = "take what the rule needs to know about the file as a parameter (microvms-core)" },
+  { path = "std::path::Path::read_dir", reason = "take what the rule needs to know about the file as a parameter (microvms-core)" },
+  { path = "std::path::Path::read_link", reason = "take what the rule needs to know about the file as a parameter (microvms-core)" },
+  { path = "std::path::Path::canonicalize", reason = "take what the rule needs to know about the file as a parameter (microvms-core)" },
+  { path = "std::env::var", reason = "take a lookup function, the way Region::from_env does; the caller decides where variables come from" },
+  { path = "std::env::var_os", reason = "take a lookup function, the way Region::from_env does; the caller decides where variables come from" },
+  { path = "std::env::vars", reason = "take a lookup function, the way Region::from_env does; the caller decides where variables come from" },
+  { path = "std::env::vars_os", reason = "take a lookup function, the way Region::from_env does; the caller decides where variables come from" },
+  { path = "std::env::temp_dir", reason = "take the directory as a parameter; the caller reads the environment" },
+  { path = "std::env::current_dir", reason = "take the directory as a parameter; the caller reads the process state" },
+  { path = "std::env::args", reason = "take the arguments as a parameter; the caller parses them" },
+  { path = "std::env::args_os", reason = "take the arguments as a parameter; the caller parses them" },
+  { path = "std::env::home_dir", reason = "take a lookup, the way names::default_state_root does; the caller reads the environment" },
+  { path = "std::env::current_exe", reason = "take the path as a parameter; the caller reads the process state" },
+  { path = "std::env::set_current_dir", reason = "the caller changes the process state" },
+  { path = "std::io::stdin", reason = "take the input as a parameter; the caller reads the stream" },
+  { path = "std::io::stdout", reason = "return the output; the caller writes the stream" },
+  { path = "std::io::stderr", reason = "return the output; the caller writes the stream" },
+  { path = "std::net::ToSocketAddrs::to_socket_addrs", reason = "a name lookup is network access, which belongs in microvms-core behind a port" },
+  { path = "std::time::SystemTime::now", reason = "take the time as a parameter, as CalendarDate::from_unix_secs does; the caller reads the clock (microvms_core::prelude)" },
+  { path = "std::time::Instant::now", reason = "take the time as a parameter; the caller reads the clock (microvms_core::prelude)" },
+  { path = "std::thread::sleep", reason = "a rule doesn't wait; the caller owns time (microvms-core)" },
+  { path = "jiff::Timestamp::now", reason = "take the time as a parameter, as CalendarDate::from_unix_secs does; the caller reads the clock (microvms_core::prelude)" },
+  { path = "jiff::Zoned::now", reason = "take the time as a parameter, as CalendarDate::from_unix_secs does; the caller reads the clock (microvms_core::prelude)" },
+  { path = "jiff::tz::TimeZone::system", reason = "rate-table age is UTC; the system zone is ambient state (TZ, /etc/localtime)", allow-invalid = true },
+  { path = "jiff::tz::TimeZone::try_system", reason = "rate-table age is UTC; the system zone is ambient state (TZ, /etc/localtime)", allow-invalid = true },
+  { path = "jiff::tz::TimeZone::get", reason = "a named zone is read from the tz database on disk; rate-table age is UTC", allow-invalid = true },
+  { path = "jiff::tz::db", reason = "the tz database is read from disk; rate-table age is UTC", allow-invalid = true },
+  { path = "x25519_dalek::StaticSecret::random", reason = "take the seed as a parameter, as LaunchIdentity::from_seeds does; the caller draws it (microvms_core::prelude)", allow-invalid = true },
+  { path = "x25519_dalek::ReusableSecret::random", reason = "take the seed as a parameter, as LaunchIdentity::from_seeds does; the caller draws it (microvms_core::prelude)", allow-invalid = true },
+  { path = "x25519_dalek::EphemeralSecret::random", reason = "take the seed as a parameter, as LaunchIdentity::from_seeds does; the caller draws it (microvms_core::prelude)", allow-invalid = true },
+]

@@ -16,6 +16,7 @@ use microvms_core::cost::{
     CalendarDate, DurationP, EstimatedUsd, PlanUsage, RunUsage, compare_residency, estimate_run,
     pinned_rates, run_report,
 };
+use microvms_core::prelude::*;
 use serde_json::{Map, Value};
 
 use crate::cli::CostArgs;

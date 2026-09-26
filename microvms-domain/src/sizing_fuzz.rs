@@ -3,7 +3,7 @@
 //!
 //! `bolero::check!` runs this as an ordinary `#[test]` under stable `cargo test`, and as a
 //! coverage-guided target under
-//! `cargo +nightly bolero test sizing_fuzz::from_request_is_minimal_and_covering -p microvms-core -T 120s`.
+//! `cargo +nightly bolero test sizing_fuzz::from_request_is_minimal_and_covering -p microvms-domain -T 120s`.
 //!
 //! # What it checks
 //!

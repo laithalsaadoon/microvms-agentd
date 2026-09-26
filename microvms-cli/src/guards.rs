@@ -6713,6 +6713,8 @@ async fn verify_identity_without_the_pair_is_refused_before_any_door_and_writes_
 /// on the refusal).
 #[tokio::test]
 async fn verify_identity_with_the_pair_probes_first_then_reaches_the_handshake_before_any_write() {
+    use microvms_core::prelude::*;
+
     let identity = microvms_core::identity::LaunchIdentity::generate()
         .expect("keys")
         .keep();

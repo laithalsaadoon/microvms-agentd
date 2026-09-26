@@ -826,8 +826,10 @@ class SeededFaultTests(unittest.TestCase):
     """The faults #281 and #285 name. Each also fired once by hand in the real tree (see the PR)."""
 
     def real_placement(self, ws):
+        # The real file has a set for the domain (#282), and the ratchet refuses a set for a
+        # crate the workspace doesn't have. An empty domain uses nothing outside its set.
         shutil.copy(ROOT / "arch" / "placement.toml", ws.root / "placement.toml")
-        return ws
+        return ws.crate("microvms-domain")
 
     def test_a_reqwest_in_microvms_py_fails_with_a_placement_key(self):
         ws = self.real_placement(
@@ -1212,6 +1214,260 @@ class AdapterLintTests(unittest.TestCase):
                 ("expect", "clippy::disallowed_methods", 5),
                 ("warn", "clippy::style", 8),
             ],
+        )
+
+
+# The domain's crate-root attribute (ARCH-6). `forbid`, not the adapters' `deny`: under
+# `forbid` an inner `#[allow]` or `#[expect]` is itself an error, so the domain needs no
+# exception list for a scan to check against.
+FORBID = "#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]"
+
+# Stand-ins for the domain's dependencies whose clock and entropy methods its `clippy.toml`
+# bans, with the real items' paths, so the bans resolve without building the real crates (the
+# CI job that runs these tests has no registry cache). `random` is behind a feature the domain
+# leaves off, which is what a feature switched on elsewhere in the workspace would expose.
+DOMAIN_STAND_INS = {
+    "jiff": """\
+        pub struct Timestamp;
+        impl Timestamp {
+            pub fn now() -> Timestamp { Timestamp }
+        }
+        pub struct Zoned;
+        impl Zoned {
+            pub fn now() -> Zoned { Zoned }
+        }
+        pub mod tz {
+            pub struct TimeZone;
+            impl TimeZone {
+                pub fn system() -> TimeZone { TimeZone }
+            }
+        }
+    """,
+    "x25519-dalek": """\
+        pub struct StaticSecret;
+        impl StaticSecret {
+            pub fn random() -> StaticSecret { StaticSecret }
+        }
+    """,
+}
+
+
+class DomainLintTests(unittest.TestCase):
+    """`microvms-domain`'s `clippy.toml` and crate root refuse I/O, and nothing turns them off.
+
+    Like `AdapterLintTests`, the fault cases run real clippy over a throwaway crate carrying the
+    domain's real `clippy.toml`, since a path clippy can't resolve is ignored.
+    """
+
+    DOMAIN = ROOT / "microvms-domain"
+
+    def clippy(self, lib):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        deps = []
+        for name, text in DOMAIN_STAND_INS.items():
+            stand_in = Path(tmp.name) / name
+            (stand_in / "src").mkdir(parents=True)
+            (stand_in / "Cargo.toml").write_text(
+                f'[package]\nname = "{name}"\nversion = "0.0.0"\nedition = "2024"\n'
+                "publish = false\n\n[workspace]\n"
+            )
+            (stand_in / "src" / "lib.rs").write_text(textwrap.dedent(text))
+            deps.append(f'{name} = {{ path = "../{name}" }}\n')
+        crate = Path(tmp.name) / "microvms-domain"
+        (crate / "src").mkdir(parents=True)
+        (crate / "Cargo.toml").write_text(
+            '[package]\nname = "microvms-domain"\nversion = "0.0.0"\nedition = "2024"\n'
+            "publish = false\n\n[workspace]\n\n[dependencies]\n" + "".join(deps)
+        )
+        shutil.copy(self.DOMAIN / "clippy.toml", crate / "clippy.toml")
+        (crate / "src" / "lib.rs").write_text(textwrap.dedent(lib))
+        env = {k: v for k, v in os.environ.items() if k != "CLIPPY_CONF_DIR"}
+        env["CARGO_TARGET_DIR"] = str(Path(tmp.name) / "target")
+        return subprocess.run(
+            [
+                "cargo",
+                "clippy",
+                "--offline",
+                "--quiet",
+                "--manifest-path",
+                str(crate / "Cargo.toml"),
+            ],
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_the_domain_root_forbids_the_disallowed_lints(self):
+        lib = self.DOMAIN / "src" / "lib.rs"
+        self.assertIn(FORBID, lib.read_text(encoding="utf-8").splitlines())
+
+    def test_no_domain_source_names_the_lints_except_the_root(self):
+        # `forbid` already makes an inner `allow` or `expect` a compile error. This catches the
+        # edit that would make one compile: the root weakened to `deny`, or a `cfg_attr` level.
+        lib = (self.DOMAIN / "src" / "lib.rs").resolve()
+        for path in sorted((self.DOMAIN / "src").rglob("*.rs")):
+            rel = path.relative_to(ROOT).as_posix()
+            for level, lint, line in lint_levels(path.read_text(encoding="utf-8")):
+                if level == "forbid" and path.resolve() == lib and "disallowed" in lint:
+                    continue
+                self.fail(
+                    f"{rel}:{line}: {level}({lint}). The domain has no exceptions: take the "
+                    "input as a parameter and let microvms-core do the I/O."
+                )
+
+    def test_the_domain_bans_each_io_route(self):
+        config = tomllib.loads((self.DOMAIN / "clippy.toml").read_text())
+        paths = {
+            key: sorted(item["path"] for item in config[key])
+            for key in ("disallowed-types", "disallowed-methods")
+        }
+        self.assertEqual(
+            paths["disallowed-types"],
+            [
+                "std::fs::DirBuilder",
+                "std::fs::File",
+                "std::fs::OpenOptions",
+                "std::fs::ReadDir",
+                "std::net::TcpListener",
+                "std::net::TcpStream",
+                "std::net::UdpSocket",
+                "std::os::unix::net::UnixDatagram",
+                "std::os::unix::net::UnixListener",
+                "std::os::unix::net::UnixStream",
+                "std::process::Command",
+                "std::time::Instant",
+                "std::time::SystemTime",
+            ],
+        )
+        path_methods = [
+            "canonicalize",
+            "exists",
+            "is_dir",
+            "is_file",
+            "is_symlink",
+            "metadata",
+            "read_dir",
+            "read_link",
+            "symlink_metadata",
+            "try_exists",
+        ]
+        self.assertEqual(
+            paths["disallowed-methods"],
+            sorted(
+                [
+                    "jiff::Timestamp::now",
+                    "jiff::Zoned::now",
+                    "jiff::tz::TimeZone::get",
+                    "jiff::tz::TimeZone::system",
+                    "jiff::tz::TimeZone::try_system",
+                    "jiff::tz::db",
+                    "std::env::args",
+                    "std::env::args_os",
+                    "std::env::current_dir",
+                    "std::env::current_exe",
+                    "std::env::home_dir",
+                    "std::env::set_current_dir",
+                    "std::env::temp_dir",
+                    "std::env::var",
+                    "std::env::var_os",
+                    "std::env::vars",
+                    "std::env::vars_os",
+                    "std::fs::canonicalize",
+                    "std::fs::copy",
+                    "std::fs::create_dir",
+                    "std::fs::create_dir_all",
+                    "std::fs::exists",
+                    "std::fs::hard_link",
+                    "std::fs::metadata",
+                    "std::fs::read",
+                    "std::fs::read_dir",
+                    "std::fs::read_link",
+                    "std::fs::read_to_string",
+                    "std::fs::remove_dir",
+                    "std::fs::remove_dir_all",
+                    "std::fs::remove_file",
+                    "std::fs::rename",
+                    "std::fs::set_permissions",
+                    "std::fs::symlink_metadata",
+                    "std::fs::write",
+                    "std::io::stderr",
+                    "std::io::stdin",
+                    "std::io::stdout",
+                    "std::net::ToSocketAddrs::to_socket_addrs",
+                    "std::os::unix::fs::symlink",
+                    "std::thread::sleep",
+                    "std::time::Instant::now",
+                    "std::time::SystemTime::now",
+                    "x25519_dalek::EphemeralSecret::random",
+                    "x25519_dalek::ReusableSecret::random",
+                    "x25519_dalek::StaticSecret::random",
+                ]
+                + [f"std::path::Path::{method}" for method in path_methods]
+            ),
+        )
+        for item in config["disallowed-types"] + config["disallowed-methods"]:
+            self.assertTrue(item.get("reason"), item)
+
+    def test_the_domain_refuses_a_call_from_each_group(self):
+        out = self.clippy(
+            f"""\
+            {FORBID}
+            pub fn file() -> bool {{
+                std::fs::read("x").is_ok() && std::path::Path::new("x").exists()
+            }}
+            pub fn subprocess() {{
+                let _ = std::process::Command::new("aws");
+            }}
+            pub fn network() -> bool {{
+                std::net::ToSocketAddrs::to_socket_addrs("localhost:80").is_ok()
+            }}
+            pub fn environment() -> bool {{
+                std::env::var("AWS_REGION").is_ok()
+            }}
+            pub fn stream() {{
+                let _ = std::io::stdin();
+            }}
+            pub fn clock() {{
+                let _ = std::time::SystemTime::now();
+                let _ = jiff::Timestamp::now();
+                let _ = jiff::tz::TimeZone::system();
+            }}
+            pub fn entropy() {{
+                let _ = x25519_dalek::StaticSecret::random();
+            }}
+            """
+        )
+        self.assertNotEqual(out.returncode, 0, out.stderr)
+        for message in [
+            "disallowed method `std::fs::read`",
+            "disallowed method `std::path::Path::exists`",
+            "disallowed type `std::process::Command`",
+            "disallowed method `std::net::ToSocketAddrs::to_socket_addrs`",
+            "disallowed method `std::env::var`",
+            "disallowed method `std::io::stdin`",
+            "disallowed method `std::time::SystemTime::now`",
+            "disallowed method `jiff::Timestamp::now`",
+            "disallowed method `jiff::tz::TimeZone::system`",
+            "disallowed method `x25519_dalek::StaticSecret::random`",
+        ]:
+            self.assertIn(message, out.stderr)
+
+    def test_an_allow_under_the_domain_root_does_not_compile(self):
+        out = self.clippy(
+            f"""\
+            {FORBID}
+            #[allow(clippy::disallowed_methods)]
+            pub fn quiet() -> bool {{
+                std::fs::read("x").is_ok()
+            }}
+            """
+        )
+        self.assertNotEqual(out.returncode, 0, out.stderr)
+        self.assertIn(
+            "allow(clippy::disallowed_methods) incompatible with previous forbid",
+            out.stderr,
         )
 
 

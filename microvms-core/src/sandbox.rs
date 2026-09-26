@@ -66,6 +66,7 @@ use crate::control::{
     ControlPlane, CreateImageRequest, Image, Microvm, RunHookPayload, RunMicrovmRequest, WaitOpts,
 };
 use crate::error::{Error, ErrorKind};
+use crate::prelude::*;
 use crate::region::Region;
 use crate::session::{Session, TokenMinter};
 

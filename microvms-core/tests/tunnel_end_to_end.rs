@@ -21,6 +21,7 @@ use std::sync::Arc;
 use futures_util::future::BoxFuture;
 use futures_util::{SinkExt as _, StreamExt as _};
 use microvms_core::Error;
+use microvms_core::prelude::*;
 use microvms_core::session::proxy::{
     PROXY_AUTH_HEADER, ProxyAuth, ProxyToken, TokenMinter, WS_AUTH_SUBPROTOCOL_PREFIX,
     WS_PORT_SUBPROTOCOL_PREFIX, WS_SUBPROTOCOL,

@@ -9,7 +9,7 @@
 //! us — so [`line_to_json`] emits **no `usd` key at all** for an unpriced line rather than a
 //! null, because a null gets summed as zero by anything permissive. That is the one
 //! arithmetic this file refuses to enable, and it is the same decision
-//! `microvms-core/src/cost.rs:624` makes by returning `Option` from `Amount::estimate`
+//! `microvms-domain/src/cost.rs:645` makes by returning `Option` from `Amount::estimate`
 //! instead of defaulting to zero.
 //!
 //! Every **dollar** figure crosses into JSON as a string, never a number. `Decimal` to `f64`
@@ -46,7 +46,7 @@
 //! the conformance oracle does not.
 //!
 //! The one place scale *is* asserted byte for byte is
-//! `microvms-core/src/cost.rs`'s `every_rate_byte_matches_the_python_literal`, and it says why:
+//! `microvms-domain/src/cost.rs`'s `every_rate_byte_matches_the_python_literal`, and it says why:
 //! a **rate** is a transcription, so `0.0038` and `0.00380000` are the same number but not the
 //! same transcription. A derived figure is not a transcription of anything.
 //!

@@ -17,8 +17,8 @@ in six places, and this script reports where:
   test     a mention in a test: a file under a Rust crate's `tests/`, a source
            file's test module, `microvms-cli/src/guards.rs`, or a binding test under
            `microvms-py/tests/` or `microvms-js/__test__/`
-  impl     a mention in production Rust source of the CLI, core, daemon, protocol,
-           or either binding
+  impl     a mention in production Rust source of the CLI, core, the domain, the
+           daemon, protocol, or either binding
   live     a live conformance check whose name starts with the key
            (`conformance/run_rs.py`, run against AWS by `mise run live`)
 
@@ -162,6 +162,16 @@ TRACED: dict[str, str | tuple[str, dict[str, str]]] = {
             "enumerated exhaustively by the Stateright model; there is no input stream to fuzz",
         },
     ),
+    "ARCH-6": (
+        "#282",
+        {
+            "model": "a property of a crate's code and dependencies, not of a state",
+            "gherkin": "no behavior to script: clippy and the dependency set enforce it at build "
+            "time",
+            "fuzz": "there is no input stream; the rule is over source and manifests",
+            "live": "the domain makes no AWS call by construction",
+        },
+    ),
 }
 
 LAYERS = ("model", "gherkin", "fuzz", "test", "impl", "live")
@@ -170,6 +180,7 @@ LAYERS = ("model", "gherkin", "fuzz", "test", "impl", "live")
 IMPL_DIRS = (
     "microvms-cli/src",
     "microvms-core/src",
+    "microvms-domain/src",
     "agentd/src",
     "protocol/src",
     "microvms-py/src",

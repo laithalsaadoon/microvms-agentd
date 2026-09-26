@@ -356,12 +356,13 @@
       "priority": "critical",
       "refines": [],
       "satisfies": [],
-      "sentence": "The microvms-core shall carry the control-plane client, the in-VM client, the trap closures, the cost engine, and the sizing model in a single library crate.",
+      "sentence": "The microvms-core shall be the single library crate the CLI crate and the language bindings depend on, re-exporting microvms-domain.",
       "status": "approved",
       "systemName": "microvms-core",
-      "systemResponse": "carry the control-plane client, the in-VM client, the trap closures, the cost engine, and the sizing model in a single library crate",
-      "updatedAt": "2026-08-08T02:10:17.186Z",
-      "verificationMethod": "inspection",
+      "systemResponse": "be the single library crate the CLI crate and the language bindings depend on, re-exporting microvms-domain",
+      "updatedAt": "2026-09-25T23:00:00.000Z",
+      "verificationMethod": "analysis",
+      "verificationNote": "microvms-cli/tests/dependency_direction.rs asserts the edges among the workspace's crates exactly; microvms-core/tests/public_paths.rs keeps every v0.10.0 path resolving through core's re-exports",
       "verifies": []
     },
     "3f00e09b-5383-4962-9b95-31fa8d8b1318": {
@@ -1239,6 +1240,25 @@
       "systemResponse": "deposit a thin idiomatic wrapper over microvms-core via PyO3",
       "updatedAt": "2026-08-08T02:16:57.929Z",
       "verificationMethod": "inspection",
+      "verifies": []
+    },
+    "be2b4d83-cda8-4828-a70f-f487418195da": {
+      "createdAt": "2026-09-25T23:00:00.000Z",
+      "derives": [],
+      "id": "be2b4d83-cda8-4828-a70f-f487418195da",
+      "key": "ARCH-6",
+      "negated": true,
+      "patternType": "ubiquitous",
+      "priority": "critical",
+      "refines": [],
+      "satisfies": [],
+      "sentence": "The microvms-domain shall not perform network, filesystem, subprocess, environment, clock, or entropy access.",
+      "status": "approved",
+      "systemName": "microvms-domain",
+      "systemResponse": "perform network, filesystem, subprocess, environment, clock, or entropy access",
+      "updatedAt": "2026-09-25T23:00:00.000Z",
+      "verificationMethod": "analysis",
+      "verificationNote": "microvms-domain/clippy.toml disallows the std file, path, process, network, environment, stream and clock types and methods, and the clock, time zone and entropy methods of the allowed crates (jiff's Timestamp::now, x25519-dalek's random), under a crate-root forbid that refuses an inner allow; scripts/test_ratchet.py pins the list and runs real clippy over it. arch/placement.toml's exact direct dependency set keeps out the crates whose job is I/O (tokio, getrandom, reqwest), and microvms-cli/tests/dependency_direction.rs asserts it and each dependency's declared features. Crates reached only transitively (rust_decimal's optional rand and getrandom) can't be named from the domain's code",
       "verifies": []
     },
     "c026070b-7600-483e-bdaf-e06b0e154929": {

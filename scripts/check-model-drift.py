@@ -932,7 +932,7 @@ def check(src: Source, model: dict[str, Any]) -> Checker:
 # They were the ones this comment's own caveat applied worst to — a literal here made the gate
 # compare the model against *this script*, with no reader in the client at all, so a respelled
 # `MicrovmState` failed the gate and had no consequence for the polling loops that branch on
-# states. They live in `microvms-core/src/constants.rs` now, where a subset assertion names the
+# states. They live in `microvms-domain/src/constants.rs` now, where a subset assertion names the
 # loop. `ROLE_ARN_PATTERN` went the same way once there was a matcher to read it.
 #
 # What is left here is genuinely unbound by the client, and each one says why at its use site.

@@ -72,6 +72,10 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+// The ELF checks read bytes, so they're rules with no I/O; this module is where a caller has
+// always found them.
+pub use microvms_domain::provision::{REQUIRED_ELF_MACHINE, elf_machine, not_aarch64};
+
 use crate::error::{Error, ErrorKind};
 
 /// The repository whose releases carry the daemon asset.
@@ -84,9 +88,6 @@ pub const ASSET: &str = "agentd";
 /// The environment variable naming a caller-managed binary, used when a request carries
 /// no [`Request::binary`].
 pub const ENV_OVERRIDE: &str = "MICROVM_AGENTD";
-
-/// The `e_machine` of an aarch64 ELF (`EM_AARCH64`).
-pub const REQUIRED_ELF_MACHINE: u16 = 0xB7;
 
 /// The digest record's file name, beside the cached binary.
 const RECORD: &str = "agentd.verified.json";
@@ -522,36 +523,6 @@ pub fn verify_sha256(sums: &str, asset: &str, bytes: &[u8]) -> Result<(), String
 pub fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::{Digest as _, Sha256};
     const_hex::encode(Sha256::digest(bytes))
-}
-
-/// The `e_machine` field of an ELF header, or `None` if `bytes` does not start with one.
-///
-/// Twenty bytes: the four-byte magic, `EI_DATA` at offset 5 deciding the byte order, then
-/// the two-byte `e_machine` at 18. Reading the byte order rather than assuming little is
-/// not pedantry: a big-endian binary would otherwise report machine `0xB700` and be
-/// rejected with a number nobody can look up.
-pub fn elf_machine(bytes: &[u8]) -> Option<u16> {
-    let header = bytes.get(..20)?;
-    if &header[..4] != b"\x7fELF" {
-        return None;
-    }
-    let field = [header[18], header[19]];
-    Some(if header[5] == 1 {
-        u16::from_le_bytes(field)
-    } else {
-        u16::from_be_bytes(field)
-    })
-}
-
-/// Why `bytes` is not an aarch64 ELF, or `None` when it is.
-pub fn not_aarch64(bytes: &[u8]) -> Option<String> {
-    match elf_machine(bytes) {
-        Some(REQUIRED_ELF_MACHINE) => None,
-        Some(machine) => Some(format!(
-            "ELF machine 0x{machine:x}, not aarch64 (0x{REQUIRED_ELF_MACHINE:x})"
-        )),
-        None => Some("not an ELF binary at all".to_string()),
-    }
 }
 
 /// A version as a release tag spells it, without the leading `v`, or a refusal.
@@ -1248,19 +1219,6 @@ mod tests {
         let missing =
             verify_sha256("abc  something-else\n", "agentd", b"x").expect_err("must refuse");
         assert!(missing.contains("no entry"), "{missing}");
-    }
-
-    /// The ELF parser, both byte orders, and everything shorter than a header.
-    #[test]
-    fn the_elf_header_is_read_in_its_own_byte_order() {
-        assert_eq!(elf_machine(&elf_header(0xB7)), Some(0xB7));
-        let mut big = elf_header(0);
-        big[5] = 2;
-        big[18..20].copy_from_slice(&0xB7u16.to_be_bytes());
-        assert_eq!(elf_machine(&big), Some(0xB7));
-        assert_eq!(elf_machine(b"#!/bin/sh"), None);
-        assert_eq!(elf_machine(&elf_header(0xB7)[..19]), None);
-        assert_eq!(not_aarch64(&elf_header(0xB7)), None);
     }
 
     /// The argv builders spell the exact commands the docs teach, so the two cannot drift.

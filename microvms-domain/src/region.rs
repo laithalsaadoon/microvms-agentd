@@ -135,7 +135,7 @@ impl Region {
     /// refused with the null-message finding attached; opting in is explicit at a call site
     /// (`--unlisted-region` in the CLI, `Region.unlisted` in the bindings). `env` is a lookup
     /// rather than `std::env::var` so a caller (and a test) decides where the variables come
-    /// from. The CLI's region resolution and [`crate::preflight::preflight`] both read it here.
+    /// from. The CLI's region resolution and `microvms_core::preflight::preflight` both read it here.
     pub fn from_env(env: &dyn Fn(&str) -> Option<String>) -> Result<Region, Error> {
         match env("AWS_REGION").or_else(|| env("AWS_DEFAULT_REGION")) {
             Some(name) => name.parse::<Region>().map_err(|error| {
