@@ -27,7 +27,10 @@ function that makes no AWS call. The waiver and its reason are rendered in the m
 so an absent layer is a stated decision rather than a gap.
 
 It also refuses a mention of an unknown key, so a typo such as `CLI-10` for `CLI-9`
-cannot pass as coverage. Keys are recognized by the prefixes the two specs define.
+cannot pass as coverage. Keys are recognized by the prefixes the two specs define. And
+it refuses to pass on input it didn't read: every directory it lists must yield a file and,
+unless KEYLESS says why not, a key; every layer's collector must find a key; and the
+sentinel key must still be in TRACED.
 `docs/TRACEABILITY.md` is the rendered matrix:
 
   ./scripts/check-trace.py           print the matrix; fail if a layer is missing
@@ -49,6 +52,7 @@ SPECS = (
     ROOT / "spec" / "agentd.symspec.json",
 )
 DOC = ROOT / "docs" / "TRACEABILITY.md"
+LIVE = ROOT / "conformance" / "run_rs.py"
 
 # The fuzz waiver the ensure_image decisions share: their input space is interleavings.
 INTERLEAVINGS = (
@@ -212,14 +216,32 @@ IMPL_DIRS = (
 RUST_TEST_DIRS = (
     "microvms-cli/tests",
     "microvms-core/tests",
+    "microvms-edges/tests",
     "agentd/tests",
     "agentd/fuzz/fuzz_targets",
 )
 BINDING_TESTS = (
     ("microvms-py/tests", "*.py"),
     ("microvms-js/__test__", "*.mjs"),
-    ("microvms-js/__test__", "*.ts"),
 )
+
+# Listed entries that yield files but no requirement key today, each with the reason.
+# Every other entry must give up at least one key, because a directory that still has
+# files but no keyed ones (tests moved into a subdirectory, leaving `conftest.py`) drops
+# out of the matrix as quietly as one that vanished. An entry here that starts yielding
+# a key is reported, so this list can only shrink.
+KEYLESS = {
+    "microvms-edges/tests": "the release-bundle test names no requirement yet; listed so "
+    "the first one that does is counted",
+    "agentd/fuzz/fuzz_targets": "the cargo-fuzz tar harness guards extraction, which no "
+    "spec requirement covers; the keyed fuzz harnesses are bolero targets under src/ and "
+    "tests/",
+}
+
+# A key the traced table always carries. The per-key loop in `main` checks every layer
+# of every key in TRACED, this one included, so a TRACED that lost its entries would
+# pass that loop vacuously; this is what notices.
+SENTINEL = "CLI-7"
 
 FUZZ_MARKER = re.compile(r"bolero::check!|fuzz_target!")
 TEST_MODULE = re.compile(r"^#\[cfg\(test\)\]\s*$", re.MULTILINE)
@@ -248,7 +270,7 @@ class Patterns:
         )
         self.tag = re.compile(rf"@({key})\b")
         # A live conformance check whose name starts with the requirement key.
-        self.live = re.compile(rf'results\.(?:check|eq)\(\s*f?"({key})\b')
+        self.live = re.compile(rf'results\.(?:check|eq|absent)\(\s*f?"({key})\b')
 
 
 def waivers(key: str) -> dict[str, str]:
@@ -266,6 +288,57 @@ def rust_files(*directories: str) -> list[Path]:
     for directory in directories:
         files.extend(sorted((ROOT / directory).rglob("*.rs")))
     return [path for path in files if "target" not in path.parts]
+
+
+def enumerator_floors() -> list[str]:
+    """A listed directory that yields no file, which would drop its layer silently.
+
+    A renamed `microvms-js/__test__` would take every Node test out of the matrix, and
+    only a key covered by Node tests alone would notice.
+    """
+    problems: list[str] = []
+    for table, directories in (
+        ("IMPL_DIRS", IMPL_DIRS),
+        ("RUST_TEST_DIRS", RUST_TEST_DIRS),
+    ):
+        for directory in directories:
+            if not rust_files(directory):
+                problems.append(f"{table} entry {directory!r} yields no .rs file")
+    for directory, pattern in BINDING_TESTS:
+        if not sorted((ROOT / directory).glob(pattern)):
+            problems.append(
+                f"BINDING_TESTS entry ({directory!r}, {pattern!r}) yields no file"
+            )
+    if not LIVE.is_file():
+        problems.append(f"the live suite {rel(LIVE)} doesn't exist")
+    return problems
+
+
+def layer_floors(found: dict[str, dict[str, set[str]]]) -> list[str]:
+    """A layer or a listed entry that gave up no key, and a TRACED without the sentinel."""
+    problems = [
+        f"the {layer} collector found no requirement key in any file it read"
+        for layer in LAYERS
+        if not any(layers[layer] for layers in found.values())
+    ]
+    keyed = {
+        path for layers in found.values() for paths in layers.values() for path in paths
+    }
+    entries = [*IMPL_DIRS, *RUST_TEST_DIRS]
+    entries += [f"{directory} ({pattern})" for directory, pattern in BINDING_TESTS]
+    for entry in entries:
+        directory = entry.split(" ", 1)[0]
+        yields = any(path.startswith(f"{directory}/") for path in keyed)
+        if entry in KEYLESS or directory in KEYLESS:
+            if yields:
+                problems.append(
+                    f"{directory} yields a requirement key now; drop it from KEYLESS"
+                )
+        elif not yields:
+            problems.append(f"the entry {entry} yields files but no requirement key")
+    if SENTINEL not in TRACED:
+        problems.append(f"the sentinel {SENTINEL} is not in TRACED")
+    return problems
 
 
 def split_test_region(text: str) -> tuple[str, str]:
@@ -316,9 +389,9 @@ def collect(patterns: Patterns) -> dict[str, dict[str, set[str]]]:
             for key in patterns.key.findall(path.read_text()):
                 note(key, "test", path)
 
-    live = ROOT / "conformance" / "run_rs.py"
-    for key in patterns.live.findall(live.read_text()):
-        note(key, "live", live)
+    if LIVE.is_file():
+        for key in patterns.live.findall(LIVE.read_text()):
+            note(key, "live", LIVE)
     return found
 
 
@@ -365,7 +438,7 @@ def main() -> int:
 
     sentences = spec_keys()
     found = collect(Patterns(sentences))
-    problems: list[str] = []
+    problems = enumerator_floors() + layer_floors(found)
 
     for key in TRACED:
         if key not in sentences:

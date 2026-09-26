@@ -71,6 +71,14 @@ REMOVED = {
 }
 
 
+# Paths and a member every baseline from v0.10.0 on has. An empty walk writes a witness that
+# names nothing, which compiles and passes, so the walk must find these before anything is
+# written. Each is a crate-root re-export, a module item or an inherent method, one per branch
+# of the walk.
+SENTINEL_PATHS = ("microvms_core::Region", "microvms_core::control::ControlPlane")
+SENTINEL_MEMBERS = ("<microvms_core::Region>::as_str",)
+
+
 # The baseline constructors that moved to `microvms_core::prelude` and are generic, so `members`
 # skips them. A call is the only way to name one, and the JSON can't produce a call, so they're
 # listed by hand against the baseline's signatures.
@@ -183,6 +191,20 @@ def main() -> int:
                     members.add(f"<{path}>::{member['name']}")
 
     walk(index[str(doc["root"])], crate)
+    if not paths or not members:
+        print(
+            f"public_paths: the walk of {source} found {len(paths)} paths and {len(members)}"
+            " members; refusing to write a witness from a walk that came back empty"
+        )
+        return 1
+    absent = [p for p in SENTINEL_PATHS if p not in paths]
+    absent += [m for m in SENTINEL_MEMBERS if m not in members]
+    if absent:
+        print(
+            f"public_paths: the walk of {source} didn't find {absent}, which every baseline"
+            " has; the rustdoc JSON's shape has probably changed"
+        )
+        return 1
     unknown = sorted(set(REMOVED) - paths)
     if unknown:
         print(f"public_paths: REMOVED names paths {baseline} never had: {unknown}")

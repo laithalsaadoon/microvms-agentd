@@ -5,8 +5,10 @@ check as PASS or FAIL. `infra/` is the Terraform stack it runs in. Everything he
 self-test is billable.
 
 - Offline first: `./conformance/run_rs.py --self-test` exercises the suite's own helpers and
-  their negative twins, and `mise run live:check` (part of `mise run check`) checks the live
-  tier's wiring in `mise.toml`. Both are free.
+  their negative twins, and `mise run live:check` checks the live tier's wiring in `mise.toml`.
+  Both are free, and `mise run check` runs both (the first as `conformance:self-test`).
+- `results.eq` fails when either side is `None`, because that's what a missing key reads as
+  through `.get()`. A check that expects nothing on purpose uses `results.absent`.
 - Live runs: `mise run live` for everything, or `mise run live:conformance-rs` for this suite.
   Both build the release CLI and the daemon from the working tree and apply `infra/` first.
   Afterward, run `mise run live:verify-clean` to confirm no VMs, images or log groups leaked.

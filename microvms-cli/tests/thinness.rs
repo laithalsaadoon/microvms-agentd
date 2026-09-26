@@ -183,6 +183,23 @@ fn scannable_sources() -> Vec<(PathBuf, String)> {
         "the skip rule excluded too much; only {} files are scanned",
         scanned.len()
     );
+    // The file floor proves the walk read files; this proves the stripper left their code. A
+    // stripper that blanked everything would pass every scan below, so the seam, which calls
+    // `ControlPlane::new` as code, must still say so after stripping. Its Falsification note is on
+    // the source scan's doc.
+    let seam = scanned
+        .iter()
+        .find(|(path, _)| path.file_name().is_some_and(|name| name == "seam.rs"));
+    assert!(
+        seam.is_some_and(|(_, source)| source.contains("ControlPlane::new")),
+        "the sentinel failed: src/seam.rs {} after stripping comments and literals, so the scan is \
+         reading blanks",
+        if seam.is_some() {
+            "no longer contains `ControlPlane::new`"
+        } else {
+            "isn't among the scanned files"
+        },
+    );
     scanned
 }
 
@@ -249,74 +266,128 @@ fn production_region(text: &str) -> String {
         .find(|(index, line)| opens_a_test_region(&lines, *index, line))
         .map(|(index, _)| index)
         .unwrap_or(usize::MAX);
-    // One pass over the whole text, tracking whether we are inside a string literal — which is the
-    // only version of this that works, and it took three wrong ones to establish that.
-    //
-    // Stripping comments line by line first is wrong, because `"s3://{bucket}/{name}.zip"` at
-    // `commands/lifecycle.rs:522` contains a `//`: cutting there truncated the literal, left the
-    // opening quote unmatched, and desynchronised the quote state for every line after it — which
-    // is what finally reported `CreateMicrovmImage` four lines later inside a message it had already
-    // stopped recognising as a message.
-    //
-    // Stripping literals line by line is wrong too, because a literal continued with a trailing
-    // `\` spans lines and several of this crate's error messages do.
-    //
-    // So: one scanner, both jobs, whole file.
+    // Then lex what's left, so comments and literals drop out by the language's own rules. Three
+    // hand-rolled scanners before this each lost track of what was a literal; see
+    // `blank_comments_and_literals`.
     blank_comments_and_literals(&lines[..cut.min(lines.len())].join("\n"))
 }
 
-/// Blanks the contents of every string literal and every `//` comment, in one pass.
+/// The file's code tokens at their own lines and columns, with every literal and comment gone.
 ///
-/// One pass because the two jobs are not separable: `//` inside a literal is not a comment, and a
-/// quote inside a comment is not a literal delimiter. Doing either first desynchronises the other,
-/// which is what the caller's comment records happening twice.
+/// Lexed by `proc-macro2`, the compiler's token rules as a library, because every hand-rolled
+/// version of this got a different corner wrong: a `//` inside a literal, a `\"` escape, and last
+/// a `'"'` char literal, which a quote tracker took for an opening delimiter. That one inverted
+/// the rest of the file, so code read as a string and strings read as code, and the source scan
+/// passed a `ControlPlane::new` in a handler (#277 review). A lexer has no such state to lose:
+/// raw strings, byte strings, char literals and lifetimes are all tokens it already knows.
 ///
 /// # Why literals are blanked at all
 ///
-/// An error message that *explains* `CreateMicrovmImage` — that the artifact must be in S3 before
-/// it, and that the service's rejection would arrive after the upload — is the most useful sentence
+/// An error message that *explains* `CreateMicrovmImage` (that the artifact must be in S3 before
+/// it, and that the service's rejection would arrive after the upload) is the most useful sentence
 /// on that code path. A guard that demanded its deletion is a guard someone deletes instead, which
 /// is `test_cli.py:269`'s lesson exactly. What CLI-2 forbids is *invoking* an operation, and an
-/// invocation is an identifier the compiler resolves. No string literal can be one.
+/// invocation is an identifier the compiler resolves. No literal can be one.
 ///
-/// Deliberately crude about the rest: it does not understand raw strings, escaped quotes, or char
-/// literals. That is safe because it only has to be conservative in the right direction —
-/// over-blanking loses nothing, since a real identifier is never inside quotes, and under-blanking
-/// would at worst leave a false positive this test then *reports* rather than hides. Newlines
-/// survive so a failure can still name a line.
+/// Comments never reach the token stream. Doc comments arrive as `#[doc = "..."]`, whose text is
+/// a literal and so is blanked too. Each line keeps its place, so a failure can still name one.
+/// A file the lexer rejects fails the test rather than being read as empty.
 fn blank_comments_and_literals(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    let mut in_string = false;
-    let mut in_comment = false;
-    while let Some(character) = chars.next() {
-        match character {
-            '\n' => {
-                in_comment = false;
-                out.push('\n');
+    let stream: proc_macro2::TokenStream = text.parse().unwrap_or_else(|error| {
+        panic!("the scan couldn't lex a shipping file, and would read nothing from it: {error:?}")
+    });
+    let mut lines: Vec<Vec<char>> = vec![Vec::new(); text.lines().count()];
+    place_tokens(stream, &mut lines);
+    lines
+        .into_iter()
+        .map(|line| line.into_iter().collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Writes each identifier, punctuation mark and delimiter of `stream` where it sat in the source.
+fn place_tokens(stream: proc_macro2::TokenStream, lines: &mut [Vec<char>]) {
+    use proc_macro2::{Delimiter, TokenTree};
+    for tree in stream {
+        match tree {
+            TokenTree::Ident(ident) => place(lines, ident.span().start(), &ident.to_string()),
+            TokenTree::Punct(punct) => {
+                place(lines, punct.span().start(), &punct.as_char().to_string());
             }
-            _ if in_comment => out.push(' '),
-            '"' => {
-                in_string = !in_string;
-                out.push('"');
+            TokenTree::Literal(_) => {}
+            TokenTree::Group(group) => {
+                let (open, close) = match group.delimiter() {
+                    Delimiter::Parenthesis => ("(", ")"),
+                    Delimiter::Brace => ("{", "}"),
+                    Delimiter::Bracket => ("[", "]"),
+                    Delimiter::None => ("", ""),
+                };
+                place(lines, group.span_open().start(), open);
+                place_tokens(group.stream(), lines);
+                place(lines, group.span_close().start(), close);
             }
-            '/' if !in_string && chars.peek() == Some(&'/') => {
-                in_comment = true;
-                out.push(' ');
-            }
-            // A backslash inside a literal consumes what follows, so an escaped quote does not
-            // close the string. Without this, `\"` flips the state and everything after it reads
-            // as code — the same desynchronisation from the other direction.
-            '\\' if in_string => {
-                out.push(' ');
-                if chars.next().is_some() {
-                    out.push(' ');
-                }
-            }
-            other => out.push(if in_string { ' ' } else { other }),
         }
     }
-    out
+}
+
+/// Writes `token` at a 1-based line and a 0-based column, padding the line with spaces.
+fn place(lines: &mut [Vec<char>], at: proc_macro2::LineColumn, token: &str) {
+    let Some(line) = at
+        .line
+        .checked_sub(1)
+        .and_then(|index| lines.get_mut(index))
+    else {
+        return;
+    };
+    for (offset, character) in token.chars().enumerate() {
+        let column = at.column + offset;
+        if line.len() <= column {
+            line.resize(column + 1, ' ');
+        }
+        line[column] = character;
+    }
+}
+
+/// The stripper keeps code that follows a quote inside a char literal or a raw string, and still
+/// blanks real literals and comments.
+///
+/// A `'"'` read as a string delimiter flips the scanner's state: the code after it is blanked and
+/// the file's next real string is read as code. The hand-rolled scanner this file used to have did
+/// exactly that, and the source scan passed a `ControlPlane::new` placed in `suspend` after a
+/// `let _quote = '"';` (#277 review).
+///
+/// **Falsification**: 2026-09-26. Against the hand-rolled scanner this failed its first assertion,
+/// and making the lexer place literals as tokens fails the `RunMicrovm` one; restored after.
+#[test]
+fn the_stripper_reads_a_quote_in_a_char_literal_as_a_literal() {
+    let source = r##"fn suspend() {
+    let _quote = '"';
+    let plane = ControlPlane::new(region);
+    let message = "RunMicrovm is explained here"; // and GetMicrovm here
+    let _raw = r#"a raw string with a " quote, then SuspendMicrovm"#;
+    let _after = ResumeMicrovm;
+}
+"##;
+    let stripped = blank_comments_and_literals(source);
+    assert!(
+        stripped.contains("ControlPlane::new"),
+        "code after a quote in a char literal or a raw string was blanked:\n{stripped}"
+    );
+    assert!(
+        stripped.contains("ResumeMicrovm"),
+        "code after a raw string holding a quote was blanked:\n{stripped}"
+    );
+    for inside in ["RunMicrovm", "GetMicrovm", "SuspendMicrovm"] {
+        assert!(
+            !stripped.contains(inside),
+            "{inside}, inside a literal or a comment, survived stripping:\n{stripped}"
+        );
+    }
+    assert_eq!(
+        stripped.lines().count(),
+        source.lines().count(),
+        "stripping changed the line count, so a failure would name the wrong line"
+    );
 }
 
 /// **The source scan.** No shipping line names a control-plane operation or a core constructor
@@ -329,6 +400,11 @@ fn blank_comments_and_literals(text: &str) -> String {
 /// **Falsification** — replace the `ctx.seam.control_plane(region)` call in
 /// `commands/lifecycle.rs`'s `suspend` with `ControlPlane::new(region)` and this goes red naming
 /// the file and the identifier. Verified; see the packet's guard proofs.
+///
+/// **Falsification**: 2026-09-26. Making `place` return before it writes a token turned this and
+/// the print-macro scan red with the seam sentinel's message in `scannable_sources`; restored
+/// after. Putting `let _quote = '"';` above that same `ControlPlane::new` in `suspend` also turns
+/// it red now; under the hand-rolled scanner it passed.
 #[test]
 fn no_shipping_source_line_names_an_operation_or_reaches_past_the_seam() {
     for (path, source) in scannable_sources() {

@@ -80,11 +80,21 @@ MAX_CATEGORIES = 5
 #: markdown file showing the same string is prose, and `AGENTS.md` deliberately quotes
 #: `cargo test -p protocol` as the example of what *does not* work — so scanning docs here
 #: would fail the gate on its own documentation.
+#:
+#: Every workflow or `mise.toml` that runs cargo with a selector must be listed; the check
+#: below reports one that isn't, because a surface left off this list is one whose stale
+#: selector passes (the #277 review found workflows missing from it).
 SELECTOR_FILES = (
     ".github/workflows/ci.yml",
     ".github/workflows/docs.yml",
+    ".github/workflows/fuzz.yml",
+    ".github/workflows/live-conformance.yml",
+    ".github/workflows/release.yml",
     "mise.toml",
 )
+
+#: Where an executable cargo selector can live, for the listing check above.
+SELECTOR_SURFACES = (".github/workflows/*.yml", "mise.toml")
 
 #: Workflows whose addon build matrix must cover exactly `napi.targets`.
 #:
@@ -124,6 +134,11 @@ CLI_MATRIX_ROW = re.compile(r"\bzigbuild:")
 #: build the old way rather than passing something wrong.
 SELECTOR = re.compile(r"(?:-p|--package)[ =]+([A-Za-z0-9_-]+)")
 
+#: A selector every healthy tree has: CI's clippy and test steps name the CLI by package.
+#: Finding no selector at all would pass the check below vacuously, and finding some but not
+#: this one means the scan stopped reaching the workflow that matters most.
+SENTINEL_SELECTOR = (".github/workflows/ci.yml", "microvms-cli")
+
 
 def metadata() -> dict:
     """The resolved workspace, read from cargo rather than by parsing TOML.
@@ -153,6 +168,17 @@ def publishable(package: dict) -> bool:
     return package["publish"] != []
 
 
+def selectors_in(path: Path) -> list[tuple[int, str]]:
+    """Each `-p <crate>` on a cargo line of `path`, with its line number."""
+    found: list[tuple[int, str]] = []
+    for number, line in enumerate(path.read_text().splitlines(), start=1):
+        # Comments describe intent and may name a crate that is gone on purpose.
+        if line.lstrip().startswith("#") or "cargo" not in line:
+            continue
+        found += [(number, selected) for selected in SELECTOR.findall(line)]
+    return found
+
+
 def stale_selectors(names: set[str]) -> list[str]:
     """Every `-p <crate>` in a workflow or task that names a package cargo cannot find.
 
@@ -164,22 +190,47 @@ def stale_selectors(names: set[str]) -> list[str]:
     whose tiers name crates explicitly, where ubuntu's `--all` passed and reported green.
     """
     failures: list[str] = []
+    seen: set[tuple[str, str]] = set()
     for relative in SELECTOR_FILES:
         path = Path(relative)
         if not path.exists():
             failures.append(f"{relative} is in SELECTOR_FILES and does not exist")
             continue
-        for number, line in enumerate(path.read_text().splitlines(), start=1):
-            # Comments describe intent and may name a crate that is gone on purpose.
-            if line.lstrip().startswith("#") or "cargo" not in line:
-                continue
-            for selected in SELECTOR.findall(line):
-                if selected not in names:
-                    failures.append(
-                        f"{relative}:{number} selects `-p {selected}`, which is not a package "
-                        f"in this workspace. cargo fails with `package ID specification "
-                        f"'{selected}' did not match any packages`."
-                    )
+        for number, selected in selectors_in(path):
+            seen.add((relative, selected))
+            if selected not in names:
+                failures.append(
+                    f"{relative}:{number} selects `-p {selected}`, which is not a package "
+                    f"in this workspace. cargo fails with `package ID specification "
+                    f"'{selected}' did not match any packages`."
+                )
+    surfaces = {
+        p.as_posix() for pattern in SELECTOR_SURFACES for p in Path().glob(pattern)
+    }
+    # The listing check is only as wide as the glob. One that reached nothing would pass it
+    # vacuously, so it must at least reach every listed file.
+    unreached = [f for f in SELECTOR_FILES if Path(f).exists() and f not in surfaces]
+    if unreached:
+        failures.append(
+            f"SELECTOR_SURFACES doesn't reach {', '.join(unreached)}, so the check for"
+            " unlisted selector files read the wrong place"
+        )
+    for surface in sorted(surfaces - set(SELECTOR_FILES)):
+        if selectors_in(Path(surface)):
+            failures.append(
+                f"{surface} runs cargo with a `-p` selector but isn't in SELECTOR_FILES,"
+                " so a stale one there would pass"
+            )
+    if not seen:
+        failures.append(
+            f"SELECTOR found no `-p` selector on any cargo line in {', '.join(SELECTOR_FILES)},"
+            " so the stale-selector check read nothing"
+        )
+    elif SENTINEL_SELECTOR not in seen:
+        failures.append(
+            f"SELECTOR found {len(seen)} selectors but not `-p {SENTINEL_SELECTOR[1]}` in"
+            f" {SENTINEL_SELECTOR[0]}, which CI's clippy and test steps always carry"
+        )
     return failures
 
 

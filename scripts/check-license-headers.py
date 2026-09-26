@@ -56,6 +56,14 @@ COMMENT = {
 #: a header that removes a rule.
 CLOSER = {".css": " */"}
 
+#: Files that must always be in the enumerated set. An empty set is caught by
+#: the floor in `main`; these catch a set that isn't empty but came from the
+#: wrong place (a working directory outside the repo, a checkout of something
+#: else). This script and the core crate root are files no refactor removes. A
+#: pathspec that stops matching one extension is the per-extension floor's job,
+#: because a sentinel only covers its own extension.
+SENTINELS = (Path("scripts/check-license-headers.py"), Path("microvms-core/src/lib.rs"))
+
 
 def tracked_sources() -> list[Path]:
     out = subprocess.run(
@@ -109,10 +117,39 @@ def fix(path: Path) -> None:
 
 def main() -> int:
     apply = "--fix" in sys.argv[1:]
-    missing = [p for p in tracked_sources() if not has_spdx(p)]
+    sources = tracked_sources()
+    # A check over nothing reports nothing, and that used to read as a pass:
+    # "all 0 tracked source files carry the SPDX line", exit 0.
+    if not sources:
+        print(
+            "license headers: `git ls-files` returned no tracked source files for"
+            f" {', '.join(f'*{ext}' for ext in COMMENT)}; run this from the repo root"
+        )
+        return 1
+    absent = [str(s) for s in SENTINELS if s not in sources]
+    if absent:
+        print(
+            f"license headers: `git ls-files` returned {len(sources)} files without"
+            f" {', '.join(absent)}, which this repo always tracks; the enumerator"
+            " read the wrong tree"
+        )
+        return 1
+    # Every extension in COMMENT is there because this tree tracks files of that
+    # kind, so each must yield at least one. Without this, a pathspec that lost
+    # `*.mjs` would pass with the Node files unchecked, and the two sentinels
+    # above, a `.py` and a `.rs`, would never notice.
+    bare = [ext for ext in COMMENT if not any(s.suffix == ext for s in sources)]
+    if bare:
+        print(
+            f"license headers: `git ls-files` returned {len(sources)} files but none"
+            f" ending in {', '.join(bare)}; either the pathspec stopped matching or"
+            " the tree no longer has that kind of file, and then COMMENT should drop it"
+        )
+        return 1
+    missing = [p for p in sources if not has_spdx(p)]
     if not missing:
         print(
-            f"license headers: all {len(tracked_sources())} tracked source files carry the SPDX line"
+            f"license headers: all {len(sources)} tracked source files carry the SPDX line"
         )
         return 0
     if apply:

@@ -744,7 +744,9 @@ class Cli:
 class Results:
     """Every check's outcome, so the summary reports facts rather than a feeling.
 
-    The four primitives are the oracle's, with the same names and the same semantics.
+    The four primitives are the oracle's, with the same names and the same semantics,
+    except that `eq` refuses `None` (its docstring says why). `absent()` is this suite's
+    own, for the checks that expect nothing on purpose.
     `skipped` is a *third* list rather than a pass with a note, because a skip folded into
     `passed` is how a suite that covers half of what it claims looks identical to one that
     covers all of it.
@@ -777,9 +779,27 @@ class Results:
         return ok
 
     def eq(self, name: str, actual: Any, expected: Any) -> bool:
+        """Passes when both sides are present and equal.
+
+        `None` on either side fails, because it's what a missing key reads as through
+        `.get()`: two envelopes that both lack a field would otherwise pass as agreeing
+        about it. Empty strings and empty lists still compare, since some checks assert
+        them on purpose. Deliberate absence goes through `absent()`.
+        """
+        if actual is None or expected is None:
+            return self.check(
+                name,
+                False,
+                "absent value; use results.absent() to assert absence"
+                f" (expected {expected!r}, got {actual!r})",
+            )
         return self.check(
             name, actual == expected, f"expected {expected!r}, got {actual!r}"
         )
+
+    def absent(self, name: str, value: Any) -> bool:
+        """Passes only when `value` is None: the check expects nothing on purpose."""
+        return self.check(name, value is None, f"expected nothing, got {value!r}")
 
     def raises(self, name: str, expected_kind: str, call: Callable[[], Any]) -> bool:
         """Asserts a call fails with exactly the `WireKind` named by `expected_kind`.
@@ -3894,10 +3914,9 @@ def drive_tunnel_identity(
         pin = record["identityVmPublicKey"]
         flipped = pin[:20] + ("A" if pin[20] != "A" else "B") + pin[21:]
         record_path.write_text(json.dumps({**record, "identityVmPublicKey": flipped}))
-        results.eq(
+        results.absent(
             "a tampered pin fails closed with nothing served",
             _tunnel_fetch(cli, vm_name, state_dir, 18444, AGENT_PORT, verify=True),
-            None,
         )
         # And the same tampered record cannot be adopted under the flag: the handshake
         # reply fails to verify against the flipped pin, and no record is written.
@@ -4101,6 +4120,23 @@ def gh_logged_out(root: Path, base: dict[str, str]) -> tuple[dict[str, str], Pat
     return env, shim / "gh.ran"
 
 
+def digest_record_agrees(
+    record: dict[str, Any], verified: Any, body: bytes, version: str
+) -> bool:
+    """Whether BIND-19's digest record names these bytes, this proof and this version.
+
+    One named check with `eq`'s rule inside it: a proof that's absent from both the record
+    and the envelope reads as None on each side and would otherwise agree. Kept apart from
+    the live driver so the self-test can make it fail, which a real run never does.
+    """
+    return (
+        record.get("sha256") == hashlib.sha256(body).hexdigest()
+        and record.get("verification") is not None
+        and record.get("verification") == verified
+        and record.get("version") == version
+    )
+
+
 def drive_provisioned_quickstart(
     cli: Cli, state: Path, logs: Any, results: Results
 ) -> None:
@@ -4193,9 +4229,7 @@ def drive_provisioned_quickstart(
         record = {"error": str(exc)}
     results.check(
         "BIND-19 the cached daemon's digest record matches its bytes and proof",
-        record.get("sha256") == hashlib.sha256(body).hexdigest()
-        and record.get("verification") == agentd.get("verified")
-        and record.get("version") == version,
+        digest_record_agrees(record, agentd.get("verified"), body, version),
         f"{record_path}: {record!r}",
     )
 
@@ -6895,6 +6929,54 @@ def self_test() -> int:
             3,
         )
         results.eq("and passes nothing while doing it", len(probe.passed), 0)
+
+        # -- eq() refuses an absent value ----------------------------------------
+        # A missing key reads as None through `.get()`, so two lookups that both missed
+        # used to compare equal and pass as agreement. The twin for each side, and both.
+        print(
+            "  -- probing that eq() refuses None (each PROBE line below is expected) --"
+        )
+        probe = Results(probe=True)
+        probe.eq("absent", None, None)
+        probe.eq("absent actual", None, "present")
+        probe.eq("absent expected", "present", None)
+        results.eq(
+            "eq() fails when either side is None, both sides included",
+            [name for name, _ in probe.failed],
+            ["absent", "absent actual", "absent expected"],
+        )
+        results.eq("and eq() passes nothing while refusing None", len(probe.passed), 0)
+        probe = Results(probe=True)
+        probe.absent("a present value is not absent", "present")
+        probe.absent("an empty string is present", "")
+        results.eq(
+            "absent() fails on any value that isn't None, an empty one included",
+            len(probe.failed),
+            2,
+        )
+        results.absent("absent() passes None", None)
+        results.eq("eq() still compares empty strings", "", "")
+        results.eq("and empty lists", [], [])
+        # BIND-19 keeps one named check, so its copy of the rule gets its own twin.
+        body = b"daemon"
+        record = {
+            "sha256": hashlib.sha256(body).hexdigest(),
+            "verification": "attested",
+            "version": "1.0.0",
+        }
+        unproven = {
+            key: value for key, value in record.items() if key != "verification"
+        }
+        results.check(
+            "the digest record check refuses a proof absent from both sides (BIND-19)",
+            not digest_record_agrees(unproven, None, body, "1.0.0"),
+            repr(unproven),
+        )
+        results.check(
+            "and passes a record that names the bytes, the proof and the version",
+            digest_record_agrees(record, "attested", body, "1.0.0"),
+            repr(record),
+        )
 
         # -- the local reject carries no kind, which is information ------------
         try:

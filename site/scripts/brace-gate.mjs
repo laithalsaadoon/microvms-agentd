@@ -21,7 +21,8 @@
  *   node scripts/brace-gate.mjs src/content/docs
  *   node scripts/brace-gate.mjs src/content/docs --json
  *
- * Exit 0: clean. Exit 1: offenders, one `file:line:column` per line on stdout. Exit 2: bad invocation.
+ * Exit 0: clean. Exit 1: offenders, one `file:line:column` per line on stdout, or a walk that found no
+ * pages or no index page (on stderr). Exit 2: bad invocation.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs"
@@ -94,6 +95,27 @@ const main = () => {
   }
 
   const files = walk(target)
+
+  /*
+   * A scan of nothing finds no brace, and that used to print "0 files, no bare brace" and exit 0: the
+   * state a sync that wrote nowhere, or a renamed content directory, leaves behind. The index page is
+   * the sentinel because every docs tree has one; a file set without it came from somewhere else.
+   */
+  if (files.length === 0) {
+    process.stderr.write(
+      `brace-gate: the walk of \`${target}\` found no ${EXTENSIONS.join(" or ")} files; run the docs sync first\n`
+    )
+    process.exit(1)
+  }
+  const index = EXTENSIONS.map((extension) => join(target, `index${extension}`))
+  if (!index.some((page) => files.includes(page))) {
+    process.stderr.write(
+      `brace-gate: the walk of \`${target}\` found ${files.length} files but no ${index
+        .map((page) => relative(target, page))
+        .join(" or ")}, which every docs tree has; it's scanning the wrong directory\n`
+    )
+    process.exit(1)
+  }
 
   /*
    * Report each path so it is clickable from where the gate was run: relative to the working directory,
