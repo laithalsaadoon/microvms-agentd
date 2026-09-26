@@ -23,6 +23,8 @@ on:
       - 'microvms-cli/src/envelope.rs'
       - 'microvms-cli/src/closed_output*.rs'
       - 'microvms-core/src/provision*.rs'
+      # `elf_machine`, which `provision_fuzz::elf` drives, lives in the domain since #282.
+      - 'microvms-domain/src/provision.rs'
       - 'microvms-core/src/control/artifact.rs'
       - 'microvms-core/tests/wrap_fuzz.rs'
       - 'microvms-core/src/control/context.rs'

@@ -2750,25 +2750,39 @@ dependencies = [
  "http",
  "hyper",
  "hyper-util",
- "jiff",
+ "microvms-domain",
  "microvms-protocol",
  "percent-encoding",
  "proptest",
  "regex",
  "reqwest",
- "rust_decimal",
- "rust_decimal_macros",
  "serde",
  "serde_json",
  "sha2 0.11.0",
  "snow",
  "tempfile",
- "thiserror 2.0.21",
  "tokio",
  "tokio-tungstenite 0.30.0",
  "turmoil",
- "x25519-dalek",
  "zip",
+]
+
+[[package]]
+name = "microvms-domain"
+version = "0.10.0"
+dependencies = [
+ "base64 0.23.1",
+ "bolero",
+ "const-hex",
+ "jiff",
+ "microvms-protocol",
+ "proptest",
+ "rust_decimal",
+ "rust_decimal_macros",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "x25519-dalek",
 ]
 
 [[package]]

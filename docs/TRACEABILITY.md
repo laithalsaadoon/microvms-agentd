@@ -6,7 +6,7 @@ defined in `spec/core.symspec.json` and `spec/agentd.symspec.json`.
 
 | Requirement | model | gherkin | fuzz | test | impl | live |
 |---|---|---|---|---|---|---|
-| CLI-7 | 1 | 1 | 1 | 4 | 5 | 1 |
+| CLI-7 | 1 | 1 | 1 | 4 | 6 | 1 |
 | CLI-8 | 1 | 1 | 1 | 2 | 3 | 1 |
 | CLI-9 | 1 | 1 | 1 | 2 | 3 | 1 |
 | IMAGE-1 | 1 | 1 | 1 | 4 | 1 | waived |
@@ -44,8 +44,9 @@ defined in `spec/core.symspec.json` and `spec/agentd.symspec.json`.
 | BIND-9 | 1 | 1 | 1 | 4 | 2 | 1 |
 | BIND-10 | 1 | 1 | 1 | 5 | 4 | 1 |
 | BIND-14 | waived | 1 | 1 | 4 | 3 | waived |
-| BIND-15 | 1 | 1 | waived | 6 | 5 | 1 |
-| BIND-16 | 1 | 1 | waived | 5 | 4 | 1 |
+| BIND-15 | 1 | 1 | waived | 6 | 6 | 1 |
+| BIND-16 | 1 | 1 | waived | 5 | 5 | 1 |
+| ARCH-6 | waived | waived | waived | 1 | 6 | waived |
 
 ## CLI-7
 
@@ -55,7 +56,7 @@ If a reader closes the CLI's stdout or stderr, then the CLI crate shall exit wit
 - **gherkin:** `microvms-cli/tests/features/closed_output.feature`
 - **fuzz:** `microvms-cli/src/closed_output_fuzz.rs`
 - **test:** `microvms-cli/src/closed_output.rs`, `microvms-cli/src/guards.rs`, `microvms-cli/tests/bdd.rs`, `microvms-cli/tests/thinness.rs`
-- **impl:** `microvms-cli/src/closed_output.rs`, `microvms-cli/src/envelope.rs`, `microvms-cli/src/main.rs`, `microvms-core/src/lib.rs`, `microvms-core/src/sandbox.rs`
+- **impl:** `microvms-cli/src/closed_output.rs`, `microvms-cli/src/envelope.rs`, `microvms-cli/src/main.rs`, `microvms-core/src/lib.rs`, `microvms-core/src/sandbox.rs`, `microvms-domain/src/lib.rs`
 - **live:** `conformance/run_rs.py`
 
 ## CLI-8
@@ -460,9 +461,9 @@ The sizing model shall select for a resource request the smallest size class who
 
 - **model:** waived: a stateless selection over the five-row size table; the bolero harness checks minimality and coverage over arbitrary requests instead
 - **gherkin:** `microvms-core/tests/features/request_and_preflight.feature`
-- **fuzz:** `microvms-core/src/sizing_fuzz.rs`
-- **test:** `microvms-core/src/sizing.rs`, `microvms-core/tests/bdd_preflight.rs`, `microvms-js/__test__/request_and_preflight.mjs`, `microvms-py/tests/test_request_and_preflight.py`
-- **impl:** `microvms-core/src/sizing.rs`, `microvms-js/src/cost.rs`, `microvms-py/src/cost.rs`
+- **fuzz:** `microvms-domain/src/sizing_fuzz.rs`
+- **test:** `microvms-core/tests/bdd_preflight.rs`, `microvms-domain/src/sizing.rs`, `microvms-js/__test__/request_and_preflight.mjs`, `microvms-py/tests/test_request_and_preflight.py`
+- **impl:** `microvms-domain/src/sizing.rs`, `microvms-js/src/cost.rs`, `microvms-py/src/cost.rs`
 - **live:** waived: a pure function of the request and the documented table; it makes no AWS call
 
 ## BIND-15
@@ -473,7 +474,7 @@ When a caller asks for a preflight, the microvms-core shall report whether the r
 - **gherkin:** `microvms-core/tests/features/request_and_preflight.feature`
 - **fuzz:** waived: the outcome space (3 region x 2 credential x 3 service worlds) is enumerated exhaustively by the Stateright model; there is no input stream to fuzz
 - **test:** `microvms-cli/src/guards.rs`, `microvms-core/src/preflight.rs`, `microvms-core/tests/bdd_preflight.rs`, `microvms-core/tests/live_preflight.rs`, `microvms-js/__test__/request_and_preflight.mjs`, `microvms-py/tests/test_request_and_preflight.py`
-- **impl:** `microvms-core/src/control/image.rs`, `microvms-core/src/control/transport.rs`, `microvms-core/src/preflight.rs`, `microvms-js/src/preflight.rs`, `microvms-py/src/preflight.rs`
+- **impl:** `microvms-core/src/control/image.rs`, `microvms-core/src/control/transport.rs`, `microvms-core/src/preflight.rs`, `microvms-domain/src/preflight.rs`, `microvms-js/src/preflight.rs`, `microvms-py/src/preflight.rs`
 - **live:** `conformance/run_rs.py`
 
 ## BIND-16
@@ -484,5 +485,16 @@ The microvms-core shall not make a billable or mutating AWS call during a prefli
 - **gherkin:** `microvms-core/tests/features/request_and_preflight.feature`
 - **fuzz:** waived: the outcome space (3 region x 2 credential x 3 service worlds) is enumerated exhaustively by the Stateright model; there is no input stream to fuzz
 - **test:** `microvms-core/src/preflight.rs`, `microvms-core/tests/bdd_preflight.rs`, `microvms-core/tests/live_preflight.rs`, `microvms-js/__test__/request_and_preflight.mjs`, `microvms-py/tests/test_request_and_preflight.py`
-- **impl:** `microvms-core/src/control/image.rs`, `microvms-core/src/preflight.rs`, `microvms-js/src/preflight.rs`, `microvms-py/src/preflight.rs`
+- **impl:** `microvms-core/src/control/image.rs`, `microvms-core/src/preflight.rs`, `microvms-domain/src/preflight.rs`, `microvms-js/src/preflight.rs`, `microvms-py/src/preflight.rs`
 - **live:** `conformance/run_rs.py`
+
+## ARCH-6
+
+The microvms-domain shall not perform network, filesystem, subprocess, environment, clock, or entropy access.
+
+- **model:** waived: a property of a crate's code and dependencies, not of a state
+- **gherkin:** waived: no behavior to script: clippy and the dependency set enforce it at build time
+- **fuzz:** waived: there is no input stream; the rule is over source and manifests
+- **test:** `microvms-cli/tests/dependency_direction.rs`
+- **impl:** `microvms-core/src/lib.rs`, `microvms-core/src/prelude.rs`, `microvms-domain/src/cost.rs`, `microvms-domain/src/identity.rs`, `microvms-domain/src/lib.rs`, `microvms-domain/src/names.rs`
+- **live:** waived: the domain makes no AWS call by construction

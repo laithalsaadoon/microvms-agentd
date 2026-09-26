@@ -44,6 +44,7 @@ use microvms_core::cost::{
     DurationP, EstimatedUsd as CoreUsd, LineItem as CoreLineItem, PlanUsage, Provenance,
     RateTable as CoreRates, RunUsage, Total as CoreTotal,
 };
+use microvms_core::prelude::*;
 use napi::bindgen_prelude::ClassInstance;
 use napi_derive::napi;
 

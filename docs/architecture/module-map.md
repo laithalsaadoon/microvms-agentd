@@ -71,7 +71,7 @@ on a strength ladder where S1 means the mistake cannot be written down at all
 (`microvms-core/src/lib.rs:7-14`, `microvms-core/src/lib.rs:23-40`). `cost.rs` carries the rule
 that makes the rest of it legible — unknown is not zero, so `Amount::Unpriced` is a distinct
 variant a consumer has to match on rather than a $0.00
-line (`microvms-core/src/cost.rs:22-27`) — and the crate re-exports `protocol` so consumers name
+line (`microvms-domain/src/cost.rs:22-27`) — and the crate re-exports `protocol` so consumers name
 wire types through here instead of depending on the contract crate
 (`microvms-core/src/lib.rs:79-81`). The `agents` module sits deliberately above the generic
 lifecycle: it is the L3 layer, a dated profile table (Claude Code, Codex), an `AgentVm` that
@@ -80,7 +80,7 @@ mints the bearer token in process (`microvms-core/src/agents/mod.rs`, `docs/AGEN
 free functions (`image_request_for`, `launch_request_for`, `install_access`, `prompt`) are what
 the bindings drive, because their sandbox sits behind a lock one `AgentVm` cannot own.
 
-- `microvms-core/src/cost.rs`
+- `microvms-domain/src/cost.rs`
 - `microvms-core/src/control/image.rs`
 - `microvms-core/src/session/exec.rs`
 - `microvms-core/src/control/microvm.rs`

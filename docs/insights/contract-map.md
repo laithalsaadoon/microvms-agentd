@@ -9,7 +9,7 @@ Three tiers, all of which cross a boundary a single `cargo build` cannot fully p
 1. **A Rust type or constant declared in one workspace crate and named by at least one
    other.** The dependency edges are `cli -> core -> protocol`, `bindings -> core`,
    `agentd -> protocol`, asserted as *equalities* over the metadata by
-   `microvms-cli/tests/dependency_direction.rs:68-125` — a violation is a test failure, not a
+   `microvms-cli/tests/dependency_direction.rs:69-126` — a violation is a test failure, not a
    convention.
 2. **A shape that crosses a language boundary**, where no compiler checks either side: the
    HTTP/SSE wire format, the `--json` envelope the Python conformance suite parses, the
@@ -17,7 +17,7 @@ Three tiers, all of which cross a boundary a single `cargo build` cannot fully p
 3. **A contract stated as a machine-checked assertion rather than as a type**: the generated
    `docs/schema.json`, the EARS requirements in `spec/core.symspec.json`, and the
    cross-language agreement tests such as
-   `every_rate_byte_matches_the_python_literal` (`microvms-core/src/cost.rs:2179-2196`).
+   `every_rate_byte_matches_the_python_literal` (`microvms-domain/src/cost.rs:2222-2239`).
 
 Ranking is by distinct consumer *file* count, measured at 9c462f0 with
 `rg -l` over qualified paths and `rg -o … | uniq -c` over occurrences. `agentd` counts as one
@@ -52,7 +52,7 @@ state of the art.
 
 ## microvms_core::ErrorKind — the coarse failure taxonomy
 
-**Producer:** `microvms-core/src/error.rs:126-159` (enum), `:166-180` (`ALL`), `:187-203` (`code`)
+**Producer:** `microvms-domain/src/error.rs:126-159` (enum), `:166-180` (`ALL`), `:187-203` (`code`)
 
 **Consumer(s):**
 
@@ -64,14 +64,14 @@ state of the art.
 - `microvms-js/src/errors.rs:143-149` — `error_codes()`, enumerated from `ErrorKind::ALL`
   rather than transcribed.
 - Raise sites across core: `microvms-core/src/sandbox.rs:68`,
-  `microvms-core/src/hooks.rs:156`, `microvms-core/src/sizing.rs:266`,
-  `microvms-core/src/cost.rs:2124`, plus `control/{artifact,image,microvm,mod,transport}.rs`
+  `microvms-domain/src/hooks.rs:156`, `microvms-domain/src/sizing.rs:266`,
+  `microvms-domain/src/cost.rs:2167`, plus `control/{artifact,image,microvm,mod,transport}.rs`
   and `session/{exec,http,mod,proxy,sse}.rs`.
 - The daemon's own uses: `agentd/src/disk.rs:69`, `agentd/src/exec.rs:776`,
   `agentd/src/fs.rs:1107`, `agentd/src/identity.rs:411`.
 
 Count at 9c462f0: 36 non-declaring files, from
-`rg -l '\bErrorKind\b' --type rust --glob '!microvms-core/src/error.rs'`.
+`rg -l '\bErrorKind\b' --type rust --glob '!microvms-domain/src/error.rs'`.
 
 **Shape:**
 
@@ -116,15 +116,15 @@ pub enum ErrorKind {
 - **The mapping to exit integers is injective, and consumers rely on that.**
   `microvms-cli/src/exit.rs:512-525` asserts no two kinds collapse onto one exit row, and
   names the plausible edit it exists to catch (routing `Precondition` to `InvalidArg`).
-- **The `ERR_*` string is the branch key, not the integer.** `microvms-core/src/error.rs:182-186`
+- **The `ERR_*` string is the branch key, not the integer.** `microvms-domain/src/error.rs:182-186`
   states it: a shell reads `$?`, an agent parsing `--json` reads `code` and should never keep
   an integer table.
 - **`ALL` is in exit-code order, and two independent hand-written tables depend on that
-  order.** `microvms-core/src/error.rs:434-452` and `microvms-cli/src/exit.rs:406-433` both
+  order.** `microvms-domain/src/error.rs:434-452` and `microvms-cli/src/exit.rs:406-433` both
   spell the codes out as literals, deliberately: "a generated list would agree with
-  a typo" (`microvms-core/src/error.rs:430-431`).
-- **Retryability is derived, never stored.** `microvms-core/src/error.rs:116-118` reads the
-  kind; `microvms-core/src/error.rs:399-417` keeps a second, test-only table so the two can
+  a typo" (`microvms-domain/src/error.rs:430-431`).
+- **Retryability is derived, never stored.** `microvms-domain/src/error.rs:116-118` reads the
+  kind; `microvms-domain/src/error.rs:399-417` keeps a second, test-only table so the two can
   be compared rather than trusted.
 - **The Python exception hierarchy is one-to-one with the kinds and rooted at one base**, so
   `except MicrovmError` catches everything (`microvms-py/src/errors.rs:4-9`).
@@ -135,17 +135,17 @@ pub enum ErrorKind {
   `.erpaval/solutions/api-patterns/napi-async-collapses-error-codes.md`.
 
 **Drift risk:** adding a kind is forced into the exhaustive matches
-(`microvms-core/src/error.rs:188`, `microvms-cli/src/exit.rs:141`,
+(`microvms-domain/src/error.rs:188`, `microvms-cli/src/exit.rs:141`,
 `microvms-py/src/errors.rs:130`) but **not** into `ALL`, so a variant added without an `ALL`
 entry compiles and silently vanishes from `error_codes()`
 (`microvms-js/src/errors.rs:143-149`) and from every consumer that enumerates the catalog.
 The cross-check at `microvms-cli/src/exit.rs:486-492` catches it only when an `EXIT_TABLE` row
 is added in the same change. Mitigation: assert `ErrorKind::ALL.len()` against a literal
-alongside the spelled codes at `microvms-core/src/error.rs:434-452`.
+alongside the spelled codes at `microvms-domain/src/error.rs:434-452`.
 
 ## microvms_core::Region — the closed region set, S1 closure
 
-**Producer:** `microvms-core/src/region.rs:44-63` (enum), `:73` (`MICROVM_REGIONS`), `:107` (`unlisted`), `:137-146` (`FromStr`)
+**Producer:** `microvms-domain/src/region.rs:44-63` (enum), `:73` (`MICROVM_REGIONS`), `:107` (`unlisted`), `:137-146` (`FromStr`)
 
 **Consumer(s):**
 
@@ -153,12 +153,12 @@ alongside the spelled codes at `microvms-core/src/error.rs:434-452`.
 - `microvms-cli/src/commands/doctor.rs:17`, `microvms-cli/src/guards.rs:29`, `microvms-cli/src/seam.rs:29`
 - `microvms-py/src/region.rs:11`, `microvms-py/src/sandbox.rs:309`
 - `microvms-js/src/region.rs:8`, `microvms-js/src/sandbox.rs:60`, `microvms-js/src/lib.rs:46`
-- `microvms-core/src/lib.rs:81` (re-export), `microvms-core/src/cost.rs:850`,
+- `microvms-core/src/lib.rs:81` (re-export), `microvms-domain/src/cost.rs:857`,
   `microvms-core/src/sandbox.rs:705`, plus `control/{artifact,connector,image,microvm,mod,transport}.rs`
 - `microvms-core/tests/live_pagination.rs:59`, `microvms-core/tests/live_versions.rs:37`
 
 Count at 9c462f0: 20 non-declaring files, from
-`rg -l '\bRegion\b' --type rust --glob '!microvms-core/src/region.rs'`.
+`rg -l '\bRegion\b' --type rust --glob '!microvms-domain/src/region.rs'`.
 
 **Shape:**
 
@@ -188,12 +188,12 @@ pub enum Region {
 
 - **`Unlisted` is a visible variant, not a hidden flag**, so a `match` over regions cannot
   forget the case exists and a reader of a call site can see that someone opted into the trap
-  (`microvms-core/src/region.rs:40-43`).
+  (`microvms-domain/src/region.rs:40-43`).
 - **`Region` is not `Copy`.** It carries a `String` in `Unlisted`, so it derives
-  `Clone, Debug, Eq, Hash, PartialEq` only (`microvms-core/src/region.rs:44`). Consumers that
+  `Clone, Debug, Eq, Hash, PartialEq` only (`microvms-domain/src/region.rs:44`). Consumers that
   hold a region across an `async` boundary clone it; `RateTable::region()` returns `&Region`
-  for the same reason (`microvms-core/src/cost.rs:868-870`).
-- **The region label is priced, not cosmetic.** `microvms-core/src/cost.rs:864-867` measures
+  for the same reason (`microvms-domain/src/cost.rs:875-877`).
+- **The region label is priced, not cosmetic.** `microvms-domain/src/cost.rs:871-874` measures
   the consequence: a Tokyo caller reading the us-east-1 table understates snapshot write by
   22.6%, and staleness checking would never surface it.
 - **The five-region list is measurement-backed and cannot be model-checked.**
@@ -205,7 +205,7 @@ pub enum Region {
 path, which works but discards the null-message diagnostic that is the whole reason the enum
 exists. Mitigation: the region list has no model to check it against, so
 re-read it whenever `docs/PLATFORM.md` gains a dated region finding and update both
-`microvms-core/src/region.rs:73` and `scripts/check-model-drift.py`'s `PINNED_REGIONS` in the
+`microvms-domain/src/region.rs:73` and `scripts/check-model-drift.py`'s `PINNED_REGIONS` in the
 same commit.
 
 ## microvms_core::session::Session — the in-VM control API handle
@@ -265,7 +265,7 @@ the scope and the header are assigned from one value.
 
 ## microvms_core::WireKind — the fine taxonomy, where 400 and 404 stay different
 
-**Producer:** `microvms-core/src/error.rs:218-268` (enum), `:272-286` (`ALL`), `:292-308` (`as_str`), `:315-331` (`status`), `:343-356` (`from_status`), `:366-397` (`error_kind`)
+**Producer:** `microvms-domain/src/error.rs:218-268` (enum), `:272-286` (`ALL`), `:292-308` (`as_str`), `:315-331` (`status`), `:343-356` (`from_status`), `:366-397` (`error_kind`)
 
 **Consumer(s):**
 
@@ -281,11 +281,11 @@ the scope and the header are assigned from one value.
 - `microvms-core/tests/turmoil_client.rs:63`
 
 Count at 9c462f0: 15 non-declaring files, from
-`rg -l '\bWireKind\b' --type rust --glob '!microvms-core/src/error.rs'`.
+`rg -l '\bWireKind\b' --type rust --glob '!microvms-domain/src/error.rs'`.
 
 **Shape:**
 
-The variants are listed at `microvms-core/src/error.rs:219-268`. The load-bearing
+The variants are listed at `microvms-domain/src/error.rs:219-268`. The load-bearing
 member is the status table, because it is where a consumer's 400-versus-404 distinction is
 either preserved or lost:
 
@@ -308,31 +308,31 @@ either preserved or lost:
 
 **Assumptions consumers make:**
 
-- **There is deliberately no generic 4xx fallback.** `microvms-core/src/error.rs:336-342`
+- **There is deliberately no generic 4xx fallback.** `microvms-domain/src/error.rs:336-342`
   names the defect a fallback would reintroduce — a 4xx mapped to `NotFound` made a protocol
   typo look like a missing file, and it hid for a full review round. Asserted at
-  `microvms-core/src/error.rs:519-529`: 402, 403, 405, 418, 429, 451 must all resolve to
+  `microvms-domain/src/error.rs:519-529`: 402, 403, 405, 418, 429, 451 must all resolve to
   `None`.
-- **5xx *does* fall back, and 503 is the one exception.** `microvms-core/src/error.rs:535-540`
+- **5xx *does* fall back, and 503 is the one exception.** `microvms-domain/src/error.rs:535-540`
   — "come back in a moment" is not "the daemon broke".
 - **`status()` and `from_status()` are inverses wherever both are defined**, asserted at
-  `microvms-core/src/error.rs:546-556`, and `Transport`, `AuthTokenMint`, `ExecTimeout`,
+  `microvms-domain/src/error.rs:546-556`, and `Transport`, `AuthTokenMint`, `ExecTimeout`,
   and `OutputGap` deliberately have no status (`:326-329`).
 - **The `as_str` strings are Python exception class names, not a re-spelling.**
-  `microvms-core/src/error.rs:288-291` — the conformance oracle compares against them, and
+  `microvms-domain/src/error.rs:288-291` — the conformance oracle compares against them, and
   `conformance/run_rs.py:187-196` reads them out of `data.kind`.
 - **`None` is information.** `conformance/run_rs.py:189-193` states that an absent
   `data.kind` means the client refused before any call. The CLI preserves that by inserting
   the key only when a wire kind exists (`microvms-cli/src/envelope.rs:326-328`), and
-  `microvms-core/src/error.rs:562-567` asserts a local reject carries none.
+  `microvms-domain/src/error.rs:562-567` asserts a local reject carries none.
 - **The retryable variants are named as literals**, so one added by mistake
-  fails a test rather than a retry loop (`microvms-core/src/error.rs:485-501`).
+  fails a test rather than a retry loop (`microvms-domain/src/error.rs:485-501`).
 
 **Drift risk:** a new variant added to `WireKind` reaches `error_kind()` as a compile error
 (the match is closed) but reaches `from_status` silently — a status the daemon starts using
 with no row in that table maps to `None` and surfaces as something other than the daemon's
 own decision. Mitigation: `status()`/`from_status()` inverse test at
-`microvms-core/src/error.rs:546-556` catches it only if the new variant declares a status, so
+`microvms-domain/src/error.rs:546-556` catches it only if the new variant declares a status, so
 declare one whenever the daemon does.
 
 ## microvms_core::sandbox::Sandbox — the product surface and its state machine
@@ -398,7 +398,7 @@ pub struct Sandbox {
 - **`Suspended` is still billing.** `Lifecycle::is_live` at
   `microvms-core/src/sandbox.rs:164-169` includes `Pending | Running | Suspending | Suspended`,
   which is what a `Drop` warning is for. That is a *different* question from
-  `constants::TERMINAL_STATES` (`microvms-core/src/constants.rs:448`), which lists
+  `constants::TERMINAL_STATES` (`microvms-domain/src/constants.rs:448`), which lists
   `SUSPENDED`/`SUSPENDING` as states a launch wait must stop on.
 - **The suspended window comes from our own `RunMicrovm` request first, and from
   `GetMicrovm`'s `idlePolicy` as the fallback.** `microvms-core/src/sandbox.rs:605-607` — a
@@ -417,7 +417,7 @@ pub struct Sandbox {
   logging a sandbox does not leak the credential.
 
 **Drift risk:** the `Lifecycle` variants and the `MICROVM_STATES` wire strings are two
-readers of one AWS fact, and `microvms-core/src/constants.rs:341-347` states plainly that a
+readers of one AWS fact, and `microvms-domain/src/constants.rs:341-347` states plainly that a
 wire string cannot be exhaustively matched. A state AWS respells fails the model gate
 (`scripts/check-model-drift.py`) and a subset test, but does not fail to compile.
 Mitigation: keep `scripts/check-model-drift.py` in `mise run check` — it needs no network and
@@ -1004,7 +1004,7 @@ edited in one commit.
 
 ## Other contracts
 
-- **`microvms_core::SizeClass`** — `microvms-core/src/sizing.rs:112-119`, five closed baselines
+- **`microvms_core::SizeClass`** — `microvms-domain/src/sizing.rs:112-119`, five closed baselines
   with `ALL` at `:132`, `DEFAULT = Mib2048` at `:129`, and the one S2 boundary at
   `from_baseline_mib` (`:146`). 13 consumer files at 9c462f0, across cli, py, js, and core's
   cost engine.
@@ -1032,13 +1032,13 @@ edited in one commit.
 - **`microvms-js/index.d.ts`** — generated by `napi build --platform`
   (`microvms-js/package.json:12`), gitignored at `.gitignore:29`, **no drift gate**.
   Declared as the package's `"types"` at `microvms-js/package.json:8`.
-- **`pinned_rates()` and its Python twin** — `microvms-core/src/cost.rs:1011-1026` against
+- **`pinned_rates()` and its Python twin** — `microvms-domain/src/cost.rs:1018-1033` against
   `scripts/check-live-rates.py:119-145`. A deliberate second copy: `:112-118` states that
   importing the values would compare a table against itself. `verify_twin` (`:148-211`) reads
   the Rust literals as text, so a reflow of `pinned_rates()` is a named exit 1.
-  `every_rate_byte_matches_the_python_literal` (`microvms-core/src/cost.rs:2179-2196`) checks
+  `every_rate_byte_matches_the_python_literal` (`microvms-domain/src/cost.rs:2222-2239`) checks
   scale as well as value.
-- **`microvms-core/src/constants.rs` against the botocore service model** — the constants
+- **`microvms-domain/src/constants.rs` against the botocore service model** — the constants
   (`MODEL_API_VERSION = "2025-09-09"` at `:57`, `MAX_RUN_HOOK_PAYLOAD_BYTES = 4096` at `:83`)
   read back out of the shipped `lambda-microvms` model by `scripts/check-model-drift.py`.
   `DOCUMENTED_RUN_HOOK_PAYLOAD_BYTES = 16_384` (`:97`) is retained as the contradicted prose
@@ -1071,7 +1071,7 @@ edited in one commit.
   an id-keyed object (each with `key`, `patternType`, `priority`, `sentence`, `systemName`,
   `verificationMethod`) plus a `stateModel` whose variables are mirrored field-for-field
   by `microvms-core/src/sandbox.rs:595-603`.
-- **The workspace dependency edges** — `microvms-cli/tests/dependency_direction.rs:68-125`
+- **The workspace dependency edges** — `microvms-cli/tests/dependency_direction.rs:69-126`
   asserts them as equalities, not as `assert!(no edge)`, because a stub crate with no
   dependencies passes a negative assertion (`:11-12`).
   `microvms-cli/tests/thinness.rs:66` holds the CLI's allowlist, each entry with a

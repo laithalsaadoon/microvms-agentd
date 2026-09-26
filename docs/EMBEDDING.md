@@ -208,7 +208,7 @@ identical token answers 200 (the platform may retry its own hook), a different
 token answers 409 and changes nothing. Until it lands, every control route
 answers 503 — not 404, not a dropped connection — so a client can distinguish
 "not yet bootstrapped" from "broken" (`agentd/src/auth.rs:62-80`). The payload
-is capped at 4096 bytes (`microvms-core/src/constants.rs:61`).
+is capped at 4096 bytes (`microvms-domain/src/constants.rs:83`).
 
 **Auth.** Every `/v1/` route except `/v1/health` and `/v1/schema` takes
 `Authorization: Bearer <agent_token>` — the same token the payload delivered.

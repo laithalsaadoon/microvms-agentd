@@ -109,7 +109,7 @@ HOURS_PER_MONTH = Decimal(730)
 #: written; `storage_gb_month` is *derived*, because the API quotes snapshot storage
 #: per GB-hour and the table holds per GB-month.
 #:
-#: **These literals are a deliberate second copy of `microvms-core/src/cost.rs`'s
+#: **These literals are a deliberate second copy of `microvms-domain/src/cost.rs`'s
 #: `pinned_rates()`.** That is the point: a drift check that imported the values it
 #: checks would compare a table against itself and pass by construction. Two
 #: independent readers is the same pattern this repo's harbor-harvest sibling uses
@@ -130,7 +130,7 @@ PINNED: dict[str, Decimal] = {
 }
 
 #: Where the twin lives, and the function whose body must carry the same figures.
-TWIN_PATH = Path("microvms-core/src/cost.rs")
+TWIN_PATH = Path("microvms-domain/src/cost.rs")
 TWIN_FN = "pub fn pinned_rates()"
 
 #: The twin's field names, in the spelling `cost.rs` uses. Identical to `PINNED`'s
@@ -570,7 +570,7 @@ def render_drift(drifts: tuple[RateDrift, ...]) -> str:
     if moved:
         fields = ", ".join(d.field for d in moved)
         lines.append(
-            f"{len(moved)} rate(s) moved: {fields} — update microvms-core/src/cost.rs, the "
+            f"{len(moved)} rate(s) moved: {fields} — update microvms-domain/src/cost.rs, the "
             "PINNED table here, and docs/PLATFORM.md in the same commit"
         )
     else:

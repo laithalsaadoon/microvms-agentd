@@ -140,7 +140,7 @@ the smallest class whose baseline covers the request, `SizeClass::DEFAULT` when
 neither axis asks for anything, and an invalid-argument refusal naming the largest
 class when no class covers it. `microvms-core/src/preflight.rs:1-32`,
 `microvms-core/src/preflight.rs:105-123`, `microvms-core/src/preflight.rs:203-213`,
-`microvms-core/src/sizing.rs:170-212`.
+`microvms-domain/src/sizing.rs:170-212`.
 
 ## microvms-core
 
@@ -154,7 +154,7 @@ pub struct Error {
 
 A failure classified once at the point it is raised, deliberately a struct with a private body rather than an enum, because an enum over every raise site would make each new failure a breaking change for a binding that matched exhaustively.
 
-`microvms-core/src/error.rs:41-43`
+`microvms-domain/src/error.rs:41-43`
 
 ### Region
 
@@ -165,7 +165,7 @@ pub enum Region {
 
 An AWS region, closed over the five that run MicroVMs plus a named escape hatch, so a typo'd region is a compile error rather than an `AccessDeniedException` carrying a null message.
 
-`microvms-core/src/region.rs:44-45`
+`microvms-domain/src/region.rs:44-45`
 
 ### ErrorKind
 
@@ -176,7 +176,7 @@ pub enum ErrorKind {
 
 The coarse failure classes, one per non-zero row of the CLI's exit table, with the integer exit code left to the CLI because a library owning process exit codes would be a library with an opinion about being a process.
 
-`microvms-core/src/error.rs:126-127`
+`microvms-domain/src/error.rs:126-127`
 
 ### SizeClass
 
@@ -193,7 +193,7 @@ pub enum SizeClass {
 
 The five documented size classes, named for the baseline a caller writes into `minimumMemoryInMiB` and deliberately not for the peak, since naming both would suggest the two are picked independently.
 
-`microvms-core/src/sizing.rs:118-125`
+`microvms-domain/src/sizing.rs:118-125`
 
 ### Session
 
@@ -272,7 +272,7 @@ pub enum WireKind {
 
 The daemon-side failure classes the conformance suite asserts on, several of which collapse onto one `ErrorKind` at the exit code rather than at the raise site.
 
-`microvms-core/src/error.rs:218-219`
+`microvms-domain/src/error.rs:218-219`
 
 ### RunHookTimeout
 
@@ -283,7 +283,7 @@ pub struct RunHookTimeout(u32);
 
 A timeout for the `run`, `resume`, `suspend`, or `terminate` hook, accepting 1..=60 seconds and offering no conversion from `BuildHookTimeout`.
 
-`microvms-core/src/hooks.rs:47-48`
+`microvms-domain/src/hooks.rs:47-48`
 
 ### Transport
 
@@ -304,7 +304,7 @@ pub struct BuildHookTimeout(u32);
 
 A timeout for the `ready` or `validate` image-build hook, accepting 1..=3600 seconds, and a distinct type so a build-sized value cannot reach a field that caps at 60.
 
-`microvms-core/src/hooks.rs:53-54`
+`microvms-domain/src/hooks.rs:53-54`
 
 ### EstimatedUsd
 
@@ -315,7 +315,7 @@ pub struct EstimatedUsd(Decimal);
 
 Dollars derived from published rates and not the bill, with no `From<EstimatedUsd> for f64`, no `Into`, no `Deref`, and no `as_f64`, so laundering an estimate into a float does not compile.
 
-`microvms-core/src/cost.rs:513-514`
+`microvms-domain/src/cost.rs:520-521`
 
 ### ExecHandle
 
@@ -336,7 +336,7 @@ pub struct RateTable {
 
 The us-east-1 rates, held privately so that pricing compute from the ARM rate is a property of the type rather than of a code path a caller can bypass.
 
-`microvms-core/src/cost.rs:838-839`
+`microvms-domain/src/cost.rs:845-846`
 
 ### CostReport
 
@@ -347,7 +347,7 @@ pub struct CostReport {
 
 Per-phase cost attribution for one sandbox, measured or projected, holding the rate table it was computed against so it stays reproducible after `pinned_rates` is updated.
 
-`microvms-core/src/cost.rs:1467-1468`
+`microvms-domain/src/cost.rs:1474-1475`
 
 ### ExecResult
 

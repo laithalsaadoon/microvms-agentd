@@ -915,6 +915,20 @@ mod tests {
     use super::*;
     use crate::region::Region;
 
+    /// A suspend waits for these, so each has to be a state the service can report. The rest
+    /// of the polling loops' sets are checked beside the enum in `constants`; this one lives
+    /// here, so its check does too.
+    #[test]
+    fn every_state_a_suspend_waits_for_is_in_the_models_enum() {
+        for state in SUSPEND_WANTED {
+            assert!(
+                crate::constants::MICROVM_STATES.contains(&state),
+                "SUSPEND_WANTED has {state}, which is not a MicrovmState: a suspend would wait \
+                 for a state the service can't report and time out"
+            );
+        }
+    }
+
     fn planted() -> (ControlPlane, Arc<FakeControlPlane>, Arc<TestClock>) {
         let fake = Arc::new(FakeControlPlane::new());
         let clock = Arc::new(TestClock::new());
@@ -1016,7 +1030,8 @@ mod tests {
             "no identity must produce byte-for-byte the payload this client always sent"
         );
 
-        let identity = crate::identity::LaunchIdentity::from_seeds([7_u8; 32], [9_u8; 32]);
+        let identity = crate::identity::LaunchIdentity::from_seeds([7_u8; 32], [9_u8; 32])
+            .expect("valid seeds");
         let with =
             RunHookPayload::for_launch_with_identity("tok", &env, Some(&identity)).expect("fits");
         assert_eq!(

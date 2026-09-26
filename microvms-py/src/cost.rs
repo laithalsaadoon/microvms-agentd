@@ -71,6 +71,7 @@ use microvms_core::cost::{
     EstimatedUsd as CoreUsd, LineItem as CoreLineItem, PlanUsage, Provenance, RateTable, RunUsage,
     Total as CoreTotal,
 };
+use microvms_core::prelude::*;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 

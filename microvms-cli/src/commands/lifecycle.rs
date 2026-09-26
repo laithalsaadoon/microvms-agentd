@@ -1291,6 +1291,7 @@ fn attach_cost<O: std::io::Write, E: std::io::Write>(
     name: &str,
 ) {
     use microvms_core::cost::{CalendarDate, DurationP, RunUsage, pinned_rates, run_report};
+    use microvms_core::prelude::*;
 
     let seconds = |value: f64| -> Option<DurationP> {
         if value <= 0.0 {

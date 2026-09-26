@@ -1,7 +1,7 @@
 # Contributing
 
-The shared implementation lives in `microvms-core`; the CLI and bindings adapt
-that implementation. Read [Protocol](docs/PROTOCOL.md) before changing wire
+The shared implementation lives in `microvms-core` and the `microvms-domain`
+crate it re-exports; the CLI and bindings adapt that implementation. Read [Protocol](docs/PROTOCOL.md) before changing wire
 behavior and [Trust](docs/TRUST.md) before changing authentication or execution.
 
 ## Setup and checks
@@ -23,6 +23,7 @@ Useful checks while iterating:
 ```bash
 cargo test -p agentd --lib
 cargo test -p agentd-model
+cargo test -p microvms-domain
 cargo test -p microvms-core
 cargo test -p microvms-cli
 cargo test --test proptest_tar
@@ -68,6 +69,20 @@ any other `allow`, `warn` or `expect` of those lints in an adapter's `src/`. A
 subprocess exception also needs its entry or decision in `ratchet/drift.json`.
 An environment read has no drift category, so its `reason` and its line in
 that list are the whole record, and review is the check.
+
+`microvms-domain` holds the rules and does no I/O (ARCH-6). Its `clippy.toml`
+bans the std file, process, network, environment and clock calls and the clock
+and entropy calls of the crates it uses, and its crate root forbids both lints,
+so an inner `#[allow]` or `#[expect]` doesn't compile. It has no exception list:
+a rule that needs the clock, a file or a variable takes it as a parameter, and
+core supplies it. `dependency_direction.rs` pins each dependency's declared
+features as well as its name. The I/O
+methods its types had in 0.10 (`CalendarDate::today_utc`, `NameRecord::new`,
+`LaunchIdentity::generate`, `TunnelIdentity::initiator`) are extension traits in
+`microvms_core::prelude`, so in-repo callers import `microvms_core::prelude::*`.
+`microvms-core/tests/public_paths.rs` names every public path core had at
+v0.10.0; regenerate it with `scripts/generate-public-paths.py` only when a
+release changes the API on purpose.
 
 ## Generated contracts and API changes
 
@@ -135,9 +150,23 @@ cleanup; Terraform does not own every resource the service creates.
 
 ## Releases and reviews
 
-The release workflow publishes `microvms-protocol`, `microvms-core`, and
-`microvms-cli` to crates.io, `microvms` to PyPI, and
+The release workflow publishes `microvms-protocol`, `microvms-domain`,
+`microvms-core`, and `microvms-cli` to crates.io, `microvms` to PyPI, and
 `@theagenticguy/microvms` to npm. `agentd` ships as a GitHub release binary.
+
+crates.io trusted publishing can't create a crate, so a crate that's new to the
+publish set needs one manual publish before the first release tag that includes
+it. `microvms-domain` is one until that's done. From a clean checkout of main,
+before the release's version bump lands, run `cargo publish -p <crate> --locked`
+with a crates.io API token scoped to publishing new crates, then add the trusted
+publisher on crates.io (this repository, workflow `release.yml`, environment
+`release`). Without it, the release publishes the crates below it and fails at
+the new one. Publishing after the bump is the same failure the other way round:
+the release's version already exists, and `cargo publish --workspace` has no
+`--skip-existing`.
+`./scripts/check-publishable.py --dry-run` warns about a published crate the
+registry doesn't have, and fails with `--tag`, which is how the release guard
+runs it.
 
 ```bash
 mise run publish:check

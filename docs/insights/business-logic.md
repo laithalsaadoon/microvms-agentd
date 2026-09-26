@@ -15,9 +15,9 @@ client duplicates it deliberately — which it does in most places, for a measur
 2026-08-07 out of botocore's `validate.py`, `VALIDATED_METADATA_ATTRS` is
 `{'required', 'min', 'document', 'union'}`, so `max`, `pattern`, and `enum` violations are
 serialized, sent, and answered with a `ValidationException`
-(`microvms-core/src/constants.rs:11-23`). And this client never reaches that validator at all:
+(`microvms-domain/src/constants.rs:11-23`). And this client never reaches that validator at all:
 it signs with `aws-sigv4` and sends with `reqwest`, so **every** model constraint including
-`min` is enforced by this crate or by nothing (`microvms-core/src/constants.rs:25-31`).
+`min` is enforced by this crate or by nothing (`microvms-domain/src/constants.rs:25-31`).
 Deleting a local guard on the assumption that the SDK covers the model reopens the constraint
 with no visible failure.
 
@@ -88,16 +88,16 @@ pinned service model constrains and the SDK does not check.
 
 | Rule | Domain | Citation | Failure mode |
 | --- | --- | --- | --- |
-| `maximumDurationInSeconds` outside `1..=28800` is refused | Launch | `microvms-core/src/control/mod.rs:477-494`, constant at `microvms-core/src/constants.rs:263` | `ERR_INVALID_ARG` saying a longer session needs a second VM, not a larger number. 28800 is eight hours and the hard ceiling on any one VM's life |
-| `idlePolicy.maxIdleDurationSeconds` under 60 is refused | Launch | `microvms-core/src/control/mod.rs:748-778`, constant at `microvms-core/src/constants.rs:241-258` | `ERR_INVALID_ARG`. The model states no maximum and the client adds none; the bound that ends a VM's life is `maximumDurationInSeconds` |
-| A `Version` value that is empty, over 2048 characters, or carries whitespace anywhere is refused | Image build, Launch | `microvms-core/src/control/mod.rs:496-542`, constants at `microvms-core/src/constants.rs:121`, `:128` | Three separate `ERR_INVALID_ARG` messages. The pattern is `[^\s]+`, so a version pasted with a trailing newline satisfies "non-empty" and fails; the message names the character it found |
-| A `NonBlankString` member (`codeArtifact.uri`, `baseImageArn`, `nameFilter`, `imageVersion`, `buildId`) that is empty, over 2048 characters, or carries whitespace is refused | Image build | `microvms-core/src/control/mod.rs:544-596`, constants at `microvms-core/src/constants.rs:141`, `:145` | `ERR_INVALID_ARG` naming the character. A blank `nameFilter` rides in the query string, where it either 400s or filters differently from what was meant |
-| An identifier that is empty or over 256 characters is refused | Every operation | `microvms-core/src/control/mod.rs:598-651`, constants at `microvms-core/src/constants.rs:174`, `:183` | `ERR_INVALID_ARG`. An empty identifier is the case that pays for this guard: where the member is a URI parameter, an empty one collapses `/microvms/<id>` onto the listing and a `DELETE` on a collapsed path is worse |
-| A `RoleArn` under 20 characters, over 2048, or off-pattern is refused | Image build, Launch | `microvms-core/src/control/mod.rs:653-708`, constants at `microvms-core/src/constants.rs:209`, `:212`, `:225` | Three messages. The short case says a value that short is almost always a role *name*; the pattern case names the twelve account digits |
-| A port of 0 is refused; there is no ceiling branch | Image build, Session | `microvms-core/src/control/mod.rs:710-746`, constants at `microvms-core/src/constants.rs:232`, `:239` | `ERR_INVALID_ARG`. Zero means "let the kernel choose" to a listener and is not a port the platform can forward to. `PortNumber.max` equals `u16::MAX`, so a ceiling branch would be unreachable — pinned instead by `microvms-core/src/constants.rs:1244` |
-| A tag key that is empty, over 128 characters, or off-pattern is refused; a tag value over 256 or off-pattern is refused | Image build | `microvms-core/src/control/mod.rs:780-846`, constants at `microvms-core/src/constants.rs:186`, `:189`, `:206` | `ERR_INVALID_ARG` naming the offending key. An empty tag *value* is legal and an empty key is not, and the two ceilings differ by 2x |
-| An image name that is empty, over 64 characters, or outside `[a-zA-Z0-9-_]+` is refused | Image build | `microvms-core/src/control/mod.rs:848-878`, constants at `microvms-core/src/constants.rs:104`, `:112` | Three messages, because the pattern message ("no dots, no slashes") misleads for a 70-character name containing neither |
-| More than 10 network connectors on a launch is refused | Networking | `microvms-core/src/control/microvm.rs:391-399`, constant at `microvms-core/src/constants.rs:290` | `ERR_INVALID_ARG`. The image-level egress list caps at **1**, not 10 (`microvms-core/src/constants.rs:292-304`), pinned by `microvms-core/src/constants.rs:897` |
+| `maximumDurationInSeconds` outside `1..=28800` is refused | Launch | `microvms-core/src/control/mod.rs:477-494`, constant at `microvms-domain/src/constants.rs:263` | `ERR_INVALID_ARG` saying a longer session needs a second VM, not a larger number. 28800 is eight hours and the hard ceiling on any one VM's life |
+| `idlePolicy.maxIdleDurationSeconds` under 60 is refused | Launch | `microvms-core/src/control/mod.rs:748-778`, constant at `microvms-domain/src/constants.rs:241-258` | `ERR_INVALID_ARG`. The model states no maximum and the client adds none; the bound that ends a VM's life is `maximumDurationInSeconds` |
+| A `Version` value that is empty, over 2048 characters, or carries whitespace anywhere is refused | Image build, Launch | `microvms-core/src/control/mod.rs:496-542`, constants at `microvms-domain/src/constants.rs:121`, `:128` | Three separate `ERR_INVALID_ARG` messages. The pattern is `[^\s]+`, so a version pasted with a trailing newline satisfies "non-empty" and fails; the message names the character it found |
+| A `NonBlankString` member (`codeArtifact.uri`, `baseImageArn`, `nameFilter`, `imageVersion`, `buildId`) that is empty, over 2048 characters, or carries whitespace is refused | Image build | `microvms-core/src/control/mod.rs:544-596`, constants at `microvms-domain/src/constants.rs:141`, `:145` | `ERR_INVALID_ARG` naming the character. A blank `nameFilter` rides in the query string, where it either 400s or filters differently from what was meant |
+| An identifier that is empty or over 256 characters is refused | Every operation | `microvms-core/src/control/mod.rs:598-651`, constants at `microvms-domain/src/constants.rs:174`, `:183` | `ERR_INVALID_ARG`. An empty identifier is the case that pays for this guard: where the member is a URI parameter, an empty one collapses `/microvms/<id>` onto the listing and a `DELETE` on a collapsed path is worse |
+| A `RoleArn` under 20 characters, over 2048, or off-pattern is refused | Image build, Launch | `microvms-core/src/control/mod.rs:653-708`, constants at `microvms-domain/src/constants.rs:209`, `:212`, `:225` | Three messages. The short case says a value that short is almost always a role *name*; the pattern case names the twelve account digits |
+| A port of 0 is refused; there is no ceiling branch | Image build, Session | `microvms-core/src/control/mod.rs:710-746`, constants at `microvms-domain/src/constants.rs:232`, `:239` | `ERR_INVALID_ARG`. Zero means "let the kernel choose" to a listener and is not a port the platform can forward to. `PortNumber.max` equals `u16::MAX`, so a ceiling branch would be unreachable — pinned instead by `microvms-domain/src/constants.rs:1240` |
+| A tag key that is empty, over 128 characters, or off-pattern is refused; a tag value over 256 or off-pattern is refused | Image build | `microvms-core/src/control/mod.rs:780-846`, constants at `microvms-domain/src/constants.rs:186`, `:189`, `:206` | `ERR_INVALID_ARG` naming the offending key. An empty tag *value* is legal and an empty key is not, and the two ceilings differ by 2x |
+| An image name that is empty, over 64 characters, or outside `[a-zA-Z0-9-_]+` is refused | Image build | `microvms-core/src/control/mod.rs:848-878`, constants at `microvms-domain/src/constants.rs:104`, `:112` | Three messages, because the pattern message ("no dots, no slashes") misleads for a 70-character name containing neither |
+| More than 10 network connectors on a launch is refused | Networking | `microvms-core/src/control/microvm.rs:391-399`, constant at `microvms-domain/src/constants.rs:290` | `ERR_INVALID_ARG`. The image-level egress list caps at **1**, not 10 (`microvms-domain/src/constants.rs:292-304`), pinned by `microvms-domain/src/constants.rs:897` |
 
 `ControlPlane::run_microvm` runs the identifier, duration, idle-duration, version, and role-ARN
 guards before it builds a wire body (`microvms-core/src/control/microvm.rs:356-374`).
@@ -123,18 +123,18 @@ that it started, and an image that still lands in `CREATE_FAILED` naming nothing
 | Rule | Domain | Citation | Failure mode |
 | --- | --- | --- | --- |
 | TRAP-1: an image-create or run token is derived from a per-attempt nonce; there is no caller-supplied token parameter | Idempotency | `microvms-core/src/control/token.rs:101`, `:111`, `:120-148` | Unwritable (S1). The parameter does not exist. Minted at `microvms-core/src/control/image.rs:187-190` and `microvms-core/src/control/microvm.rs:415` |
-| TRAP-1: the scope label is truncated at its **tail**, never its head, and the nonce is never truncated | Idempotency | `microvms-core/src/control/token.rs:55-71`, `:150` | Silent truncation of the label only. 64-byte scope plus an 8-byte hex nonce stays under the 128-character `clientToken` ceiling (`microvms-core/src/constants.rs:423`) |
+| TRAP-1: the scope label is truncated at its **tail**, never its head, and the nonce is never truncated | Idempotency | `microvms-core/src/control/token.rs:55-71`, `:150` | Silent truncation of the label only. 64-byte scope plus an 8-byte hex nonce stays under the 128-character `clientToken` ceiling (`microvms-domain/src/constants.rs:423`) |
 | TRAP-2: an image in `CREATING` past the stall grace with builds listed, non-empty, and **every** build still `PENDING` fails the wait | Image build | `microvms-core/src/control/image.rs:318-324`, `:338-390` | `ERR_BUILD_WEDGED`, naming the `clientToken` replay signature. A `clientToken` is a permanent idempotency key, so a replayed create is a no-op: the image sits in `CREATING`, cannot be deleted, and its only version cannot be dropped. Two images were wedged this way for ~15 hours |
-| TRAP-3: guest identity repair is a `bool` intent; the client injects the one accepted enum value `["ALL"]` | Image build | `microvms-core/src/control/image.rs:181-185`, `microvms-core/src/constants.rs:276-280` | Unwritable (S1). There is no capability list a caller can populate, and no way to ask for `CAP_SYS_ADMIN` alone |
+| TRAP-3: guest identity repair is a `bool` intent; the client injects the one accepted enum value `["ALL"]` | Image build | `microvms-core/src/control/image.rs:181-185`, `microvms-domain/src/constants.rs:276-280` | Unwritable (S1). There is no capability list a caller can populate, and no way to ask for `CAP_SYS_ADMIN` alone |
 | TRAP-4: a connector is an enumerated intent that derives a fully-qualified ARN for the request region | Networking | `microvms-core/src/control/connector.rs:39-47`, `:60-83` | Unwritable (S1). Enumerated intents (`AllIngress`, `HttpIngress`, `ShellIngress`, `Egress`), no free-form string. `ConnectorIntent::ALL` at `:54` is the complete set a test can enumerate |
-| TRAP-5: a `runHookPayload` over 4096 bytes is refused locally before any control-plane call | Launch | `microvms-core/src/control/microvm.rs:161-185`, constant at `microvms-core/src/constants.rs:83` | `ERR_INVALID_ARG` naming the service-model ceiling. Inclusive, measured 2026-08-07: 4096 passes, 4097 fails. Bytes, not characters. `docs/STRATEGY.md`, `docs/TRUST.md`, and the model's own documentation string all claim 16 KB (`microvms-core/src/constants.rs:97`), which is wrong by 4x in the dangerous direction — the shape `RunMicrovmRequestRunHookPayloadString` is the authority |
-| TRAP-6: a region outside the five that carry MicroVMs is refused before the first control-plane call | Region | `microvms-core/src/region.rs:38-63`, `:137-164` | S1 for a held `Region`, S2 at the `FromStr` boundary. `ERR_INVALID_ARG` naming the null-message `AccessDeniedException` finding |
+| TRAP-5: a `runHookPayload` over 4096 bytes is refused locally before any control-plane call | Launch | `microvms-core/src/control/microvm.rs:161-185`, constant at `microvms-domain/src/constants.rs:83` | `ERR_INVALID_ARG` naming the service-model ceiling. Inclusive, measured 2026-08-07: 4096 passes, 4097 fails. Bytes, not characters. `docs/STRATEGY.md`, `docs/TRUST.md`, and the model's own documentation string all claim 16 KB (`microvms-domain/src/constants.rs:97`), which is wrong by 4x in the dangerous direction — the shape `RunMicrovmRequestRunHookPayloadString` is the authority |
+| TRAP-6: a region outside the five that carry MicroVMs is refused before the first control-plane call | Region | `microvms-domain/src/region.rs:38-63`, `:137-164` | S1 for a held `Region`, S2 at the `FromStr` boundary. `ERR_INVALID_ARG` naming the null-message `AccessDeniedException` finding |
 | TRAP-8: a VM reaching a state in `fail_on` before the wanted one fails the wait with state **and** `stateReason` attached | Launch | `microvms-core/src/control/microvm.rs:461-466`, `:482-500` | `ERR_LAUNCH_DIED`. Fails fast rather than polling to the deadline. Both facts, because either alone is unactionable: the state says the VM is gone, the reason is the only evidence that survives it |
-| TRAP-10: a `minimumMemoryInMiB` that is not one of the five documented baselines is refused locally | Sizing | `microvms-core/src/sizing.rs:25-31`, `:146-161` | S1 for a held `SizeClass`, S2 at `from_baseline_mib`. Refused, never snapped to a neighbour: the two plausible service behaviors for 1500 differ in both the memory the guest gets and the rate it is billed at |
+| TRAP-10: a `minimumMemoryInMiB` that is not one of the five documented baselines is refused locally | Sizing | `microvms-domain/src/sizing.rs:25-31`, `:146-161` | S1 for a held `SizeClass`, S2 at `from_baseline_mib`. Refused, never snapped to a neighbour: the two plausible service behaviors for 1500 differ in both the memory the guest gets and the rate it is billed at |
 | TRAP-11: `CreateMicrovmShellAuthToken` is never called and `SHELL_INGRESS` is never requested | Networking | `microvms-core/src/control/connector.rs:16-28`, `microvms-core/src/control/mod.rs:27-31` | Unwritable (S1). No enum variant renders it and no method on `ControlPlane` calls it. The test counts the calls a full lifecycle makes rather than asserting a refusal |
-| Two hook-timeout families cannot be interchanged: run/resume/suspend/terminate cap at 60s, ready/validate at 3600s | Hooks | `microvms-core/src/hooks.rs:56-82`, `:84-105`, constants at `microvms-core/src/constants.rs:268`, `:271` | Unwritable across families (S1) — no `From`, no shared trait. S2 within a family: `ERR_INVALID_ARG` naming **both** ceilings, because the caller who hits it nearly always picked a build-hook number |
-| A hook port outside `1..=65535` is refused | Hooks | `microvms-core/src/hooks.rs:141-149` | `ERR_INVALID_ARG` naming the model range and version |
-| An architecture other than `ARM_64` cannot be requested | Image build | `microvms-core/src/control/image.rs:168-172`, `microvms-core/src/constants.rs:282-287` | Unwritable (S1). The enum has one value, so the field is injected rather than accepted — a field could only ever express a request AWS rejects, after the upload |
+| Two hook-timeout families cannot be interchanged: run/resume/suspend/terminate cap at 60s, ready/validate at 3600s | Hooks | `microvms-domain/src/hooks.rs:56-82`, `:84-105`, constants at `microvms-domain/src/constants.rs:268`, `:271` | Unwritable across families (S1) — no `From`, no shared trait. S2 within a family: `ERR_INVALID_ARG` naming **both** ceilings, because the caller who hits it nearly always picked a build-hook number |
+| A hook port outside `1..=65535` is refused | Hooks | `microvms-domain/src/hooks.rs:141-149` | `ERR_INVALID_ARG` naming the model range and version |
+| An architecture other than `ARM_64` cannot be requested | Image build | `microvms-core/src/control/image.rs:168-172`, `microvms-domain/src/constants.rs:282-287` | Unwritable (S1). The enum has one value, so the field is injected rather than accepted — a field could only ever express a request AWS rejects, after the upload |
 | `ENABLED` on all six hooks is a typed enum value, not a `&str` literal | Image build | `microvms-core/src/control/mod.rs:880-909` | Compile error. The literal appeared six times with no constant naming either value, so a typo in one was a `ValidationException` on a call made after the artifact upload |
 
 ### Trap closures — in-VM session
@@ -152,12 +152,12 @@ that it started, and an image that still lands in `CREATE_FAILED` naming nothing
 
 | Rule | Domain | Citation | Failure mode |
 | --- | --- | --- | --- |
-| COST-1: every duration carries a `measured` or `projected` provenance label; there is no unlabelled constructor | Cost | `microvms-core/src/cost.rs:419-425` | Unwritable (S1). `DurationP` is an enum whose every variant names its provenance; no `From<Duration>`, no `Default`, both pinned by `compile_fail` doctests at `:395-408` |
-| COST-2: an estimated dollar amount has no coercion to a bare float | Cost | `microvms-core/src/cost.rs:546-578` | Unwritable (S1). Private field, no `From`, no `Into<f64>`, no `Deref`. The `compile_fail` doctests at `:519-545` each pin their own error code |
-| COST-3: an unpriced quantity is a distinct `Unpriced` variant carrying a reason, never zero dollars | Cost | `microvms-core/src/cost.rs:614-625` | S1 by exhaustive `match`. Zero is a claim about the bill; unpriced is a claim about the documentation |
-| COST-6: `gb_decimal` is the only place an `f64` becomes a `Decimal`, and it is fallible | Cost | `microvms-core/src/cost.rs:138-152` | `ERR_INVALID_ARG`. A negative size would render as a credit; `NaN`, an infinity, and a magnitude past 28 digits have no decimal reading. `EstimatedUsd::new` takes a `Decimal` so it cannot become a third boundary (`:553-561`) |
-| COST-9: a rate catalog whose ARM compute line is missing is rejected rather than substituted | Cost | `microvms-core/src/cost.rs:1191-1199`, `:1200-1258`, `:1268-1302` | S1 for direct construction — the rate fields are private and the only doors are `pinned_rates` and `from_catalog`. S2 at `from_catalog`, which refuses a missing ARM line whose x86 sibling is present, a missing line with no sibling, a restated unit, and two products where there was one. The ARM message names the x86 rate it will not substitute and the ~18% error that substituting would introduce |
-| A calendar date arriving from outside the crate is validated against its month's real length | Cost | `microvms-core/src/cost.rs:232-241` | S2. `2026-02-30` would otherwise yield a day number for March 2nd and an age two days out |
+| COST-1: every duration carries a `measured` or `projected` provenance label; there is no unlabelled constructor | Cost | `microvms-domain/src/cost.rs:426-432` | Unwritable (S1). `DurationP` is an enum whose every variant names its provenance; no `From<Duration>`, no `Default`, both pinned by `compile_fail` doctests at `:405-418` |
+| COST-2: an estimated dollar amount has no coercion to a bare float | Cost | `microvms-domain/src/cost.rs:553-585` | Unwritable (S1). Private field, no `From`, no `Into<f64>`, no `Deref`. The `compile_fail` doctests at `:529-555` each pin their own error code |
+| COST-3: an unpriced quantity is a distinct `Unpriced` variant carrying a reason, never zero dollars | Cost | `microvms-domain/src/cost.rs:621-632` | S1 by exhaustive `match`. Zero is a claim about the bill; unpriced is a claim about the documentation |
+| COST-6: `gb_decimal` is the only place an `f64` becomes a `Decimal`, and it is fallible | Cost | `microvms-domain/src/cost.rs:138-152` | `ERR_INVALID_ARG`. A negative size would render as a credit; `NaN`, an infinity, and a magnitude past 28 digits have no decimal reading. `EstimatedUsd::new` takes a `Decimal` so it cannot become a third boundary (`:563-571`) |
+| COST-9: a rate catalog whose ARM compute line is missing is rejected rather than substituted | Cost | `microvms-domain/src/cost.rs:1198-1206`, `:1210-1268`, `:1278-1312` | S1 for direct construction — the rate fields are private and the only doors are `pinned_rates` and `from_catalog`. S2 at `from_catalog`, which refuses a missing ARM line whose x86 sibling is present, a missing line with no sibling, a restated unit, and two products where there was one. The ARM message names the x86 rate it will not substitute and the ~18% error that substituting would introduce |
+| A calendar date arriving from outside the crate is validated against its month's real length | Cost | `microvms-domain/src/cost.rs:232-241` | S2. `2026-02-30` would otherwise yield a day number for March 2nd and an age two days out |
 
 ### Daemon authorization
 
@@ -259,25 +259,25 @@ Z3 and `stateright` proofs proofs about *this struct's* reachable states
 
 | Invariant | Where enforced | Citation |
 | --- | --- | --- |
-| COST-4: an unpriced line routes the whole total to a lower-bound variant that names its unpriced items | Application, one `Total::of` | `microvms-core/src/cost.rs:706-751`. `Total::AtLeast` holds the floor *beside* the reasons, and `Add` is implemented only `EstimatedUsd + EstimatedUsd`, so summing an `Amount` is a compile error |
-| COST-5: each compute line item is computed from the size-class **baseline**, never from the peak the guest reports | Application, by reachability | `microvms-core/src/cost.rs:1584-1616`, accessors at `microvms-core/src/sizing.rs:184-205`. `compute_lines` reaches only `baseline_gb`/`baseline_vcpu`; reading the peak would overstate the memory line exactly 4x |
-| COST-7: a rate table older than 90 days attaches a staleness warning to every report computed from it | Application, on the report | `microvms-core/src/cost.rs:90-95`, `:961-987`, `:1510-1512`. Carried on the report rather than logged, so a library caller with a log filter and a CLI writing only stderr do not each lose it |
-| COST-8: the one-week minimum retention floor applies to every snapshot storage line item | Application, a field on the rate row | `microvms-core/src/cost.rs:104-109`, `:1627-1657` |
-| COST-10: every duration in a plan estimate is marked `projected` | Application, by type | `microvms-core/src/cost.rs:1871-1880`, `:1908-1913`. `PlanUsage` fields are bare `f64` seconds, so there is no field a `Measured` duration could be written into |
-| ARCH-2: protocol drift between client and daemon fails compilation | Cargo dependency graph | `microvms-cli/tests/dependency_direction.rs:179` |
-| ARCH-3 / ARCH-4 / BIND-1: `cli -> core -> protocol`, bindings depend only on core, core depends on neither | Test over `cargo_metadata` | `microvms-cli/tests/dependency_direction.rs:68`, `:95`, `:219` |
-| ARCH-5: the CLI exports no library target at all | Test over `cargo_metadata` | `microvms-cli/tests/dependency_direction.rs:126` |
+| COST-4: an unpriced line routes the whole total to a lower-bound variant that names its unpriced items | Application, one `Total::of` | `microvms-domain/src/cost.rs:713-758`. `Total::AtLeast` holds the floor *beside* the reasons, and `Add` is implemented only `EstimatedUsd + EstimatedUsd`, so summing an `Amount` is a compile error |
+| COST-5: each compute line item is computed from the size-class **baseline**, never from the peak the guest reports | Application, by reachability | `microvms-domain/src/cost.rs:1591-1623`, accessors at `microvms-domain/src/sizing.rs:184-205`. `compute_lines` reaches only `baseline_gb`/`baseline_vcpu`; reading the peak would overstate the memory line exactly 4x |
+| COST-7: a rate table older than 90 days attaches a staleness warning to every report computed from it | Application, on the report | `microvms-domain/src/cost.rs:90-95`, `:971-997`, `:1520-1522`. Carried on the report rather than logged, so a library caller with a log filter and a CLI writing only stderr do not each lose it |
+| COST-8: the one-week minimum retention floor applies to every snapshot storage line item | Application, a field on the rate row | `microvms-domain/src/cost.rs:104-109`, `:1637-1667` |
+| COST-10: every duration in a plan estimate is marked `projected` | Application, by type | `microvms-domain/src/cost.rs:1878-1887`, `:1918-1923`. `PlanUsage` fields are bare `f64` seconds, so there is no field a `Measured` duration could be written into |
+| ARCH-2: protocol drift between client and daemon fails compilation | Cargo dependency graph | `microvms-cli/tests/dependency_direction.rs:180` |
+| ARCH-3 / ARCH-4 / BIND-1: `cli -> core -> protocol`, bindings depend only on core, core depends on neither | Test over `cargo_metadata` | `microvms-cli/tests/dependency_direction.rs:69`, `:96`, `:220` |
+| ARCH-5: the CLI exports no library target at all | Test over `cargo_metadata` | `microvms-cli/tests/dependency_direction.rs:127` |
 | CLI-2: the CLI reaches the control plane and the endpoint proxy only through core, and the guard names *which* seam door was entered | Injected refusing seam | `microvms-cli/src/guards.rs:403`, `:487`; source scan at `microvms-cli/tests/thinness.rs:426` |
 | The CLI's direct dependency set contains none of the denylisted transport and signing crates | Test over `cargo_metadata` | `microvms-cli/tests/thinness.rs:96` |
 | Only the envelope module and named exceptions in `main` write to stdout | Source scan | `microvms-cli/tests/thinness.rs:503` |
 | CLI-4: one JSON envelope per invocation on stdout, on success, on failure, and on a stream that died before its first event | Spawned-binary test | `microvms-cli/tests/exit_codes.rs:154`, `:198`, `:233` |
 | BIND-5: both bindings preserve provenance-labelled durations, estimate-typed dollars, and the distinct `Unpriced` value | Application, by absent constructors | `microvms-py/src/cost.rs:9`, `:23-27`, `:220-241`; `microvms-js/src/cost.rs:20-31`, `:52-57`. `new Duration(3600)` is a `TypeError`, `Amount.usd` is null for an unpriced line, and `to_json`/`to_dict` omit the key entirely rather than emitting a null anything permissive sums as zero |
-| Every constant in `constants::as_json` is checked against the pinned botocore service model by the build gate (TRAP-12), and the key set is pinned by a test | Build gate plus a key-set test | `microvms-core/src/constants.rs:33-46`, `:589`, `:693` |
-| `DEAD_STATES` is a strict subset of `TERMINAL_STATES`, and `SUSPENDED` is terminal but not dead | Application, pinned by test | `microvms-core/src/constants.rs:448`, `:455`, `:878` |
-| The model-backed and tolerated image-ready state sets are disjoint | Application, pinned by test | `microvms-core/src/constants.rs:431`, `:441`, `:941` |
+| Every constant in `constants::as_json` is checked against the pinned botocore service model by the build gate (TRAP-12), and the key set is pinned by a test | Build gate plus a key-set test | `microvms-domain/src/constants.rs:33-46`, `:589`, `:693` |
+| `DEAD_STATES` is a strict subset of `TERMINAL_STATES`, and `SUSPENDED` is terminal but not dead | Application, pinned by test | `microvms-domain/src/constants.rs:448`, `:455`, `:878` |
+| The model-backed and tolerated image-ready state sets are disjoint | Application, pinned by test | `microvms-domain/src/constants.rs:431`, `:441`, `:941` |
 | A ledger file is removed only when nothing is outstanding; leaked identifiers are recorded **before** the delete is attempted | Application, on disk | `microvms-cli/src/ledger.rs:1-22` |
 | CLI-3: every failure class exits with its own integer and `ERR_*` string, distinct from `ERR_UNEXPECTED` | Spawned-binary test plus a classification test | `microvms-cli/src/exit.rs:78-101`, `microvms-cli/tests/exit_codes.rs:29`, `microvms-cli/src/guards.rs:2949`, `:3063`; published table cross-checked at `microvms-cli/tests/manifest.rs:161` |
-| Retryability is derived from the error kind rather than stored, so the two cannot drift | Application, one `matches!` | `microvms-core/src/error.rs:111-118`, mapping at `:358-397` |
+| Retryability is derived from the error kind rather than stored, so the two cannot drift | Application, one `matches!` | `microvms-domain/src/error.rs:111-118`, mapping at `:358-397` |
 
 The lifecycle is deliberately **runtime-checked rather than typestate**
 (`microvms-core/src/sandbox.rs:19-32`). A `Sandbox<Running>` returning a `Suspended` handle
@@ -292,58 +292,58 @@ observable that distinguishes the two designs.
 
 | Calculation | Inputs | Output | Citation |
 | --- | --- | --- | --- |
-| Compute cost for a phase, as two separate line items | size class, labelled duration, rate table, phase | vCPU-seconds and GB-seconds line items with estimated dollars | `microvms-core/src/cost.rs:1584-1616` |
-| Snapshot storage for a hold, with the retention floor applied | phase, GB, labelled hold, rate table | GB-months line item, note naming the floor when it applied | `microvms-core/src/cost.rs:1627-1657` |
-| Snapshot transfer (write on suspend, read on launch or resume) | phase, line, GB, cycle count, rate table | GB line item, no time component | `microvms-core/src/cost.rs:1661-1683` |
-| Per-GB-month storage rate, derived from the API's per-GB-hour quote | catalog entry USD per GB-hour | Decimal USD per GB-month | `microvms-core/src/cost.rs:1235-1242`, `:88` |
-| A report's total | every line item's phase and amount | `Total::Exact`, or `Total::AtLeast` with named unpriced lines | `microvms-core/src/cost.rs:726-751` |
-| Residency ratio: how many times more a running VM costs than a suspended one | two cost reports | Decimal multiplier | `microvms-core/src/cost.rs:1987-1991` |
-| Per suspend/resume cycle cost | size class baseline GB, write rate, read rate | `EstimatedUsd` | `microvms-core/src/cost.rs:1993-1999` |
-| Break-even suspended hold | size class, rate table | Decimal seconds | `microvms-core/src/cost.rs:2013-2027` |
-| Rate table age and staleness verdict | retrieval date, today | days, bool, optional warning text | `microvms-core/src/cost.rs:961-987` |
-| Proleptic-Gregorian day number, for date subtraction without a date crate | year, month, day | `i64` days since 1970-01-01 | `microvms-core/src/cost.rs:279-291` |
-| Exact seconds from a `Duration`, without a lossy float step | `std::time::Duration` | `Decimal` seconds | `microvms-core/src/cost.rs:120-124` |
+| Compute cost for a phase, as two separate line items | size class, labelled duration, rate table, phase | vCPU-seconds and GB-seconds line items with estimated dollars | `microvms-domain/src/cost.rs:1591-1623` |
+| Snapshot storage for a hold, with the retention floor applied | phase, GB, labelled hold, rate table | GB-months line item, note naming the floor when it applied | `microvms-domain/src/cost.rs:1634-1664` |
+| Snapshot transfer (write on suspend, read on launch or resume) | phase, line, GB, cycle count, rate table | GB line item, no time component | `microvms-domain/src/cost.rs:1668-1690` |
+| Per-GB-month storage rate, derived from the API's per-GB-hour quote | catalog entry USD per GB-hour | Decimal USD per GB-month | `microvms-domain/src/cost.rs:1242-1249`, `:88` |
+| A report's total | every line item's phase and amount | `Total::Exact`, or `Total::AtLeast` with named unpriced lines | `microvms-domain/src/cost.rs:733-758` |
+| Residency ratio: how many times more a running VM costs than a suspended one | two cost reports | Decimal multiplier | `microvms-domain/src/cost.rs:1994-1998` |
+| Per suspend/resume cycle cost | size class baseline GB, write rate, read rate | `EstimatedUsd` | `microvms-domain/src/cost.rs:2000-2006` |
+| Break-even suspended hold | size class, rate table | Decimal seconds | `microvms-domain/src/cost.rs:2020-2034` |
+| Rate table age and staleness verdict | retrieval date, today | days, bool, optional warning text | `microvms-domain/src/cost.rs:968-994` |
+| Proleptic-Gregorian day number, for date subtraction without a date crate | year, month, day | `i64` days since 1970-01-01 | `microvms-domain/src/cost.rs:282-285` |
+| Exact seconds from a `Duration`, without a lossy float step | `std::time::Duration` | `Decimal` seconds | `microvms-domain/src/cost.rs:120-124` |
 | Idempotency token assembly | verb, scope label, 8 random bytes | `<verb>-<tail-64-of-label>-<16 hex>` | `microvms-core/src/control/token.rs:120-148` |
 | Connector ARN | intent, region | fully-qualified ARN string | `microvms-core/src/control/connector.rs:60-83` |
 | Available bytes on a write target's filesystem | path | `u64` bytes | `agentd/src/disk.rs:66-80` |
 
 ### Compute cost per phase
 
-Both figures read the **baseline**, never the peak (`microvms-core/src/cost.rs:1593-1597`).
+Both figures read the **baseline**, never the peak (`microvms-domain/src/cost.rs:1600-1604`).
 `vcpu_quantity = baseline_vcpu × seconds`, priced at `rates.vcpu_second()`.
 `memory_quantity = baseline_gb × seconds`, priced at `rates.gb_second()`. They are two line items
 rather than one blended GB-second because that is how the pricing page prices them, and a blended
 figure cannot be reconciled against a Cost Explorer breakdown that keeps them apart
-(`microvms-core/src/cost.rs:940-944`). The guest reports the peak and bursts to it, but the peak
+(`microvms-domain/src/cost.rs:947-951`). The guest reports the peak and bursts to it, but the peak
 is charged only for the seconds above baseline actually consumed; this client cannot observe those
 seconds, so the peak is left out rather than guessed at. The 2 GB class reports 8 GB in the guest
-(`microvms-core/src/sizing.rs:81-86`), so reading the peak would overstate the memory line exactly
+(`microvms-domain/src/sizing.rs:81-86`), so reading the peak would overstate the memory line exactly
 4x.
 
 A suspended VM gets **no compute line at all**, rather than a compute line multiplied by zero. A
 zeroed line would reappear the moment someone changed how a duration is derived
-(`microvms-core/src/cost.rs:1827-1835`).
+(`microvms-domain/src/cost.rs:1834-1842`).
 
 ### Snapshot storage with the retention floor
 
 `billed_seconds = max(held_seconds, floor_seconds)` where the floor is one week
-(`microvms-core/src/cost.rs:1635-1637`). Then
+(`microvms-domain/src/cost.rs:1642-1644`). Then
 `quantity = gb × billed_seconds / SECONDS_PER_MONTH`, priced at `rates.storage_gb_month()`.
 `SECONDS_PER_MONTH` is `2628000`, which is `730 × 3600` — AWS's own month. It is spelled out
 because 30-day and calendar-month conventions both give plausible-looking answers that disagree
-with the worked examples by a few percent (`microvms-core/src/cost.rs:74-80`).
+with the worked examples by a few percent (`microvms-domain/src/cost.rs:74-80`).
 
 When the floor applies, the note quotes the day count off the rate row rather than dividing by
 86,400 beside the message. The rate-row field is the only thing that knows how long the window is,
 so a division written beside the message would keep saying "7-day" after a rate row moved to a
-fortnight (`microvms-core/src/cost.rs:1639-1648`, `:918-927`). Not applying the floor would
+fortnight (`microvms-domain/src/cost.rs:1646-1655`, `:928-937`). Not applying the floor would
 understate the one line item that dominates a create-and-destroy suite by four orders of
 magnitude: a 2 GB image deleted after sixty seconds still bills about four cents
-(`microvms-core/src/cost.rs:104-109`).
+(`microvms-domain/src/cost.rs:104-109`).
 
 ### Break-even suspended hold
 
-The least trivial formula in the module (`microvms-core/src/cost.rs:2013-2027`).
+The least trivial formula in the module (`microvms-domain/src/cost.rs:2020-2034`).
 `running_per_sec = baseline_vcpu × vcpu_rate + baseline_gb × gb_rate`.
 `storage_per_sec = baseline_gb × storage_gb_month / SECONDS_PER_MONTH`.
 `churn = baseline_gb × (write_rate + read_rate)`.
@@ -358,7 +358,7 @@ instead. Solving only one branch returns a number in the wrong regime.
 This is the figure a pool scheduler needs, and a bare "100x cheaper" headline does not show it.
 Below the break-even hold, suspending and resuming costs more than leaving the VM running, so the
 conclusion the comparison supports is "avoid churn" rather than "avoid residency"
-(`microvms-core/src/cost.rs:1993-1995`).
+(`microvms-domain/src/cost.rs:2000-2002`).
 
 ### Why the sizing table is data, not arithmetic (TRAP-13)
 
@@ -366,36 +366,36 @@ Every documented peak is exactly four times its baseline, which makes `baseline 
 the obvious simplification. The sizing module must not compute it that way. The regularity belongs
 to AWS's current table rather than to the service's contract, so a new row that broke the pattern
 would get the pattern applied to it, reporting a burst ceiling the service does not offer
-(`microvms-core/src/sizing.rs:13-23`).
+(`microvms-domain/src/sizing.rs:13-23`).
 
-So `SIZE_CLASSES` (`microvms-core/src/sizing.rs:64-99`) is the only place any of the table's
+So `SIZE_CLASSES` (`microvms-domain/src/sizing.rs:64-99`) is the only place any of the table's
 numbers appears, and every accessor reads a row out of it through one lookup. To make the guard
 falsifiable, `row_in` and `class_for_baseline_in` take the table as a **parameter**
-(`microvms-core/src/sizing.rs:247`, `:255`) so a test can drive the accessors over a table whose
+(`microvms-domain/src/sizing.rs:247`, `:255`) so a test can drive the accessors over a table whose
 peak is *not* 4x its baseline. A test against the shipped table could not tell a lookup from an
 arithmetic derivation, because every shipped peak is 4x.
 
 ### Two float boundaries, and only two (COST-6)
 
-`seconds_of` (`microvms-core/src/cost.rs:120-124`) is exact rather than a lossy conversion: a
+`seconds_of` (`microvms-domain/src/cost.rs:120-124`) is exact rather than a lossy conversion: a
 `Duration` is a whole-seconds count plus a nanosecond remainder, both integers, and the nanosecond
 division is by a power of ten.
 
-`gb_decimal` (`microvms-core/src/cost.rs:138-152`) is the **only** place an `f64` becomes a
+`gb_decimal` (`microvms-domain/src/cost.rs:138-152`) is the **only** place an `f64` becomes a
 `Decimal`. It goes through the float's decimal *string* rather than its binary value, because
 `Decimal::try_from(0.1f64)` would carry the binary error into every downstream figure. It is
 fallible rather than lossy: `NaN`, an infinity, and a magnitude past 28 digits have no decimal
 reading, and a money figure derived from one of them would be a number nobody could reconcile.
 `EstimatedUsd::new` deliberately takes a `Decimal` and not an `f64`, so it cannot become a third
-boundary (`microvms-core/src/cost.rs:553-561`).
+boundary (`microvms-domain/src/cost.rs:560-568`).
 
 ### The day-number formula
 
-`CalendarDate::day_number` (`microvms-core/src/cost.rs:279-291`) is an era-based
+`CalendarDate::day_number` (`microvms-domain/src/cost.rs:282-285`) is an era-based
 proleptic-Gregorian conversion so that date subtraction needs no date crate. The year is shifted to
 be March-based, which puts February's variable length last; `719468` is the day number of
 1970-01-01 in the era count. Rate-table age is `today.days_since(retrieved)` over that number
-(`microvms-core/src/cost.rs:962-965`).
+(`microvms-domain/src/cost.rs:969-972`).
 
 ## Policy and gates
 
@@ -406,7 +406,7 @@ be March-based, which puts February's variable length last; `719468` is the day 
   unlabelled duration constructor (COST-1), no `Measured` field on a plan (COST-10). Where a
   requirement is about an impl being *absent*, the check is a program that fails to build — as a
   `compile_fail` doctest with a **pinned error code**, because a bare `compile_fail` passes for any
-  build failure including a typo in the test. `microvms-core/src/cost.rs:395-408`, `:519-545`.
+  build failure including a typo in the test. `microvms-domain/src/cost.rs:402-415`, `:529-555`.
 
 - **Local refusal before the wire, always.** Every S2 guard fires before the first control-plane
   call, and where the distinction is observable the test asserts the control-plane **call count**
@@ -432,7 +432,7 @@ be March-based, which puts February's variable length last; `719468` is the day 
   `AccessDeniedException` with a null message and the caller spends an hour reading a correct IAM
   policy. It is a visible enum **variant** rather than a hidden flag, so a reader of a call site
   can see someone opted in, and a supported name handed to it comes back as its proper variant so
-  nothing downstream handles two spellings. `microvms-core/src/region.rs:38-63`, `:94-113`.
+  nothing downstream handles two spellings. `microvms-domain/src/region.rs:38-63`, `:94-113`.
 
 - **The region list can be wrong in two directions, and one direction is worse.** A *missing*
   region refuses a launch AWS would have accepted — the safer direction, still wrong, and what
@@ -441,7 +441,7 @@ be March-based, which puts February's variable length last; `719468` is the day 
   list while `get_available_regions` returns all 34 Lambda regions, so the list is kept by hand and
   keeping it right is the whole correctness condition. `eu-central-1` does not carry MicroVMs and
   is one of three regions measured returning the null-message denial (2026-08-07).
-  `microvms-core/src/region.rs:20-31`.
+  `microvms-domain/src/region.rs:20-31`.
 
 - **A best-effort probe only raises when it has the evidence.** TRAP-2's stall probe fires once,
   past the grace, and raises only when builds are listed, the list is non-empty, and **every**
@@ -576,7 +576,7 @@ be March-based, which puts February's variable length last; `719468` is the day 
   against pinned literals in the script instead, since a value compared only against itself passes
   by construction. The gate hard-fails when `MODEL_API_VERSION` disagrees with the service directory
   it resolves, rather than skipping: a constraint checked against a different API version is a
-  constraint that was not checked. `microvms-core/src/constants.rs:33-46`, `:52-57`, `:589`, `:693`.
+  constraint that was not checked. `microvms-domain/src/constants.rs:33-46`, `:52-57`, `:589`, `:693`.
 
 - **A disk write is refused before it starts rather than after ENOSPC.** ENOSPC arrives after the
   filesystem is already full, so by then every other writer in the VM is broken too, including the
@@ -588,7 +588,7 @@ be March-based, which puts February's variable length last; `719468` is the day 
   can only say that nobody has looked; a drift check against the Pricing API is what tells you
   whether a rate moved. Ninety days is the same order as the interval at which AWS has historically
   restructured Lambda pricing, and the cost of the warning when nothing changed is one line of
-  output. `microvms-core/src/cost.rs:50-56`, `:90-95`.
+  output. `microvms-domain/src/cost.rs:50-56`, `:90-95`.
 
 - **A rate table is all-or-nothing, and a fetched one is authoritative on rates while still
   hand-read on rules.** A partial table would price a run at less than it costs with no way for the
@@ -596,7 +596,7 @@ be March-based, which puts February's variable length last; `719468` is the day 
   one-week storage minimum, a per-request charge, a billing increment, or a free tier, so the
   retention floor is carried from the constant rather than from the fetch — dropping it there would
   understate a create-and-destroy suite by four orders of magnitude.
-  `microvms-core/src/cost.rs:1191-1199`, `:1253-1258`.
+  `microvms-domain/src/cost.rs:1198-1206`, `:1263-1268`.
 
 - **`ProtocolError`, `NotFound`, `Conflict`, `StdinClosed`, and `TooLarge` collapse onto one exit
   code deliberately, and `Unauthorized` is not one of them.** A shell cannot act differently on
@@ -604,7 +604,7 @@ be March-based, which puts February's variable length last; `719468` is the day 
   can reads `data.kind`. But a 401's remedy is a credential rather than
   a wait, so it maps to `ERR_CREDENTIALS`: retrying a 401 forever and failing a launch that was
   200 ms from ready are the two mistakes the classification exists to prevent. A `match` on a closed
-  enum has no ordering to get wrong. `microvms-core/src/error.rs:358-397`,
+  enum has no ordering to get wrong. `microvms-domain/src/error.rs:358-397`,
   `microvms-cli/src/exit.rs:8-9`, `:41`.
 
 ## See also

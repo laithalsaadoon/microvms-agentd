@@ -69,7 +69,7 @@ daemon over a real loopback socket, and both suites passing against real AWS on 
 commit — Python oracle 56/56, Rust CLI 38/38 — is what ended the oracle's job. Recovering any
 of it requires `git show`, and nothing in the tree points a reader at that commit.
 
-**The densest files are also the most-churned files.** `microvms-core/src/cost.rs` holds 242
+**The densest files are also the most-churned files.** `microvms-domain/src/cost.rs` holds 242
 symbols, the highest in the repository, and 7 commits. `agentd/src/exec.rs` 147, `agentd/src/fs.rs`
 137, `microvms-cli/src/guards.rs` 123 with 13 commits, `microvms-py/src/cost.rs` 117,
 `microvms-js/src/cost.rs` 106, `microvms-core/src/sandbox.rs` 105 with 11 commits,
@@ -216,9 +216,9 @@ the bullets name the count. Shares are computed with
 - `microvms-core/src/sandbox.rs` — sole human author (73% of 11 commits). 105 symbols
   implementing the single-writer state machine that the `model/` crate's stateright model also
   encodes; change the model in the same commit so the two descriptions cannot drift.
-- `microvms-core/src/cost.rs` — `bgagent` automated identity (71% of 7 commits). The densest
+- `microvms-domain/src/cost.rs` — `bgagent` automated identity (71% of 7 commits). The densest
   file in the repository at 242 symbols, holding a hand-pinned us-east-1 rate table that has
-  already drifted once — `microvms-core/src/cost.rs:1018-1021` records that `0.08` was the
+  already drifted once — `microvms-domain/src/cost.rs:1025-1028` records that `0.08` was the
   plausible-looking wrong value against the correct `dec!(0.0811111030)` — so keep
   `scripts/check-live-rates.py` in the billable tier and treat a rate edit as a measurement.
 - `agentd/src/routes.rs` — `bgagent` automated identity (86% of 7 commits). This file splits

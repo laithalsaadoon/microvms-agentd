@@ -1,0 +1,68 @@
+[package]
+name = "microvms-domain"
+version = "0.10.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = true
+description = "The MicroVMs client's rules and values: sizing, cost, regions, names, errors, with no I/O"
+readme = "README.md"
+keywords = ["microvms", "lambda", "aws", "sandbox", "microvm"]
+categories = ["virtualization"]
+
+# The set is exact: `arch/placement.toml` records it, and
+# `microvms-cli/tests/dependency_direction.rs` fails on a crate added here or one listed there
+# that this crate no longer uses (ARCH-6). Every crate here computes or encodes. A crate that
+# reaches the network, the filesystem, a subprocess, the clock or the OS random pool belongs
+# in `microvms-core`, behind a port this crate's callers supply.
+[dependencies]
+# The wire contract, shared with the daemon (ARCH-2). The identity seeds' validation lives
+# there so the host and the daemon can't disagree about what a seed is.
+protocol = { package = "microvms-protocol", version = "0.10.0", path = "../protocol" }
+# The error taxonomy's Display impls. 2.x rather than 1.x: `#[error]` on an enum
+# with `#[from]` is the same surface, and the 2.0 line is what receives fixes.
+thiserror = "2.0.19"
+# `constants::as_json` is the drift gate's second source (TRAP-12), so serde is a
+# runtime dependency of this crate rather than a test convenience: the CLI dumps
+# that value and `scripts/check-model-drift.py` compares it against the pinned
+# service model. `NameRecord` is also the CLI registry's on-disk format.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# ── the cost engine (T-W2-3) ────────────────────────────────────────────────
+# Money is decimal or it is wrong (COST-6): the ARM rates are figures like
+# 0.0000276944 and summing a few thousand of them in binary floating point drifts
+# in the direction of a bill nobody can reproduce. `serde-with-str` is what keeps
+# a Decimal in the JSON envelope as `"0.0000276944"` rather than as an f64 that
+# has already lost the exactness the type exists to hold.
+rust_decimal = { version = "1.42", features = ["serde-with-str"] }
+# The calendar behind CalendarDate. `std` only, no tzdb: the one consumer measures
+# rate-table age in whole UTC days, so the timezone database would be dead weight.
+jiff = { version = "0.2", default-features = false, features = ["std"] }
+rust_decimal_macros = "1.40"
+
+# ── the tunnel identity's derivation and pin ────────────────────────────────
+# Exec output and seeds are arbitrary bytes, so both sides of the wire carry base64. 0.23 to
+# match agentd: one version in the tree means the client and the daemon can't disagree about
+# padding or alphabet.
+base64 = "0.23"
+# Hex rendering for the identity pin in `Debug`. Encode-only.
+const-hex = "1.19"
+# Deriving the public half of a launch-generated seed without a handshake: the pin the
+# ledger stores, and the value the daemon must independently agree on. The 3.0 line uses
+# curve25519-dalek 5 while snow 0.10 (in core) still uses 4, so the tree carries two copies of
+# the curve arithmetic until snow bumps. `static_secrets` only: the seeds come from the
+# caller, so this crate never asks x25519-dalek for randomness.
+x25519-dalek = { version = "3", default-features = false, features = ["static_secrets"] }
+
+[dev-dependencies]
+# The size-class and region guards are table-shaped, which is exactly where a
+# hand-picked example set passes over the gap it was written to find.
+proptest = "1.11"
+# `sizing_fuzz`: `bolero::check!` runs as an ordinary `#[test]` on stable and as a
+# coverage-guided target under `cargo bolero test`.
+bolero = "0.13"
+
+[lints.rust]
+# No hand-written `unsafe` in this crate; a future one is a build error, not a scan finding.
+unsafe_code = "forbid"

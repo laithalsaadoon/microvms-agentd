@@ -24,7 +24,10 @@ and setup; do not infer live verification from local test results.
 
 - `protocol/`: shared types; package name `microvms-protocol`, import `protocol`.
 - `agentd/`: lifecycle hooks, authenticated execution, files, tunnels.
-- `microvms-core/`: AWS control plane, sessions, lifecycle, cost, agent helpers.
+- `microvms-domain/`: rules and values with no I/O: sizing, cost, regions,
+  names, service constraints, error kinds.
+- `microvms-core/`: AWS control plane, sessions, lifecycle, agent helpers;
+  re-exports the domain.
 - `microvms-cli/`: `microvm` commands and JSON envelopes.
 - `microvms-py/`, `microvms-js/`: thin PyO3 and napi-rs bindings.
 - `model/`, `spec/`, `conformance/`: portable model tests, formal requirements,
@@ -39,10 +42,18 @@ routes are generated from a schema.
 
 Behavior lives once, in Rust, at or below `microvms-core`:
 
-- `microvms-core`: rules and values, use cases, and every call that touches the
-  network, AWS, files, a subprocess, the clock or entropy belong here.
-  `microvms-protocol` holds the wire types it shares with the daemon. The
-  daemon depends on protocol, never on core.
+- `microvms-domain`: rules and values. It performs no network, filesystem,
+  subprocess, environment, clock or entropy access (ARCH-6): its `clippy.toml`
+  refuses those std calls and its dependencies' clock and entropy calls under a
+  crate-root `forbid`, and its dependency set in `arch/placement.toml` and each
+  dependency's features are asserted exactly. A rule that needs one of those inputs takes it as a
+  parameter, the way `Region::from_env` takes a lookup.
+- `microvms-core`: use cases, and every call that touches the network, AWS,
+  files, a subprocess, the clock or entropy. It re-exports the domain at the
+  paths core always had (ARCH-1), and `microvms_core::prelude` holds the
+  methods the domain's types gave up because they read the clock or the random
+  pool. `microvms-protocol` holds the wire types core and the domain share with
+  the daemon. The daemon depends on protocol, never on core.
 - `microvms-cli`, `microvms-py`, `microvms-js`: parse input, convert types,
   bridge to the host runtime, render output. A default, retry, validation rule,
   wire call, file format or subprocess here belongs in a lower layer.
@@ -52,8 +63,8 @@ formats and file I/O, the run ledger and the sync manifest among them. The
 ratchet doesn't collect that drift yet (#273), and #260 moves directory sync
 into core.
 
-Splitting core into `microvms-domain`, `microvms-app` and `microvms-edges` is
-planned in #286, and this list will name each layer then.
+Splitting the rest of core into `microvms-app` and `microvms-edges` is planned
+in #283, and this list will name each layer then.
 
 If an adapter needs something private to a lower crate, make it public there or
 move the caller down. Never copy it.
@@ -66,7 +77,8 @@ between the workspace's crates are checked by
 `microvms-cli/tests/dependency_direction.rs`. Each adapter's allowed
 dependencies (`arch/placement.toml`) are checked by the ratchet, and
 `dependency_direction.rs` asserts them exactly for each adapter the ratchet
-holds no placement drift for (the CLI joins when #260 clears its entries).
+holds no placement drift for (the CLI joins when #260 clears its entries). The
+domain's set is there too, asserted exactly, and it never carries drift.
 Forbidden calls are refused by each adapter's `clippy.toml`, and
 `scripts/test_ratchet.py` lists every site that turns those lints off. Semgrep
 thinness rules (#273) and a surface parity check (#271) are planned.

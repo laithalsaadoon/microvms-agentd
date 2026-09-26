@@ -61,7 +61,7 @@
 //! peak (COST-5).
 
 use std::fmt;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use rust_decimal::Decimal;
 use rust_decimal::prelude::{FromStr, ToPrimitive};
@@ -242,19 +242,29 @@ impl CalendarDate {
             .map_err(|_| refusal())
     }
 
-    /// Today, UTC.
+    /// The UTC civil day `secs` seconds after the Unix epoch falls on.
     ///
     /// UTC rather than local, and no tzdb: a rate table's age is measured in
-    /// ninety-day units, so the zone can only ever move the answer by a day.
-    /// Falls back to the epoch if the clock is set before 1970, which is a machine
-    /// whose age arithmetic is already meaningless.
-    pub fn today_utc() -> CalendarDate {
-        let seconds = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |since| since.as_secs());
+    /// ninety-day units, so the zone can only ever move the answer by a day. The time
+    /// is the caller's: this crate doesn't read the clock (ARCH-6), and
+    /// `microvms_core::prelude::CalendarDateExt::today_utc` is the one that does.
+    ///
+    /// Refuses a time past 9999-12-31, the last day the calendar holds, rather than
+    /// clamping it: the likeliest such value is a millisecond count passed as seconds,
+    /// and an age computed from a clamped or defaulted date would be wrong with no sign.
+    pub fn from_unix_secs(secs: u64) -> Result<CalendarDate, Error> {
         // Integer division floors, and the epoch is midnight, so this is the UTC
         // civil day without any rounding question.
-        Self::from_day_number((seconds / 86_400) as i64)
+        i64::try_from(secs / 86_400)
+            .ok()
+            .and_then(Self::from_day_number)
+            .ok_or_else(|| {
+                Error::invalid_arg(format!(
+                    "{secs} seconds after the Unix epoch is past 9999-12-31, the last day a \
+                     rate table can be dated. A time in milliseconds looks like this: pass \
+                     whole seconds"
+                ))
+            })
     }
 
     pub fn year(self) -> i32 {
@@ -274,14 +284,11 @@ impl CalendarDate {
         i64::from(self.0.since(EPOCH).expect("dates are in range").get_days())
     }
 
-    /// The inverse of [`CalendarDate::day_number`], for [`CalendarDate::today_utc`].
-    fn from_day_number(day_number: i64) -> CalendarDate {
-        let days = i32::try_from(day_number).unwrap_or_default();
-        CalendarDate(
-            EPOCH
-                .checked_add(jiff::Span::new().days(days))
-                .unwrap_or(EPOCH),
-        )
+    /// The inverse of [`CalendarDate::day_number`], for [`CalendarDate::from_unix_secs`].
+    /// `None` outside the calendar's range, which `Span::days` would panic on.
+    fn from_day_number(day_number: i64) -> Option<CalendarDate> {
+        let span = jiff::Span::new().try_days(day_number).ok()?;
+        EPOCH.checked_add(span).ok().map(CalendarDate)
     }
 
     /// Days from `earlier` to `self`, negative when `self` is the earlier one.
@@ -358,7 +365,7 @@ impl fmt::Display for Provenance {
 /// build failure at all — a typo in the test would leave the guard green.
 ///
 /// ```compile_fail,E0277
-/// # use microvms_core::cost::DurationP;
+/// # use microvms_domain::cost::DurationP;
 /// # use std::time::Duration;
 /// // There is no `From<Duration> for DurationP`, so a bare span cannot become a
 /// // labelled one by coercion.
@@ -366,7 +373,7 @@ impl fmt::Display for Provenance {
 /// ```
 ///
 /// ```compile_fail,E0599
-/// # use microvms_core::cost::DurationP;
+/// # use microvms_domain::cost::DurationP;
 /// // No `Default` either. A default would have to pick a provenance, and the one it
 /// // would pick is the stronger claim.
 /// let unlabelled = DurationP::default();
@@ -376,7 +383,7 @@ impl fmt::Display for Provenance {
 /// is one word:
 ///
 /// ```
-/// # use microvms_core::cost::{DurationP, Provenance};
+/// # use microvms_domain::cost::{DurationP, Provenance};
 /// # use std::time::Duration;
 /// let timed = DurationP::Measured(Duration::from_secs(3600));
 /// assert_eq!(timed.provenance(), Provenance::Measured);
@@ -484,7 +491,7 @@ impl fmt::Display for DurationP {
 /// guard green while measuring nothing.
 ///
 /// ```compile_fail,E0277
-/// # use microvms_core::cost::EstimatedUsd;
+/// # use microvms_domain::cost::EstimatedUsd;
 /// # use rust_decimal_macros::dec;
 /// let estimate = EstimatedUsd::new(dec!(1.23));
 /// // No `From<EstimatedUsd> for f64`, so no `Into` either. This is the line the
@@ -493,7 +500,7 @@ impl fmt::Display for DurationP {
 /// ```
 ///
 /// ```compile_fail,E0614
-/// # use microvms_core::cost::EstimatedUsd;
+/// # use microvms_domain::cost::EstimatedUsd;
 /// # use rust_decimal_macros::dec;
 /// let estimate = EstimatedUsd::new(dec!(1.23));
 /// // No `Deref` and no public field: the figure comes out through `amount()`, which
@@ -502,7 +509,7 @@ impl fmt::Display for DurationP {
 /// ```
 ///
 /// ```compile_fail,E0308
-/// # use microvms_core::cost::{Amount, EstimatedUsd};
+/// # use microvms_domain::cost::{Amount, EstimatedUsd};
 /// # use rust_decimal_macros::dec;
 /// let estimate = EstimatedUsd::new(dec!(1.23));
 /// let unknown = Amount::unpriced("no rate is published");
@@ -1767,7 +1774,7 @@ impl RunUsage {
 ///
 /// `today` decides staleness (COST-7) and is a parameter rather than a clock read, so
 /// a report is a pure function of its inputs and a test does not have to travel in
-/// time. Pass [`CalendarDate::today_utc`] from a binary.
+/// time. A binary passes `CalendarDate::today_utc()` from `microvms_core::prelude`.
 pub fn run_report(
     size: SizeClass,
     usage: &RunUsage,
@@ -2119,6 +2126,42 @@ mod tests {
     /// A month as AWS's GB-month rate defines it. Every "per month" figure in
     /// `docs/PLATFORM.md` is this many seconds, not 30 days.
     const MONTH: Duration = Duration::from_secs(730 * 3600);
+
+    /// The epoch is day zero, each day starts at a multiple of 86,400 seconds, and the
+    /// last second of a day stays on that day.
+    #[test]
+    fn a_unix_time_floors_to_its_utc_day() {
+        let day = |secs| {
+            CalendarDate::from_unix_secs(secs)
+                .expect("in range")
+                .to_string()
+        };
+        assert_eq!(day(0), "1970-01-01");
+        assert_eq!(day(86_399), "1970-01-01");
+        assert_eq!(day(86_400), "1970-01-02");
+        // 2026-09-25T00:00:00Z, and the second before it.
+        assert_eq!(day(1_790_294_400), "2026-09-25");
+        assert_eq!(day(1_790_294_399), "2026-09-24");
+        assert_eq!(
+            CalendarDate::from_unix_secs(0)
+                .expect("in range")
+                .day_number(),
+            0
+        );
+        // The calendar's last second, 9999-12-31T23:59:59Z, and the one after it.
+        assert_eq!(day(253_402_300_799), "9999-12-31");
+    }
+
+    /// Past the calendar's end is a refusal, never a panic or a quiet epoch: the same
+    /// 2026-09-25 in milliseconds, the first second of year 10000, and the largest input.
+    #[test]
+    fn a_unix_time_past_the_calendar_is_refused() {
+        for secs in [1_790_294_400_000, 253_402_300_800, u64::MAX] {
+            let error = CalendarDate::from_unix_secs(secs).expect_err("past 9999-12-31");
+            assert_eq!(error.kind(), ErrorKind::InvalidArg, "{secs}");
+            assert!(error.to_string().contains("milliseconds"), "{error}");
+        }
+    }
 
     /// A date the pinned table is fresh on, so a staleness warning in a test that is
     /// not about staleness is a failure rather than noise.
@@ -4111,7 +4154,8 @@ mod tests {
             let rates = rates();
             let today = CalendarDate::from_day_number(
                 rates.retrieved().day_number() + age_days
-            );
+            )
+            .expect("in range");
             prop_assert_eq!(rates.age_days(today), age_days);
             prop_assert_eq!(rates.is_stale(today), age_days > STALE_AFTER_DAYS);
             match rates.staleness(today) {
@@ -4143,7 +4187,7 @@ mod tests {
         fn a_day_number_round_trips_through_its_calendar_date(
             day_number in -30_000i64..30_000,
         ) {
-            let date = CalendarDate::from_day_number(day_number);
+            let date = CalendarDate::from_day_number(day_number).expect("in range");
             prop_assert_eq!(date.day_number(), day_number);
             // And the parts are a real calendar day, so the validator agrees with the
             // arithmetic.

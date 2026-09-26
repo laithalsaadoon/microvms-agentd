@@ -17,15 +17,20 @@ and half a workspace may already be on the registry. crates.io versions are immu
 there is no second attempt at `0.1.0`.
 
 The second is a crate that publishes by accident. The workspace default is `publish = false`
-and three crates opt in, so the failure shape is a *fourth* crate that quietly joins them —
-`agentd-model` is a proof harness and `agentd` is guest software that reaches a consumer as a
-binary baked into an image, and neither has anything a registry consumer could use. An
-equality against a named set is what makes that impossible to do silently; a "does it look
-publishable" heuristic would pass.
+and only the crates in `PUBLISHED` opt in, so the failure shape is one more crate that quietly
+joins them. `agentd-model` is a proof harness and `agentd` is guest software that reaches a
+consumer as a binary baked into an image, and neither has anything a registry consumer could
+use. An equality against a named set is what makes that impossible to do silently; a "does it
+look publishable" heuristic would pass.
 
 Offline by default, because `mise run check` is offline and free. `--dry-run` adds the tier
 that needs the network: `cargo publish --workspace --dry-run`, which packages and verifies
-every crate as if the others were already on the registry. That half runs in CI.
+every crate as if the others were already on the registry. That half runs in CI. It also asks
+crates.io whether each published crate exists yet, because trusted publishing can't create a
+crate: a new one needs a first manual publish, and a release tag that reaches it first fails
+halfway through `cargo publish --workspace`. On a pull request a missing crate is a warning,
+since the manual publish only has to happen before the next tag; with `--tag`, which is how the
+release workflow calls it, it's a failure.
 
 The `nothing to publish` check is not paranoia. With every crate unpublishable, `cargo publish
 --workspace --dry-run` prints a warning and exits **0** — a gate wired to it alone would go
@@ -38,6 +43,8 @@ import json
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 #: The crates that go to crates.io, and nothing else.
@@ -47,6 +54,7 @@ from pathlib import Path
 #: Adding a crate here is a decision someone makes on purpose, in a diff a reviewer sees.
 PUBLISHED = {
     "microvms-protocol",
+    "microvms-domain",
     "microvms-core",
     "microvms-cli",
 }
@@ -265,6 +273,49 @@ def _json_version(relative: str) -> str | None:
     return json.loads(Path(relative).read_text()).get("version")
 
 
+#: crates.io's API, which refuses a request without a `User-Agent` naming who is asking.
+CRATES_IO = "https://crates.io/api/v1/crates/"
+USER_AGENT = (
+    "microvms-agentd check-publishable (github.com/laithalsaadoon/microvms-agentd)"
+)
+
+#: What to do about a crate the registry doesn't have. Also in CONTRIBUTING.md's release section.
+FIRST_PUBLISH = (
+    "crates.io trusted publishing can't create a crate, so a new one needs one manual publish "
+    "before the release workflow can publish it: from a clean checkout of main, before the "
+    "release's version bump lands (so the crate still carries the last released version, and "
+    "the release's own version is left for the workflow), `cargo publish -p {name} --locked` "
+    "with a crates.io API token scoped to publishing new crates, then add the trusted publisher "
+    "on crates.io (this repository, workflow `release.yml`, environment `release`)"
+)
+
+
+def unregistered(names: set[str]) -> list[str]:
+    """The crates in `names` crates.io answers 404 for.
+
+    Any other failure (a network error, a 5xx, a 429) stops the script instead of passing: a
+    registry that couldn't be asked is not evidence that a crate exists. There's no retry: it
+    asks once per published crate per run, so rerunning the job is the retry.
+    """
+    missing = []
+    for name in sorted(names):
+        request = urllib.request.Request(
+            CRATES_IO + name, headers={"User-Agent": USER_AGENT}
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30):
+                pass
+        except urllib.error.HTTPError as error:
+            if error.code != 404:
+                sys.exit(f"publishable: crates.io answered {error.code} for {name}")
+            missing.append(name)
+        except urllib.error.URLError as error:
+            sys.exit(
+                f"publishable: couldn't reach crates.io for {name}: {error.reason}"
+            )
+    return missing
+
+
 def main() -> int:
     packages = metadata()["packages"]
     failures: list[str] = []
@@ -354,6 +405,17 @@ def main() -> int:
         print(f"publishable: every published manifest agrees with tag {tag}")
 
     if "--dry-run" in sys.argv:
+        missing = unregistered(PUBLISHED)
+        for name in missing:
+            message = (
+                f"{name} isn't on crates.io yet. {FIRST_PUBLISH.format(name=name)}."
+            )
+            if tag:
+                print(f"publishable: {message}", file=sys.stderr)
+            else:
+                print(f"::warning::{message}")
+        if missing and tag:
+            return 1
         print("publishable: cargo publish --workspace --dry-run (needs the network)")
         proc = subprocess.run(
             ["cargo", "publish", "--workspace", "--dry-run", "--locked"],

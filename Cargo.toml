@@ -3,6 +3,7 @@ members = [
     "agentd",
     "microvms-cli",
     "microvms-core",
+    "microvms-domain",
     "microvms-js",
     "microvms-py",
     "model",
@@ -14,14 +15,10 @@ resolver = "3"
 # own lockfile for the same reason.
 exclude = ["agentd/fuzz"]
 
-# The daemon crate lands here as `agentd/` once the model settles. Keeping the
-# workspace in place from the first commit means adding it is a one-line change
-# rather than a restructure.
-#
-# The list is complete rather than grown: `microvms-core`, `microvms-cli`,
-# `microvms-py`, and `microvms-js` are stubs whose owning tasks fill them in, and
-# declaring them all at once means no later change has to touch this file. A member
-# added late is a member every other in-flight branch conflicts on.
+# The list was declared whole at the start so parallel tasks wouldn't conflict on
+# it. `microvms-domain` joined later (#282), when core's rules and values moved
+# into a crate that can't do I/O, and `microvms-cli/tests/dependency_direction.rs`
+# pins the list so a member can't join without that test naming it.
 
 [workspace.package]
 edition = "2024"
@@ -32,8 +29,8 @@ repository = "https://github.com/laithalsaadoon/microvms-agentd"
 # nobody thought to write down. A member added later is unpublishable until
 # someone says otherwise in its own manifest, next to the reason.
 #
-# The three that opt in with `publish = true` are `microvms-protocol`,
-# `microvms-core`, and `microvms-cli`. The four that stay here are each a
+# The ones that opt in with `publish = true` are `microvms-protocol`,
+# `microvms-domain`, `microvms-core`, and `microvms-cli`. The four that stay here are each a
 # deliberate absence: `agentd` and `agentd-model` because the daemon ships as a
 # binary baked into an image and the model is a proof harness, `microvms-py` and
 # `microvms-js` because their registry is PyPI and npm.

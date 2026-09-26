@@ -13,6 +13,29 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
   production. The CLI and both bindings pass it instead of each wrapping `std::env::var`,
   which their `clippy.toml` now bans along with the other environment reads,
   `std::process::Command` and `tokio::process::Command`. No behavior changes.
+- **`microvms-domain`, the rules and values with no I/O (#282, ARCH-6).** Sizing, the cost
+  engine and its rate table, regions, the service constraints, name validation and the
+  name record, the error kinds, the preflight report, the ELF checks, and the tunnel
+  identity's derivation and pin moved out of `microvms-core` into a new published crate. Its
+  `clippy.toml` refuses the std file, process, network, environment and clock calls and the
+  clock and entropy calls of its own dependencies, and its dependency set and their features
+  are asserted exactly, so nothing in it can read ambient state. Core
+  re-exports every moved item at its old path (ARCH-1, amended), and
+  `microvms-core/tests/public_paths.rs` names every v0.10.0 path to keep it that way. The
+  pure constructors are new: `CalendarDate::from_unix_secs` (it refuses a time past
+  9999-12-31, such as a millisecond count), `NameRecord::new_at`,
+  `LaunchIdentity::from_seeds` (public now, and it validates), and
+  `names::resolve_record`. No behavior changes, and no AWS call changed.
+
+### Changed
+
+- **Four methods moved to `microvms_core::prelude` (#282). A Rust source break, so the next
+  release is 0.11.0.** `CalendarDate::today_utc`, `NameRecord::new`,
+  `LaunchIdentity::generate` and `TunnelIdentity::initiator` read the clock or the OS
+  random pool, which the domain crate can't do, so they're extension traits in core now:
+  `CalendarDateExt`, `NameRecordExt`, `LaunchIdentityExt` and `TunnelIdentityExt`. Add
+  `use microvms_core::prelude::*;` and the calls compile unchanged. The Python and
+  TypeScript APIs don't change.
 
 ## [0.10.0] — 2026-09-25
 

@@ -59,7 +59,7 @@ a file that never ships in a binary at the top.
 | `microvms-py/src/cost.rs` | ↑ rising | 0 warn, 66 error | Laith Al-Saadoon 57% | `microvms-py/src/cost.rs` (1,123 LOC) |
 | `microvms-js/src/cost.rs` | → flat | 0 warn, 65 error | Laith Al-Saadoon 60% | `microvms-js/src/cost.rs` (1,038 LOC) |
 | `microvms-js/src/session.rs` | → flat | 0 warn, 25 error | Laith Al-Saadoon 60% | `microvms-js/src/session.rs` (609 LOC) |
-| `microvms-core/src/cost.rs` | ↑ rising | 93 warn, 0 error | bgagent 71% | `microvms-core/src/cost.rs` (4,127 LOC) |
+| `microvms-domain/src/cost.rs` | ↑ rising | 93 warn, 0 error | bgagent 71% | `microvms-domain/src/cost.rs` (4,127 LOC) |
 | `microvms-py/src/exec.rs` | ↑ rising | 0 warn, 22 error | Laith Al-Saadoon 71% | `microvms-py/src/exec.rs` (631 LOC) |
 | `microvms-js/src/exec.rs` | → flat | 0 warn, 19 error | Laith Al-Saadoon 60% | `microvms-js/src/exec.rs` (456 LOC) |
 | `microvms-js/src/sandbox.rs` | → flat | 0 warn, 16 error | Laith Al-Saadoon 60% | `microvms-js/src/sandbox.rs` (623 LOC) |
@@ -74,7 +74,7 @@ reason is structural rather than per-file: all 18 files under `microvms-py/src/`
 `microvms-js/src/` — 3,856 and 3,760 LOC respectively — contain zero `#[cfg(test)]` modules
 and zero `#[test]` functions, while the other five crates hold 770 between them — an average
 of 19 per file in `microvms-core`, 11 in `microvms-cli`, 10 in `agentd`. The three
-non-binding rows (`microvms-core/src/cost.rs`, `microvms-core/src/sandbox.rs`,
+non-binding rows (`microvms-domain/src/cost.rs`, `microvms-core/src/sandbox.rs`,
 `agentd/src/fs.rs`) are the opposite case: heavily unit-tested files whose churn is rising
 and whose public surface no cross-file tier reaches.
 
@@ -171,7 +171,7 @@ microvms-js/src/session.rs -d 1` does return two tests —
 `agentd/tests/turmoil_transport.rs` and `microvms-core/tests/turmoil_client.rs` — reached
 through the core types this file wraps, not through the binding surface itself.
 
-### 4. `microvms-core/src/cost.rs`
+### 4. `microvms-domain/src/cost.rs`
 
 **What's there.** The cost engine proper, and the largest file in the workspace at 4,127
 lines: rate data carried as types rather than prose because MicroVMs publishes no standalone
@@ -179,11 +179,11 @@ pricing page, with two invariants enforced by shape instead of at runtime — "s
 measured, dollars are estimated" via a `DurationP` enum whose every variant names its
 provenance (COST-1), and "unknown is not zero" via `Amount::Unpriced` as a distinct variant
 that forces a match arm (COST-3), promoting to `Total::AtLeast` so a floor cannot be read
-without its reasons (COST-4) (`microvms-core/src/cost.rs:2-27`). Central types are
+without its reasons (COST-4) (`microvms-domain/src/cost.rs:2-27`). Central types are
 `RateTable` with its `region`/`source_url`/`retrieved` provenance fields
-(`microvms-core/src/cost.rs:849`), `CalendarDate` (`microvms-core/src/cost.rs:209`),
-`LineItem` (`microvms-core/src/cost.rs:1440`), `CostReport`
-(`microvms-core/src/cost.rs:1478`) and `RunUsage` (`microvms-core/src/cost.rs:1730`).
+(`microvms-domain/src/cost.rs:856`), `CalendarDate` (`microvms-domain/src/cost.rs:209`),
+`LineItem` (`microvms-domain/src/cost.rs:1447`), `CostReport`
+(`microvms-domain/src/cost.rs:1485`) and `RunUsage` (`microvms-domain/src/cost.rs:1737`).
 
 **Recent activity.** 7 commits, `↑ rising`.
 
@@ -194,16 +194,17 @@ commits.
 **Findings.** 93 warn, 0 error — the largest warn count in the repository, and every one of
 them is a tier-reach statement rather than an absence of tests: the file carries 65 in-file
 `#[test]` functions, so no symbol qualifies for the error class. Highest-dependent uncovered
-symbols are `RateTable` (15 dependents, `microvms-core/src/cost.rs:849`), `CalendarDate`
-(14, `microvms-core/src/cost.rs:209`), `LineItem` (13, `microvms-core/src/cost.rs:1440`),
-`today_utc` (12, `microvms-core/src/cost.rs:251`), `CostReport` (11,
-`microvms-core/src/cost.rs:1478`) and `RunUsage` (11, `microvms-core/src/cost.rs:1730`).
-`codegraph affected microvms-core/src/cost.rs -d 1` reaches 8 test files, the broadest of any
-file on this list. Two specifics deserve attention: `today_utc`
-(`microvms-core/src/cost.rs:251`) reads the wall clock and floors on integer division, so it
-is the file's one ambient-time dependency and cannot be exercised deterministically by a
-`turmoil` tier that controls virtual time only; and `RateTable::retrieved`
-(`microvms-core/src/cost.rs:849`) makes rate freshness a data property, which the separate
+symbols are `RateTable` (15 dependents, `microvms-domain/src/cost.rs:856`), `CalendarDate`
+(14, `microvms-domain/src/cost.rs:209`), `LineItem` (13, `microvms-domain/src/cost.rs:1447`),
+`today_utc` (12, now `microvms-core/src/prelude.rs:26`), `CostReport` (11,
+`microvms-domain/src/cost.rs:1485`) and `RunUsage` (11, `microvms-domain/src/cost.rs:1737`).
+`codegraph affected microvms-domain/src/cost.rs -d 1` reaches 8 test files, the broadest of any
+file on this list. Two specifics deserve attention: `today_utc` reads the wall clock and floors
+on integer division, so it was the file's one ambient-time dependency and couldn't be exercised
+deterministically by a `turmoil` tier that controls virtual time only. Since #282 the clock read
+is in `microvms-core/src/prelude.rs:26` and the floor is the pure
+`CalendarDate::from_unix_secs` (`microvms-domain/src/cost.rs:255`), which takes the time.
+Second, `RateTable::retrieved` (`microvms-domain/src/cost.rs:856`) makes rate freshness a data property, which the separate
 `scripts/check-live-rates.py --twin-only` cross-check exists to verify (`mise.toml:564-566`)
 rather than any Rust test tier.
 

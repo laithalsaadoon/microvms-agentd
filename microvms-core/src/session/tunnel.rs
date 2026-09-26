@@ -54,6 +54,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
 use tokio_tungstenite::tungstenite::{Message, protocol::CloseFrame};
 
 use crate::error::{Error, ErrorKind};
+use crate::prelude::*;
 use crate::session::proxy::ProxyAuth;
 
 /// Bytes read from the local connection per relayed frame.

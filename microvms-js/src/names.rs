@@ -7,6 +7,7 @@
 
 use microvms_core::error::Error;
 use microvms_core::names::{FileNameStore, NameRecord as CoreRecord, NameStore};
+use microvms_core::prelude::*;
 use napi_derive::napi;
 
 use crate::errors::{AsyncError, js, js_async};

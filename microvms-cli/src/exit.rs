@@ -23,7 +23,7 @@
 //! None of that survives into Rust, because the judgement already happened.
 //! [`microvms_core::ErrorKind`] is a closed thirteen-variant enum and
 //! [`microvms_core::Error::kind`] is exactly the answer the chain computed —
-//! `microvms-core/src/error.rs:365` documents the same reduction on its own side. So
+//! `microvms-domain/src/error.rs:366` documents the same reduction on its own side. So
 //! [`classify`] is a `match` on a closed enum, and a match has no order to get wrong.
 //!
 //! The second thing that disappears is worse and more interesting.
@@ -199,7 +199,7 @@ impl fmt::Display for Exit {
 /// Meanings and findings transcribed from `cli.py:149`'s `EXIT_TABLE`, which is what
 /// `microvm manifest` publishes and what the conformance oracle compares against. Written
 /// out rather than generated from [`ErrorKind::code`], because a generated table would
-/// agree with a typo — the same reason `microvms-core/src/error.rs:432` spells its thirteen
+/// agree with a typo — the same reason `microvms-domain/src/error.rs:433` spells its thirteen
 /// codes by hand.
 pub const EXIT_TABLE: [ExitRow; 17] = [
     ExitRow {
@@ -322,7 +322,7 @@ pub struct CliError {
     /// Carried separately from `exit` and emitted as `data.kind`, because the exit code
     /// collapses `Conflict`/`NotFound`/`ProtocolError`/`StdinClosed`/`TooLarge` onto
     /// `ERR_PROTOCOL` and the conformance oracle asserts at the finer granularity — see
-    /// the module docs and `microvms-core/src/error.rs:1`.
+    /// the module docs and `microvms-domain/src/error.rs:1`.
     pub wire_kind: Option<WireKind>,
     pub suggestions: Vec<String>,
     pub data: serde_json::Map<String, serde_json::Value>,

@@ -137,7 +137,7 @@ CLI" a property rather than a request (`microvms-cli/tests/dependency_direction.
 
 `microvms-core` depending on the CLI would make every consumer of the library, both bindings
 included, carry `clap`, `ratatui`, and a multi-thread tokio runtime
-(`microvms-cli/tests/dependency_direction.rs:63-65`).
+(`microvms-cli/tests/dependency_direction.rs:64-66`).
 
 ## The CLI's dependency set is a denylist under test
 

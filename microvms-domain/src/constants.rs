@@ -100,7 +100,7 @@ pub const DOCUMENTED_RUN_HOOK_PAYLOAD_BYTES: usize = 16_384;
 ///
 /// The minimum is 1 and this comment used to say botocore enforces that one. It does, and this
 /// client does not use botocore — so the min is checked by
-/// [`crate::control::require_valid_image_name`] like everything else, and always was.
+/// `microvms_core::control::require_valid_image_name` like everything else, and always was.
 pub const MAX_IMAGE_NAME_LEN: usize = 64;
 
 /// `ImageName.pattern`, as the model spells it.
@@ -112,7 +112,7 @@ pub const IMAGE_NAME_PATTERN: &str = "[a-zA-Z0-9-_]+";
 
 /// `Version.max`, which is also `NonBlankString.max`.
 ///
-/// Checked by [`crate::control::require_valid_version`] on the two members this client sends
+/// Checked by `microvms_core::control::require_valid_version` on the two members this client sends
 /// as a `Version` — `CreateMicrovmImage.baseImageVersion` and `RunMicrovm.imageVersion`. Issue
 /// #24 named `NonBlankString` as the model's most-reused unguarded shape; these are the two
 /// places it is now guarded, and both are sent at a moment where the service's own rejection
@@ -130,7 +130,7 @@ pub const VERSION_PATTERN: &str = "[^\\s]+";
 ///
 /// The model's most-reused constrained shape — 45 members name it — and the ones this client
 /// *sends* are `CodeArtifact.uri`, `CreateMicrovmImage.baseImageArn`, and
-/// `ListMicrovmImages.nameFilter`. Checked by [`crate::control::require_non_blank`].
+/// `ListMicrovmImages.nameFilter`. Checked by `microvms_core::control::require_non_blank`.
 ///
 /// A separate constant from [`MAX_VERSION_LEN`] rather than a reuse of it, and the reason is
 /// the same one the two connector ceilings give: `Version` and `NonBlankString` are two shapes
@@ -148,7 +148,7 @@ pub const NON_BLANK_PATTERN: &str = "[^\\s]+";
 /// Both shapes are `min: 1, max: 256`, and between them they cover **twelve** URI, body, and
 /// querystring members across every implemented operation — every `GetMicrovm`, `Suspend`,
 /// `Resume`, `Terminate`, `CreateMicrovmAuthToken`, `GetMicrovmImage`, `Delete*`, `List*`, and
-/// `RunMicrovm.imageIdentifier`. Checked by [`crate::control::require_valid_identifier`].
+/// `RunMicrovm.imageIdentifier`. Checked by `microvms_core::control::require_valid_identifier`.
 ///
 /// # The model contradicts itself here, and the client resolves it toward 256
 ///
@@ -161,7 +161,7 @@ pub const NON_BLANK_PATTERN: &str = "[^\\s]+";
 /// This client refuses above 256 on the way out, because that is the bound the *request*
 /// shapes state and a request over it is rejected by the service regardless of where the value
 /// came from. Refusing there names the contradiction — see
-/// [`crate::control::require_valid_identifier`], whose message says an over-long identifier
+/// `microvms_core::control::require_valid_identifier`, whose message says an over-long identifier
 /// that came from a response is a service-side inconsistency to report rather than a caller
 /// mistake. The alternative, accepting up to 2048 because a response might carry one, would
 /// send a request that cannot succeed and report the service's `ValidationException` as though
@@ -206,7 +206,7 @@ pub const TAG_COMPONENT_PATTERN: &str = "([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)";
 
 /// `CloudWatchLoggingLogGroupString.max` — the ceiling on `logging.cloudWatch.logGroup`.
 ///
-/// Checked by [`crate::control::require_valid_log_group`] before the create call, which
+/// Checked by `microvms_core::control::require_valid_log_group` before the create call, which
 /// happens after the artifact upload — the same ordering argument every other create-side
 /// guard makes.
 pub const MAX_LOG_GROUP_LEN: usize = 512;
@@ -222,13 +222,13 @@ pub const LOG_GROUP_PATTERN: &str = "[a-zA-Z0-9_\\-/.#]+";
 ///
 /// This bounds the value **on the wire**, which is never the caller's value verbatim: the
 /// client always appends `/<16 hex>` (see [`MAX_USER_LOG_STREAM_LEN`] for why, and
-/// `crate::control::image` for the mechanism), so the caller-facing ceiling is lower.
+/// `microvms_core::control::image` for the mechanism), so the caller-facing ceiling is lower.
 pub const MAX_LOG_STREAM_LEN: usize = 512;
 
 /// `CloudWatchLoggingLogStreamString.pattern` — anything but `:` and `*`.
 ///
 /// The two excluded characters are CloudWatch's own stream-name reserved set. Published as
-/// a string for the drift gate; [`crate::control::require_valid_log_stream`] names it in
+/// a string for the drift gate; `microvms_core::control::require_valid_log_stream` names it in
 /// its refusal.
 pub const LOG_STREAM_PATTERN: &str = "[^:*]*";
 
@@ -258,7 +258,7 @@ pub const MAX_ROLE_ARN_LEN: usize = 2048;
 
 /// `RoleArn.pattern`, as the model spells it.
 ///
-/// Checked by [`crate::control::require_valid_role_arn`] on `CreateMicrovmImage.buildRoleArn`
+/// Checked by `microvms_core::control::require_valid_role_arn` on `CreateMicrovmImage.buildRoleArn`
 /// and `RunMicrovm.executionRoleArn`. The build role is the one that matters most: the create
 /// call happens **after** the artifact upload, so the service's rejection of a malformed role
 /// ARN costs the caller the upload — the exact ordering `create_image` is arranged to prevent,
@@ -273,7 +273,7 @@ pub const ROLE_ARN_PATTERN: &str = "arn:aws[a-z\\-]*:iam::[0-9]{12}:role/?[a-zA-
 ///
 /// Port 0 is what "let the kernel choose" means to a listener and it is not a port a proxy
 /// token or a hooks block can name. `with_port(0)` was representable and sent `{"port": 0}`
-/// (issue #24); [`crate::control::require_valid_port`] is what refuses it now.
+/// (issue #24); `microvms_core::control::require_valid_port` is what refuses it now.
 pub const MIN_PORT: u16 = 1;
 
 /// `PortNumber.max`, which equals [`MAX_HOOK_PORT`] and is a different shape.
@@ -287,7 +287,7 @@ pub const MAX_PORT: u16 = 65_535;
 ///
 /// # Why this has a constant now when it deliberately did not
 ///
-/// The old comment here and on [`crate::control::RunMicrovmRequest::max_idle_sec`] justified
+/// The old comment here and on `microvms_core::control::RunMicrovmRequest::max_idle_sec` justified
 /// having no guard on the grounds that `min` is one of the four keys in botocore's
 /// `VALIDATED_METADATA_ATTRS`, so botocore refuses it before the wire with a clear message.
 /// That is true of botocore and **false of this client**: `microvms-core` signs with
@@ -296,7 +296,7 @@ pub const MAX_PORT: u16 = 65_535;
 /// held, and it did not survive the port. Issue #24 measured the consequence:
 /// `max_idle_sec: 59` reached the wire.
 ///
-/// Checked by [`crate::control::require_idle_duration`]. There is no maximum in the model, and
+/// Checked by `microvms_core::control::require_idle_duration`. There is no maximum in the model, and
 /// the client adds none: a caller who wants a VM that never auto-suspends within its
 /// `maximumDurationInSeconds` says so with a large number, and the eight-hour ceiling on the
 /// VM's life is the real bound.
@@ -347,7 +347,7 @@ pub const MAX_NETWORK_CONNECTOR_LEN: usize = 2048;
 /// wrong in the permissive direction, so the rejection would arrive from the service.
 ///
 /// Pinned here rather than left as a comment because the version readback now deserializes
-/// that list ([`crate::control::ops::MicrovmImageVersionSummaryWire`]), so the two ceilings
+/// that list (`microvms_core::control::ops::MicrovmImageVersionSummaryWire`), so the two ceilings
 /// are both live in this crate and the drift gate can hold each against its own shape.
 pub const MAX_IMAGE_EGRESS_CONNECTORS: usize = 1;
 
@@ -359,7 +359,7 @@ pub const MAX_IMAGE_EGRESS_CONNECTORS: usize = 1;
 /// enums, and this one is a request member, so a value the model dropped would be a call this
 /// client makes and the service refuses.
 ///
-/// [`crate::control::ops::VersionStatus`] is the typed spelling; this array is what the gate
+/// `microvms_core::control::ops::VersionStatus` is the typed spelling; this array is what the gate
 /// reads, and the test at the bottom of that module asserts the two agree.
 pub const IMAGE_VERSION_STATUSES: [&str; 2] = ["ACTIVE", "INACTIVE"];
 
@@ -370,7 +370,7 @@ pub const IMAGE_VERSION_STATUSES: [&str; 2] = ["ACTIVE", "INACTIVE"];
 /// `CreateMicrovmImage`: a value the model dropped is a call this client makes and the service
 /// refuses, on six fields at once.
 ///
-/// [`crate::control::ops::HookState`] is the typed spelling and is what the request carries.
+/// `microvms_core::control::ops::HookState` is the typed spelling and is what the request carries.
 /// This array is what the gate reads, and the test in that module asserts the two agree — the
 /// same arrangement [`IMAGE_VERSION_STATUSES`] has with `ops::VersionStatus`.
 pub const HOOK_STATES: [&str; 2] = ["DISABLED", "ENABLED"];
@@ -383,15 +383,15 @@ pub const HOOK_STATES: [&str; 2] = ["DISABLED", "ENABLED"];
 /// comment admitted: the gate verified the model against the *script*, with no reader in the
 /// client at all. Issue #24 named the consequence — a `MicrovmState` AWS adds fails the gate
 /// with no compile-time consequence for the polling loops in
-/// [`crate::control::microvm`] that branch on states, so the gate's failure and the loop's
+/// `microvms_core::control::microvm` that branch on states, so the gate's failure and the loop's
 /// blindness were unrelated facts.
 ///
 /// Moving the set here does not make a new state a compile error — a wire string cannot be
 /// exhaustively matched, and narrowing a *response* enum is the mistake
-/// [`crate::control::ops::MicrovmImageBuildSummaryWire::architecture`] documents at length. What
+/// `microvms_core::control::ops::MicrovmImageBuildSummaryWire::architecture` documents at length. What
 /// it does buy is a reader in the crate that the loops' own sets are checked against: the tests
 /// below assert [`TERMINAL_STATES`] and [`DEAD_STATES`] are subsets of this, and
-/// [`crate::control::microvm::SUSPEND_WANTED`] is checked against it too. So a state removed or
+/// `microvms_core::control::microvm::SUSPEND_WANTED` is checked against it too. So a state removed or
 /// respelled by AWS fails the gate *and* fails a test naming the loop that branches on it.
 pub const MICROVM_STATES: [&str; 6] = [
     "PENDING",
@@ -404,7 +404,7 @@ pub const MICROVM_STATES: [&str; 6] = [
 
 /// The `MicrovmImageState` enum, in the model's order.
 ///
-/// What [`crate::control::image::Image::is_ready`] and `is_failed` are decided against. The
+/// What `microvms_core::control::image::Image::is_ready` and `is_failed` are decided against. The
 /// three `*_FAILED` spellings are why `is_failed` is a substring test rather than a set: a
 /// fourth added later is still recognised as a failure rather than polled to the deadline, and
 /// the test below asserts that reading is still true of every member here.
@@ -446,7 +446,7 @@ pub const BUILD_STATES: [&str; 4] = ["PENDING", "IN_PROGRESS", "SUCCESSFUL", "FA
 
 /// The `Chipset` enum, which is exactly this one value.
 ///
-/// Now deserialized: [`crate::control::ops::MicrovmImageBuildSummaryWire::chipset`] and
+/// Now deserialized: `microvms_core::control::ops::MicrovmImageBuildSummaryWire::chipset` and
 /// `GetImageBuildResponseWire::chipset` both read it, so the drift-gate observation in issue #24
 /// — "`Chipset` is drift-checked but deserialized nowhere" — was closed by the
 /// build-introspection work that added the model's five missing required members to those two
@@ -536,7 +536,7 @@ pub fn is_valid_log_group(group: &str) -> bool {
 /// **The length is not checked here**, unlike [`is_valid_image_name`], and the asymmetry is
 /// deliberate: a key and a value share this one pattern and have *different* ceilings (128
 /// against 256) and different minima (1 against 0). A combined check would need to know which
-/// side it was looking at, which is what [`crate::control::require_valid_tags`] does — it names
+/// side it was looking at, which is what `microvms_core::control::require_valid_tags` does — it names
 /// the key or the value in its message, so a caller with twenty tags is told which one and
 /// which half.
 ///
@@ -577,7 +577,7 @@ pub fn is_valid_tag_component(component: &str) -> bool {
 /// a role *name* passed where an ARN was wanted, an ARN for the wrong service (a Lambda function
 /// ARN, say), or an account id with a digit dropped — and the third is the one no eyeball catches
 /// and no other check would. It is also the reason this is not a `starts_with("arn:")` test the
-/// way [`crate::control::ControlPlane::managed_base_versions`]'s is: that one distinguishes an
+/// way `microvms_core::control::ControlPlane::managed_base_versions`'s is: that one distinguishes an
 /// ARN from a bare name, and this one has a specific ARN grammar to hold a value to.
 ///
 /// What it does not decide is whether the role **exists**, whether it is assumable, or whether it
@@ -1001,7 +1001,7 @@ mod tests {
     /// The version statuses are exactly the two the model declares, spelled uppercase.
     ///
     /// The typed request-side spelling is checked against this array in
-    /// `crate::control::ops`, so the two cannot drift; here what is pinned is the pair itself
+    /// `microvms_core::control::ops`, so the two cannot drift; here what is pinned is the pair itself
     /// and the fact that neither is a lowercase or a past-tense variant of the other.
     #[test]
     fn the_two_version_statuses_are_active_and_inactive() {
@@ -1187,9 +1187,12 @@ mod tests {
     /// #24). With the sets here, the same respelling fails this test as well, and this test names
     /// the loop.
     ///
+    /// `microvms_core::control::microvm::SUSPEND_WANTED` is checked against the same enum in
+    /// that module's tests, since this crate can't see it.
+    ///
     /// **Guard proof.** Respell one member of `MICROVM_STATES` — `"SUSPENDED"` to
-    /// `"SUSPEND_PENDING"`, say — and this fails naming `TERMINAL_STATES`, `DEAD_STATES`, and
-    /// `SUSPEND_WANTED` in turn. Drop `"PENDING"` from `BUILD_STATES` and the stall-probe
+    /// `"SUSPEND_PENDING"`, say — and this fails naming `TERMINAL_STATES` and `DEAD_STATES` in
+    /// turn, and core's test fails naming `SUSPEND_WANTED`. Drop `"PENDING"` from `BUILD_STATES` and the stall-probe
     /// assertion fails.
     #[test]
     fn every_state_set_the_polling_loops_use_is_a_subset_of_the_models_enum() {
@@ -1205,13 +1208,6 @@ mod tests {
                 MICROVM_STATES.contains(&state),
                 "DEAD_STATES has {state}, which is not a MicrovmState — the resume path passes \
                  this set as its fail-fast list"
-            );
-        }
-        for state in crate::control::microvm::SUSPEND_WANTED {
-            assert!(
-                MICROVM_STATES.contains(&state),
-                "SUSPEND_WANTED has {state}, which is not a MicrovmState — a suspend would wait \
-                 for a state the service cannot report and time out"
             );
         }
         for state in MODEL_IMAGE_READY_STATES {

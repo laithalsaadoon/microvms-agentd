@@ -347,7 +347,7 @@ Out of `Attached`, on the next decoded `ExecEvent`:
   stream when `reconnect` is off — `:568-577`.
 - a retryable read error re-enters `Reconnect`; a fatal one goes to `Done` — `:578-584`. A parse
   failure is `ErrorKind::Protocol`, and `Error::retryable` is true only for
-  `ErrorKind::Retryable` (`microvms-core/src/error.rs:116-118`), so a proxy answering an error
+  `ErrorKind::Retryable` (`microvms-domain/src/error.rs:116-118`), so a proxy answering an error
   page is not retried `max_reconnects` times, refilling the buffer each pass —
   `microvms-core/src/session/exec.rs:726-731`.
 

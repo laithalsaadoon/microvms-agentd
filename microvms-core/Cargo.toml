@@ -24,27 +24,13 @@ categories = ["api-bindings", "virtualization"]
 # payloads locally, which is precisely the drift the protocol crate was extracted to
 # make impossible. A field renamed in `protocol/` must break this crate's build.
 protocol = { package = "microvms-protocol", version = "0.10.0", path = "../protocol" }
-# The error taxonomy's Display impls. 2.x rather than 1.x: `#[error]` on an enum
-# with `#[from]` is the same surface, and the 2.0 line is what receives fixes.
-thiserror = "2.0.19"
-# `constants::as_json` is the drift gate's second source (TRAP-12), so serde is a
-# runtime dependency of this crate rather than a test convenience: the CLI dumps
-# that value and `scripts/check-model-drift.py` compares it against the pinned
-# service model.
+# The rules and values, which do no I/O (ARCH-6). This crate re-exports every item at its
+# old `microvms_core::` path and supplies the clock, entropy and file reads they leave out
+# through `prelude` (ARCH-1).
+microvms-domain = { version = "0.10.0", path = "../microvms-domain" }
+# The control plane's rest-json bodies and the session's wire payloads.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-
-# ── the cost engine (T-W2-3) ────────────────────────────────────────────────
-# Money is decimal or it is wrong (COST-6): the ARM rates are figures like
-# 0.0000276944 and summing a few thousand of them in binary floating point drifts
-# in the direction of a bill nobody can reproduce. `serde-with-str` is what keeps
-# a Decimal in the JSON envelope as `"0.0000276944"` rather than as an f64 that
-# has already lost the exactness the type exists to hold.
-rust_decimal = { version = "1.42", features = ["serde-with-str"] }
-# The calendar behind CalendarDate. `std` only — no tzdb: the one consumer measures
-# rate-table age in whole UTC days, so the timezone database would be dead weight.
-jiff = { version = "0.2", default-features = false, features = ["std"] }
-rust_decimal_macros = "1.40"
 
 # ── the control plane (T-W2-4) ──────────────────────────────────────────────
 # Hand-signed rather than a generated SDK: `lambda-microvms` has no aws-sdk-rust
@@ -154,17 +140,9 @@ snow = { version = "0.10", default-features = false, features = [
     "use-sha2",
     "use-getrandom",
 ] }
-# Deriving the public half of a launch-generated seed without a handshake — the pin
-# the ledger stores, and the value the daemon must independently agree on. The same
-# crate snow's resolver uses internally, so one x25519 implementation in the tree.
-# Held at 2.x on purpose while snow 0.10 pins curve25519-dalek 4: the 3.0 line moves to
-# curve25519-dalek 5, and taking it puts two copies of the same curve arithmetic in the
-# tree — the exact duplication this crate was chosen to avoid. Revisit when snow bumps.
-x25519-dalek = { version = "3", default-features = false, features = ["static_secrets"] }
-
 [dev-dependencies]
-# The size-class and region guards are table-shaped, which is exactly where a
-# hand-picked example set passes over the gap it was written to find.
+# The token guards are table-shaped, which is exactly where a hand-picked example set
+# passes over the gap it was written to find.
 proptest = "1.11"
 # Deterministic network simulation for the reconnect-at-cursor tests, mirroring
 # the daemon's dev-dependencies so both sides of the protocol are exercised under
