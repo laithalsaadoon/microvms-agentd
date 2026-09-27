@@ -1798,12 +1798,16 @@ class AdapterLintTests(unittest.TestCase):
             (crate / path).write_text(textwrap.dedent(text))
         env = {k: v for k, v in os.environ.items() if k != "CLIPPY_CONF_DIR"}
         env["CARGO_TARGET_DIR"] = str(Path(tmp.name) / "target")
+        # CI sets CARGO_TERM_COLOR=always; colored diagnostics don't match DISALLOWED, and the
+        # tests would read an empty set.
         out = subprocess.run(
             [
                 "cargo",
                 "clippy",
                 "--offline",
                 "--quiet",
+                "--color",
+                "never",
                 "--manifest-path",
                 str(crate / "Cargo.toml"),
             ],

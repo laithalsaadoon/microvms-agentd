@@ -1571,6 +1571,17 @@ suite = "script"
 message = "FAIL: test_every_adapter_refuses_each_transport_call ("
 transform = { file = "scripts/test_ratchet.py", replace = "use of a disallowed (?:method|type)", with = "use of a banned (?:method|type)" }
 
+# CI sets CARGO_TERM_COLOR=always for every job. Without `--color never` the stand-in's colored
+# diagnostics don't match, and PR #314's first CI run failed seven AdapterLintTests on it.
+[[fault]]
+id = "adapter-lint-colored-output"
+guard = "test_ratchet.py"
+run = ["env", "CARGO_TERM_COLOR=always", "uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_adapter_refuses_each_transport_call ("
+transform = { file = "scripts/test_ratchet.py", replace = "\"--quiet\",\n                \"--color\",\n                \"never\",\n", with = "\"--quiet\",\n" }
+
 # ── StartRequest's builder (#273) ────────────────────────────────────────────
 
 # The guard is the type: `#[non_exhaustive]` refuses a struct expression outside `protocol`, so a
