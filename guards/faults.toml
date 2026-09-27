@@ -28,21 +28,6 @@ suite = "rust"
 note = "microvms-cli/tests/thinness.rs::no_production_code_writes_with_a_print_macro"
 transform = { file = "microvms-cli/src/main.rs", replace = "out.raw(&error.to_string());", with = "print!(\"{error}\");" }
 
-# The issue's one-line form matches twice (suspend and terminate) and, once narrowed, doesn't
-# compile: `ControlPlane::new` is a `ControlPlaneExt` method since #283, so the import comes too.
-[[fault]]
-id = "thinness-operation-scan"
-guard = "no_shipping_source_line_names_an_operation_or_reaches_past_the_seam"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "thinness", "--", "--exact", "no_shipping_source_line_names_an_operation_or_reaches_past_the_seam"]
-expect = "test-failed"
-suite = "rust"
-note = "microvms-cli/tests/thinness.rs::no_shipping_source_line_names_an_operation_or_reaches_past_the_seam"
-message = "lifecycle.rs names ControlPlane::new"
-transform = [
-  { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let plane = ControlPlane::new(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" },
-  { file = "microvms-cli/src/commands/lifecycle.rs", replace = "use std::time::Duration;\n", with = "use std::time::Duration;\n\nuse microvms_core::prelude::ControlPlaneExt as _;\n" },
-]
-
 [[fault]]
 id = "guards-seam-door"
 guard = "guards::every_aws_command_fails_through_the_seam_and_names_the_door_it_entered"
@@ -55,28 +40,83 @@ transform = [
   { file = "microvms-cli/src/commands/lifecycle.rs", replace = "use std::time::Duration;\n", with = "use std::time::Duration;\n\nuse microvms_core::prelude::ControlPlaneExt as _;\n" },
 ]
 
-# #277's falsifier: a char literal holding a quote used to blank the rest of the line.
+# #277's falsifier: a char literal holding a quote used to blank the rest of the line. The
+# operation scan it was written against went with #273, so it's seeded under the print scan, which
+# reads the same lexer.
 [[fault]]
 id = "thinness-char-literal"
-guard = "no_shipping_source_line_names_an_operation_or_reaches_past_the_seam"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "thinness", "--", "--exact", "no_shipping_source_line_names_an_operation_or_reaches_past_the_seam"]
+guard = "no_production_code_writes_with_a_print_macro"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "thinness", "--", "--exact", "no_production_code_writes_with_a_print_macro"]
 expect = "test-failed"
 suite = "rust"
-message = "lifecycle.rs names ControlPlane::new"
-transform = [
-  { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _quote = '\"'; let plane = ControlPlane::new(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" },
-  { file = "microvms-cli/src/commands/lifecycle.rs", replace = "use std::time::Duration;\n", with = "use std::time::Duration;\n\nuse microvms_core::prelude::ControlPlaneExt as _;\n" },
-]
+message = "lifecycle.rs:"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _quote = '\"'; print!(\"suspending\");\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
 
-# #277's sentinel: a stripper that writes nothing reads every file as blanks.
+# #277's sentinel: a token walk that records nothing reads every file as clean.
 [[fault]]
 id = "thinness-seam-sentinel"
-guard = "no_shipping_source_line_names_an_operation_or_reaches_past_the_seam"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "thinness", "--", "--exact", "no_shipping_source_line_names_an_operation_or_reaches_past_the_seam"]
+guard = "no_production_code_writes_with_a_print_macro"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "thinness", "--", "--exact", "no_production_code_writes_with_a_print_macro"]
 expect = "test-failed"
 suite = "rust"
 message = "the sentinel failed: src/seam.rs"
-transform = { file = "microvms-cli/tests/thinness.rs", replace = "fn place(lines: &mut [Vec<char>], at: proc_macro2::LineColumn, token: &str) {\n", with = "fn place(lines: &mut [Vec<char>], at: proc_macro2::LineColumn, token: &str) {\n    if !token.is_empty() {\n        return;\n    }\n" }
+transform = { file = "microvms-cli/tests/thinness.rs", replace = "                        found.push((ident.span().start().line, ident.to_string()));\n", with = "                        let _ = &ident;\n" }
+
+# #273 review round 1 (the falsifier's faults): a print macro spelled with a space or another
+# delimiter, and a nested `#![cfg(test)]` that used to drop the whole file from the scan.
+[[fault]]
+id = "thinness-print-spaced"
+guard = "no_production_code_writes_with_a_print_macro"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "thinness", "--", "--exact", "no_production_code_writes_with_a_print_macro"]
+expect = "test-failed"
+suite = "rust"
+message = "lifecycle.rs:"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    print! (\"suspending\");\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "thinness-print-braces"
+guard = "no_production_code_writes_with_a_print_macro"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "thinness", "--", "--exact", "no_production_code_writes_with_a_print_macro"]
+expect = "test-failed"
+suite = "rust"
+message = "lifecycle.rs:"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    println! {\"suspending\"};\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "thinness-print-brackets"
+guard = "no_production_code_writes_with_a_print_macro"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "thinness", "--", "--exact", "no_production_code_writes_with_a_print_macro"]
+expect = "test-failed"
+suite = "rust"
+message = "lifecycle.rs:"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    eprintln![\"suspending\"];\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "thinness-nested-test-gate"
+guard = "no_production_code_writes_with_a_print_macro"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "thinness", "--", "--exact", "no_production_code_writes_with_a_print_macro"]
+expect = "test-failed"
+suite = "rust"
+message = "lifecycle.rs:"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    print!(\"suspending\");\n    mod scratch_helpers {\n        #![cfg(test)]\n    }\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "thinness-scan-walks-groups"
+guard = "the_scan_reads_a_quote_in_a_char_literal_as_a_literal"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "thinness", "--", "--exact", "the_scan_reads_a_quote_in_a_char_literal_as_a_literal"]
+expect = "test-failed"
+suite = "rust"
+note = "microvms-cli/tests/thinness.rs::the_scan_reads_a_quote_in_a_char_literal_as_a_literal"
+transform = { file = "microvms-cli/tests/thinness.rs", replace = "                TokenTree::Group(group) => walk(group.stream(), found),\n", with = "                TokenTree::Group(_) => {}\n" }
+
+[[fault]]
+id = "thinness-file-level-test-gate"
+guard = "only_a_file_level_cfg_test_skips_a_file"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "thinness", "--", "--exact", "only_a_file_level_cfg_test_skips_a_file"]
+expect = "test-failed"
+suite = "rust"
+note = "microvms-cli/tests/thinness.rs::only_a_file_level_cfg_test_skips_a_file"
+transform = { file = "microvms-cli/tests/thinness.rs", replace = "    use proc_macro2::{Delimiter, TokenTree};\n    let mut trees = lex(text).into_iter();\n", with = "    if text.lines().any(|line| line.trim() == \"#![cfg(test)]\") {\n        return true;\n    }\n    use proc_macro2::{Delimiter, TokenTree};\n    let mut trees = lex(text).into_iter();\n" }
 
 # `default-features = false`, so the lock gains an edge and no package (the default features
 # add six crates and rewrite the lock). Retire this entry with the test, when #260's change
@@ -151,6 +191,481 @@ expect = "lint-error"
 suite = "rust"
 message = "use of a disallowed type `std::process::Command`"
 transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = std::process::Command::new(\"aws\");\n" }
+
+# #273's recorded break: a CLI handler builds a control-plane call itself.
+[[fault]]
+id = "clippy-cli-transport-call-get"
+guard = "microvms-cli clippy.toml: microvms_core::control::transport::Call::get"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::get`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = microvms_core::control::transport::Call::get(\"ListMicrovms\", \"/x\");\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+# #273: every ban in each adapter's clippy.toml, seeded into a real handler. The paths are
+# core's re-exports; each fault names one by the shortest form that compiles.
+[[fault]]
+id = "clippy-cli-call-post-json"
+guard = "microvms-cli clippy.toml: microvms_core::control::transport::Call::post_json"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::post_json`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = microvms_core::control::transport::Call::post_json(\"RunMicrovm\", \"/x\", &());\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-call-patch-json"
+guard = "microvms-cli clippy.toml: microvms_core::control::transport::Call::patch_json"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::patch_json`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = microvms_core::control::transport::Call::patch_json(\"UpdateMicrovmImageVersion\", \"/x\", &());\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-call-post-empty"
+guard = "microvms-cli clippy.toml: microvms_core::control::transport::Call::post_empty"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::post_empty`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = microvms_core::control::transport::Call::post_empty(\"SuspendMicrovm\", \"/x\");\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-call-delete"
+guard = "microvms-cli clippy.toml: microvms_core::control::transport::Call::delete"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::delete`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = microvms_core::control::transport::Call::delete(\"DeleteMicrovmImage\", \"/x\");\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-send-with-retry"
+guard = "microvms-cli clippy.toml: microvms_core::control::transport::send_with_retry"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::send_with_retry`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = microvms_core::control::transport::send_with_retry;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-send-accepting"
+guard = "microvms-cli clippy.toml: microvms_core::control::transport::send_accepting"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::send_accepting`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = microvms_core::control::transport::send_accepting;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-transport-send"
+guard = "microvms-cli clippy.toml: microvms_core::control::transport::Transport::send"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Transport::send`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = <dyn microvms_core::control::transport::Transport>::send;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-from-ports"
+guard = "microvms-cli clippy.toml: microvms_core::control::ControlPlane::from_ports"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::ControlPlane::from_ports`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = microvms_core::control::ControlPlane::from_ports;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-with-transport"
+guard = "microvms-cli clippy.toml: microvms_core::prelude::ControlPlaneExt::with_transport"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::ControlPlaneExt::with_transport`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = <microvms_core::control::ControlPlane as microvms_core::prelude::ControlPlaneExt>::with_transport;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-call-type"
+guard = "microvms-cli clippy.toml: microvms_core::control::transport::Call"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed type `microvms_core::control::transport::Call`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _: Option<microvms_core::control::transport::Call> = None;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-control-plane-new"
+guard = "microvms-cli clippy.toml: microvms_core::prelude::ControlPlaneExt::new"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::ControlPlaneExt::new`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = <microvms_core::control::ControlPlane as microvms_core::prelude::ControlPlaneExt>::new;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-sandbox-new"
+guard = "microvms-cli clippy.toml: microvms_core::prelude::SandboxExt::new"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::SandboxExt::new`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = <microvms_core::sandbox::Sandbox as microvms_core::prelude::SandboxExt>::new;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-session-connect"
+guard = "microvms-cli clippy.toml: microvms_core::prelude::SessionExt::connect"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::SessionExt::connect`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = |e: String, t: String, m| <microvms_core::session::Session as microvms_core::prelude::SessionExt>::connect(e, t, m);\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-session-direct"
+guard = "microvms-cli clippy.toml: microvms_core::prelude::SessionExt::direct"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::SessionExt::direct`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = |e: String, t: String| <microvms_core::session::Session as microvms_core::prelude::SessionExt>::direct(e, t);\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-session-attach"
+guard = "microvms-cli clippy.toml: microvms_core::prelude::SessionExt::attach"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::SessionExt::attach`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = |r, i: String, e: String, t: String| <microvms_core::session::Session as microvms_core::prelude::SessionExt>::attach(r, i, e, t, None, None);\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-session-builder"
+guard = "microvms-cli clippy.toml: microvms_core::session::Session::builder"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::session::Session::builder`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = |e: String, t: String| microvms_core::session::Session::builder(e, t);\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-signed-transport"
+guard = "microvms-cli clippy.toml: microvms_core::control::transport::SignedTransport"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed type `microvms_core::control::transport::SignedTransport`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _: Option<microvms_core::control::transport::SignedTransport> = None;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-signed-build-services"
+guard = "microvms-cli clippy.toml: microvms_core::control::SignedBuildServices"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed type `microvms_core::control::SignedBuildServices`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _: Option<microvms_core::control::SignedBuildServices> = None;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-reqwest-backend"
+guard = "microvms-cli clippy.toml: microvms_core::session::http::ReqwestBackend"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed type `microvms_core::session::http::ReqwestBackend`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _: Option<microvms_core::session::http::ReqwestBackend> = None;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+# The doors review round 1 found missing: the prelude's other credential-resolving
+# constructors, core's `preflight`, and the adapters port (#273).
+[[fault]]
+id = "clippy-cli-sandbox-adopt-in"
+guard = "microvms-cli clippy.toml: microvms_core::prelude::SandboxExt::adopt_in"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::SandboxExt::adopt_in`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _sb = <microvms_core::sandbox::Sandbox as microvms_core::prelude::SandboxExt>::adopt_in(region.clone(), microvm_id.clone(), \"http://x\", \"t\", None).await?;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-sandbox-from-name"
+guard = "microvms-cli clippy.toml: microvms_core::prelude::SandboxExt::from_name"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::SandboxExt::from_name`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _sb = <microvms_core::sandbox::Sandbox as microvms_core::prelude::SandboxExt>::from_name(&microvms_core::names::FileNameStore::new(\"names\"), \"ci\", None, None).await?;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-agent-vm-adopt-in"
+guard = "microvms-cli clippy.toml: microvms_core::prelude::AgentVmExt::adopt_in"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::AgentVmExt::adopt_in`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _vm = <microvms_core::agents::AgentVm as microvms_core::prelude::AgentVmExt>::adopt_in(region.clone(), Vec::new(), microvm_id.clone(), \"http://x\", \"t\", None).await?;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-agent-vm-from-name"
+guard = "microvms-cli clippy.toml: microvms_core::prelude::AgentVmExt::from_name"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::AgentVmExt::from_name`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _vm = <microvms_core::agents::AgentVm as microvms_core::prelude::AgentVmExt>::from_name(&microvms_core::names::FileNameStore::new(\"names\"), Vec::new(), \"ci\", None, None).await?;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-preflight"
+guard = "microvms-cli clippy.toml: microvms_core::preflight::preflight"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::preflight::preflight`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _report = microvms_core::preflight::preflight(Some(region.clone())).await;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-adapters-http-backend"
+guard = "microvms-cli clippy.toml: microvms_core::adapters::Adapters::http_backend"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::adapters::Adapters::http_backend`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _backend = microvms_core::adapters::Adapters::http_backend(&microvms_core::adapters::SystemAdapters, \"http://x\", std::time::Duration::from_secs(1))?;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-adapters-build-services"
+guard = "microvms-cli clippy.toml: microvms_core::adapters::Adapters::build_services"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::adapters::Adapters::build_services`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _services = microvms_core::adapters::Adapters::build_services(&microvms_core::adapters::SystemAdapters, region.clone()).await?;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-system-adapters"
+guard = "microvms-cli clippy.toml: microvms_core::adapters::SystemAdapters"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed type `microvms_core::adapters::SystemAdapters`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _: Option<microvms_core::adapters::SystemAdapters> = None;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+# The seam's `#[expect]` covers its two door calls, not the whole `impl`: an environment read or
+# a transport call added to a seam method still fails lint.
+[[fault]]
+id = "clippy-cli-seam-env-read"
+guard = "microvms-cli clippy.toml: std::env::var, inside AwsSeam's impl"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `std::env::var`"
+transform = { file = "microvms-cli/src/seam.rs", replace = "    fn control_plane(&self, region: Region) -> BoxFuture<'_, Result<ControlPlane, Error>> {\n        Box::pin(production_plane(region))", with = "    fn control_plane(&self, region: Region) -> BoxFuture<'_, Result<ControlPlane, Error>> {\n        let _ = std::env::var(\"AWS_PROFILE\");\n        Box::pin(production_plane(region))" }
+
+[[fault]]
+id = "clippy-cli-seam-transport"
+guard = "microvms-cli clippy.toml: microvms_core::control::transport::send_with_retry, inside AwsSeam's impl"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::send_with_retry`"
+transform = { file = "microvms-cli/src/seam.rs", replace = "    fn control_plane(&self, region: Region) -> BoxFuture<'_, Result<ControlPlane, Error>> {\n        Box::pin(production_plane(region))", with = "    fn control_plane(&self, region: Region) -> BoxFuture<'_, Result<ControlPlane, Error>> {\n        let _ = microvms_core::control::transport::send_with_retry;\n        Box::pin(production_plane(region))" }
+
+[[fault]]
+id = "clippy-py-call-get"
+guard = "microvms-py clippy.toml: microvms_core::control::transport::Call::get"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::get`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = microvms_core::control::transport::Call::get(\"GetMicrovm\", \"/x\");\n" }
+
+[[fault]]
+id = "clippy-py-call-post-json"
+guard = "microvms-py clippy.toml: microvms_core::control::transport::Call::post_json"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::post_json`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = microvms_core::control::transport::Call::post_json(\"RunMicrovm\", \"/x\", &());\n" }
+
+[[fault]]
+id = "clippy-py-call-patch-json"
+guard = "microvms-py clippy.toml: microvms_core::control::transport::Call::patch_json"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::patch_json`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = microvms_core::control::transport::Call::patch_json(\"UpdateMicrovmImageVersion\", \"/x\", &());\n" }
+
+[[fault]]
+id = "clippy-py-call-post-empty"
+guard = "microvms-py clippy.toml: microvms_core::control::transport::Call::post_empty"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::post_empty`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = microvms_core::control::transport::Call::post_empty(\"SuspendMicrovm\", \"/x\");\n" }
+
+[[fault]]
+id = "clippy-py-call-delete"
+guard = "microvms-py clippy.toml: microvms_core::control::transport::Call::delete"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::delete`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = microvms_core::control::transport::Call::delete(\"DeleteMicrovmImage\", \"/x\");\n" }
+
+[[fault]]
+id = "clippy-py-send-with-retry"
+guard = "microvms-py clippy.toml: microvms_core::control::transport::send_with_retry"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::send_with_retry`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = microvms_core::control::transport::send_with_retry;\n" }
+
+[[fault]]
+id = "clippy-py-send-accepting"
+guard = "microvms-py clippy.toml: microvms_core::control::transport::send_accepting"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::send_accepting`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = microvms_core::control::transport::send_accepting;\n" }
+
+[[fault]]
+id = "clippy-py-transport-send"
+guard = "microvms-py clippy.toml: microvms_core::control::transport::Transport::send"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Transport::send`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = <dyn microvms_core::control::transport::Transport>::send;\n" }
+
+[[fault]]
+id = "clippy-py-from-ports"
+guard = "microvms-py clippy.toml: microvms_core::control::ControlPlane::from_ports"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::ControlPlane::from_ports`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = microvms_core::control::ControlPlane::from_ports;\n" }
+
+[[fault]]
+id = "clippy-py-with-transport"
+guard = "microvms-py clippy.toml: microvms_core::prelude::ControlPlaneExt::with_transport"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::ControlPlaneExt::with_transport`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = <microvms_core::control::ControlPlane as microvms_core::prelude::ControlPlaneExt>::with_transport;\n" }
+
+[[fault]]
+id = "clippy-py-call-type"
+guard = "microvms-py clippy.toml: microvms_core::control::transport::Call"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed type `microvms_core::control::transport::Call`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _: Option<microvms_core::control::transport::Call> = None;\n" }
+
+[[fault]]
+id = "clippy-js-call-get"
+guard = "microvms-js clippy.toml: microvms_core::control::transport::Call::get"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::get`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = microvms_core::control::transport::Call::get(\"GetMicrovm\", \"/x\");\n" }
+
+[[fault]]
+id = "clippy-js-call-post-json"
+guard = "microvms-js clippy.toml: microvms_core::control::transport::Call::post_json"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::post_json`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = microvms_core::control::transport::Call::post_json(\"RunMicrovm\", \"/x\", &());\n" }
+
+[[fault]]
+id = "clippy-js-call-patch-json"
+guard = "microvms-js clippy.toml: microvms_core::control::transport::Call::patch_json"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::patch_json`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = microvms_core::control::transport::Call::patch_json(\"UpdateMicrovmImageVersion\", \"/x\", &());\n" }
+
+[[fault]]
+id = "clippy-js-call-post-empty"
+guard = "microvms-js clippy.toml: microvms_core::control::transport::Call::post_empty"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::post_empty`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = microvms_core::control::transport::Call::post_empty(\"SuspendMicrovm\", \"/x\");\n" }
+
+[[fault]]
+id = "clippy-js-call-delete"
+guard = "microvms-js clippy.toml: microvms_core::control::transport::Call::delete"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::delete`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = microvms_core::control::transport::Call::delete(\"DeleteMicrovmImage\", \"/x\");\n" }
+
+[[fault]]
+id = "clippy-js-send-with-retry"
+guard = "microvms-js clippy.toml: microvms_core::control::transport::send_with_retry"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::send_with_retry`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = microvms_core::control::transport::send_with_retry;\n" }
+
+[[fault]]
+id = "clippy-js-send-accepting"
+guard = "microvms-js clippy.toml: microvms_core::control::transport::send_accepting"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::send_accepting`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = microvms_core::control::transport::send_accepting;\n" }
+
+[[fault]]
+id = "clippy-js-transport-send"
+guard = "microvms-js clippy.toml: microvms_core::control::transport::Transport::send"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Transport::send`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = <dyn microvms_core::control::transport::Transport>::send;\n" }
+
+[[fault]]
+id = "clippy-js-from-ports"
+guard = "microvms-js clippy.toml: microvms_core::control::ControlPlane::from_ports"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::ControlPlane::from_ports`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = microvms_core::control::ControlPlane::from_ports;\n" }
+
+[[fault]]
+id = "clippy-js-with-transport"
+guard = "microvms-js clippy.toml: microvms_core::prelude::ControlPlaneExt::with_transport"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::ControlPlaneExt::with_transport`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = <microvms_core::control::ControlPlane as microvms_core::prelude::ControlPlaneExt>::with_transport;\n" }
+
+[[fault]]
+id = "clippy-js-call-type"
+guard = "microvms-js clippy.toml: microvms_core::control::transport::Call"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed type `microvms_core::control::transport::Call`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _: Option<microvms_core::control::transport::Call> = None;\n" }
 
 # ── the v0.10.0 public-path witness (#282) ───────────────────────────────────
 
@@ -533,6 +1048,574 @@ expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_every_spelling_of_the_bolero_call_is_a_harness ("
 transform = { file = "scripts/check-trace.py", replace = "r\"^(?:(?:::\\s*)?bolero\\s*::\\s*)?check$\"", with = "r\"^bolero\\s*::\\s*check$\"" }
+
+# ── ratchet:check: the adapter-logic collector and rule 3's bootstrap (#273) ─
+
+# #273's two ast-grep rules: each fault deletes one pattern alternative, and the fixture test
+# named after that shape fails. The exact-set test catches an alternative that over-matches.
+[[fault]]
+id = "adapter-logic-op-string"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_operation_literal_is_flagged_in_a_call_an_index_and_a_macro ("
+transform = { file = "ratchet/rules/operation-literal.yml", replace = "    - any: [kind: string_literal, kind: raw_string_literal]\n", with = "    - any: [kind: raw_string_literal]\n" }
+
+[[fault]]
+id = "adapter-logic-op-raw-string"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_operation_literal_is_flagged_in_a_call_an_index_and_a_macro ("
+transform = { file = "ratchet/rules/operation-literal.yml", replace = "    - any: [kind: string_literal, kind: raw_string_literal]\n", with = "    - any: [kind: string_literal]\n" }
+
+[[fault]]
+id = "adapter-logic-op-test-code"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_fixture_reports_exactly_its_ruleid_lines ("
+transform = { file = "ratchet/rules/operation-literal.yml", replace = "    - not:\n        matches: test-only\n", with = "" }
+
+[[fault]]
+id = "adapter-logic-default-const"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_default_const_is_flagged ("
+transform = { file = "ratchet/rules/literal-default.yml", replace = "        - all:\n            - any: [kind: const_item, kind: static_item]\n            - any:\n                - has: { field: name, regex: '(?i)default|timeout|interval|wait|grace|deadline|poll|delay|backoff|ttl|cycles' }\n                - has: { field: type, regex: '\\bf(32|64)\\b' }\n            - has: { field: value, any: [matches: nonzero-number, has: { matches: nonzero-number, stopBy: end }] }\n            - not: { has: { field: value, any: [kind: call_expression, has: { kind: call_expression, stopBy: end }] } }\n", with = "" }
+
+[[fault]]
+id = "adapter-logic-default-duration"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_duration_from_a_literal_is_flagged ("
+transform = { file = "ratchet/rules/literal-default.yml", replace = "        - all:\n            - kind: call_expression\n            - has:\n                field: function\n                any:\n                  - regex: '(^|::)\\s*Duration\\s*::\\s*(from_[a-z0-9_]+|new)$'\n                  - regex: '::\\s*from_(secs|millis|micros|nanos|mins|hours|days|weeks)(_f32|_f64)?$'\n            - has: { field: arguments, has: { matches: nonzero-number } }\n", with = "" }
+
+[[fault]]
+id = "adapter-logic-default-unwrap-or"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_unwrap_or_literal_is_flagged ("
+transform = { file = "ratchet/rules/literal-default.yml", replace = "        - all:\n            - kind: call_expression\n            - has:\n                field: function\n                kind: field_expression\n                has: { field: field, regex: '^(unwrap_or|map_or|get_or_insert)$' }\n            - has: { field: arguments, has: { matches: nonzero-number } }\n", with = "" }
+
+[[fault]]
+id = "adapter-logic-default-wait-opts"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_wait_opts_literal_is_flagged ("
+transform = { file = "ratchet/rules/literal-default.yml", replace = "        - all:\n            - kind: call_expression\n            - has: { field: function, regex: '(^|::)\\s*wait_opts$' }\n            - has: { field: arguments, has: { matches: nonzero-number } }\n", with = "" }
+
+[[fault]]
+id = "adapter-logic-default-timeout-plus"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_literal_added_to_a_timeout_is_flagged ("
+transform = { file = "ratchet/rules/literal-default.yml", replace = "                - all:\n                    - has: { field: right, matches: nonzero-number }\n                    - has: { field: left, regex: '(?i)timeout|deadline|grace' }\n", with = "" }
+
+[[fault]]
+id = "adapter-logic-default-plus-timeout"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_literal_added_to_a_timeout_is_flagged ("
+transform = { file = "ratchet/rules/literal-default.yml", replace = "                - all:\n                    - has: { field: left, matches: nonzero-number }\n                    - has: { field: right, regex: '(?i)timeout|deadline|grace' }\n", with = "" }
+
+[[fault]]
+id = "adapter-logic-default-test-code"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_fixture_reports_exactly_its_ruleid_lines ("
+transform = { file = "ratchet/rules/literal-default.yml", replace = "    - not:\n        matches: test-only\n", with = "" }
+
+[[fault]]
+id = "adapter-logic-default-zero"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_fixture_reports_exactly_its_ruleid_lines ("
+transform = { file = "ratchet/utils/nonzero-number.yml", replace = "    - not:\n        regex: '^0[0_]*", with = "    - not:\n        regex: '^NEVER[0_]*" }
+
+# Review round 1: the shapes the first rule let through (a `static`, a const named for a wait,
+# a float or a nested literal, an aliased `Duration`, `map_or` and a closure fallback).
+[[fault]]
+id = "adapter-logic-default-static"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_static_a_named_const_a_float_and_a_nested_literal_are_flagged ("
+transform = { file = "ratchet/rules/literal-default.yml", replace = "            - any: [kind: const_item, kind: static_item]\n", with = "            - kind: const_item\n" }
+
+[[fault]]
+id = "adapter-logic-default-const-name"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_static_a_named_const_a_float_and_a_nested_literal_are_flagged ("
+transform = { file = "ratchet/rules/literal-default.yml", replace = "                - has: { field: name, regex: '(?i)default|timeout|interval|wait|grace|deadline|poll|delay|backoff|ttl|cycles' }\n", with = "                - has: { field: name, regex: '^DEFAULT_' }\n" }
+
+[[fault]]
+id = "adapter-logic-default-const-float"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_static_a_named_const_a_float_and_a_nested_literal_are_flagged ("
+transform = { file = "ratchet/rules/literal-default.yml", replace = "                - has: { field: type, regex: '\\bf(32|64)\\b' }\n", with = "" }
+
+[[fault]]
+id = "adapter-logic-default-const-nested"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_static_a_named_const_a_float_and_a_nested_literal_are_flagged ("
+transform = { file = "ratchet/rules/literal-default.yml", replace = "            - has: { field: value, any: [matches: nonzero-number, has: { matches: nonzero-number, stopBy: end }] }\n", with = "            - has: { field: value, matches: nonzero-number }\n" }
+
+[[fault]]
+id = "adapter-logic-default-const-call"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_fixture_reports_exactly_its_ruleid_lines ("
+transform = { file = "ratchet/rules/literal-default.yml", replace = "            - not: { has: { field: value, any: [kind: call_expression, has: { kind: call_expression, stopBy: end }] } }\n", with = "" }
+
+[[fault]]
+id = "adapter-logic-default-duration-alias"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_aliased_duration_and_duration_new_are_flagged ("
+transform = { file = "ratchet/rules/literal-default.yml", replace = "                  - regex: '::\\s*from_(secs|millis|micros|nanos|mins|hours|days|weeks)(_f32|_f64)?$'\n", with = "" }
+
+[[fault]]
+id = "adapter-logic-default-duration-new"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_aliased_duration_and_duration_new_are_flagged ("
+transform = { file = "ratchet/rules/literal-default.yml", replace = "(from_[a-z0-9_]+|new)$'", with = "(from_[a-z0-9_]+)$'" }
+
+[[fault]]
+id = "adapter-logic-default-map-or"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_map_or_or_a_closure_fallback_is_flagged ("
+transform = { file = "ratchet/rules/literal-default.yml", replace = "'^(unwrap_or|map_or|get_or_insert)$'", with = "'^unwrap_or$'" }
+
+[[fault]]
+id = "adapter-logic-default-closure"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_map_or_or_a_closure_fallback_is_flagged ("
+transform = { file = "ratchet/rules/literal-default.yml", replace = "        - all:\n            - kind: call_expression\n            - has:\n                field: function\n                kind: field_expression\n                has: { field: field, regex: '^(unwrap_or_else|map_or_else|get_or_insert_with)$' }\n            - has:\n                field: arguments\n                has:\n                  kind: closure_expression\n                  has: { field: body, any: [matches: nonzero-number, { kind: block, has: { matches: nonzero-number } }] }\n", with = "" }
+
+[[fault]]
+id = "adapter-logic-default-closure-block"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_map_or_or_a_closure_fallback_is_flagged ("
+transform = { file = "ratchet/rules/literal-default.yml", replace = "any: [matches: nonzero-number, { kind: block, has: { matches: nonzero-number } }]", with = "matches: nonzero-number" }
+
+[[fault]]
+id = "adapter-logic-adapters-only"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_fixture_reports_exactly_its_ruleid_lines ("
+transform = { file = "scripts/ratchet.py", replace = "elif match[\"ruleId\"] in ADAPTER_LOGIC and under(match, found.adapters.values()):", with = "elif match[\"ruleId\"] in ADAPTER_LOGIC and under(match, found.shipping.values()):" }
+
+# Rule 3's bootstrap for a category the base's ratchet.py doesn't collect (#273).
+[[fault]]
+id = "ratchet-bootstrap-not-skipped"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "RuleTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_rule_3_is_skipped_for_a_category_the_base_does_not_collect ("
+transform = { file = "scripts/ratchet.py", replace = "if base_collected is None or entry[\"category\"] in base_collected", with = "if True" }
+
+[[fault]]
+id = "ratchet-bootstrap-too-wide"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "RuleTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_rule_3_still_applies_to_a_category_the_base_collects ("
+transform = { file = "scripts/ratchet.py", replace = "if base_collected is None or entry[\"category\"] in base_collected", with = "if base_collected is None" }
+
+[[fault]]
+id = "ratchet-bootstrap-empty-parse"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "BaseTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_base_script_without_a_collected_tuple_is_an_error ("
+transform = { file = "scripts/ratchet.py", replace = "    raise SystemExit(\n        f\"{ref}:{SCRIPT} has no COLLECTED tuple", with = "    return ()\n    raise SystemExit(\n        f\"{ref}:{SCRIPT} has no COLLECTED tuple" }
+
+[[fault]]
+id = "ratchet-bootstrap-reads-collected"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "BaseTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_base_collected_categories_are_read_from_its_script ("
+transform = { file = "scripts/ratchet.py", replace = "                return value\n", with = "                return value[:1]\n" }
+
+[[fault]]
+id = "ratchet-bootstrap-summary-new"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "FileTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_summary_says_new_for_a_category_the_base_does_not_collect ("
+transform = { file = "scripts/ratchet.py", replace = "            or (base_collected is not None and category not in base_collected)\n", with = "" }
+
+# The adapter-logic collector against the checked-in sentinel, and on an empty input.
+[[fault]]
+id = "adapter-logic-sentinel"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "SentinelTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_checked_in_sentinel_matches_its_expectation ("
+transform = { file = "scripts/ratchet.py", replace = "ADAPTER_LOGIC = (\"operation-literal\", \"literal-default\")", with = "ADAPTER_LOGIC = ()" }
+
+[[fault]]
+id = "ratchet-sentinel-empty"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "SentinelTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_collector_that_finds_nothing_fails ("
+transform = { file = "scripts/ratchet.py", replace = "        if not got:\n", with = "        if False:\n" }
+
+# ── #273's clippy bans, the adapter-logic hard gate and model:check's operations ─
+
+[[fault]]
+id = "adapter-lint-exact-list"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_adapter_bans_exactly_its_listed_paths ("
+transform = { file = "microvms-py/clippy.toml", replace = "  { path = \"microvms_core::control::transport::send_accepting\", reason = \"a control-plane call belongs in microvms-app, which names the operation, builds the request and owns retries; call the ControlPlane method that wraps it\" },\n", with = "" }
+
+[[fault]]
+id = "adapter-lint-transport-cli"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_adapter_refuses_each_transport_call ("
+transform = { file = "microvms-cli/clippy.toml", replace = "  { path = \"microvms_core::control::transport::Call::get\", reason = \"a control-plane call belongs in microvms-app, which names the operation, builds the request and owns retries; call the ControlPlane method that wraps it\" },\n", with = "" }
+
+[[fault]]
+id = "adapter-lint-transport-py"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_adapter_refuses_each_transport_call ("
+transform = { file = "microvms-py/clippy.toml", replace = "  { path = \"microvms_core::control::transport::Call::get\", reason = \"a control-plane call belongs in microvms-app, which names the operation, builds the request and owns retries; call the ControlPlane method that wraps it\" },\n", with = "" }
+
+[[fault]]
+id = "adapter-lint-transport-js"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_adapter_refuses_each_transport_call ("
+transform = { file = "microvms-js/clippy.toml", replace = "  { path = \"microvms_core::control::transport::Call::get\", reason = \"a control-plane call belongs in microvms-app, which names the operation, builds the request and owns retries; call the ControlPlane method that wraps it\" },\n", with = "" }
+
+[[fault]]
+id = "adapter-lint-transport-send"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_adapter_refuses_each_transport_call ("
+transform = { file = "microvms-js/clippy.toml", replace = "  { path = \"microvms_core::control::transport::Transport::send\", reason = \"a control-plane call belongs in microvms-app, which names the operation, builds the request and owns retries; call the ControlPlane method that wraps it\" },\n", with = "" }
+
+[[fault]]
+id = "adapter-lint-alias"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_alias_a_ufcs_call_and_a_glob_import_are_refused_too ("
+transform = { file = "microvms-cli/clippy.toml", replace = "  { path = \"microvms_core::control::transport::Call::post_empty\", reason = \"a control-plane call belongs in microvms-app, which names the operation, builds the request and owns retries; call the ControlPlane method that wraps it\" },\n", with = "" }
+
+[[fault]]
+id = "adapter-lint-ufcs"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_alias_a_ufcs_call_and_a_glob_import_are_refused_too ("
+transform = { file = "microvms-py/clippy.toml", replace = "  { path = \"microvms_core::prelude::ControlPlaneExt::with_transport\", reason = \"a control plane over a hand-picked transport is a second path to AWS; core's ControlPlane::new wires the signed transport (the CLI gets it through src/seam.rs)\" },\n", with = "" }
+
+[[fault]]
+id = "adapter-lint-doors"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_cli_refuses_each_core_door_by_path_alias_and_ufcs ("
+transform = { file = "microvms-cli/clippy.toml", replace = "  { path = \"microvms_core::prelude::SessionExt::direct\", reason = \"the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens\" },\n", with = "" }
+
+# Review round 1's door: the stand-in core carries the prelude's adopt and name constructors, so
+# a ban deleted from the CLI's file fails the door test, not only the exact-list one.
+[[fault]]
+id = "adapter-lint-doors-from-name"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_cli_refuses_each_core_door_by_path_alias_and_ufcs ("
+transform = { file = "microvms-cli/clippy.toml", replace = "  { path = \"microvms_core::prelude::AgentVmExt::from_name\", reason = \"the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens\" },\n", with = "" }
+
+[[fault]]
+id = "adapter-lint-bindings-doors"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_bindings_may_call_core_doors ("
+transform = { file = "microvms-js/clippy.toml", replace = "  { path = \"microvms_core::prelude::ControlPlaneExt::with_transport\", reason = \"a control plane over a hand-picked transport is a second path to AWS; core's ControlPlane::new wires the signed transport (the CLI gets it through src/seam.rs)\" },\n", with = "  { path = \"microvms_core::prelude::ControlPlaneExt::with_transport\", reason = \"a control plane over a hand-picked transport is a second path to AWS; core's ControlPlane::new wires the signed transport (the CLI gets it through src/seam.rs)\" },\n  { path = \"microvms_core::prelude::ControlPlaneExt::new\", reason = \"the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens\" },\n" }
+
+[[fault]]
+id = "adapter-lint-stand-in-resolves"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_adapter_refuses_each_transport_call ("
+transform = { file = "scripts/test_ratchet.py", replace = "            pub fn send_accepting(_transport: &dyn Transport, _call: Call, _accept: &[u16]) {}\n", with = "            pub fn send_accepted(_transport: &dyn Transport, _call: Call, _accept: &[u16]) {}\n" }
+
+[[fault]]
+id = "lint-exceptions-new-expect"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_no_adapter_source_turns_the_lints_off_outside_its_listed_sites ("
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "/// A lifecycle wait with the caller's deadline and core's poll interval.\nfn wait_opts(", with = "/// A lifecycle wait with the caller's deadline and core's poll interval.\n#[expect(clippy::disallowed_methods, reason = \"x\")]\nfn wait_opts(" }
+
+[[fault]]
+id = "lint-exceptions-test-only-skip"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_no_adapter_source_turns_the_lints_off_outside_its_listed_sites ("
+transform = { file = "scripts/test_ratchet.py", replace = "                and \"#![cfg(test)]\"\n", with = "                and \"#![cfg(never)]\"\n" }
+
+[[fault]]
+id = "adapter-logic-op-struct-literal"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_operation_in_a_struct_literal_is_flagged ("
+transform = { file = "ratchet/rules/operation-literal.yml", replace = "    - any: [kind: string_literal, kind: raw_string_literal]\n", with = "    - any: [kind: raw_string_literal]\n" }
+
+[[fault]]
+id = "ratchet-operation-literal-gate"
+guard = "ratchet/rules/operation-literal.yml"
+run = ["./scripts/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "new drift: [adapter-logic] microvms-cli/src/commands/lifecycle.rs: operation-literal: \"ListMicrovms\""
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = microvms_core::control::transport::Call::get(\"ListMicrovms\", \"/x\");\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "ratchet-literal-default-gate"
+guard = "ratchet/rules/literal-default.yml"
+run = ["./scripts/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "new drift: [adapter-logic] microvms-cli/src/commands/lifecycle.rs: literal-default: Duration::from_secs(7)"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = Duration::from_secs(7);\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "ratchet-literal-default-binding"
+guard = "ratchet/rules/literal-default.yml"
+run = ["./scripts/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "new drift: [adapter-logic] microvms-py/src/exec.rs: literal-default: const DEFAULT_WAIT: f64 = 300.0;"
+transform = { file = "microvms-py/src/exec.rs", replace = "const DEFAULT_WAIT: f64 = microvms_core::session::DEFAULT_EXEC_WAIT.as_secs_f64();", with = "const DEFAULT_WAIT: f64 = 300.0;" }
+
+# The falsifier's shapes at the sites it seeded them, through the hard gate.
+[[fault]]
+id = "ratchet-literal-default-static"
+guard = "ratchet/rules/literal-default.yml"
+run = ["./scripts/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "new drift: [adapter-logic] microvms-py/src/exec.rs: literal-default: static DEFAULT_WAIT: f64 = 300.0;"
+transform = { file = "microvms-py/src/exec.rs", replace = "const DEFAULT_WAIT: f64 = microvms_core::session::DEFAULT_EXEC_WAIT.as_secs_f64();", with = "static DEFAULT_WAIT: f64 = 300.0;" }
+
+[[fault]]
+id = "ratchet-literal-default-map-or"
+guard = "ratchet/rules/literal-default.yml"
+run = ["./scripts/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "literal-default: options.timeout.map_or(300.0, |t| t)"
+transform = { file = "microvms-js/src/control.rs", replace = ".unwrap_or(DEFAULT_LIFECYCLE_TIMEOUT.as_secs_f64()),", with = ".map_or(300.0, |t| t)," }
+
+[[fault]]
+id = "ratchet-adapter-logic-decision"
+guard = "ratchet/drift.json"
+run = ["./scripts/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "new drift: [adapter-logic] microvms-cli/src/commands/attached.rs: literal-default: Duration::from_millis(250)"
+transform = { file = "ratchet/drift.json", replace = "    {\n      \"category\": \"adapter-logic\",\n      \"key\": \"microvms-cli/src/commands/attached.rs: literal-default: Duration::from_millis(250)\",\n      \"reason\": \"the quiet period `sync --watch` waits after a file event so one save's burst of events runs one sync pass; it paces the CLI's interactive watch loop, the terminal affordance the notify placement decision names, and the sync pass it wakes goes to core in #260\"\n    },\n", with = "" }
+
+[[fault]]
+id = "model-drift-operations"
+guard = "scripts/check-model-drift.py"
+run = ["./scripts/check-model-drift.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "DRIFT operation-literal rule's operations"
+transform = { file = "ratchet/rules/operation-literal.yml", replace = "|ListTags|", with = "|" }
+
+[[fault]]
+id = "model-drift-operations-empty-parse"
+guard = "scripts/test_model_drift.py"
+run = ["uv", "run", "--with", "boto3>=1.40", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_model_drift.py", "-k", "OperationRuleTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_rule_the_parser_cant_read_is_an_error_not_an_empty_list ("
+transform = { file = "scripts/check-model-drift.py", replace = "    if not names or not all(", with = "    if names and not all(" }
+
+[[fault]]
+id = "model-drift-operations-repeated"
+guard = "scripts/test_model_drift.py"
+run = ["uv", "run", "--with", "boto3>=1.40", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_model_drift.py", "-k", "OperationRuleTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_repeated_name_is_drift ("
+transform = { file = "scripts/check-model-drift.py", replace = "    ours = tuple(sorted(names))\n", with = "    ours = tuple(sorted(set(names)))\n" }
+
+[[fault]]
+id = "model-drift-operations-rule-short"
+guard = "scripts/test_model_drift.py"
+run = ["uv", "run", "--with", "boto3>=1.40", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_model_drift.py", "-k", "OperationRuleTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_rule_missing_an_operation_is_drift ("
+transform = { file = "scripts/check-model-drift.py", replace = "        ours == theirs,\n", with = "        set(ours) <= set(theirs),\n" }
+
+[[fault]]
+id = "model-drift-operations-rule-long"
+guard = "scripts/test_model_drift.py"
+run = ["uv", "run", "--with", "boto3>=1.40", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_model_drift.py", "-k", "OperationRuleTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_operation_only_the_rule_names_is_drift ("
+transform = { file = "scripts/check-model-drift.py", replace = "        ours == theirs,\n", with = "        set(ours) >= set(theirs),\n" }
+
+# An empty input: the js file loses both tables, so it lists nothing.
+[[fault]]
+id = "adapter-lint-empty-config"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_adapter_bans_exactly_its_listed_paths ("
+transform = [
+  { file = "microvms-js/clippy.toml", replace = "\ndisallowed-types = [\n", with = "\nunused-types = [\n" },
+  { file = "microvms-js/clippy.toml", replace = "\ndisallowed-methods = [\n", with = "\nunused-methods = [\n" },
+]
+
+# A parser that returns nothing: the diagnostic regex can't match clippy's line.
+[[fault]]
+id = "adapter-lint-empty-parse"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_adapter_refuses_each_transport_call ("
+transform = { file = "scripts/test_ratchet.py", replace = "use of a disallowed (?:method|type)", with = "use of a banned (?:method|type)" }
+
+# CI sets CARGO_TERM_COLOR=always for every job. Without `--color never` the stand-in's colored
+# diagnostics don't match, and PR #314's first CI run failed seven AdapterLintTests on it.
+[[fault]]
+id = "adapter-lint-colored-output"
+guard = "test_ratchet.py"
+run = ["env", "CARGO_TERM_COLOR=always", "uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_adapter_refuses_each_transport_call ("
+transform = { file = "scripts/test_ratchet.py", replace = "\"--quiet\",\n                \"--color\",\n                \"never\",\n", with = "\"--quiet\",\n" }
+
+# ── StartRequest's builder (#273) ────────────────────────────────────────────
+
+# The guard is the type: `#[non_exhaustive]` refuses a struct expression outside `protocol`, so a
+# client can't pick its own `timeout_sec`, `reap_group_on_exit` or `inherit_image_env`.
+[[fault]]
+id = "start-request-literal"
+guard = "protocol::exec::StartRequest (#[non_exhaustive])"
+run = ["cargo", "build", "-p", "microvms-js"]
+expect = "compile-error"
+suite = "rust"
+code = "E0639"
+message = "cannot create non-exhaustive struct using struct expression"
+transform = { file = "microvms-js/src/session.rs", replace = "        let mut request =\n            protocol::exec::StartRequest::new(", with = "        let _literal = protocol::exec::StartRequest {\n            exec_id: String::new(),\n            command: Vec::new(),\n            shell: protocol::exec::Shell::Flag(false),\n            cwd: None,\n            env: Default::default(),\n            user: None,\n            group: None,\n            timeout_sec: None,\n            stdin: false,\n            reap_group_on_exit: false,\n            inherit_image_env: false,\n        };\n        let mut request =\n            protocol::exec::StartRequest::new(" }
+
+# The doctest twin that must not build. Run as the crate's whole doctest set, since cargo's
+# `--exact` matches no doctest name; the message is rustdoc's own line for a compile_fail that
+# compiled.
+[[fault]]
+id = "start-request-doctest-twin"
+guard = "protocol/src/exec.rs - exec::StartRequest (compile_fail twin)"
+run = ["cargo", "test", "-p", "microvms-protocol", "--doc"]
+expect = "exit-nonzero"
+suite = "rust"
+message = "Test compiled successfully, but it's marked `compile_fail`"
+transform = { file = "protocol/src/exec.rs", replace = "#[derive(Debug, Deserialize, JsonSchema, Serialize)]\n#[non_exhaustive]\npub struct StartRequest {\n", with = "#[derive(Debug, Deserialize, JsonSchema, Serialize)]\npub struct StartRequest {\n" }
+
+[[fault]]
+id = "start-request-builder-defaults"
+guard = "exec::tests::the_builder_defaults_are_the_ones_serde_gives_an_omitted_field"
+run = ["cargo", "test", "-p", "microvms-protocol", "--lib", "--", "--exact", "exec::tests::the_builder_defaults_are_the_ones_serde_gives_an_omitted_field"]
+expect = "test-failed"
+suite = "rust"
+note = "protocol/src/exec.rs::the_builder_defaults_are_the_ones_serde_gives_an_omitted_field"
+transform = { file = "protocol/src/exec.rs", replace = "            stdin: false,\n            reap_group_on_exit: false,\n            inherit_image_env: false,\n        }\n    }\n\n    /// Run `command` as a script", with = "            stdin: false,\n            reap_group_on_exit: true,\n            inherit_image_env: false,\n        }\n    }\n\n    /// Run `command` as a script" }
 
 # ── the bindings, rebuilt before each run (CI's bindings job) ────────────────
 

@@ -116,7 +116,7 @@ follow.
 | `microvms-core/tests/turmoil_client.rs` | test | yes | 7 references; `:452` and `:726` assert `WireKind::Transport`, `:781` and `:1383` assert `WireKind::AuthTokenMint` |
 | `microvms-py/tests/test_smoke.py` | test | yes | `:412` asserts one exception per kind under one shared base; `:275` asserts `wire_kind is None` for a local reject |
 | `microvms-js/__test__/smoke.mjs` | test | yes | `:345` asserts the enumerable `ERR_*` codes are exactly one per `ErrorKind` (`:347`) |
-| `microvms-cli/src/seam.rs`, `commands/lifecycle.rs` | direct import | likely | 8 and 5 references on the classify-and-report path — `microvms-cli/src/seam.rs:291`, `:306`, `:316`; `microvms-cli/src/commands/lifecycle.rs:191`, `:729`, `:741` |
+| `microvms-cli/src/seam.rs`, `commands/lifecycle.rs` | direct import | likely | 8 and 5 references on the classify-and-report path — `microvms-cli/src/seam.rs:315`, `:330`, `:340`; `microvms-cli/src/commands/lifecycle.rs:203`, `:741`, `:753` |
 | `agentd/src/fs.rs`, `agentd/src/exec.rs`, `agentd/src/disk.rs`, `agentd/src/identity.rs`, `agentd/tests/turmoil_transport.rs` | indirect | no | these are `std::io::ErrorKind`, not core's — the name collides but the type does not |
 
 ### Blast-radius notes
@@ -237,7 +237,7 @@ breaking change the compiler accepts — the module states the coupling at `:40`
 Defined at: `microvms-domain/src/sizing.rs:68` (`SIZE_CLASSES`, 5 rows / 20 numbers) and `:113`
 (`SizeClass`).
 
-Gate: `scripts/check-model-drift.py:266 PINNED_SIZE_CLASSES` is a deliberate literal twin compared
+Gate: `scripts/check-model-drift.py:279 PINNED_SIZE_CLASSES` is a deliberate literal twin compared
 against the emitted table, reached through `mise.toml:294 [tasks."model:check"]`. `mise.toml:310`
 records why a twin is the only possible check here: the sizing table is measurement-backed, so the
 service model can say nothing about it and client-versus-client is the only comparison available.
@@ -289,7 +289,7 @@ rows.
 
 Defined at: `microvms-domain/src/region.rs:45` (`Region`) and `:73` (`MICROVM_REGIONS: [Region; 5]`).
 
-Gate: `scripts/check-model-drift.py:254 PINNED_REGIONS` is the literal twin, compared through
+Gate: `scripts/check-model-drift.py:267 PINNED_REGIONS` is the literal twin, compared through
 `mise.toml:294 [tasks."model:check"]`; in-crate,
 `microvms-domain/src/region.rs:176 the_five_supported_regions_are_the_measured_ones` and
 `microvms-cli/src/cli.rs:1061 the_region_domain_is_exactly_the_five_measured_regions_and_excludes_eu_central_one`
@@ -341,7 +341,7 @@ Defined at: `microvms-domain/src/cost.rs:1018` (`pinned_rates`), returning the `
 `:849`, with the decimal literals at `:1016`-`:1023`.
 
 Gate: an offline check and a live one, running at different times.
-`microvms-domain/src/cost.rs:2223 every_rate_byte_matches_the_python_literal` compares each field
+`microvms-domain/src/cost.rs:2227 every_rate_byte_matches_the_python_literal` compares each field
 against a literal in the offline tier, and `./scripts/check-live-rates.py --twin-only` cross-checks
 the script's own pinned copy against the Rust source — offline and free, per `mise.toml:574`. The
 billable half, `mise.toml:547 [tasks."live:rates"]`, compares both against the live AWS Pricing API;
@@ -376,7 +376,7 @@ The figures were read from the Lambda pricing page on 2026-08-07 in us-east-1
   few thousand per-second ARM rates in binary floating point drifts toward a bill nobody can
   reproduce, and `docs/PLATFORM.md:1230` works the example figures at full precision.
 - **`storage_gb_month` is derived, and the code and the platform doc both record the earlier wrong
-  value.** `microvms-domain/src/cost.rs:2251` holds `dec!(0.08)` in the test that proves the current
+  value.** `microvms-domain/src/cost.rs:2255` holds `dec!(0.08)` in the test that proves the current
   figure is not it, and `docs/PLATFORM.md:304`-`:306` records that $0.08 per GB-month understated
   every stored GB by 1.37% against $0.0001111111 per GB-hour at AWS's own 730-hour month.
   `CatalogLine` (`:1038`) checks the unit the API reports for exactly this reason: if AWS restated
@@ -444,17 +444,16 @@ that guarantee is what makes it useful to an agent.
   conversion between them and separate `MAX_SECS` (`:58` = 60, `:86` = 3600), so a 3600-second build
   timeout cannot reach a field capped at 60. Mirrored in `microvms-py/src/hooks.rs` and
   `microvms-js/src/hooks.rs`.
-- `microvms-cli/src/seam.rs:136 CoreSeam` — the trait every CLI command reaches AWS through, and the
+- `microvms-cli/src/seam.rs:138 CoreSeam` — the trait every CLI command reaches AWS through, and the
   injection point the test suite substitutes at.
-  `microvms-cli/tests/thinness.rs:426 no_shipping_source_line_names_an_operation_or_reaches_past_the_seam`
-  asserts no shipping source line reaches past it, and `:457 the_scan_cut_cannot_hide_production_code`
-  guards the scan itself.
+  The CLI's `clippy.toml` refuses core's constructors and transport calls everywhere but
+  `src/seam.rs`, so no shipping source line reaches past it.
 - `microvms-app/src/control/transport.rs:243 Transport` and `microvms-app/src/clock.rs:42
   Clock` — the `Send + Sync` trait seams `ControlPlane` is constructed over
   (`microvms-app/src/control/mod.rs:132`), with `microvms-app/src/control/fake.rs` as the recording implementation.
-- `microvms-cli/Cargo.toml`'s direct dependency set — asserted as an exact equality by
-  `microvms-cli/tests/thinness.rs:145 the_direct_dependency_set_is_exactly_the_allowed_one` against
-  the `ALLOWED` table at `:66`, and the absence of a `lib` target asserted by
+- `microvms-cli/Cargo.toml`'s direct dependency set: checked by
+  `microvms-cli/tests/thinness.rs:107 no_direct_dependency_is_a_second_path_to_aws` against
+  the `FORBIDDEN` denylist at `:54`, and the absence of a `lib` target asserted by
   `microvms-cli/tests/dependency_direction.rs:127 the_cli_exports_no_library_target_at_all`. Both are
   manifest-shaped invariants a dependency addition trips.
 - **The Node binding's typed surface has no drift gate.** `microvms-js/index.d.ts` is gitignored

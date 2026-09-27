@@ -2068,6 +2068,10 @@ impl ResidencyComparison {
     }
 }
 
+/// The suspend/resume cycles [`compare_residency`] prices when the caller names none: one,
+/// the fewest that make a suspension more than a termination.
+pub const DEFAULT_RESIDENCY_CYCLES: u32 = 1;
+
 /// The warm-pool argument, with its own counter-argument attached.
 ///
 /// `cycles` should be at least 1: a suspension that is never resumed is a

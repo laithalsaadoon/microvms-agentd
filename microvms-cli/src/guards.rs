@@ -22,6 +22,10 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "a scripted transport answers the calls core makes; it never sends one"
+)]
 use microvms_core::control::transport::{Call, Reply, Transport};
 use microvms_core::control::{Clock, ControlPlane};
 use microvms_core::prelude::*;
@@ -1170,6 +1174,10 @@ async fn ls_remote_reconciles_against_both_listings_and_prunes_only_gone_entries
 /// crate. That is a feature here rather than a cost: like core's fake, every body below is a
 /// **literal** written from the service model, so a member this crate misreads cannot be
 /// misread identically by the fake.
+#[expect(
+    clippy::disallowed_types,
+    reason = "a scripted transport answers the calls core makes; it never sends one"
+)]
 struct ScriptedTransport {
     calls: Mutex<Vec<Call>>,
     /// Answers per operation, front to back; the last repeats.
@@ -1256,6 +1264,10 @@ impl ScriptedTransport {
     }
 }
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "a scripted transport answers the calls core makes; it never sends one"
+)]
 impl Transport for ScriptedTransport {
     fn send(&self, call: Call) -> BoxFuture<'_, Result<Reply, Error>> {
         let operation = call.operation.to_string();
@@ -1303,6 +1315,10 @@ struct ScriptedSeam {
     clock: Arc<YieldingClock>,
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a fake seam, the test's stand-in for src/seam.rs: it builds its plane or session over a scripted transport"
+)]
 impl CoreSeam for ScriptedSeam {
     fn control_plane(&self, region: Region) -> BoxFuture<'_, Result<ControlPlane, Error>> {
         let plane = ControlPlane::with_transport(
@@ -3352,6 +3368,10 @@ struct ScriptedSessionSeam {
     script: Arc<DaemonScript>,
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a fake seam, the test's stand-in for src/seam.rs: it builds its plane or session over a scripted transport"
+)]
 impl CoreSeam for ScriptedSessionSeam {
     fn control_plane(&self, _region: Region) -> BoxFuture<'_, Result<ControlPlane, Error>> {
         Box::pin(async move {
@@ -5924,6 +5944,10 @@ async fn a_resume_polls_the_thawed_daemon_and_lands_its_hook_observations() {
         clock: Arc<YieldingClock>,
         daemon: Arc<DaemonScript>,
     }
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a fake seam, the test's stand-in for src/seam.rs: it builds its plane or session over a scripted transport"
+    )]
     impl CoreSeam for ResumeSeam {
         fn control_plane(&self, region: Region) -> BoxFuture<'_, Result<ControlPlane, Error>> {
             let plane = ControlPlane::with_transport(
@@ -6199,6 +6223,10 @@ struct RecordingSessionSeam {
     seen: Mutex<Vec<(Attach, String)>>,
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a fake seam, the test's stand-in for src/seam.rs: it builds its plane or session over a scripted transport"
+)]
 impl CoreSeam for RecordingSessionSeam {
     fn control_plane(&self, _region: Region) -> BoxFuture<'_, Result<ControlPlane, Error>> {
         panic!("attach never opens a control plane directly")
@@ -6963,6 +6991,10 @@ struct SyncSeam {
     daemon: Arc<DaemonScript>,
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a fake seam, the test's stand-in for src/seam.rs: it builds its plane or session over a scripted transport"
+)]
 impl CoreSeam for SyncSeam {
     fn control_plane(&self, region: Region) -> BoxFuture<'_, Result<ControlPlane, Error>> {
         let plane = ControlPlane::with_transport(
@@ -7700,6 +7732,10 @@ struct DaemonSeam {
     daemon: Arc<StreamingDaemon>,
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a fake seam, the test's stand-in for src/seam.rs: it builds its plane or session over a scripted transport"
+)]
 impl CoreSeam for DaemonSeam {
     fn control_plane(&self, _region: Region) -> BoxFuture<'_, Result<ControlPlane, Error>> {
         Box::pin(async move { Err(Error::new(ErrorKind::Platform, "no control plane here")) })
@@ -7910,6 +7946,10 @@ struct NoCredentialsSeam;
 
 struct NoCredentialsTransport;
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "a scripted transport answers the calls core makes; it never sends one"
+)]
 impl Transport for NoCredentialsTransport {
     fn send(&self, call: Call) -> BoxFuture<'_, Result<Reply, Error>> {
         Box::pin(async move {
@@ -7930,6 +7970,10 @@ impl Transport for NoCredentialsTransport {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a fake seam, the test's stand-in for src/seam.rs: it builds its plane or session over a scripted transport"
+)]
 impl CoreSeam for NoCredentialsSeam {
     fn control_plane(&self, region: Region) -> BoxFuture<'_, Result<ControlPlane, Error>> {
         let plane = ControlPlane::with_transport(

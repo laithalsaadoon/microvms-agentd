@@ -327,7 +327,7 @@ description = "Fail if a hardcoded API constraint no longer matches botocore's s
 # for anyone who wants that trade knowingly.
 run = [
   "./scripts/check-model-drift.py",
-  "uv run --with 'boto3>=1.40' python -m unittest discover -s scripts -p 'test_model_drift.py'",
+  "uv run --with 'boto3>=1.40' --with 'pyyaml==6.0.3' python -m unittest discover -s scripts -p 'test_model_drift.py'",
 ]
 
 [tasks.build]

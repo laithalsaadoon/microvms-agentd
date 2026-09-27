@@ -450,19 +450,10 @@ mod tests {
     const GROUP: &str = "root:x:0:\nstaff:x:50:agent,builder\nagent:x:1001:\n";
 
     fn request(user: Option<NameOrId>, group: Option<NameOrId>, shell: Shell) -> StartRequest {
-        StartRequest {
-            exec_id: "e1".into(),
-            command: vec!["true".into()],
-            shell,
-            cwd: None,
-            env: Env::new(),
-            user,
-            group,
-            timeout_sec: None,
-            stdin: false,
-            reap_group_on_exit: false,
-            inherit_image_env: false,
-        }
+        StartRequest::new("e1", vec!["true".into()])
+            .with_shell(shell)
+            .with_user(user)
+            .with_group(group)
     }
 
     fn env(pairs: &[(&str, &str)]) -> Env {

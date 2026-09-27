@@ -41,24 +41,24 @@ trait methods but not associated types. No dead-code analyzer is integrated in t
 
 | Symbol | Path | Last modified |
 | --- | --- | --- |
-| `SessionBuilder::with_timeout` | `microvms-app/src/session/mod.rs:449` | 2026-08-15 |
+| `SessionBuilder::with_timeout` | `microvms-app/src/session/mod.rs:450` | 2026-08-15 |
 
 **Confidence: high.** `git grep -n "with_timeout\|withTimeout" -- .` over the whole
 git-tracked tree returns exactly one line — the declaration. Every sibling on the same
-builder has a caller: `with_minter` (`microvms-app/src/session/mod.rs:420`) from
+builder has a caller: `with_minter` (`microvms-app/src/session/mod.rs:421`) from
 `microvms-cli/src/seam.rs`, `microvms-app/src/sandbox.rs`, and
 `microvms-core/tests/turmoil_client.rs`; `with_proxy_auth`
-(`microvms-app/src/session/mod.rs:428`) from `microvms-core/tests/turmoil_client.rs`;
-`with_backend` (`microvms-app/src/session/mod.rs:435`) from `microvms-cli/src/guards.rs`
+(`microvms-app/src/session/mod.rs:429`) from `microvms-core/tests/turmoil_client.rs`;
+`with_backend` (`microvms-app/src/session/mod.rs:436`) from `microvms-cli/src/guards.rs`
 and `microvms-core/tests/turmoil_client.rs`; `with_port`
-(`microvms-app/src/session/mod.rs:442`) from `microvms-cli/src/seam.rs` and
+(`microvms-app/src/session/mod.rs:443`) from `microvms-cli/src/seam.rs` and
 `microvms-app/src/sandbox.rs`.
 
 The field it writes is live — only the setter is unreached. `SessionBuilder::build` reads
-`self.timeout` at `microvms-app/src/session/mod.rs:458` and `:470`, and `Session::run`
-back-fills a per-request `None` from it at `microvms-app/src/session/mod.rs:109-110`.
-`Session::builder` is the sole constructor (`microvms-app/src/session/mod.rs:223-224`) and
-seeds every path with `DEFAULT_REQUEST_TIMEOUT` (`microvms-app/src/session/mod.rs:230`).
+`self.timeout` at `microvms-app/src/session/mod.rs:459` and `:471`, and `Session::run`
+back-fills a per-request `None` from it at `microvms-app/src/session/mod.rs:110-111`.
+`Session::builder` is the sole constructor (`microvms-app/src/session/mod.rs:224-225`) and
+seeds every path with `DEFAULT_REQUEST_TIMEOUT` (`microvms-app/src/session/mod.rs:231`).
 
 **What would falsify this.** Three conditions hold; any one of them failing moves this row
 out of the table.
@@ -73,7 +73,7 @@ out of the table.
    no `#[pymethods]`.
 
 **Related defect in the same construct.** The builder's doc comment at
-`microvms-app/src/session/mod.rs:222` reads "A builder, for the cases that need a port, a
+`microvms-app/src/session/mod.rs:223` reads "A builder, for the cases that need a port, a
 timeout, or a custom backend." The port case and the backend case each have callers; the
 timeout case has none. The comment asserts a motivating case that does not exist in the tree.
 
@@ -103,7 +103,7 @@ Two files are compiled only under `cfg(test)` and are live test code, not dead s
 
 | Path | Symbol | Imported from |
 | --- | --- | --- |
-| `microvms-cli/src/commands/lifecycle.rs:2430` | `_DocsOnly` (alias of `ControlPlane`) | `microvms_core::control::ControlPlane`, re-bound from `microvms-cli/src/commands/lifecycle.rs:69` |
+| `microvms-cli/src/commands/lifecycle.rs:2445` | `_DocsOnly` (alias of `ControlPlane`) | `microvms_core::control::ControlPlane`, re-bound from `microvms-cli/src/commands/lifecycle.rs:69` |
 | `microvms-cli/src/commands/attached.rs:932` | `_DocsOnly` (alias of `ErrorKind`) | `microvms_core::ErrorKind`, re-bound from `microvms-cli/src/commands/attached.rs:40` |
 
 **Confidence: high that nothing names `_DocsOnly`; do not delete either line on its own.**
@@ -120,7 +120,7 @@ three-line construct (doc comment, attribute, `use`), and rebuilding:
 - `cargo doc --no-deps -p microvms-cli` emits the same eight warnings with or without the
   constructs, and neither `ControlPlane` nor `ErrorKind` appears among them. The stated
   reason — "Re-exported so `[ControlPlane]` is nameable in this module's docs"
-  (`microvms-cli/src/commands/lifecycle.rs:2428`) — is not the mechanism. The intra-doc link
+  (`microvms-cli/src/commands/lifecycle.rs:2443`) — is not the mechanism. The intra-doc link
   at `microvms-cli/src/commands/lifecycle.rs:10` resolves from the `:69` import directly.
 
 The two differ in whether the whole construct earns its place:

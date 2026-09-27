@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "enforced": [],
+  "enforced": ["adapter-logic"],
   "entries": [
     { "category": "placement", "key": "microvms-cli -> const-hex", "issue": 260 },
     { "category": "placement", "key": "microvms-cli -> globset", "issue": 260 },
@@ -39,6 +39,31 @@
       "category": "subprocess",
       "key": "microvms-cli/src/commands/doctor.rs: std::process::Command::new(\"terraform\")",
       "reason": "reads the local Terraform stack's outputs; no Rust library reads Terraform state backends"
+    },
+    {
+      "category": "adapter-logic",
+      "key": "microvms-cli/src/commands/lifecycle.rs: literal-default: Duration::from_secs(5)",
+      "reason": "`HEALTH_PROBE_DEADLINE`, the deadline on a best-effort health read the CLI makes only to copy the daemon's hook log into its local history, before a teardown and after a resume; core makes no such read, and the figure is short so a wedged endpoint can't hold a teardown for the transport's request timeout"
+    },
+    {
+      "category": "adapter-logic",
+      "key": "microvms-cli/src/commands/lifecycle.rs: literal-default: Duration::from_secs(10)",
+      "reason": "`ATTACH_PROBE_DEADLINE`, the deadline on attaching a session only for that hook-log read after a resume; it bounds a CLI history nicety core doesn't do, so a resume whose VM is running never stalls over it"
+    },
+    {
+      "category": "adapter-logic",
+      "key": "microvms-cli/src/commands/attached.rs: literal-default: Duration::from_secs(30)",
+      "reason": "`SYNC_DELETE_GRACE`, how long a sync pass waits past the in-guest `rm`'s own deadline; it's the figure the pass has always used, shorter than core's `DEFAULT_CLIENT_GRACE` because a pass under `sync --watch` holds the next one while it waits, and changing it is a behavior change of its own"
+    },
+    {
+      "category": "adapter-logic",
+      "key": "microvms-cli/src/commands/attached.rs: literal-default: Duration::from_millis(250)",
+      "reason": "the quiet period `sync --watch` waits after a file event so one save's burst of events runs one sync pass; it paces the CLI's interactive watch loop, the terminal affordance the notify placement decision names, and the sync pass it wakes goes to core in #260"
+    },
+    {
+      "category": "adapter-logic",
+      "key": "microvms-cli/src/commands/attached.rs: literal-default: Duration::from_millis(500)",
+      "reason": "`RESIZE_POLL_INTERVAL`, how often the interactive shell re-reads the local terminal's size to send a resize frame; the terminal is the CLI's, and no layer below it has one"
     }
   ]
 }

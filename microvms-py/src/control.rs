@@ -259,6 +259,9 @@ impl PyControlPlane {
     ///
     /// Reaching one of `fail_on` first raises `LaunchDiedError` naming the state and
     /// `stateReason`; running past `timeout` raises `TimeoutError`.
+    // Literals, not core's `DEFAULT_LIFECYCLE_TIMEOUT` and `LIFECYCLE_POLL_INTERVAL`: the stub
+    // generator writes a named default as `...`, which hides the value from a type checker's
+    // hover and from #300's check that reads each default from `microvms.pyi`.
     #[pyo3(signature = (microvm_id, wanted, *, fail_on=None, timeout=300.0, poll_interval=5.0))]
     fn wait_for_state(
         &self,

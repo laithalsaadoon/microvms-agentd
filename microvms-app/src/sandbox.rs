@@ -72,7 +72,8 @@ use crate::session::{Session, TokenMinter};
 /// The default launch wait: five minutes, matching the Python client's `ready_timeout_sec`.
 pub const DEFAULT_READY_TIMEOUT: Duration = Duration::from_secs(300);
 
-/// The default lifecycle wait for suspend, resume, and terminate.
+/// The default lifecycle wait for suspend, resume, and terminate, and for a state wait the
+/// caller gives no deadline (the bindings' `wait_for_state`, the CLI's `terminate --wait`).
 pub const DEFAULT_LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// How many times a teardown retries the image delete.
@@ -109,8 +110,9 @@ pub const DENY_EGRESS_ENV_KEYS: [&str; 6] = [
     "ALL_PROXY",
 ];
 
-/// How often a lifecycle wait polls.
-const LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_secs(5);
+/// How often a lifecycle wait polls. Public so an adapter that builds its own [`WaitOpts`]
+/// polls at the same rate rather than retyping it.
+pub const LIFECYCLE_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 /// The symspec's `vm_state`, verbatim.
 ///

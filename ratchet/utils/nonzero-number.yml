@@ -1,0 +1,10 @@
+# A numeric literal that isn't zero: `300.0`, `5`, `100_000`, `2.5e3`, `1u64`. A zero is how a
+# caller says "none" or "from the start" (an offset, a count), so it isn't a retyped default.
+# A negated literal is a `unary_expression`, not one of these, so `-1` doesn't match.
+id: nonzero-number
+language: rust
+rule:
+  all:
+    - any: [kind: integer_literal, kind: float_literal]
+    - not:
+        regex: '^0[0_]*(\.[0_]*)?([eE][+-]?[0-9_]+)?(_?(u8|u16|u32|u64|u128|usize|i8|i16|i32|i64|i128|isize|f32|f64))?$'

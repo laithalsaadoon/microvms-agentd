@@ -89,9 +89,12 @@ first:
   wire call, file format or subprocess here belongs in a lower layer.
 
 That's the rule, not a description of today's tree. The CLI still owns file
-formats and file I/O, the run ledger and the sync manifest among them. The
-ratchet doesn't collect that drift yet (#273), and #260 moves directory sync
-into core.
+formats and file I/O, the run ledger and the sync manifest among them, and #260
+moves directory sync into core. The ratchet's adapter-logic rules
+(`ratchet/rules/`) refuse an operation name written as a literal and a retyped
+default in the CLI's and both bindings' code; they don't read file formats, or
+attribute defaults such as clap's `default_value_t` and PyO3's `signature`,
+which #300 checks through the generated surfaces.
 
 If an adapter needs something private to a lower crate, make it public there or
 move the caller down. Never copy it.
@@ -110,8 +113,12 @@ never carry drift. The ratchet's port-impl collector reads the app and core as
 well as the adapters, so a port implemented anywhere but the edges is drift or
 a recorded decision. Forbidden calls are refused by each adapter's
 `clippy.toml`, and `scripts/test_ratchet.py` lists every site that turns those
-lints off. Semgrep thinness rules (#273) and a surface parity check (#271) are
-planned.
+lints off. The CLI's `clippy.toml` also refuses core's transport calls and its
+production constructors outside `src/seam.rs`, and the bindings refuse the
+transport calls. `protocol::exec::StartRequest` is `#[non_exhaustive]`, so every
+start request is built from `StartRequest::new`, which holds the wire's defaults.
+The Python binding's `run` signatures still restate four of them as keyword
+defaults, which #300 checks. A surface parity check (#271) is planned.
 
 ## Maintenance rules
 

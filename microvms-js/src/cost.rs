@@ -41,8 +41,8 @@
 use microvms_core::SizeClass as CoreSizeClass;
 use microvms_core::cost::{
     self, Amount as CoreAmount, BillingLine, CalendarDate, CostPhase, CostReport as CoreReport,
-    DurationP, EstimatedUsd as CoreUsd, LineItem as CoreLineItem, PlanUsage, Provenance,
-    RateTable as CoreRates, RunUsage, Total as CoreTotal,
+    DEFAULT_RESIDENCY_CYCLES, DurationP, EstimatedUsd as CoreUsd, LineItem as CoreLineItem,
+    PlanUsage, Provenance, RateTable as CoreRates, RunUsage, Total as CoreTotal,
 };
 use microvms_core::prelude::*;
 use napi::bindgen_prelude::ClassInstance;
@@ -1002,7 +1002,7 @@ pub fn compare_residency(
             hold,
             crate::numbers::optional_u32(cycles, "cycles")
                 .map_err(js)?
-                .unwrap_or(1),
+                .unwrap_or(DEFAULT_RESIDENCY_CYCLES),
             &table,
             CalendarDate::today_utc(),
         )

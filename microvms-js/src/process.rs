@@ -93,8 +93,8 @@ use napi_derive::napi;
 
 use crate::errors::{AsyncError, js_async};
 
-/// The default `wait()` deadline, matching `ExecHandle.wait`'s.
-const DEFAULT_WAIT: f64 = 300.0;
+/// The default `wait()` deadline, `ExecHandle.wait`'s, from the core.
+const DEFAULT_WAIT: f64 = microvms_core::session::DEFAULT_EXEC_WAIT.as_secs_f64();
 
 /// What to do when the daemon reports evicted output.
 ///

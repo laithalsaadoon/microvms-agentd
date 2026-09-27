@@ -16,6 +16,11 @@ pub fn run(argv: &[String]) {
     let _ = std::process::Command::new(&argv[0]);
 }
 
+// Below the adapters, where operation names and defaults belong: not adapter logic.
+pub fn call() {
+    let _ = ("RunMicrovm", std::time::Duration::from_secs(300));
+}
+
 // A port implemented in the kernel itself, which is reported: a use case implements a port only
 // where a decision says why.
 pub struct Local;

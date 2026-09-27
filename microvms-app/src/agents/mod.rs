@@ -444,19 +444,12 @@ pub async fn install_access(
             .upload_file(&file.path, &file.contents, Some(file.mode))
             .await?;
     }
-    let request = crate::protocol::exec::StartRequest {
-        exec_id: session.mint_exec_id(),
-        command: vec![format!("chown -R {AGENT_UID}:{AGENT_GID} {WORKDIR}")],
-        shell: true.into(),
-        cwd: None,
-        env: std::collections::HashMap::new(),
-        user: None,
-        group: None,
-        timeout_sec: Some(CHOWN_TIMEOUT.as_secs_f64()),
-        stdin: false,
-        reap_group_on_exit: false,
-        inherit_image_env: false,
-    };
+    let request = crate::protocol::exec::StartRequest::new(
+        session.mint_exec_id(),
+        vec![format!("chown -R {AGENT_UID}:{AGENT_GID} {WORKDIR}")],
+    )
+    .with_shell(true)
+    .with_timeout_sec(Some(CHOWN_TIMEOUT.as_secs_f64()));
     let result = session.run_sync(request, CHOWN_TIMEOUT).await?;
     if !result.succeeded() {
         return Err(Error::new(
@@ -540,22 +533,19 @@ pub const VERSION_PROBE_WAIT: Duration = Duration::from_secs(90);
 /// Probe the installed executable as the guest agent UID, without sourcing credentials.
 /// Only a numeric version is returned; arbitrary guest stdout/stderr never enters reports.
 pub async fn installed_version(session: &Session, agent: Agent) -> Result<String, Error> {
-    let request = crate::protocol::exec::StartRequest {
-        exec_id: session.mint_exec_id(),
-        command: profile::version_command(agent),
-        shell: false.into(),
-        cwd: Some(WORKDIR.to_string()),
-        env: std::collections::HashMap::from([(
-            "PATH".into(),
-            "/usr/local/bin:/usr/bin:/bin".into(),
-        )]),
-        user: Some(AGENT_UID.into()),
-        group: Some(AGENT_GID.into()),
-        timeout_sec: Some(VERSION_PROBE_TIMEOUT.as_secs_f64()),
-        stdin: false,
-        reap_group_on_exit: true,
-        inherit_image_env: false,
-    };
+    let request = crate::protocol::exec::StartRequest::new(
+        session.mint_exec_id(),
+        profile::version_command(agent),
+    )
+    .with_cwd(Some(WORKDIR.to_string()))
+    .with_env(std::collections::HashMap::from([(
+        "PATH".into(),
+        "/usr/local/bin:/usr/bin:/bin".into(),
+    )]))
+    .with_user(Some(AGENT_UID.into()))
+    .with_group(Some(AGENT_GID.into()))
+    .with_timeout_sec(Some(VERSION_PROBE_TIMEOUT.as_secs_f64()))
+    .with_reap_group_on_exit(true);
     let result = session.run_sync(request, VERSION_PROBE_WAIT).await?;
     if result.succeeded()
         && let Some(version) = reported_version(result.stdout())
@@ -632,21 +622,18 @@ pub fn prompt_request_with(
         ". {ENV_FILE} && {}",
         profile::headless_command(spec.agent, &sh_single_quote(task), options.permission_mode)
     );
-    Ok(crate::protocol::exec::StartRequest {
-        exec_id: options.exec_id.clone().unwrap_or_else(mint),
-        command: vec![command],
-        shell: true.into(),
-        cwd: Some(WORKDIR.to_string()),
-        // Empty on the wire: the environment file is the environment, sourced by the
-        // command, so the token never rides in a request body.
-        env: std::collections::HashMap::new(),
-        user: Some(AGENT_UID.into()),
-        group: Some(AGENT_GID.into()),
-        timeout_sec: options.timeout.map(|timeout| timeout.as_secs_f64()),
-        stdin: false,
-        reap_group_on_exit: options.reap_group_on_exit,
-        inherit_image_env: false,
-    })
+    // No `with_env`: the environment file is the environment, sourced by the command, so
+    // the token never rides in a request body and the wire's map stays empty.
+    Ok(crate::protocol::exec::StartRequest::new(
+        options.exec_id.clone().unwrap_or_else(mint),
+        vec![command],
+    )
+    .with_shell(true)
+    .with_cwd(Some(WORKDIR.to_string()))
+    .with_user(Some(AGENT_UID.into()))
+    .with_group(Some(AGENT_GID.into()))
+    .with_timeout_sec(options.timeout.map(|timeout| timeout.as_secs_f64()))
+    .with_reap_group_on_exit(options.reap_group_on_exit))
 }
 
 /// The headless command with `<TASK>` where the quoted task goes, for a caller who wants

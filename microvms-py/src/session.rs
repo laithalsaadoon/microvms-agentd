@@ -54,11 +54,12 @@ use crate::exec::{PyExecHandle, PyExecResult, seconds};
 use crate::region::PyRegion;
 use crate::runtime;
 
-/// How long to wait for a daemon to report bootstrapped, matching the core's default.
-const DEFAULT_READY_TIMEOUT: f64 = 120.0;
+/// How long to wait for a daemon to report bootstrapped: the core's default.
+const DEFAULT_READY_TIMEOUT: f64 = microvms_core::session::DEFAULT_READY_TIMEOUT.as_secs_f64();
 
-/// The default one-shot `run_sync` deadline, matching the Python client's 300s.
-const DEFAULT_RUN_SYNC_TIMEOUT: f64 = 300.0;
+/// The default one-shot `run_sync` deadline: the core's exec wait, since `run_sync` waits the
+/// same way.
+const DEFAULT_RUN_SYNC_TIMEOUT: f64 = microvms_core::session::DEFAULT_EXEC_WAIT.as_secs_f64();
 
 /// `run_to_completion`'s default `client_grace_sec`, from the core so the two cannot drift.
 const DEFAULT_CLIENT_GRACE_SEC: f64 = DEFAULT_CLIENT_GRACE.as_secs_f64();
@@ -683,6 +684,12 @@ impl PySession {
     /// `reap_group_on_exit` asks the daemon to signal the whole process group once the
     /// command's own child exits, so nothing it backgrounded outlives it; off by default,
     /// which keeps the backgrounded-grandchild-output guarantee for callers who rely on it.
+    // `shell`, `stdin`, `reap_group_on_exit` and `inherit_image_env` restate the wire's defaults
+    // (`StartRequest::new`'s) here and in `run_sync`, and `run_to_completion` restates `shell`
+    // and `inherit_image_env`, because a Python signature shows a value: `Option<bool> = None`
+    // would turn the stub's `bool = False` into `bool | None`, an API change. So these setters
+    // are called unconditionally, and a wire default that changes has to change here too.
+    // #300's surface check is where that's caught.
     #[pyo3(signature = (
         command,
         *,
@@ -718,19 +725,19 @@ impl PySession {
         reap_group_on_exit: bool,
         inherit_image_env: bool,
     ) -> PyCoreResult<PyExecHandle> {
-        let request = protocol::exec::StartRequest {
-            exec_id: exec_id.unwrap_or_else(mint_exec_id),
-            command: command.into_argv(),
-            shell: shell.into(),
-            cwd,
-            env: env.unwrap_or_default(),
-            user: user.map(Into::into),
-            group: group.map(Into::into),
-            timeout_sec,
-            stdin,
-            reap_group_on_exit,
-            inherit_image_env,
-        };
+        let request = protocol::exec::StartRequest::new(
+            exec_id.unwrap_or_else(mint_exec_id),
+            command.into_argv(),
+        )
+        .with_shell(shell)
+        .with_cwd(cwd)
+        .with_env(env.unwrap_or_default())
+        .with_user(user.map(Into::into))
+        .with_group(group.map(Into::into))
+        .with_timeout_sec(timeout_sec)
+        .with_stdin(stdin)
+        .with_reap_group_on_exit(reap_group_on_exit)
+        .with_inherit_image_env(inherit_image_env);
         // The request is moved into the closure, so it is built before the detach rather
         // than inside it — a `Command` extraction needs the GIL and the closure does not
         // have it.
@@ -786,19 +793,19 @@ impl PySession {
         reap_group_on_exit: bool,
         inherit_image_env: bool,
     ) -> PyCoreResult<PyExecResult> {
-        let request = protocol::exec::StartRequest {
-            exec_id: exec_id.unwrap_or_else(mint_exec_id),
-            command: command.into_argv(),
-            shell: shell.into(),
-            cwd,
-            env: env.unwrap_or_default(),
-            user: user.map(Into::into),
-            group: group.map(Into::into),
-            timeout_sec,
-            stdin,
-            reap_group_on_exit,
-            inherit_image_env,
-        };
+        let request = protocol::exec::StartRequest::new(
+            exec_id.unwrap_or_else(mint_exec_id),
+            command.into_argv(),
+        )
+        .with_shell(shell)
+        .with_cwd(cwd)
+        .with_env(env.unwrap_or_default())
+        .with_user(user.map(Into::into))
+        .with_group(group.map(Into::into))
+        .with_timeout_sec(timeout_sec)
+        .with_stdin(stdin)
+        .with_reap_group_on_exit(reap_group_on_exit)
+        .with_inherit_image_env(inherit_image_env);
         let timeout = seconds(timeout)?;
         Ok(PyExecResult::wrap(self.detached(py, move |session| {
             runtime::block_on_detached(session.run_sync(request, timeout))
@@ -853,19 +860,17 @@ impl PySession {
         inherit_image_env: bool,
         client_grace_sec: f64,
     ) -> PyResult<PyExecResult> {
-        let request = protocol::exec::StartRequest {
-            exec_id: exec_id.unwrap_or_else(mint_exec_id),
-            command: command.into_argv(),
-            shell: shell.into(),
-            cwd,
-            env: env.unwrap_or_default(),
-            user: user.map(Into::into),
-            group: group.map(Into::into),
-            timeout_sec,
-            stdin: false,
-            reap_group_on_exit: false,
-            inherit_image_env,
-        };
+        let request = protocol::exec::StartRequest::new(
+            exec_id.unwrap_or_else(mint_exec_id),
+            command.into_argv(),
+        )
+        .with_shell(shell)
+        .with_cwd(cwd)
+        .with_env(env.unwrap_or_default())
+        .with_user(user.map(Into::into))
+        .with_group(group.map(Into::into))
+        .with_timeout_sec(timeout_sec)
+        .with_inherit_image_env(inherit_image_env);
         let options = CompletionOptions {
             client_grace: seconds(client_grace_sec).map_err(CoreError)?,
             ..CompletionOptions::default()

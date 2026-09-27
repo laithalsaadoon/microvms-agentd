@@ -155,7 +155,6 @@ microvms-cli/tests/exit_codes.rs::a_failure_with_progress_enabled_writes_one_jso
 microvms-cli/tests/exit_codes.rs::a_streamed_exec_that_fails_before_any_event_writes_one_document_on_stdout
 microvms-cli/tests/exit_codes.rs::every_locally_reachable_row_exits_with_its_own_integer_and_code
 microvms-cli/tests/manifest.rs::every_command_the_manifest_lists_is_one_the_binary_routes
-microvms-cli/tests/thinness.rs::the_stripper_reads_a_quote_in_a_char_literal_as_a_literal
 microvms-core/src/lib.rs::the_os_pool_tokens_never_repeat
 microvms-core/src/prelude.rs::from_name_refuses_a_foreign_or_missing_name_before_any_plane
 microvms-core/src/prelude.rs::proxy_auth_new_keeps_the_defaults

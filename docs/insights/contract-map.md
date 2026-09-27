@@ -17,7 +17,7 @@ Three tiers, all of which cross a boundary a single `cargo build` cannot fully p
 3. **A contract stated as a machine-checked assertion rather than as a type**: the generated
    `docs/schema.json`, the EARS requirements in `spec/core.symspec.json`, and the
    cross-language agreement tests such as
-   `every_rate_byte_matches_the_python_literal` (`microvms-domain/src/cost.rs:2222-2239`).
+   `every_rate_byte_matches_the_python_literal` (`microvms-domain/src/cost.rs:2226-2243`).
 
 Ranking is by distinct consumer *file* count, measured at 9c462f0 with
 `rg -l` over qualified paths and `rg -o … | uniq -c` over occurrences. `agentd` counts as one
@@ -25,7 +25,7 @@ consumer of every `protocol` type, because `agentd/src/exec.rs:87-90` re-exports
 `protocol::exec` surface in one block. Every client-side consumer reaches the same types
 through `microvms_core::protocol::…`, because `microvms-core/src/lib.rs:77` re-exports the
 crate — which is what lets `microvms-cli` name wire types while its direct dependency
-set (`microvms-cli/tests/thinness.rs:66`) doesn't include `protocol`.
+set (`microvms-cli/tests/thinness.rs:71`) doesn't include `protocol`.
 
 ### Gate coverage, which is not symmetric
 
@@ -65,7 +65,7 @@ state of the art.
   rather than transcribed.
 - Raise sites across core: `microvms-app/src/sandbox.rs:68`,
   `microvms-domain/src/hooks.rs:156`, `microvms-domain/src/sizing.rs:266`,
-  `microvms-domain/src/cost.rs:2167`, plus `control/{artifact,image,microvm,mod,transport}.rs`
+  `microvms-domain/src/cost.rs:2171`, plus `control/{artifact,image,microvm,mod,transport}.rs`
   and `session/{exec,http,mod,proxy,sse}.rs`.
 - The daemon's own uses: `agentd/src/disk.rs:69`, `agentd/src/exec.rs:776`,
   `agentd/src/fs.rs:1107`, `agentd/src/identity.rs:411`.
@@ -150,7 +150,7 @@ alongside the spelled codes at `microvms-domain/src/error.rs:434-452`.
 **Consumer(s):**
 
 - `microvms-cli/src/cli.rs:35` — the `--region` value, parsed into the enum at the CLI edge.
-- `microvms-cli/src/commands/doctor.rs:17`, `microvms-cli/src/guards.rs:29`, `microvms-cli/src/seam.rs:29`
+- `microvms-cli/src/commands/doctor.rs:17`, `microvms-cli/src/guards.rs:33`, `microvms-cli/src/seam.rs:31`
 - `microvms-py/src/region.rs:11`, `microvms-py/src/sandbox.rs:309`
 - `microvms-js/src/region.rs:8`, `microvms-js/src/sandbox.rs:60`, `microvms-js/src/lib.rs:46`
 - `microvms-core/src/lib.rs:104` (re-export), `microvms-domain/src/cost.rs:857`,
@@ -197,7 +197,7 @@ pub enum Region {
   the consequence: a Tokyo caller reading the us-east-1 table understates snapshot write by
   22.6%, and staleness checking would never surface it.
 - **The five-region list is measurement-backed and cannot be model-checked.**
-  `scripts/check-model-drift.py:52-58` states that no service model names the regions and
+  `scripts/check-model-drift.py:65-71` states that no service model names the regions and
   that the two botocore calls that look like substitutes disagree with each other, so
   `PINNED_REGIONS` in that script is a deliberate second reader rather than a self-comparison.
 
@@ -210,14 +210,14 @@ same commit.
 
 ## microvms_core::session::Session — the in-VM control API handle
 
-**Producer:** `microvms-app/src/session/mod.rs:173-178` (struct), `:180-217` (constructors), `:407-415` (`SessionBuilder`)
+**Producer:** `microvms-app/src/session/mod.rs:174-179` (struct), `:181-218` (constructors), `:408-416` (`SessionBuilder`)
 
 **Consumer(s):**
 
 - `microvms-py/src/session.rs:8`, `microvms-py/src/exec.rs:482`, `microvms-py/src/runtime.rs:12`, `microvms-py/src/sandbox.rs:632`
 - `microvms-js/src/session.rs:7`, `microvms-js/src/exec.rs:319`, `microvms-js/src/process.rs:190`, `microvms-js/src/sandbox.rs:28`
-- `microvms-cli/src/seam.rs:18`, `microvms-cli/src/guards.rs:28`, `microvms-cli/src/commands/attached.rs:39`, `microvms-cli/tests/thinness.rs:242`
-- `microvms-app/src/sandbox.rs:820` (`session()`), `:1026` and `:1529` — `run` and `resume`
+- `microvms-cli/src/seam.rs:18`, `microvms-cli/src/guards.rs:32`, `microvms-cli/src/commands/attached.rs:39`, `microvms-cli/tests/thinness.rs:247`
+- `microvms-app/src/sandbox.rs:822` (`session()`), `:1028` and `:1531` — `run` and `resume`
   hand back `&mut Session`; plus `microvms-app/src/control/ops.rs` and
   `microvms-app/src/session/{http,proxy}.rs`
 - `microvms-core/tests/turmoil_client.rs:66`
@@ -238,27 +238,27 @@ pub struct Session {
 
 **Assumptions consumers make:**
 
-- **Constructing a session does not probe the VM.** `microvms-app/src/session/mod.rs:193-196`
+- **Constructing a session does not probe the VM.** `microvms-app/src/session/mod.rs:194-197`
   makes this explicit: "do I have a session" and "is the VM up" are different questions with
   different answers during a launch, so a probing constructor would conflate them.
-- **`agent_token()` is readable but never printed.** `microvms-app/src/session/mod.rs:181-190`
+- **`agent_token()` is readable but never printed.** `microvms-app/src/session/mod.rs:182-191`
   makes it public because a reattaching caller needs it; the hand-written `Debug` at
-  `:395-404` drops it. Restates
+  `:396-405` drops it. Restates
   `.erpaval/solutions/best-practices/credential-structs-never-derive-debug.md`.
 - **`Session::direct` is a supported shape, not a test escape hatch**
-  (`microvms-app/src/session/mod.rs:207-212`) — the conformance path and every local-binary
+  (`microvms-app/src/session/mod.rs:208-213`) — the conformance path and every local-binary
   test go through it, so proxy-auth headers being absent is a valid state rather than a bug.
 - **Token minting happens inside the request path**, which is what makes a long run survive
   the 60-minute proxy-token lifetime; `SessionBuilder::with_minter` /
   `with_proxy_auth` decide the schedule and the latter wins
-  (`microvms-app/src/session/mod.rs:417-431`).
-- **The HTTP backend is a replaceable seam** (`microvms-app/src/session/mod.rs:433-438`),
+  (`microvms-app/src/session/mod.rs:418-432`).
+- **The HTTP backend is a replaceable seam** (`microvms-app/src/session/mod.rs:434-439`),
   which is what lets `microvms-core/tests/turmoil_client.rs` drive the real client under
   simulated network faults. Restates
   `.erpaval/solutions/api-patterns/axum-listener-trait-enables-turmoil.md`.
 
 **Drift risk:** the port a session was built with is also the port its proxy token is scoped
-to (`microvms-app/src/session/mod.rs:440-445`), so a consumer that changes the agent port
+to (`microvms-app/src/session/mod.rs:441-446`), so a consumer that changes the agent port
 without rebuilding the session gets a token scoped to the old port and a 401-shaped failure
 that reads as a credential problem. Mitigation: keep `with_port` the only way to set it, so
 the scope and the header are assigned from one value.
@@ -273,7 +273,7 @@ the scope and the header are assigned from one value.
 - `microvms-cli/src/exit.rs:336-365` — keys the remedy suggestion on it where two conditions
   share an exit code.
 - `microvms-cli/src/exit.rs:534-560` — pins which ones collapse onto `ERR_PROTOCOL`.
-- `microvms-cli/src/guards.rs:2470`
+- `microvms-cli/src/guards.rs:2486`
 - `microvms-py/src/errors.rs:161-164` — sets `.wire_kind` on the raised exception.
 - `microvms-js/src/errors.rs:70-80`, `:152-158` — the cause's cause, and `wire_kinds()`.
 - `microvms-core/src/lib.rs:79` (re-export), plus `control/{microvm,transport}.rs` and
@@ -337,11 +337,11 @@ declare one whenever the daemon does.
 
 ## microvms_core::sandbox::Sandbox — the product surface and its state machine
 
-**Producer:** `microvms-app/src/sandbox.rs:602-662` (struct), `:120-168` (`Lifecycle`), `:884-1633` (the transitions)
+**Producer:** `microvms-app/src/sandbox.rs:604-664` (struct), `:122-170` (`Lifecycle`), `:886-1635` (the transitions)
 
 **Consumer(s):**
 
-- `microvms-cli/src/commands/lifecycle.rs:6`, `microvms-cli/src/guards.rs:27`, `microvms-cli/src/ledger.rs:94`, `microvms-cli/src/seam.rs:9`, `microvms-cli/tests/thinness.rs:240`
+- `microvms-cli/src/commands/lifecycle.rs:6`, `microvms-cli/src/guards.rs:31`, `microvms-cli/src/ledger.rs:94`, `microvms-cli/src/seam.rs:9`, `microvms-cli/tests/thinness.rs:245`
 - `microvms-py/src/sandbox.rs:6`, `microvms-py/src/session.rs:27`, `microvms-py/src/runtime.rs:12`
 - `microvms-js/src/sandbox.rs:6`, `microvms-js/src/session.rs:7`, `microvms-js/src/region.rs:11`
 
@@ -392,28 +392,28 @@ pub struct Sandbox {
 
 - **Every field is private; the contract is the accessor set.** `lifecycle()`,
   `token_installed()`, `image_exists()`, `was_terminated()`, `bootstrap_count()` at
-  `microvms-app/src/sandbox.rs:785-805` are named after the symspec's state variables,
+  `microvms-app/src/sandbox.rs:787-807` are named after the symspec's state variables,
   so a consumer asserting against the formal model reads them rather than reconstructing
   state.
 - **`Suspended` is still billing.** `Lifecycle::is_live` at
-  `microvms-app/src/sandbox.rs:163-168` includes `Pending | Running | Suspending | Suspended`,
+  `microvms-app/src/sandbox.rs:165-170` includes `Pending | Running | Suspending | Suspended`,
   which is what a `Drop` warning is for. That is a *different* question from
   `constants::TERMINAL_STATES` (`microvms-domain/src/constants.rs:448`), which lists
   `SUSPENDED`/`SUSPENDING` as states a launch wait must stop on.
 - **The suspended window comes from our own `RunMicrovm` request first, and from
-  `GetMicrovm`'s `idlePolicy` as the fallback.** `microvms-app/src/sandbox.rs:625-627` — a
+  `GetMicrovm`'s `idlePolicy` as the fallback.** `microvms-app/src/sandbox.rs:627-629` — a
   sandbox that sent no launch of its own reads the window the platform reports, so it can still
   answer "is the resume window still open".
-- **`terminate` returns a report and never raises.** `microvms-app/src/sandbox.rs:489-491`,
-  `:1633` — it runs where a `finally` would, so a consumer must inspect
-  `TeardownReport::leaked()` (`:523-525`) rather than trusting the absence of an error.
+- **`terminate` returns a report and never raises.** `microvms-app/src/sandbox.rs:491-493`,
+  `:1635` — it runs where a `finally` would, so a consumer must inspect
+  `TeardownReport::leaked()` (`:525-527`) rather than trusting the absence of an error.
 - **`undeleted` carries identifiers, not a boolean**, because "a leak nobody can name is a
-  leak nobody can clean up" (`microvms-app/src/sandbox.rs:493-507`), and the build log group
+  leak nobody can clean up" (`microvms-app/src/sandbox.rs:495-509`), and the build log group
   lands there unconditionally: this crate cannot delete it.
 - **`image_deleted: Option<bool>`** distinguishes "deletion was not asked for" from
-  "deletion failed" (`microvms-app/src/sandbox.rs:511`). Restates
+  "deletion failed" (`microvms-app/src/sandbox.rs:513`). Restates
   `.erpaval/solutions/architecture-patterns/an-absent-value-is-not-a-neutral-one.md`.
-- **`Debug` omits the agent token** (`microvms-app/src/sandbox.rs:664-668`), so a consumer
+- **`Debug` omits the agent token** (`microvms-app/src/sandbox.rs:666-670`), so a consumer
   logging a sandbox does not leak the credential.
 
 **Drift risk:** the `Lifecycle` variants and the `MICROVM_STATES` wire strings are two
@@ -432,8 +432,8 @@ no credentials because the model is a file inside botocore.
 - `agentd/src/exec.rs:87-90` (re-exported into the daemon's own namespace)
 - `microvms-app/src/session/sse.rs:243` — the `ExecEvent::Output` payload field.
 - `microvms-cli/src/commands/attached.rs:354-355` — the two-arm map to `"stdout"` / `"stderr"`.
-- `microvms-py/src/session.rs:600-603` — published as `streamKinds` from `StreamKind::ALL`.
-- `microvms-js/src/session.rs:998-1002` — the same list, built as a JSON array.
+- `microvms-py/src/session.rs:601-604` — published as `streamKinds` from `StreamKind::ALL`.
+- `microvms-js/src/session.rs:1010-1014` — the same list, built as a JSON array.
 - `microvms-js/src/process.rs:172-174` — `is_stderr`.
 - `microvms-core/tests/turmoil_client.rs:850`
 
@@ -481,8 +481,8 @@ impl StreamKind {
   variant would be classified as stdout with no compile error. Every other consumer matches
   exhaustively.
 - **`as_str` and serde's `rename_all` must agree**, asserted for every variant at
-  `protocol/src/exec.rs:318-339`, with `ALL` held complete by wildcard-free matches rather
-  than by a length check (`protocol/src/exec.rs:313-316`).
+  `protocol/src/exec.rs:319-340`, with `ALL` held complete by wildcard-free matches rather
+  than by a length check (`protocol/src/exec.rs:314-317`).
 
 **Drift risk:** a third channel added to `StreamKind` compiles against
 `microvms-js/src/process.rs:172` and silently routes to stdout. Mitigation: rewrite
@@ -495,10 +495,10 @@ impl StreamKind {
 **Consumer(s):**
 
 - `agentd/src/exec.rs:87-90` (re-export)
-- `microvms-app/src/session/exec.rs:69` (`ExecResult::phase`), `:86-91` (`done()`), `:264-269`, `:692`
+- `microvms-app/src/session/exec.rs:74` (`ExecResult::phase`), `:91-96` (`done()`), `:269-274`, `:697`
 - `microvms-cli/src/commands/attached.rs:442-448` (`phase_name`)
-- `microvms-py/src/session.rs:596-599` — published as `phases` from `Phase::ALL`
-- `microvms-js/src/session.rs:993-997` — the same list
+- `microvms-py/src/session.rs:597-600` — published as `phases` from `Phase::ALL`
+- `microvms-js/src/session.rs:1005-1009` — the same list
 - `microvms-core/tests/turmoil_client.rs:954`
 
 **Shape:**
@@ -541,29 +541,29 @@ impl Phase {
 
 **Assumptions consumers make:**
 
-- **`Exited` and `Acked` both mean finished.** `microvms-app/src/session/exec.rs:86-91`
+- **`Exited` and `Acked` both mean finished.** `microvms-app/src/session/exec.rs:91-96`
   defines `done()` as `Exited | Acked`, so a consumer must not treat `Acked` as an error
   state.
-- **`Acked` means the output is already gone.** `microvms-app/src/session/exec.rs:684-696`
+- **`Acked` means the output is already gone.** `microvms-app/src/session/exec.rs:689-701`
   returns the *ack* response rather than a post-ack poll, because a poll after the ack reports
-  `acked` with no output — named a "silent empty-output bug" at `:688`.
+  `acked` with no output — named a "silent empty-output bug" at `:693`.
 - **The daemon keeps a separate exit marker precisely because an ack takes the `Outcome`.**
   `agentd/src/exec.rs:92-99` — after an ack, `result` is `None` again and is no longer usable
   as "has this exec finished?", so a stream attaching then would wait on a channel that never
   carries another message.
 - **`as_str` is meant to be the only phase-name table, and some consumers spell their own
-  anyway.** The bindings comply (`microvms-py/src/session.rs:596-599`,
-  `microvms-js/src/session.rs:993-997`), but `microvms-app/src/session/exec.rs:264-269` and
+  anyway.** The bindings comply (`microvms-py/src/session.rs:597-600`,
+  `microvms-js/src/session.rs:1005-1009`), but `microvms-app/src/session/exec.rs:269-274` and
   `microvms-cli/src/commands/attached.rs:442-448` each hand-write every phase string. Those
   matches are exhaustive, so a new *variant* is a compile error — a renamed *wire spelling* is
   not, because `as_str` and serde would move together under the test at
-  `protocol/src/exec.rs:318` while the hand-written copies keep emitting the old string.
+  `protocol/src/exec.rs:319` while the hand-written copies keep emitting the old string.
 - **`ALL` is in lifecycle order**, and the CLI's `phase_name` deliberately avoids `Debug`
   because `Debug` emits `Running` where the wire carries `running`
   (`microvms-cli/src/commands/attached.rs:437-441`).
 
 **Drift risk:** renaming a phase on the wire (a `#[serde(rename)]` on a variant) updates
-`as_str` under compiler pressure from `protocol/src/exec.rs:318` but leaves the
+`as_str` under compiler pressure from `protocol/src/exec.rs:319` but leaves the
 hand-spelled tables emitting the old string, so the CLI envelope and a core timeout message
 would disagree with the daemon's own JSON. Mitigation: route both call sites through
 `Phase::as_str` and delete the local tables.
@@ -575,9 +575,9 @@ would disagree with the daemon's own JSON. Mitigation: route both call sites thr
 **Consumer(s):**
 
 - `agentd/src/routes.rs:19` — `pub use protocol::health::{DiskHealth, Health};`
-- `microvms-app/src/session/mod.rs:270` — `pub async fn health(&self) -> Result<protocol::health::Health, Error>`
-- `microvms-py/src/session.rs:59-85` — `PyHealth::wrap`
-- `microvms-js/src/session.rs:142-182` — `Health::wrap`
+- `microvms-app/src/session/mod.rs:271` — `pub async fn health(&self) -> Result<protocol::health::Health, Error>`
+- `microvms-py/src/session.rs:59-86` — `PyHealth::wrap`
+- `microvms-js/src/session.rs:143-183` — `Health::wrap`
 - `microvms-core/tests/turmoil_client.rs:876`
 
 **Shape:**
@@ -677,14 +677,14 @@ pub struct DiskHealth {
 - **`disk: None` is not `disk: 0`.** Asserted at `protocol/src/health.rs:111-128`:
   unmeasurable is not full, and a monitor that conflated them would page on a missing
   `statvfs`. Both bindings preserve the distinction by flattening into `Option`s
-  (`microvms-py/src/session.rs:77-79`, `microvms-js/src/session.rs:147-149`).
+  (`microvms-py/src/session.rs:78-80`, `microvms-js/src/session.rs:148-150`).
 - **`busy` and `execs` answer different questions.** `protocol/src/health.rs:78-86` —
   `busy: false, execs: 7` is a VM holding seven unacked results, and terminating it loses
   output nobody read. Asserted at `:134-151`.
 - **`version` is deliberately undocumented.** `protocol/src/health.rs:12-18` is a `//`
   comment, not a doc comment, because schemars publishes doc comments as `description` and
   `docs/schema.json` is byte-compared — adding one is a schema change.
-- **The Node binding narrows `execs: usize` to `i64`** (`microvms-js/src/session.rs:153`),
+- **The Node binding narrows `execs: usize` to `i64`** (`microvms-js/src/session.rs:154`),
   which is what `#[napi]` can express; a count above `i64::MAX` is not reachable.
 
 **Drift risk:** a new `Health` field without `#[serde(default)]` makes `health()` fail
@@ -699,10 +699,10 @@ first release, and take `busy`'s doc comment (`protocol/src/health.rs:68-74`) as
 **Consumer(s):**
 
 - `agentd/src/exec.rs:87-90` (re-export; the daemon's extractor target)
-- `microvms-app/src/session/mod.rs:321` — `pub async fn run(&self, req: protocol::exec::StartRequest)`
-- `microvms-cli/src/commands/lifecycle.rs:1917` — `pub fn start_request(spec: StartSpec<'_>) -> microvms_core::protocol::exec::StartRequest`
-- `microvms-py/src/session.rs:338`, `:400` — construction sites
-- `microvms-js/src/session.rs:280` — `fn into_request(self, command: Either<String, Vec<String>>) -> protocol::exec::StartRequest`
+- `microvms-app/src/session/mod.rs:322` — `pub async fn run(&self, req: protocol::exec::StartRequest)`
+- `microvms-cli/src/commands/lifecycle.rs:1927` — `pub fn start_request(spec: StartSpec<'_>) -> microvms_core::protocol::exec::StartRequest`
+- `microvms-py/src/session.rs:339`, `:401` — construction sites
+- `microvms-js/src/session.rs:281` — `fn into_request(self, command: Either<String, Vec<String>>) -> protocol::exec::StartRequest`
 
 **Shape:**
 
@@ -741,32 +741,32 @@ pub struct StartRequest {
   holding an open stdin pipe nobody writes to blocks forever the first time it reads, and
   `/bin/sh`, `git`, and any tool that probes for input behave differently against a pipe than
   against `/dev/null`. Writing without it is a 409
-  (`microvms-js/src/session.rs:239-240`).
-- **`command` is never split on whitespace.** `microvms-py/src/session.rs:566-572` states the
+  (`microvms-js/src/session.rs:240-241`).
+- **`command` is never split on whitespace.** `microvms-py/src/session.rs:567-573` states the
   rule: splitting turns a path containing a space into two arguments nobody meant;
   `shell=True` is how a caller asks for a script.
 - **`timeout_sec` is validated before the spawn**, not inside the waiter — the predecessor
   raised late and orphaned a running child (`protocol/src/exec.rs:123-126`).
 - **Every defaulted field can be omitted**, asserted by round-tripping a body carrying only
-  `exec_id` and `command` (`protocol/src/exec.rs:359-367`). Both bindings expose all of them
-  as optional (`microvms-js/src/session.rs:222-255`).
+  `exec_id` and `command` (`protocol/src/exec.rs:360-368`). Both bindings expose all of them
+  as optional (`microvms-js/src/session.rs:223-256`).
 - **An absent `env` and an empty `env` are the same thing** — a plain `HashMap` rather than
   an `Option`, matching the same decision on the run hook
   (`protocol/src/hook.rs:48-53`).
 
 **Drift risk:** adding a required field to `StartRequest` makes the daemon reject every body a
 pinned client sends. Mitigation: `#[serde(default)]` on every field but `exec_id` and
-`command`, and the omit-everything test at `protocol/src/exec.rs:359-367` as the guard.
+`command`, and the omit-everything test at `protocol/src/exec.rs:360-368` as the guard.
 
 ## protocol::exec::PollResponse and the flattened Outcome
 
-**Producer:** `protocol/src/exec.rs:229-236` (`PollResponse`), `:56-74` (`Outcome`)
+**Producer:** `protocol/src/exec.rs:230-237` (`PollResponse`), `:56-74` (`Outcome`)
 
 **Consumer(s):**
 
 - `agentd/src/exec.rs:87-90` (re-export)
-- `microvms-app/src/session/exec.rs:74-82` — `impl From<protocol::exec::PollResponse> for ExecResult`
-- `microvms-cli/src/guards.rs:1941` — the expected envelope shape is written out rather than
+- `microvms-app/src/session/exec.rs:79-87` — `impl From<protocol::exec::PollResponse> for ExecResult`
+- `microvms-cli/src/guards.rs:1957` — the expected envelope shape is written out rather than
   serialized from `PollResponse`, "which is the whole point".
 - `microvms-cli/src/commands/attached.rs:1089`, `:1093` — constructs `Outcome` values for its render tests.
 - `microvms-core/tests/turmoil_client.rs:952`
@@ -808,10 +808,10 @@ pub struct Outcome {
 
 **Assumptions consumers make:**
 
-- **An absent outcome is normal, not an error.** `protocol/src/exec.rs:369-374` names the
+- **An absent outcome is normal, not an error.** `protocol/src/exec.rs:370-375` names the
   failure a stricter reading would cause: a client that read a running exec's missing outcome
   as an error would fail on every poll before the first one that mattered. A running poll
-  serializes to exactly `{"exec_id":"e1","phase":"running"}` (`:382`).
+  serializes to exactly `{"exec_id":"e1","phase":"running"}` (`:383`).
 - **`truncated` is a flag, never a sentinel string in the bytes**
   (`protocol/src/exec.rs:65-67`) — a marker inside the output is indistinguishable from
   output that happens to contain it.
@@ -819,9 +819,9 @@ pub struct Outcome {
   (`protocol/src/exec.rs:69-73`), so a harness seeing empty output from a command it knows
   produced some can tell why.
 - **`exit_code: None` means a signal killed the child**, so a consumer must read `signal`
-  before concluding failure (`protocol/src/exec.rs:60-62`; `microvms-app/src/session/exec.rs:93-96`).
+  before concluding failure (`protocol/src/exec.rs:60-62`; `microvms-app/src/session/exec.rs:98-101`).
 - **`ExecResult` is a thin wrapper and renames one field.**
-  `microvms-app/src/session/exec.rs:61-82` maps `result` to `outcome`, deliberately not
+  `microvms-app/src/session/exec.rs:66-87` maps `result` to `outcome`, deliberately not
   re-modelling the shape so the two cannot disagree.
 
 **Drift risk:** `#[serde(flatten)]` means schemars inlines `Outcome`'s fields into
@@ -835,7 +835,7 @@ set so a flatten added or removed shows up as a named failure.
 
 ## The `/v1/exec/{id}/stream` SSE contract — its payloads and event names
 
-**Producer:** `protocol/src/exec.rs:180-206` (`OutputEvent`, `GapEvent`, `ExitEvent`), `:256-258` (`EVENT_*`), `:171-178` (`StreamQuery`)
+**Producer:** `protocol/src/exec.rs:180-206` (`OutputEvent`, `GapEvent`, `ExitEvent`), `:257-259` (`EVENT_*`), `:171-178` (`StreamQuery`)
 
 **Consumer(s):**
 
@@ -902,7 +902,7 @@ pub const EVENT_EXIT: &str = "exit";
 - **`ExitEvent.offset` is a total, so a client can assert it saw every byte**
   (`protocol/src/exec.rs:204-205`).
 - **The event names are constants because a typo on either side is a stream that carries
-  events nobody dispatches** (`protocol/src/exec.rs:251-255`).
+  events nobody dispatches** (`protocol/src/exec.rs:252-256`).
 - **`ExecEvent` is not `Clone`**, because `ExitEvent` is not, and adding the derive would be
   an edit to a crate the consumer does not own
   (`microvms-app/src/session/sse.rs:236-238`).
@@ -977,7 +977,7 @@ pub fn error(failure: &CliError) -> Value {
   takes the CLI at its word and reads them directly.
 - **Exactly one JSON object reaches stdout, except on the streaming path.**
   `microvms-cli/src/envelope.rs:4-11` — progress goes to stderr always, and
-  `microvms-cli/tests/thinness.rs:503` asserts no module but `envelope` and named `main`
+  `microvms-cli/tests/thinness.rs:446` asserts no module but `envelope` and named `main`
   exceptions writes to stdout. `conformance/run_rs.py:256-262` types a second document as an
   `EnvelopeError`, deliberately distinct from a protocol result, because it means the binary
   is wrong.
@@ -1015,9 +1015,9 @@ edited in one commit.
   `suggestions`, and a `data` map so a partial result stays machine-readable on the failure
   path. 9 consumer files at 9c462f0.
 - **`microvms_core::session::ExecEvent` / `ExecResult`** — `microvms-app/src/session/sse.rs:240-256`,
-  `microvms-app/src/session/exec.rs:67-72`. The client-side view of the wire types;
+  `microvms-app/src/session/exec.rs:72-77`. The client-side view of the wire types;
   `ExecEvent` had 8 consumer files at 9c462f0.
-- **`microvms_core::sandbox::TeardownReport`** — `microvms-app/src/sandbox.rs:492-519`.
+- **`microvms_core::sandbox::TeardownReport`** — `microvms-app/src/sandbox.rs:494-521`.
   Returned where a `finally` would run; `image_deleted: Option<bool>` separates "not asked
   for" from "failed". 5 consumer files at 9c462f0.
 - **`docs/schema.json`** — generated by `agentd/src/bin/schema.rs`, gated by
@@ -1036,7 +1036,7 @@ edited in one commit.
   `scripts/check-live-rates.py:119-145`. A deliberate second copy: `:112-118` states that
   importing the values would compare a table against itself. `verify_twin` (`:148-211`) reads
   the Rust literals as text, so a reflow of `pinned_rates()` is a named exit 1.
-  `every_rate_byte_matches_the_python_literal` (`microvms-domain/src/cost.rs:2222-2239`) checks
+  `every_rate_byte_matches_the_python_literal` (`microvms-domain/src/cost.rs:2226-2243`) checks
   scale as well as value.
 - **`microvms-domain/src/constants.rs` against the botocore service model** — the constants
   (`MODEL_API_VERSION = "2025-09-09"` at `:57`, `MAX_RUN_HOOK_PAYLOAD_BYTES = 4096` at `:83`)
@@ -1044,8 +1044,8 @@ edited in one commit.
   `DOCUMENTED_RUN_HOOK_PAYLOAD_BYTES = 16_384` (`:97`) is retained as the contradicted prose
   figure the check caught.
 - **`session_constants`, which diverges between the two bindings** —
-  `microvms-js/src/session.rs:990-1025` publishes every key
-  `microvms-py/src/session.rs:578-604` does, plus `wsSubprotocol`,
+  `microvms-js/src/session.rs:1002-1037` publishes every key
+  `microvms-py/src/session.rs:579-605` does, plus `wsSubprotocol`,
   `wsAuthSubprotocolPrefix`, `wsPortSubprotocolPrefix`. Nothing asserts the two dictionaries
   agree.
 - **`protocol::hook::RunHookEnvelope` / `RunHook`** — `protocol/src/hook.rs:26-30`, `:45-54`.
@@ -1059,9 +1059,9 @@ edited in one commit.
   `mode` is a string so `0644` and `644` both parse (`:21-23`); line ranges are 1-based
   inclusive on both ends with `end_line` past EOF reading through, verbatim from the AI SDK
   harness contract (`:34-37`).
-- **`protocol::exec::ErrorBody` and the `ERROR_*` slugs** — `protocol/src/exec.rs:245-249`,
-  `:266-286`. A client branches on `error` plus the status code and never on `detail`
-  (`:240-244`). The fs routes answer `text/plain` instead (`protocol/src/fs.rs:5-6`), and
+- **`protocol::exec::ErrorBody` and the `ERROR_*` slugs** — `protocol/src/exec.rs:246-250`,
+  `:267-287`. A client branches on `error` plus the status code and never on `detail`
+  (`:241-245`). The fs routes answer `text/plain` instead (`protocol/src/fs.rs:5-6`), and
   `ErrorBody` gets **no `$defs` entry** in `docs/schema.json`.
 - **`protocol::PROTOCOL_VERSION` and `VERSION_HEADER`** — `protocol/src/lib.rs:58`, `:66`.
   `protocol/src/lib.rs:40-54` states what a client must do on each mismatch case, including that a
@@ -1070,11 +1070,11 @@ edited in one commit.
 - **`spec/core.symspec.json` and `spec/agentd.symspec.json`** — EARS requirements held as
   an id-keyed object (each with `key`, `patternType`, `priority`, `sentence`, `systemName`,
   `verificationMethod`) plus a `stateModel` whose variables are mirrored field-for-field
-  by `microvms-app/src/sandbox.rs:615-623`.
+  by `microvms-app/src/sandbox.rs:617-625`.
 - **The workspace dependency edges** — `microvms-cli/tests/dependency_direction.rs:69-126`
   asserts them as equalities, not as `assert!(no edge)`, because a stub crate with no
   dependencies passes a negative assertion (`:11-12`).
-  `microvms-cli/tests/thinness.rs:66` holds the CLI's allowlist, each entry with a
+  `microvms-cli/tests/thinness.rs:71` holds the CLI's allowlist, each entry with a
   paragraph, and `:145-213` asserts the direct dependency set is exactly that.
 
 ## See also

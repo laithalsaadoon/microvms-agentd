@@ -51,8 +51,8 @@ use pyo3::types::PyBytes;
 use crate::errors::{PyCoreResult, to_py_err};
 use crate::runtime;
 
-/// The default wait for `wait`/`wait_and_ack`, matching the Python client's 300s.
-const DEFAULT_WAIT: f64 = 300.0;
+/// The default wait for `wait`/`wait_and_ack`, from the core so the two cannot drift.
+const DEFAULT_WAIT: f64 = microvms_core::session::DEFAULT_EXEC_WAIT.as_secs_f64();
 
 /// An exec's phase and, once it has one, its outcome.
 ///

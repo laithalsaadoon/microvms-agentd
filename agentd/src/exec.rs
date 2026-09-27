@@ -1700,19 +1700,7 @@ mod tests {
     }
 
     fn req(id: &str, argv: &[&str]) -> StartRequest {
-        StartRequest {
-            exec_id: id.to_string(),
-            command: argv.iter().map(|s| s.to_string()).collect(),
-            shell: false.into(),
-            cwd: None,
-            env: HashMap::new(),
-            user: None,
-            group: None,
-            timeout_sec: None,
-            stdin: false,
-            reap_group_on_exit: false,
-            inherit_image_env: false,
-        }
+        StartRequest::new(id, argv.iter().map(|s| s.to_string()).collect())
     }
 
     /// Drives an exec to completion the way the daemon does, then returns the

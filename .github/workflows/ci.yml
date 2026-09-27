@@ -380,15 +380,16 @@ jobs:
           enable-cache: false
       # TRAP-12 says "in the build gate", and pre-push alone is not a gate — a
       # --no-verify push or a merge that trusts CI skips it. The script is a PEP
-      # 723 uv script whose one dependency is boto3, for the botocore the model
-      # ships inside. It reads the Rust constants via `cargo run -q -p
+      # 723 uv script: boto3 for the botocore the model ships inside, and a pinned
+      # pyyaml to read the ratchet's operation-literal rule, whose operation list
+      # must equal the model's. It reads the Rust constants via `cargo run -q -p
       # microvms-cli -- constants --emit-json` and compares them to the model,
       # plus two pinned literals of its own for the region list and the sizing
       # table — the values no model states, which lost their cross-client reader
       # when the Python client was deleted.
       - run: ./scripts/check-model-drift.py
       - name: Model loader regression tests
-        run: uv run --with 'boto3>=1.40' python -m unittest discover -s scripts -p 'test_model_drift.py'
+        run: uv run --with 'boto3>=1.40' --with 'pyyaml==6.0.3' python -m unittest discover -s scripts -p 'test_model_drift.py'
 
       # Every Python file, linted here rather than in a job of its own. `conformance/run_rs.py`
       # is the live suite's driver and the `scripts/` gates are this job's own tooling, so the

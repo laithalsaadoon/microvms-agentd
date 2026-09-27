@@ -1,0 +1,22 @@
+# A string literal that is exactly a control-plane operation name, outside test code (#273). An
+# adapter that writes one is naming a wire call itself instead of asking core for it. Prose that
+# names an operation inside a longer message doesn't match, so useful errors stay possible, and
+# neither does a comment. A literal inside a macro's arguments does: tree-sitter parses a token
+# tree's literals.
+#
+# The alternation is every operation in botocore's lambda-microvms model, service-2 2025-09-09,
+# not only the ones core calls today: an adapter shouldn't name one core doesn't implement yet
+# either.
+#
+# What it can't see: a name built at run time (`format!("Run{}", "Microvm")`, `concat!`), or
+# one held in a constant a lower crate exports.
+id: operation-literal
+language: rust
+severity: info
+message: an operation name as a literal in a driving adapter
+rule:
+  all:
+    - any: [kind: string_literal, kind: raw_string_literal]
+    - regex: '^b?r?#*"(CreateMicrovmAuthToken|CreateMicrovmImage|CreateMicrovmShellAuthToken|DeleteMicrovmImage|DeleteMicrovmImageVersion|GetMicrovm|GetMicrovmImage|GetMicrovmImageBuild|GetMicrovmImageVersion|ListManagedMicrovmImageVersions|ListManagedMicrovmImages|ListMicrovmImageBuilds|ListMicrovmImageVersions|ListMicrovmImages|ListMicrovms|ListTags|ResumeMicrovm|RunMicrovm|SuspendMicrovm|TagResource|TerminateMicrovm|UntagResource|UpdateMicrovmImage|UpdateMicrovmImageVersion)"#*$'
+    - not:
+        matches: test-only

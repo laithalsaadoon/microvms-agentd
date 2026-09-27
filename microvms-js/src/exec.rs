@@ -54,8 +54,8 @@ use tokio::sync::Mutex;
 
 use crate::errors::{AsyncError, js, js_async};
 
-/// The default wait for `wait`/`waitAndAck`, matching the Python client's 300s.
-const DEFAULT_WAIT: f64 = 300.0;
+/// The default wait for `wait`/`waitAndAck`, from the core so the two cannot drift.
+const DEFAULT_WAIT: f64 = microvms_core::session::DEFAULT_EXEC_WAIT.as_secs_f64();
 
 /// An exec's phase and, once it has one, its outcome.
 ///

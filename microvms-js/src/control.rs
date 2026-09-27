@@ -11,6 +11,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use microvms_core::control::{ControlPlane as CoreControlPlane, Microvm as CoreMicrovm};
 use microvms_core::control::{MicrovmFilter, WaitOpts};
 use microvms_core::prelude::*;
+use microvms_core::sandbox::{DEFAULT_LIFECYCLE_TIMEOUT, LIFECYCLE_POLL_INTERVAL};
 use napi_derive::napi;
 
 use crate::errors::{AsyncError, js_async};
@@ -196,8 +197,16 @@ impl ControlPlane {
     ) -> Result<Microvm, AsyncError> {
         let options = options.unwrap_or_default();
         let opts = WaitOpts {
-            timeout: seconds_async(options.timeout.unwrap_or(300.0))?,
-            poll_interval: seconds_async(options.poll_interval.unwrap_or(5.0))?,
+            timeout: seconds_async(
+                options
+                    .timeout
+                    .unwrap_or(DEFAULT_LIFECYCLE_TIMEOUT.as_secs_f64()),
+            )?,
+            poll_interval: seconds_async(
+                options
+                    .poll_interval
+                    .unwrap_or(LIFECYCLE_POLL_INTERVAL.as_secs_f64()),
+            )?,
             stall_grace: Duration::MAX,
         };
         let fail_on = options.fail_on.unwrap_or_default();

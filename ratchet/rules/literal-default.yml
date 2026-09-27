@@ -1,0 +1,81 @@
+# A default retyped as a number in a driving adapter, outside test code (#273). A default belongs
+# in the layer below, where every surface reads the same one: an adapter that types `300.0` next
+# to core's own 300 s drifts the day core's changes. Each alternative is one shape a default
+# takes:
+#
+# - `const DEFAULT_WAIT: f64 = 300.0;`, a `const` or `static` whose name says it's a default or
+#   a wait (`DEFAULT_*`, `*_TIMEOUT`, `*_WAIT*`, `*_INTERVAL`, ...) or whose type is a float,
+#   holding a literal anywhere in its value (`[300.0, 5.0]` too). A derived one
+#   (`DEFAULT_CLIENT_GRACE.as_secs_f64()`) doesn't match, and neither does a value built by a
+#   call (`Duration::from_secs(5)` is the next shape's). An integer limit (`MAX_PACK_MEMBERS`)
+#   isn't a default.
+# - `Duration::from_secs(5)`, any `Duration::from_*` or `Duration::new` of a literal, qualified
+#   or not, and a time-unit `from_*` (`from_secs`, `from_millis`, ...) on any type, so an
+#   aliased `Duration` is seen too.
+# - `.unwrap_or(300.0)`, a missing value filled with a literal: `unwrap_or`, `map_or` and
+#   `get_or_insert` handed one, and their `_else`/`_with` forms handed a closure that returns
+#   one.
+# - `wait_opts(300.0)`, the CLI's lifecycle wait helper handed a literal.
+# - `timeout + 30.0`, a literal added to a timeout, deadline or grace.
+#
+# A zero never matches (`nonzero-number`). What it can't see: a literal in an attribute
+# (clap's `default_value_t`, PyO3's `signature`), which #300 checks through the generated
+# surfaces; a local `let` holding a literal; a `const` with none of those names and an integer
+# type; `Duration::new` under an alias; arithmetic of literals outside a `const`
+# (`Duration::from_secs(5 * 60)`); and a negated literal outside a `const`.
+id: literal-default
+language: rust
+severity: info
+message: a literal default in a driving adapter
+rule:
+  all:
+    - any:
+        - all:
+            - any: [kind: const_item, kind: static_item]
+            - any:
+                - has: { field: name, regex: '(?i)default|timeout|interval|wait|grace|deadline|poll|delay|backoff|ttl|cycles' }
+                - has: { field: type, regex: '\bf(32|64)\b' }
+            - has: { field: value, any: [matches: nonzero-number, has: { matches: nonzero-number, stopBy: end }] }
+            - not: { has: { field: value, any: [kind: call_expression, has: { kind: call_expression, stopBy: end }] } }
+        - all:
+            - kind: call_expression
+            - has:
+                field: function
+                any:
+                  - regex: '(^|::)\s*Duration\s*::\s*(from_[a-z0-9_]+|new)$'
+                  - regex: '::\s*from_(secs|millis|micros|nanos|mins|hours|days|weeks)(_f32|_f64)?$'
+            - has: { field: arguments, has: { matches: nonzero-number } }
+        - all:
+            - kind: call_expression
+            - has:
+                field: function
+                kind: field_expression
+                has: { field: field, regex: '^(unwrap_or|map_or|get_or_insert)$' }
+            - has: { field: arguments, has: { matches: nonzero-number } }
+        - all:
+            - kind: call_expression
+            - has:
+                field: function
+                kind: field_expression
+                has: { field: field, regex: '^(unwrap_or_else|map_or_else|get_or_insert_with)$' }
+            - has:
+                field: arguments
+                has:
+                  kind: closure_expression
+                  has: { field: body, any: [matches: nonzero-number, { kind: block, has: { matches: nonzero-number } }] }
+        - all:
+            - kind: call_expression
+            - has: { field: function, regex: '(^|::)\s*wait_opts$' }
+            - has: { field: arguments, has: { matches: nonzero-number } }
+        - all:
+            - kind: binary_expression
+            - has: { field: operator, regex: '^\+$' }
+            - any:
+                - all:
+                    - has: { field: right, matches: nonzero-number }
+                    - has: { field: left, regex: '(?i)timeout|deadline|grace' }
+                - all:
+                    - has: { field: left, matches: nonzero-number }
+                    - has: { field: right, regex: '(?i)timeout|deadline|grace' }
+    - not:
+        matches: test-only
