@@ -45,19 +45,11 @@ async fn attached() -> Session {
 }
 
 fn bash(script: &str, timeout_sec: Option<f64>) -> StartRequest {
-    StartRequest {
-        exec_id: mint_exec_id(),
-        command: vec!["bash".into(), "-c".into(), script.into()],
-        shell: false.into(),
-        cwd: None,
-        env: Default::default(),
-        user: None,
-        group: None,
-        timeout_sec,
-        stdin: false,
-        reap_group_on_exit: false,
-        inherit_image_env: false,
-    }
+    StartRequest::new(
+        mint_exec_id(),
+        vec!["bash".into(), "-c".into(), script.into()],
+    )
+    .with_timeout_sec(timeout_sec)
 }
 
 fn collecting() -> (OutputSink, Arc<Mutex<Vec<u8>>>) {

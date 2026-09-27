@@ -41,14 +41,17 @@ thinness guard pushed an upload into an `aws s3 cp` subprocess it couldn't see.
    can delete entries but not add them, and it can't widen a set to make a finding disappear.
    It can add a decision, which a reviewer sees in the diff with its reason, and it can add a
    set for a crate the base has none for. When the base has no drift file at all, the rule is
-   skipped: that's the one PR that creates it.
+   skipped: that's the one PR that creates it. It's skipped the same way for a category the
+   base's `scripts/ratchet.py` doesn't collect (its `COLLECTED`), since the base's file couldn't
+   record that category's findings: the PR that starts collecting one lists them as entries.
+   From the next PR on, the base collects it and the rule holds it like the rest.
 
-   A move isn't an addition. A subprocess or port-impl key is `<path>: <text>`, so moving the
-   code to another file (or another crate) or renaming what the text names re-keys it. A new
-   key passes when it takes the place of a base entry of the same category and issue that the
-   file no longer lists, and the two share their path or their text. Each base entry takes one
-   replacement. Moving and renaming in one change shares neither, so it takes two PRs. An entry
-   whose key is unchanged may name a different issue.
+   A move isn't an addition. A subprocess, port-impl or adapter-logic key is `<path>: <text>`,
+   so moving the code to another file (or another crate) or renaming what the text names
+   re-keys it. A new key passes when it takes the place of a base entry of the same category
+   and issue that the file no longer lists, and the two share their path or their text. Each
+   base entry takes one replacement. Moving and renaming in one change shares neither, so it
+   takes two PRs. An entry whose key is unchanged may name a different issue.
 4. A collected category with no entries that isn't `enforced`: its rule is ready to enforce.
 
 # The collectors
@@ -65,8 +68,13 @@ thinness guard pushed an upload into an `aws s3 cp` subprocess it couldn't see.
   its dependencies, so a port trait that moves between those crates is still a port. The
   composition root's own public traits are the prelude's extension traits, not ports. Only
   `microvms-edges`, where the production implementations belong, isn't read.
+- adapter-logic: in the `src/` of a driving adapter, a string literal that is exactly a
+  control-plane operation name (`operation-literal`), and a default retyped as a number
+  (`literal-default`: a `DEFAULT_*` constant, `Duration::from_*`, `.unwrap_or`, `wait_opts` or
+  a literal added to a timeout). The key is `<path>: <rule id>: <text>`, the matched code with
+  its whitespace squashed. Each rule's file says which shapes it reaches and which it can't.
 
-The two Rust collectors are ast-grep rules under `ratchet/`, and test code is out of both: an
+The Rust collectors are ast-grep rules under `ratchet/`, and test code is out of all of them: an
 item after `#[cfg(test)]`, `#[cfg(feature = "test-support")]` or
 `#[cfg(any(test, feature = "test-support"))]`, a `#[test]` function, anything inside any of
 them, and whole files that mark themselves with one of those `cfg`s or that a parent declares
@@ -98,6 +106,7 @@ With `$GITHUB_STEP_SUMMARY` set, the summary is also appended there as Markdown.
 """
 
 import argparse
+import ast
 import json
 import os
 import re
@@ -111,6 +120,7 @@ from typing import NamedTuple
 
 ROOT = Path(__file__).resolve().parent.parent
 DRIFT = "ratchet/drift.json"
+SCRIPT = "scripts/ratchet.py"
 PLACEMENT = "arch/placement.toml"
 SGCONFIG = ROOT / "ratchet" / "sgconfig.yml"
 
@@ -160,14 +170,16 @@ SENTINEL = Scope(
     composition_root="root",
 )
 
-COLLECTED = ("placement", "subprocess", "port-impl")
+COLLECTED = ("placement", "subprocess", "port-impl", "adapter-logic")
 
 #: Categories #281 defines whose collector doesn't exist yet. The summary says so rather than
 #: printing zero, because a zero would read as a measurement.
 NOT_COLLECTED = {
-    "adapter-logic": "until #273's semgrep thinness rules land",
     "parity-gap": "until #271's `parity:check --json` lands",
 }
+
+#: The ast-grep rules the adapter-logic collector reads, by rule id.
+ADAPTER_LOGIC = ("operation-literal", "literal-default")
 
 CATEGORIES = (*COLLECTED, *NOT_COLLECTED)
 
@@ -175,7 +187,13 @@ CATEGORIES = (*COLLECTED, *NOT_COLLECTED)
 PROMOTE = {
     "placement": "microvms-cli/tests/dependency_direction.rs as an exact set per adapter (#285)",
     "subprocess": "each crate's clippy.toml as a disallowed type (#285)",
-    "port-impl": "the semgrep thinness rules (#273)",
+    # These two stay in the ratchet's own ast-grep rules: once enforced, the collector is the
+    # hard gate, since a finding without a decision fails rule 1. Not semgrep: #281 measured
+    # that its `impl $T for $U` matches every impl, and it can't skip inline test modules.
+    "port-impl": "ratchet/rules/port-impl.yml as a hard gate, once #270 clears its entry",
+    "adapter-logic": (
+        "ratchet/rules/operation-literal.yml and literal-default.yml as a hard gate (#273)"
+    ),
 }
 
 
@@ -346,6 +364,40 @@ def read_base_sets(root: Path, ref: str) -> dict | None:
     return None if text is None else sets_from(text, f"{ref}:{PLACEMENT}")
 
 
+def read_base_collected(root: Path, ref: str) -> tuple[str, ...]:
+    """The categories `ref`'s own ratchet collects, from the `COLLECTED` in its script.
+
+    Read with `ast`, not run: the base's script is code from another commit. A script with no
+    literal `COLLECTED` is an error rather than an empty tuple, which would skip rule 3 for
+    every category.
+    """
+    text = show(root, ref, SCRIPT)
+    if text is None:
+        raise SystemExit(
+            f"{ref} has no {SCRIPT}, so rule 3 can't tell which categories it collected"
+        )
+    for node in ast.parse(text).body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "COLLECTED"
+            for target in node.targets
+        ):
+            try:
+                value = ast.literal_eval(node.value)
+            except ValueError:
+                break
+            if (
+                isinstance(value, tuple)
+                and value
+                and all(isinstance(c, str) for c in value)
+            ):
+                return value
+            break
+    raise SystemExit(
+        f"{ref}:{SCRIPT} has no COLLECTED tuple of category names, so rule 3 can't tell "
+        "which categories it collected"
+    )
+
+
 def default_base(root: Path) -> str:
     # Locally, rule 3 is only as good as `origin/main`: a fork whose origin predates the file
     # gets the bootstrap note and no rule 3. That's acceptable because the run that decides a
@@ -422,13 +474,29 @@ def grown_sets(sets: dict, base_sets: dict | None, base_label: str) -> list[str]
 
 
 def compare(
-    current: Counter, file: dict, base: dict | None, base_label: str
+    current: Counter,
+    file: dict,
+    base: dict | None,
+    base_label: str,
+    base_collected: tuple[str, ...] | None = None,
 ) -> list[str]:
-    """Every failure of the four rules over the drift file, in category order."""
+    """Every failure of the four rules over the drift file, in category order.
+
+    `base_collected` is what the base's ratchet collects (`read_base_collected`); rule 3 is
+    skipped for the others. None means the base collects what this script does.
+    """
     failures: list[str] = []
     entries = counted(file["entries"])
     recorded = entries + counted(file["decisions"])
-    added = [] if base is None else additions(file, base)
+    added = (
+        []
+        if base is None
+        else [
+            entry
+            for entry in additions(file, base)
+            if base_collected is None or entry["category"] in base_collected
+        ]
+    )
 
     for category in COLLECTED:
         found = {k: n for (c, k), n in current.items() if c == category}
@@ -490,8 +558,13 @@ def updated(file: dict, current: Counter) -> tuple[dict, list[str]]:
 # ── the summary ─────────────────────────────────────────────────────────────
 
 
-def summary(file: dict, base: dict | None) -> dict:
-    """Per category: its status, the drift count, the base's count, and its decisions."""
+def summary(
+    file: dict, base: dict | None, base_collected: tuple[str, ...] | None = None
+) -> dict:
+    """Per category: its status, the drift count, the base's count, and its decisions.
+
+    A category the base doesn't collect has no base count, so its change reads "new".
+    """
     entries = Counter(item["category"] for item in file["entries"])
     decisions = Counter(item["category"] for item in file["decisions"])
     base_entries = (
@@ -511,7 +584,10 @@ def summary(file: dict, base: dict | None) -> dict:
         rows[category] = {
             "status": "enforced" if category in file["enforced"] else "collected",
             "entries": entries[category],
-            "base": None if base_entries is None else base_entries[category],
+            "base": None
+            if base_entries is None
+            or (base_collected is not None and category not in base_collected)
+            else base_entries[category],
             "decisions": decisions[category],
         }
     return rows
@@ -814,6 +890,11 @@ def rust(scope: Scope, found: Crates, require_ports: bool) -> Counter:
         elif match["ruleId"] == "subprocess-in-macro":
             for function, arguments in macro_calls(match["text"]):
                 findings[subprocess_key(match["file"], function, arguments)] += 1
+        elif match["ruleId"] in ADAPTER_LOGIC and under(match, found.adapters.values()):
+            text = re.sub(r"\s+(?=[.?])", "", squash(match["text"]))
+            findings[
+                ("adapter-logic", f"{match['file']}: {match['ruleId']}: {text}")
+            ] += 1
         elif match["ruleId"] == "port-impl" and under(match, found.readers.values()):
             trait = squash(trait_name(mv["TRAIT"]))
             name = re.match(r"[A-Za-z_][A-Za-z0-9_]*", trait)
@@ -883,6 +964,7 @@ def main(argv: list[str]) -> int:
     ref = args.base or default_base(ROOT)
     base_label = args.base or ref[:12]
     base = read_base(ROOT, ref)
+    base_collected = None if base is None else read_base_collected(ROOT, ref)
     grown = grown_sets(load_sets(REPO), read_base_sets(ROOT, ref), base_label)
 
     if args.command == "update":
@@ -892,11 +974,17 @@ def main(argv: list[str]) -> int:
             print(f"removed {item}")
         file = parse(data, DRIFT)
 
-    failures = compare(current, file, base, base_label) + grown
-    rows = summary(file, base)
+    failures = compare(current, file, base, base_label, base_collected) + grown
+    rows = summary(file, base, base_collected)
+    newly = [
+        c for c in COLLECTED if base_collected is not None and c not in base_collected
+    ]
     base_note = (
         f"{base_label}, which has no {DRIFT}: this is the bootstrap, so rule 3 is skipped"
         if base is None
+        else f"{base_label}, whose ratchet doesn't collect {', '.join(newly)} yet, so rule 3 "
+        f"is skipped for {', '.join(newly)}"
+        if newly
         else f"{base_label}"
     )
     if args.json:

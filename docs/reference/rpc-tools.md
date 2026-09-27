@@ -8,7 +8,7 @@ The roster is closed by construction rather than by convention. One list, `surfa
 
 Every response on every endpoint carries the `microvms-agentd-version` header, stamped by a layer applied outside `route_layer` so it also covers the 401, 503, 413, and 404 that no handler produced (`protocol/src/lib.rs:68`, `agentd/src/routes.rs:85`). The protocol version is `1` and tracks the `/v1/` namespace rather than the crate version (`protocol/src/lib.rs:60`).
 
-Failing `exec` endpoints return `ErrorBody { error, detail }`, where `error` is one of a closed set of slugs a client branches on and `detail` is prose for a log (`protocol/src/exec.rs:437-440`, `protocol/src/exec.rs:457-487`). Failing `fs` endpoints answer `text/plain` instead, because their bodies are opaque byte streams and there is no typed body module for them (`protocol/src/fs.rs:4-6`).
+Failing `exec` endpoints return `ErrorBody { error, detail }`, where `error` is one of a closed set of slugs a client branches on and `detail` is prose for a log (`protocol/src/exec.rs:438-441`, `protocol/src/exec.rs:458-488`). Failing `fs` endpoints answer `text/plain` instead, because their bodies are opaque byte streams and there is no typed body module for them (`protocol/src/fs.rs:4-6`).
 
 Where `docs/PROTOCOL.md`, the hand-written contract, disagrees with the source and with the generated `docs/schema.json`:
 
@@ -28,7 +28,7 @@ Polls one exec's phase and, once the child has exited and before an ack, its cap
 
 **Input:** the `{id}` path segment only, per the signature at `agentd/src/exec.rs:429`. No body, no query.
 
-**Output:** `application/json` body `PollResponse { exec_id: String, phase: Phase, result: Option<Outcome> }`, where `result` is `#[serde(flatten)]` plus `skip_serializing_if = "Option::is_none"`, so a running exec serializes as `{"exec_id":"e1","phase":"running"}` and an exited one inlines `Outcome { exit_code: Option<i32>, signal: Option<i32>, timed_out: bool, stdout: String, stderr: String, truncated: bool, writers_may_be_alive: bool }` at the top level (`protocol/src/exec.rs:422-428`, `protocol/src/exec.rs:58-78`). `Phase` is `running` | `exited` | `acked` (`protocol/src/exec.rs:24-31`).
+**Output:** `application/json` body `PollResponse { exec_id: String, phase: Phase, result: Option<Outcome> }`, where `result` is `#[serde(flatten)]` plus `skip_serializing_if = "Option::is_none"`, so a running exec serializes as `{"exec_id":"e1","phase":"running"}` and an exited one inlines `Outcome { exit_code: Option<i32>, signal: Option<i32>, timed_out: bool, stdout: String, stderr: String, truncated: bool, writers_may_be_alive: bool }` at the top level (`protocol/src/exec.rs:423-429`, `protocol/src/exec.rs:58-78`). `Phase` is `running` | `exited` | `acked` (`protocol/src/exec.rs:24-31`).
 
 **Statuses:** 200; 401; 503; 404 `unknown_exec` (`agentd/src/schema.rs:439-449`).
 
@@ -50,9 +50,9 @@ Follows an exec's output as Server-Sent Events, replaying from a byte offset and
 
 **Auth:** Bearer (`agentd/src/routes.rs:574`).
 
-**Input:** the `{id}` path segment plus `StreamQuery { offset: Option<u64> }` as `application/x-www-form-urlencoded` query; absent `offset` means 0, that is everything still inside the replay window (`protocol/src/exec.rs:323-328`).
+**Input:** the `{id}` path segment plus `StreamQuery { offset: Option<u64> }` as `application/x-www-form-urlencoded` query; absent `offset` means 0, that is everything still inside the replay window (`protocol/src/exec.rs:324-329`).
 
-**Output:** `text/event-stream` carrying typed events, all `data:` JSON — `output` = `OutputEvent { offset: u64, stream: StreamKind, output: String }` with `output` base64-encoded and `stream` one of `stdout` | `stderr`; `gap` = `GapEvent { from: u64, to: u64 }`; `exit` = `ExitEvent { exit_code: Option<i32>, signal: Option<i32>, timed_out: bool, truncated: bool, writers_may_be_alive: bool, offset: u64 }` (`protocol/src/exec.rs:326-360`, `protocol/src/exec.rs:84-87`, event names at `protocol/src/exec.rs:448-450`).
+**Output:** `text/event-stream` carrying typed events, all `data:` JSON — `output` = `OutputEvent { offset: u64, stream: StreamKind, output: String }` with `output` base64-encoded and `stream` one of `stdout` | `stderr`; `gap` = `GapEvent { from: u64, to: u64 }`; `exit` = `ExitEvent { exit_code: Option<i32>, signal: Option<i32>, timed_out: bool, truncated: bool, writers_may_be_alive: bool, offset: u64 }` (`protocol/src/exec.rs:327-361`, `protocol/src/exec.rs:84-87`, event names at `protocol/src/exec.rs:449-451`).
 
 **Statuses:** 200; 400 `malformed_request` when `offset` is not a non-negative integer; 401; 503; 404 `unknown_exec` (`agentd/src/schema.rs:451-466`).
 
@@ -318,13 +318,13 @@ Starts a command under a caller-minted `exec_id`, idempotently on that id (`agen
 
 **Auth:** Bearer (`agentd/src/routes.rs:544`).
 
-**Input:** `application/json` body `StartRequest { exec_id: String, command: Vec<String>, shell: Shell, cwd: Option<String>, env: HashMap<String, String>, user: Option<NameOrId>, group: Option<NameOrId>, timeout_sec: Option<f64>, stdin: bool, reap_group_on_exit: bool, inherit_image_env: bool }`, with the untagged unions `NameOrId = Id(u32) | Name(String)` (a JSON integer or string) and `Shell = Flag(bool) | Named(String)` (a JSON boolean or string). Every field after `command` carries `#[serde(default)]`, so a request may be as small as `{"exec_id":"e1","command":["true"]}` (`StartRequest` at `protocol/src/exec.rs:217-289`, `NameOrId` at `protocol/src/exec.rs:117-124`, `Shell` at `protocol/src/exec.rs:174-182`). Resolution of names and the shell, and the environment layering `inherit_image_env` opts into, are in `agentd/src/exec_start.rs` and `docs/PROTOCOL.md`, "Naming the user, group and shell".
+**Input:** `application/json` body `StartRequest { exec_id: String, command: Vec<String>, shell: Shell, cwd: Option<String>, env: HashMap<String, String>, user: Option<NameOrId>, group: Option<NameOrId>, timeout_sec: Option<f64>, stdin: bool, reap_group_on_exit: bool, inherit_image_env: bool }`, with the untagged unions `NameOrId = Id(u32) | Name(String)` (a JSON integer or string) and `Shell = Flag(bool) | Named(String)` (a JSON boolean or string). Every field after `command` carries `#[serde(default)]`, so a request may be as small as `{"exec_id":"e1","command":["true"]}` (`StartRequest` at `protocol/src/exec.rs:217-290`, `NameOrId` at `protocol/src/exec.rs:117-124`, `Shell` at `protocol/src/exec.rs:174-182`). Resolution of names and the shell, and the environment layering `inherit_image_env` opts into, are in `agentd/src/exec_start.rs` and `docs/PROTOCOL.md`, "Naming the user, group and shell".
 
-**Output:** `application/json` body `StartResponse { exec_id: String, phase: Phase }` (`protocol/src/exec.rs:362-365`).
+**Output:** `application/json` body `StartResponse { exec_id: String, phase: Phase }` (`protocol/src/exec.rs:363-366`).
 
 **Statuses:** 200 on start or on a retry of an already-started `exec_id`; 400 `malformed_request` when the body is invalid, `exec_id` is empty, `timeout_sec` is not a positive finite number, `command` is empty with `shell` false, or `shell` is an empty string; 400 `unknown_user`, `unknown_group` or `unknown_shell` when a name or shell does not resolve in the guest, with nothing spawned and `detail` naming the value; 401; 503; 413 when the body exceeds `limits.max_body_bytes`; 500 `spawn_failed` when the child cannot be spawned, deliberately not 404 (`agentd/src/schema.rs:395-437`).
 
-`command` is argv when `shell` is false and a single script string when it is true or names a shell (`protocol/src/exec.rs:215-223`). Omitting `cwd` means the child inherits the daemon's own working directory, which is the image `WORKDIR` (`protocol/src/exec.rs:228-230`). `stdin` is opt-in rather than always-on: a child holding an open stdin pipe nobody will write to blocks forever the first time it reads, and `/bin/sh`, `git`, and any tool probing for input all behave differently against a pipe than against `/dev/null` (`protocol/src/exec.rs:252-262`). `timeout_sec` is validated before the child spawns, because the predecessor raised inside the waiter thread by which point the child was already running and became an orphan (`protocol/src/exec.rs:247-249`).
+`command` is argv when `shell` is false and a single script string when it is true or names a shell (`protocol/src/exec.rs:215-224`). Omitting `cwd` means the child inherits the daemon's own working directory, which is the image `WORKDIR` (`protocol/src/exec.rs:229-231`). `stdin` is opt-in rather than always-on: a child holding an open stdin pipe nobody will write to blocks forever the first time it reads, and `/bin/sh`, `git`, and any tool probing for input all behave differently against a pipe than against `/dev/null` (`protocol/src/exec.rs:253-263`). `timeout_sec` is validated before the child spawns, because the predecessor raised inside the waiter thread by which point the child was already running and became an orphan (`protocol/src/exec.rs:248-250`).
 
 `agentd/src/exec.rs:341`
 
@@ -340,7 +340,7 @@ Releases an exited exec's buffered output to the caller and starts its TTL colle
 
 **Input:** the `{id}` path segment only, per the signature at `agentd/src/exec.rs:855`. No body.
 
-**Output:** `application/json` body `PollResponse { exec_id: String, phase: Phase, result: Option<Outcome> }` — the same shape `GET /v1/exec/{id}` returns (`protocol/src/exec.rs:422-428`, `agentd/src/routes.rs:595`).
+**Output:** `application/json` body `PollResponse { exec_id: String, phase: Phase, result: Option<Outcome> }` — the same shape `GET /v1/exec/{id}` returns (`protocol/src/exec.rs:423-429`, `agentd/src/routes.rs:595`).
 
 **Statuses:** 200; 401; 503; 404 `unknown_exec`; 409 `still_running`; 409 `already_acked` (`agentd/src/schema.rs:514-536`).
 
@@ -360,11 +360,11 @@ Escalates SIGTERM then SIGKILL to the exec's whole process group (`agentd/src/ro
 
 **Input:** the `{id}` path segment only, per the signature at `agentd/src/exec.rs:929`. No body.
 
-**Output:** `application/json` body `KillResponse { exec_id: String, killed: bool }`, where `killed: false` with a 200 means the process group had already exited — which is the outcome a kill was asking for (`protocol/src/exec.rs:376-381`).
+**Output:** `application/json` body `KillResponse { exec_id: String, killed: bool }`, where `killed: false` with a 200 means the process group had already exited — which is the outcome a kill was asking for (`protocol/src/exec.rs:377-382`).
 
 **Statuses:** 200; 401; 503; 404 `unknown_exec` (`agentd/src/schema.rs:538-548`).
 
-The signal goes to the process group and not just the direct child, because a shell that backgrounded a server leaves the interesting process outside the child pid, and `kill(child)` returned success while the workload kept running (`agentd/src/exec.rs:924-928`). `KillResponse` is a named type rather than a `serde_json::json!` literal precisely so the published schema can describe the one field a client most needs to branch on (`protocol/src/exec.rs:368-374`).
+The signal goes to the process group and not just the direct child, because a shell that backgrounded a server leaves the interesting process outside the child pid, and `kill(child)` returned success while the workload kept running (`agentd/src/exec.rs:924-928`). `KillResponse` is a named type rather than a `serde_json::json!` literal precisely so the published schema can describe the one field a client most needs to branch on (`protocol/src/exec.rs:369-375`).
 
 `agentd/src/exec.rs:929`
 
@@ -382,9 +382,9 @@ Writes bytes to a running child's stdin, or closes the pipe with an explicit EOF
 
 **Auth:** Bearer (`agentd/src/routes.rs:585`).
 
-**Input:** the `{id}` path segment plus `application/json` body `StdinRequest { data_b64: Option<String>, signal: Option<String> }`; both fields are `#[serde(default)]` and meaningful together, since a final chunk plus EOF in one request is the common case for feeding a prompt. `data_b64` is base64 because stdin is arbitrary bytes and a JSON string cannot carry non-UTF-8; `signal` accepts `"eof"` (`protocol/src/exec.rs:291-307`).
+**Input:** the `{id}` path segment plus `application/json` body `StdinRequest { data_b64: Option<String>, signal: Option<String> }`; both fields are `#[serde(default)]` and meaningful together, since a final chunk plus EOF in one request is the common case for feeding a prompt. `data_b64` is base64 because stdin is arbitrary bytes and a JSON string cannot carry non-UTF-8; `signal` accepts `"eof"` (`protocol/src/exec.rs:292-308`).
 
-**Output:** `application/json` body `StdinResponse { exec_id: String, written: usize, eof: bool }`, with `eof` echoed back so a client confirms the pipe closed rather than inferring it (`protocol/src/exec.rs:315-319`, `agentd/src/schema.rs:469-474`).
+**Output:** `application/json` body `StdinResponse { exec_id: String, written: usize, eof: bool }`, with `eof` echoed back so a client confirms the pipe closed rather than inferring it (`protocol/src/exec.rs:316-320`, `agentd/src/schema.rs:469-474`).
 
 **Statuses:** 200; 400 `malformed_request`; 401; 503; 404 `unknown_exec`; 408 `stdin_write_timeout`, retryable and some bytes may already have been written; 409 `stdin_not_requested` when the exec was started without `stdin: true`, fixable at start time hence 409 and not 400; 410 `stdin_closed`, since retrying will never succeed; 413 `stdin_write_too_large` against `limits.max_stdin_write_bytes`; 500 `stdin_write_failed` (`agentd/src/schema.rs:468-512`).
 

@@ -1585,6 +1585,14 @@ fn deletable(path: &str) -> bool {
             .all(|component| !component.is_empty() && component != "..")
 }
 
+/// How long past the in-guest `rm`'s own `timeout_sec` a sync pass waits for its answer.
+///
+/// Thirty seconds, the figure this pass has always used. It isn't core's
+/// `DEFAULT_CLIENT_GRACE` (sixty): that margin covers an exec the daemon has to escalate from
+/// SIGTERM to SIGKILL, and a pass under `sync --watch` holds the next one while it waits.
+/// Changing it is a behavior change of its own, so it stays a recorded decision.
+const SYNC_DELETE_GRACE: Duration = Duration::from_secs(30);
+
 /// One incremental pass: hash, diff, upload what changed, delete what vanished, and
 /// rewrite the guest manifest. `remote` is the baseline; `None` means upload everything.
 async fn sync_pass<O: std::io::Write, E: std::io::Write>(
@@ -1655,20 +1663,10 @@ async fn sync_pass<O: std::io::Write, E: std::io::Write>(
         );
         let result = session
             .run_sync(
-                microvms_core::protocol::exec::StartRequest {
-                    exec_id,
-                    command,
-                    shell: false.into(),
-                    cwd: Some(crate::sync::REMOTE_WORKDIR.into()),
-                    env: Default::default(),
-                    user: None,
-                    group: None,
-                    timeout_sec: Some(delete_timeout),
-                    stdin: false,
-                    reap_group_on_exit: false,
-                    inherit_image_env: false,
-                },
-                Duration::from_secs_f64(delete_timeout.max(1.0) + 30.0),
+                microvms_core::protocol::exec::StartRequest::new(exec_id, command)
+                    .with_cwd(Some(crate::sync::REMOTE_WORKDIR.into()))
+                    .with_timeout_sec(Some(delete_timeout)),
+                Duration::from_secs_f64(delete_timeout.max(1.0)) + SYNC_DELETE_GRACE,
             )
             .await?;
         match result.outcome {

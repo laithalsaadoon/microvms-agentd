@@ -136,19 +136,9 @@ fn drive(plan: &Plan) -> (ExecResult, Vec<String>, bool) {
     runtime.block_on(async {
         let daemon = SimDaemon::new(script);
         let session = daemon.session();
-        let request = StartRequest {
-            exec_id: "x-fuzz".into(),
-            command: vec!["bash".into(), "-c".into(), "fuzzed".into()],
-            shell: false.into(),
-            cwd: None,
-            env: Default::default(),
-            user: None,
-            group: None,
-            timeout_sec,
-            stdin: false,
-            reap_group_on_exit: false,
-            inherit_image_env: false,
-        };
+        let request =
+            StartRequest::new("x-fuzz", vec!["bash".into(), "-c".into(), "fuzzed".into()])
+                .with_timeout_sec(timeout_sec);
         let options = CompletionOptions {
             client_grace: Duration::from_secs(u64::from(plan.grace % SPAN)),
             // A small reconnect budget, so a cut stream gives up in a few simulated seconds

@@ -113,19 +113,11 @@ fn task_directory() -> std::path::PathBuf {
 }
 
 fn start(command: &str) -> microvms_core::protocol::exec::StartRequest {
-    microvms_core::protocol::exec::StartRequest {
-        exec_id: microvms_core::session::mint_exec_id(),
-        command: vec![command.to_string()],
-        shell: microvms_core::protocol::exec::Shell::Flag(true),
-        cwd: None,
-        env: std::collections::HashMap::new(),
-        user: None,
-        group: None,
-        timeout_sec: None,
-        stdin: false,
-        reap_group_on_exit: false,
-        inherit_image_env: false,
-    }
+    microvms_core::protocol::exec::StartRequest::new(
+        microvms_core::session::mint_exec_id(),
+        vec![command.to_string()],
+    )
+    .with_shell(true)
 }
 
 #[tokio::test]

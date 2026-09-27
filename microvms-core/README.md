@@ -42,7 +42,7 @@ Replace `src/main.rs` with:
 ```rust,no_run
 use std::time::Duration;
 use microvms_core::prelude::*;
-use microvms_core::{Region, protocol::exec::{Shell, StartRequest}};
+use microvms_core::{Region, protocol::exec::StartRequest};
 use microvms_core::sandbox::{RunRequest, Sandbox, TeardownOpts};
 use microvms_core::session::{DEFAULT_READY_TIMEOUT, mint_exec_id};
 
@@ -56,19 +56,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         request.execution_role_arn = Some(role);
         let session = sandbox.run(request).await?;
         session.wait_until_ready(DEFAULT_READY_TIMEOUT).await?;
-        session.run_sync(StartRequest {
-            exec_id: mint_exec_id(),
-            command: vec!["printf 'hello from a sandbox\\n'".into()],
-            shell: Shell::Flag(true),
-            cwd: None,
-            env: Default::default(),
-            user: None,
-            group: None,
-            timeout_sec: Some(30.0),
-            stdin: false,
-            reap_group_on_exit: true,
-            inherit_image_env: false,
-        }, Duration::from_secs(35)).await
+        let command = vec!["printf 'hello from a sandbox\\n'".into()];
+        let hello = StartRequest::new(mint_exec_id(), command)
+            .with_shell(true)
+            .with_timeout_sec(Some(30.0))
+            .with_reap_group_on_exit(true);
+        session.run_sync(hello, Duration::from_secs(35)).await
     }.await;
 
     // Runs even when launch, readiness, or execution returns an error.
@@ -100,9 +93,9 @@ cargo run
 Expected output includes `hello from a sandbox` and `exit: Some(0)`.
 `use microvms_core::prelude::*;` brings the constructors that wire in AWS, such as
 `Sandbox::new`, into scope.
-`cwd: None` uses the image's working directory. Set a different directory only
-after creating it or uploading files there; a generic image need not contain
-`/workspace`.
+A request with no `with_cwd` uses the image's working directory. Set a different
+directory only after creating it or uploading files there; a generic image need not
+contain `/workspace`.
 Cleanup requests VM termination and retains the image for reuse. Dropping a
 `Sandbox` does **not** terminate it; always call `terminate` and inspect its report.
 Use `TeardownOpts::default().waiting_for_terminated()` when you must wait for

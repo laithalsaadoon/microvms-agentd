@@ -4,7 +4,7 @@
 the debt.** A case-sensitive grep for `\bTODO\b`, `\bFIXME\b`, `\bHACK\b`, and `\bXXX\b` across
 every tracked `.rs` and `.py` file produces no output. Widened to every tracked file type, the
 only hits are two documents describing the absence. Case-insensitive over `.rs` and `.py`, the
-single hit is the byte literal `b"xxxxxxxx"` in a stream test (`agentd/src/exec.rs:3234`). The
+single hit is the byte literal `b"xxxxxxxx"` in a stream test (`agentd/src/exec.rs:3222`). The
 repo states the convention that replaced markers: comments record constraints and defects
 defended against, never narration. So the substitute for a `TODO` here is a doc-comment heading
 at the debt site that names the decision, its cost, and what would flip it — 345 such headings,
@@ -62,7 +62,7 @@ expensive-and-bounded ones. Category vocabulary is closed — `marker`, `wrong a
 | 14 | The two bindings are enforced asymmetrically over one core. `microvms-py/microvms.pyi` and `py.typed` are committed and gated by `stubs:check` inside `check`, and a typed consumer is checked against the built wheel under `ty@0.0.72`. `microvms-js/index.d.ts` is gitignored, no `tsconfig.json` exists anywhere in the tree, and no gate reads the declarations — yet `package.json` still advertises `"types": "index.d.ts"` to downstream consumers. Not a staleness row, since `napi build` regenerates the file every run; what is unverified is whether the generated types are *usable*. The fix is one typed consumer, not a diff gate. | missing tests | S | `.gitignore:23-29`, `microvms-js/package.json:7`, `mise.toml:219-235`, `.github/workflows/ci.yml:335-340` |
 | 15 | The daemon's default port, 9000, is written down three times and no assertion connects them. `microvms-core` declares `DEFAULT_AGENT_PORT` twice — once in `control/`, once in `session/` — each documented as matching the daemon, and `agentd` writes the literal itself in `Config::default`. The tests that touch these constants each compare a value to its *own* module's constant, so both stay green if either moves alone. This is the exact shape the repo's own lesson names ("a comment explaining a number in terms of a value owned elsewhere"), and the repo has already invented the remedy: a compile-time `const` block that makes disagreement a build error. | duplicated logic | S | `microvms-app/src/control/mod.rs:96-97`, `microvms-app/src/session/proxy.rs:82-83`, `agentd/src/config.rs:84`, `microvms-cli/src/commands/attached.rs:1148-1160` |
 | 16 | The two bindings' error contracts diverge, and nothing checks that the divergence stays where it is. napi types the async path over its own closed `Status` enum, so a custom `ERR_*` code survives a synchronous return and collapses to `GenericFailure` through a Promise rejection — measured with a probe addon. Nearly every method is async, so the Node rule is `err.cause.message` while the Python binding's `.code` is reliable everywhere. Upstream-forced and thoroughly documented; the debt is that each suite asserts only its own contract, so no gate would catch the two surfaces drifting apart. | duplicated logic | M | `microvms-js/src/errors.rs:10-45`, `.erpaval/solutions/api-patterns/napi-async-collapses-error-codes.md:11-17`, `microvms-py/tests/test_errors.py`, `microvms-js/__test__/errors.mjs` |
-| 17 | The guard over the CLI's dependency allowlist asserts `reason.len() > 25` and nothing else about any reason string, under a comment claiming "a new one cannot be added silently." Length is not meaning: the guard catches an empty justification and cannot catch one that has stopped being true. That is the enforcement ceiling for every prose-accepted debt in this register, and this repo has already shipped one reason that went stale under it. | missing tests | S | `microvms-cli/tests/thinness.rs:212-218`, `microvms-cli/tests/thinness.rs:53`, `microvms-cli/tests/thinness.rs:66` |
+| 17 | The guard over the CLI's dependency allowlist asserts `reason.len() > 25` and nothing else about any reason string, under a comment claiming "a new one cannot be added silently." Length is not meaning: the guard catches an empty justification and cannot catch one that has stopped being true. That is the enforcement ceiling for every prose-accepted debt in this register, and this repo has already shipped one reason that went stale under it. | missing tests | S | `microvms-cli/tests/thinness.rs:192-198`, `microvms-cli/tests/thinness.rs:58`, `microvms-cli/tests/thinness.rs:71` |
 | 18 | *Deliberate.* `microvm logs` names an image's build log group and prints the working `aws logs tail` invocation that reads it (a success since the 0.6.0 ruling on #79; AWS CLI v2 only), still refusing to read CloudWatch itself. The reader was refused on three grounds, the decisive one being that the transport is single-service by construction — a `const` signing name and one `endpoint_for(region)` — so a CloudWatch reader in core would give the CLI a second path to AWS, which is what the thinness guard exists to forbid. The read grant ships as the Terraform stack's `logs_read_policy_arn`. | wrong abstraction | M | `microvms-cli/src/commands/local.rs:228` (the handler), `microvms-cli/src/commands/local.rs` `logs_succeeds_with_the_tail_command_and_refuses_to_imply_it_is_empty` (the pin) |
 | 19 | Action pinning is inconsistent inside one file. Two actions are pinned to a commit SHA with the version in a trailing comment; every other `uses:` across both workflows is a mutable tag, including `aquasecurity/trivy-action@v0.36.0` inside the job whose entire output is supply-chain assurance. The same job hash-verifies the binaries it downloads, so the discipline exists and stops at the action boundary. | version pin | S | `.github/workflows/ci.yml:174`, `.github/workflows/ci.yml:181`, `.github/workflows/ci.yml:216` |
 | 20 | Three rationale blocks describe code that is no longer there. The action-version header names `checkout@v5`, `upload-artifact@v6`, and `setup-node@v5` and argues at length that "checkout is on v5 rather than v7 … v5 is the smallest version that satisfies the actual requirement" — the file uses `@v7` for all three, so the paragraph argues against the line below it. A CI comment counts "the CLI's five test targets" where `microvms-cli/tests/` holds four. The live workflow says the suite "reports the 34 checks it cannot express as SKIP", which the suite's own source contradicts by marking that list permanently empty. | dead code adjacent | S | `.github/workflows/ci.yml:29-39`, `.github/workflows/ci.yml:94`, `.github/workflows/live-conformance.yml:94`, `conformance/run_rs.py:432-436` |
@@ -84,7 +84,7 @@ Zero lines. Widened to every tracked file type — excluding `.git`, `target`, `
 `node_modules`, and `.venv` — the only two hits are prose *about* the absence. A
 case-insensitive sweep over `.rs` and `.py` returns exactly one line, and it is not a marker:
 
-- `` shared.publish(StreamKind::Stdout, b"xxxxxxxx").await; `` — `agentd/src/exec.rs:3234`
+- `` shared.publish(StreamKind::Stdout, b"xxxxxxxx").await; `` — `agentd/src/exec.rs:3222`
 
 In place of markers, debt is accepted at the site under a doc-comment heading that names the
 decision. There are 345 such headings, carried by 77 of the 90 tracked `.rs` files. Quoted
@@ -145,7 +145,7 @@ Shows up in:
 - `microvms-js/package.json:18` and `.github/workflows/ci.yml:343` — a caret range with no lockfile, and CI bypassing the manifest entirely
 - `.gitignore:23-29` and `microvms-js/package.json:7` — declarations advertised to consumers, gitignored, and read by nothing
 - `mise.toml:219-235` and `.github/workflows/ci.yml:335-340` — the four mechanisms the Python side has
-- `microvms-cli/tests/thinness.rs:53` — a manifest guard that exists for the CLI and has no binding equivalent
+- `microvms-cli/tests/thinness.rs:58` — a manifest guard that exists for the CLI and has no binding equivalent
 
 Cost: M. The cheapest single item is one `tsconfig.json` and one typed `.mts` consumer, which
 closes row 14. A committed lockfile for `microvms-js` plus dropping `-y -p @napi-rs/cli@3` in
@@ -168,11 +168,11 @@ whose failure message points at the replacement API.
 
 Shows up in:
 
-- `microvms-cli/tests/thinness.rs:212-218` — `reason.len() > 25`, the only assertion over any acceptance reason
+- `microvms-cli/tests/thinness.rs:192-198` — `reason.len() > 25`, the only assertion over any acceptance reason
 - `microvms-cli/tests/exit_codes.rs:138-149` against `microvms-core/Cargo.toml:52-64` — a rationale outliving the defect it describes, with a test still deferred on it
 - `.github/workflows/ci.yml:29-39` against `.github/workflows/ci.yml:69` — a header arguing for a version the next line does not use
 - `microvms-cli/src/commands/attached.rs:1148-1160` — the remedy the repo already invented: a `const` block, so disagreement is a build error rather than a test failure
-- `microvms-cli/tests/thinness.rs:53` — the other remedy: a named retirement whose failure message carries the replacement
+- `microvms-cli/tests/thinness.rs:58` — the other remedy: a named retirement whose failure message carries the replacement
 
 Cost: M per site, and the work is adding one assertion beside an existing paragraph rather than
 changing behaviour.

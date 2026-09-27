@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["boto3>=1.40"]
+# dependencies = ["boto3>=1.40", "pyyaml==6.0.3"]
 # ///
 # SPDX-License-Identifier: Apache-2.0
 """Compare Rust API constraints with boto3's current Lambda MicroVM model.
@@ -9,7 +9,8 @@
 Reads `microvm constants --emit-json` from a fresh cargo build. Fails on changed
 constraints, unavailable models, new API versions, or missing Rust constants.
 Regions and size classes are checked against documented/measured tables because
-the service model does not describe them. Unchecked constraints are reported.
+the service model does not describe them. The ratchet's operation-literal rule must
+name exactly the model's operations. Unchecked constraints are reported.
 No AWS calls or credentials are needed; initial dependency resolution may use the
 network. To audit against the latest SDK, run:
 `uv run --upgrade --script scripts/check-model-drift.py`.
@@ -19,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from collections.abc import Iterable, Sequence
@@ -28,6 +30,17 @@ from typing import Any
 
 SERVICE = "lambda-microvms"
 API_VERSION = "2025-09-09"
+
+REPO = Path(__file__).resolve().parent.parent
+
+#: The ratchet's ast-grep rule that refuses an operation name written as a literal in a driving
+#: adapter (#273). Its regex alternates over every operation by name, so an operation the model
+#: gains and the rule lacks is one an adapter could hard-code without the ratchet seeing it.
+OPERATION_RULE = REPO / "ratchet" / "rules" / "operation-literal.yml"
+
+#: The `"(A|B|...)"` group inside the rule's regex.
+OPERATION_GROUP = re.compile(r'"\(([^()]*)\)"')
+OPERATION_NAME = re.compile(r"[A-Z][A-Za-z]+")
 
 #: How the Rust object is produced when no `--rust-binary` and no `--rust-json` was
 #: given. `cargo run` rather than a prebuilt path, and the trade is worth stating: a
@@ -416,6 +429,59 @@ class Checker:
     def pattern(self, label: str, shape: str, ours: str) -> None:
         self.touched.add(shape)
         self.record(label, ours, self.shape(shape).get("pattern"))
+
+
+def rule_operations(path: Path) -> tuple[str, ...]:
+    """The operation names `path`'s regex alternates over, in the rule's order.
+
+    Read with a YAML parser rather than a regex over the file, since the rule is YAML and its
+    regex is a quoted scalar. Anything but exactly one `regex` clause holding a non-empty group
+    of operation-shaped names is an error: a rule this can't read would otherwise compare as an
+    empty list, and the failure would name the model rather than the parse.
+    """
+    import yaml
+
+    try:
+        rule = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise SystemExit(
+            f"{path} is missing, so the operation list can't be checked"
+        ) from None
+    clauses = rule.get("rule", {}).get("all", []) if isinstance(rule, dict) else []
+    regexes = [c["regex"] for c in clauses if isinstance(c, dict) and "regex" in c]
+    if len(regexes) != 1:
+        raise SystemExit(
+            f"{path} should have one `regex` under `rule.all`, and has {len(regexes)}"
+        )
+    group = OPERATION_GROUP.search(regexes[0])
+    names = tuple(group.group(1).split("|")) if group else ()
+    if not names or not all(OPERATION_NAME.fullmatch(name) for name in names):
+        raise SystemExit(
+            f'{path}\'s regex has no `"(Name|Name|...)"` group of operation names: {regexes[0]!r}'
+        )
+    return names
+
+
+def operations_result(path: Path, model: dict[str, Any]) -> Result:
+    """The rule's operation names against the model's, as one comparison.
+
+    Sorted but not deduplicated, so a name the rule repeats is a disagreement too: the
+    alternation is a set written as a list.
+    """
+    names = rule_operations(path)
+    ours = tuple(sorted(names))
+    theirs = tuple(sorted(model.get("operations", {})))
+    label = (
+        path.relative_to(REPO).as_posix() if path.is_relative_to(REPO) else str(path)
+    )
+    return Result(
+        "operation-literal rule's operations",
+        ours,
+        theirs,
+        ours == theirs,
+        note=f"{len(names)} operations, each refused as an adapter literal",
+        sides=(label, "model"),
+    )
 
 
 def check(src: Source, model: dict[str, Any]) -> Checker:
@@ -910,6 +976,10 @@ def check(src: Source, model: dict[str, Any]) -> Checker:
         sides=(src.label, "pinned here"),
     )
 
+    # Not a constant of the client's: the ratchet's rule that keeps operation names out of the
+    # adapters. Appended rather than recorded, so it carries no client label.
+    c.results.append(operations_result(OPERATION_RULE, model))
+
     return c
 
 
@@ -994,7 +1064,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    repo = Path(__file__).resolve().parent.parent
+    repo = REPO
     model, path = load_model()
 
     # One source, and no flag that can skip it. `--skip-rust` used to exist for a

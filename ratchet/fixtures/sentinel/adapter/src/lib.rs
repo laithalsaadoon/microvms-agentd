@@ -21,6 +21,11 @@ impl std::fmt::Display for Minter {}
 
 impl Minter {}
 
+// Adapter logic: an operation named as a literal, and a default retyped as a number.
+pub fn hand_rolled() {
+    let _ = ("RunMicrovm", std::time::Duration::from_secs(300));
+}
+
 #[cfg(test)]
 fn item_level() {
     std::process::Command::new("item");
@@ -39,6 +44,7 @@ mod tests {
     fn inner() {
         std::process::Command::new("tests");
         let _ = vec![std::process::Command::new("in-a-macro")];
+        let _ = ("TerminateMicrovm", std::time::Duration::from_secs(5));
     }
 }
 

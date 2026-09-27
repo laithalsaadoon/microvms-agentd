@@ -207,7 +207,7 @@ class lives.
 | CLI-5: `--memory` is a closed value set over the five documented baselines | CLI | `microvms-cli/src/cli.rs:364-383`, reasoning at `:4-19` | Unparseable (S1 at the parser). 1500 never reaches a handler. The difference between refusing it at the parser and refusing it in core is a build cycle |
 | CLI-5: `--region` is a closed value set over the five MicroVM regions | CLI | `microvms-cli/src/cli.rs:417-435` | Unparseable. `--unlisted-region` is the named way out, declared `conflicts_with = "region"` once on a flattened struct so the relationship cannot be forgotten on a new command (`:466-499`) |
 | The domains are spelled out rather than generated, and a test asserts the enum equals the size table | CLI | `microvms-cli/src/cli.rs:13-19`, `microvms-cli/tests/manifest.rs:90` | A domain computed at runtime is invisible to `--help`, to shell completion, and to the manifest's `choices` field. A new size class that does not reach `cli.rs` fails the test rather than shipping unreachable |
-| No `--capabilities`, `--connector`, or `--architecture` flag exists; `--client-token` only on the launch commands `run` and `agent-up` | CLI | `microvms-cli/src/cli.rs:21-31` | Unwritable. Core has no such parameter for those flags, so there is nothing to forward. Absence asserted by `microvms-cli/tests/thinness.rs:426` and the manifest cross-check |
+| No `--capabilities`, `--connector`, or `--architecture` flag exists; `--client-token` only on the launch commands `run` and `agent-up` | CLI | `microvms-cli/src/cli.rs:21-31` | Unwritable. Core has no such parameter for those flags, so there is nothing to forward. Absence asserted by the manifest cross-check |
 | A `microvm cp --mode` conflicts with `--tar`; `--poll` conflicts with every writing flag; `--detach` conflicts with the shapes that must not return early | CLI | `microvms-cli/src/cli.rs:1199`, `:1219`, `:1576` | Unparseable, pinned by `microvms-cli/src/cli.rs:2636`, `:2688` |
 
 ## Invariants
@@ -218,23 +218,23 @@ Enforced in `microvms-app/src/sandbox.rs`, whose `Lifecycle` enum is the spec's 
 verbatim and which carries the other spec variables beside it. Every one of those fields is
 private and every mutation happens in one of the lifecycle methods, which is what makes the
 Z3 and `stateright` proofs proofs about *this struct's* reachable states
-(`microvms-app/src/sandbox.rs:9-17`, `:119-133`, `:789-805`).
+(`microvms-app/src/sandbox.rs:9-17`, `:121-135`, `:791-807`).
 
 | Invariant | Where enforced | Citation |
 | --- | --- | --- |
-| STATE-1: an accepted launch moves the lifecycle to PENDING and records the image as existing | Application, `Sandbox::run`, after the wire call | `microvms-app/src/sandbox.rs:1121-1129` |
-| STATE-2: the platform reporting a successful run hook is what marks the lifecycle RUNNING and the token installed — not the launch call | Application, `Sandbox::run`, after the wait | `microvms-app/src/sandbox.rs:1196-1200` |
-| STATE-3: the agent token is installed at most once per VM lifetime | Application, both sides | `microvms-app/src/sandbox.rs:1028-1040` (a second `run` on one sandbox is refused); `agentd/src/state.rs:202-221` (the daemon's one-shot bootstrap) |
-| STATE-4: a suspend accepted from RUNNING moves the lifecycle to SUSPENDING before the wait, and after the call | Application, `Sandbox::suspend` | `microvms-app/src/sandbox.rs:1460-1469` |
-| STATE-5: no suspend call is issued while the lifecycle is not RUNNING | Application, before the wire | `microvms-app/src/sandbox.rs:1449-1458` |
-| STATE-6: the platform reporting suspension complete marks the lifecycle SUSPENDED; a VM that dies while suspending is recorded as terminated instead | Application, `Sandbox::suspend` | `microvms-app/src/sandbox.rs:1481-1501`, wanted set at `microvms-app/src/control/microvm.rs:652` |
-| STATE-7: a resume is issued only from SUSPENDED, reuses the installed token, and re-delivers **no** run-hook payload | Application, `Sandbox::resume` | `microvms-app/src/sandbox.rs:1542-1547`, `:1552` |
-| STATE-8: a completed resume invalidates the cached proxy token, through the endpoint the service just reported | Application, `Session::rebind` | `microvms-app/src/sandbox.rs:1568-1576`, `microvms-app/src/session/mod.rs:250-261` |
-| STATE-9: an accepted terminate moves the lifecycle to TERMINATING and records the VM as terminated — **before** the call | Application, `Sandbox::terminate` | `microvms-app/src/sandbox.rs:1650-1654` |
-| STATE-10: the platform reporting termination complete marks the lifecycle TERMINATED | Application, `Sandbox::terminate`, only when a wait was asked for | `microvms-app/src/sandbox.rs:1677-1681` |
-| STATE-11: a terminated VM never returns to RUNNING, checked before the window check and before any call | Application, `Sandbox::resume` | `microvms-app/src/sandbox.rs:1533-1541` |
-| STATE-12: a resume past the launch-time suspended window is refused with the elapsed window named | Application, before `ResumeMicrovm` | `microvms-app/src/sandbox.rs:1549-1550`, `:1591-1624` |
-| The suspended-window clock is stamped after the suspend call and before the wait, and cleared on a successful resume | Application, `Sandbox` | `microvms-app/src/sandbox.rs:1466-1469`, `:1577-1580` |
+| STATE-1: an accepted launch moves the lifecycle to PENDING and records the image as existing | Application, `Sandbox::run`, after the wire call | `microvms-app/src/sandbox.rs:1123-1131` |
+| STATE-2: the platform reporting a successful run hook is what marks the lifecycle RUNNING and the token installed — not the launch call | Application, `Sandbox::run`, after the wait | `microvms-app/src/sandbox.rs:1198-1202` |
+| STATE-3: the agent token is installed at most once per VM lifetime | Application, both sides | `microvms-app/src/sandbox.rs:1030-1042` (a second `run` on one sandbox is refused); `agentd/src/state.rs:202-221` (the daemon's one-shot bootstrap) |
+| STATE-4: a suspend accepted from RUNNING moves the lifecycle to SUSPENDING before the wait, and after the call | Application, `Sandbox::suspend` | `microvms-app/src/sandbox.rs:1462-1471` |
+| STATE-5: no suspend call is issued while the lifecycle is not RUNNING | Application, before the wire | `microvms-app/src/sandbox.rs:1451-1460` |
+| STATE-6: the platform reporting suspension complete marks the lifecycle SUSPENDED; a VM that dies while suspending is recorded as terminated instead | Application, `Sandbox::suspend` | `microvms-app/src/sandbox.rs:1483-1503`, wanted set at `microvms-app/src/control/microvm.rs:652` |
+| STATE-7: a resume is issued only from SUSPENDED, reuses the installed token, and re-delivers **no** run-hook payload | Application, `Sandbox::resume` | `microvms-app/src/sandbox.rs:1544-1549`, `:1554` |
+| STATE-8: a completed resume invalidates the cached proxy token, through the endpoint the service just reported | Application, `Session::rebind` | `microvms-app/src/sandbox.rs:1570-1578`, `microvms-app/src/session/mod.rs:251-262` |
+| STATE-9: an accepted terminate moves the lifecycle to TERMINATING and records the VM as terminated — **before** the call | Application, `Sandbox::terminate` | `microvms-app/src/sandbox.rs:1652-1656` |
+| STATE-10: the platform reporting termination complete marks the lifecycle TERMINATED | Application, `Sandbox::terminate`, only when a wait was asked for | `microvms-app/src/sandbox.rs:1679-1683` |
+| STATE-11: a terminated VM never returns to RUNNING, checked before the window check and before any call | Application, `Sandbox::resume` | `microvms-app/src/sandbox.rs:1535-1543` |
+| STATE-12: a resume past the launch-time suspended window is refused with the elapsed window named | Application, before `ResumeMicrovm` | `microvms-app/src/sandbox.rs:1551-1552`, `:1593-1626` |
+| The suspended-window clock is stamped after the suspend call and before the wait, and cleared on a successful resume | Application, `Sandbox` | `microvms-app/src/sandbox.rs:1468-1471`, `:1579-1582` |
 | The Z3-proved invariants hold over every interleaving: bootstrap at most once, no suspend outside RUNNING, a terminated VM never reaches RUNNING | `stateright` model | `model/src/client.rs:554-569` |
 | A locally refused call costs **zero** wire calls — resume after terminate, resume with the window closed, and the payload count matching the launch count are all checked as counters, not as end states | `stateright` model | `model/src/client.rs:584-598`, `:623-640` |
 | The installed token is never replaced and survives a suspend/resume cycle | `stateright` model | `model/src/client.rs:599-616` |
@@ -267,16 +267,16 @@ Z3 and `stateright` proofs proofs about *this struct's* reachable states
 | ARCH-2: protocol drift between client and daemon fails compilation | Cargo dependency graph | `microvms-cli/tests/dependency_direction.rs:180` |
 | ARCH-3 / ARCH-4 / BIND-1: `cli -> core -> protocol`, bindings depend only on core, core depends on neither | Test over `cargo_metadata` | `microvms-cli/tests/dependency_direction.rs:69`, `:96`, `:220` |
 | ARCH-5: the CLI exports no library target at all | Test over `cargo_metadata` | `microvms-cli/tests/dependency_direction.rs:127` |
-| CLI-2: the CLI reaches the control plane and the endpoint proxy only through core, and the guard names *which* seam door was entered | Injected refusing seam | `microvms-cli/src/guards.rs:403`, `:487`; source scan at `microvms-cli/tests/thinness.rs:426` |
-| The CLI's direct dependency set contains none of the denylisted transport and signing crates | Test over `cargo_metadata` | `microvms-cli/tests/thinness.rs:96` |
-| Only the envelope module and named exceptions in `main` write to stdout | Source scan | `microvms-cli/tests/thinness.rs:503` |
+| CLI-2: the CLI reaches the control plane and the endpoint proxy only through core, and the guard names *which* seam door was entered | Injected refusing seam | `microvms-cli/src/guards.rs:407`, `:491`; door bans in `microvms-cli/clippy.toml` |
+| The CLI's direct dependency set contains none of the denylisted transport and signing crates | Test over `cargo_metadata` | `microvms-cli/tests/thinness.rs:101` |
+| Only the envelope module and named exceptions in `main` write to stdout | Source scan | `microvms-cli/tests/thinness.rs:446` |
 | CLI-4: one JSON envelope per invocation on stdout, on success, on failure, and on a stream that died before its first event | Spawned-binary test | `microvms-cli/tests/exit_codes.rs:154`, `:198`, `:233` |
 | BIND-5: both bindings preserve provenance-labelled durations, estimate-typed dollars, and the distinct `Unpriced` value | Application, by absent constructors | `microvms-py/src/cost.rs:9`, `:23-27`, `:220-241`; `microvms-js/src/cost.rs:20-31`, `:52-57`. `new Duration(3600)` is a `TypeError`, `Amount.usd` is null for an unpriced line, and `to_json`/`to_dict` omit the key entirely rather than emitting a null anything permissive sums as zero |
 | Every constant in `constants::as_json` is checked against the pinned botocore service model by the build gate (TRAP-12), and the key set is pinned by a test | Build gate plus a key-set test | `microvms-domain/src/constants.rs:33-46`, `:589`, `:693` |
 | `DEAD_STATES` is a strict subset of `TERMINAL_STATES`, and `SUSPENDED` is terminal but not dead | Application, pinned by test | `microvms-domain/src/constants.rs:448`, `:455`, `:878` |
 | The model-backed and tolerated image-ready state sets are disjoint | Application, pinned by test | `microvms-domain/src/constants.rs:431`, `:441`, `:941` |
 | A ledger file is removed only when nothing is outstanding; leaked identifiers are recorded **before** the delete is attempted | Application, on disk | `microvms-cli/src/ledger.rs:1-22` |
-| CLI-3: every failure class exits with its own integer and `ERR_*` string, distinct from `ERR_UNEXPECTED` | Spawned-binary test plus a classification test | `microvms-cli/src/exit.rs:78-101`, `microvms-cli/tests/exit_codes.rs:29`, `microvms-cli/src/guards.rs:2949`, `:3063`; published table cross-checked at `microvms-cli/tests/manifest.rs:161` |
+| CLI-3: every failure class exits with its own integer and `ERR_*` string, distinct from `ERR_UNEXPECTED` | Spawned-binary test plus a classification test | `microvms-cli/src/exit.rs:78-101`, `microvms-cli/tests/exit_codes.rs:29`, `microvms-cli/src/guards.rs:2965`, `:3079`; published table cross-checked at `microvms-cli/tests/manifest.rs:161` |
 | Retryability is derived from the error kind rather than stored, so the two cannot drift | Application, one `matches!` | `microvms-domain/src/error.rs:111-118`, mapping at `:358-397` |
 
 The lifecycle is deliberately **runtime-checked rather than typestate**
@@ -419,7 +419,7 @@ be March-based, which puts February's variable length last; `719468` is the day 
   function of the request, and `create_image` delegates to it rather than keeping a copy, so the
   two cannot drift. A caller who skips preflight loses only the upload.
   `microvms-app/src/control/image.rs:144-158`, `:210-271`; asserted with a zero-call count at
-  `microvms-cli/src/guards.rs:1468`.
+  `microvms-cli/src/guards.rs:1484`.
 
 - **Every refusal names its measurement.** A guard's error message cites the `docs/PLATFORM.md`
   section rather than restating the constraint, because the guards exist so a reader can reach the
@@ -455,7 +455,7 @@ be March-based, which puts February's variable length last; `719468` is the day 
   tolerates `TERMINATED`; resume must pass the *dead* states only, because failing on `SUSPENDED`
   would fail every resume — that is the state the call is made from. This is why `constants.rs`
   carries both `TERMINAL_STATES` and `DEAD_STATES`.
-  `microvms-app/src/control/microvm.rs:440-456`, `microvms-app/src/sandbox.rs:1553-1566`.
+  `microvms-app/src/control/microvm.rs:440-456`, `microvms-app/src/sandbox.rs:1555-1568`.
 
 - **Token minting lives inside the retry path, and a mint failure is retryable.** A proxy token
   capped at sixty minutes and minted once at construction expires mid-trial, and the rejection is
@@ -544,13 +544,13 @@ be March-based, which puts February's variable length last; `719468` is the day 
   (retrying, because an image in `CREATING` refuses deletion), then the log group **last**, because
   the service can recreate a group deleted before its image. The log group is *named* rather than
   deleted: CloudWatch Logs is not in this crate's dependency set.
-  `microvms-app/src/sandbox.rs:45-53`, `:1630-1633`, `:1691-1715`.
+  `microvms-app/src/sandbox.rs:45-53`, `:1632-1635`, `:1693-1717`.
 
 - **There is no `Drop` that tears down.** Rust has no context manager and `Drop` cannot await. A
   blocking `Drop` would deadlock inside a runtime and a spawning one would race process exit. So
   `Drop` only warns, naming the id, and the rule is that a caller calls `terminate` explicitly,
   or `detach` when another process takes the VM over; a detached sandbox drops without the
-  warning. `microvms-app/src/sandbox.rs:55-60`, `:1772-1779`, `:1788-1789`.
+  warning. `microvms-app/src/sandbox.rs:55-60`, `:1774-1781`, `:1790-1791`.
 
 - **Leaked identifiers are recorded before the delete is attempted, not after.** Recording after
   loses the identifier when the process dies inside the call, which is exactly the interrupt case
@@ -558,7 +558,7 @@ be March-based, which puts February's variable length last; `719468` is the day 
   file is how `microvm ls` knows there is something to tell the operator about. For a wedged image
   and a service-created log group the identifier **is** the remedy; there is no second way to find
   them. `microvms-cli/src/ledger.rs:1-22`; CLI-6's teardown-on-interrupt guarded at
-  `microvms-cli/src/guards.rs:824`, `:917`.
+  `microvms-cli/src/guards.rs:828`, `:921`.
 
 - **Exec idempotency is opt-in, which deliberately inverts TRAP-1's shape.** The default is a
   generated exec id, because `microvm exec` is one shot and an id reused by accident means the
@@ -566,7 +566,7 @@ be March-based, which puts February's variable length last; `719468` is the day 
   buys is a retry that is safe across the caller's own restart. This differs from a control-plane
   `clientToken`, whose replay wedges an image permanently and which this CLI does not have at all.
   `microvms-cli/src/cli.rs:1173-1191`, `agentd/src/exec.rs:363-377`; both halves guarded at
-  `microvms-cli/src/guards.rs:2004`, `:2045`.
+  `microvms-cli/src/guards.rs:2020`, `:2061`.
 
 - **Local constants are checked against the pinned service model in the build gate (TRAP-12), and
   the key names are a contract with a script.** `constants::as_json` publishes every hardcoded

@@ -67,7 +67,10 @@
 use std::time::Duration;
 
 use microvms_core::control::{ControlPlane, CreateImageRequest, ProjectFiles, WaitOpts};
-use microvms_core::sandbox::{RunRequest, Sandbox, TeardownOpts, TeardownReport};
+use microvms_core::sandbox::{
+    DEFAULT_LIFECYCLE_TIMEOUT, LIFECYCLE_POLL_INTERVAL, RunRequest, Sandbox, TeardownOpts,
+    TeardownReport,
+};
 use microvms_core::{Error, ErrorKind};
 use serde_json::{Map, json};
 
@@ -78,6 +81,15 @@ use crate::history::{Event, History};
 use crate::ledger::Ledger;
 use crate::render::RunOutcome;
 use crate::seam::state_dir;
+
+/// How long a best-effort health read may take on a path that doesn't need it: the hook log
+/// fetched before a teardown, and after a resume. A CLI choice rather than core's: it's short
+/// because a wedged endpoint mustn't hold a teardown for the transport's full request timeout,
+/// and nothing below the CLI makes that read.
+const HEALTH_PROBE_DEADLINE: Duration = Duration::from_secs(5);
+
+/// How long the resume path may spend attaching a session only to read that hook log.
+const ATTACH_PROBE_DEADLINE: Duration = Duration::from_secs(10);
 
 /// The future a launch races against. See the module docs.
 ///
@@ -739,7 +751,7 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
     let observed_hooks: Vec<microvms_core::protocol::health::HookObservation> =
         match sandbox.session() {
             Some(session) => {
-                match tokio::time::timeout(Duration::from_secs(5), session.health()).await {
+                match tokio::time::timeout(HEALTH_PROBE_DEADLINE, session.health()).await {
                     Ok(Ok(health)) => health.hooks,
                     _ => Vec::new(),
                 }
@@ -1907,63 +1919,61 @@ impl<'a> StartSpec<'a> {
 /// never whitespace-split — so passing a shell line that way silently looks for a binary
 /// named `ls -la`.
 ///
-/// The type comes from the `protocol` crate rather than from `microvms_core`. Core does
-/// re-export it (`pub use protocol;`), so this is no longer forced — the reason beside that
-/// dependency in `Cargo.toml` says why the direct edge stays: it resolves identically either
-/// way, it is ARCH-2's own contract, and `tests/thinness.rs` allowlists it by name.
+/// The type is `protocol`'s, named through core's re-export: the manifest says why this crate
+/// has no direct `protocol` edge.
 ///
 /// Shared with [`crate::commands::attached`] rather than duplicated, because the field this
-/// deliberately leaves unset — `timeout_sec` — is a decision with a reason, and a second
+/// deliberately leaves unset (`timeout_sec`) is a decision with a reason, and a second
 /// constructor is where it silently acquires a different answer.
 pub fn start_request(spec: StartSpec<'_>) -> microvms_core::protocol::exec::StartRequest {
-    // Every field written out rather than `..Default::default()`, and not only because
-    // `StartRequest` has no `Default`: this struct is the wire contract, so a field added on the
-    // daemon side should break this build and make someone decide what the CLI sends. A struct
-    // update would have silently defaulted it.
-    microvms_core::protocol::exec::StartRequest {
-        // The idempotency key, generated unless the caller supplied one. The default is fresh and
-        // that is the safe direction: a reused id is answered from the first exec's record, so the
-        // second caller reads someone else's output. `exec --exec-id` is the opt-in for a caller
-        // whose retry must survive its own restart — the daemon returns success for a known id
-        // without spawning a second child, which is the whole value of a key.
-        exec_id: spec
-            .exec_id
-            .unwrap_or_else(microvms_core::session::mint_exec_id),
-        command: vec![spec.command.to_string()],
+    // Built, not written out: `StartRequest` is `#[non_exhaustive]`, and its builder holds the
+    // one default for every field this doesn't set, the same one the daemon gives an omitted
+    // key. A field added on the daemon side reaches this request as that default. The fields
+    // below are the ones the CLI decides, each with its reason.
+    //
+    // The idempotency key, generated unless the caller supplied one. The default is fresh and
+    // that is the safe direction: a reused id is answered from the first exec's record, so the
+    // second caller reads someone else's output. `exec --exec-id` is the opt-in for a caller
+    // whose retry must survive its own restart: the daemon returns success for a known id
+    // without spawning a second child, which is the whole value of a key.
+    let exec_id = spec
+        .exec_id
+        .unwrap_or_else(microvms_core::session::mint_exec_id);
+    microvms_core::protocol::exec::StartRequest::new(exec_id, vec![spec.command.to_string()])
         // Always a script: a one-element command under `shell: false` would look for a binary
         // literally named `ls -la`. A named shell is forwarded for the daemon to resolve,
         // because only the guest knows which shells it has.
-        shell: spec
-            .shell
-            .map_or(microvms_core::protocol::exec::Shell::Flag(true), Into::into),
-        cwd: spec.cwd,
+        .with_shell(
+            spec.shell
+                .map_or(microvms_core::protocol::exec::Shell::Flag(true), Into::into),
+        )
+        .with_cwd(spec.cwd)
         // Verbatim, not merged: the daemon `env_clear()`s before applying this map
         // (`agentd/src/exec.rs:1003`), so the caller's `--env` flags are the child's whole
         // environment and there is nothing on this side to merge them into.
-        env: spec.env,
+        .with_env(spec.env)
         // Forwarded as the caller gave them, unvalidated: a name or a number. The guest's
         // accounts are unknowable from *any* client, and the daemon resolves a name against
         // the guest's `/etc/passwd` and `/etc/group` before it spawns, answering
         // `unknown_user`/`unknown_group` for one it does not have. Omission stays the default,
         // which is "run as the daemon's own user".
-        user: spec.user,
-        group: spec.group,
-        // The client-side deadline is the caller's `--timeout`, applied by `run_sync`. Sending it
-        // as the *daemon's* budget too would kill the child at a deadline the caller cannot see
-        // in the exit code.
-        timeout_sec: None,
+        .with_user(spec.user)
+        .with_group(spec.group)
+        // No `with_timeout_sec`: the client-side deadline is the caller's `--timeout`, applied
+        // by `run_sync`. Sending it as the *daemon's* budget too would kill the child at a
+        // deadline the caller cannot see in the exit code.
+        //
         // Opt-in, and `run`'s exec never asks: a child holding an open stdin pipe nobody will
         // ever write to is a child that blocks forever the first time it reads. `exec --stdin`
         // sets this *and* feeds the pipe, which is the only combination that is safe.
-        stdin: spec.stdin,
+        .with_stdin(spec.stdin)
         // Forwarded as asked and defaulted off. The daemon defaults a missing key to false
-        // too, so dropping this line would not fail anything — the exec would just quietly
+        // too, so dropping this line would not fail anything: the exec would just quietly
         // keep leaving its grandchildren running, which is why the guard asserts on the wire.
-        reap_group_on_exit: spec.reap,
+        .with_reap_group_on_exit(spec.reap)
         // Forwarded as asked and defaulted off, which keeps the exact `--env` map as the
         // child's environment.
-        inherit_image_env: spec.inherit_image_env,
-    }
+        .with_inherit_image_env(spec.inherit_image_env)
 }
 
 // ── suspend / resume / terminate (the attached path) ─────────────────────────
@@ -2088,11 +2098,11 @@ pub async fn resume<O: std::io::Write, E: std::io::Write>(
         port: None,
     };
     if let Ok(Ok(session)) = tokio::time::timeout(
-        Duration::from_secs(10),
+        ATTACH_PROBE_DEADLINE,
         ctx.seam.attach_session(region, attach),
     )
     .await
-        && let Ok(Ok(health)) = tokio::time::timeout(Duration::from_secs(5), session.health()).await
+        && let Ok(Ok(health)) = tokio::time::timeout(HEALTH_PROBE_DEADLINE, session.health()).await
     {
         crate::history::append_unseen_hooks(&root, &microvm_id, &health.hooks);
     }
@@ -2197,7 +2207,12 @@ pub async fn terminate<O: std::io::Write, E: std::io::Write>(
     }
     if args.wait && leaked.is_empty() {
         match plane
-            .wait_for_state(&microvm_id, &["TERMINATED"], &[], wait_opts(300.0))
+            .wait_for_state(
+                &microvm_id,
+                &["TERMINATED"],
+                &[],
+                wait_opts(DEFAULT_LIFECYCLE_TIMEOUT.as_secs_f64()),
+            )
             .await
         {
             Ok(settled) => state = settled.state,
@@ -2411,7 +2426,7 @@ fn image_name_of(identifier: &str) -> String {
 fn wait_opts(timeout_sec: f64) -> WaitOpts {
     WaitOpts {
         timeout: Duration::from_secs_f64(timeout_sec.max(0.0)),
-        poll_interval: Duration::from_secs(5),
+        poll_interval: LIFECYCLE_POLL_INTERVAL,
         // No stall grace: that is the image build's TRAP-2 probe, and a lifecycle transition
         // has no build list to probe.
         stall_grace: Duration::MAX,
@@ -2620,7 +2635,7 @@ mod tests {
     fn a_negative_timeout_becomes_zero_rather_than_a_panic() {
         assert_eq!(wait_opts(-5.0).timeout, Duration::ZERO);
         assert_eq!(wait_opts(300.0).timeout, Duration::from_secs(300));
-        assert_eq!(wait_opts(300.0).poll_interval, Duration::from_secs(5));
+        assert_eq!(wait_opts(300.0).poll_interval, LIFECYCLE_POLL_INTERVAL);
     }
 
     /// **#74, `--project` detection.** A directory with exactly one manifest+lockfile pair

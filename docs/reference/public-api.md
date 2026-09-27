@@ -94,7 +94,7 @@ one image. It reuses a ready image, waits out one a sibling is building, deletes
 failed one (any one under `force`), or builds, uploading the artifact only when a
 build is needed. Everything local runs before the first call, so a request the
 client refuses costs nothing. It returns `EnsuredImage { image, reused,
-artifact_uri, uploaded, warnings }`. `microvms-app/src/sandbox.rs:905-940`,
+artifact_uri, uploaded, warnings }`. `microvms-app/src/sandbox.rs:907-942`,
 `microvms-app/src/control/ensure.rs:1-40`, `microvms-app/src/control/ensure.rs:240-268`,
 `microvms-app/src/control/ensure.rs:297-311`.
 
@@ -116,8 +116,8 @@ endpoint, region, port }` plus the agent token through `agent_token()`, which
 `Debug` redacts. The VM keeps running and nothing is sent to AWS; the sandbox that
 detached refuses every later lifecycle call, and it drops without the leak warning.
 It's refused (`Precondition`) when there's no live VM to hand off. The adopting
-process passes those fields to `Sandbox::adopt`. `microvms-app/src/sandbox.rs:682-699`,
-`microvms-app/src/sandbox.rs:1348-1404`.
+process passes those fields to `Sandbox::adopt`. `microvms-app/src/sandbox.rs:684-701`,
+`microvms-app/src/sandbox.rs:1350-1406`.
 
 ### Egress posture
 
@@ -128,7 +128,7 @@ the refusal it would raise. The posture is `Open` (`INTERNET_EGRESS` requested),
 answers `Sealed`, because no launch option proves VPC routing without an internet or
 NAT gateway. `Session::egress_posture` carries the launched session's answer, which
 is also the CLI envelope's `egressPosture`. `microvms-app/src/control/connector.rs:119-143`,
-`microvms-app/src/control/connector.rs:180-196`, `microvms-app/src/session/mod.rs:267-269`.
+`microvms-app/src/control/connector.rs:180-196`, `microvms-app/src/session/mod.rs:268-270`.
 
 ### preflight and SizeClass::from_request
 
@@ -205,7 +205,7 @@ pub struct Session {
 
 The control API of one running MicroVM.
 
-`microvms-app/src/session/mod.rs:209`
+`microvms-app/src/session/mod.rs:210`
 
 ### ControlPlane
 
@@ -225,7 +225,7 @@ pub struct Sandbox {
 
 One MicroVM's whole life: the state machine, the suspended window, and explicit teardown.
 
-`microvms-app/src/sandbox.rs:602`
+`microvms-app/src/sandbox.rs:604`
 
 ### RunRequest
 
@@ -295,7 +295,7 @@ pub struct Transport {
 
 A backend, the agent token, and the proxy auth every request needs, kept separate from `Session` because `ExecHandle` needs it and holding a whole session would make the two mutually recursive.
 
-`microvms-app/src/session/mod.rs:74`
+`microvms-app/src/session/mod.rs:75`
 
 ### BuildHookTimeout
 
@@ -327,7 +327,7 @@ pub struct ExecHandle {
 
 One exec addressed by its caller-minted id, which is also the idempotency key, so rebuilding a handle with the same id after a process restart still addresses the same server-side exec.
 
-`microvms-app/src/session/exec.rs:332`
+`microvms-app/src/session/exec.rs:337`
 
 ### RateTable
 
@@ -364,9 +364,9 @@ pub struct ExecResult {
 }
 ```
 
-An exec's phase and, once it has one, its outcome — a thin wrapper over the daemon's `PollResponse` rather than a re-modelling of it, so the two cannot disagree. `client_deadline` is the one field the wire doesn't carry: what the client did when its own deadline expired, set only on a result `Session::run_to_completion` returned after one. `posix_exit_code()` is the code a POSIX shell would report (124 for any timeout, the daemon's or the client's; 128 plus the signal for another signal death; otherwise the exit code), and `notes()` lists one line per condition worth telling a reader (truncated output, the daemon's deadline, writers still alive, the client deadline). The bindings carry both, plus `synthesized`. `microvms-app/src/session/exec.rs:124-156`, `microvms-app/src/session/exec.rs:158-209`.
+An exec's phase and, once it has one, its outcome — a thin wrapper over the daemon's `PollResponse` rather than a re-modelling of it, so the two cannot disagree. `client_deadline` is the one field the wire doesn't carry: what the client did when its own deadline expired, set only on a result `Session::run_to_completion` returned after one. `posix_exit_code()` is the code a POSIX shell would report (124 for any timeout, the daemon's or the client's; 128 plus the signal for another signal death; otherwise the exit code), and `notes()` lists one line per condition worth telling a reader (truncated output, the daemon's deadline, writers still alive, the client deadline). The bindings carry both, plus `synthesized`. `microvms-app/src/session/exec.rs:129-161`, `microvms-app/src/session/exec.rs:163-214`.
 
-`microvms-app/src/session/exec.rs:66-77`
+`microvms-app/src/session/exec.rs:71-82`
 
 ### Image
 
@@ -408,12 +408,13 @@ The `GET /v1/health` response: daemon version, bootstrap state, disk pressure, w
 
 ```rs
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
+#[non_exhaustive]
 pub struct StartRequest {
 ```
 
-The `POST /v1/exec/start` body, whose `command` field is either an argv array or, with `shell` set (`true`, or a shell's name such as `"bash"`), a single script string. `user` and `group` take a name or a numeric id, and `inherit_image_env` starts the child from the image's `ENV`.
+The `POST /v1/exec/start` body, whose `command` field is either an argv array or, with `shell` set (`true`, or a shell's name such as `"bash"`), a single script string. `user` and `group` take a name or a numeric id, and `inherit_image_env` starts the child from the image's `ENV`. Outside the crate it's built with `StartRequest::new(exec_id, command)` and `with_*` setters, which give every field the default the daemon gives an omitted key.
 
-`protocol/src/exec.rs:215-289`
+`protocol/src/exec.rs:215-290`
 
 ### protocol::exec::Outcome
 
@@ -441,7 +442,7 @@ pub struct PollResponse {
 
 The `GET /v1/exec/{id}` body, which flattens the outcome into the response and omits it entirely while the exec is still running.
 
-`protocol/src/exec.rs:421-428`
+`protocol/src/exec.rs:422-429`
 
 ## microvms-py
 
@@ -481,7 +482,7 @@ pub struct PySession {
 
 One running MicroVM's control API, with the proxy auth handled for you.
 
-`microvms-py/src/session.rs:449-450`
+`microvms-py/src/session.rs:450-451`
 
 ### microvms-py EstimatedUsd
 
@@ -504,7 +505,7 @@ A dollar figure with no `__float__`, `__int__`, `__index__`, or `__add__`, whose
 
 The [TypeScript SDK reference](https://laithalsaadoon.github.io/microvms-agentd/reference/typescript/) is generated from the committed `index.d.ts` and gives every class, interface, and function its full signature.
 
-The Node surface has no barrel: every `#[napi]` item in the crate is exported, and `index.d.ts` plus the `index.js` loader and the compiled `.node` addon are generated by `napi build` and excluded from the repository as one platform's build output (`.gitignore:27-29`). Two shapes appear side by side and mean different things: `#[napi]` on a struct is a JS class with methods, while `#[napi(object)]` is a copied plain object with no methods, which is how the same wire results that pyo3 renders as frozen classes arrive in Node (`microvms-js/src/exec.rs:65-66`, `microvms-js/src/session.rs:53-54`). Construction diverges from Python for a reason that is structural rather than stylistic: `PySandbox` has a `#[new]` constructor that blocks on the shared runtime (`microvms-py/src/sandbox.rs:522-528`), and a `#[napi(constructor)]` cannot be async, so the Node class is built through a static factory instead (`microvms-js/src/sandbox.rs:631-635`).
+The Node surface has no barrel: every `#[napi]` item in the crate is exported, and `index.d.ts` plus the `index.js` loader and the compiled `.node` addon are generated by `napi build` and excluded from the repository as one platform's build output (`.gitignore:27-29`). Two shapes appear side by side and mean different things: `#[napi]` on a struct is a JS class with methods, while `#[napi(object)]` is a copied plain object with no methods, which is how the same wire results that pyo3 renders as frozen classes arrive in Node (`microvms-js/src/exec.rs:65-66`, `microvms-js/src/session.rs:54-55`). Construction diverges from Python for a reason that is structural rather than stylistic: `PySandbox` has a `#[new]` constructor that blocks on the shared runtime (`microvms-py/src/sandbox.rs:522-528`), and a `#[napi(constructor)]` cannot be async, so the Node class is built through a static factory instead (`microvms-js/src/sandbox.rs:631-635`).
 
 ### microvms-js Region
 
@@ -527,7 +528,7 @@ pub struct Session {
 
 One running MicroVM's control API, with the proxy auth handled for you.
 
-`microvms-js/src/session.rs:443-444`
+`microvms-js/src/session.rs:455-456`
 
 ### microvms-js Sandbox
 

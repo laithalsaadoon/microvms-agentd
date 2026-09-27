@@ -44,11 +44,12 @@ use crate::exec::{ExecHandle, ExecResult, StreamEvent, seconds_async};
 use crate::process::{ExecProcess, GapPolicy};
 use crate::region::Region;
 
-/// How long to wait for a daemon to report bootstrapped, matching the core's default.
-const DEFAULT_READY_TIMEOUT: f64 = 120.0;
+/// How long to wait for a daemon to report bootstrapped: the core's default.
+const DEFAULT_READY_TIMEOUT: f64 = microvms_core::session::DEFAULT_READY_TIMEOUT.as_secs_f64();
 
-/// The default one-shot `runSync` deadline, matching the Python client's 300s.
-const DEFAULT_RUN_SYNC_TIMEOUT: f64 = 300.0;
+/// The default one-shot `runSync` deadline: the core's exec wait, since `runSync` waits the
+/// same way.
+const DEFAULT_RUN_SYNC_TIMEOUT: f64 = microvms_core::session::DEFAULT_EXEC_WAIT.as_secs_f64();
 
 /// The daemon's liveness answer. `bootstrapped` is the useful field.
 #[napi(object)]
@@ -282,26 +283,37 @@ impl ExecOptions {
         self,
         command: Either<String, Vec<String>>,
     ) -> Result<protocol::exec::StartRequest, AsyncError> {
-        Ok(protocol::exec::StartRequest {
-            exec_id: self.exec_id.unwrap_or_else(mint_exec_id),
-            command: match command {
-                Either::A(single) => vec![single],
-                Either::B(argv) => argv,
-            },
-            shell: match self.shell {
-                None => protocol::exec::Shell::Flag(false),
-                Some(Either::A(flag)) => protocol::exec::Shell::Flag(flag),
-                Some(Either::B(name)) => protocol::exec::Shell::Named(name),
-            },
-            cwd: self.cwd,
-            env: self.env.unwrap_or_default(),
-            user: principal(self.user, "user").map_err(js_async)?,
-            group: principal(self.group, "group").map_err(js_async)?,
-            timeout_sec: self.timeout_sec,
-            stdin: self.stdin.unwrap_or(false),
-            reap_group_on_exit: self.reap_group_on_exit.unwrap_or(false),
-            inherit_image_env: self.inherit_image_env.unwrap_or(false),
-        })
+        let command = match command {
+            Either::A(single) => vec![single],
+            Either::B(argv) => argv,
+        };
+        // An option the caller left out isn't set, so it keeps the builder's default, which
+        // is the wire's.
+        let mut request =
+            protocol::exec::StartRequest::new(self.exec_id.unwrap_or_else(mint_exec_id), command)
+                .with_cwd(self.cwd)
+                .with_user(principal(self.user, "user").map_err(js_async)?)
+                .with_group(principal(self.group, "group").map_err(js_async)?)
+                .with_timeout_sec(self.timeout_sec);
+        if let Some(shell) = self.shell {
+            request = request.with_shell(match shell {
+                Either::A(flag) => protocol::exec::Shell::Flag(flag),
+                Either::B(name) => protocol::exec::Shell::Named(name),
+            });
+        }
+        if let Some(env) = self.env {
+            request = request.with_env(env);
+        }
+        if let Some(stdin) = self.stdin {
+            request = request.with_stdin(stdin);
+        }
+        if let Some(reap) = self.reap_group_on_exit {
+            request = request.with_reap_group_on_exit(reap);
+        }
+        if let Some(inherit) = self.inherit_image_env {
+            request = request.with_inherit_image_env(inherit);
+        }
+        Ok(request)
     }
 }
 

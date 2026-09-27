@@ -14,9 +14,11 @@
 //! Rust has no monkeypatching, so the seam is a trait every handler takes by `&dyn`. That
 //! is strictly better than the thing it replaces: the fake is passed in rather than swapped
 //! into a module, there is no global mutable state, and a handler that wanted to reach
-//! around it would have to name a core constructor — which the static guard forbids by
-//! asserting that `ControlPlane::new`, `Sandbox::new`, and `Session::direct` appear nowhere
-//! outside this file.
+//! around it would have to call a core constructor, which the crate's `clippy.toml` refuses
+//! outside this file: `ControlPlane::new`, `Sandbox::new`, `adopt_in` and `from_name`,
+//! `Session::connect`, `direct`, `attach` and `builder`, core's `preflight`, and the production
+//! transport and adapters by type. The two `#[expect]` sites below, one per door call, are
+//! listed in `LINT_EXCEPTIONS` in `scripts/test_ratchet.py`.
 //!
 //! # There are exactly three methods, and each is a whole capability
 //!
@@ -43,7 +45,7 @@ use futures_util_shim::BoxFuture;
 use microvms_core::control::ControlPlane;
 use microvms_core::prelude::*;
 use microvms_core::sandbox::Sandbox;
-use microvms_core::session::Session;
+use microvms_core::session::{Session, SessionBuilder};
 use microvms_core::{Error, ErrorKind, Region};
 
 /// A boxed future, spelled locally rather than by depending on `futures-util`.
@@ -177,9 +179,31 @@ pub trait CoreSeam: Send + Sync {
 /// The production seam.
 pub struct AwsSeam;
 
+// The two door calls, each alone in a function that carries its own `#[expect]`. An `expect`
+// on the `impl` below would also turn off the transport and environment bans for every line of
+// it, so a `std::env::var` or a hand-built `Call` added to a seam method would pass lint.
+
+/// Core's production control plane for `region`.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the one door to AWS: the CLI's clippy.toml refuses core's constructors everywhere else"
+)]
+async fn production_plane(region: Region) -> Result<ControlPlane, Error> {
+    ControlPlane::new(region).await
+}
+
+/// Core's session builder over the production HTTP backend.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the one door to AWS: the CLI's clippy.toml refuses core's constructors everywhere else"
+)]
+fn production_session(endpoint: String, agent_token: String) -> SessionBuilder {
+    Session::builder(endpoint, agent_token)
+}
+
 impl CoreSeam for AwsSeam {
     fn control_plane(&self, region: Region) -> BoxFuture<'_, Result<ControlPlane, Error>> {
-        Box::pin(async move { ControlPlane::new(region).await })
+        Box::pin(production_plane(region))
     }
 
     fn open_sandbox(
@@ -188,7 +212,7 @@ impl CoreSeam for AwsSeam {
         port: Option<u16>,
     ) -> BoxFuture<'_, Result<Sandbox, Error>> {
         Box::pin(async move {
-            let mut plane = ControlPlane::new(region).await?;
+            let mut plane = production_plane(region).await?;
             if let Some(port) = port {
                 // `?` rather than a check in the CLI: `--port 0` is refused by core against the
                 // model's `min: 1`, and a second message here would be a second message to keep
@@ -208,7 +232,7 @@ impl CoreSeam for AwsSeam {
         Box::pin(async move {
             // The minter goes through the same `ControlPlane` the launch path uses, so an
             // attached session mints proxy tokens exactly as a launched one does (TRAP-9).
-            let mut plane = ControlPlane::new(region).await?;
+            let mut plane = production_plane(region).await?;
             if let Some(port) = attach.port {
                 plane = plane.with_port(port)?;
             }
@@ -217,7 +241,7 @@ impl CoreSeam for AwsSeam {
                 control: Arc::new(plane),
                 microvm_id: attach.microvm_id,
             });
-            microvms_core::session::Session::builder(attach.endpoint, attach.agent_token)
+            production_session(attach.endpoint, attach.agent_token)
                 .with_minter(minter)
                 .with_port(port)
                 .build()

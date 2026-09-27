@@ -1072,6 +1072,8 @@ pub(crate) fn estimate_run(
 
 /// The warm-pool argument, with its own counter-argument attached.
 #[pyfunction]
+// A literal, not core's `DEFAULT_RESIDENCY_CYCLES`, for the reason `wait_for_state`'s
+// signature gives: the stub would print a named default as `...`.
 #[pyo3(signature = (size, hold_seconds, cycles=1, *, rates=None))]
 pub(crate) fn compare_residency(
     size: PySizeClass,

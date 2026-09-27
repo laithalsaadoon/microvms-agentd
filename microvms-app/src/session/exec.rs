@@ -55,6 +55,12 @@ const RECONNECT_BACKOFF: [Duration; 5] = [
 /// loop.
 pub const DEFAULT_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// The deadline the bindings pass to [`ExecHandle::wait`], [`ExecHandle::wait_and_ack`] and a
+/// one-shot [`Session::run_sync`](super::Session::run_sync) when their caller names none: five
+/// minutes, the Python client's figure. Those methods take a deadline, so core itself never
+/// reads this; it's here so both bindings default to one figure.
+pub const DEFAULT_EXEC_WAIT: Duration = Duration::from_secs(300);
+
 /// How often to re-poll while waiting for an exec to finish.
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 

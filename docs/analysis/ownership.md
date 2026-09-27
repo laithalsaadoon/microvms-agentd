@@ -234,8 +234,8 @@ the bullets name the count. Shares are computed with
   way a schema change is approved, and pair every edit with the `docs/PLATFORM.md` section it
   encodes.
 - `scripts/check-model-drift.py` — `bgagent` automated identity.
-  `scripts/check-model-drift.py:254` and `:266` hold `PINNED_REGIONS` and
-  `PINNED_SIZE_CLASSES` as deliberate hand-maintained copies, and `:57` states they are the
+  `scripts/check-model-drift.py:267` and `:279` hold `PINNED_REGIONS` and
+  `PINNED_SIZE_CLASSES` as deliberate hand-maintained copies, and `:70` states they are the
   second reader for two values no AWS service model publishes; any change to the Rust
   constants has to land in this file in the same commit.
 

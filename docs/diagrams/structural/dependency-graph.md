@@ -158,10 +158,10 @@ included, carry `clap`, `ratatui`, and a multi-thread tokio runtime
 `microvms-cli` takes the maintained crates it needs (`microvms-cli/Cargo.toml:35-128`), and
 nothing polices how many: the manifest's own comment
 states the rule as "dependencies are otherwise welcome" (`microvms-cli/Cargo.toml:25-34`). What is
-under test is the hazard. `microvms-cli/tests/thinness.rs:49` holds `const FORBIDDEN: [&str; 12]`,
+under test is the hazard. `microvms-cli/tests/thinness.rs:54` holds `const FORBIDDEN: [&str; 12]`,
 naming `reqwest`, `hyper`, `hyper-util`, `http`, `aws-config`, `aws-sdk-s3`, `aws-sdk-sts`,
 `aws-sigv4`, `aws-credential-types`, `aws-smithy-runtime`, `rusoto_core`, and `ureq`, and
-`no_direct_dependency_is_a_second_path_to_aws` (`microvms-cli/tests/thinness.rs:96`) reads the
+`no_direct_dependency_is_a_second_path_to_aws` (`microvms-cli/tests/thinness.rs:101`) reads the
 manifest through `cargo metadata` and fails if any of them appears as a normal or dev dependency.
 The earlier allowlist, and the `RETIRED` record of `futures-util` leaving it, were
 removed with it: a cap on the manifest asserted a size, while the denylist asserts the property
@@ -175,9 +175,9 @@ CLI-2 names, that every AWS call goes through `microvms-core`.
   bare `protocol::` path — every reference is qualified through core, as at
   `microvms-cli/src/commands/attached.rs:178`.
 - **Both bindings do have a direct `protocol` edge**, and it is live rather than vestigial:
-  `microvms-py/src/session.rs:73` and `microvms-js/src/session.rs:143` name
+  `microvms-py/src/session.rs:74` and `microvms-js/src/session.rs:144` name
   `protocol::health::Health` directly, and both build `protocol::exec::StartRequest`
-  (`microvms-py/src/session.rs:338`, `microvms-js/src/session.rs:284`). Core's public signatures
+  (`microvms-py/src/session.rs:339`, `microvms-js/src/session.rs:285`). Core's public signatures
   already return these types, so a binding that mapped them without naming the crate would
   re-declare their fields, which is the drift `protocol` was extracted to prevent
   (`microvms-py/Cargo.toml:27-32`, `microvms-js/Cargo.toml:22-25`).

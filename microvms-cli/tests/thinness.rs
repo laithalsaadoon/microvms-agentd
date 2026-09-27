@@ -1,41 +1,46 @@
 // SPDX-License-Identifier: Apache-2.0
-//! **CLI-2's static half.** The CLI reaches AWS through `microvms-core` and through nothing else,
-//! asserted from the manifest and from the source.
+//! **CLI-2's manifest half, and the print-macro scan.** The CLI reaches AWS through
+//! `microvms-core` and through nothing else, asserted from the manifest here and from the source
+//! by the compiler and the ratchet.
 //!
-//! # Two checks
+//! # What's here
 //!
 //! A **denylist** of crates that would mean a second path to AWS or HTTP, read out of
-//! `cargo metadata`, and a source scan. Dependencies are welcome in this crate — a good,
-//! maintained crate beats hand-rolled code, and nothing here polices the manifest's size.
-//! What the manifest must never grow is a crate that can open a socket to AWS or sign a
-//! request without going through `microvms-core`; those are named below, and
-//! `cargo metadata` sees them however they are spelled into the manifest.
+//! `cargo metadata`. Dependencies are welcome in this crate: a good, maintained crate beats
+//! hand-rolled code, and nothing here polices the manifest's size. What the manifest must never
+//! grow is a crate that can open a socket to AWS or sign a request without going through
+//! `microvms-core`; those are named below, and `cargo metadata` sees them however they are
+//! spelled into the manifest.
 //!
-//! The scan catches what a manifest cannot: a control-plane operation invoked through a crate that
-//! *is* fine to depend on. `microvms-core` re-exports plenty; a handler that reached past the
-//! seam into `ControlPlane::new` would add no dependency at all.
+//! A **source scan** for print macros, over the shipping code's tokens with test regions taken
+//! out.
 //!
-//! # The scan matches code, not prose, and that took three attempts
+//! # Where the source half of CLI-2 went
 //!
-//! `test_cli.py:269` records writing this check the naive way first, as a substring search — it
-//! "went red immediately, on a comment explaining *why* a region check is local". A guard that
-//! fires on its own documentation gets deleted, and then the other half is alone. That lesson cost
-//! this file two rounds of its own:
+//! This file used to scan the source for control-plane operation names and core's constructors
+//! as substrings (#273 retired it). A substring can't tell an alias, a glob import or a
+//! fully qualified call from prose, and it read only this crate. Each rule now has the tool that
+//! resolves what it names:
 //!
-//! 1. **Comments.** Stripped, per the Python's lesson.
-//! 2. **String literals.** Not stripped at first, and the guard went red on
-//!    `commands/lifecycle.rs:526` — an *error message* explaining that `CreateMicrovmImage` names an
-//!    artifact which must already be in S3. That is the single most useful sentence in the file and
-//!    the guard wanted it deleted, which is precisely the failure mode the Python names. Now
-//!    stripped too: a control-plane call is an *identifier* in code, never a word in a message.
-//! 3. **Test regions.** Skipped, because `src/guards.rs` scripts a fake control plane and names
-//!    `RunMicrovm` on purpose.
+//! - A transport call, and a core door outside `src/seam.rs`, is a clippy
+//!   `disallowed-methods`/`disallowed-types` entry in `clippy.toml`, which resolves paths the
+//!   way the compiler does. The bindings carry the transport bans too.
+//! - An operation name as a literal is the ratchet's `operation-literal` rule
+//!   (`ratchet/rules/operation-literal.yml`), over the CLI and both bindings.
 //!
-//! What survives all three is the thing actually worth forbidding: a `RunMicrovm` that is a token
-//! the compiler resolves. A CLI cannot invoke an operation without naming it that way, and it
-//! cannot be prevented from *explaining* one.
+//! # The print scan matches code, not prose
 //!
-//! (cli.py line numbers resolve at `git show 'c4d396e^:clients/python/src/microvms_agentd/cli.py'` — the retired oracle.)
+//! `test_cli.py:269` records writing a check like this the naive way first, as a substring
+//! search: it "went red immediately, on a comment explaining *why* a region check is local". A
+//! guard that fires on its own documentation gets deleted. So the scan reads the lexer's tokens:
+//!
+//! 1. **Comments** never reach the token stream.
+//! 2. **String literals** are single tokens the walk doesn't enter, because a message that
+//!    explains a macro isn't a call to one.
+//! 3. **Test regions** are skipped: `src/guards.rs` is test-only, and so is each file's
+//!    `mod tests`.
+//!
+//! (cli.py line numbers resolve at `git show 'c4d396e^:clients/python/src/microvms_agentd/cli.py'`, the retired oracle.)
 
 use std::path::{Path, PathBuf};
 
@@ -125,37 +130,11 @@ fn no_direct_dependency_is_a_second_path_to_aws() {
     }
 }
 
-/// Names that would mean this crate is talking to a service itself.
+/// The files the scan covers, each cut at its test region.
 ///
-/// The control-plane operation names come from the service model; the constructor names are core's
-/// own doors that bypass the seam. Both matter for the same reason: neither adds a dependency, so
-/// the manifest check above cannot see them.
-const FORBIDDEN_IDENTIFIERS: [&str; 14] = [
-    // Control-plane operations. A CLI that named one has grown a second implementation.
-    "CreateMicrovmImage",
-    "RunMicrovm",
-    "GetMicrovm",
-    "SuspendMicrovm",
-    "ResumeMicrovm",
-    "TerminateMicrovm",
-    "CreateMicrovmAuthToken",
-    "CreateMicrovmShellAuthToken",
-    "DeleteMicrovmImage",
-    // Core's own constructors, which reach AWS without the seam. Allowed in `seam.rs` and nowhere
-    // else — that file *is* the seam.
-    "ControlPlane::new",
-    "Sandbox::new",
-    "SignedTransport",
-    "Session::direct",
-    "Session::connect",
-];
-
-/// The files the scan covers, with their contents cut at the test region and stripped of comments.
-///
-/// A file whose *first* item is an inner `#![cfg(test)]` is skipped entirely: it does not ship, and
-/// `src/guards.rs` is exactly that — it scripts a fake control plane, so it names `RunMicrovm` and
-/// `TerminateMicrovm` on purpose. Scanning it would make the guard unsatisfiable for any crate that
-/// also has a behavioral guard, which is the wrong trade.
+/// A file whose own inner attributes include `#![cfg(test)]` is skipped entirely: it does not
+/// ship, and `src/guards.rs` is exactly that. It scripts a fake control plane and captures what a
+/// command writes, none of which is code a user runs.
 ///
 /// The skip is deliberately keyed on the **inner** attribute (`#![cfg(test)]`, whole file) rather
 /// than the outer one (`#[cfg(test)]`, next item), because those are different claims and only the
@@ -183,19 +162,20 @@ fn scannable_sources() -> Vec<(PathBuf, String)> {
         "the skip rule excluded too much; only {} files are scanned",
         scanned.len()
     );
-    // The file floor proves the walk read files; this proves the stripper left their code. A
-    // stripper that blanked everything would pass every scan below, so the seam, which calls
-    // `ControlPlane::new` as code, must still say so after stripping. Its Falsification note is on
-    // the source scan's doc.
+    // The file floor proves the walk read files; this proves the token walk reads their code. A
+    // walk that returned nothing would pass the scan below, so the seam, whose errors are built
+    // with `format!` calls, must still show one. Its Falsification note is on the print-macro
+    // scan's doc.
     let seam = scanned
         .iter()
         .find(|(path, _)| path.file_name().is_some_and(|name| name == "seam.rs"));
     assert!(
-        seam.is_some_and(|(_, source)| source.contains("ControlPlane::new")),
-        "the sentinel failed: src/seam.rs {} after stripping comments and literals, so the scan is \
-         reading blanks",
+        seam.is_some_and(|(_, source)| macro_calls(source)
+            .iter()
+            .any(|(_, name)| name == "format")),
+        "the sentinel failed: src/seam.rs {}, so the scan is reading nothing",
         if seam.is_some() {
-            "no longer contains `ControlPlane::new`"
+            "no longer shows a `format!` call to the token walk"
         } else {
             "isn't among the scanned files"
         },
@@ -221,8 +201,33 @@ fn opens_a_test_region(lines: &[&str], index: usize, line: &str) -> bool {
 }
 
 /// Whether the whole file is test-only, by an inner `#![cfg(test)]` attribute.
+///
+/// Only the file's own inner attributes count, the ones before its first item (`//!` docs lex as
+/// `#![doc = ..]`, so they're among them). An inner attribute further down belongs to the module
+/// or block it opens, so `mod helpers { #![cfg(test)] }` at the end of a handler file gates that
+/// module and nothing else. Matching the line anywhere dropped the whole file from the scan
+/// (#273 review).
 fn is_whole_file_test_module(text: &str) -> bool {
-    text.lines().any(|line| line.trim() == "#![cfg(test)]")
+    use proc_macro2::{Delimiter, TokenTree};
+    let mut trees = lex(text).into_iter();
+    loop {
+        let (
+            Some(TokenTree::Punct(hash)),
+            Some(TokenTree::Punct(bang)),
+            Some(TokenTree::Group(body)),
+        ) = (trees.next(), trees.next(), trees.next())
+        else {
+            return false;
+        };
+        if hash.as_char() != '#' || bang.as_char() != '!' || body.delimiter() != Delimiter::Bracket
+        {
+            return false;
+        }
+        let attribute: String = body.stream().to_string().split_whitespace().collect();
+        if attribute == "cfg(test)" {
+            return true;
+        }
+    }
 }
 
 /// Every `.rs` file under `dir`, recursively.
@@ -240,194 +245,139 @@ fn collect_rust_files(dir: &Path, into: &mut Vec<PathBuf>) {
     }
 }
 
-/// The part of a source file that ships, with `//` comments removed.
+/// The part of a source file that ships: everything before its inline test region.
 ///
-/// Two transformations, and both were learned rather than designed. See the module docs: the
-/// comment strip is `test_cli.py:269`'s lesson, and the test-region cut exists because
-/// `src/guards.rs` legitimately scripts a fake control plane and therefore names `Transport`,
-/// `Call`, and `Reply`.
-///
-/// The cut is at the *first* `#[cfg(test)]` at column zero, and a separate assertion below pins
-/// that each file has at most one — otherwise a file with an inline `#[cfg(test)]` helper near the
-/// top would have almost all of its production code excluded from the scan, silently.
+/// The test-region cut exists because each file's `mod tests` may print and script fakes. The
+/// cut is at the *first* `#[cfg(test)]` at column zero
+/// that opens a module, and a separate assertion below pins that each file has at most one.
+/// Otherwise a file with an inline `#[cfg(test)]` helper near the top would have almost all of its
+/// production code excluded from the scan, silently.
 fn production_region(text: &str) -> String {
     let lines: Vec<&str> = text.lines().collect();
     // The first column-zero `#[cfg(test)]` that introduces an inline test *region* — not one that
     // merely gates a `mod x;` declaration.
     //
-    // The distinction is load-bearing and it is the second defect this file's own guard found in
-    // it: `main.rs` gates `mod guards;` with `#[cfg(test)]` at line 35, so a naive cut there
-    // excluded four hundred lines of dispatcher from the scan and reported a clean pass over the
-    // module declarations. A gated `mod x;` does not begin a test region — the gated file is its
-    // own file, and is either scanned or skipped on its own merits.
+    // It's the second defect this file's own guard found in it: `main.rs` gates `mod guards;`
+    // with `#[cfg(test)]` at line 35, so a naive cut there excluded four hundred lines of
+    // dispatcher from the scan and reported a clean pass over the module declarations. A gated
+    // `mod x;` doesn't begin a test region: the gated file is its own file, and is either
+    // scanned or skipped on its own merits.
     let cut = lines
         .iter()
         .enumerate()
         .find(|(index, line)| opens_a_test_region(&lines, *index, line))
         .map(|(index, _)| index)
         .unwrap_or(usize::MAX);
-    // Then lex what's left, so comments and literals drop out by the language's own rules. Three
-    // hand-rolled scanners before this each lost track of what was a literal; see
-    // `blank_comments_and_literals`.
-    blank_comments_and_literals(&lines[..cut.min(lines.len())].join("\n"))
+    lines[..cut.min(lines.len())].join("\n")
 }
 
-/// The file's code tokens at their own lines and columns, with every literal and comment gone.
-///
-/// Lexed by `proc-macro2`, the compiler's token rules as a library, because every hand-rolled
-/// version of this got a different corner wrong: a `//` inside a literal, a `\"` escape, and last
-/// a `'"'` char literal, which a quote tracker took for an opening delimiter. That one inverted
-/// the rest of the file, so code read as a string and strings read as code, and the source scan
-/// passed a `ControlPlane::new` in a handler (#277 review). A lexer has no such state to lose:
-/// raw strings, byte strings, char literals and lifetimes are all tokens it already knows.
-///
-/// # Why literals are blanked at all
-///
-/// An error message that *explains* `CreateMicrovmImage` (that the artifact must be in S3 before
-/// it, and that the service's rejection would arrive after the upload) is the most useful sentence
-/// on that code path. A guard that demanded its deletion is a guard someone deletes instead, which
-/// is `test_cli.py:269`'s lesson exactly. What CLI-2 forbids is *invoking* an operation, and an
-/// invocation is an identifier the compiler resolves. No literal can be one.
-///
-/// Comments never reach the token stream. Doc comments arrive as `#[doc = "..."]`, whose text is
-/// a literal and so is blanked too. Each line keeps its place, so a failure can still name one.
-/// A file the lexer rejects fails the test rather than being read as empty.
-fn blank_comments_and_literals(text: &str) -> String {
-    let stream: proc_macro2::TokenStream = text.parse().unwrap_or_else(|error| {
-        panic!("the scan couldn't lex a shipping file, and would read nothing from it: {error:?}")
-    });
-    let mut lines: Vec<Vec<char>> = vec![Vec::new(); text.lines().count()];
-    place_tokens(stream, &mut lines);
-    lines
-        .into_iter()
-        .map(|line| line.into_iter().collect::<String>())
-        .collect::<Vec<_>>()
-        .join("\n")
+/// `text` as the compiler's tokens, or a failed test: a file the lexer rejects isn't read as
+/// empty.
+fn lex(text: &str) -> proc_macro2::TokenStream {
+    text.parse().unwrap_or_else(|error| {
+        panic!("the scan couldn't lex a source file, and would read nothing from it: {error:?}")
+    })
 }
 
-/// Writes each identifier, punctuation mark and delimiter of `stream` where it sat in the source.
-fn place_tokens(stream: proc_macro2::TokenStream, lines: &mut [Vec<char>]) {
-    use proc_macro2::{Delimiter, TokenTree};
-    for tree in stream {
-        match tree {
-            TokenTree::Ident(ident) => place(lines, ident.span().start(), &ident.to_string()),
-            TokenTree::Punct(punct) => {
-                place(lines, punct.span().start(), &punct.as_char().to_string());
-            }
-            TokenTree::Literal(_) => {}
-            TokenTree::Group(group) => {
-                let (open, close) = match group.delimiter() {
-                    Delimiter::Parenthesis => ("(", ")"),
-                    Delimiter::Brace => ("{", "}"),
-                    Delimiter::Bracket => ("[", "]"),
-                    Delimiter::None => ("", ""),
-                };
-                place(lines, group.span_open().start(), open);
-                place_tokens(group.stream(), lines);
-                place(lines, group.span_close().start(), close);
+/// Each macro call in `source`, as its 1-based line and the macro's name.
+///
+/// Read from the tokens `proc-macro2` lexes, the compiler's token rules as a library, because
+/// every hand-rolled reading of this source got a corner wrong: a `//` inside a literal, a `\"`
+/// escape, and last a `'"'` char literal, which a quote tracker took for an opening delimiter.
+/// That one inverted the rest of the file, so code read as a string and strings read as code
+/// (#277 review). A lexer has no such state to lose. Then a text match on the stripped source
+/// (`print!(`) passed `print! (..)`, `println! {..}` and `eprintln![..]` (#273 review); a call
+/// is the macro's name and a `!` token, whatever follows.
+///
+/// # Why a macro named in a literal or a comment isn't a call
+///
+/// A message that *names* a print macro, to say why a write goes through `Output` instead, isn't
+/// a write. A guard that demanded its deletion is a guard someone deletes instead, which is
+/// `test_cli.py:269`'s lesson exactly. Comments never reach the token stream, a doc comment
+/// arrives as a `#[doc = "..."]` whose text is a literal, and a literal is one token, so none of
+/// them is walked into.
+fn macro_calls(source: &str) -> Vec<(usize, String)> {
+    use proc_macro2::TokenTree;
+    fn walk(stream: proc_macro2::TokenStream, found: &mut Vec<(usize, String)>) {
+        let mut trees = stream.into_iter().peekable();
+        while let Some(tree) = trees.next() {
+            match tree {
+                TokenTree::Ident(ident) => {
+                    if matches!(trees.peek(), Some(TokenTree::Punct(bang)) if bang.as_char() == '!')
+                    {
+                        found.push((ident.span().start().line, ident.to_string()));
+                    }
+                }
+                TokenTree::Group(group) => walk(group.stream(), found),
+                TokenTree::Punct(_) | TokenTree::Literal(_) => {}
             }
         }
     }
+    let mut found = Vec::new();
+    walk(lex(source), &mut found);
+    found
 }
 
-/// Writes `token` at a 1-based line and a 0-based column, padding the line with spaces.
-fn place(lines: &mut [Vec<char>], at: proc_macro2::LineColumn, token: &str) {
-    let Some(line) = at
-        .line
-        .checked_sub(1)
-        .and_then(|index| lines.get_mut(index))
-    else {
-        return;
-    };
-    for (offset, character) in token.chars().enumerate() {
-        let column = at.column + offset;
-        if line.len() <= column {
-            line.resize(column + 1, ' ');
-        }
-        line[column] = character;
-    }
-}
+/// The macros that write to stdout or stderr and panic when the reader has gone.
+const PRINT_MACROS: [&str; 4] = ["print", "println", "eprint", "eprintln"];
 
-/// The stripper keeps code that follows a quote inside a char literal or a raw string, and still
-/// blanks real literals and comments.
+/// The token walk keeps code that follows a quote inside a char literal or a raw string, reads a
+/// print macro however it's spelled, and doesn't read one named in a literal or a comment.
 ///
-/// A `'"'` read as a string delimiter flips the scanner's state: the code after it is blanked and
-/// the file's next real string is read as code. The hand-rolled scanner this file used to have did
-/// exactly that, and the source scan passed a `ControlPlane::new` placed in `suspend` after a
+/// A `'"'` read as a string delimiter flips a hand-rolled scanner's state: the code after it is
+/// skipped and the file's next real string is read as code. The scanner this file used to have
+/// did exactly that, and the source scan passed a `ControlPlane::new` placed in `suspend` after a
 /// `let _quote = '"';` (#277 review).
 ///
-/// **Falsification**: 2026-09-26. Against the hand-rolled scanner this failed its first assertion,
-/// and making the lexer place literals as tokens fails the `RunMicrovm` one; restored after.
+/// **Falsification**: 2026-09-26, against the hand-rolled scanner this failed. 2026-09-27: a walk
+/// that doesn't enter groups fails it, finding none of the calls in the function body; restored
+/// after.
 #[test]
-fn the_stripper_reads_a_quote_in_a_char_literal_as_a_literal() {
+fn the_scan_reads_a_quote_in_a_char_literal_as_a_literal() {
     let source = r##"fn suspend() {
     let _quote = '"';
-    let plane = ControlPlane::new(region);
-    let message = "RunMicrovm is explained here"; // and GetMicrovm here
-    let _raw = r#"a raw string with a " quote, then SuspendMicrovm"#;
-    let _after = ResumeMicrovm;
+    print! ("a");
+    let message = "println!(\"in a literal\")"; // and eprintln!("in a comment")
+    let _raw = r#"a raw string with a " quote, then eprint!("x")"#;
+    println! {"b"};
+    eprintln!["c"];
+    std::eprint!("d");
 }
 "##;
-    let stripped = blank_comments_and_literals(source);
-    assert!(
-        stripped.contains("ControlPlane::new"),
-        "code after a quote in a char literal or a raw string was blanked:\n{stripped}"
-    );
-    assert!(
-        stripped.contains("ResumeMicrovm"),
-        "code after a raw string holding a quote was blanked:\n{stripped}"
-    );
-    for inside in ["RunMicrovm", "GetMicrovm", "SuspendMicrovm"] {
-        assert!(
-            !stripped.contains(inside),
-            "{inside}, inside a literal or a comment, survived stripping:\n{stripped}"
-        );
-    }
+    let calls = macro_calls(source);
     assert_eq!(
-        stripped.lines().count(),
-        source.lines().count(),
-        "stripping changed the line count, so a failure would name the wrong line"
+        calls,
+        vec![
+            (3, "print".to_string()),
+            (6, "println".to_string()),
+            (7, "eprintln".to_string()),
+            (8, "eprint".to_string()),
+        ],
+        "the walk misread a call, a literal or a comment in:\n{source}"
     );
 }
 
-/// **The source scan.** No shipping line names a control-plane operation or a core constructor
-/// that bypasses the seam.
+/// An inner `#![cfg(test)]` skips a file only when it's among the file's own attributes.
 ///
-/// `seam.rs` is the one exception and it is the point: that file *is* the door, so it is where
-/// `ControlPlane::new` belongs. Every other file reaching for it would be a handler that grew its
-/// own path to AWS — which adds no dependency and is therefore invisible to the manifest check.
-///
-/// **Falsification** — replace the `ctx.seam.control_plane(region)` call in
-/// `commands/lifecycle.rs`'s `suspend` with `ControlPlane::new(region)` and this goes red naming
-/// the file and the identifier. Verified; see the packet's guard proofs.
-///
-/// **Falsification**: 2026-09-26. Making `place` return before it writes a token turned this and
-/// the print-macro scan red with the seam sentinel's message in `scannable_sources`; restored
-/// after. Putting `let _quote = '"';` above that same `ControlPlane::new` in `suspend` also turns
-/// it red now; under the hand-rolled scanner it passed.
+/// **Falsification**: 2026-09-27. With the skip matching the line anywhere in the file (the
+/// version before), the nested-module assertion fails; restored after. Under that version a
+/// `print!` in `suspend` beside a `mod scratch_helpers { #![cfg(test)] }` passed the print scan.
 #[test]
-fn no_shipping_source_line_names_an_operation_or_reaches_past_the_seam() {
-    for (path, source) in scannable_sources() {
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
-        for identifier in FORBIDDEN_IDENTIFIERS {
-            // `seam.rs` holds the three constructors on purpose. It does *not* get an exemption
-            // for the operation names — a seam that named an operation would be one that had
-            // started implementing the protocol.
-            let is_the_seam = name == "seam.rs" && identifier.contains("::");
-            if is_the_seam {
-                continue;
-            }
-            assert!(
-                !source.contains(identifier),
-                "{name} names {identifier} in shipping code. Every AWS call belongs to \
-                 microvms-core and every construction goes through src/seam.rs; a CLI that names \
-                 one has grown a second path to the control plane (CLI-2)."
-            );
-        }
-    }
+fn only_a_file_level_cfg_test_skips_a_file() {
+    let nested = "// SPDX-License-Identifier: Apache-2.0\n//! A handler.\nfn suspend() {}\nmod scratch_helpers {\n    #![cfg(test)]\n}\n";
+    assert!(
+        !is_whole_file_test_module(nested),
+        "an inner attribute on a nested module took the whole file out of the scan"
+    );
+    let whole = "// SPDX-License-Identifier: Apache-2.0\n//! Test-only guards.\n#![allow(dead_code)]\n#![cfg(test)]\n\nuse std::sync::Arc;\n";
+    assert!(
+        is_whole_file_test_module(whole),
+        "a file-level #![cfg(test)] after the module docs wasn't read as test-only"
+    );
+    assert!(
+        !is_whole_file_test_module(""),
+        "an empty file isn't test-only"
+    );
 }
 
 /// Each shipping file opens at most one inline test region, so the scan's cut cannot hide code.
@@ -487,7 +437,11 @@ fn the_scan_cut_cannot_hide_production_code() {
 ///
 /// **Falsification** — 2026-09-24. Restoring `print!("{error}")` for clap's help in `main.rs`
 /// turned this red (and the `@CLI-7` help scenarios in `tests/features/closed_output.feature`);
-/// restored after.
+/// restored after. Making the token walk record nothing turns it red with the seam sentinel's
+/// message in `scannable_sources`, and a `let _quote = '"';` before a `print!` on the same line
+/// still turns it red (under the hand-rolled scanner it passed). 2026-09-27: `print! (..)`,
+/// `println! {..}` and a nested `#![cfg(test)]` beside a `print!` each turn it red (the substring
+/// match and the any-line skip passed all three). All are registry entries.
 #[test]
 fn no_production_code_writes_with_a_print_macro() {
     for (path, source) in scannable_sources() {
@@ -495,19 +449,13 @@ fn no_production_code_writes_with_a_print_macro() {
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
-        for (number, line) in source.lines().enumerate() {
-            if line.trim_start().starts_with("//") {
-                continue;
-            }
-            for macro_name in ["println!(", "print!(", "eprintln!(", "eprint!("] {
-                assert!(
-                    !line.contains(macro_name),
-                    "{name}:{} writes with {macro_name}. Every write goes through Output: a print \
-                     macro panics on a closed reader (CLI-7), and a stray stdout write breaks the \
-                     one-envelope parse (CLI-4).",
-                    number + 1
-                );
-            }
+        for (line, macro_name) in macro_calls(&source) {
+            assert!(
+                !PRINT_MACROS.contains(&macro_name.as_str()),
+                "{name}:{line} writes with {macro_name}!. Every write goes through Output: a print \
+                 macro panics on a closed reader (CLI-7), and a stray stdout write breaks the \
+                 one-envelope parse (CLI-4).",
+            );
         }
     }
 }

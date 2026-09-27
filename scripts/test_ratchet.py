@@ -39,6 +39,7 @@ render_text = RATCHET["render_text"]
 sentinel = RATCHET["sentinel"]
 read_base = RATCHET["read_base"]
 read_base_sets = RATCHET["read_base_sets"]
+read_base_collected = RATCHET["read_base_collected"]
 dump = RATCHET["dump"]
 grown_sets = RATCHET["grown_sets"]
 sets_from = RATCHET["sets_from"]
@@ -68,6 +69,11 @@ BASELINE = [
     ("placement", "microvms-cli -> tar", 260),
     ("subprocess", 'microvms-cli/src/seam.rs: Command::new("aws")', 258),
     ("port-impl", "microvms-cli/src/seam.rs: TokenMinter for PlaneMinter", 270),
+    (
+        "adapter-logic",
+        "microvms-js/src/control.rs: literal-default: options.timeout.unwrap_or(300.0)",
+        273,
+    ),
 ]
 BASELINE_FOUND = found(*((c, k) for c, k, _ in BASELINE))
 
@@ -217,6 +223,48 @@ class RuleTests(unittest.TestCase):
         # The bootstrap: the PR that creates ratchet/drift.json has no base copy to compare with.
         self.assertEqual(compare(BASELINE_FOUND, ratchet(BASELINE), None, "main"), [])
 
+    #: What a base whose ratchet.py predates the adapter-logic collector collects.
+    BEFORE_ADAPTER_LOGIC = ("placement", "subprocess", "port-impl")
+
+    def test_rule_3_is_skipped_for_a_category_the_base_does_not_collect(self):
+        # The bootstrap for a newly collected category: the base's file couldn't record its
+        # findings, so the PR that starts collecting it has to be able to list them.
+        first = (
+            "adapter-logic",
+            "microvms-js/src/exec.rs: literal-default: const DEFAULT_WAIT: f64 = 300.0;",
+            273,
+        )
+        base = ratchet(BASELINE[:3])
+        now = BASELINE_FOUND + found(first[:2])
+        failures = compare(
+            now,
+            ratchet([*BASELINE, first]),
+            base,
+            "main",
+            base_collected=self.BEFORE_ADAPTER_LOGIC,
+        )
+        self.assertEqual(failures, [])
+
+    def test_rule_3_still_applies_to_a_category_the_base_collects(self):
+        # The bootstrap is per category: a category the base collected can't use it, even in
+        # the PR that bootstraps another one.
+        added = ("subprocess", 'microvms-js/src/session.rs: Command::new("gh")', 258)
+        now = BASELINE_FOUND + found(added[:2])
+        failures = compare(
+            now,
+            ratchet([*BASELINE, added]),
+            ratchet(BASELINE[:3]),
+            "main",
+            base_collected=self.BEFORE_ADAPTER_LOGIC,
+        )
+        self.assertEqual(len(failures), 1, failures)
+        self.assertTrue(
+            failures[0].startswith(
+                'not in the base: [subprocess] microvms-js/src/session.rs: Command::new("gh")'
+            ),
+            failures[0],
+        )
+
     def moved(self, old, new, issue=284):
         """compare() after the file re-keys `old` (in the base) as `new` (found now)."""
         base = ratchet([*BASELINE, ("subprocess", old, 284)])
@@ -337,8 +385,8 @@ class RuleTests(unittest.TestCase):
         )
 
     def test_a_category_that_is_not_collected_cannot_carry_entries(self):
-        with self.assertRaisesRegex(SystemExit, "adapter-logic is not collected yet"):
-            ratchet([*BASELINE, ("adapter-logic", "x", 273)])
+        with self.assertRaisesRegex(SystemExit, "parity-gap is not collected yet"):
+            ratchet([*BASELINE, ("parity-gap", "x", 271)])
 
 
 class FileTests(unittest.TestCase):
@@ -386,7 +434,6 @@ class FileTests(unittest.TestCase):
 
     def test_the_summary_says_not_collected_rather_than_zero(self):
         rows = summary(ratchet(BASELINE), ratchet(BASELINE))
-        self.assertEqual(rows["adapter-logic"]["status"], "not collected")
         self.assertEqual(rows["parity-gap"]["status"], "not collected")
         self.assertIsNone(rows["parity-gap"]["entries"])
         self.assertEqual(rows["placement"]["entries"], 1)
@@ -394,6 +441,20 @@ class FileTests(unittest.TestCase):
         line = next(line for line in text.splitlines() if line.startswith("parity-gap"))
         self.assertIn("not collected", line)
         self.assertNotIn("0", line)
+
+    def test_the_summary_says_new_for_a_category_the_base_does_not_collect(self):
+        rows = summary(
+            ratchet(BASELINE),
+            ratchet(BASELINE[:3]),
+            base_collected=("placement", "subprocess", "port-impl"),
+        )
+        self.assertIsNone(rows["adapter-logic"]["base"])
+        line = next(
+            line
+            for line in render_text(rows).splitlines()
+            if line.startswith("adapter-logic")
+        )
+        self.assertIn("new", line)
 
     def test_the_summary_reports_the_change_from_the_base(self):
         base = ratchet([*BASELINE, ("placement", "microvms-cli -> sha2", 260)])
@@ -862,6 +923,255 @@ class MacroTests(unittest.TestCase):
         )
 
 
+#: The adapter-logic fixture, in semgrep's rule-test style: each `ruleid:` comment sits above a
+#: line one of the two rules must report, and each `ok:` above one it must not. The tests below
+#: list the keys by hand, one test per pattern alternative, so deleting an alternative from a
+#: rule fails the test named after it.
+ADAPTER_LOGIC_FORMS = """\
+    // ruleid: literal-default
+    const DEFAULT_WAIT: f64 = 300.0;
+    // ruleid: literal-default
+    pub(crate) const DEFAULT_PORT: u16 = 9000;
+    // ok: literal-default (a zero default)
+    const DEFAULT_OFFSET: f64 = 0.0;
+    // ok: literal-default (derived from a lower layer's constant)
+    const DEFAULT_CLIENT_GRACE_SEC: f64 = DEFAULT_CLIENT_GRACE.as_secs_f64();
+    // ok: literal-default (a limit, not a default)
+    const MAX_PACK_MEMBERS: usize = 100_000;
+    // ruleid: literal-default
+    const RESIZE_POLL_INTERVAL: Duration = Duration::from_millis(500);
+    // ruleid: literal-default (a static)
+    static DEFAULT_READY: f64 = 120.0;
+    // ruleid: literal-default (named for a wait, with no DEFAULT_ prefix)
+    const READY_WAIT_SEC: u64 = 120;
+    // ruleid: literal-default (a float, whatever its name)
+    const LIMIT_S: f64 = 300.0;
+    // ruleid: literal-default (a literal inside the value)
+    const DEFAULT_WAITS: [f64; 2] = [300.0, 5.0];
+    // ok: literal-default (a name that isn't a wait, of an integer type)
+    const MANIFEST_VERSION: u32 = 1;
+
+    pub fn operations(id: &str) {
+        // ruleid: operation-literal
+        let _ = Call::post_json("RunMicrovm", "/microvms");
+        // ruleid: operation-literal
+        let _ = OPS["GetMicrovm"];
+        // ruleid: operation-literal
+        let _ = vec![r"ListMicrovmImageVersions"];
+        // ruleid: operation-literal (a `Call { .. }` literal, which clippy's type ban can't see)
+        let _ = Call { operation: "SuspendMicrovm", path: String::new() };
+        // ok: operation-literal (prose that names an operation)
+        let _ = format!("RunMicrovm failed for {id}");
+        // ok: operation-literal (a longer name)
+        let _ = "GetMicrovmImages";
+        // ok: operation-literal (an operation named in a comment) GetMicrovm
+    }
+
+    pub async fn defaults(options: Options, delete_timeout: f64, count: u32) {
+        // ruleid: literal-default
+        let _ = tokio::time::timeout(Duration::from_secs(5), health()).await;
+        // ruleid: literal-default
+        let _ = std::time::Duration::from_secs_f64(2.5);
+        // ruleid: literal-default
+        let _ = options.timeout.unwrap_or(300.0);
+        // ruleid: literal-default
+        let _ = crate::numbers::optional_u32(cycles)
+            .map_err(js)?
+            .unwrap_or(1);
+        // ruleid: literal-default
+        let _ = plane.wait_for_state(&id, &["TERMINATED"], &[], wait_opts(300.0));
+        // ruleid: literal-default
+        let _ = Duration::from_secs_f64(delete_timeout.max(1.0) + 30.0);
+        // ruleid: literal-default
+        let _ = 5.0 + options.deadline;
+        // ruleid: literal-default (an aliased Duration)
+        let _ = D::from_secs(7);
+        // ruleid: literal-default
+        let _ = Duration::new(8, 0);
+        // ruleid: literal-default
+        let _ = options.wait.map_or(300.0, |t| t);
+        // ruleid: literal-default
+        let _ = options.poll.get_or_insert(5.0);
+        // ruleid: literal-default
+        let _ = options.timeout.unwrap_or_else(|| 300.0);
+        // ruleid: literal-default
+        let _ = options.poll.map_or_else(|| { 5.0 }, |t| t);
+        // ok: literal-default (zero, a computed value, a name, not a number, not a timeout)
+        let _ = Duration::from_secs(0);
+        let _ = options.offset.unwrap_or(0.0);
+        let _ = options.cycles.unwrap_or(0);
+        let _ = Duration::from_secs_f64(options.timeout.max(0.0));
+        let _ = options.timeout.unwrap_or(fallback);
+        let _ = options.name.unwrap_or("x");
+        let _ = count + 1;
+        let _ = Buffer::new(5);
+        let _ = options.timeout.unwrap_or_else(|| fallback);
+        let _ = options.count.map_or(0, |c| c + 1);
+    }
+
+    #[cfg(test)]
+    mod tests {
+        // ok: operation-literal, literal-default (test code)
+        fn f() {
+            let _ = Call::get("ListMicrovms", "/microvms");
+            let _ = Duration::from_secs(5);
+        }
+    }
+
+    #[cfg(test)]
+    mod guards;
+"""
+
+
+class AdapterLogicTests(unittest.TestCase):
+    """The adapter-logic collector: `operation-literal` and `literal-default` (#273)."""
+
+    @classmethod
+    def setUpClass(cls):
+        class Cleanups:
+            addCleanup = cls.addClassCleanup
+
+        ws = (
+            Workspace(Cleanups())
+            .crate("kernel", files={"src/lib.rs": KERNEL_LOGIC})
+            .crate(
+                "adapter",
+                deps='kernel = { path = "../kernel" }',
+                files={
+                    "src/lib.rs": ADAPTER_LOGIC_FORMS,
+                    # Test-only by its parent's declaration, like the CLI's guards.rs.
+                    "src/guards.rs": 'fn f() { let _ = "TerminateMicrovm"; }\n',
+                },
+            )
+            .placement('[adapter]\nnormal = ["kernel"]\n')
+        )
+        cls.found = keys(collect(ws.scope()), "adapter-logic")
+
+    def assertFound(self, *texts, rule):
+        for text in texts:
+            self.assertIn(f"adapter/src/lib.rs: {rule}: {text}", self.found)
+
+    def test_an_operation_literal_is_flagged_in_a_call_an_index_and_a_macro(self):
+        self.assertFound(
+            '"RunMicrovm"',
+            '"GetMicrovm"',
+            'r"ListMicrovmImageVersions"',
+            rule="operation-literal",
+        )
+
+    def test_an_operation_in_a_struct_literal_is_flagged(self):
+        # The backstop for the clippy bans: a struct expression isn't a type position, so
+        # `disallowed-types` doesn't report a hand-built `Call`, but its operation is a literal.
+        self.assertFound('"SuspendMicrovm"', rule="operation-literal")
+
+    def test_a_default_const_is_flagged(self):
+        self.assertFound(
+            "const DEFAULT_WAIT: f64 = 300.0;",
+            "pub(crate) const DEFAULT_PORT: u16 = 9000;",
+            rule="literal-default",
+        )
+
+    def test_a_static_a_named_const_a_float_and_a_nested_literal_are_flagged(self):
+        self.assertFound(
+            "static DEFAULT_READY: f64 = 120.0;",
+            "const READY_WAIT_SEC: u64 = 120;",
+            "const LIMIT_S: f64 = 300.0;",
+            "const DEFAULT_WAITS: [f64; 2] = [300.0, 5.0];",
+            rule="literal-default",
+        )
+
+    def test_an_aliased_duration_and_duration_new_are_flagged(self):
+        self.assertFound(
+            "D::from_secs(7)", "Duration::new(8, 0)", rule="literal-default"
+        )
+
+    def test_a_map_or_or_a_closure_fallback_is_flagged(self):
+        self.assertFound(
+            "options.wait.map_or(300.0, |t| t)",
+            "options.poll.get_or_insert(5.0)",
+            "options.timeout.unwrap_or_else(|| 300.0)",
+            "options.poll.map_or_else(|| { 5.0 }, |t| t)",
+            rule="literal-default",
+        )
+
+    def test_a_duration_from_a_literal_is_flagged(self):
+        self.assertFound(
+            "Duration::from_millis(500)",
+            "Duration::from_secs(5)",
+            "std::time::Duration::from_secs_f64(2.5)",
+            rule="literal-default",
+        )
+
+    def test_an_unwrap_or_literal_is_flagged(self):
+        self.assertFound(
+            "options.timeout.unwrap_or(300.0)",
+            "crate::numbers::optional_u32(cycles).map_err(js)?.unwrap_or(1)",
+            rule="literal-default",
+        )
+
+    def test_a_wait_opts_literal_is_flagged(self):
+        self.assertFound("wait_opts(300.0)", rule="literal-default")
+
+    def test_a_literal_added_to_a_timeout_is_flagged(self):
+        self.assertFound(
+            "delete_timeout.max(1.0) + 30.0",
+            "5.0 + options.deadline",
+            rule="literal-default",
+        )
+
+    def test_the_fixture_reports_exactly_its_ruleid_lines(self):
+        # Every `ok:` line is out: prose, a longer name, a comment, zero, a computed value, a
+        # name that isn't a default, test code, a test-only file and a crate below the adapters.
+        self.assertEqual(
+            self.found,
+            sorted(
+                [
+                    'adapter/src/lib.rs: operation-literal: "GetMicrovm"',
+                    'adapter/src/lib.rs: operation-literal: "RunMicrovm"',
+                    'adapter/src/lib.rs: operation-literal: r"ListMicrovmImageVersions"',
+                    'adapter/src/lib.rs: operation-literal: "SuspendMicrovm"',
+                    "adapter/src/lib.rs: literal-default: const DEFAULT_WAIT: f64 = 300.0;",
+                    "adapter/src/lib.rs: literal-default: "
+                    "pub(crate) const DEFAULT_PORT: u16 = 9000;",
+                    "adapter/src/lib.rs: literal-default: Duration::from_millis(500)",
+                    "adapter/src/lib.rs: literal-default: Duration::from_secs(5)",
+                    "adapter/src/lib.rs: literal-default: "
+                    "std::time::Duration::from_secs_f64(2.5)",
+                    "adapter/src/lib.rs: literal-default: options.timeout.unwrap_or(300.0)",
+                    "adapter/src/lib.rs: literal-default: "
+                    "crate::numbers::optional_u32(cycles).map_err(js)?.unwrap_or(1)",
+                    "adapter/src/lib.rs: literal-default: wait_opts(300.0)",
+                    "adapter/src/lib.rs: literal-default: delete_timeout.max(1.0) + 30.0",
+                    "adapter/src/lib.rs: literal-default: 5.0 + options.deadline",
+                    "adapter/src/lib.rs: literal-default: static DEFAULT_READY: f64 = 120.0;",
+                    "adapter/src/lib.rs: literal-default: const READY_WAIT_SEC: u64 = 120;",
+                    "adapter/src/lib.rs: literal-default: const LIMIT_S: f64 = 300.0;",
+                    "adapter/src/lib.rs: literal-default: "
+                    "const DEFAULT_WAITS: [f64; 2] = [300.0, 5.0];",
+                    "adapter/src/lib.rs: literal-default: D::from_secs(7)",
+                    "adapter/src/lib.rs: literal-default: Duration::new(8, 0)",
+                    "adapter/src/lib.rs: literal-default: options.wait.map_or(300.0, |t| t)",
+                    "adapter/src/lib.rs: literal-default: options.poll.get_or_insert(5.0)",
+                    "adapter/src/lib.rs: literal-default: "
+                    "options.timeout.unwrap_or_else(|| 300.0)",
+                    "adapter/src/lib.rs: literal-default: "
+                    "options.poll.map_or_else(|| { 5.0 }, |t| t)",
+                ]
+            ),
+        )
+
+
+#: A crate below the adapters, where operation literals and defaults belong. Nothing here is
+#: adapter logic.
+KERNEL_LOGIC = """\
+    const DEFAULT_READY_TIMEOUT: f64 = 120.0;
+    pub fn run() {
+        let _ = Call::post_json("RunMicrovm", "/microvms");
+        let _ = Duration::from_secs(5);
+    }
+"""
+
+
 class SentinelTests(unittest.TestCase):
     def test_the_checked_in_sentinel_matches_its_expectation(self):
         self.assertEqual(sentinel(RATCHET["SENTINEL"]), [])
@@ -870,7 +1180,7 @@ class SentinelTests(unittest.TestCase):
         ws = Workspace(self).crate("adapter").placement("[adapter]\nnormal = []\n")
         empty = ws.scope()
         failures = sentinel(empty)
-        for category in ("placement", "subprocess", "port-impl"):
+        for category in ("placement", "subprocess", "port-impl", "adapter-logic"):
             self.assertTrue(
                 any(
                     f.startswith(f"sentinel: the {category} collector found nothing")
@@ -1056,12 +1366,349 @@ LINT_EXCEPTIONS = {
     ("microvms-cli/src/main.rs", "clippy::disallowed_methods"): 1,
     # `put_via_aws_cli`, which #258 deletes.
     ("microvms-cli/src/seam.rs", "clippy::disallowed_types"): 1,
+    # The one door to AWS: `production_plane` and `production_session`, each holding one call
+    # to a core constructor. Not the whole `impl CoreSeam for AwsSeam`, which would turn the
+    # transport and environment bans off for every line of it.
+    ("microvms-cli/src/seam.rs", "clippy::disallowed_methods"): 2,
+    # The test-only guards: each fake seam builds a plane or session over a scripted transport,
+    # and each scripted transport names `Call`. `cfg(test)`, so none of it ships.
+    ("microvms-cli/src/guards.rs", "clippy::disallowed_methods"): 7,
+    ("microvms-cli/src/guards.rs", "clippy::disallowed_types"): 4,
     # `doctor`'s `terraform output`, a subprocess decision.
     ("microvms-cli/src/commands/doctor.rs", "clippy::disallowed_types"): 1,
     # Each binding's name store, the one place it composes core's process lookup.
     ("microvms-py/src/names.rs", "clippy::disallowed_methods"): 1,
     ("microvms-js/src/names.rs", "clippy::disallowed_methods"): 1,
 }
+
+# What each adapter's `clippy.toml` bans, by path. Every adapter refuses a subprocess, a direct
+# environment read, and the control plane's transport (#273): a wire call built in an adapter
+# is one the other surfaces don't make, with retries they don't share. The CLI alone refuses
+# core's doors too, since it reaches AWS through `src/seam.rs` and nothing else; the bindings
+# call those doors legitimately. Paths are core's re-exports.
+SUBPROCESS_TYPES = ["std::process::Command", "tokio::process::Command"]
+ENV_METHODS = [
+    "std::env::var",
+    "std::env::var_os",
+    "std::env::vars",
+    "std::env::vars_os",
+    "microvms_core::env::process",
+]
+TRANSPORT = "microvms_core::control::transport"
+TRANSPORT_TYPES = [f"{TRANSPORT}::Call"]
+TRANSPORT_METHODS = [
+    *(
+        f"{TRANSPORT}::Call::{name}"
+        for name in ("get", "post_json", "patch_json", "post_empty", "delete")
+    ),
+    f"{TRANSPORT}::send_with_retry",
+    f"{TRANSPORT}::send_accepting",
+    f"{TRANSPORT}::Transport::send",
+    "microvms_core::control::ControlPlane::from_ports",
+    "microvms_core::prelude::ControlPlaneExt::with_transport",
+]
+DOOR_TYPES = [
+    f"{TRANSPORT}::SignedTransport",
+    "microvms_core::control::SignedBuildServices",
+    "microvms_core::session::http::ReqwestBackend",
+    "microvms_core::adapters::SystemAdapters",
+]
+# Every public core function that resolves credentials and builds a signed plane or session.
+DOOR_METHODS = [
+    "microvms_core::prelude::ControlPlaneExt::new",
+    "microvms_core::prelude::SandboxExt::new",
+    "microvms_core::prelude::SandboxExt::adopt_in",
+    "microvms_core::prelude::SandboxExt::from_name",
+    "microvms_core::prelude::AgentVmExt::adopt_in",
+    "microvms_core::prelude::AgentVmExt::from_name",
+    "microvms_core::prelude::SessionExt::connect",
+    "microvms_core::prelude::SessionExt::direct",
+    "microvms_core::prelude::SessionExt::attach",
+    "microvms_core::session::Session::builder",
+    "microvms_core::preflight::preflight",
+    "microvms_core::adapters::Adapters::http_backend",
+    "microvms_core::adapters::Adapters::build_services",
+]
+
+
+def banned(adapter):
+    """`(types, methods)` the adapter's `clippy.toml` must list, exactly."""
+    cli = adapter == "microvms-cli"
+    types = SUBPROCESS_TYPES + TRANSPORT_TYPES + (DOOR_TYPES if cli else [])
+    methods = ENV_METHODS + TRANSPORT_METHODS + (DOOR_METHODS if cli else [])
+    return sorted(types), sorted(methods)
+
+
+# A stand-in for core with the real one's paths, so the adapter's `clippy.toml` resolves in a
+# throwaway crate the way it does in the workspace. The transport and the doors are defined in
+# stand-ins for the app and the edges and reach core through `pub use`, globbed where core
+# globs, because that's the shape clippy has to see through.
+STAND_IN_APP = """\
+    pub mod adapters {
+        pub trait Adapters {
+            fn http_backend(&self, endpoint: &str) -> u16;
+            fn build_services(&self, region: crate::control::Region) -> u16;
+        }
+    }
+
+    pub mod control {
+        use std::sync::Arc;
+
+        pub struct Region;
+
+        pub struct ControlPlane;
+
+        impl ControlPlane {
+            pub fn from_ports(_transport: Arc<dyn transport::Transport>, _region: Region) -> Self {
+                ControlPlane
+            }
+        }
+
+        pub mod transport {
+            pub trait Transport: Send + Sync {
+                fn send(&self, call: Call) -> u16;
+            }
+
+            pub struct Call {
+                pub operation: &'static str,
+                pub path: String,
+            }
+
+            impl Call {
+                pub fn get(operation: &'static str, path: &str) -> Self {
+                    Call { operation, path: path.into() }
+                }
+                pub fn post_json(operation: &'static str, path: &str, _body: &str) -> Self {
+                    Call { operation, path: path.into() }
+                }
+                pub fn patch_json(operation: &'static str, path: &str, _body: &str) -> Self {
+                    Call { operation, path: path.into() }
+                }
+                pub fn post_empty(operation: &'static str, path: &str) -> Self {
+                    Call { operation, path: path.into() }
+                }
+                pub fn delete(operation: &'static str, path: &str) -> Self {
+                    Call { operation, path: path.into() }
+                }
+            }
+
+            pub fn send_with_retry(_transport: &dyn Transport, _call: Call) {}
+
+            pub fn send_accepting(_transport: &dyn Transport, _call: Call, _accept: &[u16]) {}
+        }
+    }
+
+    pub mod sandbox {
+        pub struct Sandbox;
+    }
+
+    pub mod session {
+        pub struct Session;
+
+        pub struct SessionBuilder;
+
+        impl Session {
+            pub fn builder(_endpoint: &str, _agent_token: &str) -> SessionBuilder {
+                SessionBuilder
+            }
+        }
+    }
+"""
+
+STAND_IN_EDGES = """\
+    pub mod adapters {
+        use microvms_app::control::Region;
+
+        pub struct SystemAdapters;
+
+        impl microvms_app::adapters::Adapters for SystemAdapters {
+            fn http_backend(&self, _endpoint: &str) -> u16 {
+                200
+            }
+            fn build_services(&self, _region: Region) -> u16 {
+                200
+            }
+        }
+    }
+
+    pub mod control {
+        use microvms_app::control::Region;
+
+        pub struct SignedBuildServices {
+            _region: Region,
+        }
+
+        impl SignedBuildServices {
+            pub fn new(region: Region) -> Self {
+                SignedBuildServices { _region: region }
+            }
+        }
+
+        pub mod transport {
+            use microvms_app::control::Region;
+
+            pub struct SignedTransport {
+                _region: Region,
+            }
+
+            impl SignedTransport {
+                pub fn new(region: Region) -> Self {
+                    SignedTransport { _region: region }
+                }
+            }
+
+            impl microvms_app::control::transport::Transport for SignedTransport {
+                fn send(&self, _call: microvms_app::control::transport::Call) -> u16 {
+                    200
+                }
+            }
+        }
+    }
+
+    pub mod session {
+        pub mod http {
+            pub struct ReqwestBackend {
+                _base_url: String,
+            }
+
+            impl ReqwestBackend {
+                pub fn new(base_url: &str) -> Self {
+                    ReqwestBackend { _base_url: base_url.into() }
+                }
+            }
+        }
+    }
+"""
+
+STAND_IN_CORE = """\
+    pub use microvms_app::sandbox;
+
+    pub mod adapters {
+        pub use microvms_app::adapters::*;
+        pub use microvms_edges::adapters::SystemAdapters;
+    }
+
+    pub mod agents {
+        pub struct AgentVm;
+    }
+
+    pub mod preflight {
+        pub fn preflight(_region: Option<crate::control::Region>) -> bool {
+            true
+        }
+    }
+
+    pub mod env {
+        pub fn process(name: &str) -> Option<String> {
+            std::env::var(name).ok()
+        }
+    }
+
+    pub mod control {
+        pub use microvms_app::control::*;
+        pub use microvms_edges::control::SignedBuildServices;
+
+        pub mod transport {
+            pub use microvms_app::control::transport::*;
+            pub use microvms_edges::control::transport::SignedTransport;
+        }
+    }
+
+    pub mod session {
+        pub use microvms_app::session::*;
+
+        pub mod http {
+            pub use microvms_edges::session::http::ReqwestBackend;
+        }
+    }
+
+    pub mod prelude {
+        use std::sync::Arc;
+
+        use crate::agents::AgentVm;
+        use crate::control::transport::Transport;
+        use crate::control::{ControlPlane, Region};
+        use crate::sandbox::Sandbox;
+        use crate::session::Session;
+
+        pub trait ControlPlaneExt: Sized {
+            fn new(region: Region) -> Self;
+            fn with_transport(transport: Arc<dyn Transport>, region: Region) -> Self;
+        }
+
+        impl ControlPlaneExt for ControlPlane {
+            fn new(region: Region) -> Self {
+                let signed = microvms_edges::control::transport::SignedTransport::new(Region);
+                ControlPlane::from_ports(Arc::new(signed), region)
+            }
+            fn with_transport(transport: Arc<dyn Transport>, region: Region) -> Self {
+                ControlPlane::from_ports(transport, region)
+            }
+        }
+
+        pub trait SandboxExt: Sized {
+            fn new(region: Region) -> Self;
+            fn adopt_in(region: Region, microvm_id: &str) -> Self;
+            fn from_name(name: &str, region: Option<Region>) -> Self;
+        }
+
+        impl SandboxExt for Sandbox {
+            fn new(_region: Region) -> Self {
+                Sandbox
+            }
+            fn adopt_in(_region: Region, _microvm_id: &str) -> Self {
+                Sandbox
+            }
+            fn from_name(_name: &str, _region: Option<Region>) -> Self {
+                Sandbox
+            }
+        }
+
+        pub trait AgentVmExt: Sized {
+            fn adopt_in(region: Region, microvm_id: &str) -> Self;
+            fn from_name(name: &str, region: Option<Region>) -> Self;
+        }
+
+        impl AgentVmExt for AgentVm {
+            fn adopt_in(_region: Region, _microvm_id: &str) -> Self {
+                AgentVm
+            }
+            fn from_name(_name: &str, _region: Option<Region>) -> Self {
+                AgentVm
+            }
+        }
+
+        pub trait SessionExt: Sized {
+            fn connect(endpoint: &str) -> Self;
+            fn attach(endpoint: &str, microvm_id: &str) -> Self;
+            fn direct(endpoint: &str, agent_token: &str) -> Self;
+        }
+
+        impl SessionExt for Session {
+            fn connect(_endpoint: &str) -> Self {
+                Session
+            }
+            fn attach(_endpoint: &str, _microvm_id: &str) -> Self {
+                Session
+            }
+            fn direct(_endpoint: &str, _agent_token: &str) -> Self {
+                Session
+            }
+        }
+    }
+"""
+
+# One clippy diagnostic of a ban: the path it names and the file it points at.
+DISALLOWED = re.compile(
+    r"^(?:error|warning): use of a disallowed (?:method|type) `([^`]+)`.*\n\s*--> ([^:\n]+):",
+    re.MULTILINE,
+)
+
+
+def disallowed(stderr):
+    """Each `(banned path, file name)` clippy reported."""
+    return {(path, Path(file).name) for path, file in DISALLOWED.findall(stderr)}
+
 
 # The lint names an attribute could use to turn the adapter rules off: the two lints and the
 # groups they belong to.
@@ -1088,12 +1735,13 @@ def lint_levels(text):
 
 
 class AdapterLintTests(unittest.TestCase):
-    """Each driving adapter's `clippy.toml` refuses a subprocess and a direct environment read.
+    """Each driving adapter's `clippy.toml` refuses a subprocess, a direct environment read and
+    the control plane's transport, and the CLI's refuses core's doors.
 
     The fault cases copy the adapter's real `clippy.toml` into a throwaway crate and run real
     clippy over it, because the rule's paths only mean something to the toolchain: a path
-    clippy can't resolve is silently ignored. Cargo runs from the repository root so rustup
-    picks the toolchain `rust-toolchain.toml` pins, clippy included.
+    clippy can't resolve is only a warning, and bans nothing. Cargo runs from the repository
+    root so rustup picks the toolchain `rust-toolchain.toml` pins, clippy included.
     """
 
     def roots(self):
@@ -1112,24 +1760,32 @@ class AdapterLintTests(unittest.TestCase):
     def clippy(self, adapter, files):
         """Real clippy over a crate that carries `adapter`'s `clippy.toml` and `files`.
 
-        The crate depends on a stand-in `microvms-core` whose `env::process` has the real
-        one's path, so the ban on calling it resolves the way it does in the workspace.
+        The crate depends on the stand-in core above, so every banned path resolves the way it
+        does in the workspace, and the run asserts none of them failed to.
         """
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        core = Path(tmp.name) / "microvms-core"
-        (core / "src").mkdir(parents=True)
-        (core / "Cargo.toml").write_text(
-            '[package]\nname = "microvms-core"\nversion = "0.0.0"\nedition = "2024"\n'
-            "publish = false\n\n[workspace]\n"
-        )
-        (core / "src" / "lib.rs").write_text(
-            "pub mod env {\n"
-            "    pub fn process(name: &str) -> Option<String> {\n"
-            "        std::env::var(name).ok()\n"
-            "    }\n"
-            "}\n"
-        )
+        for name, deps, source in (
+            ("microvms-app", "", STAND_IN_APP),
+            (
+                "microvms-edges",
+                'microvms-app = { path = "../microvms-app" }\n',
+                STAND_IN_EDGES,
+            ),
+            (
+                "microvms-core",
+                'microvms-app = { path = "../microvms-app" }\n'
+                'microvms-edges = { path = "../microvms-edges" }\n',
+                STAND_IN_CORE,
+            ),
+        ):
+            stand_in = Path(tmp.name) / name
+            (stand_in / "src").mkdir(parents=True)
+            (stand_in / "Cargo.toml").write_text(
+                f'[package]\nname = "{name}"\nversion = "0.0.0"\nedition = "2024"\n'
+                f"publish = false\n\n[workspace]\n\n[dependencies]\n{deps}"
+            )
+            (stand_in / "src" / "lib.rs").write_text(textwrap.dedent(source))
         crate = Path(tmp.name) / adapter
         (crate / "src").mkdir(parents=True)
         (crate / "Cargo.toml").write_text(
@@ -1142,7 +1798,7 @@ class AdapterLintTests(unittest.TestCase):
             (crate / path).write_text(textwrap.dedent(text))
         env = {k: v for k, v in os.environ.items() if k != "CLIPPY_CONF_DIR"}
         env["CARGO_TARGET_DIR"] = str(Path(tmp.name) / "target")
-        return subprocess.run(
+        out = subprocess.run(
             [
                 "cargo",
                 "clippy",
@@ -1156,6 +1812,8 @@ class AdapterLintTests(unittest.TestCase):
             capture_output=True,
             text=True,
         )
+        self.assertNotIn("does not refer to a reachable", out.stderr)
+        return out
 
     def test_every_adapter_root_denies_the_disallowed_lints(self):
         for adapter, root in self.roots().items():
@@ -1163,26 +1821,19 @@ class AdapterLintTests(unittest.TestCase):
                 lines = root.read_text(encoding="utf-8").splitlines()
                 self.assertTrue(DENY in lines, f"{root} lacks {DENY}")
 
-    def test_every_adapter_bans_both_commands_and_every_env_read(self):
+    def test_every_adapter_bans_exactly_its_listed_paths(self):
         for adapter in RATCHET["REPO"].adapters:
             with self.subTest(adapter=adapter):
                 config = tomllib.loads((ROOT / adapter / "clippy.toml").read_text())
-                self.assertEqual(
-                    sorted(t["path"] for t in config["disallowed-types"]),
-                    ["std::process::Command", "tokio::process::Command"],
-                )
-                self.assertEqual(
-                    sorted(m["path"] for m in config["disallowed-methods"]),
-                    [
-                        "microvms_core::env::process",
-                        "std::env::var",
-                        "std::env::var_os",
-                        "std::env::vars",
-                        "std::env::vars_os",
-                    ],
-                )
-                for item in config["disallowed-types"] + config["disallowed-methods"]:
+                # `get`, so a file that lost a table fails as a mismatch, not a KeyError.
+                listed_types = config.get("disallowed-types", [])
+                listed_methods = config.get("disallowed-methods", [])
+                types, methods = banned(adapter)
+                self.assertEqual(sorted(t["path"] for t in listed_types), types)
+                self.assertEqual(sorted(m["path"] for m in listed_methods), methods)
+                for item in listed_types + listed_methods:
                     self.assertTrue(item.get("reason"), item)
+                    self.assertNotIn("allow-invalid", item)
 
     def test_an_aws_subprocess_in_microvms_js_session_fails_clippy(self):
         out = self.clippy(
@@ -1254,6 +1905,206 @@ class AdapterLintTests(unittest.TestCase):
                 ]:
                     self.assertIn(message, out.stderr)
 
+    def test_every_adapter_refuses_each_transport_call(self):
+        # Each constructor by its plain path, both send functions, the port's own `send`, and
+        # both transport-taking constructors. In a file of its own, a `Call { .. }` literal
+        # handed to a transport: clippy 1.98 doesn't report the literal itself (a struct
+        # expression isn't a type position), so what refuses it is the ban on
+        # `Transport::send`, and the ratchet's operation-literal rule sees its operation.
+        source = """\
+            use std::sync::Arc;
+
+            use microvms_core::control::transport::{self, Transport};
+            use microvms_core::control::{ControlPlane, Region};
+            use microvms_core::prelude::*;
+
+            pub fn calls(t: &dyn Transport) {
+                transport::send_with_retry(t, transport::Call::get("ListMicrovms", "/x"));
+                transport::send_with_retry(t, transport::Call::post_json("RunMicrovm", "/x", "{}"));
+                transport::send_with_retry(t, transport::Call::patch_json("UpdateMicrovmImageVersion", "/x", "{}"));
+                transport::send_with_retry(t, transport::Call::post_empty("SuspendMicrovm", "/x"));
+                transport::send_accepting(t, transport::Call::delete("DeleteMicrovmImage", "/x"), &[404]);
+            }
+
+            pub fn planes(t: Arc<dyn Transport>) -> (ControlPlane, ControlPlane) {
+                (
+                    ControlPlane::from_ports(Arc::clone(&t), Region),
+                    ControlPlane::with_transport(t, Region),
+                )
+            }
+        """
+        literal = """\
+            pub fn send(t: &dyn microvms_core::control::transport::Transport) -> u16 {
+                t.send(microvms_core::control::transport::Call { operation: "GetMicrovm", path: String::new() })
+            }
+        """
+        for adapter in RATCHET["REPO"].adapters:
+            with self.subTest(adapter=adapter):
+                out = self.clippy(
+                    adapter,
+                    {
+                        "src/lib.rs": f"{DENY}\npub mod wire;\npub mod literal;\n",
+                        "src/wire.rs": source,
+                        "src/literal.rs": literal,
+                    },
+                )
+                self.assertNotEqual(out.returncode, 0, out.stderr)
+                found = disallowed(out.stderr)
+                self.assertEqual(
+                    {path for path, file in found if file in ("wire.rs", "literal.rs")},
+                    set(TRANSPORT_METHODS) | set(TRANSPORT_TYPES),
+                    out.stderr,
+                )
+                self.assertIn(
+                    (f"{TRANSPORT}::Transport::send", "literal.rs"), found, out.stderr
+                )
+
+    def test_an_alias_a_ufcs_call_and_a_glob_import_are_refused_too(self):
+        # The shapes a text or tree scan misses, each in its own file so each is checked by
+        # itself: a type renamed at the `use`, a function renamed at the `use`, a trait method
+        # called by its fully qualified form, and a function reached through a glob import.
+        files = {
+            "src/lib.rs": f"{DENY}\npub mod alias;\npub mod renamed;\npub mod ufcs;\npub mod glob;\n",
+            "src/alias.rs": """\
+                use microvms_core::control::transport::Call as Request;
+
+                pub fn request() -> Request {
+                    Request::post_empty("ResumeMicrovm", "/x")
+                }
+            """,
+            "src/renamed.rs": """\
+                use microvms_core::control::transport::send_with_retry as send;
+
+                pub fn go(t: &dyn microvms_core::control::transport::Transport) {
+                    send(t, microvms_core::control::transport::Call::get("GetMicrovm", "/x"));
+                }
+            """,
+            "src/ufcs.rs": """\
+                use std::sync::Arc;
+
+                use microvms_core::control::transport::Transport;
+                use microvms_core::control::{ControlPlane, Region};
+                use microvms_core::prelude::ControlPlaneExt;
+
+                pub fn plane(t: Arc<dyn Transport>) -> ControlPlane {
+                    <ControlPlane as ControlPlaneExt>::with_transport(t, Region)
+                }
+            """,
+            "src/glob.rs": """\
+                use microvms_core::control::transport::*;
+
+                pub fn go(t: &dyn Transport, call: Call) {
+                    send_accepting(t, call, &[200]);
+                }
+            """,
+        }
+        for adapter in RATCHET["REPO"].adapters:
+            with self.subTest(adapter=adapter):
+                out = self.clippy(adapter, files)
+                self.assertNotEqual(out.returncode, 0, out.stderr)
+                found = disallowed(out.stderr)
+                for expected in [
+                    (f"{TRANSPORT}::Call", "alias.rs"),
+                    (f"{TRANSPORT}::Call::post_empty", "alias.rs"),
+                    (f"{TRANSPORT}::send_with_retry", "renamed.rs"),
+                    (
+                        "microvms_core::prelude::ControlPlaneExt::with_transport",
+                        "ufcs.rs",
+                    ),
+                    (f"{TRANSPORT}::send_accepting", "glob.rs"),
+                    (f"{TRANSPORT}::Call", "glob.rs"),
+                ]:
+                    self.assertIn(expected, found, out.stderr)
+
+    def test_the_cli_refuses_each_core_door_by_path_alias_and_ufcs(self):
+        out = self.clippy(
+            "microvms-cli",
+            {
+                "src/lib.rs": f"{DENY}\npub mod doors;\npub mod alias;\npub mod ufcs;\n",
+                "src/doors.rs": """\
+                    use microvms_core::adapters::{Adapters as _, SystemAdapters};
+                    use microvms_core::agents::AgentVm;
+                    use microvms_core::control::{ControlPlane, Region};
+                    use microvms_core::prelude::*;
+                    use microvms_core::sandbox::Sandbox;
+                    use microvms_core::session::Session;
+
+                    // A type position: clippy reports a type ban there, not at a unit value.
+                    pub fn adapters(_: SystemAdapters) {}
+
+                    pub fn doors() {
+                        let _ = ControlPlane::new(Region);
+                        let _ = Sandbox::new(Region);
+                        let _ = Sandbox::adopt_in(Region, "mvm-1");
+                        let _ = Sandbox::from_name("ci", None);
+                        let _ = AgentVm::adopt_in(Region, "mvm-1");
+                        let _ = AgentVm::from_name("ci", None);
+                        let _ = microvms_core::preflight::preflight(None);
+                        let _ = SystemAdapters.http_backend("https://x");
+                        let _ = SystemAdapters.build_services(Region);
+                        let _ = Session::connect("https://mvm-1.example");
+                        let _ = Session::direct("https://mvm-1.example", "t");
+                        let _ = Session::attach("https://mvm-1.example", "mvm-1");
+                        let _ = Session::builder("https://mvm-1.example", "t");
+                        let _ = microvms_core::control::transport::SignedTransport::new(Region);
+                        let _ = microvms_core::control::SignedBuildServices::new(Region);
+                        let _ = microvms_core::session::http::ReqwestBackend::new("https://x");
+                    }
+                """,
+                "src/alias.rs": """\
+                    use microvms_core::control::ControlPlane as Plane;
+                    use microvms_core::control::Region;
+                    use microvms_core::prelude::*;
+
+                    pub fn plane() -> Plane {
+                        Plane::new(Region)
+                    }
+                """,
+                "src/ufcs.rs": """\
+                    use microvms_core::prelude::SessionExt;
+                    use microvms_core::session::Session;
+
+                    pub fn session() -> Session {
+                        <Session as SessionExt>::direct("https://mvm-1.example", "t")
+                    }
+                """,
+            },
+        )
+        self.assertNotEqual(out.returncode, 0, out.stderr)
+        found = disallowed(out.stderr)
+        self.assertEqual(
+            {path for path, file in found if file == "doors.rs"},
+            set(DOOR_METHODS) | set(DOOR_TYPES),
+            out.stderr,
+        )
+        self.assertIn(
+            ("microvms_core::prelude::ControlPlaneExt::new", "alias.rs"), found
+        )
+        self.assertIn(("microvms_core::prelude::SessionExt::direct", "ufcs.rs"), found)
+
+    def test_the_bindings_may_call_core_doors(self):
+        # The door bans are the CLI's alone: a binding builds its own plane, sandbox and
+        # session, and that's its job.
+        for adapter in ("microvms-py", "microvms-js"):
+            with self.subTest(adapter=adapter):
+                out = self.clippy(
+                    adapter,
+                    {
+                        "src/lib.rs": f"""\
+                            {DENY}
+                            use microvms_core::control::{{ControlPlane, Region}};
+                            use microvms_core::prelude::*;
+                            use microvms_core::session::Session;
+
+                            pub fn doors() -> (ControlPlane, Session) {{
+                                (ControlPlane::new(Region), Session::direct("https://mvm-1.example", "t"))
+                            }}
+                        """,
+                    },
+                )
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertEqual(disallowed(out.stderr), set(), out.stderr)
+
     def test_no_adapter_source_turns_the_lints_off_outside_its_listed_sites(self):
         roots = {root.resolve() for root in self.roots().values()}
         found = Counter()
@@ -1291,8 +2142,14 @@ class AdapterLintTests(unittest.TestCase):
             for record in drift["entries"] + drift["decisions"]
             if record["category"] == "subprocess"
         ]
+        # A test-only file's banned types are fakes (the scripted transports), and the ratchet
+        # reads no test code, so there's no drift record for them to point at.
         for rel, lint in LINT_EXCEPTIONS:
-            if lint == "clippy::disallowed_types":
+            if (
+                lint == "clippy::disallowed_types"
+                and "#![cfg(test)]"
+                not in (ROOT / rel).read_text(encoding="utf-8").splitlines()
+            ):
                 with self.subTest(site=rel):
                     self.assertTrue(
                         any(key.startswith(f"{rel}: ") for key in subprocess_keys),
@@ -1991,6 +2848,29 @@ class BaseTests(unittest.TestCase):
         commit(root, "first")
         self.assertIsNone(read_base_sets(root, "HEAD"))
 
+    def test_the_base_collected_categories_are_read_from_its_script(self):
+        root = git_repo(self)
+        (root / "scripts").mkdir()
+        (root / "scripts" / "ratchet.py").write_text(
+            'COLLECTED = ("placement", "subprocess")\nNOT_COLLECTED = {}\n'
+        )
+        commit(root, "script")
+        self.assertEqual(read_base_collected(root, "HEAD"), ("placement", "subprocess"))
+
+    def test_a_base_script_without_a_collected_tuple_is_an_error(self):
+        # A parser that finds nothing can't read as "the base collected nothing", which would
+        # skip rule 3 for every category.
+        root = git_repo(self)
+        (root / "scripts").mkdir()
+        (root / "scripts" / "ratchet.py").write_text("CATEGORIES = ()\n")
+        commit(root, "script")
+        with self.assertRaisesRegex(SystemExit, "no COLLECTED"):
+            read_base_collected(root, "HEAD")
+        (root / "scripts" / "ratchet.py").unlink()
+        commit(root, "no script")
+        with self.assertRaisesRegex(SystemExit, "no scripts/ratchet.py"):
+            read_base_collected(root, "HEAD")
+
     def test_an_unknown_base_ref_is_an_error_rather_than_a_bootstrap(self):
         root = git_repo(self)
         commit(root, "first")
@@ -2017,7 +2897,7 @@ class HistoryTests(unittest.TestCase):
         )
         self.assertEqual(points[0]["counts"]["placement"], 1)
         self.assertEqual(points[1]["counts"]["placement"], 0)
-        self.assertEqual(points[1]["total"], 2)
+        self.assertEqual(points[1]["total"], len(BASELINE) - 1)
 
     def test_an_uncommitted_change_is_the_last_point(self):
         root = git_repo(self)
@@ -2027,7 +2907,7 @@ class HistoryTests(unittest.TestCase):
         )
         points = HISTORY["history"](root)
         self.assertEqual([p["sha"] for p in points][1:], [None])
-        self.assertEqual(points[-1]["total"], 2)
+        self.assertEqual(points[-1]["total"], len(BASELINE) - 1)
 
 
 if __name__ == "__main__":

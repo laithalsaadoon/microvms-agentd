@@ -51,7 +51,7 @@ than zero (`microvms-domain/src/cost.rs:22-27`).
 envelope to stdout and progress to stderr (`microvms-cli/src/envelope.rs:4-11`). It has no
 lib target (`microvms-cli/Cargo.toml:21-23`) and no second path to AWS: a denylist
 of HTTP clients, signers, and credential chains is asserted against `cargo metadata`
-(`microvms-cli/tests/thinness.rs:49-96`). `microvms-py` and `microvms-js`
+(`microvms-cli/tests/thinness.rs:54-101`). `microvms-py` and `microvms-js`
 wrap the same core and never the CLI (`microvms-py/Cargo.toml:22-26`,
 `microvms-js/Cargo.toml:20-21`). Verification sits outside the product graph: `model` depends
 only on `stateright`, with no workspace edge, modelling the protocol rather than importing it

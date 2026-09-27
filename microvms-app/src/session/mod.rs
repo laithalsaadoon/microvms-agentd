@@ -45,7 +45,8 @@ pub use complete::{
     NO_TIMEOUT_CEILING, OutputFlow, OutputSink,
 };
 pub use exec::{
-    EndReason, ExecHandle, ExecResult, StreamEnd, StreamOptions, TIMED_OUT_EXIT_CODE, exec_id_at,
+    DEFAULT_EXEC_WAIT, EndReason, ExecHandle, ExecResult, StreamEnd, StreamOptions,
+    TIMED_OUT_EXIT_CODE, exec_id_at,
 };
 pub use http::{ChunkSource, HttpBackend, HttpRequest, HttpResponse, OpenStream, SharedBackend};
 pub use keepalive::{KeepAwake, KeepAwakeEnd, KeepAwakeReport, KeepAwakeTask, RunningGate};
@@ -875,19 +876,7 @@ mod tests {
     use crate::session::proxy::testing::CountingMinter;
 
     fn start_request(exec_id: &str) -> protocol::exec::StartRequest {
-        protocol::exec::StartRequest {
-            exec_id: exec_id.to_string(),
-            command: vec!["/bin/true".to_string()],
-            shell: false.into(),
-            cwd: None,
-            env: Default::default(),
-            user: None,
-            group: None,
-            timeout_sec: None,
-            stdin: false,
-            reap_group_on_exit: false,
-            inherit_image_env: false,
-        }
+        protocol::exec::StartRequest::new(exec_id, vec!["/bin/true".to_string()])
     }
 
     fn header(request: &HttpRequest, name: &str) -> Option<String> {

@@ -54,12 +54,12 @@ microvm run [OPTIONS] [BINARY]
 
 Builds an image, launches a VM, runs a command, reports the cost, and tears the VM down. Teardown is the default so that a closed laptop does not leave a billable VM.
 
-`microvms-cli/src/commands/lifecycle.rs:118`
+`microvms-cli/src/commands/lifecycle.rs:130`
 
 Flags:
 
 - `[BINARY_OR_DIR]` — the aarch64 agentd binary to bake in as the image CMD (ignored when `--image` names an image to launch instead), or a directory to sync. The two readings cannot collide: a path is a directory or it is not. See "Sync mode" below. `microvms-cli/src/cli.rs`, `RunArgs::binary`.
-- `--image <IDENTIFIER>` — launch this existing image instead of building one. Takes an ARN or a bare image name: a name is resolved to its ARN through the account's image listing (exact match, every page read) before the launch, with a progress line naming the resolved ARN. An identifier already shaped like an ARN passes through with zero extra calls. The envelope's `imageName` reports the launched image's own name (the ARN's last colon segment), never the per-invocation default a build would have used. A name that resolves to nothing fails locally with `ERR_PRECONDITION` naming the name and suggesting `microvm build` — the service's own answer to a bare name is HTTP 400 "Malformed ARN", which says nothing about names. `microvms-cli/src/commands/lifecycle.rs:1018-1032`, resolution in `microvms-app/src/control/image.rs:416-480`.
+- `--image <IDENTIFIER>` — launch this existing image instead of building one. Takes an ARN or a bare image name: a name is resolved to its ARN through the account's image listing (exact match, every page read) before the launch, with a progress line naming the resolved ARN. An identifier already shaped like an ARN passes through with zero extra calls. The envelope's `imageName` reports the launched image's own name (the ARN's last colon segment), never the per-invocation default a build would have used. A name that resolves to nothing fails locally with `ERR_PRECONDITION` naming the name and suggesting `microvm build` — the service's own answer to a bare name is HTTP 400 "Malformed ARN", which says nothing about names. `microvms-cli/src/commands/lifecycle.rs:1030-1044`, resolution in `microvms-app/src/control/image.rs:416-480`.
 - `--image-version <VERSION>` — launch this exact image version instead of the image's latest active one. Omitted takes whatever `latestActiveImageVersion` is at the moment the call lands, which is right for the ordinary case and wrong for the two that matter: a canary wants the version it just built rather than whatever became latest while it was starting, and a rollback wants the known-good version, which "latest" cannot name once a bad version is the latest one. A version the control plane has set `INACTIVE` refuses to launch when named here — measured, the answer is HTTP 404 `No active version found for MicroVM image <arn> and version <v>`, which is what makes a retire real rather than advisory. Free text rather than a closed set, because a version's legal values are an account fact only `ListManagedMicrovmImageVersions` can answer; the constraint that *is* knowable is checked before any call, so an empty version, one over 2048 characters, or one containing whitespace anywhere fails locally with `ERR_INVALID_ARG` and the reason. A version pasted from a terminal carries a trailing newline, which is that case. `microvms-app/src/control/mod.rs`'s `require_valid_version`, wiring in `microvms-cli/src/commands/lifecycle.rs`.
 - `--artifact-uri <S3_URI>` — where the build artifact already is; `microvms-core` builds the artifact bytes and takes the URI but does not upload. `microvms-cli/src/cli.rs:752-753`.
 - `--exec <COMMAND>` — a shell command to run in the VM. When it is omitted, the run only launches and tears down, which is how you check that an image boots. `microvms-cli/src/cli.rs:758-759`.
@@ -101,7 +101,7 @@ microvm build [OPTIONS] [BINARY]
 
 Builds a MicroVM image and waits for it to be usable. Nothing is torn down afterward. The image is the durable artifact, and because its snapshot has a one-week minimum retention, deleting it early saves nothing.
 
-`microvms-cli/src/commands/lifecycle.rs:1359`
+`microvms-cli/src/commands/lifecycle.rs:1371`
 
 Flags:
 
@@ -115,7 +115,7 @@ Flags:
 - `--log-group <GROUP>` — CloudWatch log group for the build's logs, instead of the service-created `/aws/lambda-microvms/<image-name>`. Letters, digits, and `_ - / . #` only, up to 512 characters, validated locally before the artifact upload. The build role must be able to write to whatever this names (`logs:CreateLogGroup`/`CreateLogStream`/`PutLogEvents`); a group outside a granted prefix builds with **no logs at all**, the same silent outcome as the wrong-prefix policy in `docs/PLATFORM.md`.
 - `--log-stream <STREAM>` — log stream name **prefix** inside `--log-group`; requires it. The platform's `logging.logStream` member is an exact stream name — prefixes are unsupported — and one image build is three VMs writing three streams (docker build, Graviton 3 snapshot, Graviton 4 snapshot), so a fixed configured name would collapse every build's logs into one indistinguishable stream. The client therefore appends `/<16 hex>` of fresh randomness per build attempt, and the envelope reports the resolved exact name as `logStream` — the only place it exists. No `:` or `*` (the shape's pattern is `[^:*]*`); up to 495 characters (the platform's 512 minus the suffix's 17). See `docs/PLATFORM.md`, "An image build is three VMs and three log streams".
 - `--repair-identity` — request identity repair and additional OS capabilities. Inspect health for `identity_degraded`; requested capabilities do not guarantee every repair succeeds.
-- `--reuse` — reuse an existing image whose build inputs match, instead of building. Computes a sha256 over the build inputs (the daemon binary's bytes, the Dockerfile, and — with `--project` — the manifest and lockfile, names and bytes both), derives the image name `<name>-<hash12>` — where the prefix is `--name` or the stable stem `microvm-cli` — and checks the listing for that exact name. A hit skips the build entirely and reports the existing image with `reused: true` in the envelope; a miss builds under the derived name, so the next invocation with the same inputs hits. The hash is in the name because recreating an image under a previously-used fixed name can serve a stale snapshot (measured; the same hazard class as the clientToken replay in `docs/PLATFORM.md`) — content-keying gives both properties at once: unchanged inputs reuse their image, changed inputs get a fresh name and a fresh build. With `--project` that is #74's promise: two projects with identical dependency files share a layer, and a lockfile edit builds a fresh one. `--memory` is not part of the identity, so a reused image keeps the size class it was created with; the envelope's `size` is the requested class and the text says so. `microvms-cli/src/commands/lifecycle.rs:1433-1439`, the hash at `microvms-app/src/control/artifact.rs`'s `artifact_content_hash`.
+- `--reuse` — reuse an existing image whose build inputs match, instead of building. Computes a sha256 over the build inputs (the daemon binary's bytes, the Dockerfile, and — with `--project` — the manifest and lockfile, names and bytes both), derives the image name `<name>-<hash12>` — where the prefix is `--name` or the stable stem `microvm-cli` — and checks the listing for that exact name. A hit skips the build entirely and reports the existing image with `reused: true` in the envelope; a miss builds under the derived name, so the next invocation with the same inputs hits. The hash is in the name because recreating an image under a previously-used fixed name can serve a stale snapshot (measured; the same hazard class as the clientToken replay in `docs/PLATFORM.md`) — content-keying gives both properties at once: unchanged inputs reuse their image, changed inputs get a fresh name and a fresh build. With `--project` that is #74's promise: two projects with identical dependency files share a layer, and a lockfile edit builds a fresh one. `--memory` is not part of the identity, so a reused image keeps the size class it was created with; the envelope's `size` is the requested class and the text says so. `microvms-cli/src/commands/lifecycle.rs:1445-1451`, the hash at `microvms-app/src/control/artifact.rs`'s `artifact_content_hash`.
 - `--port <PORT>` — the daemon's port inside the guest. `microvms-cli/src/cli.rs:1091-1092`.
 - Plus `RegionFlags` and `InfraFlags`. `microvms-cli/src/cli.rs:1094-1098`.
 
@@ -388,7 +388,7 @@ microvm suspend [OPTIONS] <MICROVM_ID>
 
 Freezes a MicroVM, which keeps its memory, filesystem, token, and endpoint. The operation is a freeze and restore rather than a stop and start.
 
-`microvms-cli/src/commands/lifecycle.rs:1982`
+`microvms-cli/src/commands/lifecycle.rs:1992`
 
 Flags:
 
@@ -404,7 +404,7 @@ microvm resume [OPTIONS] <MICROVM_ID>
 
 Thaws a suspended MicroVM and reports its endpoint. Past the launch-time `suspendedDurationSeconds` window the VM has been terminated, so the resume fails.
 
-`microvms-cli/src/commands/lifecycle.rs:2052`
+`microvms-cli/src/commands/lifecycle.rs:2062`
 
 Flags:
 
@@ -420,7 +420,7 @@ microvm terminate [OPTIONS] <MICROVM_ID>
 
 Tears down a MicroVM and optionally its image and build log group. When part of the teardown fails, the command still exits successfully and reports the leaked identifier.
 
-`microvms-cli/src/commands/lifecycle.rs:2123`
+`microvms-cli/src/commands/lifecycle.rs:2133`
 
 Flags:
 

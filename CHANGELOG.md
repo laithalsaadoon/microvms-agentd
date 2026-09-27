@@ -81,6 +81,19 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
   reports a warning no caller is left to receive: a `Sandbox` dropped with its VM live warns
   through it, and `SystemAdapters` writes that to stderr as before.
 
+- **`StartRequest::new` and its `with_*` setters (#273).** `protocol::exec::StartRequest` has a
+  builder: `StartRequest::new(exec_id, command)` sets every other field to the default the
+  daemon gives a body that omits it, and `with_shell`, `with_cwd`, `with_env`, `with_user`,
+  `with_group`, `with_timeout_sec`, `with_stdin`, `with_reap_group_on_exit` and
+  `with_inherit_image_env` set the rest. Core, the CLI and both bindings build every request
+  with it.
+- **The client defaults the bindings and the CLI used to retype (#273).**
+  `microvms_core::session::DEFAULT_EXEC_WAIT` (300 seconds, the wait for an exec and a
+  one-shot `run_sync` when the caller names none), `microvms_core::cost::DEFAULT_RESIDENCY_CYCLES`
+  (one) and `microvms_core::sandbox::LIFECYCLE_POLL_INTERVAL` (5 seconds, now public). The
+  TypeScript defaults read all three and the Python ones read `DEFAULT_EXEC_WAIT`, with the
+  same values as before.
+
 ### Changed
 
 - **The daemon fetch no longer runs `gh` or `curl` (#284).** When `run`, `build`,
@@ -135,6 +148,12 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
   `CalendarDateExt`, `NameRecordExt`, `LaunchIdentityExt` and `TunnelIdentityExt`. Add
   `use microvms_core::prelude::*;` and the calls compile unchanged. The Python and
   TypeScript APIs don't change.
+- **`StartRequest` is `#[non_exhaustive]` (#273). A Rust source break in the published
+  `microvms-protocol`, part of the same 0.11.0.** A struct expression outside the crate no longer
+  builds (E0639), so a client can't pick its own default for a field it didn't mean to set,
+  and a field the daemon adds reaches every client as its wire default. Build requests with
+  `StartRequest::new(exec_id, command)` and the `with_*` setters. Reading the fields is
+  unchanged, and so is the JSON on the wire. The Python and TypeScript APIs don't change.
 
 ## [0.10.0] — 2026-09-25
 

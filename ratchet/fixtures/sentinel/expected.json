@@ -11,5 +11,9 @@
     "adapter/src/session.rs: Fetch for Session",
     "kernel/src/lib.rs: Fetch for Local",
     "root/src/lib.rs: Fetch for Wired"
+  ],
+  "adapter-logic": [
+    "adapter/src/lib.rs: literal-default: std::time::Duration::from_secs(300)",
+    "adapter/src/lib.rs: operation-literal: \"RunMicrovm\""
   ]
 }

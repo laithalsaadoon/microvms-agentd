@@ -328,19 +328,8 @@ mod tests {
     }
 
     fn request(timeout_sec: Option<f64>) -> protocol::exec::StartRequest {
-        protocol::exec::StartRequest {
-            exec_id: "e1".into(),
-            command: vec!["bash".into(), "-c".into(), "echo hi".into()],
-            shell: false.into(),
-            cwd: None,
-            env: Default::default(),
-            user: None,
-            group: None,
-            timeout_sec,
-            stdin: false,
-            reap_group_on_exit: false,
-            inherit_image_env: false,
-        }
+        protocol::exec::StartRequest::new("e1", vec!["bash".into(), "-c".into(), "echo hi".into()])
+            .with_timeout_sec(timeout_sec)
     }
 
     type Seen = Arc<Mutex<Vec<(u64, Vec<u8>)>>>;

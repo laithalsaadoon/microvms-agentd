@@ -141,7 +141,7 @@ through here instead of depending on the contract crate (`microvms-core/src/lib.
 `microvms-cli/src/main.rs:2`). Thinness is checked rather than intended — the direct
 dependency set contains none of the denylisted transport and signing crates, no source file here names a transport or a
 control-plane operation, and every AWS-touching command must fail when the library seam is made
-to refuse (`microvms-cli/src/main.rs:10-13`, `microvms-cli/tests/thinness.rs:66`). A coding agent
+to refuse (`microvms-cli/src/main.rs:10-13`, `microvms-cli/tests/thinness.rs:71`). A coding agent
 is a first-class consumer, so `microvm manifest` emits the whole command tree with its option
 domains, exit codes, and envelope schema generated from the parser, and every command writes
 exactly one envelope object to stdout with progress on stderr

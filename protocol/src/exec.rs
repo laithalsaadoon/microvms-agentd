@@ -215,6 +215,7 @@ impl Shell {
 /// A start request. `command` is either an argv array or, with `shell` set, a single
 /// script string.
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
+#[non_exhaustive]
 pub struct StartRequest {
     /// Caller-minted idempotency key. Harbor retries, and a retry must not
     /// produce a second child.
@@ -486,6 +487,106 @@ pub const ERROR_UNKNOWN_GROUP: &str = "unknown_group";
 /// file. 400, and nothing was spawned; `detail` names the shell and where it looked.
 pub const ERROR_UNKNOWN_SHELL: &str = "unknown_shell";
 
+impl StartRequest {
+    /// A request to run `command` as an argv under the idempotency key `exec_id`, with
+    /// every other field at the default a body that omits it gets.
+    ///
+    /// `exec_id` has no default here: minting one needs a clock and a random source,
+    /// which this crate doesn't have, and a shared fixed key would answer a second exec
+    /// from the first one's record.
+    ///
+    /// This and the `with_*` setters are the only way to build a request outside this
+    /// crate, because `StartRequest` is `#[non_exhaustive]`. The builder is where every
+    /// optional field gets its one default, the same one serde gives a body that omits it,
+    /// so a client can't pick its own `timeout_sec`, `reap_group_on_exit` or
+    /// `inherit_image_env` by writing the struct out, and a field added here reaches every
+    /// caller as its default instead of as a build error in each client. (The struct's own
+    /// doc comment is the published schema's description, so this lives here.)
+    ///
+    /// ```
+    /// # use microvms_protocol::exec::StartRequest;
+    /// let request: StartRequest = StartRequest::new("e1", vec!["true".into()]);
+    /// # assert!(!request.reap_group_on_exit);
+    /// ```
+    ///
+    /// The same request as a struct expression doesn't build outside this crate (E0639):
+    ///
+    /// ```compile_fail,E0639
+    /// # use microvms_protocol::exec::StartRequest;
+    /// let request: StartRequest = StartRequest { ..StartRequest::new("e1", vec!["true".into()]) };
+    /// # assert!(!request.reap_group_on_exit);
+    /// ```
+    pub fn new(exec_id: impl Into<String>, command: Vec<String>) -> Self {
+        StartRequest {
+            exec_id: exec_id.into(),
+            command,
+            shell: Shell::default(),
+            cwd: None,
+            env: HashMap::new(),
+            user: None,
+            group: None,
+            timeout_sec: None,
+            stdin: false,
+            reap_group_on_exit: false,
+            inherit_image_env: false,
+        }
+    }
+
+    /// Run `command` as a script under this shell, or as an argv for `false`.
+    pub fn with_shell(mut self, shell: impl Into<Shell>) -> Self {
+        self.shell = shell.into();
+        self
+    }
+
+    /// The child's working directory; `None` inherits the daemon's.
+    pub fn with_cwd(mut self, cwd: Option<String>) -> Self {
+        self.cwd = cwd;
+        self
+    }
+
+    /// The top layer of the child's environment.
+    pub fn with_env(mut self, env: HashMap<String, String>) -> Self {
+        self.env = env;
+        self
+    }
+
+    /// The user to demote to; `None` runs as the daemon's own user.
+    pub fn with_user(mut self, user: Option<NameOrId>) -> Self {
+        self.user = user;
+        self
+    }
+
+    /// The group to demote to; `None` follows [`StartRequest::user`]'s rule.
+    pub fn with_group(mut self, group: Option<NameOrId>) -> Self {
+        self.group = group;
+        self
+    }
+
+    /// The daemon's wall-clock budget for the child; `None` sets none.
+    pub fn with_timeout_sec(mut self, timeout_sec: Option<f64>) -> Self {
+        self.timeout_sec = timeout_sec;
+        self
+    }
+
+    /// Give the child a writable stdin pipe.
+    pub fn with_stdin(mut self, stdin: bool) -> Self {
+        self.stdin = stdin;
+        self
+    }
+
+    /// Signal the exec's process group once its own child exits.
+    pub fn with_reap_group_on_exit(mut self, reap: bool) -> Self {
+        self.reap_group_on_exit = reap;
+        self
+    }
+
+    /// Start the child's environment from the image's `ENV`.
+    pub fn with_inherit_image_env(mut self, inherit: bool) -> Self {
+        self.inherit_image_env = inherit;
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -575,6 +676,23 @@ mod tests {
             !request.reap_group_on_exit,
             "reaping is opt-in: an old client that never heard of the flag keeps today's \
              grandchild-output guarantee"
+        );
+    }
+
+    /// The builder's defaults are the wire's: a request built with nothing set writes the
+    /// same body the daemon reads from one that omits every optional field. A builder that
+    /// picked its own default would send a different request than an old client does.
+    ///
+    /// **Falsification**: 2026-09-27. Defaulting `reap_group_on_exit` to `true` in
+    /// `StartRequest::new` turned this red; restored after.
+    #[test]
+    fn the_builder_defaults_are_the_ones_serde_gives_an_omitted_field() {
+        let built = StartRequest::new("e1", vec!["true".into()]);
+        let read: StartRequest =
+            serde_json::from_str(r#"{"exec_id":"e1","command":["true"]}"#).expect("deserializes");
+        assert_eq!(
+            serde_json::to_value(&built).expect("serializes"),
+            serde_json::to_value(&read).expect("serializes"),
         );
     }
 
