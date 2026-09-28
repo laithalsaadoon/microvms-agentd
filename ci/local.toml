@@ -72,6 +72,8 @@ steps = [
   "license header unit tests",
   "license headers",
   "conformance self-test",
+  "agents check unit tests",
+  "agents check",
   "license consistency",
   "cargo-deny (dependency licenses, yanked crates, sources)",
   "actionlint",

@@ -1463,6 +1463,286 @@ suite = "script"
 message = "FAIL  the digest record check refuses a proof absent from both sides"
 transform = { file = "conformance/run_rs.py", replace = "        and record.get(\"verification\") is not None\n", with = "" }
 
+# ── agents:check: what the contributor docs name exists (#278) ───────────────
+
+# The issue's deliberate break: the task moves and the docs that name it stay put.
+[[fault]]
+id = "agents-md-task-renamed"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`mise run guards:fire` names no task in mise.toml"
+transform = { file = "mise.toml", replace = "[tasks.\"guards:fire\"]\n", with = "[tasks.\"guards:seed\"]\n" }
+
+[[fault]]
+id = "agents-md-path-dangling"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`conformance/run.py` is no such path in this tree"
+transform = { file = "AGENTS.md", replace = "`Results.eq` in\n  `conformance/run_rs.py`", with = "`Results.eq` in\n  `conformance/run.py`" }
+
+[[fault]]
+id = "agents-md-job-missing"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "the `mutants` job isn't a job id or name in .github/workflows/ci.yml"
+transform = { file = ".github/workflows/ci.yml", replace = "\n  mutants:\n", with = "\n  mutation:\n" }
+
+[[fault]]
+id = "agents-md-symbol-missing"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`results.absent` isn't a method of Results in conformance/run_rs.py"
+transform = { file = "conformance/run_rs.py", replace = "    def absent(self, name: str, value: Any) -> bool:\n", with = "    def absent_value(self, name: str, value: Any) -> bool:\n" }
+
+[[fault]]
+id = "agents-md-not-paths-stale"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "NOT_PATHS lists `rust/hard-coded-cryptographic-value`"
+transform = { file = "microvms-app/AGENTS.md", replace = "`rust/hard-coded-cryptographic-value`", with = "`hard-coded-cryptographic-value`" }
+
+# The floor, the sentinel, and each parser returning nothing.
+[[fault]]
+id = "agents-md-docs-floor"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "found no docs to read"
+transform = { file = "scripts/check-agents-md.py", replace = "docs = [d for d in docs if (root / d).is_file()]", with = "docs = [d for d in docs if False]" }
+
+[[fault]]
+id = "agents-md-sentinel"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "the sentinel `mise run check` isn't among the task references"
+transform = { file = "scripts/check-agents-md.py", replace = "MISE_RUN = re.compile(r\"\\bmise run (\\S+)\")", with = "MISE_RUN = re.compile(r\"\\bmise run (\\S+:\\S+)\")" }
+
+[[fault]]
+id = "agents-md-path-extractor-empty"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "found no path references"
+transform = { file = "scripts/check-agents-md.py", replace = "            elif is_path(word):\n", with = "            elif False:\n" }
+
+[[fault]]
+id = "agents-md-jobs-parser-empty"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "found no jobs in .github/workflows/ci.yml"
+transform = { file = "scripts/check-agents-md.py", replace = "in_jobs = line.rstrip() == \"jobs:\"", with = "in_jobs = line.rstrip() == \"job:\"" }
+
+[[fault]]
+id = "agents-md-results-class-empty"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "no class Results in conformance/run_rs.py"
+transform = { file = "scripts/check-agents-md.py", replace = "node.name == SYMBOL_CLASS", with = "node.name == SYMBOL_CLASS.lower()" }
+
+# The unit suite: a blank line inside `jobs:` ended the block in the first draft, and the real
+# ci.yml has one between every job.
+[[fault]]
+id = "agents-md-unit-blank-line-in-jobs"
+guard = "test_check_agents_md.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_agents_md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_job_named_by_its_display_name_resolves ("
+transform = { file = "scripts/check-agents-md.py", replace = "        if not line.strip() or line.startswith(\"#\"):\n            continue\n", with = "" }
+
+[[fault]]
+id = "agents-md-unit-git-env"
+guard = "test_check_agents_md.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_agents_md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_inherited_git_dir_leaves_that_repo_alone ("
+transform = { file = "scripts/test_check_agents_md.py", replace = "if k not in GIT_ENV_LEAKS}", with = "if k not in ()}" }
+
+# First review round: the kinds and floors added after the reviewers' faults stayed green.
+# A doc says a task is in `check`, and `check` stops running it.
+[[fault]]
+id = "agents-md-member-dropped"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`guards:list` isn't in `check`"
+transform = { file = "mise.toml", replace = "  \"guards:list\",\n", with = "" }
+
+[[fault]]
+id = "agents-md-fault-id-renamed"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`agentd-fs-pop` is no fault id in guards/faults.toml"
+transform = { file = "guards/faults.toml", replace = "id = \"agentd-fs-pop\"\n", with = "id = \"agentd-fs-normalize-pop\"\n" }
+
+# The issue's own case: a test the PR template names is renamed everywhere the registry
+# makes the author carry it, and check-guards-fire.py's docstring example still spells
+# the old name. A docstring isn't the name existing.
+[[fault]]
+id = "agents-md-identifier-renamed"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+# The message can't spell the test's name: a registry field counts as code, so it would
+# resolve the name it's waiting for.
+message = "`normalize_rejects_escapes_"
+transform = [
+  { file = "agentd/src/fs.rs", replace = "fn normalize_rejects_escapes_and_absorbs_benign_traversal()", with = "fn normalize_refuses_escapes()" },
+  { file = "guards/faults.toml", replace = "guard = \"fs::tests::normalize_rejects_escapes_and_absorbs_benign_traversal\"", with = "guard = \"fs::tests::normalize_refuses_escapes\"" },
+  { file = "guards/faults.toml", replace = "\"--exact\", \"fs::tests::normalize_rejects_escapes_and_absorbs_benign_traversal\"]", with = "\"--exact\", \"fs::tests::normalize_refuses_escapes\"]" },
+  { file = "guards/faults.toml", replace = "message = \"fs.rs::normalize_rejects_escapes_and_absorbs_benign_traversal (\"", with = "message = \"fs.rs::normalize_refuses_escapes (\"" },
+]
+
+# The root guide reads as empty while every other doc still names each kind.
+[[fault]]
+id = "agents-md-root-doc-empty"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "agents:check: AGENTS.md yields no references"
+transform = { file = "scripts/check-agents-md.py", replace = "    return (root / doc).read_text(encoding=\"utf-8\")\n", with = "    return \"\" if doc == ROOT_DOC else (root / doc).read_text(encoding=\"utf-8\")\n" }
+
+[[fault]]
+id = "agents-md-unclosed-fence"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "this fence is never closed"
+transform = { file = "AGENTS.md", replace = "- Tests assert the verdict", with = "```\n- Tests assert the verdict" }
+
+[[fault]]
+id = "agents-md-symbol-call"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`Results.missing` isn't a method of Results"
+transform = { file = "AGENTS.md", replace = "`Results.absent` is the", with = "`Results.missing()` is the" }
+
+[[fault]]
+id = "agents-md-path-line-suffix"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`agentd/src/fz.rs` is no such path in this tree"
+transform = { file = "CONTRIBUTING.md", replace = "`agentd/src/fs.rs:632:5:", with = "`agentd/src/fz.rs:632:5:" }
+
+[[fault]]
+id = "agents-md-glob-empty"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`microvms-js/__tests__/*.mjs` matches no file in this tree"
+transform = { file = "AGENTS.md", replace = "\"microvms-js/__test__/*.mjs\"", with = "\"microvms-js/__tests__/*.mjs\"" }
+
+[[fault]]
+id = "agents-md-file-name"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`microvms.pyx` is no file's name in this tree"
+transform = { file = ".github/PULL_REQUEST_TEMPLATE.md", replace = "`microvms.pyi`", with = "`microvms.pyx`" }
+
+[[fault]]
+id = "agents-md-faults-parser-empty"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "found no fault ids in guards/faults.toml"
+transform = { file = "scripts/check-agents-md.py", replace = "    return {f[\"id\"] for f in faults if isinstance(f, dict) and \"id\" in f}\n", with = "    return set()\n" }
+
+[[fault]]
+id = "agents-md-gated-empty"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`check` depends on no task in mise.toml"
+transform = { file = "scripts/check-agents-md.py", replace = "    seen.discard(top)\n    return seen\n", with = "    return set()\n" }
+
+[[fault]]
+id = "agents-md-spelled-empty"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "isn't spelled in any code outside these docs"
+transform = { file = "scripts/check-agents-md.py", replace = "    return found & words\n", with = "    return set()\n" }
+
+[[fault]]
+id = "agents-md-unit-docstring-counted"
+guard = "test_check_agents_md.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_agents_md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_name_spelled_only_in_prose_about_the_code_fails ("
+transform = { file = "scripts/check-agents-md.py", replace = "            if id(node) not in docstrings:\n", with = "            if True:\n" }
+
+[[fault]]
+id = "agents-md-unit-fence-length"
+guard = "test_check_agents_md.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_agents_md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_shorter_fence_inside_a_longer_one_doesnt_close_it ("
+transform = { file = "scripts/check-agents-md.py", replace = "            and len(mark.group(1)) >= fence[1]\n", with = "" }
+
+[[fault]]
+id = "agents-md-unit-directory"
+guard = "test_check_agents_md.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_agents_md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_directory_reference_resolves ("
+transform = { file = "scripts/check-agents-md.py", replace = "        return candidate in present or candidate.rstrip(\"/\") + \"/\" in dirs\n", with = "        return candidate in present\n" }
+
+[[fault]]
+id = "agents-md-unit-kinds-floor"
+guard = "test_check_agents_md.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_agents_md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_docs_with_no_reference_of_a_kind_fail_naming_the_kind ("
+transform = { file = "scripts/check-agents-md.py", replace = "KINDS = (\"task\", \"member\", \"fault\", \"path\", \"file\", \"identifier\", \"job\", \"symbol\")", with = "KINDS = (\"task\", \"member\", \"fault\", \"path\", \"file\", \"job\", \"symbol\")" }
+
+[[fault]]
+id = "agents-md-unit-root-kinds"
+guard = "test_check_agents_md.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_agents_md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_root_guide_missing_a_kind_its_rules_use_fails_naming_it ("
+transform = { file = "scripts/check-agents-md.py", replace = "ROOT_KINDS = (\"task\", \"member\", \"path\", \"job\", \"symbol\")", with = "ROOT_KINDS = (\"task\", \"path\", \"job\", \"symbol\")" }
+
 # ── this registry's own gate ─────────────────────────────────────────────────
 
 [[fault]]

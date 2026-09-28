@@ -490,6 +490,20 @@ description = "The live suite's own helpers and their negative twins, against a 
 # script's own pinned dependencies; it makes no AWS call.
 run = "uv run --script conformance/run_rs.py --self-test"
 
+[tasks."agents:check"]
+description = "Every task, fault id, path, file, CI job and code name AGENTS.md, CONTRIBUTING.md and the PR template cite exists. Offline"
+# AGENTS.md states each rule with the check that holds it (#278), and a rule whose check was
+# renamed reads as enforced when nothing enforces it. In `check` for `live:check`'s reason: it
+# reads local files and git's index, so it costs the same as a lint. The script's docstring
+# says what counts as a reference.
+#
+# The unit tests run first, for `trace:check`'s reason: they build throwaway repos and run the
+# real script over them, so an extractor that stopped matching fails there first.
+run = [
+  "uv run python -m unittest discover -s scripts -p 'test_check_agents_md.py'",
+  "./scripts/check-agents-md.py",
+]
+
 [tasks.check]
 description = "The full local gate — the definition of done"
 depends = [
@@ -506,6 +520,7 @@ depends = [
   "publish:check",
   "live:check",
   "conformance:self-test",
+  "agents:check",
   "build",
   "background:check",
   "trace:check",

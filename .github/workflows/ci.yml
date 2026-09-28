@@ -245,6 +245,14 @@ jobs:
       # because this job has uv and is required; it makes no AWS call.
       - name: conformance self-test
         run: uv run --script conformance/run_rs.py --self-test
+      # `mise run agents:check` (#278): every task, fault id, path, CI job and code name the
+      # contributor docs cite exists, so a rule can't point at a check that was renamed. Its
+      # unit tests first, for the reason the header check gives. It reads git's index, which
+      # this job's full checkout has.
+      - name: agents check unit tests
+        run: uv run python -m unittest discover -s scripts -p 'test_check_agents_md.py'
+      - name: agents check
+        run: ./scripts/check-agents-md.py
       # The LICENSE file itself, and the crate manifests agreeing with it. The
       # dependency-license audit is cargo-deny, two steps down; this asserts the
       # repo's own claim is consistent.
