@@ -27,7 +27,8 @@ export const HISTORY_SCRIPT = "scripts/ratchet-history.py"
  * @typedef {object} DriftPoint
  * @property {string | null} sha the commit, or null for an uncommitted working-tree change
  * @property {string} date ISO 8601
- * @property {Record<string, number>} counts entries per collected category
+ * @property {Record<string, number | null>} counts entries per category, null where that commit's
+ *   ratchet didn't collect the category yet
  * @property {number} total
  * @property {number} decisions
  */
@@ -84,7 +85,9 @@ export const validateHistory = (parsed) => {
   }
   for (const point of history.points) {
     for (const category of history.categories) {
-      if (!Number.isInteger(point.counts?.[category])) {
+      const count = point.counts?.[category]
+      // null is a count nobody took: the commit's ratchet didn't collect the category yet.
+      if (count !== null && !Number.isInteger(count)) {
         throw new Error(`a point in ${HISTORY_SCRIPT}'s output has no count for ${category}`)
       }
     }
@@ -97,6 +100,19 @@ const day = (point) => point.date.slice(0, 10)
 
 /** @param {DriftPoint} point */
 const commitOf = (point) => (point.sha === null ? "working tree" : point.sha.slice(0, 7))
+
+/**
+ * Each category first counted after the first point, with the point it was first counted at. The
+ * total rises there by that category's first count, which is a new measurement, not new drift.
+ *
+ * @param {DriftHistory} history
+ * @returns {[string, DriftPoint][]}
+ */
+const laterCategories = (history) =>
+  history.categories.flatMap((category) => {
+    const first = history.points.findIndex((point) => point.counts[category] !== null)
+    return first > 0 ? [[category, history.points[first]]] : []
+  })
 
 /**
  * The line chart: one line, the total, because `xychart-beta` draws no legend and a second unlabeled
@@ -127,6 +143,7 @@ export const driftPage = (history) => {
   const id = `${TIER}/architecture-drift`
   const latest = history.points[history.points.length - 1]
   const notCollected = Object.entries(history.notCollected ?? {})
+  const later = laterCategories(history)
   return {
     id,
     path: `${id}.md`,
@@ -151,7 +168,19 @@ export const driftPage = (history) => {
           inlineText(
             `The total at each commit, oldest first. At ${latest.sha === null ? "the working tree" : code(commitOf(latest))}, dated ${day(latest)}, it's ${latest.total}, with ${latest.decisions} decisions beside it.`
           ),
-          chart(history)
+          chart(history),
+          ...(later.length === 0
+            ? []
+            : [
+                inlineText(
+                  `A category joins the count at the commit whose ratchet started collecting it, and the cells before that read "not collected": ${later
+                    .map(
+                      ([category, point]) =>
+                        `${code(category)} from ${point.sha === null ? "the working tree" : code(commitOf(point))}, dated ${day(point)}, where its first count joins the total`
+                    )
+                    .join("; ")}.`
+                )
+              ])
         ].join("\n\n")
       },
       {
@@ -162,7 +191,9 @@ export const driftPage = (history) => {
             history.points.map((point) => [
               day(point),
               point.sha === null ? "working tree" : code(commitOf(point)),
-              ...history.categories.map((category) => String(point.counts[category])),
+              ...history.categories.map((category) =>
+                point.counts[category] === null ? "not collected" : String(point.counts[category])
+              ),
               String(point.total),
               String(point.decisions)
             ])

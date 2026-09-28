@@ -1,0 +1,24 @@
+# The parity-gap collector's sentinel: each shape of exemption the collector reads, with an issue
+# (a gap it counts) and without one (a decision it doesn't). expected.json lists the gaps.
+
+[[capability]]
+id = "adopt"
+core = "microvms_core::sandbox::Sandbox::adopt"
+cli = { exempt = "no command adopts a Sandbox", issue = "#269" }
+py = "Sandbox.adopt"
+ts = "Sandbox.adopt"
+
+[[capability]]
+id = "ledger"
+core = { exempt = "local CLI state" }
+cli = "ledger"
+py = { exempt = "local CLI state" }
+ts = "ledger"
+
+[[type]]
+name = "Session"
+exempt_members.ts = { spawn = { exempt = "TypeScript only", issue = "#261" }, create = "the factory idiom" }
+
+[exempt_names]
+py = { legacy_helper = { exempt = "kept for one release", issue = "#264" } }
+ts = { __napiBindingTarget = "a napi-rs build artifact" }

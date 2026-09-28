@@ -5,7 +5,8 @@ converts types and maps errors; behavior belongs in the Rust layers below.
 
 - A change to the exposed surface means `mise run dts` to regenerate `index.d.ts`;
   `dts:check` in `mise run check` fails on stale declarations, and the docs site's TypeScript
-  reference is generated from that file.
+  reference is generated from that file. A new public function, or a new method of a class
+  `parity/capabilities.toml` names, needs its row there, or `parity:check` fails.
 - `mise run check` doesn't build the addon or run its tests. Build and run them the way CI's
   `python and node bindings` job does:
 

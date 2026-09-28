@@ -10,7 +10,7 @@ behavior and [Trust](docs/TRUST.md) before changing authentication or execution.
 ```bash
 mise install
 mise run install       # install git hooks
-mise run check         # code, security, tests, schema, stubs and declarations, API drift, packaging, build, traceability, layering drift, seeded-fault registry
+mise run check         # code, security, tests, schema, stubs and declarations, surface parity, API drift, packaging, build, traceability, layering drift, seeded-fault registry
 mise run ci:local      # CI's Linux jobs, each in a clone shaped like its checkout; before a push
 mise tasks             # all available tasks
 ```
@@ -85,6 +85,19 @@ isn't a fix: re-key its entry in the same change. A re-keyed entry keeps its
 issue and changes its path or its text, not both, so a move and a rename land
 in separate PRs.
 
+`mise run parity:check` holds `parity/capabilities.toml` to the four surfaces
+(core through `parity/core-api.json`, the CLI through `docs/manifest.json`, and
+the two bindings through their stub and declarations). A public function, a
+method of a class the table names, or a command that no row names fails, and so
+does a row naming something a surface doesn't have. A new class and its methods
+aren't held yet; that's the option-level follow-up. Name
+the capability on each surface, or exempt the surface with a reason, and an
+`issue` if a later change closes the gap. The ratchet counts an exemption with
+an issue as parity-gap drift, and a PR can't add drift, so a new function or
+method lands on every surface or is exempted without an issue, as a decision.
+`mise run core-api` regenerates the core snapshot, and `core-api:check` fails
+when it's stale.
+
 Each driving adapter's `clippy.toml` bans a subprocess (`std::process::Command`,
 `tokio::process::Command`) and a direct environment read (`std::env::var`,
 `var_os`, `vars`, `vars_os`, and calling `microvms_core::env::process` by
@@ -135,11 +148,13 @@ Regenerate affected contracts and include their diffs:
 mise run schema        # docs/schema.json
 mise run manifest      # docs/manifest.json
 mise run stubs         # Python declarations
+mise run core-api      # parity/core-api.json, core's public paths
 mise run model:check   # implemented constraints versus the installed boto3 model
 ```
 
 Use current boto3 models and AWS documentation to identify capabilities the
-package should expose, verify request serialization, and check CLI/SDK parity.
+package should expose, verify request serialization, and check CLI/SDK parity
+(`mise run parity:check` covers names, not options).
 The [MicroVM API](https://docs.aws.amazon.com/lambda/latest/microvm-api/Welcome.html)
 manages images and VMs; [Lambda core](https://docs.aws.amazon.com/lambda/latest/lambda-core/Welcome.html)
 manages VPC connectors. Document the package's supported workflows and limits.

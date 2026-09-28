@@ -56,6 +56,11 @@ steps = [
   "clippy (client crates everywhere, everything on linux)",
   "test",
   "schema artifact is not stale",
+  "command manifest is not stale",
+  "core surface unit tests",
+  "core surface snapshot is not stale",
+  "capability table unit tests",
+  "capability table matches the surfaces",
   "every publishable crate can actually publish",
 ]
 

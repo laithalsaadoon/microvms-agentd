@@ -238,6 +238,40 @@ cargo run -q -p microvms-cli -- manifest > "$tmp"
 diff -u docs/manifest.json "$tmp"
 """
 
+[tasks.core-api]
+description = "Regenerate parity/core-api.json, every public path of microvms-core"
+# The core surface `parity:check` reads (#271). Core re-exports most of its API from the crates
+# below it, so this builds the rustdoc JSON of each and stitches them; the script's docstring
+# has why it's a committed snapshot and how it builds on stable.
+run = "./scripts/generate-core-api.py"
+
+[tasks."core-api:check"]
+description = "Fail if parity/core-api.json no longer matches core's public surface"
+# `schema:check`'s argument, pointed at the snapshot `parity:check` reads for core: a stale one
+# holds the table to a surface nobody ships. The stitcher's unit tests run first; they build a
+# two-crate fixture workspace with the real toolchain, so a rustdoc that changed under the pin
+# fails there, naming its format_version, before the gate reads core through it. It documents
+# the five crates alone, no dependency docs: measured 2026-09-28, about 5 s warm. CI's `rust`
+# job runs both.
+run = [
+  "uv run python -m unittest discover -s scripts -p 'test_rustdoc_walk.py'",
+  "./scripts/generate-core-api.py --check",
+]
+
+[tasks."parity:check"]
+description = "Every capability in parity/capabilities.toml resolves on core, the CLI, Python and TypeScript, and every function, method and command it holds has a row"
+# The table says, for each capability, what each surface calls it or why it lacks it (#271); the
+# script's docstring has the rules. It reads the committed surfaces (core-api.json, manifest.json,
+# microvms.pyi, index.d.ts), so the gates that hold those to the code (`core-api:check`,
+# `manifest:check`, `stubs:check`, `dts:check`) are what make a pass here mean the shipped
+# surfaces agree. Griffe runs from the site's lockfile and TypeDoc through npx at the site's
+# pins, so a cold cache downloads them once. The self-test runs first, for `model:check`'s
+# reason. CI's `rust` job runs both.
+run = [
+  "uv run python -m unittest discover -s scripts -p 'test_check_parity.py'",
+  "./scripts/check-parity.py",
+]
+
 [tasks.stubs]
 description = "Regenerate microvms-py/microvms.pyi from the pyo3 surface"
 run = "./scripts/generate-py-stubs.py"
@@ -456,6 +490,8 @@ depends = [
   "test",
   "schema:check",
   "manifest:check",
+  "core-api:check",
+  "parity:check",
   "stubs:check",
   "dts:check",
   "model:check",

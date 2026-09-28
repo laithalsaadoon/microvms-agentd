@@ -679,6 +679,464 @@ code = "E0432"
 message = "unresolved import `microvms_core::SizeClass`"
 transform = { file = "microvms-core/src/lib.rs", replace = "pub use sizing::SizeClass;\n", with = "" }
 
+# ── core-api: core's surface stitched across its crates (#271) ───────────────
+
+# The snapshot's CI step: a re-export deleted from core is a diff naming the paths it took.
+[[fault]]
+id = "core-api-stale-reexport"
+guard = "scripts/generate-core-api.py"
+run = ["./scripts/generate-core-api.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "-    \"microvms_core::BuildHookTimeout\": \"struct\","
+transform = { file = "microvms-core/src/lib.rs", replace = "pub use hooks::{BuildHookTimeout, RunHookTimeout};\n", with = "" }
+
+[[fault]]
+id = "core-api-empty-input"
+guard = "scripts/generate-core-api.py"
+run = ["./scripts/generate-core-api.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "microvms_core.json doesn't exist; the crate's rustdoc JSON wasn't built"
+argv_fault = ["--doc-dir", "{empty_dir}"]
+
+# A walk that returns nothing, and one that stops following re-exports into the crates below.
+[[fault]]
+id = "core-api-walk-empty"
+guard = "scripts/generate-core-api.py"
+run = ["./scripts/generate-core-api.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "the walk of microvms_core found no public paths"
+transform = { file = "scripts/rustdoc_walk.py", replace = "if child[\"visibility\"] != \"public\":", with = "if child[\"visibility\"] != \"crate\":" }
+
+[[fault]]
+id = "core-api-stitch-sentinel"
+guard = "scripts/generate-core-api.py"
+run = ["./scripts/generate-core-api.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "these sentinels are missing or of another kind"
+transform = { file = "scripts/rustdoc_walk.py", replace = "        other = self.doc(crate)\n", with = "        other = None\n" }
+
+[[fault]]
+id = "rustdoc-walk-cross-crate"
+guard = "test_rustdoc_walk.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_rustdoc_walk.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_reexport_from_another_crate_resolves_with_its_members ("
+transform = { file = "scripts/rustdoc_walk.py", replace = "        other = self.doc(crate)\n", with = "        other = None\n" }
+
+[[fault]]
+id = "rustdoc-walk-extension"
+guard = "test_rustdoc_walk.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_rustdoc_walk.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_extension_trait_method_is_named_on_the_type_it_extends ("
+transform = { file = "scripts/rustdoc_walk.py", replace = "    walk.attribute_extensions()\n", with = "" }
+
+[[fault]]
+id = "rustdoc-walk-glob-shadow"
+guard = "test_rustdoc_walk.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_rustdoc_walk.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_local_item_shadows_what_a_glob_brings_in ("
+transform = { file = "scripts/rustdoc_walk.py", replace = "self.walk(glob_doc, glob, prefix, inherited)", with = "self.walk(glob_doc, glob, prefix)" }
+
+[[fault]]
+id = "rustdoc-walk-format-version"
+guard = "test_rustdoc_walk.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_rustdoc_walk.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_unknown_format_version_is_refused_naming_it ("
+transform = { file = "scripts/rustdoc_walk.py", replace = "    if version not in ACCEPTED_FORMAT_VERSIONS:\n", with = "    if version is None:\n" }
+
+# Without the refusal, an empty index fails later as a KeyError, which unittest reports as an
+# error rather than a failure.
+[[fault]]
+id = "rustdoc-walk-empty-index"
+guard = "test_rustdoc_walk.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_rustdoc_walk.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ERROR: test_an_empty_index_is_refused ("
+transform = { file = "scripts/rustdoc_walk.py", replace = "    if not index or str(doc.get(\"root\")) not in index:\n", with = "    if index is None:\n" }
+
+# ── parity: the capability table's gate (#271) ──────────────────────────────
+
+# The issue's three deliberate breaks: a stub method gone (rule (b)), a sentinel's cell gone
+# (rule (c)), and the Griffe step pointed at an empty stub (the sentinels).
+[[fault]]
+id = "parity-stub-file-exists"
+guard = "scripts/check-parity.py"
+run = ["./scripts/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "file-exists: py: Session.file_exists isn't on the surface"
+transform = { file = "microvms-py/microvms.pyi", replace = "    def file_exists(self, /, path: str) -> bool:\n        \"\"\"\n        Whether a path exists, distinguishing absence from every other refusal.\n        \"\"\"\n", with = "" }
+
+[[fault]]
+id = "parity-health-ts-cell"
+guard = "scripts/check-parity.py"
+run = ["./scripts/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "health: ts: no cell; name the surface or exempt it"
+transform = { file = "parity/capabilities.toml", replace = "py = \"Session.health\"\nts = \"Session.health\"\n", with = "py = \"Session.health\"\n" }
+
+[[fault]]
+id = "parity-empty-pyi"
+guard = "scripts/check-parity.py"
+run = ["./scripts/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "sentinel launch: py: Sandbox.run isn't on the surface"
+argv_fault = ["--pyi", "parity/fixtures/empty.pyi"]
+
+# Every other input empty, and each reader returning nothing from a real input.
+[[fault]]
+id = "parity-empty-dts"
+guard = "scripts/check-parity.py"
+run = ["./scripts/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "sentinel launch: ts: Sandbox.run isn't on the surface"
+argv_fault = ["--dts", "parity/fixtures/empty.d.ts"]
+
+[[fault]]
+id = "parity-empty-manifest"
+guard = "scripts/check-parity.py"
+run = ["./scripts/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "sentinel launch: cli: run isn't on the surface"
+argv_fault = ["--manifest", "parity/fixtures/empty.json"]
+
+[[fault]]
+id = "parity-empty-core-api"
+guard = "scripts/check-parity.py"
+run = ["./scripts/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "sentinel launch: core: microvms_core::sandbox::Sandbox::run isn't on the surface"
+argv_fault = ["--core-api", "parity/fixtures/empty.json"]
+
+[[fault]]
+id = "parity-empty-table"
+guard = "scripts/check-parity.py"
+run = ["./scripts/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "table: no [[capability]] rows"
+argv_fault = ["--table", "parity/fixtures/empty.toml"]
+
+[[fault]]
+id = "parity-py-reader-empty"
+guard = "scripts/check-parity.py"
+run = ["./scripts/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "sentinel run-report: py: run_report isn't on the surface"
+transform = { file = "scripts/check-parity.py", replace = "        if dunder(name):\n", with = "        if name:\n" }
+
+# A TypeDoc whose JSON moved its members under another key reads as an empty project.
+[[fault]]
+id = "parity-ts-reader-empty"
+guard = "scripts/check-parity.py"
+run = ["./scripts/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "sentinel run-report: ts: runReport isn't on the surface"
+transform = { file = "scripts/check-parity.py", replace = "    read_ts_children(project.get(\"children\") or [], \"\", surface)\n", with = "    read_ts_children(project.get(\"members\") or [], \"\", surface)\n" }
+
+[[fault]]
+id = "parity-typedoc-pin"
+guard = "scripts/check-parity.py"
+run = ["./scripts/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "pins: typedoc is 0.28.20 here and 0.28.21 in site/package.json"
+transform = { file = "site/package.json", replace = "    \"typedoc\": \"0.28.20\",\n", with = "    \"typedoc\": \"0.28.21\",\n" }
+
+# Rule (a) and the type pairing over the real surfaces: a row pointed away from the method it
+# mapped, and an exempt member deleted.
+[[fault]]
+id = "parity-row-unmapped"
+guard = "scripts/check-parity.py"
+run = ["./scripts/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "py: RateTable.age_days belongs to no row"
+transform = { file = "parity/capabilities.toml", replace = "py = \"RateTable.age_days\"\n", with = "py = \"RateTable.staleness\"\n" }
+
+[[fault]]
+id = "parity-exempt-member-deleted"
+guard = "scripts/check-parity.py"
+run = ["./scripts/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "type Session: ts: spawn has no Python twin and no exemption"
+transform = { file = "parity/capabilities.toml", replace = "name = \"Session\"\nexempt_members.ts = { spawn = { exempt = \"Python has no split-stream spawn\", issue = \"#261\" } }\n", with = "name = \"Session\"\n" }
+
+# The self-test's named cases, each against the code that makes it pass.
+[[fault]]
+id = "parity-test-unmapped-function"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_unmapped_python_function_fails ("
+transform = { file = "scripts/check-parity.py", replace = "        for name in sorted(surface.functions - covered):\n", with = "        for name in sorted(surface.functions & covered):\n" }
+
+[[fault]]
+id = "parity-test-missing-name"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_row_naming_a_typescript_method_that_does_not_exist_fails ("
+transform = { file = "scripts/check-parity.py", replace = "return None if name in surface.names else f\"{name} isn't on the surface\"", with = "return None" }
+
+[[fault]]
+id = "parity-test-missing-cell"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_missing_cli_cell_with_no_exemption_fails ("
+transform = { file = "scripts/check-parity.py", replace = "                problems.append(f\"{where}: no cell; name the surface or exempt it\")\n", with = "" }
+
+[[fault]]
+id = "parity-test-empty-reason"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_exemption_with_an_empty_reason_fails ("
+transform = { file = "scripts/check-parity.py", replace = "    if not isinstance(reason, str) or not reason.strip():\n", with = "    if not isinstance(reason, str):\n" }
+
+[[fault]]
+id = "parity-test-issue-form"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_issue_that_is_not_a_number_fails ("
+transform = { file = "scripts/check-parity.py", replace = "ISSUE = re.compile(r\"#[1-9][0-9]*\")", with = "ISSUE = re.compile(r\".+\")" }
+
+[[fault]]
+id = "parity-test-empty-sentinel"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_empty_griffe_dump_fails_on_the_sentinels ("
+transform = { file = "scripts/check-parity.py", replace = "                        f\"sentinel {row_id}: {key}: {why}\"\n", with = "                        f\"{row_id}: {key}: {why}\"\n" }
+
+# ── wiring the table in (#271): the snapshot's format refusal, the ratchet's parity-gap ─
+
+# The stitcher's format_version refusal through the gate CI runs, beside its unit-tier entry
+# `rustdoc-walk-format-version`: a rustdoc whose format the walk wasn't written for is refused
+# by name before any path is read.
+[[fault]]
+id = "core-api-format-version"
+guard = "scripts/generate-core-api.py"
+run = ["./scripts/generate-core-api.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "and this walk was written for [59]"
+transform = { file = "scripts/rustdoc_walk.py", replace = "ACCEPTED_FORMAT_VERSIONS = frozenset({60, 61})", with = "ACCEPTED_FORMAT_VERSIONS = frozenset({59})" }
+
+# `--exemptions`, the table-only mode the ratchet reads: an issue it can't read would print as
+# null and drop out of the count as a decision.
+[[fault]]
+id = "parity-exemptions-malformed-issue"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_parity.py", "-k", "ExemptionRecordTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_exemptions_mode_refuses_an_issue_it_cannot_read ("
+transform = { file = "scripts/check-parity.py", replace = "    if problems:\n        print(\"parity: the table's exemptions can't be read:\")", with = "    if False:\n        print(\"parity: the table's exemptions can't be read:\")" }
+
+# The parity-gap collector. Its sentinel first: a collector that reads nothing, and one that reads
+# the decisions instead of the gaps, both fail against ratchet/fixtures/sentinel/parity/.
+[[fault]]
+id = "ratchet-parity-gap-sentinel"
+guard = "ratchet/fixtures/sentinel/expected.json"
+run = ["./scripts/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "sentinel: the parity-gap collector found nothing"
+transform = { file = "scripts/ratchet.py", replace = "records = json.loads(out.stdout)[\"exemptions\"]", with = "records = []" }
+
+[[fault]]
+id = "ratchet-parity-gap-sentinel-decisions"
+guard = "ratchet/fixtures/sentinel/expected.json"
+run = ["./scripts/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "sentinel: unexpected [parity-gap] ledger/core"
+transform = { file = "scripts/ratchet.py", replace = "if record[\"issue\"] is not None", with = "if record[\"issue\"] is None" }
+
+[[fault]]
+id = "ratchet-parity-gap-unit"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "ParityGapTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_tracked_exemption_is_a_gap_and_a_decision_is_not ("
+transform = { file = "scripts/ratchet.py", replace = "if record[\"issue\"] is not None", with = "if record[\"issue\"] is None" }
+
+[[fault]]
+id = "ratchet-parity-gap-unreadable-issue"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "ParityGapTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_issue_the_check_cannot_read_is_an_error ("
+transform = { file = "scripts/check-parity.py", replace = "    if problems:\n        print(\"parity: the table's exemptions can't be read:\")", with = "    if False:\n        print(\"parity: the table's exemptions can't be read:\")" }
+
+# The real tree: an empty table, a gap the file doesn't record, and a gap closed (here, turned
+# into a decision) while the file still lists it.
+[[fault]]
+id = "ratchet-parity-gap-empty-table"
+guard = "scripts/ratchet.py"
+run = ["./scripts/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+# Any `fixed:` line: the first one in table order moves as #280 closes gaps, and a clean run
+# prints none.
+message = "fixed: [parity-gap] "
+transform = { file = "scripts/ratchet.py", replace = "parity_table=ROOT / \"parity\" / \"capabilities.toml\",", with = "parity_table=ROOT / \"parity\" / \"fixtures\" / \"empty.toml\"," }
+
+[[fault]]
+id = "ratchet-parity-gap-new-drift"
+guard = "ratchet/drift.json"
+run = ["./scripts/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "new drift: [parity-gap] ensure-image/cli. Give that surface the capability"
+transform = { file = "ratchet/drift.json", replace = "    { \"category\": \"parity-gap\", \"key\": \"ensure-image/cli\", \"issue\": 258 },\n", with = "" }
+
+[[fault]]
+id = "ratchet-parity-gap-fixed"
+guard = "ratchet/drift.json"
+run = ["./scripts/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "fixed: [parity-gap] ensure-image/cli"
+transform = { file = "parity/capabilities.toml", replace = "reuse instead of calling core\", issue = \"#258\" }", with = "reuse instead of calling core\" }" }
+
+[[fault]]
+id = "ratchet-parity-gap-advice"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "RuleTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_rule_1_a_new_parity_gap_points_at_the_table ("
+transform = { file = "scripts/ratchet.py", replace = "NEW_DRIFT_FIX.get(category, LAYERING_FIX)", with = "LAYERING_FIX" }
+
+# The drift page's history: a category a commit's ratchet didn't collect is null there, not 0.
+[[fault]]
+id = "ratchet-history-not-collected"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ratchet.py", "-k", "HistoryTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_category_a_commit_did_not_collect_is_null_there ("
+transform = { file = "scripts/ratchet-history.py", replace = "counts[category] if category in collected else None", with = "counts[category]" }
+
+# Rule (a) over a `[[type]]`'s methods (#271 review): a method both bindings add needs a row, or
+# the pairing alone passes it and nothing asks about core or the CLI. On the real surfaces, a
+# row that stops naming `AgentVm.image_name`; in the self-test, the old skip put back.
+[[fault]]
+id = "parity-type-method-unmapped"
+guard = "scripts/check-parity.py"
+run = ["./scripts/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "py: AgentVm.image_name belongs to no row"
+transform = { file = "parity/capabilities.toml", replace = "py = \"AgentVm.image_name\"\n", with = "py = { exempt = \"seeded\" }\n" }
+
+[[fault]]
+id = "parity-test-type-method"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_parity.py", "-k", "RuleTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_new_method_on_both_sides_of_a_type_needs_a_row ("
+transform = { file = "scripts/check-parity.py", replace = "    if key != \"ts\" or cls not in types:\n        return methods\n", with = "    if cls in types:\n        return set()\n    if key != \"ts\":\n        return methods\n" }
+
+# The TypeScript side of a `[[type]]` holds a method only when its Python twin is a method: napi
+# writes each getter as a method, and holding those would ask for a row per accessor.
+[[fault]]
+id = "parity-test-type-accessor"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_parity.py", "-k", "RuleTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_type_accessor_is_held_by_the_pairing_alone ("
+transform = { file = "scripts/check-parity.py", replace = "    return {name for name in methods if normalize(name) in python_methods}\n", with = "    return methods\n" }
+
+# The TypeScript reader (#271 review): a function inside a namespace, the shape napi-rs writes
+# for `#[napi(namespace = ...)]`, and a declaration TypeDoc drops for its JSDoc tag. Each one
+# is seeded into the real declarations, TS-only, with no row.
+[[fault]]
+id = "parity-ts-namespace-function"
+guard = "scripts/check-parity.py"
+run = ["./scripts/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ts: snapshots.snapshotVm belongs to no row"
+transform = { file = "microvms-js/index.d.ts", replace = "/** The layer's fixed values as JSON, for a caller that wants to reason about the guest. */\n", with = "export declare namespace snapshots {\n  export function snapshotVm(): void\n}\n/** The layer's fixed values as JSON, for a caller that wants to reason about the guest. */\n" }
+
+[[fault]]
+id = "parity-ts-hidden-tag"
+guard = "scripts/check-parity.py"
+run = ["./scripts/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "has JSDoc tags TypeDoc drops a declaration for"
+transform = { file = "microvms-js/index.d.ts", replace = "/** The layer's fixed values as JSON, for a caller that wants to reason about the guest. */\n", with = "/** Snapshots the VM. @hidden */\nexport declare function snapshotVm(): void\n/** The layer's fixed values as JSON, for a caller that wants to reason about the guest. */\n" }
+
+[[fault]]
+id = "parity-test-ts-namespace"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_parity.py", "-k", "RuleTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_unmapped_function_in_a_typescript_namespace_fails ("
+transform = { file = "scripts/check-parity.py", replace = "            read_ts_children(item.get(\"children\") or [], f\"{name}.\", surface)\n", with = "            pass\n" }
+
+[[fault]]
+id = "parity-test-ts-hidden-tag"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_parity.py", "-k", "ReaderTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_declaration_typedoc_would_drop_is_refused ("
+transform = { file = "scripts/check-parity.py", replace = "    if hidden:\n        raise ParityError(", with = "    if False:\n        raise ParityError(" }
+
+# The `guards` job's Node (#271 review): its pin is held to mise.toml's major like the others.
+[[fault]]
+id = "ci-parity-guards-node-major"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "runs Node 24, and mise.toml pins 22 (majors compared)"
+transform = { file = ".github/workflows/ci.yml", replace = "the runner image ships.\n      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7\n        with:\n          node-version: '22'\n", with = "the runner image ships.\n      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7\n        with:\n          node-version: '24'\n" }
+
+# Not registered: the drift page's vitest cases for a category a commit didn't collect
+# (site/tests/drift-reference.test.ts, "writes not collected ..." and "names the commit a
+# category started being counted at ..."). The registry's suites are rust, script and bindings,
+# no site test has an entry, and a scratch worktree has no site/node_modules, so a vitest entry
+# needs a site suite first. #271 broke both cases by hand; `docs:check` runs them.
+
 # ── the release's Sigstore check (#284) ──────────────────────────────────────
 
 [[fault]]
@@ -1484,7 +1942,7 @@ run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_base_script_without_a_collected_tuple_is_an_error ("
-transform = { file = "scripts/ratchet.py", replace = "    raise SystemExit(\n        f\"{ref}:{SCRIPT} has no COLLECTED tuple", with = "    return ()\n    raise SystemExit(\n        f\"{ref}:{SCRIPT} has no COLLECTED tuple" }
+transform = { file = "scripts/ratchet.py", replace = "    raise SystemExit(\n        f\"{where} has no COLLECTED tuple", with = "    return ()\n    raise SystemExit(\n        f\"{where} has no COLLECTED tuple" }
 
 [[fault]]
 id = "ratchet-bootstrap-reads-collected"
@@ -1885,7 +2343,7 @@ run = ["./scripts/check-ci-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "runs Node 24, and mise.toml pins 22 (majors compared)"
-transform = { file = ".github/workflows/ci.yml", replace = "          node-version: '22'\n", with = "          node-version: '24'\n" }
+transform = { file = ".github/workflows/ci.yml", replace = "          enable-cache: false\n      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7\n        with:\n          node-version: '22'\n", with = "          enable-cache: false\n      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7\n        with:\n          node-version: '24'\n" }
 
 [[fault]]
 id = "ci-parity-actionlint-unpinned"

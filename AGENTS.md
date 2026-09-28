@@ -131,12 +131,22 @@ production constructors outside `src/seam.rs`, and the bindings refuse the
 transport calls. `protocol::exec::StartRequest` is `#[non_exhaustive]`, so every
 start request is built from `StartRequest::new`, which holds the wire's defaults.
 The Python binding's `run` signatures still restate four of them as keyword
-defaults, which #300 checks. A surface parity check (#271) is planned.
+defaults, which #300 checks.
+
+`parity/capabilities.toml` says what core, the CLI, Python and TypeScript each
+call every capability, or why a surface lacks it. `mise run parity:check` holds
+it to the four surfaces and fails on a public function, a method of a class the
+table names, or a command, when no row names it. An exemption with an issue is a gap that issue closes, and the
+ratchet counts it as parity-gap drift, so closing one deletes its exemption and
+its entry together. One without an issue is a decision. The script's docstring
+has the rules; option-level parity (flags, keyword arguments) isn't checked yet.
 
 ## Maintenance rules
 
 - Use `microvm manifest` for the current command contract. Regenerate
-  `docs/manifest.json`, `docs/schema.json`, and Python stubs when affected.
+  `docs/manifest.json`, `docs/schema.json`, and Python stubs when affected, and
+  `parity/core-api.json` (`mise run core-api`) when core's public surface
+  changes.
 - Edit `site/authored/` and top-level `docs/*.md`; generated content under
   `site/src/content/docs/` is overwritten. Generated source analyses contain
   line-number citations that can become stale.

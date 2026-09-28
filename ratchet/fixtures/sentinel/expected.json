@@ -15,5 +15,6 @@
   "adapter-logic": [
     "adapter/src/lib.rs: literal-default: std::time::Duration::from_secs(300)",
     "adapter/src/lib.rs: operation-literal: \"RunMicrovm\""
-  ]
+  ],
+  "parity-gap": ["Session.spawn/ts", "adopt/cli", "legacy_helper/py"]
 }

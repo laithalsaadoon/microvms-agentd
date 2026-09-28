@@ -51,7 +51,9 @@ thinness guard pushed an upload into an `aws s3 cp` subprocess it couldn't see.
    re-keys it. A new key passes when it takes the place of a base entry of the same category
    and issue that the file no longer lists, and the two share their path or their text. Each
    base entry takes one replacement. Moving and renaming in one change shares neither, so it
-   takes two PRs. An entry whose key is unchanged may name a different issue.
+   takes two PRs. An entry whose key is unchanged may name a different issue. A parity-gap
+   key names a table row, not a place in the code, so it never pairs: renaming a row that
+   carries a gap is a new key.
 4. A collected category with no entries that isn't `enforced`: its rule is ready to enforce.
 
 # The collectors
@@ -73,6 +75,12 @@ thinness guard pushed an upload into an `aws s3 cp` subprocess it couldn't see.
   (`literal-default`: a `DEFAULT_*` constant, `Duration::from_*`, `.unwrap_or`, `wait_opts` or
   a literal added to a timeout). The key is `<path>: <rule id>: <text>`, the matched code with
   its whitespace squashed. Each rule's file says which shapes it reaches and which it can't.
+- parity-gap: each exemption in `parity/capabilities.toml` that names an issue, a capability a
+  surface lacks until that issue closes it (#271). The key is the record key
+  `scripts/check-parity.py --exemptions` prints: `<capability>/<surface>`,
+  `<Type>.<member>/<surface>` or `<name>/<surface>`. An exemption without an issue is the
+  table's own decision and isn't read. `parity:check` holds the table to the surfaces, so a gap
+  the table doesn't record fails there, not here.
 
 The Rust collectors are ast-grep rules under `ratchet/`, and test code is out of all of them: an
 item after `#[cfg(test)]`, `#[cfg(feature = "test-support")]` or
@@ -123,6 +131,7 @@ DRIFT = "ratchet/drift.json"
 SCRIPT = "scripts/ratchet.py"
 PLACEMENT = "arch/placement.toml"
 SGCONFIG = ROOT / "ratchet" / "sgconfig.yml"
+CHECK_PARITY = ROOT / "scripts" / "check-parity.py"
 
 
 class Scope(NamedTuple):
@@ -147,6 +156,8 @@ class Scope(NamedTuple):
     #: wires implementations in and may hold none itself (ARCH-8). Its own public traits are
     #: the extension traits that keep old call syntax on the types below it, not ports.
     composition_root: str | None = None
+    #: The capability table whose tracked exemptions are parity gaps. None reads no gaps.
+    parity_table: Path | None = None
 
 
 REPO = Scope(
@@ -159,6 +170,7 @@ REPO = Scope(
     # where port implementations belong.
     composed=("microvms-app",),
     composition_root="microvms-core",
+    parity_table=ROOT / "parity" / "capabilities.toml",
 )
 
 SENTINEL_ROOT = ROOT / "ratchet" / "fixtures" / "sentinel"
@@ -168,15 +180,14 @@ SENTINEL = Scope(
     adapters=("adapter",),
     composed=("kernel",),
     composition_root="root",
+    parity_table=SENTINEL_ROOT / "parity" / "capabilities.toml",
 )
 
-COLLECTED = ("placement", "subprocess", "port-impl", "adapter-logic")
+COLLECTED = ("placement", "subprocess", "port-impl", "adapter-logic", "parity-gap")
 
-#: Categories #281 defines whose collector doesn't exist yet. The summary says so rather than
-#: printing zero, because a zero would read as a measurement.
-NOT_COLLECTED = {
-    "parity-gap": "until #271's `parity:check --json` lands",
-}
+#: Categories defined before their collector exists. The summary says so rather than printing
+#: zero, because a zero would read as a measurement. Empty since #271 collected parity-gap.
+NOT_COLLECTED: dict[str, str] = {}
 
 #: The ast-grep rules the adapter-logic collector reads, by rule id.
 ADAPTER_LOGIC = ("operation-literal", "literal-default")
@@ -194,7 +205,24 @@ PROMOTE = {
     "adapter-logic": (
         "ratchet/rules/operation-literal.yml and literal-default.yml as a hard gate (#273)"
     ),
+    "parity-gap": (
+        "scripts/check-parity.py refusing an exemption with an issue, once #280 closes the "
+        "last gap"
+    ),
 }
+
+
+#: What rule 1 tells the reader to do with new drift. A parity gap isn't work in the wrong layer.
+NEW_DRIFT_FIX = {
+    "parity-gap": (
+        "Give that surface the capability, or, if the gap is permanent, drop the exemption's "
+        "issue in parity/capabilities.toml so it reads as a decision."
+    ),
+}
+LAYERING_FIX = (
+    "Move the work to the layer whose job it is (I/O belongs in microvms-edges, behind a port "
+    "in microvms-app), or add a decision with its reason."
+)
 
 
 def describe(category: str, key: str) -> str:
@@ -376,6 +404,11 @@ def read_base_collected(root: Path, ref: str) -> tuple[str, ...]:
         raise SystemExit(
             f"{ref} has no {SCRIPT}, so rule 3 can't tell which categories it collected"
         )
+    return collected_from(text, f"{ref}:{SCRIPT}")
+
+
+def collected_from(text: str, where: str) -> tuple[str, ...]:
+    """The literal `COLLECTED` tuple in a ratchet script's text. `where` names it in an error."""
     for node in ast.parse(text).body:
         if isinstance(node, ast.Assign) and any(
             isinstance(target, ast.Name) and target.id == "COLLECTED"
@@ -393,8 +426,8 @@ def read_base_collected(root: Path, ref: str) -> tuple[str, ...]:
                 return value
             break
     raise SystemExit(
-        f"{ref}:{SCRIPT} has no COLLECTED tuple of category names, so rule 3 can't tell "
-        "which categories it collected"
+        f"{where} has no COLLECTED tuple of category names, so there's no telling which "
+        "categories it collected"
     )
 
 
@@ -419,8 +452,9 @@ def default_base(root: Path) -> str:
 
 
 def location_and_text(category: str, key: str) -> tuple[str | None, str | None]:
-    """A Rust key's `<path>` and `<text>` halves. Placement keys name crates, not places."""
-    if category == "placement" or ": " not in key:
+    """A Rust key's `<path>` and `<text>` halves. Placement and parity-gap keys name crates and
+    table rows, not places."""
+    if category in ("placement", "parity-gap") or ": " not in key:
         return None, None
     path, text = key.split(": ", 1)
     return path, text
@@ -504,9 +538,8 @@ def compare(
         for key in sorted(found.keys() | listed.keys()):
             if found.get(key, 0) > listed.get(key, 0):
                 failures.append(
-                    f"new drift: {describe(category, key)}. Move the work to the layer "
-                    "whose job it is (I/O belongs in microvms-edges, behind a port in "
-                    "microvms-app), or add a decision with its reason."
+                    f"new drift: {describe(category, key)}. "
+                    + NEW_DRIFT_FIX.get(category, LAYERING_FIX)
                 )
             elif listed.get(key, 0) > found.get(key, 0):
                 failures.append(
@@ -905,12 +938,54 @@ def rust(scope: Scope, found: Crates, require_ports: bool) -> Counter:
     return findings
 
 
+def parity_gaps(scope: Scope) -> Counter:
+    """Each exemption in the scope's capability table that names an issue (#271).
+
+    The table's own gate, `check-parity.py`, holds the table to the four surfaces, so a gap it
+    doesn't record fails there. This reads the records its `--exemptions` mode prints, which
+    come from the table alone: the job the ratchet runs in has no Node for TypeDoc.
+
+    Like every collector, it returns keys, not issues, so a drift.json entry's `issue` isn't
+    compared with its exemption's. Rule 3 lets an unchanged key name a new issue in any
+    category, and the table is where a reader looks up the gap: an entry names its exemption's
+    issue because `--exemptions` printed it, not because anything holds the two together.
+    """
+    if scope.parity_table is None:
+        return Counter()
+    out = subprocess.run(
+        [
+            sys.executable,
+            str(CHECK_PARITY),
+            "--exemptions",
+            "--table",
+            str(scope.parity_table),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if out.returncode != 0:
+        raise SystemExit(
+            f"check-parity.py --exemptions failed on {scope.parity_table}:\n"
+            f"{out.stdout}{out.stderr}"
+        )
+    records = json.loads(out.stdout)["exemptions"]
+    return Counter(
+        ("parity-gap", record["key"])
+        for record in records
+        if record["issue"] is not None
+    )
+
+
 def collect(scope: Scope, require_ports: bool = False) -> Counter:
     """Every finding in `scope`, as a count per `(category, key)`."""
     metadata = cargo_metadata(scope)
     sets = load_sets(scope)
     found = crates(scope, metadata, sets)
-    return placement(metadata, sets) + rust(scope, found, require_ports)
+    return (
+        placement(metadata, sets)
+        + rust(scope, found, require_ports)
+        + parity_gaps(scope)
+    )
 
 
 def sentinel(scope: Scope) -> list[str]:
