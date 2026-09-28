@@ -92,15 +92,15 @@ more than expected, in four layers.
 
 **Measured platform behavior.** `docs/PLATFORM.md` carries 43 H2 headings, 42 of them
 distinct — the heading "A WebSocket reaches a guest server through the endpoint, and the proxy
-strips its own subprotocols" appears at both `docs/PLATFORM.md:784` and
-`docs/PLATFORM.md:853`, so the file holds one duplicated section and a reader counting
+strips its own subprotocols" appears at both `docs/PLATFORM.md:342` and
+`docs/PLATFORM.md:387`, so the file holds one duplicated section and a reader counting
 findings should count 42. Each is a finding that cannot be derived from this repository's
 source, because it describes the AWS service rather than this code. Measurement dates run
 2026-06-17 through 2026-08-16, with 22 references to 2026-08-15 alone. Two sections show why
 the file cannot be cheaply regenerated:
-`docs/PLATFORM.md:46` establishes that `runHookPayload` arrives wrapped rather than as the
+`docs/PLATFORM.md:30` establishes that `runHookPayload` arrives wrapped rather than as the
 request body, which cost a full build-and-run cycle because the platform terminates the VM on
-the resulting 400 before the payload can be read; `docs/PLATFORM.md:64` fixes the
+the resulting 400 before the payload can be read; `docs/PLATFORM.md:43` fixes the
 `runHookPayload` ceiling at 4096 bytes and notes the service model states it twice,
 differently.
 
@@ -204,8 +204,8 @@ the bullets name the count. Shares are computed with
   `microvms-cli/tests/manifest.rs` and `thinness.rs` assertions rather than behind review
   alone.
 - `microvms-app/src/control/image.rs` — sole human author (82% of 11 commits). 99 symbols
-  covering image and version creation, an area where `docs/PLATFORM.md:725` and
-  `docs/PLATFORM.md:747` record two service refusals; keep those two sections and this file
+  covering image and version creation, an area where `docs/PLATFORM.md:317` and
+  `docs/PLATFORM.md:325` record two service refusals; keep those two sections and this file
   under one change.
 - `microvms-app/src/control/ops.rs` — sole human author (78% of 9 commits). Cross-train a
   second reader here before the control-plane call surface grows again, since 96 symbols in

@@ -2,7 +2,7 @@
 
 AWS Lambda MicroVMs hands you an isolated Firecracker VM and no way to use it: there is no
 API to run a command inside one and no API to move a file into or out of one
-(`docs/PLATFORM.md:20-23`). Every harness built on the service has to supply both itself.
+(`docs/PLATFORM.md:14-17`). Every harness built on the service has to supply both itself.
 This repository is that supply — `agentd`, a static daemon baked into the VM image, plus the
 `microvm` CLI and the Rust, Python, and Node libraries that talk to it (`README.md:11-15`).
 The CLI and libraries are distributed through crates.io, PyPI, and npm; the
