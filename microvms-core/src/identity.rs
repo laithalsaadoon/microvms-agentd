@@ -42,8 +42,11 @@ mod tests {
     use crate::prelude::*;
 
     #[test]
-    fn demo_grace_accepts_a_short_grace() {
-        assert!(demo_grace(30).is_ok());
+    fn demo_grace_accepts_up_to_an_hour_and_refuses_more() {
+        use std::time::Duration;
+        assert_eq!(demo_grace(30), Ok(Duration::from_secs(30)));
+        assert_eq!(demo_grace(3600), Ok(Duration::from_secs(3600)));
+        assert!(demo_grace(3601).is_err());
     }
 
     #[test]
