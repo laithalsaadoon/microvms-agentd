@@ -213,7 +213,7 @@ breaking change the compiler accepts — the module states the coupling at `:40`
 | `microvms-cli/src/commands/lifecycle.rs` | direct import | likely | `:988` reads `DEAD_STATES`; `:974` records that failing fast on it beats burning the poll budget |
 | `microvms-cli/tests/manifest.rs` | test | yes | `:229 constants_emit_json_writes_the_bare_object_the_drift_gate_reads`; `:297` asserts the command is listed rather than hidden |
 | `microvms-cli/src/commands/local.rs` (own tests) | test | yes | `:399` asserts the parsed output equals `microvms_core::constants::as_json()` |
-| `docs/PLATFORM.md`, `docs/TRUST.md`, `docs/STRATEGY.md` | config | likely | `docs/PLATFORM.md:64` documents the 4096-byte ceiling and `docs/PLATFORM.md:92` records that a commit "correcting" it to 16384 fails a test; `docs/TRUST.md:315` and `docs/STRATEGY.md:89` restate it |
+| `docs/PLATFORM.md`, `docs/TRUST.md` | config | likely | `docs/PLATFORM.md:43-48` documents the 4096-byte ceiling and notes that the service model's member documentation still says 16,384; `docs/TRUST.md:211-212` restates it |
 
 ### Blast-radius notes
 
@@ -245,7 +245,7 @@ In-crate, `microvms-domain/src/sizing.rs:273 the_documented_table_carries_the_me
 rows.
 
 `minimumMemoryInMiB` selects a class whose two numbers differ by 4x; it does not size a VM directly
-(`docs/PLATFORM.md:236`). The table is the only place any of the twenty numbers appears
+(`docs/PLATFORM.md:139`). The table is the only place any of the twenty numbers appears
 (`microvms-domain/src/sizing.rs:20`).
 
 | Downstream | Type | Touch on change | Citation |
@@ -322,7 +322,7 @@ botocore calls that look like substitutes disagree with each other (`microvms-do
   missing one.** `microvms-domain/src/region.rs:24` states both cases. A missing region refuses a launch
   AWS would have accepted, which is recoverable — `Region::unlisted` (`:107`) exists for that case. An
   extra region reopens the null-message trap for a name nothing will reject
-  (`docs/PLATFORM.md:146`), which is why
+  (`docs/PLATFORM.md:59`), which is why
   `microvms-domain/src/region.rs:196 eu_central_one_is_refused_naming_the_null_message_trap`
   names that specific value and why tests in Rust, Python, and Node each repeat it.
 - **`unlisted()` normalizes a supported name back to its variant, so there is never a second spelling
@@ -374,11 +374,11 @@ The figures were read from the Lambda pricing page on 2026-08-07 in us-east-1
 - **Money is always a `Decimal`, and the pinned figures carry ten significant digits.**
   The literals at `microvms-domain/src/cost.rs:1023`-`:1033` are `dec!()` values, not floats. Summing a
   few thousand per-second ARM rates in binary floating point drifts toward a bill nobody can
-  reproduce, and `docs/PLATFORM.md:1230` works the example figures at full precision.
+  reproduce, and `docs/PLATFORM.md:164-170` lists the dated Pricing API rates to ten decimal places.
 - **`storage_gb_month` is derived, and the code and the platform doc both record the earlier wrong
   value.** `microvms-domain/src/cost.rs:2255` holds `dec!(0.08)` in the test that proves the current
-  figure is not it, and `docs/PLATFORM.md:304`-`:306` records that $0.08 per GB-month understated
-  every stored GB by 1.37% against $0.0001111111 per GB-hour at AWS's own 730-hour month.
+  figure is not it, and `docs/PLATFORM.md:180`-`:181` records that $0.08 per GB-month was rounded
+  low against the API rate, which gives $0.081111103 at a 730-hour month.
   `CatalogLine` (`:1038`) checks the unit the API reports for exactly this reason: if AWS restated
   storage per GB-month, the number would change by 730x and every downstream arithmetic check would
   still pass, because they all read the same table.
