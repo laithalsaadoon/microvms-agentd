@@ -1,0 +1,139 @@
+{
+  "capability": "estimate",
+  "input": {
+    "size_mib": 2048,
+    "running_seconds": 600,
+    "suspended_seconds": 3600,
+    "suspend_resume_cycles": 1,
+    "defaults": {
+      "launched": true,
+      "label": "estimate"
+    }
+  },
+  "expect": {
+    "complete": true,
+    "estimated": true,
+    "fullyMeasured": false,
+    "items": [
+      {
+        "amount": {
+          "kind": "estimated-usd",
+          "usd": "0.00310"
+        },
+        "duration": null,
+        "line": "snapshot-read",
+        "note": "1 x 2 GB; 'launch or resume' shares one rate, and which snapshot a launch reads is undocumented",
+        "phase": "launch",
+        "quantity": "2",
+        "unit": "GB"
+      },
+      {
+        "amount": {
+          "kind": "estimated-usd",
+          "usd": "0.0166166400"
+        },
+        "duration": {
+          "provenance": "projected",
+          "seconds": 600.0
+        },
+        "line": "vcpu",
+        "note": "1 vCPU baseline",
+        "phase": "running",
+        "quantity": "600",
+        "unit": "vCPU-seconds"
+      },
+      {
+        "amount": {
+          "kind": "estimated-usd",
+          "usd": "0.0044000400"
+        },
+        "duration": {
+          "provenance": "projected",
+          "seconds": 600.0
+        },
+        "line": "memory",
+        "note": "2 GB baseline, billed separately from vCPU",
+        "phase": "running",
+        "quantity": "1200",
+        "unit": "GB-seconds"
+      },
+      {
+        "amount": {
+          "kind": "estimated-usd",
+          "usd": "0.0373333296000000000000000000"
+        },
+        "duration": {
+          "provenance": "projected",
+          "seconds": 3600.0
+        },
+        "line": "snapshot-storage",
+        "note": "2 GB held 3600s (projected); billed 7-day minimum retention (604800s) instead",
+        "phase": "suspended",
+        "quantity": "0.4602739726027397260273972603",
+        "unit": "GB-months"
+      },
+      {
+        "amount": {
+          "kind": "estimated-usd",
+          "usd": "0.0076"
+        },
+        "duration": null,
+        "line": "snapshot-write",
+        "note": "1 x 2 GB",
+        "phase": "suspend",
+        "quantity": "2",
+        "unit": "GB"
+      },
+      {
+        "amount": {
+          "kind": "estimated-usd",
+          "usd": "0.00310"
+        },
+        "duration": null,
+        "line": "snapshot-read",
+        "note": "1 x 2 GB",
+        "phase": "resume",
+        "quantity": "2",
+        "unit": "GB"
+      }
+    ],
+    "label": "estimate",
+    "rates": {
+      "region": "us-east-1",
+      "retrieved": "2026-08-07",
+      "sourceUrl": "https://aws.amazon.com/lambda/pricing/"
+    },
+    "size": {
+      "baselineMib": 2048,
+      "baselineVcpu": 1.0,
+      "describe": "2 GB / 1 vCPU baseline (billed while running), with a fixed ceiling of 8 GB / 4 vCPU provisioned from the start (what the guest reports)",
+      "headroomMib": 6144,
+      "peakMib": 8192,
+      "peakVcpu": 4.0
+    },
+    "total": {
+      "isLowerBound": false,
+      "priced": "0.0721500096000000000000000000",
+      "render": "~$0.072150 (estimated)"
+    }
+  },
+  "ignore": [
+    "staleness"
+  ],
+  "known_drift": {
+    "py": {
+      "issue": "#255",
+      "keys": [
+        "label",
+        "size.headroomMib"
+      ]
+    },
+    "ts": {
+      "issue": "#255",
+      "keys": [
+        "label",
+        "size.headroomMib"
+      ]
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "capability": "sync-directory",
+  "input": {
+    "status": 507,
+    "body": "refusing to write /workspace: 4096 bytes available on the target filesystem, below the 1048576 byte reserve"
+  },
+  "expect": {
+    "error": {
+      "code": "ERR_RETRYABLE",
+      "wire_kind": "ServerError",
+      "retryable": true
+    }
+  },
+  "known_drift": {
+    "cli": {
+      "issue": "#256",
+      "keys": [
+        "error.code",
+        "error.wire_kind",
+        "error.retryable"
+      ]
+    }
+  }
+}

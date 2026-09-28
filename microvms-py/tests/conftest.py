@@ -68,12 +68,19 @@ class SseServer:
     the condition the core's reconnect keys on. `requested_paths` is what makes the reconnect
     assertable — the offset a second attach asks for is in the query string, and that number is
     the whole point of the cursor.
+
+    `status` is the one every response answers with, so a script can also be a daemon refusal:
+    `SseServer([[b"not bootstrapped"]], status=503)`. A `PUT` or `POST` is answered the same way
+    once its body is read, which is how an upload meets a scripted status (#272's error cases).
+    `requested_methods` pairs with `requested_paths`.
     """
 
-    def __init__(self, scripts: Sequence[Sequence[bytes]]) -> None:
+    def __init__(self, scripts: Sequence[Sequence[bytes]], status: int = 200) -> None:
         self.requested_paths: list[str] = []
+        self.requested_methods: list[str] = []
         remaining = iter(list(scripts))
         paths = self.requested_paths
+        methods = self.requested_methods
 
         class Handler(http.server.BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
@@ -86,6 +93,21 @@ class SseServer:
             # suppressed nothing and RUF100 flagged it. The reason survives as prose; the
             # dead suppression does not.
             def do_GET(self) -> None:
+                self.answer()
+
+            def do_PUT(self) -> None:
+                self.answer()
+
+            def do_POST(self) -> None:
+                self.answer()
+
+            def answer(self) -> None:
+                # Read the request body before answering, so the client sees the status
+                # rather than a connection reset on an upload it hasn't finished sending.
+                length = int(self.headers.get("content-length") or 0)
+                if length:
+                    self.rfile.read(length)
+                methods.append(self.command)
                 paths.append(self.path)
                 try:
                     frames = next(remaining)
@@ -95,8 +117,11 @@ class SseServer:
                     # own assertion rather than on a timeout.
                     frames = []
                 body = b"".join(frames)
-                self.send_response(200)
-                self.send_header("content-type", "text/event-stream")
+                self.send_response(status)
+                self.send_header(
+                    "content-type",
+                    "text/event-stream" if status == 200 else "text/plain",
+                )
                 self.send_header("content-length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -139,8 +164,8 @@ def sse_server() -> Iterator[type[SseServer]]:
     """
     built: list[SseServer] = []
 
-    def factory(scripts: Sequence[Sequence[bytes]]) -> SseServer:
-        server = SseServer(scripts)
+    def factory(scripts: Sequence[Sequence[bytes]], status: int = 200) -> SseServer:
+        server = SseServer(scripts, status)
         built.append(server)
         return server
 

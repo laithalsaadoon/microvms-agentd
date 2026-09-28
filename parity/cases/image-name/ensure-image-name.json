@@ -1,0 +1,23 @@
+{
+  "capability": "ensure-image",
+  "input": {
+    "name_prefix": "parity-task",
+    "binary_hex": "7f454c460001000000000000000000000000b700",
+    "size_mib": 2048
+  },
+  "expect": {
+    "name": "parity-task-17b6047ddff1"
+  },
+  "known_drift": {
+    "cli": {
+      "issue": "#258",
+      "keys": [
+        "name"
+      ]
+    }
+  },
+  "skip": {
+    "py": "`ensure_image` computes the name in core's local half and hands it back only with a built image, so no offline call answers it (IMAGE-12)",
+    "ts": "`ensureImage` computes the name in core's local half and hands it back only with a built image, so no offline call answers it (IMAGE-12)"
+  }
+}

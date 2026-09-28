@@ -1,0 +1,23 @@
+{
+  "capability": "upload-file",
+  "input": {
+    "status": 507,
+    "path": "/workspace/big.bin",
+    "body": "refusing to write /workspace: 4096 bytes available on the target filesystem, below the 1048576 byte reserve"
+  },
+  "expect": {
+    "error": {
+      "code": "ERR_RETRYABLE",
+      "wire_kind": "ServerError",
+      "retryable": true
+    }
+  },
+  "known_drift": {
+    "ts": {
+      "issue": "#256",
+      "keys": [
+        "error.retryable"
+      ]
+    }
+  }
+}

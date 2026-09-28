@@ -1,0 +1,22 @@
+{
+  "capability": "health",
+  "input": {
+    "status": 401,
+    "body": "unauthorized"
+  },
+  "expect": {
+    "error": {
+      "code": "ERR_CREDENTIALS",
+      "wire_kind": "Unauthorized",
+      "retryable": false
+    }
+  },
+  "known_drift": {
+    "ts": {
+      "issue": "#256",
+      "keys": [
+        "error.retryable"
+      ]
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "capability": "size-from-request",
+  "input": {
+    "cpus": 2,
+    "memory_mib": null
+  },
+  "expect": {
+    "baseline_mib": 4096
+  }
+}
