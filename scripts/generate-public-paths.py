@@ -22,10 +22,12 @@ then, from this repository:
 
     ./scripts/generate-public-paths.py /tmp/baseline/target/doc/microvms_core.json v0.10.0
 
-It walks the module tree from the crate root, so it sees what a consumer can name: every
-public item and re-export, each enum variant, and each inherent method or associated constant
-of a non-generic type. A method with a type parameter (an `impl Into<String>` argument is one)
-can't be named without its arguments, so the in-repo callers compiling is its check instead.
+It walks the module tree from the crate root with `scripts/rustdoc_walk.py`, the walk
+`generate-core-api.py` also uses, so it sees what a consumer can name: every public item and
+re-export, each enum variant, and each inherent method or associated constant of a non-generic
+type. A method with a type parameter (an `impl Into<String>` argument is one) can't be named
+without its arguments, so the in-repo callers compiling is its check instead. The walk refuses
+a rustdoc `format_version` it wasn't written for; its docstring says how to accept one.
 
 A path removed on purpose goes in `REMOVED` with the issue that removed it, and the release's
 CHANGELOG entry names the break. The script refuses a `REMOVED` entry the baseline never had, so
@@ -34,10 +36,11 @@ a typo can't hide a path that still needs naming.
 
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 from pathlib import Path
+
+import rustdoc_walk
 
 OUT = (
     Path(__file__).resolve().parent.parent
@@ -45,19 +48,6 @@ OUT = (
     / "tests"
     / "public_paths.rs"
 )
-NAMED = {
-    "module",
-    "struct",
-    "enum",
-    "union",
-    "trait",
-    "function",
-    "constant",
-    "static",
-    "type_alias",
-    "macro",
-    "trait_alias",
-}
 
 
 # Baseline paths a later change removed on purpose, each with the issue that removed it. The
@@ -115,82 +105,30 @@ fn every_moved_generic_constructor_still_resolves() {
 """
 
 
-def kind(item: dict) -> str:
-    return next(iter(item["inner"]))
-
-
 def main() -> int:
     source, baseline = sys.argv[1], sys.argv[2]
-    doc = json.loads(Path(source).read_text(encoding="utf-8"))
-    index = doc["index"]
-    crate = index[str(doc["root"])]["name"]
-    paths: set[str] = set()
-    members: set[str] = set()
-    seen: set[tuple[str, str]] = set()
-
-    def items_of(type_item: dict) -> None:
-        inner = type_item["inner"][kind(type_item)]
-        if inner["generics"]["params"]:
-            return
-        yield from inner.get("impls", [])
-
-    def walk(module: dict, prefix: str) -> None:
-        for child_id in module["inner"]["module"]["items"]:
-            child = index[str(child_id)]
-            if child["visibility"] != "public":
-                continue
-            what = kind(child)
-            if what == "use":
-                use = child["inner"]["use"]
-                target = index.get(str(use["id"])) if use["id"] is not None else None
-                if use["is_glob"]:
-                    if target is not None and kind(target) == "module":
-                        walk(target, prefix)
-                    continue
-                name = f"{prefix}::{use['name']}"
-                paths.add(name)
-                if target is not None:
-                    visit(target, name)
-                continue
-            if what not in NAMED:
-                continue
-            name = f"{prefix}::{child['name']}"
-            paths.add(name)
-            visit(child, name)
-
-    def visit(item: dict, path: str) -> None:
-        what = kind(item)
-        if (path, what) in seen:
-            return
-        seen.add((path, what))
-        if what == "module":
-            walk(item, path)
-        elif what == "enum":
-            for variant in item["inner"]["enum"]["variants"]:
-                paths.add(f"{path}::{index[str(variant)]['name']}")
-        if what in ("struct", "enum", "union"):
-            for impl_id in items_of(item):
-                impl = index[str(impl_id)]["inner"]["impl"]
-                if impl["trait"] is not None or impl["generics"]["params"]:
-                    continue
-                for member_id in impl["items"]:
-                    member = index[str(member_id)]
-                    if member["visibility"] != "public":
-                        continue
-                    member_kind = kind(member)
-                    if member_kind == "function":
-                        if any(
-                            "type" in param["kind"]
-                            for param in member["inner"]["function"]["generics"][
-                                "params"
-                            ]
-                        ):
-                            continue
-                    elif member_kind != "assoc_const":
-                        continue
-                    members.add(f"<{path}>::{member['name']}")
-
-    walk(index[str(doc["root"])], crate)
+    # The baseline was one crate, so the walk reads that one and names anything it
+    # re-exports from another crate without walking it.
+    crate = Path(source).stem
+    try:
+        entries = rustdoc_walk.stitch(Path(source).parent, crate, {crate})
+    except rustdoc_walk.StitchError as error:
+        print(f"public_paths: {error}")
+        return 1
+    paths = {
+        entry.path
+        for entry in entries
+        if entry.owner is None and not entry.path.endswith("::*")
+    }
+    # A generic member can't be named without its arguments, and a trait's own items
+    # resolve through the trait, which is already in `paths`.
+    members = {
+        f"<{entry.owner}>::{entry.name}"
+        for entry in entries
+        if entry.via == "inherent"
+        and not entry.generic
+        and entry.kind in ("method", "assoc_const")
+    }
     if not paths or not members:
         print(
             f"public_paths: the walk of {source} found {len(paths)} paths and {len(members)}"

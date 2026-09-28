@@ -8,7 +8,8 @@ per accessor, and no arithmetic or coercion the core doesn't have. The crate doc
   doesn't add defaults, retries or validation.
 - A change to the exposed surface means `mise run stubs` to regenerate `microvms.pyi`;
   `stubs:check` in `mise run check` fails on a stale stub. Don't change the stub generator's
-  maturin pin without checking its output path.
+  maturin pin without checking its output path. A new public function, or a new method
+  of a class `parity/capabilities.toml` names, needs its row there, or `parity:check` fails.
 - `mise run check` doesn't build this crate as a Python module or run its tests. Build and
   run them the way CI's `python and node bindings` job does:
 

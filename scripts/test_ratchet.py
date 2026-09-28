@@ -23,6 +23,7 @@ import unittest
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -74,6 +75,7 @@ BASELINE = [
         "microvms-js/src/control.rs: literal-default: options.timeout.unwrap_or(300.0)",
         273,
     ),
+    ("parity-gap", "wait-until-running/cli", 269),
 ]
 BASELINE_FOUND = found(*((c, k) for c, k, _ in BASELINE))
 
@@ -161,6 +163,19 @@ class RuleTests(unittest.TestCase):
                 "new drift: [placement] microvms-cli -> globset. Move the work to the layer "
                 "whose job it is (I/O belongs in microvms-edges, behind a port in "
                 "microvms-app), or add a decision with its reason."
+            ],
+        )
+
+    def test_rule_1_a_new_parity_gap_points_at_the_table(self):
+        # A gap isn't work in the wrong layer, so the layering advice would send the reader to
+        # the wrong file.
+        now = BASELINE_FOUND + found(("parity-gap", "adopt/cli"))
+        self.assertEqual(
+            compare(now, ratchet(BASELINE), ratchet(BASELINE), "main"),
+            [
+                "new drift: [parity-gap] adopt/cli. Give that surface the capability, or, if "
+                "the gap is permanent, drop the exemption's issue in "
+                "parity/capabilities.toml so it reads as a decision."
             ],
         )
 
@@ -385,8 +400,21 @@ class RuleTests(unittest.TestCase):
         )
 
     def test_a_category_that_is_not_collected_cannot_carry_entries(self):
-        with self.assertRaisesRegex(SystemExit, "parity-gap is not collected yet"):
-            ratchet([*BASELINE, ("parity-gap", "x", 271)])
+        with not_collected_yet():
+            with self.assertRaisesRegex(SystemExit, "later-gap is not collected yet"):
+                ratchet([*BASELINE, ("later-gap", "x", 271)])
+
+
+def not_collected_yet():
+    """The ratchet's globals with one category defined but not collected, as parity-gap was
+    until #271. Nothing is in `NOT_COLLECTED` today, so the tests of that path plant one."""
+    return mock.patch.dict(
+        parse.__globals__,
+        {
+            "NOT_COLLECTED": {"later-gap": "until its collector lands"},
+            "CATEGORIES": (*RATCHET["COLLECTED"], "later-gap"),
+        },
+    )
 
 
 class FileTests(unittest.TestCase):
@@ -433,14 +461,20 @@ class FileTests(unittest.TestCase):
         self.assertEqual(len(data["entries"]), len(BASELINE))
 
     def test_the_summary_says_not_collected_rather_than_zero(self):
-        rows = summary(ratchet(BASELINE), ratchet(BASELINE))
-        self.assertEqual(rows["parity-gap"]["status"], "not collected")
-        self.assertIsNone(rows["parity-gap"]["entries"])
+        with not_collected_yet():
+            rows = summary(ratchet(BASELINE), ratchet(BASELINE))
+            text = render_text(rows)
+        self.assertEqual(rows["later-gap"]["status"], "not collected")
+        self.assertIsNone(rows["later-gap"]["entries"])
         self.assertEqual(rows["placement"]["entries"], 1)
-        text = render_text(rows)
-        line = next(line for line in text.splitlines() if line.startswith("parity-gap"))
+        line = next(line for line in text.splitlines() if line.startswith("later-gap"))
         self.assertIn("not collected", line)
         self.assertNotIn("0", line)
+
+    def test_parity_gap_is_collected(self):
+        rows = summary(ratchet(BASELINE), ratchet(BASELINE))
+        self.assertEqual(rows["parity-gap"]["status"], "collected")
+        self.assertEqual(rows["parity-gap"]["entries"], 1)
 
     def test_the_summary_says_new_for_a_category_the_base_does_not_collect(self):
         rows = summary(
@@ -1172,6 +1206,77 @@ KERNEL_LOGIC = """\
 """
 
 
+PARITY_TABLE = """
+[[capability]]
+id = "adopt"
+core = "microvms_core::sandbox::Sandbox::adopt"
+cli = { exempt = "no command adopts a Sandbox", issue = "#269" }
+py = "Sandbox.adopt"
+ts = "Sandbox.adopt"
+
+[[capability]]
+id = "ledger"
+core = { exempt = "local CLI state" }
+cli = "ledger"
+py = { exempt = "local CLI state" }
+ts = { exempt = "local CLI state", issue = "#264" }
+
+[[type]]
+name = "Session"
+exempt_members.ts = { spawn = { exempt = "TS only", issue = "#261" }, create = "the factory idiom" }
+
+[exempt_names]
+ts = { __napiBindingTarget = "a napi-rs build artifact" }
+"""
+
+
+class ParityGapTests(unittest.TestCase):
+    """The parity-gap collector: `check-parity.py --exemptions`, the records with an issue."""
+
+    def scope_with(self, text):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        table = Path(tmp.name) / "capabilities.toml"
+        table.write_text(text)
+        return RATCHET["SENTINEL"]._replace(parity_table=table)
+
+    def test_a_tracked_exemption_is_a_gap_and_a_decision_is_not(self):
+        gaps = RATCHET["parity_gaps"](self.scope_with(PARITY_TABLE))
+        self.assertEqual(
+            gaps,
+            found(
+                ("parity-gap", "adopt/cli"),
+                ("parity-gap", "ledger/ts"),
+                ("parity-gap", "Session.spawn/ts"),
+            ),
+        )
+
+    def test_an_issue_the_check_cannot_read_is_an_error(self):
+        # A placeholder issue would otherwise drop out of the count as though it were a decision.
+        scope = self.scope_with(PARITY_TABLE.replace('"#264"', '"TBD"'))
+        with self.assertRaisesRegex(
+            SystemExit, "issue 'TBD' isn't of the form #<number>"
+        ):
+            RATCHET["parity_gaps"](scope)
+
+    def test_a_missing_table_is_an_error(self):
+        scope = RATCHET["SENTINEL"]._replace(
+            parity_table=Path("/nonexistent/table.toml")
+        )
+        with self.assertRaisesRegex(SystemExit, "check-parity.py --exemptions"):
+            RATCHET["parity_gaps"](scope)
+
+    def test_a_scope_without_a_table_has_no_gaps(self):
+        # The throwaway workspaces the other collector tests build have no table.
+        ws = Workspace(self).crate("adapter").placement("[adapter]\nnormal = []\n")
+        self.assertEqual(RATCHET["parity_gaps"](ws.scope()), Counter())
+
+    def test_the_repo_scope_reads_the_real_table(self):
+        self.assertEqual(
+            RATCHET["REPO"].parity_table, ROOT / "parity" / "capabilities.toml"
+        )
+
+
 class SentinelTests(unittest.TestCase):
     def test_the_checked_in_sentinel_matches_its_expectation(self):
         self.assertEqual(sentinel(RATCHET["SENTINEL"]), [])
@@ -1180,7 +1285,13 @@ class SentinelTests(unittest.TestCase):
         ws = Workspace(self).crate("adapter").placement("[adapter]\nnormal = []\n")
         empty = ws.scope()
         failures = sentinel(empty)
-        for category in ("placement", "subprocess", "port-impl", "adapter-logic"):
+        for category in (
+            "placement",
+            "subprocess",
+            "port-impl",
+            "adapter-logic",
+            "parity-gap",
+        ):
             self.assertTrue(
                 any(
                     f.startswith(f"sentinel: the {category} collector found nothing")
@@ -2817,6 +2928,13 @@ def commit(root, message, drift=None, date="2026-09-25T12:00:00+00:00"):
     return git(root, "rev-parse", "HEAD").strip()
 
 
+def ratchet_script(root, collected=None):
+    """A stand-in `scripts/ratchet.py` holding only the `COLLECTED` a commit's history reads."""
+    (root / "scripts").mkdir(exist_ok=True)
+    collected = tuple(RATCHET["COLLECTED"] if collected is None else collected)
+    (root / "scripts" / "ratchet.py").write_text(f"COLLECTED = {collected!r}\n")
+
+
 def drift_file(entries):
     return {
         "version": 1,
@@ -2885,6 +3003,7 @@ class BaseTests(unittest.TestCase):
 class HistoryTests(unittest.TestCase):
     def test_each_commit_that_changed_the_file_is_a_point(self):
         root = git_repo(self)
+        ratchet_script(root)
         commit(root, "before", date="2026-09-01T00:00:00+00:00")
         first = commit(
             root, "baseline", drift_file(BASELINE), date="2026-09-02T00:00:00+00:00"
@@ -2905,6 +3024,7 @@ class HistoryTests(unittest.TestCase):
 
     def test_an_uncommitted_change_is_the_last_point(self):
         root = git_repo(self)
+        ratchet_script(root)
         commit(root, "baseline", drift_file(BASELINE))
         (root / "ratchet" / "drift.json").write_text(
             json.dumps(drift_file(BASELINE[1:]))
@@ -2912,6 +3032,28 @@ class HistoryTests(unittest.TestCase):
         points = HISTORY["history"](root)
         self.assertEqual([p["sha"] for p in points][1:], [None])
         self.assertEqual(points[-1]["total"], len(BASELINE) - 1)
+
+    def test_a_category_a_commit_did_not_collect_is_null_there(self):
+        # A zero would chart a category nobody counted yet as measured and clean, so a point
+        # carries a count only for what that commit's own ratchet collected.
+        root = git_repo(self)
+        ratchet_script(root, ("placement", "subprocess", "port-impl"))
+        before = [
+            e for e in BASELINE if e[0] in ("placement", "subprocess", "port-impl")
+        ]
+        commit(root, "three categories", drift_file(before))
+        ratchet_script(root)
+        commit(root, "every category", drift_file(BASELINE))
+        (root / "ratchet" / "drift.json").write_text(
+            json.dumps(drift_file(BASELINE[1:]))
+        )
+        first, second, working = HISTORY["history"](root)
+        self.assertIsNone(first["counts"]["adapter-logic"])
+        self.assertIsNone(first["counts"]["parity-gap"])
+        self.assertEqual(first["counts"]["placement"], 1)
+        self.assertEqual(second["counts"]["parity-gap"], 1)
+        self.assertEqual(working["counts"]["adapter-logic"], 1)
+        self.assertEqual(working["counts"]["placement"], 0)
 
 
 if __name__ == "__main__":

@@ -11,6 +11,10 @@ its committer date, and the entry count per collected category. On main that's t
 merges, one per PR that moved the count. A working tree whose file differs from HEAD's adds a
 last point with no commit, so a local docs build shows the change being made.
 
+A category that commit's own `scripts/ratchet.py` didn't collect yet has a null count there,
+not a zero: nobody measured it, and its first entries arrive with the commit that starts
+collecting it.
+
 The counts come from the file, not from rerunning the collectors at each commit: `ratchet:check`
 holds the file equal to the tree on every commit that passes, so the file is the record.
 
@@ -32,6 +36,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 RATCHET = runpy.run_path(str(HERE / "ratchet.py"))
 DRIFT = RATCHET["DRIFT"]
+SCRIPT = RATCHET["SCRIPT"]
 
 
 def git(root: Path, *args: str) -> str:
@@ -40,13 +45,16 @@ def git(root: Path, *args: str) -> str:
     ).stdout
 
 
-def point(sha: str | None, date: str, text: str) -> dict:
+def point(sha: str | None, date: str, text: str, collected: tuple[str, ...]) -> dict:
     file = RATCHET["parse"](json.loads(text), f"{sha or 'working tree'}:{DRIFT}")
     counts = Counter(entry["category"] for entry in file["entries"])
     return {
         "sha": sha,
         "date": date,
-        "counts": {category: counts[category] for category in RATCHET["COLLECTED"]},
+        "counts": {
+            category: counts[category] if category in collected else None
+            for category in RATCHET["COLLECTED"]
+        },
         "total": sum(counts.values()),
         "decisions": len(file["decisions"]),
     }
@@ -70,13 +78,17 @@ def history(root: Path) -> list[dict]:
         ):
             continue
         last = git(root, "show", spec)
-        points.append(point(sha, date, last))
+        points.append(point(sha, date, last, RATCHET["read_base_collected"](root, sha)))
     working = root / DRIFT
     if working.exists():
         text = working.read_text(encoding="utf-8")
         if last is None or json.loads(text) != json.loads(last):
             now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-            points.append(point(None, now, text))
+            script = root / SCRIPT
+            collected = RATCHET["collected_from"](
+                script.read_text(encoding="utf-8"), str(script)
+            )
+            points.append(point(None, now, text, collected))
     return points
 
 
