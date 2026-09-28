@@ -123,6 +123,9 @@ fuzzing = []
 
 [dev-dependencies]
 proptest = "1.11"
+# `#[cfg_attr(test, mutants::skip)]` on code only a non-Unix build compiles (see
+# .cargo/mutants.toml). A no-op attribute; cargo-mutants reads it from the source.
+mutants = "0.0.4"
 hyper = { version = "1.11", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "tokio"] }
 turmoil = "0.7.2"

@@ -59,7 +59,9 @@ Not compared yet: trivy (trivy-action's bundled default), terraform (setup-terra
 version, in a job ci:local skips), cargo-deny (cargo-deny-action's bundled binary, 0.20.2 at
 the pinned SHA, the same as mise's today), and cargo-fuzz (unpinned on both sides). Each is
 installed by an action or command with its own default, so a comparison needs a `version`
-input on the CI side first.
+input on the CI side first. cargo-mutants isn't compared either: CI downloads its release by
+checksum, and mise builds it from source through the cargo backend, so mise.lock records no
+asset checksum to hold the CI hash to.
 
 `plan()` is also what `scripts/ci-local.py` runs from, so the runner refuses a plan this check
 would fail.

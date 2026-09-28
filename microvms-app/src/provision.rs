@@ -550,4 +550,24 @@ mod tests {
             verify_sha256("abc  something-else\n", "agentd", b"x").expect_err("must refuse");
         assert!(missing.contains("no entry"), "{missing}");
     }
+
+    /// The names the CLI's JSON and both bindings report for how the bytes were proven.
+    #[test]
+    fn each_verification_has_its_reported_name() {
+        assert_eq!(Verification::Attestation.as_str(), "attestation");
+        assert_eq!(Verification::Checksum.as_str(), "checksum");
+    }
+
+    /// A debug print of fetched bytes gives their length, not the binary.
+    #[test]
+    fn a_debug_print_of_fetched_bytes_gives_their_length() {
+        let fetched = Fetched {
+            bytes: vec![0x7f; 3],
+            verification: Verification::Checksum,
+        };
+        assert_eq!(
+            format!("{fetched:?}"),
+            "Fetched { bytes: <3 bytes>, verification: Checksum }"
+        );
+    }
 }

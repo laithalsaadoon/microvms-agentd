@@ -614,6 +614,7 @@ impl fmt::Debug for ProxyAuth {
 }
 
 #[cfg(any(test, feature = "test-support"))]
+#[cfg_attr(test, mutants::skip)] // a test double; see .cargo/mutants.toml
 pub(crate) mod testing {
     //! The minter the session tests share, so `mod.rs`'s and `exec.rs`'s tests reach the
     //! same one rather than each growing a near-copy that can drift.

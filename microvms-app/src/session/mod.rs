@@ -656,6 +656,7 @@ impl SessionBuilder {
 }
 
 #[cfg(any(test, feature = "test-support"))]
+#[cfg_attr(test, mutants::skip)] // a test double; see .cargo/mutants.toml
 pub(crate) mod testing {
     //! A recording backend the session tests share.
     //!

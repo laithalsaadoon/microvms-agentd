@@ -154,6 +154,7 @@ fn mode_of(metadata: &std::fs::Metadata) -> u32 {
 }
 
 #[cfg(not(unix))]
+#[cfg_attr(test, mutants::skip)] // Linux never compiles it; see .cargo/mutants.toml
 fn mode_of(_metadata: &std::fs::Metadata) -> u32 {
     0o644
 }

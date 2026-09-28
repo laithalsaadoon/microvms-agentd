@@ -58,6 +58,7 @@ pub fn launch_identity(entropy: &dyn Entropy) -> Result<LaunchIdentity, Error> {
 }
 
 #[cfg(any(test, feature = "test-support"))]
+#[cfg_attr(test, mutants::skip)] // a test double; see .cargo/mutants.toml
 pub(crate) mod testing {
     //! The deterministic source the tests share.
 
