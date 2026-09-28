@@ -562,9 +562,10 @@ jobs:
           echo "$RUNNER_TEMP/ast-grep" >> "$GITHUB_PATH"
       # A command's own timeout below the job's, so a hung fault prints its name and the
       # tail of its output instead of the runner cutting the log off. `--target-dir target`
-      # for rust-cache, as in the bindings job: nothing here builds after `fire`.
+      # for rust-cache, as in the bindings job: nothing here builds after `fire`. `--jobs 4`
+      # runs faults in four scratch worktrees; workers 2 to 4 build their own targets.
       - name: every seeded fault fires
-        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target
+        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 4
 
   build:
     name: static aarch64 binary
