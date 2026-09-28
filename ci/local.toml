@@ -1,0 +1,212 @@
+# What `mise run ci:local` runs for each CI job on Linux, and why anything differs (#315).
+#
+# `scripts/ci-local.py` reads each job's steps from the workflow itself and runs their `run:`
+# text as it's written there, so a command can't drift between CI and this file. What lives here
+# is the part a workflow can't say about a local run:
+#
+# - `steps`: every `run:` step of the job by its label (its `name`, or the first line of its
+#   `run` when it has none), in the workflow's order, plus any `uses:` step that runs a local
+#   command below. `./scripts/check-ci-parity.py` (`ci:parity`, in `check` and CI) fails on a
+#   `run:` step missing here, on a label here that names no step, and on a job with no entry.
+# - `task`: the `ci:<task>` mise task that runs the job. A job with `skip` instead doesn't run
+#   locally, and the reason says why.
+# - `local."<label>"`: a step that runs differently here. `skip` is the reason it doesn't run;
+#   `run` replaces a `uses:` action with the local command it stands for; `env` adds variables
+#   and `unset` removes them. Each needs a `reason`, or `skip` is the reason. `{tools}` in an
+#   `env` value is ci:local's own tool directory, which is first on every job's PATH.
+# - `[expressions]`: the value of each `${{ }}` the planned steps use, for a pull request
+#   against main on the ubuntu leg. An expression missing here fails the parity check.
+#
+# - `[actions]`: each action a job that runs here uses without a local command, with the reason
+#   a local run doesn't need it. A `uses:` step whose action isn't here and isn't listed with a
+#   local `run` fails the parity check, so a lint or scanner shipped as an action can't be
+#   CI-only by accident. A skipped job's actions need no entry: its `skip` is the reason.
+#
+# The checkout depth comes from the workflow's `actions/checkout` step: `fetch-depth: 0` clones
+# the full history plus origin/main, and anything else clones one commit with no remote.
+#
+# `[expressions]` answers for a pull request only. A push to main (the `BASE` expression's
+# `HEAD^` side) isn't modeled.
+
+workflows = ["ci.yml", "fuzz.yml"]
+
+[expressions]
+"matrix.os" = "ubuntu-latest"
+"matrix.os == 'ubuntu-latest'" = "true"
+"github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^'" = "origin/main"
+
+[actions]
+"actions/checkout" = "ci-local.py clones the snapshot at the depth this step asks for"
+"dtolnay/rust-toolchain" = "rust-toolchain.toml picks the same channel through rustup, and `ci:parity` compares this step's input with it"
+"Swatinem/rust-cache" = "each job keeps its own target between local runs"
+"astral-sh/setup-uv" = "mise installs uv at the version `ci:parity` holds equal to this step's input"
+"actions/setup-node" = "mise installs Node at the major `ci:parity` holds equal to this step's input"
+"actions/upload-artifact" = "it keeps a failed job's files on CI; ci-local.py keeps a failed job's whole tree in `failed-<job>/` instead"
+
+# ── ci.yml ──────────────────────────────────────────────────────────────────
+
+[job."ci.yml".background-example]
+skip = "`mise run background:check` runs the same commands, and it's in `check`"
+steps = ["Check example"]
+
+[job."ci.yml".rust]
+task = "rust"
+steps = [
+  "cargo fmt --all -- --check",
+  "clippy (client crates everywhere, everything on linux)",
+  "test",
+  "schema artifact is not stale",
+  "every publishable crate can actually publish",
+]
+
+[job."ci.yml".security]
+task = "security"
+steps = [
+  "semgrep",
+  "betterleaks over full history (pinned, checksummed)",
+  "license header unit tests",
+  "license headers",
+  "conformance self-test",
+  "license consistency",
+  "cargo-deny (dependency licenses, yanked crates, sources)",
+  "actionlint",
+  "ci parity unit tests",
+  "ci parity",
+  "install ast-grep (pinned, checksummed)",
+  "ratchet unit tests",
+  "traceability unit tests",
+  "requirement traceability",
+  "seeded-fault registry unit tests",
+  "seeded-fault registry",
+  "ratchet check",
+]
+
+[job."ci.yml".security.local."cargo-deny (dependency licenses, yanked crates, sources)"]
+# The action's own entrypoint with its default inputs, through mise's cargo-deny.
+run = "cargo deny --log-level warn --manifest-path ./Cargo.toml --all-features check"
+reason = "a Docker action with its own cargo-deny; this is the command its entrypoint runs, through mise's pin"
+
+[job."ci.yml".security.local.actionlint]
+run = "actionlint"
+reason = "a JavaScript action; this is the binary it downloads, at the version `ci:parity` holds equal"
+
+[job."ci.yml".sbom]
+skip = "its installs `sudo mv` binaries into /usr/local/bin, and its scanners read vulnerability databases that change daily, so a local pass says nothing about the next CI run. `mise run sbom` and `mise run vuln` are the local forms"
+steps = [
+  "validate the VEX document's shape",
+  "install syft and grype (pinned, checksummed)",
+  "generate SBOMs (CycloneDX + SPDX)",
+  "grype (audits what the SBOM publishes)",
+  "osv-scanner (lockfiles against OSV; pinned, checksummed)",
+]
+
+[job."ci.yml".drift]
+task = "drift"
+steps = [
+  "./scripts/check-model-drift.py",
+  "Model loader regression tests",
+  "./scripts/check-lint-coverage.py",
+  "uvx ruff@0.15.22 check .",
+  "uvx ruff@0.15.22 format --check .",
+]
+
+[job."ci.yml".bindings]
+task = "bindings"
+steps = [
+  "python binding tests",
+  "python stub is not stale",
+  "typed consumer checks against the built wheel",
+  "node binding tests",
+  "typescript declarations are not stale",
+  "the npm loader resolves its platform packages",
+  "seeded binding faults fire",
+]
+
+[job."ci.yml".guards]
+task = "guards"
+steps = [
+  "install ast-grep (pinned, checksummed)",
+  "every seeded fault fires",
+]
+
+[job."ci.yml".build]
+task = "build"
+steps = [
+  "install cross linker",
+  "build",
+  "report size and linkage",
+]
+
+[job."ci.yml".build.local."install cross linker"]
+skip = "`sudo apt-get` installs the runner's aarch64 gcc; here .cargo/config.toml links the musl target with rust-lld, as `mise run build` does"
+
+[job."ci.yml".build.local.build]
+unset = ["CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER"]
+reason = "that linker is the gcc the skipped step installs; without it, .cargo/config.toml's rust-lld links the same static target"
+
+# ── fuzz.yml ────────────────────────────────────────────────────────────────
+#
+# Every job goes to `ci:fuzz`, which runs them one after another with fuzz.yml's own time
+# bounds. The installs go into ci:local's tool directory rather than ~/.cargo/bin, so a local
+# run doesn't change the caller's cargo-fuzz or cargo-bolero. Nightly comes from rustup, as the
+# workflow's `dtolnay/rust-toolchain` step does on CI: `rustup toolchain install nightly` once.
+
+[job."fuzz.yml".fuzz]
+task = "fuzz"
+steps = ["install cargo-fuzz", "fuzz tar_extract for two minutes"]
+
+[job."fuzz.yml".fuzz.local."install cargo-fuzz"]
+env = { CARGO_INSTALL_ROOT = "{tools}" }
+reason = "into ci:local's tool directory, not the caller's ~/.cargo/bin"
+
+[job."fuzz.yml".closed-output]
+task = "fuzz"
+steps = ["install cargo-bolero", "fuzz the closed-output harness for two minutes"]
+
+[job."fuzz.yml".closed-output.local."install cargo-bolero"]
+env = { CARGO_INSTALL_ROOT = "{tools}" }
+reason = "into ci:local's tool directory, not the caller's ~/.cargo/bin"
+
+[job."fuzz.yml".wrap-dockerfile]
+task = "fuzz"
+steps = ["install cargo-bolero", "fuzz the wrap harness for two minutes"]
+
+[job."fuzz.yml".wrap-dockerfile.local."install cargo-bolero"]
+env = { CARGO_INSTALL_ROOT = "{tools}" }
+reason = "into ci:local's tool directory, not the caller's ~/.cargo/bin"
+
+[job."fuzz.yml".exec-start]
+task = "fuzz"
+steps = ["install cargo-bolero", "fuzz the exec-start harness for two minutes"]
+
+[job."fuzz.yml".exec-start.local."install cargo-bolero"]
+env = { CARGO_INSTALL_ROOT = "{tools}" }
+reason = "into ci:local's tool directory, not the caller's ~/.cargo/bin"
+
+[job."fuzz.yml".provision]
+task = "fuzz"
+steps = ["install cargo-bolero", "fuzz the provisioning parsers"]
+
+[job."fuzz.yml".provision.local."install cargo-bolero"]
+env = { CARGO_INSTALL_ROOT = "{tools}" }
+reason = "into ci:local's tool directory, not the caller's ~/.cargo/bin"
+
+[job."fuzz.yml".egress-posture]
+task = "fuzz"
+steps = ["install cargo-bolero", "fuzz the egress-posture harness for two minutes"]
+
+[job."fuzz.yml".egress-posture.local."install cargo-bolero"]
+env = { CARGO_INSTALL_ROOT = "{tools}" }
+reason = "into ci:local's tool directory, not the caller's ~/.cargo/bin"
+
+[job."fuzz.yml".build-context]
+task = "fuzz"
+steps = [
+  "install cargo-bolero",
+  "fuzz the ignore rules for one minute",
+  "fuzz the context hash for one minute",
+]
+
+[job."fuzz.yml".build-context.local."install cargo-bolero"]
+env = { CARGO_INSTALL_ROOT = "{tools}" }
+reason = "into ci:local's tool directory, not the caller's ~/.cargo/bin"

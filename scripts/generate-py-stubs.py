@@ -81,11 +81,11 @@ REPO = Path(__file__).resolve().parent.parent
 CRATE = REPO / "microvms-py"
 ARTIFACT = CRATE / "microvms.pyi"
 
-# Pinned rather than floating, and pinned to the same minor the CI `bindings` job
-# installs. maturin's stub generation reads pyo3's *experimental* introspection format —
-# pyo3's own word for it — so the writer and the format can disagree across releases. A
-# floating `maturin@latest` here would turn someone else's release into this repo's drift
-# failure, on a commit that changed nothing.
+# Pinned rather than floating, and to the same release the CI `bindings` job installs
+# (`ci:parity` compares them). maturin's stub generation reads pyo3's *experimental*
+# introspection format (pyo3's own word for it), so the writer and the format can disagree
+# across releases. A floating `maturin@latest` here would turn someone else's release into
+# this repo's drift failure, on a commit that changed nothing.
 MATURIN = "maturin@1.14.1"
 
 

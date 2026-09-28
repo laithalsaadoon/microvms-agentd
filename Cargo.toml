@@ -40,6 +40,20 @@ repository = "https://github.com/laithalsaadoon/microvms-agentd"
 # `microvms-js` because their registry is PyPI and npm.
 publish = false
 
+# Line tables for the workspace's crates and no debug info for dependencies: a panic's
+# backtrace still names each workspace frame's file and line, and every build and link writes
+# less. #315 kept it for build time and target size; a timed `guards:fire` showed no gain past
+# the noise between runs. For a debugger session that wants locals, set
+# `CARGO_PROFILE_DEV_DEBUG=true`, which reaches the workspace's crates only, since the
+# `package."*"` table below outranks it; add `--config 'profile.dev.package."*".debug=true'`
+# for dependencies too. `[profile.fuzz]` inherits both, so a fuzz crash's backtrace has no
+# line numbers inside dependencies either.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 # `cargo bolero test` builds with this profile. Optimised for throughput, and `dev`'s debug
 # assertions stay on, because `Output`'s one-envelope `debug_assert!` is part of what the
 # closed-output harness checks (#216).

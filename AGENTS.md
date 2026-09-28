@@ -10,6 +10,7 @@ Rust client stack and guest daemon for AWS Lambda MicroVMs. Start with
 
 ```bash
 mise run check         # local code, security, tests, contracts, drift, packaging, build
+mise run ci:local      # CI's Linux jobs in CI-shaped clones, before a push
 mise run docs:check    # documentation build and checks
 mise run live          # billable AWS verification
 mise run live:verify-clean
@@ -20,8 +21,20 @@ installation or advisory/rule updates. It does not run the documentation,
 formal requirements, or live AWS tiers, and it doesn't build or test the Python
 and Node bindings. When a change reaches behavior a binding exposes, build each
 binding and run its suite the way CI's `python and node bindings` job does
-(`pytest microvms-py/tests`, `node --test "microvms-js/__test__/*.mjs"`). See
-CONTRIBUTING.md for targeted tests and setup; do not infer live verification
+(`pytest microvms-py/tests`, `node --test "microvms-js/__test__/*.mjs"`), or run
+`mise run ci:bindings`, which is that job.
+
+`mise run ci:local` runs each Linux job of ci.yml and fuzz.yml the way CI does: the job's
+own steps, in a clone of a snapshot of the worktree with the job's checkout depth and the
+workflow's env, each job with its own target directory. It catches what only CI used to, such
+as output parsed under `CARGO_TERM_COLOR=always` or a command that needs origin/main in a
+shallow checkout. `mise run ci:<job>` runs one job, and `-- --apply <patch>` runs it over the
+snapshot with a patch applied. It isn't in `check`, and each job's target takes tens of GB
+under `$TMPDIR` (`$CI_LOCAL_DIR` moves it). It tests the branch as it stands, while CI tests
+a pull request's merge with main, so rebase onto a fresh origin/main first. `ci/local.toml`
+says what each job skips and why. A new step in ci.yml needs an entry there, or, for a setup
+action, a reason in its `[actions]` table (`ci:parity` fails without one).
+See CONTRIBUTING.md for targeted tests and setup; do not infer live verification
 from local test results.
 
 ## Code map
