@@ -26,28 +26,10 @@ pub use microvms_domain::identity::*;
 // Seed generation and the Noise initiator draw from the OS random pool, so they're
 // `crate::prelude::LaunchIdentityExt` and `TunnelIdentityExt`; the rest is the domain's.
 
-/// The grace a caller asked for, refused past an hour. A demo for #275's CI-tier proof: the
-/// branch's next commits strengthen its test, then delete both.
-#[doc(hidden)]
-pub fn demo_grace(seconds: u64) -> Result<std::time::Duration, String> {
-    if seconds > 3600 {
-        return Err(format!("{seconds} s is more than an hour"));
-    }
-    Ok(std::time::Duration::from_secs(seconds))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::prelude::*;
-
-    #[test]
-    fn demo_grace_accepts_up_to_an_hour_and_refuses_more() {
-        use std::time::Duration;
-        assert_eq!(demo_grace(30), Ok(Duration::from_secs(30)));
-        assert_eq!(demo_grace(3600), Ok(Duration::from_secs(3600)));
-        assert!(demo_grace(3601).is_err());
-    }
 
     #[test]
     fn generated_material_is_fresh_and_valid() {
