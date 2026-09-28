@@ -149,7 +149,7 @@ impl HttpBackend for ReqwestBackend {
 
             // The status is read before any body byte. On a failure the body is
             // collected so the typed error carries the daemon's detail string.
-            if !(200..300).contains(&status) {
+            if is_failure(status) {
                 let body = response
                     .bytes()
                     .await
@@ -179,6 +179,15 @@ impl HttpBackend for ReqwestBackend {
             Ok((head, Box::new(chunks) as Box<dyn ChunkSource>))
         })
     }
+}
+
+/// A status `open_stream` doesn't stream: anything but a 2xx.
+///
+/// Apart from `open_stream` so it has an offline test. Only a daemon on the other end reaches
+/// `open_stream`, so `.cargo/mutants.toml` excludes its return value, and a check left inline
+/// there would never be mutated.
+fn is_failure(status: u16) -> bool {
+    !(200..300).contains(&status)
 }
 
 /// No body at all, for the failure path where the head already carries everything.
@@ -264,5 +273,17 @@ mod tests {
             "https://host",
             "a trailing slash would produce a double one on every path"
         );
+    }
+
+    /// A stream opens on a 2xx only. Anything else collects its body, so the typed error
+    /// carries the daemon's detail string.
+    #[test]
+    fn only_a_success_status_opens_a_stream() {
+        for status in [200, 204, 299] {
+            assert!(!is_failure(status), "{status}");
+        }
+        for status in [101, 199, 300, 404, 500] {
+            assert!(is_failure(status), "{status}");
+        }
     }
 }

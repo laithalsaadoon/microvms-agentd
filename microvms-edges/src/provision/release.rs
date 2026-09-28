@@ -272,35 +272,68 @@ async fn get(url: &str, token: Option<&str>, limit: usize) -> Result<Vec<u8>, Ht
         .send()
         .await
         .map_err(|error| failure(format!("GET {url}: {}", chain(&error))))?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(HttpFailure {
-            status: Some(status.as_u16()),
-            message: format!("GET {url}: HTTP {}", status.as_u16()),
-        });
-    }
-    if response
-        .content_length()
-        .is_some_and(|length| length > limit as u64)
-    {
-        return Err(failure(format!(
-            "GET {url}: the body is over {limit} bytes"
-        )));
-    }
-    let mut body = Vec::new();
+    let mut body = Body::start(url, response.status(), response.content_length(), limit)?;
     while let Some(chunk) = response
         .chunk()
         .await
         .map_err(|error| failure(format!("GET {url}: {}", chain(&error))))?
     {
-        if body.len() + chunk.len() > limit {
-            return Err(failure(format!(
-                "GET {url}: the body is over {limit} bytes"
-            )));
-        }
-        body.extend_from_slice(&chunk);
+        body.push(&chunk)?;
     }
-    Ok(body)
+    Ok(body.bytes)
+}
+
+/// A response body read under a byte limit. The status and size rules live here rather than in
+/// [`get`] so they have an offline test; `get` only feeds in what the network returns.
+struct Body<'a> {
+    url: &'a str,
+    limit: usize,
+    bytes: Vec<u8>,
+}
+
+impl<'a> Body<'a> {
+    /// An empty body for a response with `status` that declared `length` bytes, or why it's
+    /// refused before a byte is read: a status other than success, or a declared length over
+    /// `limit`.
+    fn start(
+        url: &'a str,
+        status: reqwest::StatusCode,
+        length: Option<u64>,
+        limit: usize,
+    ) -> Result<Self, HttpFailure> {
+        if !status.is_success() {
+            return Err(HttpFailure {
+                status: Some(status.as_u16()),
+                message: format!("GET {url}: HTTP {}", status.as_u16()),
+            });
+        }
+        let body = Self {
+            url,
+            limit,
+            bytes: Vec::new(),
+        };
+        if length.is_some_and(|length| length > limit as u64) {
+            return Err(body.over_limit());
+        }
+        Ok(body)
+    }
+
+    /// Appends `chunk`, refusing one that takes the body over the limit. A server can send
+    /// more than it declared, or declare nothing.
+    fn push(&mut self, chunk: &[u8]) -> Result<(), HttpFailure> {
+        if self.bytes.len() + chunk.len() > self.limit {
+            return Err(self.over_limit());
+        }
+        self.bytes.extend_from_slice(chunk);
+        Ok(())
+    }
+
+    fn over_limit(&self) -> HttpFailure {
+        HttpFailure {
+            status: None,
+            message: format!("GET {}: the body is over {} bytes", self.url, self.limit),
+        }
+    }
 }
 
 /// An error and its causes on one line. reqwest's own message stops at "error sending request",
@@ -870,6 +903,8 @@ mod tests {
             None
         );
         assert_eq!(GitHubRelease::from_env(&|_| None).token, None);
+        let fetch = HttpsFetch::from_env(&|name| (name == TOKEN_VARIABLE).then(|| "t".into()));
+        assert_eq!(fetch.release.token.as_deref(), Some("t"));
     }
 
     /// A request runs from inside a runtime too, which is where the CLI calls it from. A
@@ -878,5 +913,109 @@ mod tests {
     async fn a_request_runs_from_inside_a_runtime() {
         let answer = run(async { Ok::<_, HttpFailure>(7) });
         assert_eq!(answer, Ok(7));
+    }
+
+    /// Only a success status starts a body, and a refusal carries the status, which is how
+    /// [`GitHubRelease::lookup`] tells a 404 from a rate limit.
+    #[test]
+    fn a_status_other_than_success_is_refused_with_the_status() {
+        let start = |status: u16| {
+            let status = reqwest::StatusCode::from_u16(status).expect("a status");
+            Body::start("https://example.invalid/x", status, None, 8).map(|body| body.bytes)
+        };
+        assert_eq!(start(200), Ok(Vec::new()));
+        assert_eq!(start(204), Ok(Vec::new()));
+        for status in [301, 403, 404, 429, 500] {
+            assert_eq!(
+                start(status),
+                Err(HttpFailure {
+                    status: Some(status),
+                    message: format!("GET https://example.invalid/x: HTTP {status}"),
+                }),
+            );
+        }
+    }
+
+    /// A body over its limit is refused, whether the server declares its length up front or
+    /// sends more than the limit without saying, and a body of exactly the limit is read whole.
+    #[test]
+    fn a_body_over_its_limit_is_refused() {
+        let over = Err(HttpFailure {
+            status: None,
+            message: "GET https://example.invalid/x: the body is over 4 bytes".to_string(),
+        });
+        let start = |length: Option<u64>| {
+            Body::start(
+                "https://example.invalid/x",
+                reqwest::StatusCode::OK,
+                length,
+                4,
+            )
+        };
+        for length in [None, Some(0), Some(3), Some(4)] {
+            assert!(start(length).is_ok(), "declared {length:?}");
+        }
+        assert_eq!(start(Some(5)).map(|body| body.bytes), over);
+
+        let read = |chunks: &[&[u8]]| {
+            let mut body = start(None)?;
+            for chunk in chunks {
+                body.push(chunk)?;
+            }
+            Ok(body.bytes)
+        };
+        assert_eq!(read(&[b"ab", b"cd"]), Ok(b"abcd".to_vec()));
+        assert_eq!(read(&[b"abcd", b""]), Ok(b"abcd".to_vec()));
+        assert_eq!(read(&[b"abcde"]), over);
+        assert_eq!(read(&[b"ab", b"cd", b"e"]), over);
+        assert_eq!(read(&[b"a", b"a", b"a", b"a", b"a"]), over);
+    }
+
+    /// The limits admit the committed release, so a change to one that turns a real release
+    /// away fails here rather than on a user's first fetch.
+    #[test]
+    fn the_limits_admit_a_real_release() {
+        assert!(agentd().len() <= ASSET_LIMIT, "{} bytes", agentd().len());
+        assert!(BUNDLE.len() <= SMALL_LIMIT, "{} bytes", BUNDLE.len());
+        assert!(SUMS.len() <= SMALL_LIMIT, "{} bytes", SUMS.len());
+        let listed = format!(r#"{{"attestations": [{{"bundle": {BUNDLE}}}]}}"#);
+        assert!(listed.len() <= API_LIMIT, "{} bytes", listed.len());
+    }
+
+    /// An error's causes are on the line, since reqwest's own message stops before the one a
+    /// reader acts on.
+    #[test]
+    fn an_error_is_printed_with_its_causes() {
+        #[derive(Debug)]
+        struct Layer(&'static str, Option<Box<Layer>>);
+        impl fmt::Display for Layer {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(self.0)
+            }
+        }
+        impl std::error::Error for Layer {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                self.1.as_deref().map(|cause| cause as _)
+            }
+        }
+        let error = Layer(
+            "error sending request",
+            Some(Box::new(Layer(
+                "dns error",
+                Some(Box::new(Layer("no such host", None))),
+            ))),
+        );
+        assert_eq!(
+            chain(&error),
+            "error sending request: dns error: no such host"
+        );
+        assert_eq!(chain(&Layer("timed out", None)), "timed out");
+    }
+
+    /// The verifier's debug print says which trusted root it holds; the root itself isn't
+    /// `Debug`.
+    #[test]
+    fn the_verifier_prints_the_root_it_holds() {
+        assert_eq!(format!("{:?}", verifier()), "SigstoreVerifier(public-good)");
     }
 }

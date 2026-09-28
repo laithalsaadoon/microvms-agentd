@@ -1,0 +1,89 @@
+# cargo-mutants' settings (#275). `scripts/check-mutants.py` runs it over a change's Rust diff
+# and holds the package list, which this file has no key for. The keys are checked against
+# `cargo mutants --emit-schema=config` from 27.1.0.
+
+# Doctests are guards here (the `compile_fail` pairs in microvms-domain/src/cost.rs and
+# core's lib.rs), and nextest doesn't run doctests.
+test_tool = "cargo"
+# No `test_package`: a mutant runs only its own package's tests, cargo-mutants' default. Some
+# code in the app and the edges is pinned only by core's tests. Over #283's diff at 67a13cb,
+# core's tests caught 10 of the 39 misses the default scope left (`NameStore::release_by_vm` 5,
+# `BearerToken` 2, `BuildContext::with_warnings`, and the Unix `mode_of` 2), so a change to
+# those lines fails the job until the crate has its own test. `test_package` is global in
+# 27.1.0 (every agentd mutant would run the app's, the edges' and core's tests too) and cost
+# 3.7x on release.rs, so the other option is a second cargo-mutants run for the app and the
+# edges. That's still open.
+# The default, written down so a change to it is a reviewed diff.
+timeout_multiplier = 5.0
+# A floor on the timeout cargo-mutants sets from the baseline. CI runners are slower than the
+# machines the baselines were measured on.
+minimum_test_timeout = 60
+
+# The app's shared test doubles are compiled for `cfg(any(test, feature = "test-support"))`.
+# cargo-mutants treats only a plain `cfg(test)` as test code, so it mutates them, and a mutant
+# in a fake says nothing about shipping code. Measured at 8dba7ed: 209 mutants. The two that
+# are files of their own are excluded here. The ones inside a shipping file are each a
+# `mod testing` carrying `#[cfg_attr(test, mutants::skip)]` beside its gate (the `mutants`
+# crate is an app dev-dependency), because 27.1.0 doesn't apply `exclude_re` to the
+# struct-field deletions it generates (src/visit.rs, `visit_expr_struct`): over #283's diff,
+# one in `TestAdapters::with_clock` was reported MISSED with a name-based exclusion in place.
+# rustc refuses that attribute on a file module (E0658), so the files stay globs. A new double
+# behind that gate needs one or the other.
+#
+# Code only a non-Unix build compiles (the `cfg(not(unix))` twins of `mode_of` in
+# microvms-edges/src/control/context.rs and `unix_signal` in agentd/src/exec.rs) is always
+# missed, since the job runs on Linux: over #283's diff, `mode_of`'s two mutants MISSED. The
+# Windows leg of the `rust` job tests it. It gets the attribute too, not an `exclude_re` entry,
+# because a `cfg` twin has the tested Unix function's name and a name regex drops both (measured
+# for `mode_of`: 7 mutants to 3). The `mutants` crate is a dev-dependency of each crate with a
+# skip. scripts/test_check_mutants.py lists every skip site in `SKIPS`, so a new one is reviewed.
+exclude_globs = [
+  "microvms-app/src/control/fake.rs",
+  "microvms-app/src/testing.rs",
+]
+
+# Each entry names the mutants it drops, anchored to its file, with the measured reason and
+# the check that covers the code instead. A name matches `path:line:col: <mutation>` as
+# `cargo mutants --list` prints it. Every entry drops only `replace <function> -> `, the
+# mutants that swap a whole return value; scripts/test_check_mutants.py holds each to that
+# shape and its file to the tree. An operator mutant is named `... in <function>`, so logic
+# inside an excluded function is still mutated, and logic worth testing moves into a function
+# of its own (`Body` in release.rs, `is_failure` in session/http.rs).
+exclude_re = [
+  # Compiled only with agentd's `fuzzing` feature, which no `cargo test` build enables, so no
+  # test can see it. Measured at 4119cd1: both mutants MISSED. Its coverage is the libFuzzer
+  # target agentd/fuzz/fuzz_targets/tar_extract.rs, which fuzz.yml runs on a change to fs.rs.
+  '^agentd/src/fs\.rs:\d+:\d+: replace fuzz_extract -> ',
+
+  # The daemon release fetch's network calls (#284). Measured over #284's diff at ad29407:
+  # every mutant of `https_get`, of `GitHubRelease`'s `asset` and `checksums`, and of `get`'s
+  # return value MISSED, since no offline test makes an HTTPS request. The rules inside `get`
+  # (status, declared length, streamed length) are `Body` and tested offline, so what's left is
+  # the request itself. Covered by microvms-core/tests/live_release.rs (`mise run
+  # live:release`, free, no AWS), which fetches and verifies a published release over these.
+  # Logic added to `get` isn't excluded by the `get` entry: its mutants are named `... in get`.
+  '^microvms-edges/src/provision/release\.rs:\d+:\d+: replace https_get -> ',
+  '^microvms-edges/src/provision/release\.rs:\d+:\d+: replace <impl ReleaseSource for GitHubRelease>::(asset|checksums) -> ',
+  '^microvms-edges/src/provision/release\.rs:\d+:\d+: replace get -> ',
+
+  # The session's HTTP to the daemon (#283 moved it here). Measured over #283's diff at
+  # 67a13cb, with core's tests run as well: `open_stream`'s status test MISSED, and every
+  # other mutant of the `HttpBackend` impl is unviable. Only a daemon on the other end reaches
+  # it; core's simulated daemon talks to the app's `HttpBackend` port, not to reqwest. Covered
+  # by conformance/run_rs.py's exec, streaming and file transfer sections (`mise run live`).
+  # The status test is `is_failure` now, with an offline test, so this drops the two methods'
+  # return values only, and logic added to either is still mutated.
+  '^microvms-edges/src/session/http\.rs:\d+:\d+: replace <impl HttpBackend for ReqwestBackend>::(send|open_stream) -> ',
+
+  # The signed S3 and STS requests `ensure_image` makes (#283). Measured over #283's diff at
+  # 67a13cb: every mutant of `SignedBuildServices::send`'s return value MISSED, with core's
+  # tests too. Covered by microvms-core/tests/live_ensure_image.rs, which run_rs.py's
+  # ensure-image section runs (`mise run live`).
+  '^microvms-edges/src/control/services\.rs:\d+:\d+: replace SignedBuildServices::send -> ',
+
+  # The reqwest client the control plane and the build services share. Measured over #283's
+  # diff at 67a13cb: `Ok(Default::default())` MISSED, since a default client differs only in
+  # its timeouts, which no offline test waits out. Every control-plane call in `mise run live`
+  # goes through it, starting with run_rs.py's preflight section.
+  '^microvms-edges/src/control/transport\.rs:\d+:\d+: replace http_client -> ',
+]

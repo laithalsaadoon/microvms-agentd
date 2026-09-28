@@ -1147,6 +1147,16 @@ expect = "test-failed"
 suite = "rust"
 transform = { file = "microvms-edges/src/provision/release.rs", replace = "sigstore_verify::VerificationPolicy::new(&signer.identity, &signer.issuer)", with = "sigstore_verify::VerificationPolicy::with_issuer(&signer.issuer)" }
 
+# #275: the download's byte limit, apart from the network so it has an offline test. Checking
+# only what's already read lets one chunk carry the body past the limit.
+[[fault]]
+id = "release-body-streamed-limit"
+guard = "provision::release::tests::a_body_over_its_limit_is_refused"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "provision::release::tests::a_body_over_its_limit_is_refused"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "microvms-edges/src/provision/release.rs", replace = "if self.bytes.len() + chunk.len() > self.limit {", with = "if self.bytes.len() > self.limit {" }
+
 # ── agentd-model: each spec function's note names the property test ──────────
 
 [[fault]]
@@ -2759,6 +2769,232 @@ expect = "exit-nonzero"
 suite = "script"
 message = "test_a_failed_jobs_tree_outlives_the_next_jobs_clone ("
 transform = { file = "scripts/ci-local.py", replace = "            if results[-1][\"status\"] != \"passed\":\n                keep_failed(", with = "            if False:\n                keep_failed(" }
+
+# ── mutants: the wrapper over cargo-mutants (#275) ─────────────────────────────
+
+# A missed mutant and a timeout each read as a pass.
+[[fault]]
+id = "mutants-wrapper-missed-passes"
+guard = "test_check_mutants.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_mutants.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_missed_mutant_fails_and_names_it ("
+transform = { file = "scripts/check-mutants.py", replace = "    if code == 0:\n        return 0\n", with = "    if code in (0, 2):\n        return 0\n" }
+
+[[fault]]
+id = "mutants-wrapper-timeout-passes"
+guard = "test_check_mutants.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_mutants.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_timeout_fails_and_names_the_mutant ("
+transform = { file = "scripts/check-mutants.py", replace = "    if code == 0:\n        return 0\n", with = "    if code in (0, 3):\n        return 0\n" }
+
+# A git that fails answers nothing, which reads as a change with no Rust in it.
+[[fault]]
+id = "mutants-wrapper-git-failure-is-empty"
+guard = "test_check_mutants.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_mutants.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_base_git_cannot_resolve_fails_rather_than_reading_as_no_changes ("
+transform = { file = "scripts/check-mutants.py", replace = "    if result.returncode != 0:\n", with = "    if result.returncode not in (0, 128):\n" }
+
+# A pathspec that matches nothing: every Rust change reads as none.
+[[fault]]
+id = "mutants-wrapper-pathspec-empty"
+guard = "test_check_mutants.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_mutants.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_clean_run_passes ("
+transform = { file = "scripts/check-mutants.py", replace = "names = git(\"diff\", \"--name-only\", merge_base, \"--\", \"*.rs\", cwd=root)", with = "names = git(\"diff\", \"--name-only\", merge_base, \"--\", \"*.rs.none\", cwd=root)" }
+
+# The whole diff handed over instead of its Rust, and a package that has no Rust tests of its own.
+[[fault]]
+id = "mutants-wrapper-whole-diff"
+guard = "test_check_mutants.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_mutants.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_it_hands_over_the_rust_diff_the_packages_and_the_extra_arguments ("
+transform = { file = "scripts/check-mutants.py", replace = "diff = git(\"diff\", *DIFF_FORMAT, merge_base, \"--\", \"*.rs\", cwd=root)", with = "diff = git(\"diff\", *DIFF_FORMAT, merge_base, cwd=root)" }
+
+[[fault]]
+id = "mutants-wrapper-model-package"
+guard = "test_check_mutants.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_mutants.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_it_hands_over_the_rust_diff_the_packages_and_the_extra_arguments ("
+transform = { file = "scripts/check-mutants.py", replace = "    \"agentd\",\n)\n", with = "    \"agentd\",\n    \"agentd-model\",\n)\n" }
+
+# A diff handed in with `--diff` that names no Rust file reads as a clean run, and so does one
+# the header pattern can't see.
+[[fault]]
+id = "mutants-wrapper-given-diff-unchecked"
+guard = "test_check_mutants.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_mutants.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_given_diff_with_no_rust_in_it_fails_without_running_cargo_mutants ("
+transform = { file = "scripts/check-mutants.py", replace = "    if not RUST_HEADER.search(text):\n", with = "    if False:\n" }
+
+[[fault]]
+id = "mutants-wrapper-rust-header-matches-nothing"
+guard = "test_check_mutants.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_mutants.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_given_diff_is_handed_over_as_it_is ("
+transform = { file = "scripts/check-mutants.py", replace = "(?:b/)?\\S+\\.rs\\s*$", with = "(?:b/)?\\S+\\.rs\\s*$(?!)" }
+
+# The caller's CARGO_TARGET_DIR handed to cargo-mutants' copies, so a later build of the
+# caller's tree can trust an artifact built from a mutated copy.
+[[fault]]
+id = "mutants-wrapper-shared-target"
+guard = "test_check_mutants.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_mutants.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_cargo_mutants_builds_in_its_own_targets_unless_it_mutates_in_place ("
+transform = { file = "scripts/check-mutants.py", replace = "env.pop(\"CARGO_TARGET_DIR\", None)", with = "env.get(\"CARGO_TARGET_DIR\")" }
+
+# The exclusion list (#275): `fuzz_extract` is compiled only with agentd's `fuzzing` feature, so
+# no `cargo test` build can catch a mutant in it. Without its `exclude_re` entry, a change that
+# touches the function fails the `mutants` job with both of its mutants missed. The command
+# mutates a diff of that one function, built from the tree when it runs so it follows the
+# function when fs.rs moves (a committed copy would pin its line numbers, and cargo-mutants
+# refuses a diff whose lines don't match). Clean, the entry drops both mutants and the run
+# passes with nothing to test; a renamed function fails the awk, and a pattern that stopped
+# matching fails the clean run. `--in-place` mutates the scratch tree and builds in its target.
+[[fault]]
+id = "mutants-fuzz-extract-exclusion"
+guard = "scripts/check-mutants.py"
+run = ["bash", "-c", "set -eu; diff=$(mktemp); trap 'rm -f \"$diff\"' EXIT; awk '/^pub fn fuzz_extract\\(/ { s = NR } s && !e { body = body \"+\" $0 \"\\n\" } s && !e && /^}/ { e = NR } END { if (!e) { print \"no fn fuzz_extract in agentd/src/fs.rs\" > \"/dev/stderr\"; exit 1 } printf \"--- a/agentd/src/fs.rs\\n+++ b/agentd/src/fs.rs\\n@@ -%d,0 +%d,%d @@\\n%s\", s - 1, s, e - s + 1, body }' agentd/src/fs.rs > \"$diff\"; ./scripts/check-mutants.py --diff \"$diff\" -- --in-place"]
+expect = "exit-nonzero"
+suite = "script"
+message = "MISSED"
+transform = { file = ".cargo/mutants.toml", replace = "  '^agentd/src/fs\\.rs:\\d+:\\d+: replace fuzz_extract -> ',\n", with = "" }
+
+# A user's `diff.mnemonicPrefix` writes `+++ w/<path>`, which names no file for cargo-mutants,
+# and a real run then passes with nothing mutated.
+[[fault]]
+id = "mutants-wrapper-user-diff-prefix"
+guard = "test_check_mutants.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_mutants.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_diff_keeps_its_a_and_b_prefixes_whatever_git_is_set_to ("
+transform = { file = "scripts/check-mutants.py", replace = "diff = git(\"diff\", *DIFF_FORMAT, merge_base,", with = "diff = git(\"diff\", merge_base," }
+
+# The package list not held to the workspace: a new crate is never mutated, and a renamed one
+# only draws a warning from `-p`.
+[[fault]]
+id = "mutants-wrapper-members-unchecked"
+guard = "test_check_mutants.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_mutants.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_workspace_member_in_neither_list_fails_naming_it ("
+transform = { file = "scripts/check-mutants.py", replace = "    if problems:\n", with = "    if False:\n" }
+
+# The metadata reader returns no members. Every listed package then reads as gone, so even a
+# clean run fails.
+[[fault]]
+id = "mutants-wrapper-members-read-nothing"
+guard = "test_check_mutants.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_mutants.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_clean_run_passes ("
+transform = { file = "scripts/check-mutants.py", replace = "for package in metadata.get(\"packages\") or []", with = "for package in []" }
+
+# `--detect` answers no Rust whatever the change, so CI's first step skips every later one.
+[[fault]]
+id = "mutants-wrapper-detect-always-false"
+guard = "test_check_mutants.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_mutants.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_detect_answers_whether_there_is_rust_without_running_cargo ("
+transform = { file = "scripts/check-mutants.py", replace = "print(f\"rust={'true' if names else 'false'}\")", with = "print(\"rust=false\")" }
+
+# The job's first step, as ci.yml writes it, asks about the wrong change: against HEAD, a
+# committed change to Rust reads as none, and every shard passes without mutating anything.
+# The #275 falsifier's pathspec fault on the step's first shell form had this effect.
+[[fault]]
+id = "mutants-ci-detect-step-wrong-base"
+guard = "test_check_mutants.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_mutants.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_ci_jobs_steps_run_the_wrapper_as_these_cases_do ("
+transform = { file = ".github/workflows/ci.yml", replace = "run: python3 scripts/check-mutants.py --base \"$BASE\" --detect", with = "run: python3 scripts/check-mutants.py --base HEAD --detect" }
+
+# A gated step that reads an output the first step doesn't write never runs.
+[[fault]]
+id = "mutants-ci-gated-step-wrong-output"
+guard = "test_check_mutants.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_mutants.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_ci_jobs_steps_run_the_wrapper_as_these_cases_do ("
+transform = { file = ".github/workflows/ci.yml", replace = "        if: steps.diff.outputs.rust == 'true'\n        env:\n          BASE: origin/${{ github.base_ref }}\n          SHARD:", with = "        if: steps.diff.outputs.changed == 'true'\n        env:\n          BASE: origin/${{ github.base_ref }}\n          SHARD:" }
+
+# A `mutants::skip` on shipping code drops its mutants with no run and no line in the job's
+# output. The #275 falsifier's fault: an untested function exits 2 without it and 0 with it.
+[[fault]]
+id = "mutants-skip-on-shipping-code"
+guard = "test_check_mutants.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_mutants.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_mutants_skip_is_a_listed_site ("
+transform = { file = "microvms-app/src/provision.rs", replace = "pub fn sha256_hex(bytes: &[u8]) -> String {", with = "#[cfg_attr(test, mutants::skip)]\npub fn sha256_hex(bytes: &[u8]) -> String {" }
+
+# The skip census lists no Rust files, so it finds no skip to hold to the table.
+[[fault]]
+id = "mutants-skip-scan-reads-nothing"
+guard = "test_check_mutants.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_mutants.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_mutants_skip_is_a_listed_site ("
+transform = { file = "scripts/test_check_mutants.py", replace = "\"--exclude-standard\", \"--\", \"*.rs\"]", with = "\"--exclude-standard\", \"--\", \"*.rs.none\"]" }
+
+# An exclusion wide enough to drop operator mutants: logic added to the function is never
+# mutated. The #275 falsifier's fault: new logic in `send` listed no mutants under the entry's
+# first form.
+[[fault]]
+id = "mutants-exclusion-drops-logic"
+guard = "test_check_mutants.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_mutants.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_each_exclusion_drops_only_a_named_functions_return_value ("
+transform = { file = ".cargo/mutants.toml", replace = "  '^microvms-edges/src/session/http\\.rs:\\d+:\\d+: replace <impl HttpBackend for ReqwestBackend>::(send|open_stream) -> ',", with = "  '^microvms-edges/src/session/http\\.rs:\\d+:\\d+: .*<impl HttpBackend for ReqwestBackend>::'," }
+
+# The config reader returns no exclusions, so no entry is held to its shape.
+[[fault]]
+id = "mutants-exclusion-reads-nothing"
+guard = "test_check_mutants.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_mutants.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_each_exclusion_drops_only_a_named_functions_return_value ("
+transform = { file = "scripts/test_check_mutants.py", replace = "entries = config.get(\"exclude_re\", [])", with = "entries = []" }
+
+# The session's stream status check, apart from `open_stream` so it has an offline test (#275):
+# a stream opened on a failure status loses the daemon's detail string.
+[[fault]]
+id = "http-stream-failure-status"
+guard = "session::http::tests::only_a_success_status_opens_a_stream"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::http::tests::only_a_success_status_opens_a_stream"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "microvms-edges/src/session/http.rs", replace = "    !(200..300).contains(&status)", with = "    (200..300).contains(&status)" }
 
 # ── the bindings, rebuilt before each run (CI's bindings job) ────────────────
 

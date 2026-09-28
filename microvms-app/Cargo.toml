@@ -64,6 +64,9 @@ proptest = "1.11"
 bolero = "0.13"
 # A runtime for the async tests, and `test-util` for the ones that pause tokio's clock.
 tokio = { version = "1.53", features = ["rt", "macros", "test-util"] }
+# `#[cfg_attr(test, mutants::skip)]` on the in-module test doubles (see .cargo/mutants.toml). A
+# no-op attribute; cargo-mutants reads it from the source.
+mutants = "0.0.4"
 
 [lints.rust]
 # No hand-written `unsafe` in this crate; a future one is a build error, not a scan finding.

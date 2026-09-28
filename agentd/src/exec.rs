@@ -1677,6 +1677,7 @@ fn unix_signal(status: &std::process::ExitStatus) -> Option<i32> {
 }
 
 #[cfg(not(unix))]
+#[cfg_attr(test, mutants::skip)] // Linux never compiles it; see .cargo/mutants.toml
 fn unix_signal(_status: &std::process::ExitStatus) -> Option<i32> {
     None
 }

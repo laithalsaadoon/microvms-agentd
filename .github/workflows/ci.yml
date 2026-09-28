@@ -328,6 +328,12 @@ jobs:
         env:
           BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
         run: ./scripts/check-guards-fire.py list --base "$BASE"
+      # `mise run mutants:check` (#275): the wrapper the `mutants` job runs, that job's own steps
+      # read from this file, the `mutants::skip` sites and the exclusions' shape. Here as well
+      # as in the `guards` job's entries, so a broken wrapper fails on every push, not twenty
+      # minutes into `guards`.
+      - name: mutants wrapper unit tests
+        run: uv run --with 'pyyaml==6.0.3' python -m unittest discover -s scripts -p 'test_check_mutants.py'
       # A pull request compares with its base branch. A push to main compares with the commit
       # before it: the merge base of main and itself is itself, and rule 3 would pass vacuously.
       # The script appends the per-category counts and their change to the job summary.
@@ -602,12 +608,112 @@ jobs:
           echo "a26253a9c821d935f7e383e40f0de7c2ca62a4121de1f73a6d81ec32eae631e0  ast-grep.zip" | sha256sum -c -
           unzip -q ast-grep.zip ast-grep -d "$RUNNER_TEMP/ast-grep"
           echo "$RUNNER_TEMP/ast-grep" >> "$GITHUB_PATH"
+      # The `fuzz_extract` exclusion's entry (#275) runs cargo-mutants: the `mutants` job's
+      # install, same version and hash.
+      - name: install cargo-mutants (pinned, checksummed)
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -sSfL -o cargo-mutants.tgz https://github.com/sourcefrog/cargo-mutants/releases/download/v27.1.0/cargo-mutants-x86_64-unknown-linux-gnu.tar.gz
+          echo "dfe6dc37d0342c891d2829b5a695aa57c2d0edecef7e7d0399a30cc6e206411e  cargo-mutants.tgz" | sha256sum -c -
+          mkdir cargo-mutants
+          tar -xzf cargo-mutants.tgz -C cargo-mutants cargo-mutants
+          echo "$RUNNER_TEMP/cargo-mutants" >> "$GITHUB_PATH"
       # A command's own timeout below the job's, so a hung fault prints its name and the
       # tail of its output instead of the runner cutting the log off. `--target-dir target`
       # for rust-cache, as in the bindings job: nothing here builds after `fire`. `--jobs 4`
       # runs faults in four scratch worktrees; workers 2 to 4 build their own targets.
       - name: every seeded fault fires
         run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 4
+
+  # `mise run mutants` (#275), in shards: cargo-mutants changes the Rust a pull request
+  # touches, one mutant at a time (a return value, an operator, a deleted `!`), and the job
+  # fails when the mutated package's own tests still pass with one in. `.cargo/mutants.toml`
+  # has the settings and each exclusion's reason, scripts/check-mutants.py the package list
+  # and what each exit code means, and CONTRIBUTING.md how to read a shard's missed.txt.
+  #
+  # Pull requests only: the question is about a change, and a push to main was asked it on its
+  # pull request. No workflow path filter, since a required check behind one never reports on
+  # a change it filters out, and that blocks the merge. The first step ends the job green
+  # instead when the diff has no Rust. No `needs: rust`, which would wait for all three OS legs:
+  # each shard runs its own unmutated baseline first, and a red baseline fails the shard.
+  #
+  # A fixed four-way split in cargo-mutants' order (`--shard k/4` takes consecutive slices),
+  # so a shard's mutants sit close together and each one rebuilds little. `--in-place` builds
+  # in the checkout, which the runner throws away, so rust-cache can restore dependencies into
+  # its target. Its key has this job's id and the job never runs on main, so a pull request's
+  # first push builds them cold in every shard; later pushes restore what a shard saved, a red
+  # one included (`cache-on-failure`, since rust-cache saves dependencies only, never the
+  # mutated workspace crates).
+  # Measured over #283's diff at 67a13cb (173 mutants under this config) on four cores of a
+  # shared devbox with warm dependencies, 2026-09-28: 87 s to 325 s a shard. A hosted runner
+  # builds its first baseline cold; the timeout is the budget for that.
+  mutants:
+    name: mutation testing (shard ${{ matrix.shard }} of 4)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # The diff starts at the base branch, which a shallow clone doesn't have.
+          fetch-depth: 0
+      # The wrapper passes a change with no Rust without mutating anything too; this step is
+      # here so such a change doesn't install a toolchain first. It's the wrapper's own answer
+      # (`--detect`, the runner's python3, no dependencies), so the gate and the run can't
+      # disagree, and test_check_mutants.py runs this step and the gated ones as written here.
+      # A base git can't resolve fails the step rather than reading as no Rust.
+      - name: the change touches Rust
+        id: diff
+        env:
+          BASE: origin/${{ github.base_ref }}
+        run: python3 scripts/check-mutants.py --base "$BASE" --detect >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        if: steps.diff.outputs.rust == 'true'
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        if: steps.diff.outputs.rust == 'true'
+        with:
+          cache-on-failure: true
+      # See the `security` job for why no cache.
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        if: steps.diff.outputs.rust == 'true'
+        with:
+          version: "0.12.13" # mise.toml's uv; ci:parity compares them
+          enable-cache: false
+      # The release binary by checksum, the way ast-grep arrives in the `security` job. The
+      # release publishes no checksum file, so the hash is the asset's GitHub digest. The binary
+      # needs glibc 2.39, which ubuntu-24.04 has; mise.toml's `mutants` task builds the same
+      # version from source. A new version means this step, the `guards` job's copy, those
+      # tasks' pins and the hash, together.
+      - name: install cargo-mutants (pinned, checksummed)
+        if: steps.diff.outputs.rust == 'true'
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -sSfL -o cargo-mutants.tgz https://github.com/sourcefrog/cargo-mutants/releases/download/v27.1.0/cargo-mutants-x86_64-unknown-linux-gnu.tar.gz
+          echo "dfe6dc37d0342c891d2829b5a695aa57c2d0edecef7e7d0399a30cc6e206411e  cargo-mutants.tgz" | sha256sum -c -
+          mkdir cargo-mutants
+          tar -xzf cargo-mutants.tgz -C cargo-mutants cargo-mutants
+          echo "$RUNNER_TEMP/cargo-mutants" >> "$GITHUB_PATH"
+      - name: mutate this shard of the change
+        if: steps.diff.outputs.rust == 'true'
+        env:
+          BASE: origin/${{ github.base_ref }}
+          SHARD: ${{ matrix.shard }}/4
+        run: ./scripts/check-mutants.py --base "$BASE" -- --shard "$SHARD" --in-place
+      # Each mutant's diff and test log, and the missed and timeout lists, one click from the
+      # PR. A shard the diff gave no mutants writes none.
+      - name: upload mutants.out
+        if: always() && steps.diff.outputs.rust == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mutants-out-shard-${{ matrix.shard }}
+          path: mutants.out/
+          if-no-files-found: warn
 
   build:
     name: static aarch64 binary

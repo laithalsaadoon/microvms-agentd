@@ -51,6 +51,14 @@ node = "22"
 # checksum (ci.yml's `security` job, a required check).
 "aqua:ast-grep/ast-grep" = "0.43.0"
 
+[settings]
+# The cargo backend builds its tools from source (`cargo install --locked`) rather than through
+# cargo-binstall. binstall fetches cargo-mutants' release binary, which needs glibc 2.39, and on
+# an older host (AL2023 has 2.34) that binary can't start, so `mutants` and `guards:fire` fail
+# before they test anything. cargo-deny is the other cargo tool: a first install builds it too,
+# once, in a few minutes. CI doesn't install through mise (D14).
+cargo.binstall = false
+
 [env]
 # The shipping target. MicroVMs are ARM64-only, and a static binary is what lets
 # the daemon bake into any task image without depending on an interpreter or libc
@@ -503,6 +511,7 @@ depends = [
   "trace:check",
   "ratchet:check",
   "guards:list",
+  "mutants:check",
   "ci:parity",
 ]
 
@@ -611,7 +620,32 @@ description = "Seed each registered fault in a scratch worktree and require its 
 # `-- --affected` fires only the entries whose own files or registry text changed against
 # origin/main: a rule, not a trace, so the full fire is still owed before a push. The script's
 # docstring has both.
+#
+# cargo-mutants is here for the `fuzz_extract` exclusion's entry, at the `mutants` task's pin.
+tools = { "cargo:cargo-mutants" = "27.1.0" }
 run = "./scripts/check-guards-fire.py fire"
+
+[tasks."mutants:check"]
+description = "The mutants wrapper's unit tests, and the skip sites and exclusions it hands cargo-mutants. No builds"
+# The cheap half of `mutants`, in `check` and in CI's `security` job. A fake cargo stands in for
+# cargo-mutants, and the CI job's own steps run from ci.yml over a throwaway repo, so a broken
+# wrapper or step fails here rather than as a green shard that mutated nothing.
+run = "uv run --with 'pyyaml==6.0.3' python -m unittest discover -s scripts -p 'test_check_mutants.py'"
+
+[tasks.mutants]
+description = "Mutation-test the Rust this branch changes against origin/main; fails on a mutant its tests miss"
+# CI's `mutants` job, unsharded (#275). The wrapper's docstring says what it runs, and
+# `.cargo/mutants.toml` holds the settings and the exclusions. Not in `check` or any hook: each
+# mutant is a build and a test run, and #283's diff took 7 minutes at `-j 4` on a 16-core
+# devbox (67a13cb, 2026-09-28). Arguments after `--` go to the wrapper, and after a second `--` to cargo-mutants:
+# `mise run mutants -- -- --shard 1/4 -j 3`. Uncommitted edits to tracked files are in the
+# diff it mutates; a new file needs `git add` first.
+#
+# A per-task tool, for the lychee task's reason: nothing else needs it on a fresh clone. mise
+# builds it from source (`[settings]` above says why), about three minutes the first time. CI
+# installs the same version's release binary by checksum.
+tools = { "cargo:cargo-mutants" = "27.1.0" }
+run = "./scripts/check-mutants.py"
 
 [tasks."ratchet:check"]
 description = "Fail on new layering drift, and on a fix ratchet/drift.json doesn't record yet"

@@ -62,3 +62,8 @@ site/public/schema.json
 site/dist-typecheck-probe/
 # bolero's corpus and crash reproducers from `cargo bolero test` (#216); CI uploads crashes.
 __fuzz__/
+# cargo-mutants' output from `mise run mutants` (#275): each mutant's diff and test log, and the
+# caught, missed and timeout lists. It moves the previous run's to `mutants.out.old/`. CI
+# uploads the job's copy as an artifact.
+mutants.out/
+mutants.out.old/

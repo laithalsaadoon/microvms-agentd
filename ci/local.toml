@@ -83,6 +83,7 @@ steps = [
   "requirement traceability",
   "seeded-fault registry unit tests",
   "seeded-fault registry",
+  "mutants wrapper unit tests",
   "ratchet check",
 ]
 
@@ -131,7 +132,21 @@ steps = [
 task = "guards"
 steps = [
   "install ast-grep (pinned, checksummed)",
+  "install cargo-mutants (pinned, checksummed)",
   "every seeded fault fires",
+]
+
+[job."ci.yml".guards.local."install cargo-mutants (pinned, checksummed)"]
+run = "cargo install --locked cargo-mutants@27.1.0"
+env = { CARGO_INSTALL_ROOT = "{tools}" }
+reason = "the release binary needs glibc 2.39, newer than some Linux hosts have (AL2023 has 2.34), so the same version is built from source into ci:local's tool directory"
+
+[job."ci.yml".mutants]
+skip = "it runs on pull requests only, as a matrix of shards, and each mutant is a build. `mise run mutants` runs the same wrapper over the branch against origin/main, unsharded; `mise run mutants -- -- --shard k/4` runs one shard"
+steps = [
+  "the change touches Rust",
+  "install cargo-mutants (pinned, checksummed)",
+  "mutate this shard of the change",
 ]
 
 [job."ci.yml".build]

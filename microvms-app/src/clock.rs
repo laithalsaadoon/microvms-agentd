@@ -61,6 +61,7 @@ pub trait Clock: Send + Sync + fmt::Debug {
 }
 
 #[cfg(any(test, feature = "test-support"))]
+#[cfg_attr(test, mutants::skip)] // a test double; see .cargo/mutants.toml
 pub(crate) mod testing {
     //! The clocks the tests share, so the control-plane tests, the session tests and the
     //! CLI's guards don't each keep a near-copy that can drift.

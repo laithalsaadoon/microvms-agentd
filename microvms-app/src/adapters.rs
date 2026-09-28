@@ -54,6 +54,7 @@ pub trait Adapters: Send + Sync + fmt::Debug {
 }
 
 #[cfg(any(test, feature = "test-support"))]
+#[cfg_attr(test, mutants::skip)] // a test double; see .cargo/mutants.toml
 pub(crate) mod testing {
     //! The adapters the crate's tests wire in when nothing under test should reach a network.
 

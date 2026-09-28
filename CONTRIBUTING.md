@@ -71,6 +71,37 @@ a change that reaches a guard through code the entry doesn't name, such as the t
 clippy ban names, isn't seen. Run the full fire, or let CI's `guards` job, before you
 count on it.
 
+CI's `mutants` job runs cargo-mutants over the Rust a pull request changes, and
+`mise run mutants` runs it over your branch against origin/main. It isn't in
+`check`, because each mutant is a build. A mutant is one small change to the
+code, such as a return value replaced or a `>` turned into `>=`. Only the
+mutated package's own tests run against it, so a test in `microvms-core/tests`
+doesn't catch a mutant in the app. A change with no Rust in it passes at once.
+
+Reading `missed.txt`: each shard uploads its `mutants.out` as an artifact, and
+the job's log prints the same list. Each line names a mutant by file, line,
+column and change, such as
+`agentd/src/fs.rs:632:5: replace fuzz_extract -> Result<u64, String> with Ok(0)`,
+and `mutants.out/diff/` and `mutants.out/log/` hold its diff and its test
+output. A missed mutant means the tests ran that code and nothing checked what
+it did. Write the assertion that fails with the mutant in, and rerun. When no
+offline test can reach the code (a network call only a live test makes, or code
+behind a feature `cargo test` doesn't enable), add an `exclude_re` entry to
+`.cargo/mutants.toml` with the measured miss and the check that covers the code
+instead. An entry drops only a function's `replace <function> -> ` mutants, so
+move any logic worth testing out of that function first. A mutant in
+`timeout.txt` made the tests hang, and it's handled like a missed one.
+
+Two kinds of code take `#[cfg_attr(test, mutants::skip)]` rather than an
+exclusion: a new test double behind `cfg(any(test, feature = "test-support"))`
+(on its module, or a glob in `.cargo/mutants.toml` for a file of its own), and
+code only a non-Unix build compiles, such as a `cfg(not(unix))` twin, which the
+Linux job always reports missed. A name regex would also drop the tested Unix
+twin's mutants, since the two share a name. Each skip is listed in `SKIPS` in
+`scripts/test_check_mutants.py`, and a crate with one needs the `mutants` crate
+as a dev-dependency. A new workspace crate goes in the wrapper's `PACKAGES` or,
+with a reason, `LEFT_OUT`; the job fails until it's in one of them.
+
 In network simulation tests, coordinate child processes through stdin rather
 than wall-clock sleeps: child processes and the simulator use different clocks.
 
