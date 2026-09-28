@@ -20,19 +20,26 @@ message here: name what was measured, and admit what is unverified. -->
 - [ ] Live conformance run, if this touches the wire protocol or AWS lifecycle.
       Region and pass/fail counts:
 
+## Parity
+
+- [ ] No public name changed on any surface (core, CLI commands, `microvms.pyi`, `index.d.ts`).
+- [ ] `parity/capabilities.toml` updated: the other surfaces are implemented, or
+      exempted with a reason, and an issue number when a later change closes the gap.
+      `mise run parity:check` passes.
+
 ## Guards
 
 **If this adds a guard, register the deliberate break that proves it fires.** Add its
 entry to `guards/faults.toml` (the schema is in `scripts/check-guards-fire.py`) and paste
 the line `mise run guards:fire -- --only <id>` printed for it. A test that passes either
-way is a false answer, not a passing test; see `CONTRIBUTING.md` for the two that did
-exactly that here.
+way gives a false answer.
 
 For a guard no fault can be seeded for mechanically, such as a live check: what you broke,
 that the check failed, and that it passed again after you restored the code.
 
 <!-- e.g. "agentd-fs-pop: removed the `?` from `parts.pop()?` in agentd/src/fs.rs so ../x
-became x; `guards:fire -- --only agentd-fs-pop` printed `fired: agentd-fs-pop`." -->
+became x, and `normalize_rejects_escapes_and_absorbs_benign_traversal` failed;
+`guards:fire -- --only agentd-fs-pop` printed `fired: agentd-fs-pop`." -->
 
 ## Platform claims
 

@@ -10,7 +10,7 @@ behavior and [Trust](docs/TRUST.md) before changing authentication or execution.
 ```bash
 mise install
 mise run install       # install git hooks
-mise run check         # code, security, tests, schema, stubs and declarations, surface parity, API drift, packaging, build, traceability, layering drift, seeded-fault registry
+mise run check         # code, security, tests, schema, stubs and declarations, surface parity, API drift, packaging, build, traceability, layering drift, seeded-fault registry, doc references
 mise run ci:local      # CI's Linux jobs, each in a clone shaped like its checkout; before a push
 mise tasks             # all available tasks
 ```
@@ -59,9 +59,10 @@ failure in `guards/faults.toml`, and show `mise run guards:fire -- --only <id>`
 printing `fired` for it. `check` runs `guards:list`, which fails when an entry's
 anchor or patch no longer matches the tree, and when a test gains a
 `**Falsification**` note with no entry (`guards/unregistered.txt` lists the
-older ones and only shrinks). CI's `guards` job seeds every fault. A guard no
-fault can be seeded for, such as a live check, is still broken by hand, restored,
-and recorded in the PR.
+older ones and only shrinks). CI's `guards` job seeds the Rust and script
+faults, and the `bindings` job the binding ones. A guard no fault can be seeded
+for, such as a live check, is still broken by hand, restored, and recorded in
+the PR.
 
 Locally, `mise run guards:fire -- --jobs 4` seeds faults in four scratch worktrees at
 once and reports what a serial run reports, in the same order. `-- --affected` fires
@@ -137,7 +138,7 @@ name), and its crate root denies both lints. The adapter hands
 and everything else takes the lookup it's given. An exception is an
 `#[expect(..., reason = "...")]` at the call site plus its line in
 `LINT_EXCEPTIONS` in `scripts/test_ratchet.py`, which fails `ratchet:check` on
-any other `allow`, `warn` or `expect` of those lints in an adapter's `src/`. A
+any other `allow`, `warn` or `expect` of those lints in an adapter's source. A
 subprocess exception also needs its entry or decision in `ratchet/drift.json`.
 An environment read has no drift category, so its `reason` and its line in
 that list are the whole record, and review is the check.
@@ -203,8 +204,9 @@ is not portable. A passing `check` does not verify those documents.
 Edit `site/authored/` for tutorials and landing pages, and top-level `docs/*.md`
 for contracts and measured findings. `site/src/content/docs/` is generated and
 ignored. The CLI reference comes from `docs/manifest.json`; historical source
-analyses under `docs/architecture/`, `reference/`, `behavior/`, `analysis/`,
-`diagrams/`, and `insights/` may need regeneration after a refactor.
+analyses under `docs/architecture/`, `docs/reference/`, `docs/behavior/`,
+`docs/analysis/`, `docs/diagrams/`, and `docs/insights/` may need regeneration
+after a refactor.
 
 ```bash
 mise run docs:check     # lint, spelling, build, typecheck, output checks

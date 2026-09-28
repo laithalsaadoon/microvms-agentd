@@ -12,6 +12,7 @@ Rust client stack and guest daemon for AWS Lambda MicroVMs. Start with
 mise run check         # local code, security, tests, contracts, drift, packaging, build
 mise run ci:local      # CI's Linux jobs in CI-shaped clones, before a push
 mise run docs:check    # documentation build and checks
+mise run guards:fire   # re-prove the seeded faults (bindings ones need --venv); CI runs it
 mise run live          # billable AWS verification
 mise run live:verify-clean
 ```
@@ -127,19 +128,31 @@ well as the adapters, so a port implemented anywhere but the edges is drift or
 a recorded decision. Forbidden calls are refused by each adapter's
 `clippy.toml`, and `scripts/test_ratchet.py` lists every site that turns those
 lints off. The CLI's `clippy.toml` also refuses core's transport calls and its
-production constructors outside `src/seam.rs`, and the bindings refuse the
+production constructors outside `microvms-cli/src/seam.rs`, and the bindings refuse the
 transport calls. `protocol::exec::StartRequest` is `#[non_exhaustive]`, so every
 start request is built from `StartRequest::new`, which holds the wire's defaults.
 The Python binding's `run` signatures still restate four of them as keyword
 defaults, which #300 checks.
 
-`parity/capabilities.toml` says what core, the CLI, Python and TypeScript each
-call every capability, or why a surface lacks it. `mise run parity:check` holds
-it to the four surfaces and fails on a public function, a method of a class the
-table names, or a command, when no row names it. An exemption with an issue is a gap that issue closes, and the
-ratchet counts it as parity-gap drift, so closing one deletes its exemption and
-its entry together. One without an issue is a decision. The script's docstring
-has the rules; option-level parity (flags, keyword arguments) isn't checked yet.
+Core is the one implementation. The CLI, Python and TypeScript expose the same
+capabilities, or `parity/capabilities.toml` says why one doesn't.
+
+- A capability lands in core first. The change that adds a public name to any
+  surface adds its row to the table, with the other surfaces implemented, or
+  exempted with a reason. `mise run parity:check` fails on a public function, a
+  method of a class the table names, or a command, when no row names it, and on
+  a row naming something a surface doesn't have. An exemption with an issue is
+  a gap that issue closes, and the ratchet counts it as parity-gap drift, so
+  closing one deletes its exemption and its entry together. One without an issue
+  is a decision. The script's docstring has the rules; option-level parity
+  (flags, keyword arguments) isn't checked yet.
+- Defaults live at or below core. The CLI and the bindings use the constant
+  core re-exports from the layer that owns it, and don't add a duration, size
+  or retry literal of their own without a decision in `ratchet/drift.json`.
+  The ratchet's `literal-default` rule (`ratchet/rules/literal-default.yml`)
+  fails `ratchet:check` on one in adapter source that has no decision there. A
+  flag or keyword default isn't held yet: #300 checks those through the
+  generated surfaces.
 
 ## Maintenance rules
 
@@ -158,9 +171,9 @@ has the rules; option-level parity (flags, keyword arguments) isn't checked yet.
   through metadata, so use least privilege even with VPC isolation.
 - Preserve the image bootstrap invariant: `agentd` is `CMD`, and workloads
   start only after readiness. Root workloads are not isolated from the daemon.
-- Demonstrate that new invariant guards catch their intended failure. AWS
-  changes need a live exercise and a persistent conformance check, or an
-  explicit statement that they remain unverified against AWS.
+- AWS changes need a live exercise and a persistent conformance check, or an
+  explicit statement that they remain unverified against AWS. Guards follow
+  "Checks that can fail" below.
 - Rebuild the release CLI before targeted live checks. Verify cleanup of VMs,
   images, and service-created log groups independently.
 - `spec:core` references a local symspec checkout; formal requirements are
@@ -183,3 +196,35 @@ Documentation doesn't state counts of lines, files, modules, tests, checks, or
 classes in prose. Those numbers drift with every commit, and a stale count reads
 as a fact. A number may appear only when the build generates it, or when it's a
 dated measurement that names the commit it was taken at.
+
+## Checks that can fail
+
+A check that passes on broken code gives a false answer. Each rule here names the
+check that holds it, or says that review does.
+
+- Every new guard, gate or scanner ships with a seeded fault in
+  `guards/faults.toml` that makes it fail. A scanner's floor (an empty input)
+  and its sentinel get a fault each. Review holds that a new check has its
+  entries; CI holds that every entry fires. The `guards` job seeds the Rust and
+  script faults and the `bindings` job seeds the binding ones, as
+  `mise run guards:fire` does locally, and each fails when a fault doesn't
+  fire. `guards:list` in `check` fails on an entry that no longer applies to
+  the tree, and on a new Falsification note that has no entry and no line in
+  `guards/unregistered.txt`.
+- Tests assert the verdict, not only that something ran or stayed contained.
+  CI's `mutants` job fails on a mutant of the changed Rust that no test
+  catches, which is what a test that only checks "it returned" leaves behind.
+  It isn't a required check yet, so read its result before a merge.
+- A requirement is covered by a test that names it, not by a mention.
+  `trace:check` counts a key only in a test's name, its own doc comment or
+  docstring, a pytest marker, or a Node test's title.
+- Live checks treat an absent value as a failure. `Results.eq` in
+  `conformance/run_rs.py` fails on an absent value, and `Results.absent` is the
+  one way to assert absence; `conformance:self-test` in `check` runs their
+  negative twins.
+- These docs name their checks, so `agents:check` in `check` fails when
+  AGENTS.md, a crate's AGENTS.md, CONTRIBUTING.md or the pull request template
+  names a task, fault id, path, file, CI job, `Results` method or code name
+  that doesn't exist, or says a task is in `check` when `check` doesn't run it.
+  Its docstring says what it reads as a name. A name outside backticks isn't
+  read, so write the ones a rule depends on in backticks.
