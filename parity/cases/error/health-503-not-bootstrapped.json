@@ -1,0 +1,22 @@
+{
+  "capability": "health",
+  "input": {
+    "status": 503,
+    "body": "the run hook has not landed"
+  },
+  "expect": {
+    "error": {
+      "code": "ERR_RETRYABLE",
+      "wire_kind": "NotBootstrapped",
+      "retryable": true
+    }
+  },
+  "known_drift": {
+    "ts": {
+      "issue": "#256",
+      "keys": [
+        "error.retryable"
+      ]
+    }
+  }
+}

@@ -96,6 +96,9 @@ tokio = { version = "1.53", features = [
 ] }
 # Temp state directories for the provisioning tests: random names, cleanup on drop.
 tempfile = "3"
+# The capability table the case corpus names rows of (`tests/parity_cases.rs`). The CLI's
+# pin, which reads `microvm.toml` with it.
+toml = "1"
 
 # An independent oracle for the `.dockerignore` matcher in `tests/context_fuzz.rs`: the
 # fuzzed matcher is hand-written, and the oracle translates the same patterns to regexes the

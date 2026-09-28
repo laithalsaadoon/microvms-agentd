@@ -1,0 +1,13 @@
+{
+  "capability": "size-from-request",
+  "input": {
+    "cpus": 64,
+    "memory_mib": null
+  },
+  "expect": {
+    "error": {
+      "code": "ERR_INVALID_ARG",
+      "wire_kind": null
+    }
+  }
+}

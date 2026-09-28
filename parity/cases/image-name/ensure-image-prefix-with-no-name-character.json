@@ -1,0 +1,14 @@
+{
+  "capability": "ensure-image",
+  "input": {
+    "name_prefix": "///",
+    "binary_hex": "7f454c460001000000000000000000000000b700",
+    "size_mib": 2048
+  },
+  "expect": {
+    "error": {
+      "code": "ERR_INVALID_ARG",
+      "wire_kind": null
+    }
+  }
+}

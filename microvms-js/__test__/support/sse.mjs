@@ -52,25 +52,37 @@ export function exitFrame(total, { exitCode = 0, signal = null } = {}) {
  * — the offset a second attach asks for is in the query string, and that number is the point of
  * the cursor.
  *
+ * `status` is the one every response answers with, so a script can also be a daemon refusal:
+ * `startSseServer([['not bootstrapped']], { status: 503 })`. Any method is answered, once its
+ * body is read, which is how an upload meets a scripted status (#272's error cases).
+ * The handle's `requestedMethods` pairs with `requestedPaths`.
+ *
  * Returns a handle with `endpoint`, `requestedPaths`, `offsetsRequested()`, and `close()`. The
  * caller must `close()`, because a leaked listener makes the *next* test flaky — the worst
  * failure mode a helper can have.
  */
-export async function startSseServer(scripts) {
+export async function startSseServer(scripts, { status = 200 } = {}) {
   const requestedPaths = [];
+  const requestedMethods = [];
   let attach = 0;
 
   const server = http.createServer((request, response) => {
     requestedPaths.push(request.url);
+    requestedMethods.push(request.method);
     // A script that ran out answers an empty body, which the core reads as a cut. Better than
     // hanging: a test that over-attaches should fail on its own assertion, not on a timeout.
     const frames = scripts[attach++] ?? [];
     const body = frames.join('');
-    response.writeHead(200, {
-      'content-type': 'text/event-stream',
-      'content-length': Buffer.byteLength(body),
+    // Answered once the request body is read, so an upload sees the status rather than a
+    // connection reset on bytes it hasn't finished sending.
+    request.resume();
+    request.on('end', () => {
+      response.writeHead(status, {
+        'content-type': status === 200 ? 'text/event-stream' : 'text/plain',
+        'content-length': Buffer.byteLength(body),
+      });
+      response.end(body);
     });
-    response.end(body);
   });
 
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -79,6 +91,7 @@ export async function startSseServer(scripts) {
   return {
     endpoint: `http://127.0.0.1:${port}`,
     requestedPaths,
+    requestedMethods,
     /** The `?offset=` each attach asked for, in order. */
     offsetsRequested() {
       return requestedPaths.map((path) => Number(path.split('offset=')[1]));

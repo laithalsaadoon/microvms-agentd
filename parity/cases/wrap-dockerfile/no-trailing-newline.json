@@ -1,0 +1,9 @@
+{
+  "capability": "wrap-dockerfile",
+  "input": {
+    "task": "FROM python:3.12-slim\nRUN pip install pytest"
+  },
+  "expect": {
+    "dockerfile": "FROM python:3.12-slim\nRUN pip install pytest\nCOPY agentd /agentd\nRUN chmod 0755 /agentd\nENV AGENTD_PORT=9000\nENV AGENTD_LOG=info\nEXPOSE 9000\nENTRYPOINT []\nCMD [\"/agentd\"]\n"
+  }
+}

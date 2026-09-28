@@ -1137,6 +1137,123 @@ transform = { file = ".github/workflows/ci.yml", replace = "the runner image shi
 # no site test has an entry, and a scratch worktree has no site/node_modules, so a vitest entry
 # needs a site suite first. #271 broke both cases by hand; `docs:check` runs them.
 
+# ── the shared case corpus (#272): each runner's floor, strictness and one real regression ──
+#
+# Every Rust runner is one test that plans, answers and judges the whole corpus, so each entry
+# names the reason it has to fail by. The floor entries hand a runner an empty corpus directory
+# or a loader that drops what it parses: a path mistake has to fail, not pass over nothing. The
+# three Rust runners share `parity_corpus/mod.rs`, so its loader is seeded once, under core.
+
+[[fault]]
+id = "parity-core-empty-corpus"
+guard = "core_answers_the_shared_case_corpus"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]
+expect = "test-failed"
+suite = "rust"
+message = "no case ran in area \"image-name\" on core"
+transform = { file = "microvms-core/tests/parity_corpus/mod.rs", replace = "pub fn cases_dir() -> PathBuf {\n    repo_root().join(\"parity\").join(\"cases\")\n}\n", with = "pub fn cases_dir() -> PathBuf {\n    let empty = std::env::temp_dir().join(format!(\"parity-empty-{}\", std::process::id()));\n    std::fs::create_dir_all(&empty).expect(\"an empty corpus directory\");\n    empty\n}\n" }
+
+[[fault]]
+id = "parity-cli-fakes-empty-corpus"
+guard = "guards::the_cli_answers_the_shared_case_corpus_against_its_fakes"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::the_cli_answers_the_shared_case_corpus_against_its_fakes"]
+expect = "test-failed"
+suite = "rust"
+message = "no case ran in area \"image-name\" on cli"
+transform = { file = "microvms-core/tests/parity_corpus/mod.rs", replace = "pub fn cases_dir() -> PathBuf {\n    repo_root().join(\"parity\").join(\"cases\")\n}\n", with = "pub fn cases_dir() -> PathBuf {\n    let empty = std::env::temp_dir().join(format!(\"parity-empty-{}\", std::process::id()));\n    std::fs::create_dir_all(&empty).expect(\"an empty corpus directory\");\n    empty\n}\n" }
+
+[[fault]]
+id = "parity-cli-process-empty-corpus"
+guard = "the_cli_process_answers_the_shared_case_corpus"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "parity_cases", "--", "--exact", "the_cli_process_answers_the_shared_case_corpus"]
+expect = "test-failed"
+suite = "rust"
+message = "no case ran in area \"cost\" on cli"
+transform = { file = "microvms-core/tests/parity_corpus/mod.rs", replace = "pub fn cases_dir() -> PathBuf {\n    repo_root().join(\"parity\").join(\"cases\")\n}\n", with = "pub fn cases_dir() -> PathBuf {\n    let empty = std::env::temp_dir().join(format!(\"parity-empty-{}\", std::process::id()));\n    std::fs::create_dir_all(&empty).expect(\"an empty corpus directory\");\n    empty\n}\n" }
+
+[[fault]]
+id = "parity-core-loader-returns-nothing"
+guard = "core_answers_the_shared_case_corpus"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]
+expect = "test-failed"
+suite = "rust"
+message = "the sentinel wrap-dockerfile/sentinel.json wasn't loaded"
+transform = { file = "microvms-core/tests/parity_corpus/mod.rs", replace = "                        Ok(case) => cases.push(case),\n", with = "                        Ok(_) => {}\n" }
+
+[[fault]]
+id = "parity-core-no-handler"
+guard = "core_answers_the_shared_case_corpus"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]
+expect = "test-failed"
+suite = "rust"
+message = "the core runner has no handler for area \"size-class\""
+transform = { file = "microvms-core/tests/parity_cases.rs", replace = "const AREAS: [&str; 6] = [\n    \"image-name\",\n    \"cost\",\n    \"error\",\n    \"egress\",\n    \"size-class\",\n    \"wrap-dockerfile\",\n];\n", with = "const AREAS: [&str; 5] = [\n    \"image-name\",\n    \"cost\",\n    \"error\",\n    \"egress\",\n    \"wrap-dockerfile\",\n];\n" }
+
+# The case's expected name moved to what the CLI's `build --reuse` answers today, as a #258 fix
+# would leave it: the CLI's marker has to fail until the fixing PR removes it.
+
+[[fault]]
+id = "parity-cli-drift-now-agrees"
+guard = "guards::the_cli_answers_the_shared_case_corpus_against_its_fakes"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::the_cli_answers_the_shared_case_corpus_against_its_fakes"]
+expect = "test-failed"
+suite = "rust"
+message = "image-name/ensure-image-name: cli now agrees at name; remove known_drift"
+transform = { file = "parity/cases/image-name/ensure-image-name.json", replace = "\"name\": \"parity-task-17b6047ddff1\"", with = "\"name\": \"parity-task-a893b3c5a12e\"" }
+
+# The issue's regression: `wrap_dockerfile` stops ending the task's last line before the stanza.
+# Core, Python and TypeScript each fail the case (the binding entries are in the bindings section).
+
+[[fault]]
+id = "parity-core-wrap-newline"
+guard = "core_answers_the_shared_case_corpus"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]
+expect = "test-failed"
+suite = "rust"
+message = "pip install pytestCOPY agentd"
+transform = { file = "microvms-app/src/control/artifact.rs", replace = "    wrapped.push_str(task);\n    if !task.ends_with('\\n') {\n        wrapped.push('\\n');\n    }\n", with = "    wrapped.push_str(task);\n" }
+
+# The CLI's two tiers read one split of the areas. Each break moves `egress`: handed to the
+# fakes tier, which has no handler for it; dropped from both lists; or listed in both.
+
+[[fault]]
+id = "parity-cli-area-handed-over"
+guard = "guards::the_cli_answers_the_shared_case_corpus_against_its_fakes"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::the_cli_answers_the_shared_case_corpus_against_its_fakes"]
+expect = "test-failed"
+suite = "rust"
+message = "gives the fakes tier area \"egress\", which it has no handler for"
+transform = { file = "microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 2] = [\"cost\", \"egress\"];\npub const CLI_FAKE_AREAS: [&str; 2] = [\"image-name\", \"error\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 1] = [\"cost\"];\npub const CLI_FAKE_AREAS: [&str; 3] = [\"image-name\", \"error\", \"egress\"];\n" }
+
+[[fault]]
+id = "parity-cli-area-dropped"
+guard = "the_cli_process_answers_the_shared_case_corpus"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "parity_cases", "--", "--exact", "the_cli_process_answers_the_shared_case_corpus"]
+expect = "test-failed"
+suite = "rust"
+message = "the cli runner has no handler for area \"egress\""
+transform = { file = "microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 2] = [\"cost\", \"egress\"];\npub const CLI_FAKE_AREAS: [&str; 2] = [\"image-name\", \"error\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 1] = [\"cost\"];\npub const CLI_FAKE_AREAS: [&str; 2] = [\"image-name\", \"error\"];\n" }
+
+[[fault]]
+id = "parity-cli-area-in-both-tiers"
+guard = "the_cli_process_answers_the_shared_case_corpus"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "parity_cases", "--", "--exact", "the_cli_process_answers_the_shared_case_corpus"]
+expect = "test-failed"
+suite = "rust"
+message = "area \"egress\" is both this cli runner's and another's"
+transform = { file = "microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 2] = [\"cost\", \"egress\"];\npub const CLI_FAKE_AREAS: [&str; 2] = [\"image-name\", \"error\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 2] = [\"cost\", \"egress\"];\npub const CLI_FAKE_AREAS: [&str; 3] = [\"image-name\", \"error\", \"egress\"];\n" }
+
+# A skip that doesn't name its issue or trace id fails the reader, in every runner.
+
+[[fault]]
+id = "parity-core-skip-without-reference"
+guard = "core_answers_the_shared_case_corpus"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]
+expect = "test-failed"
+suite = "rust"
+message = "image-name/ensure-image-name: skip.py ends by naming its issue or trace id"
+transform = { file = "parity/cases/image-name/ensure-image-name.json", replace = "so no offline call answers it (IMAGE-12)\",\n", with = "so no offline call answers it\",\n" }
+
 # ── the release's Sigstore check (#284) ──────────────────────────────────────
 
 [[fault]]
@@ -3030,3 +3147,217 @@ expect = "test-failed"
 suite = "bindings"
 note = "microvms-js/__test__/exec.mjs::a stream survives more events than the channel can hold"
 transform = { file = "microvms-js/src/exec.rs", replace = "match sender.send(Ok(event)).await {", with = "match sender.try_send(Ok(event)) {" }
+
+# The shared case corpus's binding runners (#272). The two wrap entries are core's regression
+# seen through each binding; the label entries fix a #255 drift without removing its marker;
+# the rest are each runner's floor and handler rule.
+
+[[fault]]
+id = "parity-py-wrap-newline"
+guard = "microvms-py/tests/test_parity_cases.py::test_a_case[wrap-dockerfile/no-trailing-newline]"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "microvms-py/tests/test_parity_cases.py::test_a_case[wrap-dockerfile/no-trailing-newline]"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "pip install pytestCOPY agentd"
+transform = { file = "microvms-app/src/control/artifact.rs", replace = "    wrapped.push_str(task);\n    if !task.ends_with('\\n') {\n        wrapped.push('\\n');\n    }\n", with = "    wrapped.push_str(task);\n" }
+
+[[fault]]
+id = "parity-ts-wrap-newline"
+guard = "wrap-dockerfile/no-trailing-newline"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "microvms-js/__test__/parity_cases.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "pip install pytestCOPY agentd"
+transform = { file = "microvms-app/src/control/artifact.rs", replace = "    wrapped.push_str(task);\n    if !task.ends_with('\\n') {\n        wrapped.push('\\n');\n    }\n", with = "    wrapped.push_str(task);\n" }
+
+[[fault]]
+id = "parity-py-cost-marker-removed"
+guard = "microvms-py/tests/test_parity_cases.py::test_a_case[cost/estimate-suspended-only]"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "microvms-py/tests/test_parity_cases.py::test_a_case[cost/estimate-suspended-only]"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "\"label\": \"plan\""
+transform = { file = "parity/cases/cost/estimate-suspended-only.json", replace = "  \"known_drift\": {\n    \"py\": {\n      \"issue\": \"#255\",\n      \"keys\": [\n        \"label\",\n        \"size.headroomMib\",\n        \"items\",\n        \"total\"\n      ]\n    },\n    \"ts\"", with = "  \"known_drift\": {\n    \"ts\"" }
+
+[[fault]]
+id = "parity-py-label-now-agrees"
+guard = "microvms-py/tests/test_parity_cases.py::test_a_case[cost/estimate-suspended-only]"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "microvms-py/tests/test_parity_cases.py::test_a_case[cost/estimate-suspended-only]"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "py now agrees at label; remove known_drift"
+transform = { file = "microvms-py/src/cost.rs", replace = "    label=\"plan\",\n", with = "    label=\"estimate\",\n" }
+
+[[fault]]
+id = "parity-ts-label-now-agrees"
+guard = "cost/estimate-suspended-only"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "microvms-js/__test__/parity_cases.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "ts now agrees at label; remove known_drift"
+transform = { file = "microvms-js/src/cost.rs", replace = "options.label.unwrap_or_else(|| \"plan\".to_string()),", with = "options.label.unwrap_or_else(|| \"estimate\".to_string())," }
+
+[[fault]]
+id = "parity-py-empty-corpus"
+guard = "microvms-py/tests/test_parity_cases.py::test_every_area_and_the_sentinel_run"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "microvms-py/tests/test_parity_cases.py::test_every_area_and_the_sentinel_run"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "no case runs in area 'image-name' on py"
+transform = { file = "microvms-py/tests/test_parity_cases.py", replace = "CASES = ROOT / \"parity\" / \"cases\"\n", with = "CASES = Path(__import__(\"tempfile\").mkdtemp())\n" }
+
+[[fault]]
+id = "parity-py-loader-returns-nothing"
+guard = "microvms-py/tests/test_parity_cases.py::test_every_area_and_the_sentinel_run"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "microvms-py/tests/test_parity_cases.py::test_every_area_and_the_sentinel_run"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "the sentinel wrap-dockerfile/sentinel.json wasn't loaded"
+transform = { file = "microvms-py/tests/test_parity_cases.py", replace = "                cases.append(read_case(path, area.name))\n", with = "                read_case(path, area.name)\n" }
+
+[[fault]]
+id = "parity-py-no-handler"
+guard = "microvms-py/tests/test_parity_cases.py::test_the_corpus_plans_cleanly"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "microvms-py/tests/test_parity_cases.py::test_the_corpus_plans_cleanly"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "the py runner has no handler for area 'size-class'"
+transform = { file = "microvms-py/tests/test_parity_cases.py", replace = "    \"size-class\": size_class,\n", with = "" }
+
+[[fault]]
+id = "parity-ts-empty-corpus"
+guard = "every area and the sentinel run"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "microvms-js/__test__/parity_cases.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "no case runs in area image-name on ts"
+transform = { file = "microvms-js/__test__/parity_cases.mjs", replace = "const CASES = join(ROOT, 'parity', 'cases');\n", with = "const CASES = (await import('node:fs')).mkdtempSync(join((await import('node:os')).tmpdir(), 'parity-empty-'));\n" }
+
+[[fault]]
+id = "parity-ts-loader-returns-nothing"
+guard = "every area and the sentinel run"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "microvms-js/__test__/parity_cases.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "the sentinel wrap-dockerfile/sentinel.json wasn't loaded"
+transform = { file = "microvms-js/__test__/parity_cases.mjs", replace = "        cases.push(readCase(path, area, name));\n", with = "        readCase(path, area, name);\n" }
+
+[[fault]]
+id = "parity-ts-no-handler"
+guard = "the corpus plans cleanly"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "microvms-js/__test__/parity_cases.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "the ts runner has no handler for area size-class"
+transform = { file = "microvms-js/__test__/parity_cases.mjs", replace = "  ['size-class', sizeClass],\n", with = "" }
+
+# The last test in each binding runner fails on a planned case nothing judged: every case
+# test skipped with the floors still green.
+
+[[fault]]
+id = "parity-py-unjudged"
+guard = "microvms-py/tests/test_parity_cases.py::test_every_planned_case_was_judged"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "microvms-py/tests/test_parity_cases.py"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "wrap-dockerfile/sentinel: planned for py but never judged"
+transform = { file = "microvms-py/tests/test_parity_cases.py", replace = "        yield pytest.param(case, id=case.id)\n", with = "        yield pytest.param(case, id=case.id, marks=pytest.mark.skip(reason=\"flaky\"))\n" }
+
+[[fault]]
+id = "parity-ts-unjudged"
+guard = "every planned case was judged"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "microvms-js/__test__/parity_cases.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "wrap-dockerfile/sentinel: planned for ts but never judged"
+transform = { file = "microvms-js/__test__/parity_cases.mjs", replace = "  test(testCase.id, async () => {\n", with = "  test(testCase.id, { skip: 'flaky' }, async () => {\n" }
+
+[[fault]]
+id = "parity-py-skip-without-reference"
+guard = "microvms-py/tests/test_parity_cases.py::test_the_corpus_plans_cleanly"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "microvms-py/tests/test_parity_cases.py::test_the_corpus_plans_cleanly"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "image-name/ensure-image-name: skip.py ends by naming its issue or trace id"
+transform = { file = "parity/cases/image-name/ensure-image-name.json", replace = "so no offline call answers it (IMAGE-12)\",\n", with = "so no offline call answers it\",\n" }
+
+[[fault]]
+id = "parity-ts-skip-without-reference"
+guard = "the corpus plans cleanly"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "microvms-js/__test__/parity_cases.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "image-name/ensure-image-name: skip.ts ends by naming its issue or trace id"
+transform = { file = "parity/cases/image-name/ensure-image-name.json", replace = "so no offline call answers it (IMAGE-12)\"\n", with = "so no offline call answers it\"\n" }
+
+# The one case that compares a binding's suspended lines: a binding that drops the cycles or
+# the suspended seconds it's given fails it, under the same #255 markers as the others.
+
+[[fault]]
+id = "parity-py-cycles-dropped"
+guard = "microvms-py/tests/test_parity_cases.py::test_a_case[cost/estimate-running-and-suspended]"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "microvms-py/tests/test_parity_cases.py::test_a_case[cost/estimate-running-and-suspended]"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "cost/estimate-running-and-suspended: py answered"
+transform = { file = "microvms-py/src/cost.rs", replace = "        image_retained_seconds,\n        suspend_resume_cycles,\n", with = "        image_retained_seconds,\n        suspend_resume_cycles: suspend_resume_cycles.min(0),\n" }
+
+[[fault]]
+id = "parity-ts-suspended-dropped"
+guard = "cost/estimate-running-and-suspended"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "microvms-js/__test__/parity_cases.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "cost/estimate-running-and-suspended: ts answered"
+transform = { file = "microvms-js/src/cost.rs", replace = "        suspended_seconds: options.suspended_seconds.unwrap_or(0.0),\n", with = "        suspended_seconds: options.suspended_seconds.map_or(0.0, |_| 0.0),\n" }

@@ -1,0 +1,14 @@
+{
+  "capability": "launch",
+  "input": {
+    "egress": true,
+    "egress_network_connectors": [],
+    "deny_egress": true
+  },
+  "expect": {
+    "error": {
+      "code": "ERR_INVALID_ARG",
+      "wire_kind": null
+    }
+  }
+}

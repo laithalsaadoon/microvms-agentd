@@ -1,0 +1,14 @@
+{
+  "capability": "agent-image-name",
+  "input": {
+    "agents": [
+      "codex",
+      "claude-code"
+    ],
+    "binary_hex": "7f454c460001000000000000000000000000b700",
+    "size_mib": 2048
+  },
+  "expect": {
+    "name": "agent-vm-claude-code-codex-1f53244478a2"
+  }
+}

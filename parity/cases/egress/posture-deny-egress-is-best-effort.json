@@ -1,0 +1,11 @@
+{
+  "capability": "egress-posture-for",
+  "input": {
+    "egress": false,
+    "egress_network_connectors": [],
+    "deny_egress": true
+  },
+  "expect": {
+    "posture": "best-effort"
+  }
+}
