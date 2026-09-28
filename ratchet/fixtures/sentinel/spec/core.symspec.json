@@ -1,0 +1,8 @@
+{
+  "requirements": {
+    "00000000-0000-4000-8000-000000000001": { "key": "GATE-1", "sentence": "The gate shall be traced." },
+    "00000000-0000-4000-8000-000000000002": { "key": "GATE-2", "sentence": "The gate shall be untraced." },
+    "00000000-0000-4000-8000-000000000003": { "key": "GATE-3", "sentence": "The gate shall be untraced too." },
+    "00000000-0000-4000-8000-000000000004": { "key": "GATE-4", "sentence": "The gate shall be listed with every layer waived." }
+  }
+}

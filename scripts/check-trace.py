@@ -79,6 +79,8 @@ INTERLEAVINGS = (
 
 # Requirements traced end to end. The value is the issue that introduced the key, or
 # `(issue, {layer: reason})` for a key that waives a layer; see the module docs.
+# scripts/ratchet.py runs this file with runpy to read `TRACED` and `LAYERS` (its untraced
+# category), so the module level imports only the standard library.
 TRACED: dict[str, str | tuple[str, dict[str, str]]] = {
     "CLI-7": "#216",
     "CLI-8": "#216",

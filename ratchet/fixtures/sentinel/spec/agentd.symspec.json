@@ -1,0 +1,6 @@
+{
+  "requirements": {
+    "00000000-0000-4000-8000-000000000011": { "key": "DAEMON-1", "sentence": "The daemon shall be traced with a waiver." },
+    "00000000-0000-4000-8000-000000000012": { "key": "DAEMON-2", "sentence": "The daemon shall be untraced." }
+  }
+}

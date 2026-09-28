@@ -16,5 +16,6 @@
     "adapter/src/lib.rs: literal-default: std::time::Duration::from_secs(300)",
     "adapter/src/lib.rs: operation-literal: \"RunMicrovm\""
   ],
-  "parity-gap": ["Session.spawn/ts", "adopt/cli", "legacy_helper/py"]
+  "parity-gap": ["Session.spawn/ts", "adopt/cli", "legacy_helper/py"],
+  "untraced": ["DAEMON-2", "GATE-2", "GATE-3", "GATE-4"]
 }

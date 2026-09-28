@@ -10,7 +10,7 @@ behavior and [Trust](docs/TRUST.md) before changing authentication or execution.
 ```bash
 mise install
 mise run install       # install git hooks
-mise run check         # code, security, tests, schema, stubs and declarations, surface parity, API drift, packaging, build, traceability, layering drift, seeded-fault registry, doc references
+mise run check         # code, security, tests, schema, stubs and declarations, surface parity, API drift, packaging, build, traceability, the drift ratchet, seeded-fault registry, doc references
 mise run ci:local      # CI's Linux jobs, each in a clone shaped like its checkout; before a push
 mise tasks             # all available tasks
 ```
@@ -106,16 +106,18 @@ with a reason, `LEFT_OUT`; the job fails until it's in one of them.
 In network simulation tests, coordinate child processes through stdin rather
 than wall-clock sleeps: child processes and the simulator use different clocks.
 
-`mise run ratchet:check` holds `ratchet/drift.json` equal to the layering drift
-its collectors find, such as an adapter dependency outside `arch/placement.toml`
-or a subprocess in a shipping crate. A new finding fails, and so does a fix the
-file still lists: run `mise run ratchet:update` and commit the file. The check
-refuses an entry the base branch doesn't have, and a crate added to a set the
-base already has, so new drift moves to the layer whose job it is or goes under
-`decisions` with its reason. Moving recorded drift to another file or crate
-isn't a fix: re-key its entry in the same change. A re-keyed entry keeps its
-issue and changes its path or its text, not both, so a move and a rename land
-in separate PRs.
+`mise run ratchet:check` holds `ratchet/drift.json` equal to the drift its
+collectors find, such as an adapter dependency outside `arch/placement.toml`, a
+subprocess in a shipping crate, or a spec requirement `TRACED` doesn't list. A
+new finding fails, and so does a fix the file still lists: run `mise run
+ratchet:update` and commit the file. The check refuses an entry the base branch
+doesn't have, and a crate added to a set the base already has, so new drift
+moves to the layer whose job it is or goes under `decisions` with its reason. An
+untraced requirement can't be a decision: it gets a `TRACED` entry, with a
+waiver for any layer it can't carry. Moving recorded drift to another file or
+crate isn't a fix: re-key its entry in the same change. A re-keyed entry keeps
+its issue and changes its path or its text, not both, so a move and a rename
+land in separate PRs.
 
 `mise run parity:check` holds `parity/capabilities.toml` to the four surfaces
 (core through `parity/core-api.json`, the CLI through `docs/manifest.json`, and
