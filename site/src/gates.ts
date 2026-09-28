@@ -104,7 +104,7 @@ export const BASE_SEGMENT = BASE.replace(/\/$/, "")
  *   heading, a signature fence and a docstring per member, dozens of times over. The Python one is
  *   laid out by this repository's renderer and the TypeScript one by `typedoc-plugin-markdown`, so
  *   they are two templates rather than one.
- * - the Architecture drift page is the one `xychart-beta` figure: a line chart of the count in
+ * - the Architecture drift page is the one with `xychart-beta` figures: line charts of the counts in
  *   `ratchet/drift.json`, written by `scripts/reference/drift.mjs`. Its inline SVG is a different
  *   shape from every flowchart's, so the census below refused the sample without it (2026-09-25).
  *

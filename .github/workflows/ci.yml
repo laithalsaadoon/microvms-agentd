@@ -296,7 +296,7 @@ jobs:
           uv run --with 'pyyaml==6.0.3' python -m unittest discover -s scripts -p 'test_ci_local.py'
       - name: ci parity
         run: ./scripts/check-ci-parity.py
-      # The layering drift ratchet (#281). It runs in this job rather than its own because this
+      # The drift ratchet (#281). It runs in this job rather than its own because this
       # job is a required status check, and rule 3 only holds where it can block a merge: a
       # separate job would go red and the PR would merge anyway.
       # For `cargo metadata --no-deps`, which reads manifests and builds nothing, so no cache.

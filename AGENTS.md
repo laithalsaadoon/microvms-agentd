@@ -57,7 +57,7 @@ from local test results.
 - `model/`, `spec/`, `conformance/`: portable model tests, formal requirements,
   and live AWS checks.
 - `arch/placement.toml`, `ratchet/`: each crate's allowed dependencies and the
-  layering drift count (see Architecture).
+  drift count (see Architecture).
 
 `microvms-domain`, `microvms-app`, `microvms-edges`, `microvms-cli`, both bindings,
 `agentd` and `conformance/` each carry an `AGENTS.md` with the rules and commands for
@@ -113,10 +113,13 @@ which #300 checks through the generated surfaces.
 If an adapter needs something private to a lower crate, make it public there or
 move the caller down. Never copy it.
 
-`ratchet/drift.json` is the layering drift count. `mise run ratchet:check`
-fails on new drift and on a fix whose entry is still in the file; `mise run
-ratchet:update` removes fixed entries. A PR can't add an entry: fix the code,
-or record a permanent exception in `decisions` with its reason. The edges
+`ratchet/drift.json` is the drift count: layering drift, parity gaps and
+untraced requirements, each with the issue that removes it. `mise run
+ratchet:check` fails on new drift and on a fix whose entry is still in the
+file; `mise run ratchet:update` removes fixed entries. A PR can't add an entry:
+fix the code, or record a permanent exception in `decisions` with its reason.
+An untraced requirement takes no decision: list it in `TRACED` and waive there
+any layer it can't carry, with its reason. The edges
 between the workspace's crates are checked by
 `microvms-cli/tests/dependency_direction.rs`. Each adapter's allowed
 dependencies (`arch/placement.toml`) are checked by the ratchet, and

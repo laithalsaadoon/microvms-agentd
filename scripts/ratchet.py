@@ -4,10 +4,11 @@
 # dependencies = []
 # ///
 # SPDX-License-Identifier: Apache-2.0
-"""Hold the repo's layering drift to a checked-in count that can only go down (#281).
+"""Hold the repo's drift to a checked-in count that can only go down (#281).
 
-`ratchet/drift.json` records every place a driving adapter does work that belongs below it.
-This script collects the same findings from the tree, compares, and fails on either side of a
+`ratchet/drift.json` records every place a driving adapter does work that belongs below it,
+every capability a surface lacks until an issue closes it (#271), and every requirement no
+layer traces yet (#295). This script collects the same findings from the tree, compares, and fails on either side of a
 mismatch. A pass/fail rule has no memory of how much drift it accepted, so it can't tell whether
 the drift is shrinking, and it can steer a violation sideways instead of down: the CLI's
 thinness guard pushed an upload into an `aws s3 cp` subprocess it couldn't see.
@@ -39,8 +40,8 @@ thinness guard pushed an upload into an `aws s3 cp` subprocess it couldn't see.
 3. An entry absent from the base branch's copy of the file, or a crate added to an allowed set
    the base's `arch/placement.toml` already has. This is what makes the count a ratchet: a PR
    can delete entries but not add them, and it can't widen a set to make a finding disappear.
-   It can add a decision, which a reviewer sees in the diff with its reason, and it can add a
-   set for a crate the base has none for. When the base has no drift file at all, the rule is
+   It can add a decision (in any category but untraced), which a reviewer sees in the diff
+   with its reason, and it can add a set for a crate the base has none for. When the base has no drift file at all, the rule is
    skipped: that's the one PR that creates it. It's skipped the same way for a category the
    base's `scripts/ratchet.py` doesn't collect (its `COLLECTED`), since the base's file couldn't
    record that category's findings: the PR that starts collecting one lists them as entries.
@@ -81,6 +82,14 @@ thinness guard pushed an upload into an `aws s3 cp` subprocess it couldn't see.
   `<Type>.<member>/<surface>` or `<name>/<surface>`. An exemption without an issue is the
   table's own decision and isn't read. `parity:check` holds the table to the surfaces, so a gap
   the table doesn't record fails there, not here.
+- untraced: each requirement key in `spec/core.symspec.json` and `spec/agentd.symspec.json`
+  that `TRACED` in `scripts/check-trace.py` doesn't list, a requirement no layer checks (#295).
+  The key is the bare spec key (`TRAP-1`); its group is the prefix. `trace:check` holds a
+  listed key to its layers, so a traced key missing one fails there, not here. A requirement
+  that can't carry a layer waives it in `TRACED` with its reason rather than staying an entry,
+  and the category takes no decisions, since a decision would take a requirement out of the
+  count with no layer checking it. A listed key that waives every layer is still an entry: no
+  layer checks it either. A requirement with no key is an error, since `TRACED` can't list it.
 
 The Rust collectors are ast-grep rules under `ratchet/`, and test code is out of all of them: an
 item after `#[cfg(test)]`, `#[cfg(feature = "test-support")]` or
@@ -118,6 +127,7 @@ import ast
 import json
 import os
 import re
+import runpy
 import subprocess
 import sys
 import textwrap
@@ -158,6 +168,10 @@ class Scope(NamedTuple):
     composition_root: str | None = None
     #: The capability table whose tracked exemptions are parity gaps. None reads no gaps.
     parity_table: Path | None = None
+    #: The requirement specs whose keys the untraced collector reads.
+    specs: tuple[Path, ...] = ()
+    #: The script whose `TRACED` table lists the traced keys. None reads no untraced keys.
+    traced: Path | None = None
 
 
 REPO = Scope(
@@ -171,6 +185,8 @@ REPO = Scope(
     composed=("microvms-app",),
     composition_root="microvms-core",
     parity_table=ROOT / "parity" / "capabilities.toml",
+    specs=(ROOT / "spec" / "core.symspec.json", ROOT / "spec" / "agentd.symspec.json"),
+    traced=ROOT / "scripts" / "check-trace.py",
 )
 
 SENTINEL_ROOT = ROOT / "ratchet" / "fixtures" / "sentinel"
@@ -181,9 +197,21 @@ SENTINEL = Scope(
     composed=("kernel",),
     composition_root="root",
     parity_table=SENTINEL_ROOT / "parity" / "capabilities.toml",
+    specs=(
+        SENTINEL_ROOT / "spec" / "core.symspec.json",
+        SENTINEL_ROOT / "spec" / "agentd.symspec.json",
+    ),
+    traced=SENTINEL_ROOT / "traced.py",
 )
 
-COLLECTED = ("placement", "subprocess", "port-impl", "adapter-logic", "parity-gap")
+COLLECTED = (
+    "placement",
+    "subprocess",
+    "port-impl",
+    "adapter-logic",
+    "parity-gap",
+    "untraced",
+)
 
 #: Categories defined before their collector exists. The summary says so rather than printing
 #: zero, because a zero would read as a measurement. Empty since #271 collected parity-gap.
@@ -209,20 +237,48 @@ PROMOTE = {
         "scripts/check-parity.py refusing an exemption with an issue, once #280 closes the "
         "last gap"
     ),
+    "untraced": (
+        "scripts/check-trace.py failing on a spec key missing from TRACED, once #301 to #307 "
+        "trace the last key"
+    ),
 }
 
 
-#: What rule 1 tells the reader to do with new drift. A parity gap isn't work in the wrong layer.
+#: What rule 1 tells the reader to do with new drift. A parity gap or an untraced requirement
+#: isn't work in the wrong layer.
 NEW_DRIFT_FIX = {
     "parity-gap": (
         "Give that surface the capability, or, if the gap is permanent, drop the exemption's "
         "issue in parity/capabilities.toml so it reads as a decision."
+    ),
+    "untraced": (
+        "Trace the requirement: list its key in TRACED in scripts/check-trace.py, give it each "
+        "layer or a waiver with its reason (a key that waives every layer stays untraced), and "
+        "run ./scripts/check-trace.py --write."
     ),
 }
 LAYERING_FIX = (
     "Move the work to the layer whose job it is (I/O belongs in microvms-edges, behind a port "
     "in microvms-app), or add a decision with its reason."
 )
+#: What rule 3 tells the reader to do with an entry the base doesn't have. Layering drift can
+#: take a decision; a parity gap and an untraced requirement leave the way rule 1 says.
+NOT_IN_BASE_FIX = {
+    "parity-gap": (
+        "give that surface the capability, or, if the gap is permanent, drop the exemption's "
+        "issue in parity/capabilities.toml."
+    ),
+    "untraced": "trace the requirement in TRACED in scripts/check-trace.py instead.",
+}
+LAYERING_NOT_IN_BASE_FIX = "fix the code, or add a decision with its reason."
+
+#: Categories `decisions` can't name, with what to do instead.
+NO_DECISIONS = {
+    "untraced": (
+        "a requirement that can't carry a layer waives that layer in TRACED in "
+        "scripts/check-trace.py with its reason, so it stays traced"
+    ),
+}
 
 
 def describe(category: str, key: str) -> str:
@@ -278,6 +334,11 @@ def parse(data: object, where: str) -> dict:
                 )
             if not isinstance(key, str) or not key.strip():
                 fail(f"a key must be a non-empty string: {item!r}")
+            if name == "decisions" and category in NO_DECISIONS:
+                fail(
+                    f"{describe(category, key)} can't be a decision: "
+                    f"{NO_DECISIONS[category]}"
+                )
         return items
 
     entries = records("entries", "issue")
@@ -551,8 +612,8 @@ def compare(
                 failures.append(
                     f"not in the base: {describe(category, entry['key'])} is an entry here "
                     f"but not in {base_label}'s {DRIFT}, and it doesn't replace one there "
-                    "that shares its path or its text. Entries can only be removed: fix the "
-                    "code, or add a decision with its reason."
+                    "that shares its path or its text. Entries can only be removed: "
+                    + NOT_IN_BASE_FIX.get(category, LAYERING_NOT_IN_BASE_FIX)
                 )
         if category not in file["enforced"] and not any(
             c == category for c, _ in entries
@@ -976,6 +1037,66 @@ def parity_gaps(scope: Scope) -> Counter:
     )
 
 
+def untraced(scope: Scope) -> Counter:
+    """Each requirement key in the scope's specs that its `TRACED` table doesn't list (#295).
+
+    `TRACED` is read by running the script, the way `ratchet-history.py` loads this one: its
+    waivers name module constants, so a literal read can't take it, and the script imports
+    nothing from outside the standard library. A spec or a table that gives up nothing is an
+    error, not an empty category: every entry would read as fixed, and `update` would delete
+    them all.
+    """
+    if scope.traced is None:
+        return Counter()
+    if not scope.specs:
+        raise SystemExit(
+            f"{scope.traced} is read for TRACED, but the scope names no spec"
+        )
+    keys: set[str] = set()
+    for spec in scope.specs:
+        # Read, not stat then read: CodeQL flags the gap between the two.
+        try:
+            text = spec.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            raise SystemExit(f"{spec} is missing") from None
+        document = json.loads(text)
+        requirements = (
+            document.get("requirements") if isinstance(document, dict) else None
+        )
+        if not isinstance(requirements, dict):
+            raise SystemExit(f"{spec} has no requirements object")
+        # check-trace.py's `spec_keys` skips a requirement without a key, so nothing would
+        # count it: it would land with no layer checking it and no entry saying so.
+        found = set()
+        for uuid, entry in requirements.items():
+            key = entry.get("key") if isinstance(entry, dict) else None
+            if not isinstance(key, str) or not key.strip():
+                raise SystemExit(
+                    f"{spec}: requirement {uuid} has no key, so TRACED can't list it"
+                )
+            found.add(key)
+        if not found:
+            raise SystemExit(f"{spec} defines no requirement keys")
+        keys |= found
+    script = runpy.run_path(str(scope.traced))
+    traced = script.get("TRACED")
+    if not isinstance(traced, dict):
+        raise SystemExit(f"{scope.traced} has no TRACED dict")
+    if not traced:
+        raise SystemExit(f"{scope.traced}'s TRACED is empty")
+    layers = script.get("LAYERS")
+    if not isinstance(layers, tuple) or not layers:
+        raise SystemExit(f"{scope.traced} has no LAYERS tuple")
+    # A value is the issue, or `(issue, {layer: reason})` for a key that waives a layer. A key
+    # that waives them all passes trace:check with nothing checking it, so it stays an entry.
+    checked = {
+        key
+        for key, value in traced.items()
+        if not set(layers) <= set(value[1] if isinstance(value, tuple) else ())
+    }
+    return Counter(("untraced", key) for key in keys - checked)
+
+
 def collect(scope: Scope, require_ports: bool = False) -> Counter:
     """Every finding in `scope`, as a count per `(category, key)`."""
     metadata = cargo_metadata(scope)
@@ -985,6 +1106,7 @@ def collect(scope: Scope, require_ports: bool = False) -> Counter:
         placement(metadata, sets)
         + rust(scope, found, require_ports)
         + parity_gaps(scope)
+        + untraced(scope)
     )
 
 

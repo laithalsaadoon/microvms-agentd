@@ -76,6 +76,7 @@ BASELINE = [
         273,
     ),
     ("parity-gap", "wait-until-running/cli", 269),
+    ("untraced", "TRAP-1", 301),
 ]
 BASELINE_FOUND = found(*((c, k) for c, k, _ in BASELINE))
 
@@ -179,6 +180,19 @@ class RuleTests(unittest.TestCase):
             ],
         )
 
+    def test_rule_1_an_untraced_requirement_points_at_traced(self):
+        # A requirement with no trace isn't work in the wrong layer either: the fix is a TRACED
+        # entry and the layers it names.
+        now = BASELINE_FOUND + found(("untraced", "TRAP-14"))
+        self.assertEqual(
+            compare(now, ratchet(BASELINE), ratchet(BASELINE), "main"),
+            [
+                "new drift: [untraced] TRAP-14. Trace the requirement: list its key in TRACED "
+                "in scripts/check-trace.py, give it each layer or a waiver with its reason (a key "
+                "that waives every layer stays untraced), and run ./scripts/check-trace.py --write."
+            ],
+        )
+
     def test_rule_1_a_decision_covers_its_key(self):
         now = BASELINE_FOUND + found(
             ("subprocess", "agentd/src/exec.rs: Command::new(shell)")
@@ -233,6 +247,22 @@ class RuleTests(unittest.TestCase):
             [("subprocess", 'doctor.rs: Command::new("terraform")', "reads tf state")],
         )
         self.assertEqual(compare(now, file, ratchet(BASELINE), "main"), [])
+
+    def test_rule_3_points_an_untraced_entry_at_traced(self):
+        # An untraced requirement can't take a decision, so rule 3's layering advice ("or add
+        # a decision") would send the reader to a file that refuses it.
+        added = ("untraced", "TRAP-14", 301)
+        now = BASELINE_FOUND + found(added[:2])
+        failures = compare(now, ratchet([*BASELINE, added]), ratchet(BASELINE), "main")
+        self.assertEqual(len(failures), 1, failures)
+        self.assertTrue(failures[0].startswith("not in the base: [untraced] TRAP-14"))
+        self.assertTrue(
+            failures[0].endswith(
+                "Entries can only be removed: trace the requirement in TRACED in "
+                "scripts/check-trace.py instead."
+            ),
+            failures[0],
+        )
 
     def test_rule_3_is_skipped_when_the_base_has_no_file(self):
         # The bootstrap: the PR that creates ratchet/drift.json has no base copy to compare with.
@@ -439,6 +469,16 @@ class FileTests(unittest.TestCase):
     def test_an_unknown_category_is_refused(self):
         with self.assertRaisesRegex(SystemExit, "unknown category"):
             ratchet([("layering", "x", 1)])
+
+    def test_an_untraced_decision_is_refused(self):
+        # A decision would take a requirement out of the count with no layer checking it: a
+        # new requirement could land that way, or the backlog could shrink with nothing traced.
+        with self.assertRaisesRegex(
+            SystemExit,
+            r"\[untraced\] TRAP-14 can't be a decision: a requirement that can't carry a "
+            "layer waives that layer in TRACED",
+        ):
+            ratchet(BASELINE, [("untraced", "TRAP-14", "not worth a test")])
 
     def test_a_key_is_either_an_entry_or_a_decision(self):
         with self.assertRaisesRegex(SystemExit, "both an entry and a decision"):
@@ -1277,6 +1317,191 @@ class ParityGapTests(unittest.TestCase):
         )
 
 
+class UntracedTests(unittest.TestCase):
+    """The untraced collector: every spec key that check-trace.py's `TRACED` doesn't list."""
+
+    #: The keys the sentinel's two specs define that its `traced.py` doesn't list: one spec
+    #: each at least, so a collector that read only the first spec would miss one.
+    SENTINEL_UNTRACED = ("DAEMON-2", "GATE-2", "GATE-3", "GATE-4")
+
+    def copy(self):
+        """A copy of the sentinel fixture and a scope over it, for a test to break."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name) / "sentinel"
+        shutil.copytree(RATCHET["SENTINEL"].root, root)
+        scope = RATCHET["SENTINEL"]._replace(
+            root=root,
+            placement=root / "placement.toml",
+            parity_table=root / "parity" / "capabilities.toml",
+            specs=tuple(
+                root / spec.relative_to(RATCHET["SENTINEL"].root)
+                for spec in RATCHET["SENTINEL"].specs
+            ),
+            traced=root
+            / RATCHET["SENTINEL"].traced.relative_to(RATCHET["SENTINEL"].root),
+        )
+        return root, scope
+
+    def test_the_fixture_spec_yields_exactly_its_untraced_keys(self):
+        self.assertEqual(
+            RATCHET["untraced"](RATCHET["SENTINEL"]),
+            found(*(("untraced", key) for key in self.SENTINEL_UNTRACED)),
+        )
+
+    def test_the_sentinel_expects_the_same_keys(self):
+        expected = json.loads(
+            (RATCHET["SENTINEL"].root / "expected.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(sorted(expected["untraced"]), list(self.SENTINEL_UNTRACED))
+
+    def test_an_empty_spec_fails_the_sentinel(self):
+        # A spec the reader gets nothing from would otherwise report every entry fixed, and
+        # `ratchet:update` would delete them all.
+        root, scope = self.copy()
+        for spec in scope.specs:
+            spec.write_text(json.dumps({"requirements": {}}))
+        with self.assertRaisesRegex(SystemExit, "defines no requirement keys"):
+            sentinel(scope)
+
+    def test_one_empty_spec_is_refused_too(self):
+        root, scope = self.copy()
+        scope.specs[1].write_text(json.dumps({"requirements": {}}))
+        with self.assertRaisesRegex(
+            SystemExit, "agentd.symspec.json defines no requirement keys"
+        ):
+            RATCHET["untraced"](scope)
+
+    def test_a_spec_without_requirements_is_refused(self):
+        root, scope = self.copy()
+        scope.specs[0].write_text(json.dumps({"glossary": []}))
+        with self.assertRaisesRegex(SystemExit, "has no requirements object"):
+            RATCHET["untraced"](scope)
+
+    def test_a_missing_spec_is_refused(self):
+        root, scope = self.copy()
+        scope.specs[0].unlink()
+        with self.assertRaisesRegex(SystemExit, "core.symspec.json is missing"):
+            RATCHET["untraced"](scope)
+
+    def test_a_fully_traced_spec_fails_the_sentinel(self):
+        # The fixture exists to have untraced keys; one that has none proves nothing.
+        root, scope = self.copy()
+        text = scope.traced.read_text(encoding="utf-8")
+        scope.traced.write_text(
+            text.replace(
+                "TRACED = {",
+                'TRACED = {\n    "GATE-2": "#3",\n    "GATE-3": "#3",'
+                '\n    "DAEMON-2": "#3",',
+            ).replace(
+                '("#3", {layer: "nothing checks it" for layer in LAYERS})', '"#3"'
+            )
+        )
+        self.assertEqual(RATCHET["untraced"](scope), Counter())
+        failures = sentinel(scope)
+        self.assertIn(
+            f"sentinel: the untraced collector found nothing in {root}, so it can't be "
+            "trusted to find drift in the tree either.",
+            failures,
+        )
+
+    def test_an_empty_traced_is_refused(self):
+        # An empty table reads as every key untraced, which is new drift, but a TRACED the
+        # script lost is a broken read, not a hundred new requirements.
+        root, scope = self.copy()
+        scope.traced.write_text("TRACED = {}\n")
+        with self.assertRaisesRegex(SystemExit, "TRACED is empty"):
+            RATCHET["untraced"](scope)
+
+    def test_a_script_without_traced_is_refused(self):
+        root, scope = self.copy()
+        scope.traced.write_text("TRACKED = {'GATE-1': '#1'}\n")
+        with self.assertRaisesRegex(SystemExit, "has no TRACED dict"):
+            RATCHET["untraced"](scope)
+
+    def test_traced_is_read_by_running_the_script(self):
+        # `TRACED` names module constants (`INTERLEAVINGS`), so a literal read can't take it;
+        # the fixture's waiver does the same, and the key it waives stays traced.
+        text = RATCHET["SENTINEL"].traced.read_text(encoding="utf-8")
+        self.assertRegex(text, r'"DAEMON-1": \([^)]*\bREASON\b')
+        self.assertNotIn(
+            ("untraced", "DAEMON-1"), RATCHET["untraced"](RATCHET["SENTINEL"])
+        )
+
+    def test_a_key_that_waives_every_layer_stays_untraced(self):
+        # trace:check passes a listed key whose every layer is waived, with nothing checking
+        # it; counting it as traced would let the backlog shrink by a waiver.
+        text = RATCHET["SENTINEL"].traced.read_text(encoding="utf-8")
+        self.assertRegex(
+            text, r'"GATE-4": \("#3", \{layer: [^}]* for layer in LAYERS\}\)'
+        )
+        self.assertIn(("untraced", "GATE-4"), RATCHET["untraced"](RATCHET["SENTINEL"]))
+
+    def test_a_key_that_waives_all_but_one_layer_is_traced(self):
+        root, scope = self.copy()
+        text = scope.traced.read_text(encoding="utf-8")
+        scope.traced.write_text(
+            text.replace(
+                "for layer in LAYERS}", 'for layer in LAYERS if layer != "test"}'
+            )
+        )
+        self.assertNotIn(("untraced", "GATE-4"), RATCHET["untraced"](scope))
+
+    def test_a_script_without_layers_is_refused(self):
+        # Without LAYERS every key would read as waiving all of them, or none.
+        root, scope = self.copy()
+        text = scope.traced.read_text(encoding="utf-8")
+        scope.traced.write_text(
+            text.replace("LAYERS = (", "LAYER_NAMES = (").replace(
+                "for layer in LAYERS}", "for layer in LAYER_NAMES}"
+            )
+        )
+        with self.assertRaisesRegex(SystemExit, "has no LAYERS tuple"):
+            RATCHET["untraced"](scope)
+
+    def test_a_requirement_without_a_key_is_refused(self):
+        # check-trace.py skips it too, so neither gate would count or name it.
+        root, scope = self.copy()
+        for key in ("", None):
+            document = json.loads(scope.specs[1].read_text(encoding="utf-8"))
+            requirement = {"sentence": "The daemon shall do a keyless thing."}
+            if key is not None:
+                requirement["key"] = key
+            document["requirements"]["00000000-0000-4000-8000-000000000019"] = (
+                requirement
+            )
+            scope.specs[1].write_text(json.dumps(document))
+            with (
+                self.subTest(key=key),
+                self.assertRaisesRegex(
+                    SystemExit,
+                    "agentd.symspec.json: requirement 00000000-0000-4000-8000-000000000019 has "
+                    "no key, so TRACED can't list it",
+                ),
+            ):
+                RATCHET["untraced"](scope)
+
+    def test_a_table_with_no_spec_is_refused(self):
+        root, scope = self.copy()
+        with self.assertRaisesRegex(SystemExit, "the scope names no spec"):
+            RATCHET["untraced"](scope._replace(specs=()))
+
+    def test_a_scope_without_specs_has_no_untraced_keys(self):
+        # The throwaway workspaces the other collector tests build have no spec.
+        ws = Workspace(self).crate("adapter").placement("[adapter]\nnormal = []\n")
+        self.assertEqual(RATCHET["untraced"](ws.scope()), Counter())
+
+    def test_the_repo_scope_reads_every_spec_check_trace_reads(self):
+        trace = runpy.run_path(str(HERE / "check-trace.py"))
+        self.assertEqual(RATCHET["REPO"].traced, HERE / "check-trace.py")
+        self.assertEqual(RATCHET["REPO"].specs, trace["SPECS"])
+        # A spec file check-trace.py doesn't list would be outside both scripts.
+        self.assertEqual(
+            sorted(RATCHET["REPO"].specs),
+            sorted((ROOT / "spec").glob("*.symspec.json")),
+        )
+
+
 class SentinelTests(unittest.TestCase):
     def test_the_checked_in_sentinel_matches_its_expectation(self):
         self.assertEqual(sentinel(RATCHET["SENTINEL"]), [])
@@ -1291,6 +1516,7 @@ class SentinelTests(unittest.TestCase):
             "port-impl",
             "adapter-logic",
             "parity-gap",
+            "untraced",
         ):
             self.assertTrue(
                 any(
@@ -3054,6 +3280,20 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(second["counts"]["parity-gap"], 1)
         self.assertEqual(working["counts"]["adapter-logic"], 1)
         self.assertEqual(working["counts"]["placement"], 0)
+
+    def test_untraced_is_null_before_the_commit_that_collects_it(self):
+        # #295's first PR adds every untraced key as an entry at once. A zero before it would
+        # chart a jump from a clean count to the whole backlog, when nobody had counted it yet.
+        root = git_repo(self)
+        before = tuple(c for c in RATCHET["COLLECTED"] if c != "untraced")
+        ratchet_script(root, before)
+        commit(root, "before", drift_file([e for e in BASELINE if e[0] != "untraced"]))
+        ratchet_script(root)
+        commit(root, "collects untraced", drift_file(BASELINE))
+        first, second = HISTORY["history"](root)
+        self.assertIsNone(first["counts"]["untraced"])
+        self.assertEqual(second["counts"]["untraced"], 1)
+        self.assertEqual(second["total"], len(BASELINE))
 
 
 if __name__ == "__main__":

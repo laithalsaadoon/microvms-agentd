@@ -3,7 +3,7 @@
  * The "Architecture drift" page: the count `ratchet/drift.json` holds, at each commit that changed it.
  *
  * `scripts/ratchet-history.py` reads the series out of git and prints it as JSON; this file lays it
- * out as a table and a Mermaid `xychart-beta` line, which `beautiful-mermaid` renders at build time
+ * out as tables and Mermaid `xychart-beta` lines, which `beautiful-mermaid` renders at build time
  * like every other diagram here. The split mirrors the Python SDK's: the history script owns the part
  * that needs git and the file's schema, and the layout stays in the tier's own Markdown helpers.
  *
@@ -14,7 +14,7 @@
 import { execFileSync } from "node:child_process"
 import { join } from "node:path"
 
-import { code, fence, inlineText, sections, table } from "./markdown.mjs"
+import { cell, code, fence, inlineText, sections, table } from "./markdown.mjs"
 import { routeOf, TIER } from "./pages.mjs"
 
 /** @typedef {import("./pages.mjs").ReferencePage} ReferencePage */
@@ -22,6 +22,66 @@ import { routeOf, TIER } from "./pages.mjs"
 /** The file the page counts, and the script that reads its history. */
 export const DRIFT_SOURCE = "ratchet/drift.json"
 export const HISTORY_SCRIPT = "scripts/ratchet-history.py"
+const THIS_FILE = "site/scripts/reference/drift.mjs"
+
+/**
+ * What an entry in each category records, and the kind of drift that makes it. The file mixes kinds
+ * since #271 and #295, so the page can't say one thing about every entry. A category the ratchet
+ * collects and this table doesn't name fails `validateHistory`: the page would describe it wrongly.
+ *
+ * @type {Record<string, { kind: string, meaning: string }>}
+ */
+export const CATEGORIES = {
+  placement: {
+    kind: "layering",
+    meaning: `a dependency a crate has outside its allowed set in ${code("arch/placement.toml")}`
+  },
+  subprocess: {
+    kind: "layering",
+    meaning: `a ${code("Command::new")} in the source of a crate that ships`
+  },
+  "port-impl": {
+    kind: "layering",
+    meaning: `a port implemented above ${code("microvms-edges")}, where the production implementations belong`
+  },
+  "adapter-logic": {
+    kind: "layering",
+    meaning:
+      "a control-plane operation name spelled out, or a default retyped as a number, in a driving adapter"
+  },
+  "parity-gap": {
+    kind: "parity",
+    meaning: `a capability one surface lacks until an issue closes it: an exemption in ${code("parity/capabilities.toml")} that names the issue`
+  },
+  untraced: {
+    kind: "traceability",
+    meaning: `a requirement in ${code("spec/")} that ${code("TRACED")} in ${code("scripts/check-trace.py")} doesn't list, so ${code("trace:check")} holds no layer to it`
+  }
+}
+
+/**
+ * The charts, each over the categories of its kinds. Untraced requirements get their own because
+ * their backlog arrived all at once with #295 and is larger than the rest of the file: on one line
+ * it would flatten every layering fix into noise.
+ *
+ * @type {ReadonlyArray<{ title: string, axis: string, kinds: ReadonlyArray<string>, decisions: boolean }>}
+ */
+export const CHARTS = [
+  {
+    title: "Layering and parity drift",
+    axis: "Drift entries",
+    kinds: ["layering", "parity"],
+    decisions: true
+  },
+  {
+    title: "Untraced requirements",
+    axis: "Untraced requirements",
+    kinds: ["traceability"],
+    // The ratchet refuses an untraced decision, so the history's file-wide decision count is
+    // the first chart's alone.
+    decisions: false
+  }
+]
 
 /**
  * @typedef {object} DriftPoint
@@ -79,6 +139,13 @@ export const validateHistory = (parsed) => {
   if (!Array.isArray(history?.categories) || history.categories.length === 0) {
     throw new Error(`${HISTORY_SCRIPT} printed no categories`)
   }
+  for (const category of history.categories) {
+    if (!Object.hasOwn(CATEGORIES, category)) {
+      throw new Error(
+        `${HISTORY_SCRIPT} printed ${category}, and the page doesn't describe ${category}: add it to CATEGORIES in ${THIS_FILE}`
+      )
+    }
+  }
   if (!Array.isArray(history.points) || history.points.length === 0) {
     // The working tree always yields a point while the file exists, so none means it's gone.
     throw new Error(`${HISTORY_SCRIPT} found no history for ${DRIFT_SOURCE}; is the file missing?`)
@@ -105,34 +172,122 @@ const commitOf = (point) => (point.sha === null ? "working tree" : point.sha.sli
  * Each category first counted after the first point, with the point it was first counted at. The
  * total rises there by that category's first count, which is a new measurement, not new drift.
  *
- * @param {DriftHistory} history
+ * @param {string[]} categories
+ * @param {DriftPoint[]} points
  * @returns {[string, DriftPoint][]}
  */
-const laterCategories = (history) =>
-  history.categories.flatMap((category) => {
-    const first = history.points.findIndex((point) => point.counts[category] !== null)
-    return first > 0 ? [[category, history.points[first]]] : []
+const laterCategories = (categories, points) =>
+  categories.flatMap((category) => {
+    const first = points.findIndex((point) => point.counts[category] !== null)
+    return first > 0 ? [[category, points[first]]] : []
   })
 
 /**
- * The line chart: one line, the total, because `xychart-beta` draws no legend and a second unlabeled
- * line would be a guess. The table below it carries each category.
+ * The sum of a point's counts over some categories, a null count adding nothing.
  *
- * @param {DriftHistory} history
+ * @param {DriftPoint} point
+ * @param {string[]} categories
  */
-const chart = (history) => {
-  const labels = history.points.map((point) => `"${day(point)} ${commitOf(point)}"`)
-  const totals = history.points.map((point) => point.total)
+const totalOf = (point, categories) =>
+  categories.reduce((sum, category) => sum + (point.counts[category] ?? 0), 0)
+
+/**
+ * One line, the chart's total, because `xychart-beta` draws no legend and a second unlabeled line
+ * would be a guess. The table below it carries each category.
+ *
+ * @param {DriftPoint[]} points
+ * @param {number[]} totals
+ * @param {string} axis
+ */
+const chart = (points, totals, axis) => {
+  const labels = points.map((point) => `"${day(point)} ${commitOf(point)}"`)
   const ceiling = Math.max(1, Math.ceil(Math.max(...totals) * 1.25))
   return fence(
     "mermaid",
     [
       "xychart-beta",
       `  x-axis [${labels.join(", ")}]`,
-      `  y-axis "Drift entries" 0 --> ${ceiling}`,
+      `  y-axis "${axis}" 0 --> ${ceiling}`,
       `  line [${totals.join(", ")}]`
     ].join("\n")
   )
+}
+
+/** @param {DriftPoint} point */
+const where = (point) => (point.sha === null ? "the working tree" : code(commitOf(point)))
+
+/**
+ * A chart's section: the latest count, the line, and the table by commit. It starts at the first
+ * point that counts one of its categories, so a chart whose categories came late doesn't open on a
+ * run of "not collected" rows.
+ *
+ * @param {DriftHistory} history
+ * @param {(typeof CHARTS)[number]} spec
+ * @returns {import("./markdown.mjs").Section}
+ */
+const chartSection = (history, spec) => {
+  const categories = history.categories.filter((category) =>
+    spec.kinds.includes(CATEGORIES[category].kind)
+  )
+  const start = history.points.findIndex((point) =>
+    categories.some((category) => point.counts[category] !== null)
+  )
+  if (start === -1) {
+    return {
+      title: spec.title,
+      body: inlineText(
+        `No commit that changed the file counted it yet: the chart starts at the first commit whose ratchet collects ${categories.map(code).join(", ")}.`
+      )
+    }
+  }
+  const points = history.points.slice(start)
+  const totals = points.map((point) => totalOf(point, categories))
+  const latest = points[points.length - 1]
+  const later = laterCategories(categories, points)
+  const several = categories.length > 1
+  const lead =
+    start === 0
+      ? `The ${several ? "total" : "count"} at each commit, oldest first.`
+      : `The ${several ? "total" : "count"} at each commit, oldest first, from ${where(points[0])}, dated ${day(points[0])}, where the ratchet started collecting it.`
+  return {
+    title: spec.title,
+    body: [
+      inlineText(
+        `${lead} At ${where(latest)}, dated ${day(latest)}, it's ${totals[totals.length - 1]}${spec.decisions ? `, with ${latest.decisions} decisions beside it` : ""}.`
+      ),
+      chart(points, totals, spec.axis),
+      ...(later.length === 0
+        ? []
+        : [
+            inlineText(
+              `A category joins the count at the commit whose ratchet started collecting it, and the cells before that read "not collected": ${later
+                .map(
+                  ([category, point]) =>
+                    `${code(category)} from ${where(point)}, dated ${day(point)}, where its first count joins the total`
+                )
+                .join("; ")}.`
+            )
+          ]),
+      table(
+        [
+          "Date",
+          "Commit",
+          ...categories.map(code),
+          ...(several ? ["Total"] : []),
+          ...(spec.decisions ? ["Decisions"] : [])
+        ],
+        points.map((point, at) => [
+          day(point),
+          point.sha === null ? "working tree" : code(commitOf(point)),
+          ...categories.map((category) =>
+            point.counts[category] === null ? "not collected" : String(point.counts[category])
+          ),
+          ...(several ? [String(totals[at])] : []),
+          ...(spec.decisions ? [String(point.decisions)] : [])
+        ])
+      )
+    ].join("\n\n")
+  }
 }
 
 /**
@@ -141,16 +296,14 @@ const chart = (history) => {
  */
 export const driftPage = (history) => {
   const id = `${TIER}/architecture-drift`
-  const latest = history.points[history.points.length - 1]
   const notCollected = Object.entries(history.notCollected ?? {})
-  const later = laterCategories(history)
   return {
     id,
     path: `${id}.md`,
     route: routeOf(id),
     title: "Architecture drift",
     description:
-      "How much layering drift the repository carries: the entries in ratchet/drift.json per category, at each commit that changed the file.",
+      "The entries in ratchet/drift.json at each commit that changed the file: layering and parity drift, and the requirements no layer traces yet.",
     // After the four contract pages and the wire schema; the sidebar lists it by hand beside them.
     sidebarOrder: 5,
     sidebarLabel: "Architecture drift",
@@ -158,61 +311,37 @@ export const driftPage = (history) => {
     body: sections([
       {
         title: "What the count is",
-        body: inlineText(
-          `Each entry in ${code(DRIFT_SOURCE)} is a place where a driving adapter (the CLI or a binding) does work that belongs in a lower layer, and it names the issue that removes it. A decision is a permanent exception with its reason, and it isn't counted. ${code("mise run ratchet:check")} fails when the file and the tree disagree in either direction, and it refuses an entry the base branch doesn't have, so the count can only go down.`
-        )
-      },
-      {
-        title: "The trend",
         body: [
           inlineText(
-            `The total at each commit, oldest first. At ${latest.sha === null ? "the working tree" : code(commitOf(latest))}, dated ${day(latest)}, it's ${latest.total}, with ${latest.decisions} decisions beside it.`
+            `Each entry in ${code(DRIFT_SOURCE)} names the issue that removes it, and what it records depends on its category. Layering drift is work a driving adapter (the CLI or a binding) does that belongs in a lower layer; a parity gap is a capability one surface has and another lacks; an untraced requirement is one no test, model or live check is held to yet.`
           ),
-          chart(history),
-          ...(later.length === 0
-            ? []
-            : [
-                inlineText(
-                  `A category joins the count at the commit whose ratchet started collecting it, and the cells before that read "not collected": ${later
-                    .map(
-                      ([category, point]) =>
-                        `${code(category)} from ${point.sha === null ? "the working tree" : code(commitOf(point))}, dated ${day(point)}, where its first count joins the total`
-                    )
-                    .join("; ")}.`
-                )
-              ])
-        ].join("\n\n")
-      },
-      {
-        title: "By commit",
-        body: [
           table(
-            ["Date", "Commit", ...history.categories.map(code), "Total", "Decisions"],
-            history.points.map((point) => [
-              day(point),
-              point.sha === null ? "working tree" : code(commitOf(point)),
-              ...history.categories.map((category) =>
-                point.counts[category] === null ? "not collected" : String(point.counts[category])
-              ),
-              String(point.total),
-              String(point.decisions)
+            ["Category", "Kind", "An entry is"],
+            history.categories.map((category) => [
+              code(category),
+              CATEGORIES[category].kind,
+              cell(CATEGORIES[category].meaning)
             ])
+          ),
+          inlineText(
+            `A decision is a permanent exception with its reason, and it isn't counted. ${code("mise run ratchet:check")} fails when the file and the tree disagree in either direction, and it refuses an entry the base branch doesn't have, so the count can only go down.`
           ),
           ...(notCollected.length === 0
             ? []
             : [
                 inlineText(
-                  `Not collected yet, so absent from the table rather than shown as zero: ${notCollected
+                  `Not collected yet, so absent from the tables rather than shown as zero: ${notCollected
                     .map(([category, when]) => `${code(category)} (${when})`)
                     .join(", ")}.`
                 )
               ])
         ].join("\n\n")
       },
+      ...CHARTS.map((spec) => chartSection(history, spec)),
       {
         title: "Provenance",
         body: inlineText(
-          `This page is generated from the git history of ${code(DRIFT_SOURCE)}: ${code(HISTORY_SCRIPT)} reads the file at each first-parent commit that changed it, and ${code("site/scripts/gen-reference.mjs")} writes the page on every ${code("pnpm run sync")}. A working tree whose copy differs from HEAD's adds a last point marked "working tree". To change a number, change the code the entry names and run ${code("mise run ratchet:update")}.`
+          `This page is generated from the git history of ${code(DRIFT_SOURCE)}: ${code(HISTORY_SCRIPT)} reads the file at each first-parent commit that changed it, and ${code("site/scripts/gen-reference.mjs")} writes the page on every ${code("pnpm run sync")}. A working tree whose copy differs from HEAD's adds a last point marked "working tree". To change a number, fix what the entry names (move the code, give the surface the capability, or trace the requirement in ${code("TRACED")} in ${code("scripts/check-trace.py")}) and run ${code("mise run ratchet:update")}.`
         )
       }
     ])
