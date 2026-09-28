@@ -18,23 +18,37 @@
 # not know they were using. Removing the entry entirely is worse: cargo then
 # leaves mise's PATH and every task fails with "command not found".
 rust = "stable"
-uv = "latest"
-ruff = "latest"
-semgrep = "latest"
-betterleaks = "latest"
-syft = "latest"
-grype = "latest"
-trivy = "latest"
-osv-scanner = "latest"
-terraform = "latest"
+# Every other tool is an exact version, and mise.lock records what each one resolved to (#315).
+# They were `latest`, which meant a contributor's ruff or semgrep was whatever that machine had
+# last installed while CI fetched a newer one, and a finding could appear on one side only.
+# `./scripts/check-ci-parity.py` (`ci:parity`, in `check` and in CI's `security` job) fails
+# when ci.yml runs a different version of ruff, semgrep, Node's major, actionlint, or any of
+# the checksummed downloads below. Bumping one of those means this line and ci.yml together,
+# plus the sha256 beside a checksummed download.
+#
+# betterleaks, syft, grype and osv-scanner take the version ci.yml already installs by
+# checksum, since that's the one CI has proven; the rest took what `latest` resolved to here
+# on 2026-09-27.
+uv = "0.12.13"
+ruff = "0.15.22"
+semgrep = "1.176.1"
+betterleaks = "1.7.3"
+syft = "1.50.0"
+grype = "0.116.1"
+trivy = "0.74.0"
+osv-scanner = "2.5.0"
+terraform = "1.15.8"
 tflint = "0.63.1"
-lefthook = "latest"
-node = "24"
-"cargo:cargo-deny" = "latest"
-"aqua:rhysd/actionlint" = "latest"
-# `ratchet:check`'s Rust collectors. Exact, unlike the rest, because a tree-sitter grammar update
-# can change what a rule matches, and the ratchet fails on any change in what's found. CI
-# installs the same release by checksum (ci.yml's `security` job, a required check).
+lefthook = "2.1.10"
+# 22 rather than 24: it's the major CI's bindings job runs and the floor of microvms-js's
+# `engines` (`>=22.13.0`), so the suite contributors run is the one CI proves (D26). The parity
+# check compares majors; mise.lock holds the exact release.
+node = "22"
+"cargo:cargo-deny" = "0.20.2"
+"aqua:rhysd/actionlint" = "1.7.12"
+# `ratchet:check`'s Rust collectors. A tree-sitter grammar update can change what a rule
+# matches, and the ratchet fails on any change in what's found. CI installs the same release by
+# checksum (ci.yml's `security` job, a required check).
 "aqua:ast-grep/ast-grep" = "0.43.0"
 
 [env]
@@ -42,6 +56,12 @@ node = "24"
 # the daemon bake into any task image without depending on an interpreter or libc
 # that image may not have. Linker choice lives in .cargo/config.toml.
 AGENTD_TARGET = "aarch64-unknown-linux-musl"
+
+# Every key of ci.yml's top-level `env`, with the same value, so a local run sees what CI's
+# does (`ci:parity` holds the two together). CI colors cargo's output, and a test that parses
+# cargo or clippy output without `--color never` read an empty set there and nowhere else:
+# PR #314's first CI run failed `AdapterLintTests` that way.
+CARGO_TERM_COLOR = "always"
 
 # ── local gates ─────────────────────────────────────────────────────────────
 
@@ -447,7 +467,81 @@ depends = [
   "trace:check",
   "ratchet:check",
   "guards:list",
+  "ci:parity",
 ]
+
+[tasks."ci:parity"]
+description = "ci.yml's env and tool versions match mise.toml's, and ci/local.toml covers every CI step. No builds"
+# CI doesn't install mise (D14), so the two files are compared rather than run: ci.yml's
+# top-level `env` against `[env]`, and each tool CI installs against the version pinned here
+# (the script's docstring lists them). Offline once uv has the script's pinned pyyaml. CI's
+# `security` job runs both commands as steps.
+#
+# It also holds `ci/local.toml` to the workflows: every `run:` step needs an entry there, so
+# `ci:local` (below) runs it or says why not.
+#
+# The unit tests run first, over fixture ci.yml and mise.toml pairs, so a rule that stopped
+# matching fails there before it reads this tree. The runner's tests clone throwaway repos.
+run = [
+  "uv run --with 'pyyaml==6.0.3' python -m unittest discover -s scripts -p 'test_check_ci_parity.py'",
+  "uv run --with 'pyyaml==6.0.3' python -m unittest discover -s scripts -p 'test_ci_local.py'",
+  "./scripts/check-ci-parity.py",
+]
+
+# ── ci:local: CI's Linux jobs, here (#315) ──────────────────────────────────
+#
+# Each `ci:<job>` task runs that CI job's own `run:` steps, in order, in a clone of a snapshot
+# of this worktree shaped like the job's checkout, with the workflow's env. `ci/local.toml` says
+# which jobs each task runs and why any step runs differently; `./scripts/ci-local.py`'s
+# docstring has the rest. `mise run ci:local` runs them all in parallel, each with its own
+# target directory, then prints every result and what stays CI-only. `mise run -c ci:local`
+# lets the rest finish when one fails.
+#
+# Not in `check` or any hook (`ci:parity` fails if `check` depends on one): each task builds
+# the tree from its own target, and `ci:fuzz` fuzzes for fuzz.yml's full time bounds. It's the
+# step before a push. Pass arguments through: `mise run ci:security -- --apply fault.patch`
+# runs the job over the snapshot with the patch applied, and the worktree stays as it is.
+
+[tasks."ci:rust"]
+description = "CI's `rust` job (the ubuntu leg), in a shallow clone of a worktree snapshot"
+run = "./scripts/ci-local.py rust"
+
+[tasks."ci:security"]
+description = "CI's `security` job, in a full clone of a worktree snapshot with origin/main"
+run = "./scripts/ci-local.py security"
+
+[tasks."ci:drift"]
+description = "CI's `drift` job, in a shallow clone of a worktree snapshot"
+run = "./scripts/ci-local.py drift"
+
+[tasks."ci:bindings"]
+description = "CI's `bindings` job, in a shallow clone of a worktree snapshot"
+run = "./scripts/ci-local.py bindings"
+
+[tasks."ci:guards"]
+description = "CI's `guards` job (every seeded fault), in a shallow clone of a worktree snapshot"
+run = "./scripts/ci-local.py guards"
+
+[tasks."ci:build"]
+description = "CI's `build` job (the static aarch64 binary), in a shallow clone of a worktree snapshot"
+run = "./scripts/ci-local.py build"
+
+[tasks."ci:fuzz"]
+description = "fuzz.yml's jobs one after another, with its time bounds. Needs a nightly toolchain"
+run = "./scripts/ci-local.py fuzz"
+
+[tasks."ci:local"]
+description = "Every ci:<job> task in parallel, then their results and what stays CI-only"
+depends = [
+  "ci:rust",
+  "ci:security",
+  "ci:drift",
+  "ci:bindings",
+  "ci:guards",
+  "ci:build",
+  "ci:fuzz",
+]
+run = "./scripts/ci-local.py summary"
 
 [tasks."guards:list"]
 description = "Every seeded fault in guards/faults.toml still applies, and every Falsification note has an entry or is listed. No builds"
@@ -475,6 +569,12 @@ description = "Seed each registered fault in a scratch worktree and require its 
 # into target/guards-fire, not target/, so a later narrow cargo run never picks up a scratch
 # build (the script's docstring has the two ways that went wrong); that's a second build's
 # worth of disk.
+#
+# `-- --jobs N` runs faults in N scratch worktrees at once with the serial run's verdicts
+# and output; each extra worker builds in its own target, removed when the run ends.
+# `-- --affected` fires only the entries whose own files or registry text changed against
+# origin/main: a rule, not a trace, so the full fire is still owed before a push. The script's
+# docstring has both.
 run = "./scripts/check-guards-fire.py fire"
 
 [tasks."ratchet:check"]
@@ -921,7 +1021,7 @@ depends = ["docs:build"]
 # `--offline` is absent on purpose: the whole point is the network. The exit code is preserved
 # so a human running it sees the failure; `.github/workflows/links.yml` is what declines to
 # gate.
-tools = { "aqua:lycheeverse/lychee" = "latest" }
+tools = { "aqua:lycheeverse/lychee" = "0.24.2" }
 run = "lychee --config lychee.toml 'site/dist/**/*.html'"
 
 [tasks."docs:check"]

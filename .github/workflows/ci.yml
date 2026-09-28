@@ -59,14 +59,15 @@ jobs:
       # No Rust toolchain: the example installs the published microvms wheel.
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
+          version: "0.12.13" # mise.toml's uv; ci:parity compares them
           enable-cache: false
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
           terraform_wrapper: false
       - name: Check example
         run: |
-          uvx ruff check examples/background-coding-agent
-          uvx ruff format --check examples/background-coding-agent
+          uvx ruff@0.15.22 check examples/background-coding-agent
+          uvx ruff@0.15.22 format --check examples/background-coding-agent
           terraform -chdir=examples/background-coding-agent/infra fmt -check
           terraform -chdir=examples/background-coding-agent/infra init -backend=false
           terraform -chdir=examples/background-coding-agent/infra validate
@@ -99,6 +100,7 @@ jobs:
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         if: matrix.os == 'ubuntu-latest'
         with:
+          version: "0.12.13" # mise.toml's uv; ci:parity compares them
           enable-cache: false
       - run: cargo fmt --all -- --check
         if: matrix.os == 'ubuntu-latest'
@@ -167,6 +169,7 @@ jobs:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
+          version: "0.12.13" # mise.toml's uv; ci:parity compares them
           # No cache, deliberately. `enable-cache: auto` looks for a lockfile or a
           # requirements file to key the cache on, finds none in this repo, and
           # warns "No file matched to [**/uv.lock, ...]. The cache will never get
@@ -184,7 +187,7 @@ jobs:
       # defect. WARNING and ERROR fail the job.
       - name: semgrep
         run: |
-          uvx semgrep scan --config p/rust --config p/secrets \
+          uvx semgrep@1.176.1 scan --config p/rust --config p/secrets \
             --severity WARNING --severity ERROR --error --quiet --metrics=off \
             protocol/src agentd/src model/src microvms-domain/src microvms-app/src microvms-edges/src microvms-core/src microvms-cli/src microvms-py/src microvms-js/src
       # The whole history, not the tree: a secret committed and later deleted is
@@ -232,7 +235,22 @@ jobs:
       - name: actionlint
         uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
         with:
+          # mise.toml's pin. With no `version` the action fetches the newest release, so a
+          # new actionlint check could fail CI on a commit that passed locally.
+          version: 1.7.12
           fail-on-error: true
+      # `mise run ci:parity` (#315): this file's top-level `env` and the tool versions it installs
+      # match mise.toml's, so a local `check` runs what CI runs, and every `run:` step here has an
+      # entry in ci/local.toml, so `mise run ci:local` runs it or says why not. A new step needs
+      # that entry. Its unit tests first, for the reason the trace and registry steps give, and
+      # the `ci:local` runner's with them. It's here because the job is required, has uv, and
+      # builds nothing.
+      - name: ci parity unit tests
+        run: |
+          uv run --with 'pyyaml==6.0.3' python -m unittest discover -s scripts -p 'test_check_ci_parity.py'
+          uv run --with 'pyyaml==6.0.3' python -m unittest discover -s scripts -p 'test_ci_local.py'
+      - name: ci parity
+        run: ./scripts/check-ci-parity.py
       # The layering drift ratchet (#281). It runs in this job rather than its own because this
       # job is a required status check, and rule 3 only holds where it can block a merge: a
       # separate job would go red and the PR would merge anyway.
@@ -374,6 +392,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
+          version: "0.12.13" # mise.toml's uv; ci:parity compares them
           # See the `security` job: no lockfile to key a cache on, and a cache that
           # can never be invalidated would pin the boto3 whose bundled service model
           # this job's whole purpose is to read fresh.
@@ -404,9 +423,13 @@ jobs:
       # `check-license-headers.py` alike (issue #32), and `check-lint-coverage.py` is what keeps
       # that honest. A single `.` on both sides is also what makes this job and `mise run lint`
       # provably the same check rather than two path lists that agree today.
+      # `RUFF` because nothing here puts ruff on PATH, and the script's fallback is an unpinned
+      # `uvx ruff`.
       - run: ./scripts/check-lint-coverage.py
-      - run: uvx ruff check .
-      - run: uvx ruff format --check .
+        env:
+          RUFF: uvx ruff@0.15.22
+      - run: uvx ruff@0.15.22 check .
+      - run: uvx ruff@0.15.22 format --check .
 
   bindings:
     name: python and node bindings
@@ -419,7 +442,8 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
-          # See the `security` job. Nothing here is locked either: `uvx maturin@1.14`
+          version: "0.12.13" # mise.toml's uv; ci:parity compares them
+          # See the `security` job. Nothing here is locked either: `uvx maturin@1.14.1`
           # pins its own version inline and the venv holds exactly `pytest`, so there
           # is no file a cache key could watch.
           enable-cache: false
@@ -435,7 +459,7 @@ jobs:
         run: |
           uv venv .venv-bindings
           . .venv-bindings/bin/activate
-          uvx maturin@1.14 develop -m microvms-py/Cargo.toml
+          uvx maturin@1.14.1 develop -m microvms-py/Cargo.toml
           uv pip install pytest
           pytest microvms-py/tests -q
       # The committed `.pyi` against the crate it describes. Here rather than in the
@@ -459,14 +483,14 @@ jobs:
       # reads `py.typed` and `.pyi` by the same PEP 561 rules. Proven able to fail — five
       # deliberate breakages of `typed_usage.py` are recorded in this commit's message.
       #
-      # Pinned exactly, unlike the `uvx` tools above, and for a reason the version number
-      # states: `ty` is pre-1.0 (0.0.72 here) and pre-release checkers add diagnostics
-      # between patch releases. A floating pin would turn someone else's release into a red
+      # Pinned exactly, like every `uvx` tool here (`ci:parity` fails an unpinned one), and
+      # for a reason the version number states: `ty` is pre-1.0 (0.0.72 here) and
+      # pre-release checkers add diagnostics between patch releases. A floating pin would turn someone else's release into a red
       # build on a commit that changed nothing — the same argument `setup-uv`'s comment
       # makes, reaching the opposite conclusion because there is no rolling major to track.
       - name: typed consumer checks against the built wheel
         run: |
-          uvx maturin@1.14 build -m microvms-py/Cargo.toml -o dist-wheel
+          uvx maturin@1.14.1 build -m microvms-py/Cargo.toml -o dist-wheel
           uv venv .venv-typed
           uv pip install --python .venv-typed/bin/python dist-wheel/*.whl
           uvx ty@0.0.72 check --python .venv-typed microvms-py/examples/typed_usage.py
@@ -526,6 +550,7 @@ jobs:
       # See the `security` job for why no cache.
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
+          version: "0.12.13" # mise.toml's uv; ci:parity compares them
           enable-cache: false
       # The trace entries run `check-trace.py`, which parses with ast-grep: the `security` job's
       # install, same version and hash.
@@ -537,9 +562,10 @@ jobs:
           echo "$RUNNER_TEMP/ast-grep" >> "$GITHUB_PATH"
       # A command's own timeout below the job's, so a hung fault prints its name and the
       # tail of its output instead of the runner cutting the log off. `--target-dir target`
-      # for rust-cache, as in the bindings job: nothing here builds after `fire`.
+      # for rust-cache, as in the bindings job: nothing here builds after `fire`. `--jobs 4`
+      # runs faults in four scratch worktrees; workers 2 to 4 build their own targets.
       - name: every seeded fault fires
-        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target
+        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 4
 
   build:
     name: static aarch64 binary

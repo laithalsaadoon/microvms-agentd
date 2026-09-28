@@ -14,7 +14,7 @@ per accessor, and no arithmetic or coercion the core doesn't have. The crate doc
 
   ```bash
   uv venv .venv-bindings && . .venv-bindings/bin/activate
-  uvx maturin@1.14 develop -m microvms-py/Cargo.toml
+  uvx maturin@1.14.1 develop -m microvms-py/Cargo.toml
   uv pip install pytest && pytest microvms-py/tests -q
   ```
 

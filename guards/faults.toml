@@ -891,6 +891,211 @@ suite = "script"
 message = "fs.rs::normalize_rejects_escapes_and_absorbs_benign_traversal ("
 transform = { file = "agentd/src/fs.rs", replace = "    #[test]\n    fn normalize_rejects_escapes_and_absorbs_benign_traversal() {", with = "    /// **Falsification**: drop the `?` from `parts.pop()?` and this fails.\n    #[test]\n    fn normalize_rejects_escapes_and_absorbs_benign_traversal() {" }
 
+# `fire --jobs` and `fire --affected` (#315), through the script's own suite: verdicts in
+# registry order, a miss still reported as one, a target per worker and none left behind, a
+# signal that ends every command and removes every tree, and a selection that reads the seeded
+# file, the guard's file and the entry's own text. `-k` runs only the class the fault reaches.
+
+[[fault]]
+id = "guards-fire-jobs-order"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireInParallel"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_jobs_report_the_serial_verdicts_in_the_serial_order ("
+transform = { file = "scripts/check-guards-fire.py", replace = "        for index in range(len(selected)):\n            [(line, failed)] = board.get(index)\n", with = "        seen: set[int] = set()\n        while len(seen) < len(selected):\n            with board.cond:\n                ready = [i for i in board.done if i not in seen]\n            if not ready:\n                time.sleep(0.01)\n                continue\n            index = ready[0]\n            seen.add(index)\n            [(line, failed)] = board.get(index)\n" }
+
+[[fault]]
+id = "guards-fire-jobs-did-not-fire"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireInParallel"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_fault_that_does_not_fire_is_still_did_not_fire ("
+transform = { file = "scripts/check-guards-fire.py", replace = "            if why is None:\n", with = "            if why is None or worker.number > 1:\n" }
+
+[[fault]]
+id = "guards-fire-jobs-shared-target"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireInParallel"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_each_worker_builds_in_its_own_target_and_only_the_first_one_stays ("
+transform = { file = "scripts/check-guards-fire.py", replace = "            if number > 1:\n", with = "            if False:\n" }
+
+[[fault]]
+id = "guards-fire-jobs-target-left"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireInParallel"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_each_worker_builds_in_its_own_target_and_only_the_first_one_stays ("
+transform = { file = "scripts/check-guards-fire.py", replace = "wenv[\"CARGO_TARGET_DIR\"] = str(tree.scratch / \"target\")", with = "wenv[\"CARGO_TARGET_DIR\"] = tempfile.mkdtemp(prefix=\"guards-target-\")" }
+
+[[fault]]
+id = "guards-fire-signal-group"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireInParallel"]
+expect = "exit-nonzero"
+suite = "script"
+message = "test_a_signal_ends_every_command_and_removes_every_tree_and_target ("
+transform = { file = "scripts/check-guards-fire.py", replace = "os.killpg(proc.pid, signal.SIGKILL)", with = "proc.kill()" }
+
+[[fault]]
+id = "guards-fire-signal-trees"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireInParallel"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_signal_ends_every_command_and_removes_every_tree_and_target ("
+transform = { file = "scripts/check-guards-fire.py", replace = "        for worker in workers:\n            worker.tree.remove()\n", with = "        for worker in workers[:1]:\n            worker.tree.remove()\n" }
+
+[[fault]]
+id = "guards-fire-affected-seeded-file"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_changed_seeded_file_selects_only_its_entries ("
+transform = { file = "scripts/check-guards-fire.py", replace = "out = {t[\"file\"] for t in fault.transforms}", with = "out: set[str] = set()" }
+
+[[fault]]
+id = "guards-fire-affected-guard-file"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_changed_guard_file_selects_its_entry ("
+transform = { file = "scripts/check-guards-fire.py", replace = "rf\"fn {re.escape(name)}\\b\",", with = "rf\"fn {re.escape(name)}_\\b\"," }
+
+[[fault]]
+id = "guards-fire-affected-registry"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_changed_or_new_entry_is_affected ("
+transform = { file = "scripts/check-guards-fire.py", replace = "elif before[fault.id] != raw[fault.id]:", with = "elif False:" }
+
+[[fault]]
+id = "guards-fire-affected-skips-unsaid"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_changed_seeded_file_selects_only_its_entries ("
+transform = { file = "scripts/check-guards-fire.py", replace = "+ (f\": {', '.join(skipped)}\" if skipped else \"\")", with = "+ \"\"" }
+
+[[fault]]
+id = "guards-fire-affected-empty-diff"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_changed_guard_file_selects_its_entry ("
+transform = { file = "scripts/check-guards-fire.py", replace = "return {p for p in (diff + \"\\0\" + untracked).split(\"\\0\") if p}, commit", with = "return set(), commit" }
+
+[[fault]]
+id = "guards-fire-affected-suite-script"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_changed_script_selects_the_unit_suite_that_tests_it ("
+transform = { file = "scripts/check-guards-fire.py", replace = "out |= {f\"{where}/{n}.py\" for n in (name, f\"check-{name}\")} & files", with = "out |= set()" }
+
+# Fix round 1: the `--affected` sources the falsifier found untested, and the restored pass on
+# more than one worker.
+[[fault]]
+id = "guards-fire-affected-clippy"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_changed_clippy_toml_selects_its_lint_entries ("
+transform = { file = "scripts/check-guards-fire.py", replace = "            if clippy in files:\n", with = "            if False:\n" }
+
+[[fault]]
+id = "guards-fire-affected-untracked"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_untracked_file_counts ("
+transform = { file = "scripts/check-guards-fire.py", replace = "    return {p for p in (diff + \"\\0\" + untracked).split(\"\\0\") if p}, commit", with = "    return {p for p in (diff).split(\"\\0\") if p}, commit" }
+
+[[fault]]
+id = "guards-fire-affected-patch"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_changed_patch_selects_its_entry ("
+transform = { file = "scripts/check-guards-fire.py", replace = "        out.add(fault.patch)\n", with = "        pass\n" }
+
+[[fault]]
+id = "guards-fire-affected-renames"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_renamed_file_selects_by_its_old_name ("
+transform = { file = "scripts/check-guards-fire.py", replace = "\"diff\", \"--name-only\", \"--no-renames\", \"-z\"", with = "\"diff\", \"--name-only\", \"-M\", \"-z\"" }
+
+[[fault]]
+id = "guards-fire-affected-build-input"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_build_input_selects_every_entry ("
+transform = { file = "scripts/check-guards-fire.py", replace = "        elif inputs:\n", with = "        elif False:\n" }
+
+[[fault]]
+id = "guards-fire-affected-venv-exit"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
+expect = "exit-nonzero"
+suite = "script"
+message = "test_an_affected_selection_the_missing_venv_empties_exits_like_nothing_affected ("
+transform = { file = "scripts/check-guards-fire.py", replace = "    if not selected and args.affected:\n", with = "    if False:\n" }
+
+[[fault]]
+id = "guards-fire-affected-owed"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_changed_seeded_file_selects_only_its_entries ("
+transform = { file = "scripts/check-guards-fire.py", replace = "        if skipped:\n            print(\n                \"guards: --affected selects by", with = "        if False:\n            print(\n                \"guards: --affected selects by" }
+
+[[fault]]
+id = "guards-fire-affected-siblings"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_script_a_tested_script_loads_selects_the_suite ("
+transform = { file = "scripts/check-guards-fire.py", replace = "    out |= sibling_scripts(root, {f for f in out if f.endswith(\".py\")}, files)", with = "    out |= set()" }
+
+[[fault]]
+id = "guards-fire-jobs-restored-every-worker"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireInParallel"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_restored_run_red_in_one_worker_only_fails_the_run ("
+transform = { file = "scripts/check-guards-fire.py", replace = "        for code, output, said, _, _ in runs:\n", with = "        for code, output, said, _, _ in runs[:1]:\n" }
+
+[[fault]]
+id = "guards-fire-jobs-stolen-restored"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireInParallel"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_worker_that_takes_a_fault_runs_its_command_clean_again ("
+transform = { file = "scripts/check-guards-fire.py", replace = "            worker.touched.setdefault(command_key(fault))\n            worker.tree.reset()\n", with = "            worker.tree.reset()\n" }
+
 # ── trace:check (#276, #277) ─────────────────────────────────────────────────
 
 [[fault]]
@@ -1617,13 +1822,493 @@ suite = "rust"
 note = "protocol/src/exec.rs::the_builder_defaults_are_the_ones_serde_gives_an_omitted_field"
 transform = { file = "protocol/src/exec.rs", replace = "            stdin: false,\n            reap_group_on_exit: false,\n            inherit_image_env: false,\n        }\n    }\n\n    /// Run `command` as a script", with = "            stdin: false,\n            reap_group_on_exit: true,\n            inherit_image_env: false,\n        }\n    }\n\n    /// Run `command` as a script" }
 
+# ── ci:parity: ci.yml's env and tool versions match mise.toml's (#315) ───────────
+
+[[fault]]
+id = "ci-parity-env-missing"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "and mise.toml [env] has no CARGO_TERM_COLOR"
+transform = { file = "mise.toml", replace = "CARGO_TERM_COLOR = \"always\"\n", with = "" }
+
+[[fault]]
+id = "ci-parity-env-value"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "and mise.toml [env] sets CARGO_TERM_COLOR=always"
+transform = { file = ".github/workflows/ci.yml", replace = "  CARGO_TERM_COLOR: always\n", with = "  CARGO_TERM_COLOR: never\n" }
+
+[[fault]]
+id = "ci-parity-env-empty"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml has no top-level env block"
+transform = { file = ".github/workflows/ci.yml", replace = "env:\n  CARGO_TERM_COLOR: always\n", with = "env: {}\n" }
+
+[[fault]]
+id = "ci-parity-ruff-ci-side"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "runs 0.15.21, and mise.toml pins 0.15.22"
+transform = { file = ".github/workflows/ci.yml", replace = "      - run: uvx ruff@0.15.22 check .\n", with = "      - run: uvx ruff@0.15.21 check .\n" }
+
+[[fault]]
+id = "ci-parity-semgrep-mise-side"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "runs 1.176.1, and mise.toml pins 1.177.0"
+transform = { file = "mise.toml", replace = "semgrep = \"1.176.1\"\n", with = "semgrep = \"1.177.0\"\n" }
+
+[[fault]]
+id = "ci-parity-maturin-stub-side"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "runs 1.14.1, and scripts/generate-py-stubs.py pins 1.14.2"
+transform = { file = "scripts/generate-py-stubs.py", replace = "MATURIN = \"maturin@1.14.1\"\n", with = "MATURIN = \"maturin@1.14.2\"\n" }
+
+[[fault]]
+id = "ci-parity-node-major"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "runs Node 24, and mise.toml pins 22 (majors compared)"
+transform = { file = ".github/workflows/ci.yml", replace = "          node-version: '22'\n", with = "          node-version: '24'\n" }
+
+[[fault]]
+id = "ci-parity-actionlint-unpinned"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "has no `version` input, so it runs the latest release"
+transform = { file = ".github/workflows/ci.yml", replace = "          version: 1.7.12\n", with = "" }
+
+[[fault]]
+id = "ci-parity-download-ci-side"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "betterleaks: ci.yml job `security` step `betterleaks over full history (pinned, checksummed)` runs 1.7.4, and mise.toml pins 1.7.3"
+transform = { file = ".github/workflows/ci.yml", replace = "betterleaks/releases/download/v1.7.3/betterleaks_1.7.3_", with = "betterleaks/releases/download/v1.7.4/betterleaks_1.7.4_" }
+
+[[fault]]
+id = "ci-parity-download-hash"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "syft: ci.yml job `sbom` step `install syft and grype (pinned, checksummed)` checks sha256 0f7b29"
+transform = { file = ".github/workflows/ci.yml", replace = "\"bf7b29ff57f06da30918266a0e1c2885a8f99784798d1bdb1628886aa015d788  syft.tgz\"", with = "\"0f7b29ff57f06da30918266a0e1c2885a8f99784798d1bdb1628886aa015d788  syft.tgz\"" }
+
+[[fault]]
+id = "ci-parity-uvx-unpinned"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "runs `uvx semgrep`, which names no exact version"
+transform = { file = ".github/workflows/ci.yml", replace = "uvx semgrep@1.176.1 scan", with = "uvx semgrep scan" }
+
+[[fault]]
+id = "ci-parity-mise-latest"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "mise.toml [tools] pins `lefthook` to latest"
+transform = { file = "mise.toml", replace = "lefthook = \"2.1.10\"\n", with = "lefthook = \"latest\"\n" }
+
+[[fault]]
+id = "ci-parity-ci-unparseable"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "doesn't parse as YAML"
+transform = { file = ".github/workflows/ci.yml", replace = "  CARGO_TERM_COLOR: always\n", with = "  CARGO_TERM_COLOR: [always\n" }
+
+# An empty file: /dev/null reads as one on the Linux runners and here.
+[[fault]]
+id = "ci-parity-ci-empty"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml: /dev/null is empty"
+argv_fault = ["--ci", "/dev/null"]
+
+[[fault]]
+id = "ci-parity-mise-empty"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "mise.toml: /dev/null is empty"
+argv_fault = ["--mise", "/dev/null"]
+
+[[fault]]
+id = "ci-parity-root-empty"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "can't read"
+argv_fault = ["--root", "{empty_dir}"]
+
+# The release pattern reading nothing: every checksummed tool is then missing by name.
+[[fault]]
+id = "ci-parity-release-sentinel"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ast-grep: found nowhere in ci.yml"
+transform = { file = "scripts/check-ci-parity.py", replace = "r\"https://github\\.com/([\\w.-]+/[\\w.-]+)/releases/download/v?([^/\\s]+)/\"", with = "r\"https://github\\.com/([\\w.-]+/[\\w.-]+)/release/download/v?([^/\\s]+)/\"" }
+
+# The unit suite catching a rule that stopped comparing values.
+[[fault]]
+id = "ci-parity-unit-env-value"
+guard = "test_check_ci_parity.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_ci_parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_differing_env_value_fails ("
+transform = { file = "scripts/check-ci-parity.py", replace = "        elif scalar(mise_env[key]) != want:\n", with = "        elif False:\n" }
+
+# ── ci:parity's step coverage and the ci:local runner (#315) ─────────────────
+
+# A new ci.yml `run:` step with no ci/local.toml entry: ci:local would skip it silently.
+[[fault]]
+id = "ci-parity-step-uncovered"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml job `drift` step `echo uncovered` has no entry in ci/local.toml"
+transform = { file = ".github/workflows/ci.yml", replace = "      - run: uvx ruff@0.15.22 format --check .\n", with = "      - run: uvx ruff@0.15.22 format --check .\n      - run: echo uncovered\n" }
+
+[[fault]]
+id = "ci-parity-step-stale"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml job `drift` lists `a step that isn't there`, which names no step there"
+transform = { file = "ci/local.toml", replace = "  \"uvx ruff@0.15.22 format --check .\",\n]\n", with = "  \"uvx ruff@0.15.22 format --check .\",\n  \"a step that isn't there\",\n]\n" }
+
+[[fault]]
+id = "ci-parity-skip-no-reason"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml job `background-example` is skipped and gives no reason"
+transform = { file = "ci/local.toml", replace = "skip = \"`mise run background:check` runs the same commands, and it's in `check`\"\n", with = "skip = \"\"\n" }
+
+[[fault]]
+id = "ci-parity-change-no-reason"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml job `build` step `build` runs differently here and gives no reason"
+transform = { file = "ci/local.toml", replace = "reason = \"that linker is the gcc the skipped step installs; without it, .cargo/config.toml's rust-lld links the same static target\"\n", with = "" }
+
+[[fault]]
+id = "ci-parity-expression-missing"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "uses `${{ matrix.os }}`, which has no value in ci/local.toml [expressions]"
+transform = { file = "ci/local.toml", replace = "\"matrix.os\" = \"ubuntu-latest\"\n", with = "" }
+
+[[fault]]
+id = "ci-parity-local-unparseable"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "doesn't parse as TOML"
+transform = { file = "ci/local.toml", replace = "\n[expressions]\n", with = "\n[expressions\n" }
+
+# An empty plan: /dev/null reads as an empty file on the Linux runners and here.
+[[fault]]
+id = "ci-parity-local-empty"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci/local.toml: /dev/null is empty"
+argv_fault = ["--local", "/dev/null"]
+
+# The step reader finding nothing: every job would pass as covered without the floor.
+[[fault]]
+id = "ci-parity-steps-sentinel"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml: found no `run:` steps, so there's nothing to cover"
+transform = { file = "scripts/check-ci-parity.py", replace = "    return \"run\" in step\n", with = "    return \"runs\" in step\n" }
+
+[[fault]]
+id = "ci-parity-task-missing"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`ci:local` doesn't depend on `ci:fuzz`"
+transform = { file = "mise.toml", replace = "  \"ci:fuzz\",\n]\nrun = \"./scripts/ci-local.py summary\"\n", with = "]\nrun = \"./scripts/ci-local.py summary\"\n" }
+
+[[fault]]
+id = "ci-parity-check-runs-ci-local"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`check` depends on `ci:local`"
+transform = { file = "mise.toml", replace = "  \"ci:parity\",\n]\n", with = "  \"ci:parity\",\n  \"ci:local\",\n]\n" }
+
+# The unit suite catching a coverage rule that stopped comparing.
+[[fault]]
+id = "ci-parity-unit-step-uncovered"
+guard = "test_check_ci_parity.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_ci_parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_run_step_with_no_entry_fails ("
+transform = { file = "scripts/check-ci-parity.py", replace = "        if is_run(step) and label not in listed:\n", with = "        if False:\n" }
+
+# The runner's own suite (#315): the checkout depth, the caller's index, the scrubbed env,
+# and the refusal to run an uncovered plan.
+[[fault]]
+id = "ci-local-unit-depth"
+guard = "test_ci_local.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ci_local.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_shallow_job_gets_one_commit_and_no_remote ("
+transform = { file = "scripts/ci-local.py", replace = "        fetch += [\"--depth\", \"1\", commit]\n", with = "        fetch += [commit]\n" }
+
+[[fault]]
+id = "ci-local-unit-index"
+guard = "test_ci_local.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ci_local.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_run_leaves_the_source_repo_as_it_was ("
+transform = { file = "scripts/ci-local.py", replace = "    scratch = env | {\"GIT_INDEX_FILE\": str(index)}\n", with = "    scratch = env\n" }
+
+[[fault]]
+id = "ci-local-unit-env"
+guard = "test_ci_local.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ci_local.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_step_gets_the_workflow_job_and_step_env_and_not_the_callers ("
+transform = { file = "scripts/ci-local.py", replace = "    for key in mise_only_keys(root, jobs):\n", with = "    for key in []:\n" }
+
+[[fault]]
+id = "ci-local-unit-refuse"
+guard = "test_ci_local.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ci_local.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_uncovered_step_refuses_to_run ("
+transform = { file = "scripts/ci-local.py", replace = "    jobs = PARITY[\"plan\"](root, local, problems)\n    if problems:\n", with = "    jobs = PARITY[\"plan\"](root, local, problems)\n    if False:\n" }
+
+# ── fix round 1 (#315 reviews): every uvx spelling, uv, `uses:` steps, unmodeled keys ──
+# 
+# The falsifier's spellings: an option before the tool, `--from`, `uv tool run`. Each runs
+# another ruff on CI, and the old `uvx <tool>@X` pattern read none of them.
+[[fault]]
+id = "ci-parity-uvx-option-first"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ruff: ci.yml job `background-example` step `Check example` runs 0.1.0, and mise.toml pins 0.15.22"
+transform = { file = ".github/workflows/ci.yml", replace = "uvx ruff@0.15.22 check examples/background-coding-agent", with = "uvx -q ruff@0.1.0 check examples/background-coding-agent" }
+
+[[fault]]
+id = "ci-parity-uvx-from"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ruff: ci.yml job `background-example` step `Check example` runs 0.1.0, and mise.toml pins 0.15.22"
+transform = { file = ".github/workflows/ci.yml", replace = "uvx ruff@0.15.22 check examples/background-coding-agent", with = "uvx --from ruff==0.1.0 ruff check examples/background-coding-agent" }
+
+[[fault]]
+id = "ci-parity-uv-tool-run"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ruff: ci.yml job `background-example` step `Check example` runs 0.1.0, and mise.toml pins 0.15.22"
+transform = { file = ".github/workflows/ci.yml", replace = "uvx ruff@0.15.22 check examples/background-coding-agent", with = "uv tool run ruff@0.1.0 check examples/background-coding-agent" }
+
+[[fault]]
+id = "ci-parity-uvx-unreadable"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "can't be read; write it as `uvx <tool>@X.Y.Z`"
+transform = { file = ".github/workflows/ci.yml", replace = "uvx ruff@0.15.22 check examples/background-coding-agent", with = "uvx 'ruff@0.15.22 check examples/background-coding-agent" }
+
+[[fault]]
+id = "ci-parity-unit-uvx-valued"
+guard = "test_check_ci_parity.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_ci_parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_uvx_spelling_is_compared ("
+transform = { file = "scripts/check-ci-parity.py", replace = "        elif name in UVX_VALUED and not eq:\n", with = "        elif False:\n" }
+
+[[fault]]
+id = "ci-parity-task-pin"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ruff: mise.toml [tasks.'docs:links'] tools pins `ruff` = '0.1.0', and [tools] pins 0.15.22"
+transform = { file = "mise.toml", replace = "tools = { \"aqua:lycheeverse/lychee\" = \"0.24.2\" }", with = "tools = { \"aqua:lycheeverse/lychee\" = \"0.24.2\", ruff = \"0.1.0\" }" }
+
+[[fault]]
+id = "ci-parity-uv-unpinned"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "uv: ci.yml job `background-example` step `astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4` has no `version` input"
+transform = { file = ".github/workflows/ci.yml", replace = "          version: \"0.12.13\" # mise.toml's uv; ci:parity compares them\n          enable-cache: false\n      - uses: hashicorp/setup-terraform", with = "          enable-cache: false\n      - uses: hashicorp/setup-terraform" }
+
+[[fault]]
+id = "ci-parity-uv-mise-side"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "runs 0.12.13, and mise.toml pins 0.12.14"
+transform = { file = "mise.toml", replace = "uv = \"0.12.13\"", with = "uv = \"0.12.14\"" }
+
+# A lint shipped as an action, in a job ci:local runs (the critic's `typos` probe).
+[[fault]]
+id = "ci-parity-uses-uncovered"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml job `drift` step `typos` runs the action `crate-ci/typos`, which ci/local.toml neither lists"
+transform = { file = ".github/workflows/ci.yml", replace = "      - run: uvx ruff@0.15.22 format --check .\n", with = "      - run: uvx ruff@0.15.22 format --check .\n      - name: typos\n        uses: crate-ci/typos@0000000000000000000000000000000000000000\n" }
+
+[[fault]]
+id = "ci-parity-actions-stale"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "[actions] names `actions/cache`, which no step ci:local runs uses"
+transform = { file = "ci/local.toml", replace = "[actions]\n", with = "[actions]\n\"actions/cache\" = \"a cache\"\n" }
+
+[[fault]]
+id = "ci-parity-job-key"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml job `drift` sets `if`, which ci:local doesn't model"
+transform = { file = ".github/workflows/ci.yml", replace = "    name: hardcoded constraints match the service model\n    runs-on: ubuntu-latest\n", with = "    name: hardcoded constraints match the service model\n    runs-on: ubuntu-latest\n    if: github.event_name == 'push'\n" }
+
+[[fault]]
+id = "ci-parity-step-key"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "step `uvx ruff@0.15.22 format --check .` sets `continue-on-error`, which ci:local doesn't model"
+transform = { file = ".github/workflows/ci.yml", replace = "      - run: uvx ruff@0.15.22 format --check .\n", with = "      - run: uvx ruff@0.15.22 format --check .\n        continue-on-error: true\n" }
+
+[[fault]]
+id = "ci-parity-top-defaults"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml sets top-level `defaults`, which ci:local doesn't model"
+transform = { file = ".github/workflows/ci.yml", replace = "\njobs:\n", with = "\ndefaults:\n  run:\n    shell: sh\njobs:\n" }
+
+[[fault]]
+id = "ci-parity-runs-on"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml job `drift` runs on `macos-latest`, and ci:local runs Linux jobs only"
+transform = { file = ".github/workflows/ci.yml", replace = "    name: hardcoded constraints match the service model\n    runs-on: ubuntu-latest\n", with = "    name: hardcoded constraints match the service model\n    runs-on: macos-latest\n" }
+
+# The floors for the two new readers: a uv-call pattern that matches nothing, and a step reader
+# that never sees a `uses:` step, each fail by name instead of comparing nothing.
+[[fault]]
+id = "ci-parity-uvx-sentinel"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ruff: found nowhere in ci.yml"
+transform = { file = "scripts/check-ci-parity.py", replace = "UV_CALL = re.compile(r\"(?<![\\w./-])(uvx|uv\\s+tool\\s+run)(?=\\s)\")", with = "UV_CALL = re.compile(r\"(?<![\\w./-])(uvxx|uv\\s+tool\\s+runx)(?=\\s)\")" }
+
+[[fault]]
+id = "ci-parity-uses-sentinel"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "[actions] names `actions/checkout`, which no step ci:local runs uses"
+transform = { file = "scripts/check-ci-parity.py", replace = "        if \"uses\" not in step or label in listed:\n            continue\n", with = "        if True:\n            continue\n" }
+
+# A timed-out step killed first, before the signal it cleans up on (the gauntlet's finding).
+[[fault]]
+id = "ci-local-unit-timeout-grace"
+guard = "test_ci_local.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ci_local.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_timed_out_step_gets_a_signal_it_can_clean_up_on ("
+transform = { file = "scripts/ci-local.py", replace = "ESCALATION = ((signal.SIGINT, 7.5), (signal.SIGTERM, 2.5), (signal.SIGKILL, None))", with = "ESCALATION = ((signal.SIGKILL, None),)" }
+
+[[fault]]
+id = "ci-local-unit-keep-failed"
+guard = "test_ci_local.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ci_local.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "test_a_failed_jobs_tree_outlives_the_next_jobs_clone ("
+transform = { file = "scripts/ci-local.py", replace = "            if results[-1][\"status\"] != \"passed\":\n                keep_failed(", with = "            if False:\n                keep_failed(" }
+
 # ── the bindings, rebuilt before each run (CI's bindings job) ────────────────
 
 [[fault]]
 id = "py-unpriced-usd"
 guard = "microvms-py/tests/test_smoke.py::test_an_unpriced_line_omits_the_usd_key_entirely"
 run = [
-  ["uvx", "maturin@1.14", "develop", "-q", "-m", "microvms-py/Cargo.toml"],
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "microvms-py/Cargo.toml"],
   ["python", "-m", "pytest", "-q", "-rA", "microvms-py/tests/test_smoke.py::test_an_unpriced_line_omits_the_usd_key_entirely"],
 ]
 expect = "test-failed"

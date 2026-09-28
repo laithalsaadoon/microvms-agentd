@@ -11,8 +11,18 @@ behavior and [Trust](docs/TRUST.md) before changing authentication or execution.
 mise install
 mise run install       # install git hooks
 mise run check         # code, security, tests, schema, stubs and declarations, API drift, packaging, build, traceability, layering drift, seeded-fault registry
+mise run ci:local      # CI's Linux jobs, each in a clone shaped like its checkout; before a push
 mise tasks             # all available tasks
 ```
+
+`ci:local` isn't part of `check`: it builds the tree once per job, keeping a target
+per job (tens of GB under `$TMPDIR`, or `$CI_LOCAL_DIR`), and fuzzes for fuzz.yml's
+time bounds. `mise run ci:<job>` runs one job (`ci:rust`, `ci:security`, `ci:drift`,
+`ci:bindings`, `ci:guards`, `ci:build`, `ci:fuzz`). It tests your branch, and CI tests
+its merge with main, so rebase onto a fresh origin/main before you rely on it. A new
+step in ci.yml needs an entry in `ci/local.toml`, or, for a setup action, a reason in
+its `[actions]` table; the file also records each step `ci:local` skips and why, and
+`ci:parity` in `check` fails without it.
 
 `check` does not create AWS resources. Initial dependency downloads, security
 rule loading, and advisory updates can require network access. Documentation,
@@ -52,6 +62,14 @@ anchor or patch no longer matches the tree, and when a test gains a
 older ones and only shrinks). CI's `guards` job seeds every fault. A guard no
 fault can be seeded for, such as a live check, is still broken by hand, restored,
 and recorded in the PR.
+
+Locally, `mise run guards:fire -- --jobs 4` seeds faults in four scratch worktrees at
+once and reports what a serial run reports, in the same order. `-- --affected` fires
+only the entries whose own files changed against origin/main (`--base <ref>` for
+another base) and names the ones it skips. It's a quick first pass, not the full fire:
+a change that reaches a guard through code the entry doesn't name, such as the type a
+clippy ban names, isn't seen. Run the full fire, or let CI's `guards` job, before you
+count on it.
 
 In network simulation tests, coordinate child processes through stdin rather
 than wall-clock sleeps: child processes and the simulator use different clocks.
