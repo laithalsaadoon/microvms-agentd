@@ -149,9 +149,12 @@ pub async fn open(
 /// Runs the Noise KK handshake, then relays the guest connection inside it.
 ///
 /// The handshake happens **before** the dial, so a caller whose identity is refused never
-/// causes a connection to a guest service. That ordering is deliberate: the cheapest refusal
+/// causes a connection to a guest service, and no byte crosses the relay unauthenticated
+/// (AGENTD-18). That ordering is deliberate: the cheapest refusal
 /// is one that touches nothing, and a guest server that logged a connection from a rejected
-/// caller would be misleading evidence.
+/// caller would be misleading evidence. The WebSocket close frame that ends the tunnel isn't a
+/// relayed byte: it's sent outside the Noise session, which is the plaintext-close gap in
+/// `docs/TRUST.md`'s threat table.
 async fn verified_relay(socket: WebSocket, port: u16, material: crate::tunnel_identity::Shared) {
     let Some(material) = material else {
         // The caller asked for proof and this VM has no key. Refused rather than downgraded:

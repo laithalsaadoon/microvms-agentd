@@ -5,7 +5,7 @@ twice over for the VM lifecycle — and the formal declaration is the authority:
 crate holds `stateright` models whose properties hold over every interleaving
 (`model/src/lib.rs:441-526`, `model/src/client.rs:546-699`), and `spec/core.symspec.json`
 carries a state model with a machine-readable transition effect per requirement
-(`spec/core.symspec.json:995-1041`).
+(`spec/core.symspec.json:1014-1060`).
 
 The models are ordinary `cargo test` targets in the `agentd-model` crate
 (`model/Cargo.toml:2`), driven by `.checker().spawn_bfs().join().assert_properties()`
@@ -57,8 +57,8 @@ Mirrors:
   diagram's edge labels. `AppState::bootstrap` decides all three under the token lock
   (`agentd/src/state.rs:202-221`) and `POST /run` maps them to 200/200/409
   (`agentd/src/routes.rs:213-234`).
-- `spec/agentd.symspec.json:11-114` — the EARS requirements that are this machine:
-  install the agent token (`spec/agentd.symspec.json:89`), accept an identical token
+- `spec/agentd.symspec.json:11-133` — the EARS requirements that are this machine:
+  install the agent token (`spec/agentd.symspec.json:108`), accept an identical token
   (`spec/agentd.symspec.json:21`), reject a differing token (`spec/agentd.symspec.json:72`), and
   reject a control request while the token is not installed (`spec/agentd.symspec.json:56`).
 
@@ -167,7 +167,7 @@ state is a private field written only through `set_lifecycle` (`microvms-app/src
 `run`, `wait_until_running`, `adopt`, `suspend`, `resume`, and `terminate` call.
 
 Entry is `Lifecycle::Pending` (`microvms-app/src/sandbox.rs:743`), matching the symspec's
-`initial` (`spec/core.symspec.json:996`) and the model's sole init state
+`initial` (`spec/core.symspec.json:1015`) and the model's sole init state
 (`model/src/client.rs:287`).
 
 Edge labels below are the model's `Action` variants (`model/src/client.rs:116-142`), which is the
@@ -251,7 +251,7 @@ which refuses to hand off a VM that is not live (`microvms-app/src/sandbox.rs:13
 
 Mirrors:
 
-- `spec/core.symspec.json:1004-1011` — `vm_state`, an enum whose domain is exactly `PENDING`,
+- `spec/core.symspec.json:1023-1030` — `vm_state`, an enum whose domain is exactly `PENDING`,
   `RUNNING`, `SUSPENDING`, `SUSPENDED`, `TERMINATING`, `TERMINATED`, beside the other
   variables the `Sandbox` carries: `token_installed`, `image_exists`, `was_terminated`,
   `bootstrap_count` (`:1028-1056`). The `STATE-1`..`STATE-12` keys cited above are EARS

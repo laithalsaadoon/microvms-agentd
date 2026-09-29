@@ -1527,3 +1527,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod sse_fuzz;

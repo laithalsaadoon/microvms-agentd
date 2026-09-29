@@ -83,6 +83,35 @@ deployments. Unit and conformance tests exercise the implementation. The
 model does not cover identity repair, filesystem confinement, or all Linux
 process behavior.
 
+## Threats and the tests that guard them
+
+Each row names a threat, the requirement key that states the defense (in
+`spec/agentd.symspec.json` or `spec/core.symspec.json`), and a test that fails
+when the defense is removed. `mise run trace:check` reads this table: it fails
+on a key neither spec defines, on a guard that isn't a running test at that path
+or doesn't name one of its row's keys, and on a known gap that names no issue,
+and it renders the table in [Traceability](TRACEABILITY.md). A guard is written
+`path::test`.
+
+| Threat | Requirement | Guard | Status |
+|---|---|---|---|
+| An in-VM process races the platform to the bootstrap hook | `AGENTD-1`, `AGENTD-3` | `agentd/tests/model_conformance.rs::every_walked_path_of_the_model_replays_against_the_daemon`, `agentd/src/state.rs::identical_replay_succeeds_and_a_different_token_conflicts` | guarded; a process that starts before the daemon still wins, which is the unenforced invariant below |
+| A caller holding the agent token but not the host key opens a verified tunnel | `AGENTD-17` | `agentd/src/tunnel_identity.rs::only_the_pinned_host_key_completes_a_handshake`, `agentd/tests/tunnel_relay.rs::a_valid_token_with_the_wrong_host_key_is_refused` | guarded; its seeded fault waits for #297's handshake model, since under KK no one-sided change turns the pin off |
+| A verified tunnel's handshake fails, or the VM has no key, and the guest service is reached anyway | `AGENTD-18` | `agentd/tests/tunnel_relay.rs::a_refused_caller_never_causes_a_guest_connection`, `agentd/tests/tunnel_relay.rs::identity_against_a_seedless_vm_is_refused_not_downgraded` | guarded |
+| A guest answers a verified tunnel's handshake with a key other than the pinned VM key | `BIND-21` | `microvms-core/tests/tunnel_end_to_end.rs::a_wrong_pin_fails_closed_with_a_diagnosis`, `microvms-core/tests/tunnel_end_to_end.rs::a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel` | guarded |
+| A guest replays or forges tunnel frames after the handshake | none | none | known gap, #297: both frame reads refuse a frame that doesn't authenticate, but no key states it and no test or harness sends one |
+| A guest streams hostile server-sent events to the client | `BIND-22` | `microvms-app/src/session/sse.rs::an_unterminated_stream_is_refused_at_the_pending_ceiling`, `microvms-app/src/session/sse.rs::an_unrecognized_or_unparseable_frame_is_dropped_rather_than_raised`, `microvms-app/src/session/sse_fuzz.rs::hostile_stream_bytes_stay_bounded_and_every_event_round_trips` | guarded |
+| A replaced or tampered daemon release asset | `BIND-18` | `microvms-edges/src/provision/release.rs::another_signer_identity_is_refused`, `microvms-edges/src/provision/release.rs::one_flipped_byte_in_the_asset_is_refused` | guarded |
+| An on-path party ends a verified tunnel early, with a plaintext close frame or by dropping the connection | none | none | known gap, #342: the close frame is plaintext, and the client reads a transport error or a hangup after the handshake as a clean end too, so a stream cut short looks complete |
+
+**The plaintext close.** A verified tunnel ends with a WebSocket close frame
+sent in the clear (`Noise::close` in `agentd/src/tunnel.rs`), and after the
+handshake the client reads a close frame, a transport error and a hangup alike
+as a clean end (`microvms-edges/src/session/tunnel.rs`). Anything on the path
+can send that frame or drop the connection, so a port-forward cut short looks
+complete to both ends. Until the tunnel sends an authenticated end of stream (#342)
+before the WebSocket close, check a transfer's length or digest where it matters.
+
 ## The unenforced invariant
 
 **Run the daemon as the image's `CMD`, and start workloads only after bootstrap

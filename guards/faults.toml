@@ -2818,6 +2818,235 @@ suite = "script"
 message = "FAIL: test_every_spelling_of_the_bolero_call_is_a_harness ("
 transform = { file = "scripts/check-trace.py", replace = "r\"^(?:(?:::\\s*)?bolero\\s*::\\s*)?check$\"", with = "r\"^bolero\\s*::\\s*check$\"" }
 
+# ── trace:check's threat table (#297) ────────────────────────────────────────
+
+# A row's key that neither spec defines.
+[[fault]]
+id = "trace-threat-unknown-key"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "AGENTD-99 is not defined in either spec"
+transform = { file = "docs/TRUST.md", replace = "| `AGENTD-17` |", with = "| `AGENTD-99` |" }
+
+# A guard naming a test the file doesn't have (a rename the table didn't follow).
+[[fault]]
+id = "trace-threat-missing-guard"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "isn't a test that runs in agentd/tests/tunnel_relay.rs"
+transform = { file = "docs/TRUST.md", replace = "::a_valid_token_with_the_wrong_host_key_is_refused`", with = "::a_valid_token_with_a_wrong_host_key_is_refused`" }
+
+# A guard that runs but no longer names its row's key.
+[[fault]]
+id = "trace-threat-unnamed-guard"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "doesn't name AGENTD-17"
+transform = { file = "agentd/tests/tunnel_relay.rs", replace = "is refused with 4403** (AGENTD-17).", with = "is refused with 4403**." }
+
+[[fault]]
+id = "trace-threat-gap-issue"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "a known gap names the issue that closes it"
+transform = { file = "docs/TRUST.md", replace = "| known gap, #342: the close frame", with = "| known gap: the close frame" }
+
+# The floor on empty input: a blank line after the header leaves a table with no rows.
+[[fault]]
+id = "trace-threat-empty-table"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "the threat table in docs/TRUST.md parses to no rows"
+transform = { file = "docs/TRUST.md", replace = "|---|---|---|---|\n| An in-VM process", with = "|---|---|---|---|\n\n| An in-VM process" }
+
+# The floor with a parser that returns nothing.
+[[fault]]
+id = "trace-threat-floor"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "the threat table in docs/TRUST.md parses to no rows"
+transform = { file = "scripts/check-trace.py", replace = "        if not line.startswith(\"|\"):\n", with = "        if not line.startswith(\"||\"):\n" }
+
+# The sentinel: a parser that keeps only the first row passes the floor.
+[[fault]]
+id = "trace-threat-sentinel"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "the sentinel row naming BIND-18 is not in the threat table"
+transform = { file = "scripts/check-trace.py", replace = "    for number, line in body:\n", with = "    for number, line in body[:1]:\n" }
+
+# A doc credited to the last test in the file instead of the one it sits on.
+[[fault]]
+id = "trace-threat-unit-neighbor"
+guard = "test_check_trace.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_trace.py", "-k", "ThreatTable"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_key_on_a_neighboring_test_does_not_name_the_guard ("
+transform = { file = "scripts/check-trace.py", replace = "named[path][following[0]]", with = "named[path][following[-1]]" }
+
+# A missing docs/TRUST.md read as an empty table with nothing to say.
+[[fault]]
+id = "trace-threat-unit-missing-file"
+guard = "test_check_trace.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_trace.py", "-k", "ThreatTable"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_missing_trust_file_is_reported ("
+transform = { file = "scripts/check-trace.py", replace = "    except FileNotFoundError:\n        return [], [f\"{where} doesn't exist\"]\n", with = "    except FileNotFoundError:\n        return [], []\n" }
+
+# #297a review round 1: a table with no delimiter row used to lose its first row unread, and a
+# blank line inside the table every row after it.
+[[fault]]
+id = "trace-threat-no-delimiter"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "the line after the threat table's header isn't its delimiter row"
+transform = { file = "docs/TRUST.md", replace = "| Threat | Requirement | Guard | Status |\n|---|---|---|---|\n", with = "| Threat | Requirement | Guard | Status |\n" }
+
+[[fault]]
+id = "trace-threat-row-past-a-break"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "this row is past a break in the threat table"
+transform = { file = "docs/TRUST.md", replace = "\n| An on-path party ends", with = "\n\n| An on-path party ends" }
+
+# A guard whose file no `mod` reaches never compiles, and its row used to pass as guarded.
+[[fault]]
+id = "trace-threat-guard-unreached"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "which no `mod` declaration reaches from its crate"
+transform = { file = "microvms-app/src/session/mod.rs", replace = "#[cfg(test)]\nmod sse_fuzz;\n", with = "" }
+
+# The module rule counting a declaration a feature `cfg` could leave out everywhere.
+[[fault]]
+id = "trace-threat-unit-gated-mod"
+guard = "test_check_trace.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_trace.py", "-k", "ThreatTable"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_guard_no_mod_declaration_reaches_is_reported ("
+transform = { file = "scripts/check-trace.py", replace = "                    {\"has\": {\"field\": \"body\", \"kind\": \"declaration_list\"}},\n                    *_OFF,\n", with = "                    {\"has\": {\"field\": \"body\", \"kind\": \"declaration_list\"}},\n" }
+
+# ── the verified tunnel's guards (#297) ──────────────────────────────────────
+
+# The daemon dials the guest before the handshake decides, so a refused caller reaches it.
+[[fault]]
+id = "agentd-tunnel-dial-before-handshake"
+guard = "a_refused_caller_never_causes_a_guest_connection"
+run = ["cargo", "test", "-p", "agentd", "--test", "tunnel_relay", "--", "--exact", "a_refused_caller_never_causes_a_guest_connection"]
+expect = "test-failed"
+suite = "rust"
+message = "a refused caller must never cause a connection to the guest service"
+transform = { file = "agentd/src/tunnel.rs", replace = "    let mut noise = match handshake::respond(socket, responder).await {", with = "    let _early = dial(port).await;\n    let mut noise = match handshake::respond(socket, responder).await {" }
+
+# A VM with no seed relays the identity tunnel as a plain one instead of refusing it.
+[[fault]]
+id = "agentd-tunnel-seedless-downgrade"
+guard = "identity_against_a_seedless_vm_is_refused_not_downgraded"
+run = ["cargo", "test", "-p", "agentd", "--test", "tunnel_relay", "--", "--exact", "identity_against_a_seedless_vm_is_refused_not_downgraded"]
+expect = "test-failed"
+suite = "rust"
+message = "the daemon refuses a seedless identity tunnel rather than relaying it"
+transform = { file = "agentd/src/tunnel.rs", replace = "    let Some(material) = material else {\n", with = "    let Some(material) = material else {\n        if port != 0 {\n            relay(socket, port).await;\n            return;\n        }\n" }
+
+# The client reads its own failed check of the reply as a clean end instead of an error.
+[[fault]]
+id = "bind21-client-pin-failure-read-as-a-clean-end"
+guard = "a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "tunnel_end_to_end", "--", "--exact", "a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel"]
+expect = "test-failed"
+suite = "rust"
+message = "a reply that doesn't verify must fail the tunnel, not end Closed"
+transform = { file = "microvms-edges/src/session/tunnel.rs", replace = "        Some(identity) => match initiate(&mut socket, identity, guest_port).await? {", with = "        Some(identity) => match initiate(&mut socket, identity, guest_port)\n            .await\n            .unwrap_or(Initiated::Refused(TunnelEnd::Closed))\n        {" }
+
+# The client falls back to a plain relay when the reply doesn't verify.
+[[fault]]
+id = "bind21-client-pin-failure-downgrades"
+guard = "a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "tunnel_end_to_end", "--", "--exact", "a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel"]
+expect = "test-failed"
+suite = "rust"
+message = "a reply that doesn't verify ends the tunnel rather than relaying"
+transform = { file = "microvms-edges/src/session/tunnel.rs", replace = "        Some(identity) => match initiate(&mut socket, identity, guest_port).await? {\n            Initiated::Transport(transport) => Some(transport),\n            Initiated::Refused(end) => return Ok(Opened::Refused(end)),\n        },", with = "        Some(identity) => match initiate(&mut socket, identity, guest_port).await {\n            Ok(Initiated::Transport(transport)) => Some(transport),\n            Ok(Initiated::Refused(end)) => return Ok(Opened::Refused(end)),\n            Err(_) => None,\n        }," }
+
+# ── the client's event-stream parser (#297) ──────────────────────────────────
+
+# The pending-bytes ceiling removed from `SseParser::feed`: the harness's first flood holds more
+# than it. The harness runs for its one-second stable budget and doesn't shrink, so this costs
+# about as much as the unit entry below.
+[[fault]]
+id = "sse-fuzz-ceiling-removed"
+guard = "session::sse_fuzz::hostile_stream_bytes_stay_bounded_and_every_event_round_trips"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::sse_fuzz::hostile_stream_bytes_stay_bounded_and_every_event_round_trips"]
+expect = "test-failed"
+suite = "rust"
+message = "bytes held, over the 4194304-byte ceiling"
+transform = { file = "microvms-app/src/session/sse.rs", replace = "        if self.buffer.len() > MAX_PENDING_BYTES {", with = "        if false {" }
+
+# The same fault under the unit test that has guarded the ceiling since before the harness.
+[[fault]]
+id = "sse-ceiling-removed"
+guard = "session::sse::tests::an_unterminated_stream_is_refused_at_the_pending_ceiling"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::sse::tests::an_unterminated_stream_is_refused_at_the_pending_ceiling"]
+expect = "test-failed"
+suite = "rust"
+message = "the buffer passed the ceiling without erroring"
+note = "microvms-app/src/session/sse.rs::an_unterminated_stream_is_refused_at_the_pending_ceiling"
+transform = { file = "microvms-app/src/session/sse.rs", replace = "        if self.buffer.len() > MAX_PENDING_BYTES {", with = "        if false {" }
+
+# The harness stops naming its key, and BIND-22 loses its fuzz layer.
+[[fault]]
+id = "trace-sse-fuzz-layer"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "BIND-22 has no fuzz layer"
+transform = { file = "microvms-app/src/session/sse_fuzz.rs", replace = "/// **BIND-22.** Hostile stream bytes", with = "/// Hostile stream bytes" }
+
+# #297a review round 1 (the falsifier's faults): a gap that ends before it starts panics the
+# decoder, and a scan that doesn't back up misses a terminator split across two feeds. The
+# harness used to build neither.
+[[fault]]
+id = "sse-fuzz-gap-backwards"
+guard = "session::sse_fuzz::hostile_stream_bytes_stay_bounded_and_every_event_round_trips"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::sse_fuzz::hostile_stream_bytes_stay_bounded_and_every_event_round_trips"]
+expect = "test-failed"
+suite = "rust"
+message = "attempt to subtract with overflow"
+transform = { file = "microvms-app/src/session/sse.rs", replace = "            Ok(Some(ExecEvent::Gap {\n", with = "            let _span = payload.to - payload.from;\n            Ok(Some(ExecEvent::Gap {\n" }
+
+[[fault]]
+id = "sse-fuzz-straddle-missed"
+guard = "session::sse_fuzz::hostile_stream_bytes_stay_bounded_and_every_event_round_trips"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::sse_fuzz::hostile_stream_bytes_stay_bounded_and_every_event_round_trips"]
+expect = "test-failed"
+suite = "rust"
+message = "BIND-22: the chunks yield each piece's frames"
+transform = { file = "microvms-app/src/session/sse.rs", replace = "            let from = self.scanned.saturating_sub(MAX_TERMINATOR_LEN - 1);", with = "            let from = self.scanned;" }
+
 # ── ratchet:check: the adapter-logic collector and rule 3's bootstrap (#273) ─
 
 # #273's two ast-grep rules: each fault deletes one pattern alternative, and the fixture test

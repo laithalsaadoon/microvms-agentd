@@ -485,6 +485,8 @@ mod tests {
         assert!(state.is_bootstrapped());
     }
 
+    /// A second bootstrap with a different token is refused and leaves the first in place
+    /// (AGENTD-3), which is what keeps a losing racer from replacing the winner's token.
     #[test]
     fn identical_replay_succeeds_and_a_different_token_conflicts() {
         let state = state();

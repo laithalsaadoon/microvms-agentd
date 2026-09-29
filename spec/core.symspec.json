@@ -813,6 +813,25 @@
       "verificationNote": "PLATFORM.md: idlePolicy terminates a suspended VM after suspendedDurationSeconds",
       "verifies": []
     },
+    "763ab89b-4db5-4daf-9a97-b9e40bcebda6": {
+      "createdAt": "2026-09-29T05:00:00.000Z",
+      "derives": [],
+      "id": "763ab89b-4db5-4daf-9a97-b9e40bcebda6",
+      "key": "BIND-21",
+      "negated": false,
+      "patternType": "unwanted-behavior",
+      "priority": "critical",
+      "refines": [],
+      "satisfies": [],
+      "sentence": "If the far end of an identity-verified tunnel does not complete the handshake against the VM public key pinned in the name record, then the microvms-core shall fail the tunnel rather than relay the local connection through the tunnel.",
+      "status": "draft",
+      "systemName": "microvms-core",
+      "systemResponse": "fail the tunnel rather than relay the local connection through the tunnel",
+      "trigger": "the far end of an identity-verified tunnel does not complete the handshake against the VM public key pinned in the name record",
+      "updatedAt": "2026-09-29T05:00:00.000Z",
+      "verificationMethod": "test",
+      "verifies": []
+    },
     "778064c5-8028-47cf-8bd7-24ec10aa5cea": {
       "createdAt": "2026-09-24T18:00:00.000Z",
       "derives": [],
@@ -1052,6 +1071,25 @@
       "systemResponse": "transition the lifecycle to PENDING and record the image as existing",
       "trigger": "a launch request is accepted",
       "updatedAt": "2026-08-08T02:10:17.186Z",
+      "verificationMethod": "test",
+      "verifies": []
+    },
+    "a3647e5e-72a9-49f7-b2d4-31d0cf179ba6": {
+      "createdAt": "2026-09-29T05:00:00.000Z",
+      "derives": [],
+      "id": "a3647e5e-72a9-49f7-b2d4-31d0cf179ba6",
+      "key": "BIND-22",
+      "negated": false,
+      "patternType": "unwanted-behavior",
+      "priority": "high",
+      "refines": [],
+      "satisfies": [],
+      "sentence": "If a daemon event stream carries bytes that are not well-formed server-sent events, then the microvms-core shall drop the frame or end the stream with an error, without a panic and without holding more than 4 MiB of bytes that no frame terminator ends between reads.",
+      "status": "draft",
+      "systemName": "microvms-core",
+      "systemResponse": "drop the frame or end the stream with an error, without a panic and without holding more than 4 MiB of bytes that no frame terminator ends between reads",
+      "trigger": "a daemon event stream carries bytes that are not well-formed server-sent events",
+      "updatedAt": "2026-09-29T05:00:00.000Z",
       "verificationMethod": "test",
       "verifies": []
     },
@@ -1695,6 +1733,11 @@
       "code": "GTWR_R6_MISSING_UNITS",
       "reason": "124 and 128 are POSIX exit statuses (timeout(1)'s 124, 128 plus a signal number), which carry no unit",
       "requirementId": "234d70e2-caec-4d60-987a-4c5dca2fdecf"
+    },
+    {
+      "code": "GTWR_R6_MISSING_UNITS",
+      "reason": "4 carries its unit: the response reads 'more than 4 MiB'; the linter's unit list does not include MiB",
+      "requirementId": "a3647e5e-72a9-49f7-b2d4-31d0cf179ba6"
     }
   ]
 }

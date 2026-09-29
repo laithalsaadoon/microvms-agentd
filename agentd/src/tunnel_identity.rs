@@ -44,7 +44,8 @@ use protocol::identity::{HOST_PUBLIC_KEY_KEY, SEED_BYTES, SEED_KEY, SeedError, s
 pub struct Material {
     /// The seed, which *is* the x25519 static secret. 32 bytes, from the run-hook payload.
     seed: [u8; SEED_BYTES],
-    /// The launching host's public key, pinned. A handshake from any other key fails.
+    /// The launching host's public key, pinned. A handshake from any other key fails
+    /// (AGENTD-17).
     host_public_key: [u8; SEED_BYTES],
 }
 
@@ -315,8 +316,8 @@ mod tests {
         assert!(material.responder().is_ok(), "a second tunnel gets its own");
     }
 
-    /// The whole point, as a test: a handshake from the pinned host succeeds and one from any
-    /// other key fails.
+    /// The whole point, as a test (AGENTD-17): a handshake from the pinned host succeeds and one
+    /// from any other key fails.
     ///
     /// Driven in memory rather than over a socket, because what is under test is the key
     /// binding rather than the transport. The relay's own tests cover the wire.

@@ -456,6 +456,9 @@ fn seal(
 }
 
 /// How the identity handshake ended: a keyed transport, or the daemon's refusal.
+///
+/// A transport exists only once the daemon's reply verifies against the pinned VM key, so a
+/// far end holding any other key never gets a byte of the local connection (BIND-21).
 enum Initiated {
     Transport(snow::TransportState),
     Refused(TunnelEnd),
