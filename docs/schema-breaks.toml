@@ -1,0 +1,13 @@
+# Wire breaks the next release declares (#298). `mise run schema:compat` reads this file.
+#
+# A change that breaks a caller of the previous release bumps PROTOCOL_VERSION in
+# protocol/src/lib.rs and lists each break here, as the line the check prints, with the reason
+# a reviewer approves. While the version differs from the previous release tag's, the check
+# passes only when this list and the breaks it finds are the same: a later change that breaks
+# something else still fails, and a break that's been undone has to come off the list. Once
+# the release that ships them is tagged, the entries waive nothing (the check says so); empty
+# the list then. docs/PROTOCOL.md, "Compatibility between releases", has the rule.
+#
+# [[break]]
+# change = "route GET /v1/procs is gone"
+# why = "replaced by GET /v1/processes, which carries the pgid"

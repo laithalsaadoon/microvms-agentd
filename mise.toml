@@ -222,6 +222,21 @@ description = "Fail if the committed schema no longer matches what is served"
 # serves.
 run = "cargo run -q -p agentd --bin schema -- --check"
 
+[tasks."schema:compat"]
+description = "docs/schema.json against the previous release tag's copy: no route, status or field an older client or daemon reads is gone or newly required. Offline"
+# `schema:check` holds the schema to what this tree serves; this holds it to what the last
+# release served, which is what a caller meets mid-upgrade (#298). The script's docstring has
+# the direction-aware rule, what's out of scope, and why a clone with no `v*` tag refuses
+# rather than passes. The base is a local tag read with `git show`, so it's offline; CI's
+# `rust` job runs both commands on its ubuntu leg, with the full history and tags.
+#
+# The unit tests run first, for `trace:check`'s reason: they run the real script over the
+# v0.8.0, v0.9.0 and v0.10.0 schemas and over copies with one break seeded in each.
+run = [
+  "uv run python -m unittest discover -s scripts -p 'test_check_schema_compat.py'",
+  "./scripts/check-schema-compat.py",
+]
+
 [tasks.manifest]
 description = "Regenerate docs/manifest.json from the CLI's own argument tree"
 # The docs site's Reference tier (`site/scripts/gen-reference.mjs`) is generated from this
@@ -511,6 +526,7 @@ depends = [
   "security",
   "test",
   "schema:check",
+  "schema:compat",
   "manifest:check",
   "core-api:check",
   "parity:check",
