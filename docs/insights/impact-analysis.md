@@ -213,7 +213,7 @@ breaking change the compiler accepts — the module states the coupling at `:40`
 | `microvms-cli/src/commands/lifecycle.rs` | direct import | likely | `:988` reads `DEAD_STATES`; `:974` records that failing fast on it beats burning the poll budget |
 | `microvms-cli/tests/manifest.rs` | test | yes | `:229 constants_emit_json_writes_the_bare_object_the_drift_gate_reads`; `:297` asserts the command is listed rather than hidden |
 | `microvms-cli/src/commands/local.rs` (own tests) | test | yes | `:399` asserts the parsed output equals `microvms_core::constants::as_json()` |
-| `docs/PLATFORM.md`, `docs/TRUST.md` | config | likely | `docs/PLATFORM.md:43-48` documents the 4096-byte ceiling and notes that the service model's member documentation still says 16,384; `docs/TRUST.md:211-212` restates it |
+| `docs/PLATFORM.md`, `docs/TRUST.md` | config | likely | `docs/PLATFORM.md:43-48` documents the 4096-byte ceiling and notes that the service model's member documentation still says 16,384; `docs/TRUST.md:240-241` restates it |
 
 ### Blast-radius notes
 

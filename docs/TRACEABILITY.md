@@ -26,11 +26,13 @@ defined in `spec/core.symspec.json` and `spec/agentd.symspec.json`.
 | AGENTD-9 | 1 | 1 | 1 | 2 | 1 | 1 |
 | AGENTD-10 | 1 | 1 | 1 | 2 | 1 | 1 |
 | AGENTD-11 | 1 | 1 | 1 | 4 | 3 | 1 |
-| AGENTD-12 | 1 | 1 | 1 | 2 | 2 | 1 |
+| AGENTD-12 | 1 | 1 | 1 | 2 | 3 | 1 |
 | AGENTD-13 | 1 | 1 | 1 | 3 | 1 | 1 |
 | AGENTD-14 | 1 | 1 | 1 | 4 | 3 | 1 |
 | AGENTD-15 | 1 | 1 | 1 | 2 | 2 | 1 |
 | AGENTD-16 | 1 | 1 | 1 | 4 | 4 | 1 |
+| AGENTD-17 | waived | waived | waived | 2 | 1 | waived |
+| AGENTD-18 | waived | waived | waived | 1 | 1 | 1 |
 | BIND-11 | 1 | 1 | 1 | 3 | 1 | 1 |
 | BIND-12 | 1 | 1 | 1 | 5 | 3 | 1 |
 | BIND-13 | 1 | 1 | 1 | 3 | 3 | waived |
@@ -38,6 +40,8 @@ defined in `spec/core.symspec.json` and `spec/agentd.symspec.json`.
 | BIND-18 | 1 | 1 | 1 | 4 | 3 | 1 |
 | BIND-19 | 1 | 1 | 1 | 2 | 1 | 1 |
 | BIND-20 | 1 | 1 | 1 | 2 | 3 | 1 |
+| BIND-21 | waived | waived | waived | 1 | 1 | 1 |
+| BIND-22 | waived | waived | 1 | 1 | 1 | waived |
 | BIND-6 | 1 | 1 | 1 | 4 | 6 | 1 |
 | BIND-7 | 1 | 1 | 1 | 4 | 3 | 1 |
 | BIND-8 | 1 | 1 | 1 | 4 | 1 | 1 |
@@ -278,7 +282,7 @@ The agentd shall exclude each AGENTD_ variable and the agent token from the imag
 - **gherkin:** `agentd/tests/features/exec_start.feature`
 - **fuzz:** `agentd/src/exec_start_fuzz.rs`
 - **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
-- **impl:** `agentd/src/exec_start.rs`, `agentd/src/main.rs`
+- **impl:** `agentd/src/exec_start.rs`, `agentd/src/lib.rs`, `agentd/src/main.rs`
 - **live:** `conformance/run_rs.py`
 
 ## AGENTD-13
@@ -323,6 +327,28 @@ When a start request carries its user and group as integers and its shell as a b
 - **fuzz:** `agentd/src/exec_start_fuzz.rs`
 - **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
 - **impl:** `agentd/src/exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-js/src/session.rs`, `microvms-py/src/session.rs`
+- **live:** `conformance/run_rs.py`
+
+## AGENTD-17
+
+If the handshake of an identity-verified tunnel is not made with the host key the run hook pinned, then the agentd shall close the tunnel with close code 4403.
+
+- **model:** waived: #297 adds a stateright model of the tunnel handshake and its pins; until then the handshake and relay tests hold the key
+- **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
+- **fuzz:** waived: #297 adds a harness over the daemon's tunnel frame read
+- **test:** `agentd/src/tunnel_identity.rs`, `agentd/tests/tunnel_relay.rs`
+- **impl:** `agentd/src/tunnel_identity.rs`
+- **live:** waived: no live check presents another host key: that needs a second host identity for one VM, and the relay tests drive the daemon's real route with one
+
+## AGENTD-18
+
+While the handshake of an identity-verified tunnel has not completed, the agentd shall not dial the guest port or relay any byte between the caller and the guest.
+
+- **model:** waived: #297 adds a stateright model of the tunnel handshake and its pins; until then the handshake and relay tests hold the key
+- **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
+- **fuzz:** waived: #297 adds a harness over the daemon's tunnel frame read
+- **test:** `agentd/tests/tunnel_relay.rs`
+- **impl:** `agentd/src/tunnel.rs`
 - **live:** `conformance/run_rs.py`
 
 ## BIND-11
@@ -401,6 +427,28 @@ If a caller-supplied or fetched agentd binary is not an aarch64 ELF executable, 
 - **test:** `microvms-edges/src/provision.rs`, `microvms-js/__test__/provision.mjs`
 - **impl:** `microvms-edges/src/provision.rs`, `microvms-js/src/provision.rs`, `microvms-py/src/provision.rs`
 - **live:** `conformance/run_rs.py`
+
+## BIND-21
+
+If the far end of an identity-verified tunnel does not complete the handshake against the VM public key pinned in the name record, then the microvms-core shall fail the tunnel rather than relay the local connection through the tunnel.
+
+- **model:** waived: #297 adds a stateright model of the tunnel handshake and its pins; until then the handshake and relay tests hold the key
+- **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
+- **fuzz:** waived: #297 adds a harness over the client's tunnel frame read
+- **test:** `microvms-core/tests/tunnel_end_to_end.rs`
+- **impl:** `microvms-edges/src/session/tunnel.rs`
+- **live:** `conformance/run_rs.py`
+
+## BIND-22
+
+If a daemon event stream carries bytes that are not well-formed server-sent events, then the microvms-core shall drop the frame or end the stream with an error, without a panic and without holding more than 4 MiB of bytes that no frame terminator ends between reads.
+
+- **model:** waived: one stream read by one parser has no interleavings to explore; its input space is bytes
+- **gherkin:** waived: hostile bytes aren't a scenario a caller drives; the parser's tests feed it directly
+- **fuzz:** `microvms-app/src/session/sse_fuzz.rs`
+- **test:** `microvms-app/src/session/sse.rs`
+- **impl:** `microvms-app/src/session/sse.rs`
+- **live:** waived: a live daemon sends well-formed events, so a live run can't present hostile bytes
 
 ## BIND-6
 
@@ -522,3 +570,19 @@ The microvms-core shall not contain logic beyond composition and re-exports.
 - **test:** `microvms-cli/tests/dependency_direction.rs`
 - **impl:** `microvms-core/src/lib.rs`
 - **live:** waived: composition makes no AWS call of its own
+
+## Threats
+
+The threat table in `docs/TRUST.md`, each key marked when this matrix doesn't
+trace it.
+
+| Threat | Requirement | Guard | Status |
+|---|---|---|---|
+| An in-VM process races the platform to the bootstrap hook | AGENTD-1 (not traced), AGENTD-3 (not traced) | `agentd/tests/model_conformance.rs::every_walked_path_of_the_model_replays_against_the_daemon`, `agentd/src/state.rs::identical_replay_succeeds_and_a_different_token_conflicts` | guarded; a process that starts before the daemon still wins, which is the unenforced invariant below |
+| A caller holding the agent token but not the host key opens a verified tunnel | AGENTD-17 | `agentd/src/tunnel_identity.rs::only_the_pinned_host_key_completes_a_handshake`, `agentd/tests/tunnel_relay.rs::a_valid_token_with_the_wrong_host_key_is_refused` | guarded; its seeded fault waits for #297's handshake model, since under KK no one-sided change turns the pin off |
+| A verified tunnel's handshake fails, or the VM has no key, and the guest service is reached anyway | AGENTD-18 | `agentd/tests/tunnel_relay.rs::a_refused_caller_never_causes_a_guest_connection`, `agentd/tests/tunnel_relay.rs::identity_against_a_seedless_vm_is_refused_not_downgraded` | guarded |
+| A guest answers a verified tunnel's handshake with a key other than the pinned VM key | BIND-21 | `microvms-core/tests/tunnel_end_to_end.rs::a_wrong_pin_fails_closed_with_a_diagnosis`, `microvms-core/tests/tunnel_end_to_end.rs::a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel` | guarded |
+| A guest replays or forges tunnel frames after the handshake | none | none | known gap, #297: both frame reads refuse a frame that doesn't authenticate, but no key states it and no test or harness sends one |
+| A guest streams hostile server-sent events to the client | BIND-22 | `microvms-app/src/session/sse.rs::an_unterminated_stream_is_refused_at_the_pending_ceiling`, `microvms-app/src/session/sse.rs::an_unrecognized_or_unparseable_frame_is_dropped_rather_than_raised`, `microvms-app/src/session/sse_fuzz.rs::hostile_stream_bytes_stay_bounded_and_every_event_round_trips` | guarded |
+| A replaced or tampered daemon release asset | BIND-18 | `microvms-edges/src/provision/release.rs::another_signer_identity_is_refused`, `microvms-edges/src/provision/release.rs::one_flipped_byte_in_the_asset_is_refused` | guarded |
+| An on-path party ends a verified tunnel early, with a plaintext close frame or by dropping the connection | none | none | known gap, #342: the close frame is plaintext, and the client reads a transport error or a hangup after the handshake as a clean end too, so a stream cut short looks complete |

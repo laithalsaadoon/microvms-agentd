@@ -686,7 +686,7 @@ async fn a_verified_tunnel_completes_and_carries_bytes() {
     assert_eq!(ended, TunnelEnd::Closed);
 }
 
-/// **A wrong pin fails closed, before any local byte moves.**
+/// **A wrong pin fails closed, before any local byte moves** (BIND-21).
 ///
 /// The far end here is a *different* VM — a fresh seed — which is exactly what a replayed
 /// ledger record produces. The client must report the pin mismatch, and the guest server
@@ -713,15 +713,21 @@ async fn a_wrong_pin_fails_closed_with_a_diagnosis() {
     let kept = launch.keep();
     let (_client, local) = tokio::io::duplex(64 * 1024);
     let endpoint = format!("http://{relay}");
-    let outcome = microvms_core::session::tunnel::relay_connection_verified(
-        local,
-        &endpoint,
-        8080,
-        AGENT_TOKEN,
-        &auth,
-        &kept,
+    // Bounded, because a client that fell back to a plain relay here would wait on the local
+    // side forever, and a hang isn't a failure the guards can report.
+    let outcome = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        microvms_core::session::tunnel::relay_connection_verified(
+            local,
+            &endpoint,
+            8080,
+            AGENT_TOKEN,
+            &auth,
+            &kept,
+        ),
     )
-    .await;
+    .await
+    .expect("a wrong pin ends the tunnel rather than relaying");
 
     // Either side may detect it first (both statics are in the handshake hash): the daemon
     // refuses with 4403, or our own verification of its reply fails with the pin diagnosis.
@@ -738,4 +744,103 @@ async fn a_wrong_pin_fails_closed_with_a_diagnosis() {
         }
         Ok(other) => panic!("a wrong pin must not produce a working tunnel: {other:?}"),
     }
+}
+
+/// A stand-in far end that holds no key the client pinned: it reads the client's handshake
+/// message, answers with `reply`, and counts the binary frames the client sends after that.
+///
+/// Under KK a far end without the pinned VM key can't read the client's first message, so it
+/// can't write a real second one either. Bytes that don't verify are all it can answer with,
+/// and they're what makes the client's own check of the reply the one that fires (the
+/// daemon-side refusal in `verified_relay_server` never lets the client get that far).
+async fn forged_reply_server(reply: Vec<u8>) -> (SocketAddr, tokio::task::JoinHandle<usize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("a free port");
+    let addr = listener.local_addr().expect("bound");
+    let after = tokio::spawn(async move {
+        let Ok((stream, _)) = listener.accept().await else {
+            return 0;
+        };
+        let recorder = Arc::new(std::sync::Mutex::new(Observed::default()));
+        let Ok(mut socket) =
+            tokio_tungstenite::accept_hdr_async(stream, Recorder { recorder }).await
+        else {
+            return 0;
+        };
+        loop {
+            match socket.next().await {
+                Some(Ok(Message::Binary(_))) => break,
+                Some(Ok(_)) => continue,
+                _ => return 0,
+            }
+        }
+        if socket.send(Message::Binary(reply.into())).await.is_err() {
+            return 0;
+        }
+        let mut frames = 0;
+        while let Some(Ok(message)) = socket.next().await {
+            match message {
+                Message::Binary(_) | Message::Text(_) => frames += 1,
+                Message::Close(_) => break,
+                _ => {}
+            }
+        }
+        frames
+    });
+    (addr, after)
+}
+
+/// **A reply that doesn't verify against the pinned VM key fails the tunnel, and the local
+/// connection's bytes never cross it** (BIND-21).
+///
+/// The far end answers the handshake with bytes of a real second message's length that no
+/// holder of the pinned key wrote. The client has to refuse on its own check, name the pin,
+/// and send nothing after its handshake message, though the local side has bytes waiting.
+#[tokio::test]
+async fn a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel() {
+    // A KK second message with an empty payload: a 32-byte ephemeral key and a 16-byte tag.
+    let forged = (0_u8..48)
+        .map(|byte| byte.wrapping_mul(37) ^ 0x5a)
+        .collect();
+    let (relay, after) = forged_reply_server(forged).await;
+    let (auth, _minter) = auth();
+
+    let kept = microvms_core::identity::LaunchIdentity::generate()
+        .expect("the pool works")
+        .keep();
+    let (mut client, local) = tokio::io::duplex(64 * 1024);
+    client
+        .write_all(b"bytes that must not leave this host")
+        .await
+        .expect("written");
+    let endpoint = format!("http://{relay}");
+    let outcome = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        microvms_core::session::tunnel::relay_connection_verified(
+            local,
+            &endpoint,
+            8080,
+            AGENT_TOKEN,
+            &auth,
+            &kept,
+        ),
+    )
+    .await
+    .expect("a reply that doesn't verify ends the tunnel rather than relaying");
+
+    let text = match outcome {
+        Err(error) => error.to_string(),
+        Ok(end) => panic!("a reply that doesn't verify must fail the tunnel, not end {end:?}"),
+    };
+    assert!(
+        text.contains("pinned key"),
+        "the error must name the pin: {text}"
+    );
+    let sent = tokio::time::timeout(std::time::Duration::from_secs(5), after)
+        .await
+        .expect("the stand-in sees the tunnel end")
+        .expect("the stand-in joins");
+    assert_eq!(
+        sent, 0,
+        "no frame may follow the handshake message on a tunnel whose reply didn't verify"
+    );
 }

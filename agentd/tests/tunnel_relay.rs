@@ -600,7 +600,7 @@ async fn a_verified_tunnel_proves_the_vm_and_carries_encrypted_bytes() {
     }
 }
 
-/// **A caller who does not hold the launching host's key is refused with 4403.**
+/// **A caller who does not hold the launching host's key is refused with 4403** (AGENTD-17).
 ///
 /// The agent token alone must not be enough: it is a bearer credential the proxy carries
 /// on every request, and this test connects with a perfectly valid token and a wrong key.
@@ -646,7 +646,8 @@ async fn a_pin_from_a_different_vm_is_refused() {
     assert_eq!(code, protocol::tunnel::close::IDENTITY_REFUSED);
 }
 
-/// **`identity=true` against a VM launched without a seed is 4401, not a downgrade.**
+/// **`identity=true` against a VM launched without a seed is 4401, not a downgrade**
+/// (AGENTD-18).
 #[tokio::test]
 async fn identity_against_a_seedless_vm_is_refused_not_downgraded() {
     let server = upper_server().await;
@@ -654,14 +655,21 @@ async fn identity_against_a_seedless_vm_is_refused_not_downgraded() {
     let daemon = daemon().await;
     let mut socket = open_identity_tunnel(daemon, server.port()).await;
 
-    // No handshake to send — the daemon must close first with 4401.
-    let outcome = close_outcome(&mut socket).await;
+    // No handshake to send: the daemon must close first with 4401. Bounded, because a daemon
+    // that relayed instead would leave this wait open, and a hang isn't a failure.
+    let outcome = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        close_outcome(&mut socket),
+    )
+    .await
+    .expect("the daemon refuses a seedless identity tunnel rather than relaying it");
     let (code, reason) = outcome.expect("a close frame with the refusal");
     assert_eq!(code, protocol::tunnel::close::NO_IDENTITY);
     assert!(reason.contains("launched without"), "{reason}");
 }
 
-/// **The identity handshake runs before the dial: a refused caller never reaches a guest.**
+/// **The identity handshake runs before the dial: a refused caller never reaches a guest**
+/// (AGENTD-18).
 ///
 /// Asserted by pointing the verified tunnel at a listener that records connections: after a
 /// refused handshake, the listener must have seen none.

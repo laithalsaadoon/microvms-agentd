@@ -103,7 +103,6 @@ microvms-app/src/session/http.rs::a_request_debug_prints_header_names_and_never_
 microvms-app/src/session/mod.rs::build_with_keeps_the_callers_backend
 microvms-app/src/session/mod.rs::try_build_needs_a_backend_and_a_clock
 microvms-app/src/session/sse.rs::a_terminator_straddling_a_chunk_boundary_is_still_found
-microvms-app/src/session/sse.rs::an_unterminated_stream_is_refused_at_the_pending_ceiling
 microvms-app/src/session/sse.rs::scanning_an_unterminated_buffer_stays_linear
 microvms-cli/src/cli.rs::naming_a_config_file_conflicts_with_refusing_every_config_file
 microvms-cli/src/commands/agent.rs::a_refresh_reads_the_posture_off_the_record_and_never_assumes_open

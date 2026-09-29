@@ -230,6 +230,14 @@ steps = ["install cargo-bolero", "fuzz the egress-posture harness for two minute
 env = { CARGO_INSTALL_ROOT = "{tools}" }
 reason = "into ci:local's tool directory, not the caller's ~/.cargo/bin"
 
+[job."fuzz.yml".sse]
+task = "fuzz"
+steps = ["install cargo-bolero", "fuzz the event-stream harness for two minutes"]
+
+[job."fuzz.yml".sse.local."install cargo-bolero"]
+env = { CARGO_INSTALL_ROOT = "{tools}" }
+reason = "into ci:local's tool directory, not the caller's ~/.cargo/bin"
+
 [job."fuzz.yml".build-context]
 task = "fuzz"
 steps = [

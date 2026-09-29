@@ -43,7 +43,18 @@ so a typo such as `CLI-10` for `CLI-9` cannot pass as coverage. Keys are recogni
 prefixes the two specs define. And it refuses to pass on input it didn't read: every
 directory it lists must yield a file and, unless KEYLESS says why not, a key; every layer's
 collector must find a key; and the sentinel key must still be in TRACED.
-`docs/TRACEABILITY.md` is the rendered matrix:
+It also holds the threat table in `docs/TRUST.md` ("Threats and the tests that guard them") to
+the specs and the tests. Each row names a threat, its requirement keys, its guards as
+`path::test`, and a status. A key must be one a spec defines; a guard must be a test that runs,
+by the rules above, in that Rust file, and its own name or doc must name one of the row's keys.
+The file has to compile, too: a chain of `mod` declarations must reach it from a crate target
+(`src/lib.rs`, `src/main.rs`, `src/bin/`, `tests/`), or its tests never run. A `guarded` row
+names at least one of each, and a `known gap` names the issue that closes it. The table is one
+block of rows under its header and delimiter row: a missing delimiter or a row past a break
+fails rather than being skipped. A table that parses to no rows fails, and so does one without
+the row naming THREAT_SENTINEL.
+
+`docs/TRACEABILITY.md` is the rendered matrix, with the threat table after it:
 
   ./scripts/check-trace.py           print the matrix; fail if a layer is missing
   ./scripts/check-trace.py --write   also render docs/TRACEABILITY.md
@@ -68,6 +79,12 @@ SPECS = (
     ROOT / "spec" / "agentd.symspec.json",
 )
 DOC = ROOT / "docs" / "TRACEABILITY.md"
+TRUST = Path("docs") / "TRUST.md"
+THREATS = "Threats and the tests that guard them"
+THREAT_COLUMNS = ("Threat", "Requirement", "Guard", "Status")
+# A row the threat table always carries, for SENTINEL's reason: a parser that kept only some rows
+# (the first, or only the gaps) would leave the floor satisfied and the rest of the table unread.
+THREAT_SENTINEL = "BIND-18"
 LIVE = ROOT / "conformance" / "run_rs.py"
 
 # The fuzz waiver the ensure_image decisions share: their input space is interleavings.
@@ -75,6 +92,17 @@ INTERLEAVINGS = (
     "the input space is two callers interleaved against the platform, which "
     "model/src/image.rs checks exhaustively; the decision table is ten rows, all pinned "
     "by the_plan_table"
+)
+
+# The waivers the tunnel's identity keys share until #297's handshake model and frame harnesses
+# land; each of those removes its waiver.
+TUNNEL_MODEL = (
+    "#297 adds a stateright model of the tunnel handshake and its pins; until then the "
+    "handshake and relay tests hold the key"
+)
+TUNNEL_GHERKIN = (
+    "no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire "
+    "themselves, which a scenario would only restate"
 )
 
 # Requirements traced end to end. The value is the issue that introduced the key, or
@@ -142,6 +170,24 @@ TRACED: dict[str, str | tuple[str, dict[str, str]]] = {
     "AGENTD-14": "#226",
     "AGENTD-15": "#226",
     "AGENTD-16": "#224",
+    "AGENTD-17": (
+        "#297",
+        {
+            "model": TUNNEL_MODEL,
+            "gherkin": TUNNEL_GHERKIN,
+            "fuzz": "#297 adds a harness over the daemon's tunnel frame read",
+            "live": "no live check presents another host key: that needs a second host "
+            "identity for one VM, and the relay tests drive the daemon's real route with one",
+        },
+    ),
+    "AGENTD-18": (
+        "#297",
+        {
+            "model": TUNNEL_MODEL,
+            "gherkin": TUNNEL_GHERKIN,
+            "fuzz": "#297 adds a harness over the daemon's tunnel frame read",
+        },
+    ),
     "BIND-11": "#227",
     "BIND-12": "#227",
     "BIND-13": (
@@ -156,6 +202,25 @@ TRACED: dict[str, str | tuple[str, dict[str, str]]] = {
     "BIND-18": "#219",
     "BIND-19": "#219",
     "BIND-20": "#219",
+    "BIND-21": (
+        "#297",
+        {
+            "model": TUNNEL_MODEL,
+            "gherkin": TUNNEL_GHERKIN,
+            "fuzz": "#297 adds a harness over the client's tunnel frame read",
+        },
+    ),
+    "BIND-22": (
+        "#297",
+        {
+            "model": "one stream read by one parser has no interleavings to explore; its "
+            "input space is bytes",
+            "gherkin": "hostile bytes aren't a scenario a caller drives; the parser's tests "
+            "feed it directly",
+            "live": "a live daemon sends well-formed events, so a live run can't present "
+            "hostile bytes",
+        },
+    ),
     "BIND-6": "#222",
     "BIND-7": "#222",
     "BIND-8": "#222",
@@ -418,6 +483,24 @@ RULES = {
     "rust-fuzz-call": ("Rust", {"any": [_BOLERO, _FUZZ_TARGET]}),
     "rust-bare-check": ("Rust", _BARE_CHECK),
     "rust-bolero-import": ("Rust", _BOLERO_IMPORT),
+    # `mod name;`, which makes the compiler read `name.rs` or `name/mod.rs`. A threat guard's
+    # file has to be reached by a chain of these, or it never compiles and its tests never run.
+    # One under a `cfg` that could be off everywhere doesn't count, and neither does one with a
+    # `#[path]`, since the file it reads isn't the one its name spells.
+    "rust-mod-decl": (
+        "Rust",
+        {
+            "kind": "mod_item",
+            **_NAME,
+            "not": {
+                "any": [
+                    {"has": {"field": "body", "kind": "declaration_list"}},
+                    *_OFF,
+                    _in_run({"regex": r"^#\[\s*path\s*="}),
+                ]
+            },
+        },
+    ),
     # tree-sitter leaves a macro's body as unparsed tokens, so a `proptest! {}` body is
     # parsed again on its own to find the tests inside it.
     "rust-proptest": (
@@ -839,6 +922,265 @@ def mentions(patterns: Patterns, root: Path = ROOT) -> dict[str, set[str]]:
     return seen
 
 
+@dataclass
+class Threat:
+    """One row of the threat table in `docs/TRUST.md`."""
+
+    line: int
+    threat: str
+    keys: list[str]
+    guards: list[str]
+    status: str
+
+
+_CELL_ITEM = re.compile(r"^`([^`]+)`$")
+_GUARD = re.compile(r"^(?P<path>[^:`\s]+\.rs)::(?P<name>[A-Za-z_][A-Za-z0-9_]*)$")
+_ISSUE = re.compile(r"#\d+\b")
+_DELIMITER = re.compile(r"^\|(?:\s*:?-{3,}:?\s*\|){%d}$" % len(THREAT_COLUMNS))
+
+
+def _cells(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def _names(cell: str) -> list[str] | None:
+    """`none` as no names, a comma-separated list of backticked names, or None for anything else."""
+    if cell == "none":
+        return []
+    items = [_CELL_ITEM.match(item.strip()) for item in cell.split(",")]
+    if not all(items):
+        return None
+    return [item.group(1) for item in items]
+
+
+def parse_threats(text: str) -> tuple[list[Threat], list[str]]:
+    """The rows of the threat table, and what's wrong with its shape."""
+    where = TRUST.as_posix()
+    lines = text.splitlines()
+    heading = f"## {THREATS}"
+    try:
+        start = lines.index(heading)
+    except ValueError:
+        return [], [f"{where} has no {THREATS!r} section"]
+    # The table is the first block of `|` lines in the section. A `|` line past the end of that
+    # block is reported rather than skipped, since a blank line inside the table would otherwise
+    # hide every row after it.
+    table: list[tuple[int, str]] = []
+    stray: list[int] = []
+    ended = False
+    for number, line in enumerate(lines[start + 1 :], start=start + 2):
+        if line.startswith("## "):
+            break
+        if not line.startswith("|"):
+            ended = ended or bool(table)
+        elif ended:
+            stray.append(number)
+        else:
+            table.append((number, line))
+    if not table:
+        return [], []
+    header_line, header = table[0]
+    if tuple(_cells(header)) != THREAT_COLUMNS:
+        expected = "| " + " | ".join(THREAT_COLUMNS) + " |"
+        return [], [
+            f"{where}:{header_line}: the threat table's header is {header!r}, not {expected!r}"
+        ]
+    rows: list[Threat] = []
+    problems = [
+        f"{where}:{number}: this row is past a break in the threat table, so the table "
+        "ends before it; keep the table one unbroken block of rows"
+        for number in stray
+    ]
+    # Without the delimiter row Markdown renders no table, and reading the first row as the
+    # delimiter would drop it unchecked, so the rows are read from the line after the header.
+    delimited = len(table) > 1 and _DELIMITER.match(table[1][1].strip())
+    if not delimited:
+        problems.append(
+            f"{where}:{header_line + 1}: the line after the threat table's header isn't its "
+            "delimiter row, `|---|---|---|---|`"
+        )
+    body = table[2:] if delimited else table[1:]
+    for number, line in body:
+        cells = _cells(line)
+        if len(cells) != len(THREAT_COLUMNS):
+            problems.append(
+                f"{where}:{number}: the threat row has {len(cells)} cells, not "
+                f"{len(THREAT_COLUMNS)}"
+            )
+            continue
+        threat, key_cell, guard_cell, status = cells
+        keys, guards = _names(key_cell), _names(guard_cell)
+        for column, names in (("Requirement", keys), ("Guard", guards)):
+            if names is None:
+                problems.append(
+                    f"{where}:{number}: the {column} column isn't `none` or a list of "
+                    "backticked names"
+                )
+        rows.append(Threat(number, threat, keys or [], guards or [], status))
+    return rows, problems
+
+
+def guard_tests(
+    patterns: Patterns, files: list[Path], root: Path
+) -> dict[str, dict[str, set[str]]]:
+    """For each Rust file, its tests that run, each with the keys its name or own doc names.
+
+    The same ast-grep rules the test and fuzz layers use, so a guard counts exactly when a test
+    would: `#[ignore]` and non-platform `cfg`s are out, and a harness is a test here. A doc is
+    the item's when the item is the first test after it, since the rules only match a doc in
+    the run of attributes and comments that ends at a test.
+    """
+    tests: dict[str, list[tuple[int, str]]] = {}
+    docs: dict[str, list[tuple[int, str]]] = {}
+    for match in ast_grep(files, root):
+        rule, path = match["ruleId"], match["file"]
+        if rule in ("rust-test-name", "rust-live-test-name", "rust-harness-name"):
+            name = match["metaVariables"]["single"]["NAME"]["text"]
+            tests.setdefault(path, []).append((match["range"]["start"]["line"], name))
+        elif rule in ("rust-test-doc", "rust-live-test-doc", "rust-harness-doc"):
+            docs.setdefault(path, []).append(
+                (match["range"]["end"]["line"], match["text"])
+            )
+    named: dict[str, dict[str, set[str]]] = {}
+    for path, found in tests.items():
+        found.sort()
+        named[path] = {name: patterns.in_name(name) for _, name in found}
+        for end, text in docs.get(path, []):
+            following = [name for start, name in found if start > end]
+            if following:
+                named[path][following[0]] |= set(patterns.key.findall(text))
+    return named
+
+
+def _declared_by(path: str, root: Path) -> tuple[str, list[str]] | None:
+    """The module name a Rust file compiles as, and the files a `mod` for it could be in.
+
+    None for a file that's a crate target of its own: `src/lib.rs`, `src/main.rs`,
+    `src/bin/*.rs`, and a file directly in a `tests/` directory.
+    """
+    file = Path(path)
+    parent = file.parent
+    if parent.name == "tests" or (parent.name == "bin" and parent.parent.name == "src"):
+        return None
+    if parent.name == "src" and file.name in ("lib.rs", "main.rs"):
+        return None
+    name, where = (
+        (parent.name, parent.parent) if file.name == "mod.rs" else (file.stem, parent)
+    )
+    if where.name == "src":
+        return name, [(where / "lib.rs").as_posix(), (where / "main.rs").as_posix()]
+    if where.name == "tests":
+        # A `tests/<dir>/mod.rs` helper is declared by the test targets beside it.
+        return name, sorted(rel(target, root) for target in (root / where).glob("*.rs"))
+    return name, [
+        (where.parent / f"{where.name}.rs").as_posix(),
+        (where / "mod.rs").as_posix(),
+    ]
+
+
+def unreached(paths: list[str], root: Path) -> dict[str, str]:
+    """Each Rust file in `paths` no chain of `mod` declarations reaches from a crate target.
+
+    The value names the first declaration missing on the way up. A file only a `#[cfg]`-gated
+    or `#[path]` declaration reaches counts as unreached (see the `rust-mod-decl` rule).
+    """
+    parents: set[str] = set()
+    todo, seen = list(paths), set()
+    while todo:
+        path = todo.pop()
+        if path in seen:
+            continue
+        seen.add(path)
+        up = _declared_by(path, root)
+        for parent in up[1] if up else []:
+            if (root / parent).is_file():
+                parents.add(parent)
+                todo.append(parent)
+    declared: dict[str, set[str]] = {}
+    for match in ast_grep([root / path for path in sorted(parents)], root):
+        if match["ruleId"] == "rust-mod-decl":
+            name = match["metaVariables"]["single"]["NAME"]["text"]
+            declared.setdefault(match["file"], set()).add(name)
+
+    def missing(path: str) -> str | None:
+        up = _declared_by(path, root)
+        if up is None:
+            return None
+        name, candidates = up
+        above = [parent for parent in candidates if name in declared.get(parent, ())]
+        if not above:
+            return f"no `mod {name};` in {' or '.join(candidates) or 'a test target'}"
+        reasons = [missing(parent) for parent in above]
+        return None if None in reasons else reasons[0]
+
+    return {path: why for path in paths if (why := missing(path))}
+
+
+def check_threats(
+    patterns: Patterns, sentences: dict[str, str], root: Path = ROOT
+) -> tuple[list[Threat], list[str]]:
+    """The threat table's rows, and each row whose key or guard doesn't resolve."""
+    where = TRUST.as_posix()
+    try:
+        text = (root / TRUST).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return [], [f"{where} doesn't exist"]
+    rows, problems = parse_threats(text)
+    guards = {guard: _GUARD.match(guard) for row in rows for guard in row.guards}
+    files = sorted(
+        {root / match["path"] for match in guards.values() if match}, key=str
+    )
+    present = [path for path in files if path.is_file()]
+    tests = guard_tests(patterns, present, root)
+    orphans = unreached([rel(path, root) for path in present], root)
+    for row in rows:
+        at = f"{where}:{row.line}"
+        if row.status.startswith("guarded"):
+            if not row.keys or not row.guards:
+                problems.append(f"{at}: a guarded row names a key and a guard")
+        elif row.status.startswith("known gap"):
+            if not _ISSUE.search(row.status):
+                problems.append(f"{at}: a known gap names the issue that closes it")
+        else:
+            problems.append(f"{at}: the status starts with 'guarded' or 'known gap'")
+        for key in row.keys:
+            if key not in sentences:
+                problems.append(f"{at}: {key} is not defined in either spec")
+        for guard in row.guards:
+            match = guards[guard]
+            if not match:
+                problems.append(
+                    f"{at}: the Guard column isn't `none` or a list of backticked names "
+                    f"(`path.rs::test`): {guard!r}"
+                )
+                continue
+            path, name = match["path"], match["name"]
+            if not (root / path).is_file():
+                problems.append(
+                    f"{at}: the guard {guard} names {path}, which doesn't exist"
+                )
+            elif path in orphans:
+                problems.append(
+                    f"{at}: the guard {guard} is in {path}, which no `mod` declaration reaches "
+                    f"from its crate, so it never compiles: {orphans[path]}"
+                )
+            elif name not in tests.get(path, {}):
+                problems.append(
+                    f"{at}: the guard {guard} isn't a test that runs in {path}"
+                )
+            elif not tests[path][name] & set(row.keys):
+                problems.append(
+                    f"{at}: the guard {guard} doesn't name {', '.join(row.keys) or 'a key'}"
+                )
+    if not rows:
+        problems.append(f"the threat table in {where} parses to no rows")
+    elif not any(THREAT_SENTINEL in row.keys for row in rows):
+        problems.append(
+            f"the sentinel row naming {THREAT_SENTINEL} is not in the threat table in {where}"
+        )
+    return rows, problems
+
+
 def gaps(found: dict[str, dict[str, set[str]]], traced=None) -> list[str]:
     """Each layer a traced key neither covers nor waives."""
     traced = TRACED if traced is None else traced
@@ -856,7 +1198,11 @@ def cell(found: dict[str, dict[str, set[str]]], key: str, layer: str) -> str:
     return str(len(found.get(key, {}).get(layer, ())))
 
 
-def render(found: dict[str, dict[str, set[str]]], sentences: dict[str, str]) -> str:
+def render(
+    found: dict[str, dict[str, set[str]]],
+    sentences: dict[str, str],
+    threats: list[Threat] | None = None,
+) -> str:
     lines = [
         "# Requirement traceability",
         "",
@@ -879,6 +1225,24 @@ def render(found: dict[str, dict[str, set[str]]], sentences: dict[str, str]) -> 
             if reason:
                 listed = f"waived: {reason}" + (f" ({listed})" if listed else "")
             lines.append(f"- **{layer}:** " + (listed or "none"))
+    lines += [
+        "",
+        "## Threats",
+        "",
+        f"The threat table in `{TRUST.as_posix()}`, each key marked when this matrix doesn't",
+        "trace it.",
+        "",
+        "| " + " | ".join(THREAT_COLUMNS) + " |",
+        "|---|" + "---|" * (len(THREAT_COLUMNS) - 1),
+    ]
+    for row in threats or []:
+        keys = ", ".join(
+            key if key in TRACED else f"{key} (not traced)" for key in row.keys
+        )
+        guards = ", ".join(f"`{guard}`" for guard in row.guards)
+        lines.append(
+            f"| {row.threat} | {keys or 'none'} | {guards or 'none'} | {row.status} |"
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -914,14 +1278,20 @@ def main() -> int:
                 f"{key} is mentioned but not defined in the spec: {', '.join(where)}"
             )
     problems += gaps(found)
+    threats, threat_problems = check_threats(patterns, sentences)
+    problems += threat_problems
 
     width = max(len(layer) for layer in LAYERS)
     print("requirement  " + "  ".join(layer.ljust(width) for layer in LAYERS))
     for key in TRACED:
         counts = [cell(found, key, layer).ljust(width) for layer in LAYERS]
         print(f"{key:<11}  " + "  ".join(counts))
+    print(f"\nthreats in {TRUST.as_posix()}, by line")
+    for row in threats:
+        status = "guarded" if row.status.startswith("guarded") else "gap"
+        print(f"{row.line:<11}  {status:<7}  {', '.join(row.keys) or 'none'}")
 
-    rendered = render(found, sentences) if not problems or args.write else ""
+    rendered = render(found, sentences, threats) if not problems or args.write else ""
     if args.write and rendered:
         DOC.write_text(rendered)
         print(f"wrote {rel(DOC)}")

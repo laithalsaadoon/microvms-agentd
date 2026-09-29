@@ -481,6 +481,263 @@ class FuzzLayerCountsOnlyNamedHarnesses(unittest.TestCase):
         )
 
 
+# The threat table's fixture: `docs/TRUST.md` holding a section with the given rows, and a
+# release row naming the sentinel key, since every table must carry it.
+SENTINEL_ROW = (
+    "| A replaced release asset | `BIND-18` | `microvms-edges/src/release.rs::a_bad_asset_is_refused` "
+    "| guarded |"
+)
+SENTINEL_TEST = "/// BIND-18\n#[test]\nfn a_bad_asset_is_refused() {}\n"
+THREAT_SENTENCES = {key: "" for key in ("AGENTD-17", "AGENTD-18", "BIND-18", "BIND-21")}
+
+
+class ThreatTable(unittest.TestCase):
+    """Each threat row's key is in a spec and its guard is a running test that names it."""
+
+    def check(
+        self,
+        rows: list[str],
+        files: dict[str, str] | None = None,
+        *,
+        sentinel: bool = True,
+        section: str | None = None,
+    ) -> list[str]:
+        if section is None:
+            table = [
+                "| Threat | Requirement | Guard | Status |",
+                "|---|---|---|---|",
+                *rows,
+                *([SENTINEL_ROW] if sentinel else []),
+            ]
+            section = (
+                "## Threats and the tests that guard them\n\nProse.\n\n"
+                + "\n".join(table)
+            )
+        trust = f"# Trust\n\n## The five defenses that remain\n\nText.\n\n{section}\n\n## Next\n"
+        tree = Tree(
+            self,
+            {
+                "docs/TRUST.md": trust,
+                "microvms-edges/src/lib.rs": "mod release;\n",
+                "microvms-edges/src/release.rs": SENTINEL_TEST,
+                **(files or {}),
+            },
+        )
+        _, problems = TRACE["check_threats"](PATTERNS, THREAT_SENTENCES, tree.root)
+        return problems
+
+    def row(self, key: str = "`AGENTD-17`", guard: str | None = None, status="guarded"):
+        guard = guard or "`agentd/tests/relay.rs::the_wrong_host_key_is_refused`"
+        return f"| A caller without the host key | {key} | {guard} | {status} |"
+
+    def relay(self, doc: str = "/// AGENTD-17", attribute: str = "#[test]") -> dict:
+        return {
+            "agentd/tests/relay.rs": f"{doc}\n{attribute}\nfn the_wrong_host_key_is_refused() {{}}\n"
+        }
+
+    def assert_reported(self, problems: list[str], fragment: str) -> None:
+        self.assertTrue(
+            any(fragment in problem for problem in problems),
+            f"no problem mentions {fragment!r}: {problems}",
+        )
+
+    def test_a_table_whose_keys_and_guards_resolve_passes(self):
+        self.assertEqual(self.check([self.row()], self.relay()), [])
+
+    def test_a_guard_named_by_its_name_and_a_row_with_two_keys_pass(self):
+        files = {
+            "agentd/tests/relay.rs": "#[test]\nfn agentd_18_nothing_is_relayed() {}\n"
+        }
+        row = self.row(
+            "`AGENTD-17`, `AGENTD-18`",
+            "`agentd/tests/relay.rs::agentd_18_nothing_is_relayed`",
+        )
+        self.assertEqual(self.check([row], files), [])
+
+    def test_a_key_neither_spec_defines_is_reported(self):
+        problems = self.check([self.row("`BIND-99`")], self.relay("/// BIND-99"))
+        self.assert_reported(problems, "BIND-99 is not defined in either spec")
+
+    def test_a_guard_whose_file_does_not_exist_is_reported(self):
+        problems = self.check([self.row()])
+        self.assert_reported(
+            problems, "names agentd/tests/relay.rs, which doesn't exist"
+        )
+
+    def test_a_guard_that_is_not_a_test_is_reported(self):
+        problems = self.check([self.row()], self.relay(attribute=""))
+        self.assert_reported(
+            problems, "isn't a test that runs in agentd/tests/relay.rs"
+        )
+
+    def test_a_guard_that_never_runs_is_reported(self):
+        problems = self.check([self.row()], self.relay(attribute="#[test]\n#[ignore]"))
+        self.assert_reported(
+            problems, "isn't a test that runs in agentd/tests/relay.rs"
+        )
+
+    def test_a_guard_that_does_not_name_its_rows_key_is_reported(self):
+        for doc in ("/// The wrong key.", "// AGENTD-17", "/// AGENTD-18"):
+            with self.subTest(doc=doc):
+                problems = self.check([self.row()], self.relay(doc))
+                self.assert_reported(problems, "doesn't name AGENTD-17")
+
+    def test_a_key_on_a_neighboring_test_does_not_name_the_guard(self):
+        files = {
+            "agentd/tests/relay.rs": "/// AGENTD-17\n#[test]\nfn a_neighbor() {}\n\n"
+            "#[test]\nfn the_wrong_host_key_is_refused() {}\n"
+        }
+        problems = self.check([self.row()], files)
+        self.assert_reported(problems, "doesn't name AGENTD-17")
+
+    def test_a_guarded_row_without_a_key_or_a_guard_is_reported(self):
+        for row in (self.row("none"), self.row(guard="none")):
+            with self.subTest(row=row):
+                problems = self.check([row], self.relay())
+                self.assert_reported(problems, "a guarded row names a key and a guard")
+
+    def test_a_known_gap_names_the_issue_that_closes_it(self):
+        gap = self.row("none", "none", "known gap: nobody checks it")
+        self.assert_reported(
+            self.check([gap]), "a known gap names the issue that closes it"
+        )
+        self.assertEqual(self.check([self.row("none", "none", "known gap, #297")]), [])
+
+    def test_a_status_that_is_neither_guarded_nor_a_gap_is_reported(self):
+        problems = self.check([self.row(status="probably fine")], self.relay())
+        self.assert_reported(
+            problems, "the status starts with 'guarded' or 'known gap'"
+        )
+
+    def test_a_cell_that_is_not_backticked_names_is_reported(self):
+        for row in (
+            self.row("AGENTD-17"),
+            self.row(guard="agentd/tests/relay.rs::the_wrong_host_key_is_refused"),
+            self.row(guard="`the_wrong_host_key_is_refused`"),
+        ):
+            with self.subTest(row=row):
+                problems = self.check([row], self.relay())
+                self.assert_reported(
+                    problems, "column isn't `none` or a list of backticked"
+                )
+
+    def test_a_row_with_the_wrong_cell_count_is_reported(self):
+        problems = self.check(["| A threat | `AGENTD-17` | guarded |"], self.relay())
+        self.assert_reported(problems, "has 3 cells, not 4")
+
+    def test_a_header_that_is_not_the_four_columns_is_reported(self):
+        section = (
+            "## Threats and the tests that guard them\n\n| Threat | Key | Test | Status |\n"
+            f"|---|---|---|---|\n{SENTINEL_ROW}"
+        )
+        self.assert_reported(
+            self.check([], section=section), "the threat table's header"
+        )
+
+    def test_a_missing_trust_file_is_reported(self):
+        tree = Tree(self, {"microvms-edges/src/release.rs": SENTINEL_TEST})
+        _, problems = TRACE["check_threats"](PATTERNS, THREAT_SENTENCES, tree.root)
+        self.assertEqual(problems, ["docs/TRUST.md doesn't exist"])
+
+    def test_a_missing_section_is_reported(self):
+        problems = self.check([], section="## Something else\n\nNo table.")
+        self.assert_reported(
+            problems, "has no 'Threats and the tests that guard them' section"
+        )
+
+    def test_a_table_that_parses_to_no_rows_is_reported(self):
+        for section in (
+            "## Threats and the tests that guard them\n\nThe table moved.",
+            "## Threats and the tests that guard them\n\n| Threat | Requirement | Guard | Status |"
+            "\n|---|---|---|---|",
+        ):
+            with self.subTest(section=section):
+                self.assert_reported(
+                    self.check([], section=section), "parses to no rows"
+                )
+
+    def test_a_table_without_its_delimiter_row_is_reported_and_its_first_row_still_read(
+        self,
+    ):
+        section = (
+            "## Threats and the tests that guard them\n\n| Threat | Requirement | Guard | Status |"
+            f"\n{self.row('`BIND-99`')}\n{SENTINEL_ROW}"
+        )
+        problems = self.check([], self.relay(), section=section)
+        self.assert_reported(problems, "isn't its delimiter row")
+        self.assert_reported(problems, "BIND-99 is not defined in either spec")
+
+    def test_a_row_past_a_break_in_the_table_is_reported(self):
+        for gap in ("", "Prose between rows."):
+            with self.subTest(gap=gap):
+                problems = self.check(
+                    [self.row(), gap, self.row("`BIND-99`")], self.relay()
+                )
+                self.assert_reported(problems, "is past a break in the threat table")
+
+    def guard_in(self, files: dict[str, str], path: str) -> list[str]:
+        row = self.row(guard=f"`{path}::the_wrong_host_key_is_refused`")
+        test = "/// AGENTD-17\n#[test]\nfn the_wrong_host_key_is_refused() {}\n"
+        return self.check([row], {**files, path: test})
+
+    def test_a_guard_that_mod_declarations_reach_passes(self):
+        for files, path in (
+            (
+                {
+                    "agentd/src/lib.rs": "pub mod session;\n",
+                    "agentd/src/session/mod.rs": "#[cfg(test)]\nmod relay;\n",
+                },
+                "agentd/src/session/relay.rs",
+            ),
+            (
+                {
+                    "agentd/src/main.rs": "mod session;\n",
+                    "agentd/src/session.rs": "pub(crate) mod relay;\n",
+                },
+                "agentd/src/session/relay.rs",
+            ),
+            (
+                {
+                    "agentd/src/lib.rs": "mod session;\n",
+                    "agentd/src/session/mod.rs": "",
+                },
+                "agentd/src/session/mod.rs",
+            ),
+            ({"agentd/tests/relay.rs": "mod common;\n"}, "agentd/tests/common/mod.rs"),
+            ({}, "agentd/src/bin/relay.rs"),
+        ):
+            with self.subTest(path=path, files=files):
+                self.assertEqual(self.guard_in(files, path), [])
+
+    def test_a_guard_no_mod_declaration_reaches_is_reported(self):
+        for parent in (
+            "",
+            "// mod relay;\n",
+            "mod relay {}\n",
+            '#[cfg(feature = "slow")]\nmod relay;\n',
+            '#[path = "other.rs"]\nmod relay;\n',
+        ):
+            with self.subTest(parent=parent):
+                files = {
+                    "agentd/src/lib.rs": "pub mod session;\n",
+                    "agentd/src/session/mod.rs": parent,
+                }
+                problems = self.guard_in(files, "agentd/src/session/relay.rs")
+                self.assert_reported(
+                    problems, "no `mod relay;` in agentd/src/session.rs"
+                )
+        # A declaration whose own file nothing reaches doesn't reach its child either.
+        files = {"agentd/src/lib.rs": "", "agentd/src/session/mod.rs": "mod relay;\n"}
+        problems = self.guard_in(files, "agentd/src/session/relay.rs")
+        self.assert_reported(problems, "no `mod session;` in agentd/src/lib.rs")
+
+    def test_a_table_without_the_sentinel_row_is_reported(self):
+        problems = self.check([self.row()], self.relay(), sentinel=False)
+        self.assert_reported(
+            problems, "the sentinel row naming BIND-18 is not in the threat table"
+        )
+
+
 class InputFloors(unittest.TestCase):
     """The check refuses to pass on input it didn't read, or read and found nothing in."""
 
@@ -550,6 +807,8 @@ class ParserFloors(unittest.TestCase):
             out.stderr,
         )
         self.assertIn("CLI-7 has no test layer", out.stderr)
+        # The threat table's guards are Rust tests, so none of them resolves either.
+        self.assertIn("isn't a test that runs in", out.stderr)
 
     def test_a_missing_parser_fails_the_check(self):
         directory = tempfile.TemporaryDirectory()

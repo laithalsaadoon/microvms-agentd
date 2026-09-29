@@ -35,7 +35,7 @@ in CI (`protocol/src/lib.rs:23-27`).
 not have (`agentd/src/lib.rs:4-7`). Its modules divide by defect class rather than by HTTP
 surface: `state` owns the one-shot bootstrap, `auth` decides authorization before a body byte is
 read, `exec` owns idempotent start with ack-gated release, and `fs` owns streaming tar
-(`agentd/src/lib.rs:31-46`). The trust boundary is the crate's organizing fact — the platform's
+(`agentd/src/lib.rs:37-52`). The trust boundary is the crate's organizing fact — the platform's
 own `/run` hook arrives from `127.0.0.1`, indistinguishable at the socket level from a request
 sent by a process inside the VM, so source-address filtering would reject a legitimate bootstrap
 and the one-shot property is the only defense left (`agentd/src/lib.rs:11-16`). `routes.rs`

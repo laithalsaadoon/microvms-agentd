@@ -35,7 +35,7 @@ pub struct Frame {
 /// The longest frame terminator, in bytes. See [`find_frame_end`].
 const MAX_TERMINATOR_LEN: usize = 4;
 
-/// The ceiling on bytes held for a frame that has not terminated.
+/// The ceiling on bytes held for a frame that has not terminated (BIND-22).
 ///
 /// # Why a ceiling at all
 ///
@@ -434,7 +434,7 @@ mod tests {
         }
     }
 
-    /// An undelimited stream is refused at the ceiling rather than buffered forever.
+    /// An undelimited stream is refused at the ceiling rather than buffered forever (BIND-22).
     ///
     /// [`ErrorKind::Protocol`] and therefore **not retryable**, which is the half that
     /// matters to `exec::Attach`: a reconnect into the same non-SSE body would refill the
@@ -607,7 +607,7 @@ mod tests {
     }
 
     /// An unknown event name and unparseable data are both dropped, matching the
-    /// daemon's own degradation. One bad frame must not end a live stream.
+    /// daemon's own degradation. One bad frame must not end a live stream (BIND-22).
     #[test]
     fn an_unrecognized_or_unparseable_frame_is_dropped_rather_than_raised() {
         let mut parser = SseParser::new();
@@ -626,7 +626,7 @@ mod tests {
         }
     }
 
-    /// Undecodable base64 in an *output* event is an error, not a drop.
+    /// Undecodable base64 in an *output* event is an error, not a drop or a panic (BIND-22).
     ///
     /// The one place a drop would be wrong: those are bytes the caller asked for, and
     /// silently losing output is the failure the gap event exists to make impossible.

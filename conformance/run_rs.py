@@ -3915,7 +3915,7 @@ def drive_tunnel_identity(
         flipped = pin[:20] + ("A" if pin[20] != "A" else "B") + pin[21:]
         record_path.write_text(json.dumps({**record, "identityVmPublicKey": flipped}))
         results.absent(
-            "a tampered pin fails closed with nothing served",
+            "AGENTD-18 a tampered pin fails closed with nothing served",
             _tunnel_fetch(cli, vm_name, state_dir, 18444, AGENT_PORT, verify=True),
         )
         # And the same tampered record cannot be adopted under the flag: the handshake
@@ -3933,13 +3933,13 @@ def drive_tunnel_identity(
                 str(adopted_dir),
             )
             results.check(
-                "attach --verify-identity with a tampered pin is refused and writes nothing",
+                "BIND-21 attach --verify-identity with a tampered pin is refused and writes nothing",
                 False,
                 "no refusal",
             )
         except KindError as exc:
             results.check(
-                "attach --verify-identity with a tampered pin is refused and writes nothing",
+                "BIND-21 attach --verify-identity with a tampered pin is refused and writes nothing",
                 exc.code == "ERR_PRECONDITION"
                 and not (adopted_dir / "names" / f"{tampered_name}.json").exists(),
                 f"code={exc.code} written={(adopted_dir / 'names' / f'{tampered_name}.json').exists()}",

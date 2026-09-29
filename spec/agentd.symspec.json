@@ -86,6 +86,25 @@
       "verificationMethod": "test",
       "verifies": []
     },
+    "3f6d5cc2-dc98-4d58-a8f6-e1d99ca509e2": {
+      "createdAt": "2026-09-29T05:00:00.000Z",
+      "derives": [],
+      "id": "3f6d5cc2-dc98-4d58-a8f6-e1d99ca509e2",
+      "key": "AGENTD-18",
+      "negated": true,
+      "patternType": "state-driven",
+      "preCondition": "the handshake of an identity-verified tunnel has not completed",
+      "priority": "critical",
+      "refines": [],
+      "satisfies": [],
+      "sentence": "While the handshake of an identity-verified tunnel has not completed, the agentd shall not dial the guest port or relay any byte between the caller and the guest.",
+      "status": "draft",
+      "systemName": "agentd",
+      "systemResponse": "dial the guest port or relay any byte between the caller and the guest",
+      "updatedAt": "2026-09-29T05:00:00.000Z",
+      "verificationMethod": "test",
+      "verifies": []
+    },
     "52611cba-ebc5-4e49-836c-b50fcf4227cf": {
       "createdAt": "2026-09-24T21:09:26.751Z",
       "derives": [],
@@ -237,6 +256,25 @@
       "verificationMethod": "test",
       "verifies": []
     },
+    "b7cd0126-e1fc-4a4d-8fc1-23479866e19d": {
+      "createdAt": "2026-09-29T05:00:00.000Z",
+      "derives": [],
+      "id": "b7cd0126-e1fc-4a4d-8fc1-23479866e19d",
+      "key": "AGENTD-17",
+      "negated": false,
+      "patternType": "unwanted-behavior",
+      "priority": "critical",
+      "refines": [],
+      "satisfies": [],
+      "sentence": "If the handshake of an identity-verified tunnel is not made with the host key the run hook pinned, then the agentd shall close the tunnel with close code 4403.",
+      "status": "draft",
+      "systemName": "agentd",
+      "systemResponse": "close the tunnel with close code 4403",
+      "trigger": "the handshake of an identity-verified tunnel is not made with the host key the run hook pinned",
+      "updatedAt": "2026-09-29T05:00:00.000Z",
+      "verificationMethod": "test",
+      "verifies": []
+    },
     "d4f15798-c44b-426e-a642-d268ee4018e8": {
       "createdAt": "2026-09-24T21:09:26.539Z",
       "derives": [],
@@ -317,5 +355,11 @@
     "variables": []
   },
   "terms": [],
-  "waivers": []
+  "waivers": [
+    {
+      "code": "GTWR_R6_MISSING_UNITS",
+      "reason": "4403 is a WebSocket close code (protocol::tunnel::close::IDENTITY_REFUSED), which carries no unit",
+      "requirementId": "b7cd0126-e1fc-4a4d-8fc1-23479866e19d"
+    }
+  ]
 }

@@ -221,6 +221,10 @@ check that holds it, or says that review does.
 - A requirement is covered by a test that names it, not by a mention.
   `trace:check` counts a key only in a test's name, its own doc comment or
   docstring, a pytest marker, or a Node test's title.
+- Each threat in the table in `docs/TRUST.md` names the requirement key that
+  states its defense and a test that guards it. `trace:check` fails on a row
+  whose key no spec defines, whose guard isn't a running test that names one of
+  the row's keys, or whose known gap names no issue.
 - Live checks treat an absent value as a failure. `Results.eq` in
   `conformance/run_rs.py` fails on an absent value, and `Results.absent` is the
   one way to assert absence; `conformance:self-test` in `check` runs their

@@ -25,7 +25,7 @@ layers. `protocol` is the wire contract as types: pure data, serde plus schemars
 no axum, no base64 (`protocol/src/lib.rs:16-21`). Both the daemon and the client
 compile against it, so a renamed field fails a build instead of a consumer's runtime
 (`agentd/Cargo.toml:11-15`). `agentd` is the daemon
-(`agentd/src/lib.rs:31-46`) — `state` owns the one-shot bootstrap, `auth` decides
+(`agentd/src/lib.rs:37-52`) — `state` owns the one-shot bootstrap, `auth` decides
 before a body byte is read, `exec` and `fs` own idempotent exec and streaming tar. Its
 router is assembled by walking the same endpoint list `/v1/schema` publishes, so a
 documented route with no handler panics at startup (`agentd/src/routes.rs:29-35`);
@@ -57,7 +57,7 @@ wrap the same core and never the CLI (`microvms-py/Cargo.toml:22-26`,
 only on `stateright`, with no workspace edge, modelling the protocol rather than importing it
 (`model/Cargo.toml:12-13`), and `conformance/run_rs.py` drives the built CLI through its named
 checks against real AWS (`conformance/run_rs.py:9`). Start at
-`agentd/src/lib.rs:9-29` for the trust boundary, then `microvms-core/src/lib.rs:21-40` for
+`agentd/src/lib.rs:9-35` for the trust boundary, then `microvms-core/src/lib.rs:21-40` for
 the trap ladder.
 
 ## Stack
