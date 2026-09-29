@@ -9,18 +9,25 @@ case that fails is failing for the thing it broke.
 The reader cases run the real parsers (Griffe through `griffe_dump.py`, TypeDoc through npx)
 over a tiny stub and declaration file, because a reader tested only against hand-written dumps
 proves the hand-written dumps. They need uv and npx on PATH, so run this under `mise x` or a
-mise task.
+mise task, on a POSIX host (the npx lock cases use fcntl, as the TypeDoc run needs a POSIX shell).
 """
 
+import contextlib
 import copy
+import fcntl
+import io
 import json
+import os
 import runpy
 import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SCRIPT = Path(__file__).with_name("check-parity.py")
 PARITY = runpy.run_path(str(SCRIPT))
@@ -583,6 +590,154 @@ class ReaderTests(unittest.TestCase):
             stub.write_text("# SPDX-License-Identifier: Apache-2.0\n", encoding="utf-8")
             surface = PARITY["py_surface"](PARITY["run_griffe"](stub))
         self.assertEqual(surface.names, set())
+
+
+# Stands in for npx. Locating typedoc succeeds only while someone else holds the lock beside the
+# npm cache exclusively, so a locate that runs unlocked, or under a shared lock, fails. The probe
+# is shared because an exclusive probe is refused by a held shared lock too. The TypeDoc run
+# writes an empty project.
+FAKE_NPX = """#!{python}
+import fcntl, json, os, sys
+argv = sys.argv[1:]
+if argv[-2:] == ["-c", "command -v typedoc"]:
+    with open(os.environ["FAKE_NPX_LOCK"], "a") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError:
+            cache = os.environ["npm_config_cache"]
+            print(os.path.join(cache, "_npx", "0", "node_modules", ".bin", "typedoc"))
+            sys.exit(0)
+    print("npx ran with the lock free")
+    sys.exit(3)
+with open(argv[argv.index("--json") + 1], "w") as out:
+    json.dump({{"children": []}}, out)
+"""
+
+
+def first_on_path(directory: Path) -> dict[str, str]:
+    return {"PATH": f"{directory}{os.pathsep}{os.environ['PATH']}"}
+
+
+class NpxLockTests(unittest.TestCase):
+    """Concurrent callers installing TypeDoc into one npx cache extract over each other (#347).
+
+    The first case runs the real npm, which answers `npm config get cache` from
+    `npm_config_cache`; the others put a fake npm first on PATH. None of them touches the
+    caller's `~/.npm`.
+    """
+
+    def test_typedoc_is_located_with_the_npx_lock_held(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            npx = bin_dir / "npx"
+            npx.write_text(FAKE_NPX.format(python=sys.executable), encoding="utf-8")
+            npx.chmod(0o755)
+            cache = root / "cache"
+            # a used cache that lacks this package set, which is what the race needs, so a
+            # lock taken only on an empty cache fails too
+            (cache / "_npx" / "other").mkdir(parents=True)
+            declarations = root / "index.d.ts"
+            declarations.write_text(DECLARATIONS, encoding="utf-8")
+            env = {
+                **first_on_path(bin_dir),
+                "npm_config_cache": str(cache),
+                # spelled here, not asked of the helper, so a lock on any other file fails
+                "FAKE_NPX_LOCK": str(cache / "microvms-agentd-npx.lock"),
+            }
+            with mock.patch.dict(os.environ, env):
+                try:
+                    project = PARITY["run_typedoc"](declarations, root)
+                except PARITY["ParityError"] as error:
+                    self.fail(str(error))
+        self.assertEqual(project, {"children": []})
+
+    def test_a_second_caller_waits_for_the_lock(self):
+        # The test holds the lock itself; flock locks belong to an open file, so the helper's
+        # own open() in another thread conflicts with it. The helper's flock calls are recorded
+        # and must be one try and then one blocking wait, both exclusive: a lock that raises,
+        # polls and then gives up, or waits shared lets a second install in while the first
+        # is still extracting. The wait itself has to say so on stderr.
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            cache = root / "cache"
+            cache.mkdir()
+            npm = root / "npm"
+            npm.write_text(f"#!/bin/sh\necho '{cache}'\n", encoding="utf-8")
+            npm.chmod(0o755)
+            errors: list[BaseException] = []
+            entered = threading.Event()
+            waiting = threading.Event()
+            calls: list[int] = []
+            real_flock = fcntl.flock
+
+            def recording_flock(fd, operation):
+                if threading.current_thread() is caller:
+                    calls.append(operation)
+                    if not operation & fcntl.LOCK_NB:
+                        waiting.set()
+                return real_flock(fd, operation)
+
+            def second_caller():
+                try:
+                    with PARITY["npx_lock"]():
+                        entered.set()
+                except BaseException as error:  # noqa: BLE001 - reported by the test below
+                    errors.append(error)
+
+            caller = threading.Thread(target=second_caller, daemon=True)
+            stderr = io.StringIO()
+            with (
+                mock.patch.dict(os.environ, first_on_path(root)),
+                (cache / "microvms-agentd-npx.lock").open("a") as held,
+            ):
+                fcntl.flock(held, fcntl.LOCK_EX)
+                with (
+                    mock.patch.object(fcntl, "flock", recording_flock),
+                    contextlib.redirect_stderr(stderr),
+                ):
+                    try:
+                        caller.start()
+                        deadline = time.monotonic() + 30
+                        while caller.is_alive() and not entered.is_set():
+                            if waiting.is_set() or time.monotonic() > deadline:
+                                break
+                            time.sleep(0.02)
+                        self.assertTrue(
+                            caller.is_alive() and not entered.is_set(),
+                            f"the second caller didn't wait for the held lock: {errors!r}",
+                        )
+                    finally:
+                        real_flock(held, fcntl.LOCK_UN)
+                    caller.join(timeout=30)
+            self.assertFalse(caller.is_alive(), "the second caller never got the lock")
+            self.assertEqual(errors, [])
+            self.assertTrue(entered.is_set())
+            self.assertEqual(
+                calls,
+                [fcntl.LOCK_EX | fcntl.LOCK_NB, fcntl.LOCK_EX],
+                "the helper must try once, then block exclusively until the lock is free",
+            )
+            self.assertIn(f"parity: waiting for {cache}", stderr.getvalue())
+
+    def test_an_npm_that_names_no_cache_is_refused(self):
+        # A blank answer would lock a file in the working directory, which no other caller
+        # shares, so the lock would hold nothing back.
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            npm = root / "npm"
+            npm.write_text("#!/bin/sh\necho\n", encoding="utf-8")
+            npm.chmod(0o755)
+            with (
+                mock.patch.dict(os.environ, first_on_path(root)),
+                contextlib.chdir(root),
+                self.assertRaisesRegex(
+                    PARITY["ParityError"], "not a directory to lock"
+                ),
+                PARITY["npx_lock"](),
+            ):
+                pass
 
 
 if __name__ == "__main__":

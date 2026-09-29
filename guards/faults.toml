@@ -1840,6 +1840,91 @@ suite = "script"
 message = "FAIL: test_a_declaration_typedoc_would_drop_is_refused ("
 transform = { file = "scripts/check-parity.py", replace = "    if hidden:\n        raise ParityError(", with = "    if False:\n        raise ParityError(" }
 
+# Concurrent callers installing TypeDoc into one cold npx cache extract over each other (#347).
+# The locate runs under a lock beside npm's cache; without it the fake npx finds the lock free.
+[[fault]]
+id = "parity-npx-lock-dropped"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_typedoc_is_located_with_the_npx_lock_held ("
+transform = { file = "scripts/check-parity.py", replace = "    with npx_lock():\n        where = run(", with = "    with contextlib.nullcontext():\n        where = run(" }
+
+# A blank answer from npm would lock a file nobody else opens.
+[[fault]]
+id = "parity-npx-lock-blank-cache"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_npm_that_names_no_cache_is_refused ("
+transform = { file = "scripts/check-parity.py", replace = "    if not cache.is_absolute():\n", with = "    if False:\n" }
+
+# A shared lock lets a second caller into the install, so the race comes back with the lock taken.
+[[fault]]
+id = "parity-npx-lock-shared"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_typedoc_is_located_with_the_npx_lock_held ("
+transform = { file = "scripts/check-parity.py", replace = "fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)", with = "fcntl.flock(handle, fcntl.LOCK_SH | fcntl.LOCK_NB)" }
+
+# The same for the wait: a second caller waiting shared still gets in beside a third.
+[[fault]]
+id = "parity-npx-lock-shared-wait"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_second_caller_waits_for_the_lock ("
+transform = { file = "scripts/check-parity.py", replace = "            fcntl.flock(handle, fcntl.LOCK_EX)\n", with = "            fcntl.flock(handle, fcntl.LOCK_SH)\n" }
+
+# A lock that doesn't wait raises for a second caller, so every overlap fails instead of the rare
+# race.
+[[fault]]
+id = "parity-npx-lock-nonblocking"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_second_caller_waits_for_the_lock ("
+transform = { file = "scripts/check-parity.py", replace = "            fcntl.flock(handle, fcntl.LOCK_EX)\n", with = "            raise\n" }
+
+# A lock that polls for a second and then installs anyway passes a short hold (#347 review): the
+# cold install it's for takes longer, so the race comes back. The recorded calls catch it.
+[[fault]]
+id = "parity-npx-lock-gives-up"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_second_caller_waits_for_the_lock ("
+transform = { file = "scripts/check-parity.py", replace = "            fcntl.flock(handle, fcntl.LOCK_EX)\n", with = "            for _ in range(50):\n                try:\n                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)\n                    break\n                except BlockingIOError:\n                    __import__(\"time\").sleep(0.02)\n" }
+
+# A waiter that prints nothing leaves a host-wide stall behind a slow install with no trace in the
+# log (#347 review).
+[[fault]]
+id = "parity-npx-lock-silent-wait"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_second_caller_waits_for_the_lock ("
+transform = { file = "scripts/check-parity.py", replace = "            print(\n                f\"parity: waiting for {lock}, held by another npx install\",\n                file=sys.stderr,\n            )\n", with = "            pass\n" }
+
+# The race needs only this package set's directory to be cold, not the whole cache, so a lock
+# skipped once `_npx` exists lets it back in (#347 review).
+[[fault]]
+id = "parity-npx-lock-skipped-when-warm"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_typedoc_is_located_with_the_npx_lock_held ("
+transform = { file = "scripts/check-parity.py", replace = "    lock = cache / \"microvms-agentd-npx.lock\"\n", with = "    if (cache / \"_npx\").is_dir():\n        yield\n        return\n    lock = cache / \"microvms-agentd-npx.lock\"\n" }
+
 # The `guards` job's Node (#271 review): its pin is held to mise.toml's major like the others.
 [[fault]]
 id = "ci-parity-guards-node-major"

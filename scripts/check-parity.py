@@ -22,7 +22,9 @@ Each surface is read by the tool that already owns it:
   pins of typedoc, typescript and @types/node (this script holds its pins to
   `site/package.json`). The declarations name `Buffer`, so `@types/node` has to resolve; npx
   puts it in its own cache, and a generated tsconfig that extends the site's names that
-  directory as `typeRoots`.
+  directory as `typeRoots`. Every caller on one host shares npx's cache, so the locate that
+  installs runs under a lock beside it, and a second caller waits for the first install
+  instead of extracting over it (#347).
 
 The check fails when:
 
@@ -69,6 +71,7 @@ to them is this check's job, and the ratchet runs in a CI job with no Node for T
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
@@ -76,6 +79,7 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -520,6 +524,47 @@ def npx() -> list[str]:
     return argv
 
 
+@contextlib.contextmanager
+def npx_lock() -> Iterator[None]:
+    # npx installs into <cache>/_npx/<hash of the packages>, and two callers installing one set
+    # at once extract over each other (TAR_ENTRY_ERROR, then no .bin/typedoc or a tree with
+    # files gone). The lock sits beside the cache because that's what callers share: every
+    # worktree, `fire` worker and `ci:local` clone uses the one `~/.npm`, while each agent on a
+    # shared host has its own TMPDIR. The lock goes with the file, so a killed holder drops it.
+    # Imported here so `--exemptions` still loads where fcntl doesn't exist.
+    #
+    # A waiter says so on stderr and then waits with no deadline, on purpose: a lock that gives
+    # up and installs anyway brings the race back on exactly the slow cold install it's for,
+    # and a waiter would only have made the same registry fetch. The caller's own timeout
+    # (`fire`'s per command, CI's per job) bounds a hung holder.
+    #
+    # The lock prevents new damage and doesn't repair old: a tree a lost race left half written
+    # stays that way, because npx sees the directory and skips the install. Delete that
+    # `_npx/<hash>` directory by hand. check-dts-consumer.py's `locate_tsc` installs its own set
+    # without this lock; each `guards` shard runs its one command once, so only two local runs
+    # on a cold cache can race it (a follow-up to #347).
+    import fcntl
+
+    printed = run(["npm", "config", "get", "cache"], "npm locating its cache").strip()
+    cache = Path(printed)
+    if not cache.is_absolute():
+        raise ParityError(
+            f"npm config get cache printed {printed!r}, not a directory to lock"
+        )
+    cache.mkdir(parents=True, exist_ok=True)
+    lock = cache / "microvms-agentd-npx.lock"
+    with lock.open("a") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print(
+                f"parity: waiting for {lock}, held by another npx install",
+                file=sys.stderr,
+            )
+            fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
+
+
 def run_typedoc(dts: Path, scratch: Path) -> dict[str, Any]:
     hidden = hidden_declarations(dts.read_text(encoding="utf-8"))
     if hidden:
@@ -527,7 +572,11 @@ def run_typedoc(dts: Path, scratch: Path) -> dict[str, Any]:
             f"{dts} has JSDoc tags TypeDoc drops a declaration for, so this check can't see"
             f" what they hide: {'; '.join(hidden)}"
         )
-    where = run([*npx(), "-c", "command -v typedoc"], "npx locating typedoc").strip()
+    # the locate installs; once it returns the tree is whole, so TypeDoc runs stay parallel
+    with npx_lock():
+        where = run(
+            [*npx(), "-c", "command -v typedoc"], "npx locating typedoc"
+        ).strip()
     # <npx cache>/node_modules/.bin/typedoc, so @types sits beside .bin
     type_roots = Path(where).parent.parent / "@types"
     tsconfig = scratch / "tsconfig.json"
