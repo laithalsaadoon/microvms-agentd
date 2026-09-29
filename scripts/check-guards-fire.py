@@ -72,6 +72,30 @@ Two subcommands:
           the full fire runs when it skipped any. CI's `guards` job runs it on a pull request
           against the pull request's base, and fires every entry on each push to main (#323).
 
+          `--shard k/N` fires shard k of N (numbered from 0, as cargo-mutants numbers its
+          shards) of what the other flags select: it's cut after `--only`, `--suite`,
+          `--affected` and the bindings drop, and the restored pass runs the shard's own
+          commands. CI's `guards` job runs one shard a leg (#345). The N shards partition the
+          selection, and shard k of N of the same tree and base is always the same entries. A
+          shard holds whole commands, so a command's clean and restored runs happen once across
+          the matrix. Each command weighs the sum of its entries' rough CI seconds
+          (`entry_cost`: 16 for an entry that builds the CLI, 14 for another Rust entry, 6 for
+          a script one), and commands go heaviest first onto the lightest shard, a tie in
+          weight to the command that comes first in the registry and a tie in load to the lower
+          shard; a shard's entries keep registry order. A cost, not a count, because a Rust
+          entry costs about twice a script entry's time and the CLI's entries sit together:
+          split by entry count, one of three shards held most of the CLI's entries and took
+          440 s locally against 295 s and 314 s for the other two, and split by cost the three
+          took 302 s, 359 s and 304 s (2026-09-29, this change's tree). Modeled on main's push
+          at 6a868e9 with that run's per-command and per-fault seconds, the slowest of three
+          legs is about 12 minutes by cost against about 17 by count, and about 15 either way
+          with #340's entries added. Commands stay whole because splitting one repeats its
+          clean and restored runs in each shard that holds part of it. It prints which shard
+          it is and how much of the selection it keeps, and a shard with nothing in its slice
+          exits 0.
+          `mise run guards:fire -- --affected --shard 1/3` runs one pull request leg's share
+          here.
+
           Cargo builds into `--target-dir`, by default `guards-fire` under the caller's
           target (`$CARGO_TARGET_DIR`, or `<repo>/target`). It persists, so a fault costs an
           incremental build from the second run on. It isn't the caller's own target because
@@ -156,6 +180,7 @@ import tempfile
 import threading
 import time
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -1148,31 +1173,83 @@ def start(workers: list[Worker], board: Board, do) -> list[threading.Thread]:
     return threads
 
 
+def command_weights(
+    faults: list[Fault], cost: Callable[[Fault], int] = lambda fault: 1
+) -> dict[tuple, int]:
+    """Each command's weight in a split, in registry order: the sum of its entries' `cost`,
+    by default the number of entries it runs (the split over workers)."""
+    weight: dict[tuple, int] = {}
+    for fault in faults:
+        key = command_key(fault)
+        weight[key] = weight.get(key, 0) + cost(fault)
+    return weight
+
+
+def entry_cost(fault: Fault) -> int:
+    """An entry's seconds on CI's runner, roughly, for the split over shards: an entry that
+    builds the CLI (its argv names microvms-cli) about 16, another Rust entry (a cargo build)
+    about 14, and a script entry about 6. Measured per fault on main's push at 6a868e9 (cargo
+    13.7 s, the rest 5.8 s) and on #340's second round (entries naming microvms-cli 17.8 s).
+    The module docstring's `--shard` says why a cost and not a count."""
+    if any("microvms-cli" in arg for argv in fault.run for arg in argv):
+        return 16
+    return 14 if fault.suite == "rust" else 6
+
+
+def spread(
+    weight: dict[tuple, int], bins: int, load: list[int] | None = None
+) -> list[list[tuple]]:
+    """`weight`'s keys in `bins` bins, heaviest first onto the lightest bin, from `load`.
+
+    A tie in weight goes to the key that comes first in `weight` (registry order) and a tie in
+    load to the lower bin, so the same keys always land in the same bins. No hash and no set
+    order: `hash()` of a string changes with PYTHONHASHSEED from one process to the next.
+    """
+    order = {key: index for index, key in enumerate(weight)}
+    load = list(load or [0] * bins)
+    out: list[list[tuple]] = [[] for _ in range(bins)]
+    for key in sorted(weight, key=lambda k: (-weight[k], order[k])):
+        lightest = min(range(bins), key=lambda n: (load[n], n))
+        out[lightest].append(key)
+        load[lightest] += weight[key]
+    return out
+
+
 def assign(selected: list[Fault], jobs: int) -> list[list[tuple]]:
     """Each worker's commands for the clean pass, heaviest first onto the lightest worker.
 
     Bindings commands go to worker 1, which holds `--venv`. Within a worker, commands keep
     the registry's order, so the main thread's in-order printing waits as little as it can.
     """
-    order: dict[tuple, int] = {}
-    weight: dict[tuple, int] = {}
-    for fault in selected:
-        key = command_key(fault)
-        order.setdefault(key, len(order))
-        weight[key] = weight.get(key, 0) + 1
-    queues: list[list[tuple]] = [[] for _ in range(jobs)]
-    load = [0] * jobs
-    for key in order:
-        if key[0] == "bindings":
-            queues[0].append(key)
-            load[0] += weight[key]
-    for key in sorted(
-        (k for k in order if k[0] != "bindings"), key=lambda k: (-weight[k], order[k])
-    ):
-        lightest = min(range(jobs), key=lambda n: (load[n], n))
-        queues[lightest].append(key)
-        load[lightest] += weight[key]
+    weight = command_weights(selected)
+    order = {key: index for index, key in enumerate(weight)}
+    pinned = [k for k in weight if k[0] == "bindings"]
+    load = [sum(weight[k] for k in pinned)] + [0] * (jobs - 1)
+    queues = spread({k: w for k, w in weight.items() if k[0] != "bindings"}, jobs, load)
+    queues[0] = pinned + queues[0]
     return [sorted(q, key=order.__getitem__) for q in queues]
+
+
+# ASCII digits only: `\d` would take any script's digits, which `int` reads too.
+SHARD = re.compile(r"([0-9]+)/([0-9]+)")
+
+
+def parse_shard(text: str) -> tuple[int, int] | None:
+    """`k/N` as (k, N) when 0 <= k < N; None otherwise."""
+    match = SHARD.fullmatch(text)
+    if match is None:
+        return None
+    k, n = map(int, match.groups())
+    return (k, n) if k < n else None
+
+
+def shard(selected: list[Fault], k: int, n: int) -> list[Fault]:
+    """Shard `k` of `n` (from 0) of `selected`, in registry order: whole commands, weighted by
+    `entry_cost` and spread by `spread` over `n` bins. The module docstring's `--shard` says
+    why."""
+    weights = command_weights(selected, entry_cost)
+    keep = set(spread(weights, n)[k])
+    return [fault for fault in selected if command_key(fault) in keep]
 
 
 def check_pass(
@@ -1456,6 +1533,15 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
     if args.jobs < 1:
         print("guards: --jobs needs a count of 1 or more", file=sys.stderr)
         return 1
+    spec = None
+    if args.shard is not None:
+        spec = parse_shard(args.shard)
+        if spec is None:
+            print(
+                f"guards: --shard takes k/N with 0 <= k < N; got {args.shard}",
+                file=sys.stderr,
+            )
+            return 1
     unknown = sorted(set(args.only) - {f.id for f in faults})
     if unknown:
         print(f"guards: no entry has the id {', '.join(unknown)}", file=sys.stderr)
@@ -1514,6 +1600,17 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
     if not selected:
         print("guards: no entry selected", file=sys.stderr)
         return 1
+    if spec is not None:
+        k, n = spec
+        whole, commands = len(selected), len(command_weights(selected))
+        selected = shard(selected, k, n)
+        print(
+            f"guards: shard {k} of {n} keeps {len(selected)} of {whole} selected entries "
+            f"({len(command_weights(selected))} of {commands} commands)"
+        )
+        if not selected:
+            print("guards: this shard's slice is empty, so nothing to fire")
+            return 0
     env = clean_env()
     env["CARGO_TARGET_DIR"] = str(
         Path(args.target_dir).resolve()
@@ -1732,6 +1829,11 @@ def main(argv: list[str] | None = None) -> int:
         "--base",
         help="the ref --affected diffs against, through its merge base with HEAD "
         "(default: origin/main)",
+    )
+    fire.add_argument(
+        "--shard",
+        metavar="K/N",
+        help="fire only shard K of N (from 0) of the selection, as one leg of CI's matrix",
     )
     args = parser.parse_args(argv)
     root = (

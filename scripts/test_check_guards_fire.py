@@ -8,8 +8,10 @@ the scratch worktree included. The census cases run the real ast-grep, so run th
 `mise run guards:list`.
 """
 
+import json
 import os
 import re
+import runpy
 import shlex
 import shutil
 import signal
@@ -20,6 +22,7 @@ import tempfile
 import textwrap
 import time
 import tomllib
+import types
 import unittest
 from pathlib import Path
 
@@ -1749,6 +1752,427 @@ jobs:
 """
 
 
+# ── --shard (#345) ───────────────────────────────────────────────────────────
+
+
+def command(guard: str, fids: list[str], noted: frozenset[str] = frozenset()) -> str:
+    """Entries that share one command, `cargo test -- --exact <guard>`. Each seeds
+    `<guard>=fail` after its own word `w-<fid>=ok`, which the fake runner reads after the
+    guard's `ok`, so each entry fires on its own. An id in `noted` gets a `note`, which
+    changes its registry text and nothing else."""
+    return "".join(
+        entry(
+            fid=fid,
+            guard=guard,
+            run=["cargo", "test", "--", "--exact", guard],
+            fault=f'transform = {{ file = "state.txt", replace = "w-{fid}=ok", with = "w-{fid}=ok {guard}=fail" }}',
+            **({"note": "changed"} if fid in noted else {}),
+        )
+        for fid in fids
+    )
+
+
+def commands_registry(
+    spec: list[tuple[str, list[str]]], noted: frozenset[str] = frozenset()
+) -> str:
+    return "".join(command(guard, fids, noted) for guard, fids in spec)
+
+
+def commands_repo(
+    test: object, spec: list[tuple[str, list[str]]], extra: str = "", **files: str
+) -> Repo:
+    state = [f"{guard}=ok" for guard, _ in spec]
+    state += [f"w-{fid}=ok" for _, fids in spec for fid in fids]
+    return Repo(
+        test,
+        {
+            "guards/faults.toml": commands_registry(spec) + extra,
+            "state.txt": " ".join(state) + "\n",
+            **files,
+        },
+    )
+
+
+# The shared fixture, in registry order: a one-entry command ahead of a two-entry one, so the
+# order the split visits commands in (heaviest first) isn't the registry's, then five one-entry
+# commands. Guard names run backward through the alphabet, so a tie broken by the sorted key is
+# the reverse of one broken by registry position. A bindings entry comes last, and `fire` drops
+# it without `--venv`.
+SHARED = [
+    ("gh", ["h"]),
+    ("gg", ["g1", "g2"]),
+    ("gf", ["f"]),
+    ("ge", ["e"]),
+    ("gd", ["d"]),
+    ("gc", ["c"]),
+    ("gb", ["b"]),
+]
+SHARED_IDS = [fid for _, fids in SHARED for fid in fids]
+SHARED_BINDING = entry(
+    fid="bi",
+    guard="t",
+    run=["node", "--test", "--test-reporter=tap", "t.mjs"],
+    suite="bindings",
+    fault='transform = { file = "state-js.txt", replace = "t=ok", with = "t=fail" }',
+)
+# The shared fixture's slices under the documented rule: the heaviest command first, a tie by
+# first registry position, each onto the lightest shard, a tie to the lower shard; within a
+# shard, registry order.
+GOLDEN = {
+    2: [["g1", "g2", "e", "c"], ["h", "f", "d", "b"]],
+    3: [["g1", "g2", "c"], ["h", "e", "b"], ["f", "d"]],
+}
+BANNER = re.compile(
+    r"^guards: shard (\d+) of (\d+) keeps (\d+) of (\d+) selected entries "
+    r"\((\d+) of (\d+) commands\)$",
+    re.MULTILINE,
+)
+# A child that loads the script and prints `shard`'s slices of the shared fixture, so the
+# tie-break is checked under one hash seed per process.
+SLICES = """\
+import json, runpy, sys
+from pathlib import Path
+script = runpy.run_path(sys.argv[1])
+faults, _ = script["load"](Path(sys.argv[2]))
+rust = [f for f in faults if f.suite != "bindings"]
+print(json.dumps({n: [[f.id for f in script["shard"](rust, k, n)] for k in range(n)] for n in (2, 3)}))
+"""
+
+
+def fired_ids(stdout: str) -> list[str]:
+    return re.findall(r"^fired: ([a-z0-9-]+) ", stdout, re.MULTILINE)
+
+
+class FireSharded(unittest.TestCase):
+    """`fire --shard k/N` keeps shard k of the selection and fires only that (#345). CI's
+    `guards` job runs one shard a leg, so the slices have to cover the selection, never
+    overlap, keep each command whole, and come out the same on every run.
+
+    Each registry entry for this class runs one test, so its fixture runs are cached on the
+    class: a test that shares the sweep pays for it once, and so does the whole class."""
+
+    cache: dict[str, object] = {}
+
+    @classmethod
+    def once(cls, name: str, make):
+        if name not in cls.cache:
+            cls.cache[name] = make(
+                types.SimpleNamespace(addCleanup=cls.addClassCleanup)
+            )
+        return cls.cache[name]
+
+    @classmethod
+    def shared(cls) -> Repo:
+        return cls.once(
+            "shared",
+            lambda holder: commands_repo(
+                holder, SHARED, SHARED_BINDING, **{"state-js.txt": "t=ok\n"}
+            ),
+        )
+
+    @classmethod
+    def sweep(cls) -> dict[object, subprocess.CompletedProcess[str]]:
+        """Every shard of the shared fixture at N = 1 to 3, and the unsharded fire, under one
+        hash seed."""
+
+        def run(_holder: object) -> dict[object, subprocess.CompletedProcess[str]]:
+            repo = cls.shared()
+            runs: dict[object, subprocess.CompletedProcess[str]] = {
+                None: repo.run("fire", PYTHONHASHSEED="0")
+            }
+            for n in (1, 2, 3):
+                for k in range(n):
+                    runs[(k, n)] = repo.run(
+                        "fire", "--shard", f"{k}/{n}", PYTHONHASHSEED="0"
+                    )
+            return runs
+
+        runs = cls.once("sweep", run)
+        for key, out in runs.items():
+            if out.returncode != 0:
+                raise AssertionError(
+                    f"fire {key}: exit {out.returncode}\n{out.stdout}{out.stderr}"
+                )
+        return runs
+
+    def shards(self, n: int) -> list[list[str]]:
+        return [fired_ids(self.sweep()[(k, n)].stdout) for k in range(n)]
+
+    def test_no_entry_is_dropped(self):
+        for n in (1, 2, 3):
+            with self.subTest(n=n):
+                self.assertEqual(
+                    set().union(*self.shards(n)),
+                    set(SHARED_IDS),
+                    f"the {n} shards together don't fire every selected entry",
+                )
+
+    def test_no_entry_fires_in_two_shards(self):
+        for n in (2, 3):
+            with self.subTest(n=n):
+                shards = self.shards(n)
+                self.assertEqual(
+                    sum(map(len, shards)),
+                    len(set().union(*shards)),
+                    f"an entry fires in more than one of {n} shards: {shards}",
+                )
+
+    def test_a_command_stays_in_one_shard(self):
+        # g1 and g2 share a command, so splitting them runs its clean and restored passes
+        # twice across the matrix.
+        for n in (2, 3):
+            with self.subTest(n=n):
+                self.assertEqual(
+                    [("g1" in s, "g2" in s) for s in self.shards(n)].count(
+                        (True, True)
+                    ),
+                    1,
+                    f"g1 and g2 share a command but not a shard: {self.shards(n)}",
+                )
+
+    def test_shard_0_of_1_is_the_unsharded_fire(self):
+        # A one-entry command comes before the two-entry one, so a slice in the order the
+        # split visits commands (heaviest first) prints g1 before h.
+        runs = self.sweep()
+        whole = [v for v in verdicts(runs[(0, 1)].stdout) if not BANNER.match(v)]
+        self.assertEqual(
+            whole,
+            verdicts(runs[None].stdout),
+            "shard 0 of 1 doesn't print the unsharded fire's lines in its order",
+        )
+        self.assertEqual(fired_ids(runs[None].stdout), SHARED_IDS)
+
+    def test_each_shard_keeps_its_documented_slice(self):
+        for n, want in GOLDEN.items():
+            with self.subTest(n=n, via="fire"):
+                self.assertEqual(
+                    self.shards(n), want, "a shard's slice isn't the documented one"
+                )
+        repo = self.shared()
+        for seed in range(8):
+            with self.subTest(seed=seed):
+                out = subprocess.run(
+                    [sys.executable, "-c", SLICES, str(SCRIPT), str(repo.root)],
+                    capture_output=True,
+                    text=True,
+                    env=clean_env(PYTHONHASHSEED=str(seed)),
+                )
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertEqual(
+                    json.loads(out.stdout),
+                    {str(n): want for n, want in GOLDEN.items()},
+                    f"PYTHONHASHSEED={seed}: a shard's slice isn't the documented one",
+                )
+
+    def test_a_shard_says_which_it_is_and_what_it_keeps(self):
+        runs = self.sweep()
+        for n in (1, 2, 3):
+            kept = commands = 0
+            for k in range(n):
+                with self.subTest(k=k, n=n):
+                    out = runs[(k, n)].stdout
+                    found = BANNER.findall(out)
+                    self.assertEqual(
+                        len(found), 1, f"shard {k}/{n} prints no banner\n{out}"
+                    )
+                    shard, count, keeps, whole, has, total = map(int, found[0])
+                    self.assertEqual((shard, count), (k, n))
+                    self.assertEqual(keeps, len(fired_ids(out)))
+                    self.assertEqual((whole, total), (len(SHARED_IDS), len(SHARED)))
+                    kept += keeps
+                    commands += has
+            self.assertEqual((kept, commands), (len(SHARED_IDS), len(SHARED)))
+
+    def test_the_bindings_drop_comes_before_the_slice(self):
+        # Without --venv, `fire` drops bindings entries; the slice is of what's left, so the
+        # banner counts the rust entries only.
+        runs = self.sweep()
+        for k in (0, 1):
+            with self.subTest(k=k):
+                out = runs[(k, 2)].stdout
+                self.assertIn("guards: skipping 1 bindings entries", out)
+                self.assertEqual(
+                    [int(m[3]) for m in BANNER.findall(out)],
+                    [len(SHARED_IDS)],
+                    "the slice isn't of the selection the bindings drop leaves",
+                )
+                self.assertNotIn("bi", fired_ids(out))
+
+    def test_a_shard_runs_only_its_own_commands_clean_and_restored(self):
+        runs = self.sweep()
+        for n in (2, 3):
+            for k in range(n):
+                with self.subTest(k=k, n=n):
+                    out = runs[(k, n)].stdout
+                    mine = set(fired_ids(out))
+                    for label in ("clean", "restored"):
+                        named = set(
+                            re.findall(
+                                rf"^guards: {label} run for ([a-z0-9-]+) ",
+                                out,
+                                re.MULTILINE,
+                            )
+                        )
+                        self.assertTrue(named, f"shard {k}/{n} has no {label} run")
+                        self.assertLessEqual(
+                            named,
+                            mine,
+                            f"shard {k}/{n} runs another shard's command {label}",
+                        )
+
+    def test_whole_commands_spread_heaviest_first(self):
+        # Three three-entry commands at registry positions 0, 1 and 3 among nine: a
+        # contiguous split puts the first two in shard 0, and so does round robin to the
+        # first and third.
+        spec = [
+            ("gp", ["p1", "p2", "p3"]),
+            ("gq", ["q1", "q2", "q3"]),
+            ("gr", ["r"]),
+            ("gs", ["s1", "s2", "s3"]),
+            ("gt", ["t"]),
+            ("gu", ["u"]),
+            ("gv", ["v"]),
+            ("gw", ["w"]),
+            ("gx", ["x"]),
+        ]
+        repo = commands_repo(self, spec)
+        for k in range(3):
+            with self.subTest(k=k):
+                out = repo.run("fire", "--shard", f"{k}/3")
+                self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+                big = {fid[0] for fid in fired_ids(out.stdout) if fid[0] in "pqs"}
+                self.assertEqual(
+                    len(big), 1, f"shard {k} of 3 doesn't hold one heavy command: {big}"
+                )
+
+    @classmethod
+    def affected_runs(cls) -> dict[int, subprocess.CompletedProcess[str]]:
+        """A (three entries), B (two), C and D (one each); the branch changes A's and D's
+        registry entries, so `--affected` selects A and D."""
+
+        def run(holder: object) -> dict[int, subprocess.CompletedProcess[str]]:
+            spec = [
+                ("ga", ["a1", "a2", "a3"]),
+                ("gb", ["b1", "b2"]),
+                ("gc", ["c"]),
+                ("gd", ["d"]),
+            ]
+            repo = commands_repo(holder, spec)
+            noted = frozenset(["a1", "a2", "a3", "d"])
+            repo.write("guards/faults.toml", commands_registry(spec, noted))
+            repo.commit()
+            return {
+                k: repo.run("fire", "--affected", "--shard", f"{k}/2") for k in (0, 1)
+            }
+
+        return cls.once("affected", run)
+
+    def test_the_banner_counts_the_affected_selection(self):
+        # Sliced before `--affected`, the banner would count the whole registry's seven.
+        for k, out in self.affected_runs().items():
+            with self.subTest(k=k):
+                self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+                self.assertEqual(
+                    [(int(m[3]), int(m[5])) for m in BANNER.findall(out.stdout)],
+                    [(4, 2)],
+                    f"shard {k} of 2 doesn't count the affected selection\n{out.stdout}",
+                )
+
+    def test_each_shard_fires_its_share_of_the_affected_entries(self):
+        # The registry's own slices would put A and D both in shard 0 and leave shard 1 idle.
+        runs = self.affected_runs()
+        self.assertEqual(
+            [fired_ids(runs[k].stdout) for k in (0, 1)],
+            [["a1", "a2", "a3"], ["d"]],
+            "the shards don't split the affected entries",
+        )
+
+    def test_an_empty_slice_passes_and_says_so(self):
+        repo = self.shared()
+        out = repo.run("fire", "--only", "h", "--shard", "1/2")
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertRegex(out.stdout, r"keeps 0 of 1 selected entries")
+        self.assertIn("so nothing to fire", out.stdout)
+        self.assertEqual(fired_ids(out.stdout), [])
+        self.assertEqual(repo.worktrees(), 1)
+        # An empty selection is still an error, shard or not, so an empty slice can't hide an
+        # empty registry.
+        out = repo.run("fire", "--suite", "script", "--shard", "0/2")
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertIn("guards: no entry selected", out.stderr)
+
+    def test_a_shard_outside_its_count_is_refused(self):
+        repo = self.shared()
+        # "١/٢" is 1/2 in Arabic-Indic digits, which `int` reads and CI never writes.
+        for spec in ("3/3", "2/1", "0/0", "-1/2", "1", "a/b", "1/2/3", " 1/2", "١/٢"):
+            with self.subTest(spec=spec):
+                out = repo.run("fire", f"--shard={spec}")
+                self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+                self.assertIn(
+                    f"guards: --shard takes k/N with 0 <= k < N; got {spec}", out.stderr
+                )
+                self.assertEqual(fired_ids(out.stdout), [])
+
+    def test_a_shard_weighs_an_entry_by_what_it_builds(self):
+        # X: three script entries (6 each), Y: two that build the CLI (16 each), Z: two other
+        # Rust entries (14 each). By cost Y goes first to shard 0 and Z and X share shard 1. A
+        # count, a CLI entry priced as another Rust one, or a script entry priced as a Rust
+        # one each gives other slices.
+        spec = [
+            ("x", "script", ["python3", "x.py"]),
+            (
+                "y",
+                "rust",
+                ["cargo", "test", "-p", "microvms-cli", "--", "--exact", "y"],
+            ),
+            ("z", "rust", ["cargo", "test", "--", "--exact", "z"]),
+        ]
+        sizes = {"x": 3, "y": 2, "z": 2}
+        registry = "".join(
+            entry(
+                fid=f"{name}{i}",
+                guard=name,
+                run=run,
+                expect="exit-nonzero",
+                suite=suite,
+                message="no",
+                fault=f'transform = {{ file = "state.txt", replace = "{name}{i}=ok", with = "{name}{i}=bad" }}',
+            )
+            for name, suite, run in spec
+            for i in range(sizes[name])
+        )
+        state = " ".join(f"{n}{i}=ok" for n, size in sizes.items() for i in range(size))
+        repo = Repo(self, {"guards/faults.toml": registry, "state.txt": state + "\n"})
+        script = runpy.run_path(str(SCRIPT))
+        faults, problems = script["load"](repo.root)
+        self.assertEqual(problems, [])
+        self.assertEqual(
+            [[f.id for f in script["shard"](faults, k, 2)] for k in (0, 1)],
+            [["y0", "y1"], ["x0", "x1", "x2", "z0", "z1"]],
+            "the shards aren't split by the entries' cost",
+        )
+
+    def test_the_registrys_own_shards_partition_it(self):
+        # The split CI makes, on the registry it makes it of: the rust and script entries in
+        # CI's three shards.
+        script = runpy.run_path(str(SCRIPT))
+        faults, problems = script["load"](HERE.parent)
+        self.assertEqual(problems, [])
+        selected = [f for f in faults if f.suite in ("rust", "script")]
+        self.assertTrue(selected, "the registry has no rust or script entry to split")
+        key = script["command_key"]
+        shards = [script["shard"](selected, k, 3) for k in range(3)]
+        ids = [f.id for s in shards for f in s]
+        self.assertEqual(sorted(ids), sorted(f.id for f in selected))
+        self.assertEqual(len(ids), len(set(ids)))
+        owners: dict[tuple, set[int]] = {}
+        for number, part in enumerate(shards):
+            self.assertTrue(part, f"shard {number} of 3 is empty")
+            for fault in part:
+                owners.setdefault(key(fault), set()).add(number)
+        self.assertEqual([k for k, o in owners.items() if len(o) > 1], [])
+
+
 # ── the `guards` job's steps, as ci.yml writes them (#323) ────────────────────
 
 CI = HERE.parent / ".github/workflows/ci.yml"
@@ -1763,13 +2187,22 @@ LOCAL = HERE.parent / "ci/local.toml"
 EXPRESSION = re.compile(r"\$\{\{\s*(.+?)\s*\}\}")
 
 
-def guards_job() -> dict:
+def workflow_jobs() -> dict:
     # Imported here, not at the top: the registry's `-k` entries run this module without
     # pyyaml, and none of them reaches this class.
     import yaml
 
     workflow = yaml.safe_load(CI.read_text()) or {}
-    return (workflow.get("jobs") or {}).get("guards") or {}
+    return workflow.get("jobs") or {}
+
+
+def guards_job() -> dict:
+    return workflow_jobs().get("guards") or {}
+
+
+# The check ruleset 21934766 requires. The shards report under their own names, and one job
+# reports their combined result under this one (#345).
+REQUIRED = "seeded faults fire"
 
 
 def fired(stdout: str) -> list[str]:
@@ -1782,7 +2215,13 @@ def fired(stdout: str) -> list[str]:
 
 class GuardsJob(unittest.TestCase):
     """Pull requests fire the entries their diff affects, and every push to main fires every
-    entry (D31). The steps run as ci.yml writes them, against a fixture repository."""
+    entry (D31), each as a matrix of shards whose combined result is the required check (D35,
+    #345). The steps run as ci.yml writes them, once per shard, against a fixture repository."""
+
+    def legs(self) -> list:
+        legs = ((guards_job().get("strategy") or {}).get("matrix") or {}).get("shard")
+        self.assertTrue(legs, "the guards job has no `shard` matrix")
+        return list(legs)
 
     def fire_steps(self, event: str) -> list[dict]:
         steps = [
@@ -1812,12 +2251,20 @@ class GuardsJob(unittest.TestCase):
         )
         return chosen
 
-    def run_step(self, repo: Repo, step: dict) -> subprocess.CompletedProcess[str]:
+    def run_step(
+        self, repo: Repo, step: dict, shard: int = 0, total: int = 1
+    ) -> subprocess.CompletedProcess[str]:
+        answers = {
+            **EXPRESSIONS,
+            "matrix.shard": str(shard),
+            "strategy.job-total": str(total),
+        }
+
         def value(match: re.Match) -> str:
             self.assertIn(
-                match.group(1), EXPRESSIONS, f"unmodeled `${{{{ {match.group(1)} }}}}`"
+                match.group(1), answers, f"unmodeled `${{{{ {match.group(1)} }}}}`"
             )
-            return EXPRESSIONS[match.group(1)]
+            return answers[match.group(1)]
 
         env = {
             k: EXPRESSION.sub(value, str(v)) for k, v in (step.get("env") or {}).items()
@@ -1876,23 +2323,29 @@ class GuardsJob(unittest.TestCase):
             repo.write(path, (repo.root / path).read_text() + "extra=ok\n")
         repo.commit()
 
+        legs = self.legs()
+
+        def each_shard(
+            event: str, step: dict, selected: set[str], want: set[str]
+        ) -> None:
+            ids: list[str] = []
+            for shard in legs:
+                out = self.run_step(repo, step, shard, len(legs))
+                self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+                self.assertEqual(selection(out.stdout), selected, out.stdout)
+                ids += fired_ids(out.stdout)
+            self.assertEqual(
+                len(ids), len(set(ids)), f"{event}: an entry fires in two shards: {ids}"
+            )
+            self.assertEqual(set(ids), want, f"{event}: the shards together")
+
         (pr,) = self.fire_steps("pull_request")
-        out = self.run_step(repo, pr)
-        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
-        self.assertEqual(selection(out.stdout), {"a", "sc"}, out.stdout)
-        self.assertEqual(
-            fired(out.stdout), ["fired: a (t)", "fired: sc (t)"], out.stdout
-        )
+        each_shard("pull_request", pr, {"a", "sc"}, {"a", "sc"})
 
         (push,) = self.fire_steps("push")
         self.assertNotIn("--affected", push["run"])
         self.assertNotIn("--only", push["run"])
-        out = self.run_step(repo, push)
-        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
-        self.assertEqual(selection(out.stdout), set(), out.stdout)
-        self.assertEqual(
-            fired(out.stdout), [f"fired: {i} (t)" for i in [*ORDER, "sc"]], out.stdout
-        )
+        each_shard("push", push, set(), {*ORDER, "sc"})
 
     def test_the_pull_request_step_is_the_push_step_plus_the_selection(self):
         # So the two legs can't drift apart in a flag (a lost suite, or a bindings suite this
@@ -1910,39 +2363,164 @@ class GuardsJob(unittest.TestCase):
         self.assertEqual(pr_argv, [*push_argv, "--affected", "--base", "$BASE"])
 
     def test_ci_local_answers_the_guards_job_as_a_pull_request(self):
-        # ci:local runs one leg, the pull request's. Its answers have to agree with each other
-        # and with ci.yml: swapped event answers would run main's full fire there, and the push
-        # leg's budget would let the pull request's run long.
-        answers = tomllib.loads(LOCAL.read_text())["expressions"]
+        # ci:local runs one leg, the pull request's, as one run of its whole selection. Its
+        # answers have to agree with each other and with ci.yml: swapped event answers would run
+        # main's full fire there, and a shard count above one would fire a third of it.
+        local = tomllib.loads(LOCAL.read_text())
+        answers = local["expressions"]
         self.assertEqual(answers.get(ON_PULL_REQUEST), "true", ON_PULL_REQUEST)
         self.assertEqual(answers.get(ON_PUSH), "false", ON_PUSH)
         # ci-local.py clones origin/main as the base, so the base branch is main.
         self.assertEqual(answers.get("github.base_ref"), "main")
-        budget = re.fullmatch(
-            r"\$\{\{ (github\.event_name == 'pull_request' && (\d+) \|\| \d+) \}\}",
-            str(guards_job().get("timeout-minutes")),
-        )
-        self.assertIsNotNone(
-            budget, "the guards job's timeout-minutes isn't split by event"
-        )
         self.assertEqual(
-            answers.get(budget.group(1)),
-            budget.group(2),
-            "ci/local.toml's budget isn't the pull request's",
+            (answers.get("matrix.shard"), answers.get("strategy.job-total")),
+            ("0", "1"),
+            "ci:local runs one shard of the selection, not all of it",
+        )
+        jobs = local["job"]["ci.yml"]
+        (name,) = [
+            j for j, body in workflow_jobs().items() if body.get("name") == REQUIRED
+        ]
+        self.assertIn(
+            "skip", jobs.get(name, {}), f"ci/local.toml runs the `{name}` job"
         )
 
-    def test_mains_push_has_a_larger_budget_than_a_pull_request(self):
-        # The push leg fires every entry, so it gets the time a full fire needs, and a pull
-        # request keeps the budget that shows the registry's growth before merge.
-        budget = re.fullmatch(
-            r"\$\{\{ github\.event_name == 'pull_request' && (\d+) \|\| (\d+) \}\}",
-            str(guards_job().get("timeout-minutes")),
+    def test_every_shard_has_sixty_minutes_on_both_legs(self):
+        # D35: one budget for a pull request's shards and main's push's, as a number, so a
+        # shard's time is the same question on both.
+        self.assertEqual(
+            guards_job().get("timeout-minutes"),
+            60,
+            "each shard's budget, on a pull request and on main's push",
         )
-        self.assertIsNotNone(
-            budget, "the guards job's timeout-minutes isn't split by event"
+
+    def test_the_matrix_runs_every_shard_and_lets_each_finish(self):
+        strategy = guards_job().get("strategy") or {}
+        matrix = strategy.get("matrix") or {}
+        # A second axis would run each shard once per value, firing its slice twice.
+        self.assertEqual(list(matrix), ["shard"], "the guards job's matrix axes")
+        legs = self.legs()
+        self.assertGreater(len(legs), 1, "one shard is the unsharded job")
+        self.assertEqual(legs, list(range(len(legs))), "the shards aren't 0 to N-1")
+        # A shard that fails would cancel the others, and the aggregator would show only the
+        # first failure.
+        self.assertIs(
+            strategy.get("fail-fast"), False, "a failed shard cancels the others"
         )
-        pull_request, push = map(int, budget.groups())
-        self.assertLess(pull_request, push)
+        for event in ("pull_request", "push"):
+            (step,) = self.fire_steps(event)
+            self.assertEqual(
+                (step.get("env") or {}).get("SHARD"),
+                "${{ matrix.shard }}/${{ strategy.job-total }}",
+                f"{event}: the fire step's SHARD isn't its leg of the matrix",
+            )
+            argv = shlex.split(step["run"])
+            self.assertIn(
+                ("--shard", "$SHARD"),
+                list(zip(argv, argv[1:])),
+                f'{event}: the fire step doesn\'t pass --shard "$SHARD"',
+            )
+
+    def aggregator(self) -> dict:
+        jobs = workflow_jobs()
+        named = [j for j, body in jobs.items() if body.get("name") == REQUIRED]
+        self.assertEqual(
+            len(named),
+            1,
+            f"{len(named)} jobs carry the required check's name `{REQUIRED}`, not one",
+        )
+        self.assertNotEqual(named[0], "guards", "the required check is one shard")
+        return jobs[named[0]]
+
+    def test_the_required_check_is_the_aggregator(self):
+        job = self.aggregator()
+        needs = job.get("needs")
+        self.assertIn(
+            "guards",
+            [needs] if isinstance(needs, str) else list(needs or []),
+            "the aggregator doesn't wait for the shards",
+        )
+        # Without `always()` it's skipped when a shard fails, and a skipped required check
+        # counts as passing.
+        self.assertIn(
+            str(job.get("if")),
+            ("always()", "${{ always() }}"),
+            "the aggregator doesn't run when a shard fails",
+        )
+
+    def test_the_aggregator_passes_only_when_every_shard_passed(self):
+        # A timed-out shard reports `cancelled`, not `failure` (#340's two rounds), so only
+        # `success` passes.
+        steps = [s for s in self.aggregator().get("steps") or [] if "run" in s]
+        self.assertEqual(len(steps), 1, "the aggregator runs one step")
+        (step,) = steps
+        for result in ("success", "failure", "cancelled", "skipped"):
+            with self.subTest(result=result):
+
+                def value(match: re.Match) -> str:
+                    self.assertEqual(
+                        match.group(1),
+                        "needs.guards.result",
+                        f"unmodeled `${{{{ {match.group(1)} }}}}`",
+                    )
+                    return result
+
+                env = {
+                    k: EXPRESSION.sub(value, str(v))
+                    for k, v in (step.get("env") or {}).items()
+                }
+                out = subprocess.run(
+                    [
+                        "bash",
+                        "--noprofile",
+                        "--norc",
+                        "-eo",
+                        "pipefail",
+                        "-c",
+                        step["run"],
+                    ],
+                    capture_output=True,
+                    text=True,
+                    env=clean_env(**env),
+                )
+                self.assertEqual(
+                    out.returncode == 0,
+                    result == "success",
+                    f"the aggregator's exit {out.returncode} with the shards {result}",
+                )
+                if result != "success":
+                    # A red required check with an empty log doesn't say where to look.
+                    self.assertIn(
+                        f"::error::a guards shard ended {result}",
+                        out.stdout,
+                        "the aggregator fails without saying why",
+                    )
+
+    def test_the_aggregator_has_no_way_to_pass_over_a_red_shard(self):
+        # A step `if` skips its one step and `continue-on-error` swallows its exit, and either
+        # leaves the job green with a shard red. ci:parity checks a job's keys against what
+        # ci:local models, but not a job ci/local.toml skips, as this one is, so this holds
+        # the aggregator to keys that can't make it pass.
+        job = self.aggregator()
+        extra = set(job) - {
+            "name",
+            "needs",
+            "if",
+            "runs-on",
+            "timeout-minutes",
+            "steps",
+        }
+        self.assertEqual(
+            extra, set(), "the aggregator job sets a key that can hide a red shard"
+        )
+        for step in job.get("steps") or []:
+            with self.subTest(step=step.get("name")):
+                extra = set(step) - {"name", "env", "run"}
+                self.assertEqual(
+                    extra,
+                    set(),
+                    "an aggregator step sets a key that can hide a red shard",
+                )
 
     def test_the_checkout_has_the_base_branch_the_merge_base_needs(self):
         checkout = [

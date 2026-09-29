@@ -26,9 +26,10 @@
 # the full history plus origin/main, and anything else clones one commit with no remote.
 #
 # `[expressions]` answers for a pull request only. A push to main (the `BASE` expression's
-# `HEAD^` side) isn't modeled, so `ci:guards` runs the pull request's `--affected` selection
-# under its 30-minute budget, never main's full fire under 60; `mise run guards:fire --
-# --jobs 4` is the full fire here.
+# `HEAD^` side) isn't modeled, so `ci:guards` runs the pull request's `--affected` selection,
+# never main's full fire. It runs it as shard 0 of 1, the whole selection in one run under the
+# job's 60 minutes, where CI splits it across the matrix; `mise run guards:fire -- --jobs 4` is
+# the full fire here, and `-- --affected --shard k/3` one CI leg's share.
 
 workflows = ["ci.yml", "fuzz.yml"]
 
@@ -38,7 +39,8 @@ workflows = ["ci.yml", "fuzz.yml"]
 "github.base_ref" = "main"
 "github.event_name == 'pull_request'" = "true"
 "github.event_name != 'pull_request'" = "false"
-"github.event_name == 'pull_request' && 30 || 60" = "30"
+"matrix.shard" = "0"
+"strategy.job-total" = "1"
 "github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^'" = "origin/main"
 
 [actions]
@@ -151,6 +153,10 @@ steps = [
 run = "cargo install --locked cargo-mutants@27.1.0"
 env = { CARGO_INSTALL_ROOT = "{tools}" }
 reason = "the release binary needs glibc 2.39, newer than some Linux hosts have (AL2023 has 2.34), so the same version is built from source into ci:local's tool directory"
+
+[job."ci.yml".guards-result]
+skip = "it runs no command of its own: it reports the guards shards' combined result under the required check's name, and ci:guards fires the whole selection as shard 0 of 1"
+steps = ["every shard passed"]
 
 [job."ci.yml".mutants]
 skip = "it runs on pull requests only, as a matrix of shards, and each mutant is a build. `mise run mutants` runs the same wrapper over the branch against origin/main, unsharded; `mise run mutants -- -- --shard k/4` runs one shard"
