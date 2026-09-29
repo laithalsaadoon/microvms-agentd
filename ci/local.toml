@@ -62,6 +62,8 @@ steps = [
   "clippy (client crates everywhere, everything on linux)",
   "test",
   "schema artifact is not stale",
+  "schema compatibility unit tests",
+  "schema is compatible with the previous release",
   "command manifest is not stale",
   "core surface unit tests",
   "core surface snapshot is not stale",

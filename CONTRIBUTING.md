@@ -193,6 +193,15 @@ mise run core-api      # parity/core-api.json, core's public paths
 mise run model:check   # implemented constraints versus the installed boto3 model
 ```
 
+A wire change also has to work with the previous release in both directions.
+`schema:compat` in `check` compares `docs/schema.json` with the copy at the
+highest `v*` tag reachable from HEAD, route by route, and fails on a removed
+route, status or field, or a field an older client or daemon doesn't send
+becoming required; [Protocol](docs/PROTOCOL.md) has the rule. An intended break
+bumps `PROTOCOL_VERSION` and lists each break in `docs/schema-breaks.toml`. It
+refuses a clone with no release tag, so run `git fetch --unshallow --tags` in a
+shallow one.
+
 Use current boto3 models and AWS documentation to identify capabilities the
 package should expose, verify request serialization, and check CLI/SDK parity
 (`mise run parity:check` covers names, not options).

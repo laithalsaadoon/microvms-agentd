@@ -57,6 +57,41 @@ fire", never as "only the platform could have fired it". Both fields are
 `#[serde(default)]` like `busy` and `execs`, and for the same reason: an older
 daemon omits them, and empty/zero is the honest reading.
 
+## Compatibility between releases
+
+Every upgrade puts an older client in front of a newer daemon, or a newer client
+in front of an older one, so each release has to work with the one before it in
+both directions. `mise run schema:compat` holds `docs/schema.json` to the copy at
+the previous release tag. It follows serde's two contracts, because the daemon
+reads a request and the client reads a response, and it compares each route's
+shapes where the route uses them, so a route that gains a body or points at
+another definition is held like an edited one:
+
+- A route, a status (its code and error) or a stream event the previous release
+  had doesn't go away.
+- In a request or query body, no field becomes required (a body or query a
+  route didn't have counts as one with no fields), no field is removed, and no
+  required field becomes optional. An older client doesn't send the new required
+  field, a field it still sends would be ignored, and a newer client that leaves
+  out a field an older daemon requires is refused.
+- In a response or stream event, a body the route had doesn't go away, and a
+  field an older client requires with no default isn't removed or left out of
+  `required`, unless it's nullable (serde reads an absent `Option` as `None`). A
+  field becomes required only with a serde default, since an older daemon
+  doesn't send it.
+
+A new route, an optional request field, a response field with a default and a
+definition renamed with its shape kept are all compatible. A change that has to
+break the rules bumps `PROTOCOL_VERSION` in `protocol/src/lib.rs` and lists each
+break in `docs/schema-breaks.toml`, as the line the check prints and with the
+reason. While the version differs from the previous tag's, the check passes only
+when that list and the breaks it finds are the same, so a later change that
+breaks something else before the next release still fails. No client reads
+`protocol_version` yet, so the bump tells reviewers, not callers, and an older
+client that meets the break fails the way any undecodable answer does. Type
+changes (a field that accepts less than it did, an enum that loses a variant, a
+body's media type) and `limits` aren't checked; review holds those.
+
 ## Workload hook handlers
 
 The platform always keeps a suspended VM's full memory and disk, and
