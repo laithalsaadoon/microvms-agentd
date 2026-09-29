@@ -996,9 +996,9 @@ class ParityTests(unittest.TestCase):
         self.assertEqual(typed.note, "CI only")
 
     def test_a_timeout_expression_takes_its_value_from_expressions(self):
-        # The guards job gives main's push its own budget (#323). ci:local answers for a pull
-        # request, as it does every expression, and a budget it can't read is a problem
-        # rather than a run with no timeout.
+        # A budget written as an expression, as the guards job's was from #323 until #345.
+        # ci:local answers for a pull request, as it does every expression, and a budget it
+        # can't read is a problem rather than a run with no timeout.
         expr = "github.event_name == 'pull_request' && 30 || 60"
         root = Path(tempfile.mkdtemp())
         self.addCleanup(__import__("shutil").rmtree, root)

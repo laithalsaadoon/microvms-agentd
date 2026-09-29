@@ -650,7 +650,8 @@ description = "Seed each registered fault in a scratch worktree and require its 
 # and output; each extra worker builds in its own target, removed when the run ends.
 # `-- --affected` fires only the entries whose own files or registry text changed against
 # origin/main: a rule, not a trace. It's what CI's `guards` job runs on a pull request, and the
-# full fire runs on every push to main (#323). The script's docstring has both.
+# full fire runs on every push to main (#323). `-- --shard k/N` fires shard k (from 0) of N of
+# the selection, one leg of that job's matrix (#345). The script's docstring has all three.
 #
 # cargo-mutants is here for the `fuzz_extract` exclusion's entry, at the `mutants` task's pin.
 tools = { "cargo:cargo-mutants" = "27.1.0" }

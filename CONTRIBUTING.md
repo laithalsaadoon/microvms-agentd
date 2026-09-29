@@ -72,8 +72,11 @@ request, and it isn't the full fire: a change that reaches a guard through code 
 entry doesn't name, such as the type a clippy ban names, isn't seen. (A change to the
 script, a build input such as Cargo.lock, a Cargo.toml or mise.toml, or ci.yml's `guards`
 job or top-level `env` selects every entry.) Main's push runs the full fire after the
-merge, with a 60-minute budget to the pull request's 30, so a fault only it catches turns
-main red. When your change reaches guards that way, run
+merge, so a fault only it catches turns main red. Both run as a matrix of shards, each
+firing its share of the selection within 60 minutes, and the required
+`seeded faults fire` check is their combined result;
+`mise run guards:fire -- --affected --shard=1/3` runs one pull request leg's share here.
+When your change reaches guards that way, run
 `mise run guards:fire -- --jobs 4` before you push. A red `seeded faults fire` on main is
 fixed before the next merge, because the next pull request that selects every entry
 fails on it as well. If your pull request fails an entry it didn't touch, look at main's

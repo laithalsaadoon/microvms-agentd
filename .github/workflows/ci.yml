@@ -615,15 +615,30 @@ jobs:
   # entry fails on it too; one that fails an entry it didn't touch reads main's last push run
   # first.
   #
-  # The timeout is each leg's budget. A pull request keeps 30 minutes, so a registry that
-  # outgrows a full fire shows on the pull requests that still select every entry. Main's push
-  # always runs the full fire, and a timed-out run never fires the entries after the cutoff,
-  # so it gets 60. Measured on main's push at efaded2 (the full registry, 322 entries): 24 min
-  # 39 s, 619.2 s of faults and 270.6 s for the restored pass.
+  # The job is a matrix of shards (D35, #345). Each leg fires `--shard k/N` of the same
+  # selection (whole commands, weighted by their entries' rough CI seconds; the script's
+  # docstring has the rule) and has 60 minutes, on a pull request and on main's push alike.
+  # The legs report under their own names, and `guards-result` below carries the required
+  # check's. Three shards, from measurement: main's push at 6a868e9 fired the full registry
+  # (439 entries) in one leg in 33 min 30 s, past a pull request's old 30 minutes. Modeled with
+  # this split on that run's per-command and per-fault seconds, the slowest of three legs takes
+  # about 12 minutes for the registry at this change, and about 15 with #340's entries added,
+  # against about 20 and 21 for two legs. Those are floors: the model counts the cold build
+  # each worker pays once across the whole run, and every leg's workers pay their own, a few
+  # more minutes a leg. A fourth leg gains little, since the largest commands can't be split,
+  # and pays one more setup and more cold builds. That leaves each leg room for the registry to
+  # grow about threefold. The legs share rust-cache's key but build different commands, so the
+  # leg that saves first leaves the others a partial cache; workers 2 to 4 build cold in every
+  # leg anyway. `mise run guards:fire -- --affected --shard 1/3` runs one pull request leg's
+  # share locally.
   guards:
-    name: seeded faults fire
+    name: seeded faults fire (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 30 || 60 }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -675,10 +690,35 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           BASE: origin/${{ github.base_ref }}
-        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 4 --affected --base "$BASE"
+          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
+        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 4 --shard "$SHARD" --affected --base "$BASE"
       - name: every seeded fault fires
         if: github.event_name != 'pull_request'
-        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 4
+        env:
+          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
+        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 4 --shard "$SHARD"
+
+  # The required check `seeded faults fire` (ruleset 21934766), as the shards' combined
+  # result: the shards report under their own names, so this job keeps the name the ruleset
+  # holds. `always()` runs it when a shard fails, since a skipped required check counts as
+  # passing, and it passes on `success` only: GitHub reports a shard that timed out as
+  # `cancelled`, not `failure`. It's `always()` and not `!cancelled()`: a cancelled run would
+  # skip this job, and a skipped required check passes, so a superseded pull request run shows
+  # red instead. A pull request that selects nothing still reports it green, because each
+  # shard passes with nothing to fire. It has no step `if` and no `continue-on-error`, since
+  # either would let it pass over a red shard; ci:parity doesn't read a skipped job's keys, so
+  # test_check_guards_fire.py holds its shape.
+  guards-result:
+    name: seeded faults fire
+    needs: guards
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: every shard passed
+        env:
+          RESULT: ${{ needs.guards.result }}
+        run: '[ "$RESULT" = success ] || { echo "::error::a guards shard ended $RESULT; open the red seeded faults fire (shard k of N) check"; exit 1; }'
 
   # `mise run mutants` (#275), in shards: cargo-mutants changes the Rust a pull request
   # touches, one mutant at a time (a return value, an operator, a deleted `!`), and the job

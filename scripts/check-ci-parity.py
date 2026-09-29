@@ -844,8 +844,9 @@ def plan_job(
         )
     timeout = body.get("timeout-minutes")
     if isinstance(timeout, str):
-        # A budget split by event (the guards job's, #323) is answered for a pull request,
-        # like every other expression. Dropping it would run the job with no timeout.
+        # A budget written as an expression (the guards job's split by event, from #323
+        # until #345) is answered for a pull request, like every other expression. Dropping
+        # it would run the job with no timeout.
         text = resolve(timeout, expressions, f"{where} timeout-minutes", problems)
         try:
             timeout = float(text)
