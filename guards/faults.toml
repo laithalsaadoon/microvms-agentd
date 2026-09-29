@@ -2202,6 +2202,353 @@ suite = "rust"
 message = "no test in this file claims a requirement key"
 transform = { file = "agentd/tests/model_conformance.rs", replace = "claims(&source.items, ", with = "claims(&source.items[..0], " }
 
+# ── model-conformance: the app's tables driven over the model's rows (#296) ─────
+
+# One row of each app policy changed, and one floor per model: a model that returns no rows
+# passes every comparison, so its test fails instead. `cargo test -p agentd-model` stays green
+# under every one of these, since the model doesn't depend on the app.
+
+# An inherited workdir refused even when the caller passed one.
+[[fault]]
+id = "model-conformance-wrap-inherit-ignores-workdir"
+guard = "wrap_dockerfile_answers_every_row_of_the_wrap_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "wrap_dockerfile_answers_every_row_of_the_wrap_model"]
+expect = "test-failed"
+suite = "rust"
+note = "model-conformance/tests/tables.rs::wrap_dockerfile_answers_every_row_of_the_wrap_model"
+message = "inherit_workdir: true } answers Wrapped"
+transform = { file = "microvms-app/src/control/artifact.rs", replace = "    if opts.inherit_workdir && workdir.is_none() && !dockerfile_declares_workdir(task) {\n", with = "    if opts.inherit_workdir && !dockerfile_declares_workdir(task) {\n" }
+
+# A denied launch reported `unsealed`, as if the advisory deny weren't there.
+[[fault]]
+id = "model-conformance-posture-deny-unsealed"
+guard = "egress_posture_for_answers_every_row_of_the_posture_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "egress_posture_for_answers_every_row_of_the_posture_model"]
+expect = "test-failed"
+suite = "rust"
+note = "model-conformance/tests/tables.rs::egress_posture_for_answers_every_row_of_the_posture_model"
+message = "deny=true reports BestEffort"
+transform = { file = "microvms-app/src/control/connector.rs", replace = "    Ok(EgressPosture::for_launch(egress, deny_egress))\n}\n", with = "    Ok(EgressPosture::for_launch(egress, false))\n}\n" }
+
+# The listing sent after the credential chain failed (BIND-16).
+[[fault]]
+id = "model-conformance-preflight-listing-without-credentials"
+guard = "preflight_reports_every_row_of_the_preflight_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "preflight_reports_every_row_of_the_preflight_model"]
+expect = "test-failed"
+suite = "rust"
+note = "model-conformance/tests/tables.rs::preflight_reports_every_row_of_the_preflight_model"
+message = "credentials: false, service: Answers, lines: [Pass, Fatal, NotRun]"
+transform = { file = "microvms-app/src/preflight.rs", replace = "        (Ok(plane), true) => service_check(plane).await,\n", with = "        (Ok(plane), _) => service_check(plane).await,\n" }
+
+# A caller that finds the image deleting creates at once, and the service refuses the create.
+[[fault]]
+id = "model-conformance-plan-deleting-builds"
+guard = "the_ensure_plan_is_every_row_of_the_image_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "the_ensure_plan_is_every_row_of_the_image_model"]
+expect = "test-failed"
+suite = "rust"
+note = "model-conformance/tests/tables.rs::the_ensure_plan_is_every_row_of_the_image_model"
+message = "the image model's row Deleting force=false plans AwaitAbsent"
+transform = { file = "microvms-app/src/control/ensure.rs", replace = "        (Found::Deleting, _) => Plan::AwaitAbsent,\n", with = "        (Found::Deleting, _) => Plan::Build,\n" }
+
+# An exit code wins over the daemon's deadline: a child that traps SIGTERM and exits 0 reads as a success.
+[[fault]]
+id = "model-conformance-exit-code-over-timed-out"
+guard = "posix_exit_code_is_every_row_of_the_run_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "posix_exit_code_is_every_row_of_the_run_model"]
+expect = "test-failed"
+suite = "rust"
+note = "model-conformance/tests/tables.rs::posix_exit_code_is_every_row_of_the_run_model"
+message = "timed_out: true, truncated: false }) None has exit code Some(124)"
+transform = { file = "microvms-app/src/session/exec.rs", replace = "        let outcome = self.outcome.as_ref()?;\n        if outcome.timed_out {\n", with = "        let outcome = self.outcome.as_ref()?;\n        if outcome.timed_out && outcome.exit_code.is_none() {\n" }
+
+# A release that answers it has no bundle falls through to SHA256SUMS: the laundering BIND-18 rules out.
+[[fault]]
+id = "model-conformance-provision-absent-bundle-launders"
+guard = "fetch_release_verifies_every_row_of_the_provision_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "fetch_release_verifies_every_row_of_the_provision_model"]
+expect = "test-failed"
+suite = "rust"
+note = "model-conformance/tests/tables.rs::fetch_release_verifies_every_row_of_the_provision_model"
+message = "never consults SHA256SUMS, and fetch_release did"
+transform = { file = "microvms-app/src/provision.rs", replace = "        Bundles::Absent(reason) => return Err(absent(tag, bytes, &reason)),\n", with = "        Bundles::Absent(reason) => reason,\n" }
+
+# The wrap model's floor: its rows come back empty.
+[[fault]]
+id = "model-conformance-wrap-no-rows"
+guard = "wrap_dockerfile_answers_every_row_of_the_wrap_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "wrap_dockerfile_answers_every_row_of_the_wrap_model"]
+expect = "test-failed"
+suite = "rust"
+message = "the wrap model returned no rows, so nothing was checked"
+transform = { file = "model/src/wrap.rs", replace = "\n    rows\n}\n\n#[cfg(test)]\n", with = "\n    rows.clear();\n    rows\n}\n\n#[cfg(test)]\n" }
+
+# The posture model's floor: its rows come back empty.
+[[fault]]
+id = "model-conformance-posture-no-rows"
+guard = "egress_posture_for_answers_every_row_of_the_posture_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "egress_posture_for_answers_every_row_of_the_posture_model"]
+expect = "test-failed"
+suite = "rust"
+message = "the posture model returned no rows, so nothing was checked"
+transform = { file = "model/src/posture.rs", replace = "\n    rows\n}\n\n#[cfg(test)]\n", with = "\n    rows.clear();\n    rows\n}\n\n#[cfg(test)]\n" }
+
+# The preflight model's floor: its rows come back empty.
+[[fault]]
+id = "model-conformance-preflight-no-rows"
+guard = "preflight_reports_every_row_of_the_preflight_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "preflight_reports_every_row_of_the_preflight_model"]
+expect = "test-failed"
+suite = "rust"
+message = "the preflight model returned no rows, so nothing was checked"
+transform = { file = "model/src/preflight.rs", replace = "        .collect()\n}\n\n#[cfg(test)]\n", with = "        .filter(|_| false)\n        .collect()\n}\n\n#[cfg(test)]\n" }
+
+# The image model's floor: its rows come back empty.
+[[fault]]
+id = "model-conformance-image-no-rows"
+guard = "the_ensure_plan_is_every_row_of_the_image_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "the_ensure_plan_is_every_row_of_the_image_model"]
+expect = "test-failed"
+suite = "rust"
+message = "the image model returned no rows, so nothing was checked"
+transform = { file = "model/src/image.rs", replace = "\n    rows\n}\n\n#[cfg(test)]\n", with = "\n    rows.clear();\n    rows\n}\n\n#[cfg(test)]\n" }
+
+# The run model's floor: its rows come back empty.
+[[fault]]
+id = "model-conformance-run-no-rows"
+guard = "posix_exit_code_is_every_row_of_the_run_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "posix_exit_code_is_every_row_of_the_run_model"]
+expect = "test-failed"
+suite = "rust"
+message = "the run model returned no rows, so nothing was checked"
+transform = { file = "model/src/run.rs", replace = "\n    rows\n}\n\n#[cfg(test)]\n", with = "\n    rows.clear();\n    rows\n}\n\n#[cfg(test)]\n" }
+
+# The provision model's floor: its rows come back empty.
+[[fault]]
+id = "model-conformance-provision-no-rows"
+guard = "fetch_release_verifies_every_row_of_the_provision_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "fetch_release_verifies_every_row_of_the_provision_model"]
+expect = "test-failed"
+suite = "rust"
+message = "the provision model returned no rows, so nothing was checked"
+transform = { file = "model/src/provision.rs", replace = "\n    rows\n}\n\n#[cfg(test)]\n", with = "\n    rows.clear();\n    rows\n}\n\n#[cfg(test)]\n" }
+
+# Review round 1 (#296b). A wrap that leaves the stanza off: the task text and `USER root` are
+# still right, so a comparison of those alone passed.
+[[fault]]
+id = "model-conformance-wrap-drops-stanza"
+guard = "wrap_dockerfile_answers_every_row_of_the_wrap_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "wrap_dockerfile_answers_every_row_of_the_wrap_model"]
+expect = "test-failed"
+suite = "rust"
+message = "ends on the generator's stanza, intact"
+transform = { file = "microvms-app/src/control/artifact.rs", replace = "    wrapped.push_str(&stanza);\n    Ok(wrapped)\n", with = "    let _ = &stanza;\n    Ok(wrapped)\n" }
+
+# A row function that stops ranging over one flag (here the advisory deny) still returns rows,
+# and the rows it keeps all agree with the app. The pinned count is what fails.
+[[fault]]
+id = "model-conformance-posture-rows-shrink"
+guard = "egress_posture_for_answers_every_row_of_the_posture_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "egress_posture_for_answers_every_row_of_the_posture_model"]
+expect = "test-failed"
+suite = "rust"
+message = "the posture model returned 46 rows, not the 92"
+transform = { file = "model/src/posture.rs", replace = "                for deny in [false, true] {\n                    let options = Options {\n", with = "                for deny in [false] {\n                    let options = Options {\n" }
+
+# The posture rows answered at another ceiling than TABLE's: same count, and TABLE's rows are no
+# longer among them, which is what `posture::rows()`'s doc says they are.
+[[fault]]
+id = "model-conformance-posture-table-not-in-rows"
+guard = "egress_posture_for_answers_every_row_of_the_posture_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "egress_posture_for_answers_every_row_of_the_posture_model"]
+expect = "test-failed"
+suite = "rust"
+message = "isn't among the rows it exposes"
+transform = { file = "model/src/posture.rs", replace = "                        deny,\n                        specified(options, WIRE_CEILING),\n", with = "                        deny,\n                        specified(options, WIRE_CEILING - 1),\n" }
+
+# A change to the model the app never followed: a status with both an exit code and a signal
+# reads as the signal death. No model property or model table reads that row, so
+# `cargo test -p agentd-model` stays green, and so does the app's own restated table, which
+# doesn't read the model. Only this test sees the two disagree.
+[[fault]]
+id = "model-conformance-run-model-drift"
+guard = "posix_exit_code_is_every_row_of_the_run_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "posix_exit_code_is_every_row_of_the_run_model"]
+expect = "test-failed"
+suite = "rust"
+message = "signal: Some(9), timed_out: false, truncated: false }) None has exit code Some(137)"
+transform = { file = "model/src/run.rs", replace = "    if status.timed_out {\n        return Some(TIMED_OUT);\n    }\n    match (status.exit_code, status.signal) {\n        (Some(code), _) => Some(code),\n", with = "    if status.timed_out {\n        return Some(TIMED_OUT);\n    }\n    match (status.exit_code, status.signal) {\n        (Some(code), None) => Some(code),\n        (Some(_), Some(signal)) => Some(128 + signal),\n" }
+
+# ── client_lifecycle.rs: the client lifecycle model replayed against Sandbox (#296) ──
+
+# `cargo test -p agentd-model` stays green under each of these: the app faults because the model
+# doesn't depend on the app, the model one because no model test names the property it renames.
+
+# A resume that sends the launch's run-hook payload again after its ResumeMicrovm call.
+[[fault]]
+id = "model-conformance-client-resume-resends-payload"
+guard = "every_walked_path_of_the_client_model_replays_against_the_sandbox"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "every_walked_path_of_the_client_model_replays_against_the_sandbox"]
+expect = "test-failed"
+suite = "rust"
+note = "model-conformance/tests/client_lifecycle.rs::every_walked_path_of_the_client_model_replays_against_the_sandbox"
+message = "run-hook payloads: sandbox 2, model 1"
+transform = { file = "microvms-app/src/sandbox.rs", replace = "        self.control.resume(&id).await?;\n", with = "        self.control.resume(&id).await?;\n        let token = self.pending_agent_token.clone().unwrap_or_default();\n        let payload = RunHookPayload::for_launch(&token, &Default::default())?;\n        self.control.run_microvm(RunMicrovmRequest::new(&id, payload)).await?;\n" }
+
+# A suspend that records SUSPENDING only once the wait settles. A wait that times out leaves the
+# sandbox RUNNING while the platform suspends, and the next suspend is issued outside RUNNING.
+# Replay-only: every other test target stays green under it.
+[[fault]]
+id = "model-conformance-client-suspend-skips-suspending"
+guard = "every_walked_path_of_the_client_model_replays_against_the_sandbox"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "every_walked_path_of_the_client_model_replays_against_the_sandbox"]
+expect = "test-failed"
+suite = "rust"
+message = "lifecycle: sandbox Running, model Suspending"
+transform = { file = "microvms-app/src/sandbox.rs", replace = "        self.control.suspend(&id).await?;\n        self.set_lifecycle(Lifecycle::Suspending);\n", with = "        self.control.suspend(&id).await?;\n" }
+
+# The floor: a recorder that records nothing replays nothing and would pass.
+[[fault]]
+id = "model-conformance-client-empty-walk"
+guard = "every_walked_path_of_the_client_model_replays_against_the_sandbox"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "every_walked_path_of_the_client_model_replays_against_the_sandbox"]
+expect = "test-failed"
+suite = "rust"
+message = "the walk recorded no path, so nothing was replayed"
+transform = { file = "model-conformance/tests/client_lifecycle.rs", replace = "accessor().into_iter().map(", with = "accessor().into_iter().filter(|_| false).map(" }
+
+# Without the untaken-step paths, a step into a state a shorter path reached is never replayed.
+[[fault]]
+id = "model-conformance-client-untaken-steps"
+guard = "every_walked_path_of_the_client_model_replays_against_the_sandbox"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "every_walked_path_of_the_client_model_replays_against_the_sandbox"]
+expect = "test-failed"
+suite = "rust"
+message = "of the model's steps untaken, so no path replays them"
+transform = { file = "model-conformance/tests/client_lifecycle.rs", replace = "    walked.extend(untaken.into_iter().map(|path| (path, false)));\n", with = "    drop(untaken);\n" }
+
+# A planner that never pairs a request with its completion skips most paths, and the coverage
+# floor names the calls it no longer makes.
+[[fault]]
+id = "model-conformance-client-uncovered"
+guard = "every_walked_path_of_the_client_model_replays_against_the_sandbox"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "every_walked_path_of_the_client_model_replays_against_the_sandbox"]
+expect = "test-failed"
+suite = "rust"
+message = "the replay never makes"
+transform = { file = "model-conformance/tests/client_lifecycle.rs", replace = "next == wanted && verdict(completed) == Verdict::Issued", with = "next == wanted && verdict(completed) == Verdict::Ignored" }
+
+# The key floor: a model property that loses its key leaves the replay's claim with nothing to
+# back it, and trace:check can't see that while the STATE keys aren't in TRACED (#302).
+[[fault]]
+id = "model-conformance-client-unkeyed-property"
+guard = "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"]
+expect = "test-failed"
+suite = "rust"
+note = "model-conformance/tests/client_lifecycle.rs::the_keys_the_replay_backs_name_safety_properties_of_the_client_model"
+message = "no safety property of the client model is named for [\"STATE-8\"]"
+transform = { file = "model/src/client.rs", replace = "                \"STATE-8 a resume completion drops the proxy token\",\n", with = "                \"a resume completion drops the proxy token\",\n" }
+
+# The key floor's own floor: a model that states no property backs no key, and says so.
+[[fault]]
+id = "model-conformance-client-no-properties"
+guard = "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"]
+expect = "test-failed"
+suite = "rust"
+message = "the client model states no property, so no key can be checked against it"
+transform = { file = "model-conformance/tests/client_lifecycle.rs", replace = "ClientLifecycle::new(Config::guards_held()).properties();\n", with = "ClientLifecycle::new(Config::guards_held()).properties().into_iter().take(0).collect::<Vec<_>>();\n" }
+
+# A test's doc claims a key that no model property backs. The check reads the same doc the
+# claim is written in, not a list beside it.
+[[fault]]
+id = "model-conformance-client-doc-claims-unbacked-key"
+guard = "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"]
+expect = "test-failed"
+suite = "rust"
+message = "no safety property of the client model is named for [\"STATE-12\"]"
+transform = { file = "model-conformance/tests/client_lifecycle.rs", replace = "/// It's the sandbox's side of the model's keyed properties: STATE-3 (", with = "/// It's the sandbox's side of the model's keyed properties: STATE-12, STATE-3 (" }
+
+# The key check on empty input: a source with no tests claims no key, and says so.
+[[fault]]
+id = "model-conformance-client-keys-empty-source"
+guard = "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"]
+expect = "test-failed"
+suite = "rust"
+message = "no test in this file claims a requirement key"
+transform = { file = "model-conformance/tests/client_lifecycle.rs", replace = "syn::parse_file(include_str!(\"client_lifecycle.rs\"))", with = "syn::parse_file(\"\")" }
+
+# The key check with a parser that returns nothing.
+[[fault]]
+id = "model-conformance-client-keys-no-items"
+guard = "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"]
+expect = "test-failed"
+suite = "rust"
+message = "no test in this file claims a requirement key"
+transform = { file = "model-conformance/tests/client_lifecycle.rs", replace = "claims(&source.items, ", with = "claims(&source.items[..0], " }
+
+# Review round 1 (#296b). A planner that skips every path past six calls: each call kind still
+# shows up in some short path, so the coverage floor passed with four fifths of the walk gone.
+[[fault]]
+id = "model-conformance-client-planner-skips-recorded"
+guard = "every_walked_path_of_the_client_model_replays_against_the_sandbox"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "every_walked_path_of_the_client_model_replays_against_the_sandbox"]
+expect = "test-failed"
+suite = "rust"
+message = "a path the recorder kept doesn't plan"
+transform = { file = "model-conformance/tests/client_lifecycle.rs", replace = "    Ok(steps)\n}\n", with = "    if steps.len() > 6 {\n        return Err(\"a completion arrives after another step\");\n    }\n    Ok(steps)\n}\n" }
+
+# The untaken-step paths the planner skips are pinned: a planner that skips another set, here
+# one that stops skipping a closed window that opens again, fails before it replays anything.
+[[fault]]
+id = "model-conformance-client-skips-moved"
+guard = "every_walked_path_of_the_client_model_replays_against_the_sandbox"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "every_walked_path_of_the_client_model_replays_against_the_sandbox"]
+expect = "test-failed"
+suite = "rust"
+message = "the planner skips a different set of untaken-step paths than SKIPPED names"
+transform = { file = "model-conformance/tests/client_lifecycle.rs", replace = "(Action::ResumeRequested { .. }, Verdict::Issued) if window_closed => {", with = "(Action::ResumeRequested { .. }, Verdict::Issued) if false && window_closed => {" }
+
+# A key that moves onto a property stating another rule: STATE-8 still starts some property's
+# name, so the claimed-key check alone passed, and `cargo test -p agentd-model` stays green.
+[[fault]]
+id = "model-conformance-client-key-moved"
+guard = "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"]
+expect = "test-failed"
+suite = "rust"
+message = "the client model's keyed safety properties aren't the ones KEYED names"
+transform = [
+  { file = "model/src/client.rs", replace = "                \"STATE-8 a resume completion drops the proxy token\",\n", with = "                \"a resume completion drops the proxy token\",\n" },
+  { file = "model/src/client.rs", replace = "always(\"the installed token is never replaced\"", with = "always(\"STATE-8 the installed token is never replaced\"" },
+]
+
+# A claim check-trace.py credits and the scan used to miss: a test inside a nested `mod`
+# whose doc names STATE-12, which no property backs.
+[[fault]]
+id = "model-conformance-client-claim-in-nested-mod"
+guard = "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"]
+expect = "test-failed"
+suite = "rust"
+message = "no safety property of the client model is named for [\"STATE-12\"]"
+transform = { file = "model-conformance/tests/client_lifecycle.rs", replace = "/// Every requirement key either spec defines.\n", with = "mod window {\n    /// STATE-12: a resume past the window is refused.\n    #[test]\n    fn a_closed_window_refuses() {}\n}\n\n/// Every requirement key either spec defines.\n" }
+
+# The same, for a name check-trace.py's `ident` pattern reads: `fn test_state_12_...`.
+[[fault]]
+id = "model-conformance-client-claim-by-test-prefix"
+guard = "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"]
+expect = "test-failed"
+suite = "rust"
+message = "no safety property of the client model is named for [\"STATE-12\"]"
+transform = { file = "model-conformance/tests/client_lifecycle.rs", replace = "/// Every requirement key either spec defines.\n", with = "#[test]\nfn test_state_12_a_closed_window_refuses() {}\n\n/// Every requirement key either spec defines.\n" }
+
 # ── generated artifacts ──────────────────────────────────────────────────────
 
 # `mise run manifest:check`'s script, spelled out: CI runs this without mise.

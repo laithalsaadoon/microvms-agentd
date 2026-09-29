@@ -551,10 +551,10 @@ impl Model for ClientLifecycle {
             // daemon model's headline property records: a property that consults the flag
             // it is meant to discriminate becomes vacuous in the very run where it should
             // fail.
-            Property::<Self>::always("bootstrap happens at most once", |_, state| {
+            Property::<Self>::always("STATE-3 bootstrap happens at most once", |_, state| {
                 state.bootstrap_count <= 1
             }),
-            Property::<Self>::always("no suspend call outside RUNNING", |_, state| {
+            Property::<Self>::always("STATE-5 no suspend call outside RUNNING", |_, state| {
                 // Against the counter, not against the state. The first version of this
                 // property tried to infer the pre-state from the post-state — "a legal
                 // suspend leaves a bootstrapped, unterminated VM" — and the checker produced
@@ -564,9 +564,10 @@ impl Model for ClientLifecycle {
                 // resulting state to tell them apart, and only the transition knows.
                 state.suspends_outside_running == 0
             }),
-            Property::<Self>::always("a terminated VM never reaches RUNNING", |_, state| {
-                !(state.was_terminated && state.vm_state == VmState::Running)
-            }),
+            Property::<Self>::always(
+                "STATE-11 a terminated VM never reaches RUNNING",
+                |_, state| !(state.was_terminated && state.vm_state == VmState::Running),
+            ),
             Property::<Self>::always(
                 "the image exists exactly when a launch was accepted",
                 |_, state| {
@@ -614,12 +615,13 @@ impl Model for ClientLifecycle {
                         || state.vm_state == VmState::Terminated
                 },
             ),
-            Property::<Self>::always("a resume completion drops the proxy token", |_, state| {
-                match state.last {
+            Property::<Self>::always(
+                "STATE-8 a resume completion drops the proxy token",
+                |_, state| match state.last {
                     Some((Action::ResumeComplete, Verdict::Issued)) => !state.proxy_token_cached,
                     _ => true,
-                }
-            }),
+                },
+            ),
             Property::<Self>::always("every wire call is accounted for", |_, state| {
                 // The property that makes every `RefusedLocally` above mean something, and it
                 // is worth stating because the first version of it did not: it matched on the
@@ -770,7 +772,7 @@ mod tests {
             .checker()
             .spawn_bfs()
             .join()
-            .assert_any_discovery("no suspend call outside RUNNING");
+            .assert_any_discovery("STATE-5 no suspend call outside RUNNING");
     }
 
     /// **STATE-3.** Even with a double bootstrap planted — the client calling `run` twice —
@@ -789,7 +791,7 @@ mod tests {
             .checker()
             .spawn_bfs()
             .join()
-            .assert_no_discovery("bootstrap happens at most once");
+            .assert_no_discovery("STATE-3 bootstrap happens at most once");
 
         // The second launch has to be *reachable*, or the config above is silently a no-op
         // and the assertion is over the same space as the guarded run. Driven directly

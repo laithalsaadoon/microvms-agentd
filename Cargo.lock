@@ -2986,6 +2986,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "model-conformance"
+version = "0.1.0"
+dependencies = [
+ "agentd-model",
+ "microvms-app",
+ "serde_json",
+ "stateright",
+ "syn 2.0.119",
+ "tokio",
+]
+
+[[package]]
 name = "multiversion_no_op"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

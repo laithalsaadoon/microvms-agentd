@@ -280,7 +280,7 @@ smoke test drives the built `.node` through `node --test` rather than through `c
 (`microvms-js/Cargo.toml:12-17`, `microvms-js/package.json:13`).
 
 Neither crate publishes. `publish = false` is inherited workspace-wide
-(`Cargo.toml:26-32`), the bindings restate it (`microvms-py/Cargo.toml:11`,
+(`Cargo.toml:28-34`), the bindings restate it (`microvms-py/Cargo.toml:11`,
 `microvms-js/Cargo.toml:10`), and the npm side says the same thing with `"private": true`
 (`microvms-js/package.json:5`).
 

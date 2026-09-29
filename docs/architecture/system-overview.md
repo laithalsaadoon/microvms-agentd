@@ -66,7 +66,7 @@ the trap ladder.
 | --- | --- | --- |
 | Language | Rust, `edition = "2024"`, `resolver = "3"` | `Cargo.toml:23`, `Cargo.toml:11` |
 | Toolchain and targets | `channel = "stable"`, `targets = ["aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl"]` | `rust-toolchain.toml:13-16` |
-| Shipping artifact | `lto`, `codegen-units = 1`, `panic = "unwind"`, `strip`, `opt-level = "z"` | `Cargo.toml:36-59` |
+| Shipping artifact | `lto`, `codegen-units = 1`, `panic = "unwind"`, `strip`, `opt-level = "z"` | `Cargo.toml:38-61` |
 | Daemon HTTP | `axum = "0.8.9"`; `tower-http` `"0.6"` with `limit` + `catch-panic` | `agentd/Cargo.toml:16`, `agentd/Cargo.toml:25` |
 | Async runtime | `tokio = "1.53"`, no `rt-multi-thread` in the daemon or the library | `agentd/Cargo.toml:35-45`, `microvms-app/Cargo.toml:33`, `microvms-edges/Cargo.toml:88` |
 | AWS control plane | `reqwest = "0.13"` on `rustls`, `aws-sigv4 = "1.5"`, `aws-config = "1.10"` | `microvms-edges/Cargo.toml:58-63`, `microvms-edges/Cargo.toml:52`, `microvms-edges/Cargo.toml:41-46` |

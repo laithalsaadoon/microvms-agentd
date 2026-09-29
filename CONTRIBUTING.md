@@ -34,6 +34,7 @@ Useful checks while iterating:
 ```bash
 cargo test -p agentd --lib
 cargo test -p agentd-model
+cargo test -p model-conformance
 cargo test -p microvms-domain
 cargo test -p microvms-app
 cargo test -p microvms-edges
@@ -218,7 +219,8 @@ resources, run `uv run --upgrade --script scripts/check-model-drift.py`.
 The `spec` and `spec:core` tasks are separate from `check`. They require
 compatible symspec tooling; `spec:core` currently names a local checkout and
 is not portable. A passing `check` does not verify those documents.
-`cargo test -p agentd-model` runs the portable state-machine checks.
+`cargo test -p agentd-model` runs the portable state-machine checks, and
+`cargo test -p model-conformance` checks the app against them.
 
 ## Documentation
 

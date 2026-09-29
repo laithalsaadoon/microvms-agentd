@@ -309,6 +309,51 @@ impl Model for PreflightModel {
     }
 }
 
+/// One world and the report the specified procedure gives in it.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct Row {
+    pub region: RegionWorld,
+    pub credentials: bool,
+    pub service: ServiceWorld,
+    /// The region, credentials and service lines, in that order.
+    pub lines: [Line; 3],
+    pub ok: bool,
+    /// `ListManagedMicrovmImages` calls, counting an operation once however often it's sent.
+    pub free_reads: u8,
+}
+
+/// Every world the model chooses, run through [`Behavior::Specified`] to its report.
+///
+/// The rows come from the model's own steps, not from a restated table: each initial state is
+/// stepped until it reports. `model-conformance` builds each world from the app's fakes and
+/// holds `microvms_app::preflight::preflight_with` to the row.
+pub fn rows() -> Vec<Row> {
+    let model = PreflightModel {
+        behavior: Behavior::Specified,
+    };
+    model
+        .init_states()
+        .into_iter()
+        .map(|mut state| {
+            while state.step != Step::Done {
+                state = model
+                    .next_state(&state, state.step)
+                    .expect("every step before the report moves the procedure on");
+            }
+            Row {
+                region: state.region,
+                credentials: state.credentials,
+                service: state.service,
+                lines: state
+                    .lines
+                    .map(|line| line.expect("a finished report names every check")),
+                ok: state.ok.expect("a finished report says whether it's ok"),
+                free_reads: state.free_reads,
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

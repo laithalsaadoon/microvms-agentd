@@ -2203,8 +2203,8 @@ mod tests {
     /// **The table `model/src/wrap.rs` specifies**, rendered as real Dockerfile text: every
     /// task and option combination the model enumerates, and the refusal (or the `USER root`
     /// verdict) the model's `specified` gives it. The model crate cannot be a dependency here
-    /// (a path dependency without a version is a wildcard `deny.toml` refuses), so the table
-    /// is restated as `expected` below and the two are kept equal by review.
+    /// (this crate is published and the model isn't), so the table is restated as `expected`
+    /// below, and `model-conformance/tests/tables.rs` drives this function over the model's rows.
     #[test]
     fn wrap_agrees_with_the_model_table() {
         #[derive(Debug)]

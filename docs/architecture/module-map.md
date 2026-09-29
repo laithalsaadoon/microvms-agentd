@@ -1,6 +1,6 @@
 # microvms-agentd · Module map
 
-The workspace declares its members (`Cargo.toml:2-13`), and the sections below run in the
+The workspace declares its members (`Cargo.toml:2-14`), and the sections below run in the
 dependency order of the `system-overview.md` flowchart, bottom-up: the wire contract first,
 then `agentd` and the client's layers (`microvms-domain`, `microvms-app`, `microvms-edges`, and
 `microvms-core` over them), which compile against it, then the CLI and the bindings over the

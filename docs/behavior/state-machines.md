@@ -3,13 +3,13 @@
 Each machine below is declared once as a Rust enum. Boot, ExecPhase, and Lifecycle are also declared formally —
 twice over for the VM lifecycle — and the formal declaration is the authority: the `model/`
 crate holds `stateright` models whose properties hold over every interleaving
-(`model/src/lib.rs:441-526`, `model/src/client.rs:546-699`), and `spec/core.symspec.json`
+(`model/src/lib.rs:441-526`, `model/src/client.rs:546-701`), and `spec/core.symspec.json`
 carries a state model with a machine-readable transition effect per requirement
 (`spec/core.symspec.json:1014-1060`).
 
 The models are ordinary `cargo test` targets in the `agentd-model` crate
 (`model/Cargo.toml:2`), driven by `.checker().spawn_bfs().join().assert_properties()`
-(`model/src/lib.rs:536-543`, `model/src/client.rs:710-716`) and run by `cargo test --all`
+(`model/src/lib.rs:536-543`, `model/src/client.rs:712-718`) and run by `cargo test --all`
 (`mise.toml:164`). The Z3 pass over the symspec is a separate task,
 `spec:core`, run with `--reachability-timeout-ms 5000` through `scripts/check-spec.sh`, which refuses a symspec CLI
 older than 1.0 (`mise.toml:279-292`), with the daemon's own requirements gated by
@@ -20,7 +20,11 @@ dependency — `agentd-model` has no edge to `microvms-core` or to `agentd`
 (`model/src/client.rs:58-59`) — so each mirror is named beside its diagram. The edge that does
 exist runs the other way: `agentd`'s tests depend on the model, and
 `agentd/tests/model_conformance.rs` replays the Boot and ExecPhase machine against the daemon's
-routes, step by step.
+routes, step by step. The app's side is the unpublished `model-conformance` crate, which depends
+on the model and on `microvms-app`: `model-conformance/tests/client_lifecycle.rs` replays the
+client lifecycle against `Sandbox` over the app's fake control plane, and
+`model-conformance/tests/tables.rs` drives the app's pure policies over the rows the other
+models expose.
 
 ## Boot
 
@@ -262,18 +266,19 @@ Mirrors:
   (`model/src/client.rs:99-108`).
 
 The invariants Z3 proves over the symspec are restated as `stateright` `always`
-properties over every interleaving of the model's actions: `bootstrap happens at most once`
-(`model/src/client.rs:554-556`), `no suspend call outside RUNNING`
-(`model/src/client.rs:557-566`), and `a terminated VM never reaches RUNNING`
-(`model/src/client.rs:567-569`). The second is asserted against the counter
-`suspends_outside_running` rather than against the resulting state, because a suspend from
-`Running` and one from `Suspended` both land in `Suspending`, so nothing in the post-state
-distinguishes them — the first attempt at this property passed while a twelve-step
-counterexample existed (`model/src/client.rs:558-565`). Wire-call counts are state variables for
-the same reason (`model/src/client.rs:23-34`): "a resume after terminate is rejected" is
-satisfied by a client that calls, fails, and burns a poll timeout, so the property that matters
-is that no resume call ever fires once `was_terminated` holds
-(`model/src/client.rs:584-589`).
+properties over every interleaving of the model's actions:
+`STATE-3 bootstrap happens at most once` (`model/src/client.rs:554-556`),
+`STATE-5 no suspend call outside RUNNING` (`model/src/client.rs:557-566`), and
+`STATE-11 a terminated VM never reaches RUNNING` (`model/src/client.rs:567-570`). The keys are
+the spec's (`spec/core.symspec.json`), on the properties whose text matches the requirement's
+sentence. The STATE-5 property is asserted against the counter `suspends_outside_running`
+rather than against the resulting state, because a suspend from `Running` and one from
+`Suspended` both land in `Suspending`, so nothing in the post-state distinguishes them. The
+first attempt at this property passed while a twelve-step counterexample existed
+(`model/src/client.rs:558-565`). Wire-call counts are state variables for the same reason
+(`model/src/client.rs:23-34`): "a resume after terminate is rejected" is satisfied by a client
+that calls, fails, and burns a poll timeout, so the property that matters is that no resume call
+ever fires once `was_terminated` holds (`model/src/client.rs:585-590`).
 
 Model checking found a defect behind the third invariant that code reading had missed. A resume
 issued legally from `Suspended`, then a terminate, then the resume's completion arriving late,
@@ -286,8 +291,8 @@ clears the session and the lifecycle before anything else — `model/src/client.
 Each guard is proved falsifiable rather than merely green. Under `Config::guards_skipped`
 (`model/src/client.rs:247-252`) the client issues a suspend outside RUNNING, a resume after a
 terminate, and a resume with the window closed, and `stateright` hands back each path —
-`model/src/client.rs:726-745`, `:750-763`, `:768-774`. Every `always` property has a `sometimes`
-property beside it (`model/src/client.rs:647-697`) so none can pass over a space that never
+`model/src/client.rs:728-747`, `:752-765`, `:770-776`. Every `always` property has a `sometimes`
+property beside it (`model/src/client.rs:649-699`) so none can pass over a space that never
 reached the interesting state.
 
 ```mermaid
