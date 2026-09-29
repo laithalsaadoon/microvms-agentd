@@ -26,13 +26,19 @@
 # the full history plus origin/main, and anything else clones one commit with no remote.
 #
 # `[expressions]` answers for a pull request only. A push to main (the `BASE` expression's
-# `HEAD^` side) isn't modeled.
+# `HEAD^` side) isn't modeled, so `ci:guards` runs the pull request's `--affected` selection
+# under its 30-minute budget, never main's full fire under 60; `mise run guards:fire --
+# --jobs 4` is the full fire here.
 
 workflows = ["ci.yml", "fuzz.yml"]
 
 [expressions]
 "matrix.os" = "ubuntu-latest"
 "matrix.os == 'ubuntu-latest'" = "true"
+"github.base_ref" = "main"
+"github.event_name == 'pull_request'" = "true"
+"github.event_name != 'pull_request'" = "false"
+"github.event_name == 'pull_request' && 30 || 60" = "30"
 "github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^'" = "origin/main"
 
 [actions]
@@ -135,6 +141,7 @@ task = "guards"
 steps = [
   "install ast-grep (pinned, checksummed)",
   "install cargo-mutants (pinned, checksummed)",
+  "the seeded faults a pull request affects fire",
   "every seeded fault fires",
 ]
 

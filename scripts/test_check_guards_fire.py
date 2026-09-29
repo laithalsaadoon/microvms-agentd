@@ -10,6 +10,7 @@ the scratch worktree included. The census cases run the real ast-grep, so run th
 
 import os
 import re
+import shlex
 import shutil
 import signal
 import stat
@@ -18,6 +19,7 @@ import sys
 import tempfile
 import textwrap
 import time
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -1402,7 +1404,7 @@ def affected_repo(test: unittest.TestCase, extra: str = "") -> Repo:
 
 ORDER = ["a", "p", "gate", "py", "crate", "lint"]
 ALL = set(ORDER)
-OWED = "the full fire (CI's guards job) is still owed before a push"
+OWED = "the full fire runs on every push to main, or here without --affected"
 
 
 def selection(stdout: str) -> set[str]:
@@ -1675,6 +1677,285 @@ class FireAffected(unittest.TestCase):
         out = repo.run("fire", "--base", "HEAD")
         self.assertEqual(out.returncode, 1)
         self.assertIn("--base is for --affected", out.stderr)
+
+    # CI's side of mise.toml (#323): the `guards` job's own steps and the workflow's `env`.
+
+    def workflow_repo(self) -> Repo:
+        repo = affected_repo(self)
+        repo.write(WORKFLOW, FIXTURE_WORKFLOW)
+        repo.commit("the workflow")
+        git(repo.root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        return repo
+
+    def test_a_change_to_the_guards_jobs_steps_or_the_workflow_env_selects_every_entry(
+        self,
+    ):
+        # A pull request that drops clippy from the job would otherwise skip every clippy
+        # entry, pass, and turn main red.
+        for old, new in (
+            ("components: clippy, rustfmt", "components: rustfmt"),
+            ("CARGO_TERM_COLOR: always", "CARGO_TERM_COLOR: never"),
+        ):
+            with self.subTest(change=new):
+                repo = self.workflow_repo()
+                repo.write(WORKFLOW, FIXTURE_WORKFLOW.replace(old, new))
+                self.check(repo, ALL, f"affected: a: {WORKFLOW_REASON}")
+
+    def test_a_deleted_or_emptied_workflow_selects_every_entry(self):
+        for emptied in (False, True):
+            with self.subTest(emptied=emptied):
+                repo = self.workflow_repo()
+                if emptied:
+                    repo.write(WORKFLOW, "")
+                else:
+                    (repo.root / WORKFLOW).unlink()
+                self.check(repo, ALL, f"affected: a: {WORKFLOW_REASON}")
+
+    def test_another_job_or_a_comment_in_the_workflow_selects_nothing(self):
+        repo = self.workflow_repo()
+        repo.write(
+            WORKFLOW,
+            FIXTURE_WORKFLOW.replace("echo other", "echo changed").replace(
+                "# The toolchain", "# Its toolchain"
+            ),
+        )
+        self.check(repo, set())
+
+
+WORKFLOW = ".github/workflows/ci.yml"
+WORKFLOW_REASON = (
+    f"the `guards` job or the top-level `env` in {WORKFLOW} changed, and CI runs every "
+    "command under them"
+)
+FIXTURE_WORKFLOW = """\
+name: ci
+on:
+  pull_request:
+env:
+  CARGO_TERM_COLOR: always
+jobs:
+  guards:
+    runs-on: ubuntu-latest
+    steps:
+      # The toolchain every command runs under.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: ./scripts/check-guards-fire.py fire --affected
+  other:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo other
+"""
+
+
+# ── the `guards` job's steps, as ci.yml writes them (#323) ────────────────────
+
+CI = HERE.parent / ".github/workflows/ci.yml"
+# The two conditions the job's fire steps may carry; any other fails the case by name.
+ON_PULL_REQUEST = "github.event_name == 'pull_request'"
+ON_PUSH = "github.event_name != 'pull_request'"
+# What a pull request gives the steps' `${{ }}`s. The fixture's base is `release`, not main, and
+# it has no origin/main, so a step that ignores `github.base_ref` (a hard-coded origin/main, or
+# a `$BASE` that's unset and falls back to it) finds no merge base and fails.
+EXPRESSIONS = {"github.base_ref": "release"}
+LOCAL = HERE.parent / "ci/local.toml"
+EXPRESSION = re.compile(r"\$\{\{\s*(.+?)\s*\}\}")
+
+
+def guards_job() -> dict:
+    # Imported here, not at the top: the registry's `-k` entries run this module without
+    # pyyaml, and none of them reaches this class.
+    import yaml
+
+    workflow = yaml.safe_load(CI.read_text()) or {}
+    return (workflow.get("jobs") or {}).get("guards") or {}
+
+
+def fired(stdout: str) -> list[str]:
+    return [
+        v
+        for v in verdicts(stdout)
+        if re.match(r"(fired|DID NOT FIRE|stale anchor): ", v)
+    ]
+
+
+class GuardsJob(unittest.TestCase):
+    """Pull requests fire the entries their diff affects, and every push to main fires every
+    entry (D31). The steps run as ci.yml writes them, against a fixture repository."""
+
+    def fire_steps(self, event: str) -> list[dict]:
+        steps = [
+            s
+            for s in guards_job().get("steps") or []
+            if "check-guards-fire.py fire" in s.get("run", "")
+        ]
+        self.assertTrue(
+            steps,
+            "ci.yml's guards job has no step that runs `check-guards-fire.py fire`",
+        )
+        chosen = []
+        for step in steps:
+            condition = step.get("if")
+            if condition is not None:
+                self.assertIn(
+                    condition,
+                    (ON_PULL_REQUEST, ON_PUSH),
+                    f"unmodeled `if: {condition}`",
+                )
+            if condition is None or (condition == ON_PULL_REQUEST) == (
+                event == "pull_request"
+            ):
+                chosen.append(step)
+        self.assertEqual(
+            len(chosen), 1, f"{event}: {len(chosen)} fire steps run, not one"
+        )
+        return chosen
+
+    def run_step(self, repo: Repo, step: dict) -> subprocess.CompletedProcess[str]:
+        def value(match: re.Match) -> str:
+            self.assertIn(
+                match.group(1), EXPRESSIONS, f"unmodeled `${{{{ {match.group(1)} }}}}`"
+            )
+            return EXPRESSIONS[match.group(1)]
+
+        env = {
+            k: EXPRESSION.sub(value, str(v)) for k, v in (step.get("env") or {}).items()
+        }
+        # The step runs the checkout's own script; this one stands in, pointed at the fixture.
+        run = step["run"].replace(
+            "./scripts/check-guards-fire.py",
+            f"{shlex.quote(sys.executable)} {shlex.quote(str(SCRIPT))} --root {shlex.quote(str(repo.root))}",
+        )
+        path = os.pathsep.join([str(repo.bin), os.environ.get("PATH", "")])
+        return subprocess.run(
+            ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", run],
+            cwd=repo.root,
+            capture_output=True,
+            text=True,
+            env=clean_env(PATH=path, TMPDIR=str(repo.tmp), **env),
+        )
+
+    def test_a_pull_request_fires_the_entries_it_affects_and_a_push_fires_every_entry(
+        self,
+    ):
+        # One entry of each other suite beside the fixture's rust ones: this job fires rust
+        # and script, and the bindings job fires bindings.
+        script = entry(
+            fid="sc",
+            guard="sgate.py",
+            run=[sys.executable, "sgate.py"],
+            expect="exit-nonzero",
+            suite="script",
+            message="sgate says no",
+            fault='transform = { file = "state-s.txt", replace = "s=ok", with = "s=bad" }',
+        )
+        binding = entry(
+            fid="bi",
+            guard="t",
+            run=["node", "--test", "--test-reporter=tap", "t.mjs"],
+            suite="bindings",
+            fault='transform = { file = "state-js.txt", replace = "t=ok", with = "t=fail" }',
+        )
+        repo = affected_repo(self, extra=script + binding)
+        # The step's `--target-dir target` is inside the checkout, as on the runner.
+        repo.write(".gitignore", "target/\n")
+        repo.write("state-s.txt", "s=ok\n")
+        repo.write(
+            "sgate.py",
+            "import sys\nbad = 's=bad' in open('state-s.txt').read()\n"
+            "bad and print('sgate says no')\nsys.exit(1 if bad else 0)\n",
+        )
+        repo.write("state-js.txt", "t=ok\n")
+        repo.commit("the fixture's base")
+        git(repo.root, "update-ref", "refs/remotes/origin/release", "HEAD")
+        git(repo.root, "update-ref", "-d", "refs/remotes/origin/main")
+        # HEAD plays the pull request's merge commit: one rust, one script and one bindings
+        # entry's files change.
+        for path in ("state-a.txt", "state-s.txt", "state-js.txt"):
+            repo.write(path, (repo.root / path).read_text() + "extra=ok\n")
+        repo.commit()
+
+        (pr,) = self.fire_steps("pull_request")
+        out = self.run_step(repo, pr)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(selection(out.stdout), {"a", "sc"}, out.stdout)
+        self.assertEqual(
+            fired(out.stdout), ["fired: a (t)", "fired: sc (t)"], out.stdout
+        )
+
+        (push,) = self.fire_steps("push")
+        self.assertNotIn("--affected", push["run"])
+        self.assertNotIn("--only", push["run"])
+        out = self.run_step(repo, push)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(selection(out.stdout), set(), out.stdout)
+        self.assertEqual(
+            fired(out.stdout), [f"fired: {i} (t)" for i in [*ORDER, "sc"]], out.stdout
+        )
+
+    def test_the_pull_request_step_is_the_push_step_plus_the_selection(self):
+        # So the two legs can't drift apart in a flag (a lost suite, or a bindings suite this
+        # job has no toolchain for), and neither can leave the worker count and per-command
+        # timeout the budgets were measured with: four workers on the four-vCPU runner, and
+        # a hung fault stopped well inside the job's time.
+        (pr,) = self.fire_steps("pull_request")
+        (push,) = self.fire_steps("push")
+        pr_argv, push_argv = shlex.split(pr["run"]), shlex.split(push["run"])
+        suites = [b for a, b in zip(push_argv, push_argv[1:]) if a == "--suite"]
+        self.assertEqual(suites, ["rust", "script"], push["run"])
+        options = dict(zip(push_argv, push_argv[1:]))
+        for flag, want in (("--jobs", "4"), ("--timeout", "900")):
+            self.assertEqual(options.get(flag), want, f"the push step's {flag}")
+        self.assertEqual(pr_argv, [*push_argv, "--affected", "--base", "$BASE"])
+
+    def test_ci_local_answers_the_guards_job_as_a_pull_request(self):
+        # ci:local runs one leg, the pull request's. Its answers have to agree with each other
+        # and with ci.yml: swapped event answers would run main's full fire there, and the push
+        # leg's budget would let the pull request's run long.
+        answers = tomllib.loads(LOCAL.read_text())["expressions"]
+        self.assertEqual(answers.get(ON_PULL_REQUEST), "true", ON_PULL_REQUEST)
+        self.assertEqual(answers.get(ON_PUSH), "false", ON_PUSH)
+        # ci-local.py clones origin/main as the base, so the base branch is main.
+        self.assertEqual(answers.get("github.base_ref"), "main")
+        budget = re.fullmatch(
+            r"\$\{\{ (github\.event_name == 'pull_request' && (\d+) \|\| \d+) \}\}",
+            str(guards_job().get("timeout-minutes")),
+        )
+        self.assertIsNotNone(
+            budget, "the guards job's timeout-minutes isn't split by event"
+        )
+        self.assertEqual(
+            answers.get(budget.group(1)),
+            budget.group(2),
+            "ci/local.toml's budget isn't the pull request's",
+        )
+
+    def test_mains_push_has_a_larger_budget_than_a_pull_request(self):
+        # The push leg fires every entry, so it gets the time a full fire needs, and a pull
+        # request keeps the budget that shows the registry's growth before merge.
+        budget = re.fullmatch(
+            r"\$\{\{ github\.event_name == 'pull_request' && (\d+) \|\| (\d+) \}\}",
+            str(guards_job().get("timeout-minutes")),
+        )
+        self.assertIsNotNone(
+            budget, "the guards job's timeout-minutes isn't split by event"
+        )
+        pull_request, push = map(int, budget.groups())
+        self.assertLess(pull_request, push)
+
+    def test_the_checkout_has_the_base_branch_the_merge_base_needs(self):
+        checkout = [
+            s
+            for s in guards_job().get("steps") or []
+            if str(s.get("uses", "")).startswith("actions/checkout@")
+        ]
+        self.assertEqual(
+            len(checkout),
+            1,
+            "the guards job doesn't have exactly one actions/checkout step",
+        )
+        self.assertEqual(str((checkout[0].get("with") or {}).get("fetch-depth")), "0")
 
 
 if __name__ == "__main__":

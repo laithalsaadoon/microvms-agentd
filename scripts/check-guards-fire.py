@@ -63,12 +63,14 @@ Two subcommands:
           or imports, the `-p` crate's file that defines a cargo test, the crate's clippy.toml
           for a lint). A change to this script, or to a build input every command reads
           (any Cargo.toml, Cargo.lock, rust-toolchain.toml, .cargo/config.toml, the root
-          clippy.toml, mise.toml, mise.lock), selects every entry. It's a rule, not a trace:
+          clippy.toml, mise.toml, mise.lock), selects every entry, and so does a change to
+          ci.yml's `guards` job or its top-level `env` (CI's side of mise.toml: that job's
+          steps install the toolchain every command runs under). It's a rule, not a trace:
           a change to code a guard reaches without naming it (the module that defines a type
           a clippy ban names, a helper a test calls) selects nothing, so a green run here
-          isn't the full fire. It prints why each entry is in, the ids it skipped, and that
-          the full fire is still owed when it skipped any. CI runs every entry; this is for a
-          quick local run before the full one.
+          isn't the full fire. It prints why each entry is in, the ids it skipped, and where
+          the full fire runs when it skipped any. CI's `guards` job runs it on a pull request
+          against the pull request's base, and fires every entry on each push to main (#323).
 
           Cargo builds into `--target-dir`, by default `guards-fire` under the caller's
           target (`$CARGO_TARGET_DIR`, or `<repo>/target`). It persists, so a fault costs an
@@ -167,6 +169,12 @@ BUILD_INPUTS = {
     "mise.toml",
     "mise.lock",
 }
+# CI's side of mise.toml: on the runner, the `guards` job's own steps install the toolchain and
+# tools every command runs under (the Rust components, uv, Node, the ast-grep and cargo-mutants
+# pins), and the workflow's top-level `env` reaches every step. A change to either selects every
+# entry, as a mise.toml change does.
+CI_WORKFLOW = ".github/workflows/ci.yml"
+CI_JOB = "guards"
 UNREGISTERED = "guards/unregistered.txt"
 
 # Built, not written, so this file doesn't carry the marker it counts.
@@ -1254,6 +1262,37 @@ def base_entries(root: Path, commit: str) -> dict[str, dict]:
     }
 
 
+def workflow_inputs(text: str) -> list[str]:
+    """The workflow's top-level `env` block and its `guards` job, blank and comment lines
+    dropped. A line scan, not a YAML parse: this script has no dependencies, and ci.yml starts
+    each top-level key at column 0 and each job's key at two spaces."""
+    kept: list[str] = []
+    top = job = None
+    for line in text.splitlines():
+        body = line.strip()
+        if not body or body.startswith("#"):
+            continue
+        if not line[0].isspace():
+            top, job = line.split(":", 1)[0], None
+        elif top == "jobs" and re.match(r"  \S", line):
+            job = line.split(":", 1)[0].strip()
+        if top == "env" or (top == "jobs" and job == CI_JOB):
+            kept.append(line)
+    return kept
+
+
+def workflow_inputs_changed(root: Path, commit: str) -> bool:
+    """Whether ci.yml's `guards` job or its top-level `env` differs between `commit` and the
+    working tree. A deleted ci.yml differs from any base that had them."""
+    try:
+        head = (root / CI_WORKFLOW).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        head = ""
+    # Empty when the base has no ci.yml.
+    base = git(root, "show", f"{commit}:{CI_WORKFLOW}", check=False).stdout
+    return workflow_inputs(base) != workflow_inputs(head)
+
+
 def crate_dirs(root: Path, files: set[str]) -> dict[str, str]:
     """Each workspace package's name and directory, from the tracked Cargo.toml files."""
     out: dict[str, str] = {}
@@ -1384,12 +1423,18 @@ def affected(
     inputs = sorted(
         p for p in changed if p in BUILD_INPUTS or Path(p).name == "Cargo.toml"
     )
+    workflow = CI_WORKFLOW in changed and workflow_inputs_changed(root, commit)
     for fault in faults:
         if this in changed:
             reasons[fault.id] = f"{this} changed, and it decides every verdict"
         elif inputs:
             reasons[fault.id] = (
                 f"{inputs[0]} changed, and every build or command reads it"
+            )
+        elif workflow:
+            reasons[fault.id] = (
+                f"the `{CI_JOB}` job or the top-level `env` in {CI_WORKFLOW} changed, "
+                "and CI runs every command under them"
             )
         elif fault.id not in before:
             reasons[fault.id] = f"the entry is new in {REGISTRY}"
@@ -1437,7 +1482,7 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
             print(
                 "guards: --affected selects by the files each entry names, so a change "
                 "that reaches a skipped guard some other way isn't seen; the full fire "
-                "(CI's guards job) is still owed before a push"
+                "runs on every push to main, or here without --affected"
             )
         if not selected:
             print("guards: no selected entry names a changed file, so nothing to fire")

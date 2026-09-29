@@ -9,7 +9,7 @@
 `mise run check` is fast, and CI still caught failures no local gate could see. PR #314's first
 run failed seven `AdapterLintTests` on colored clippy output, because ci.yml sets
 `CARGO_TERM_COLOR=always`; PR #313's `guards` job failed on a registry entry that needed a
-merge base, because that job's checkout is shallow with no origin/main. Both passed every local
+merge base, because that job's checkout was shallow with no origin/main. Both passed every local
 gate. This script runs a job's own `run:` steps in a checkout shaped like the job's, so a
 difference of that kind shows up before a push.
 

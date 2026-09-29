@@ -60,17 +60,24 @@ printing `fired` for it. `check` runs `guards:list`, which fails when an entry's
 anchor or patch no longer matches the tree, and when a test gains a
 `**Falsification**` note with no entry (`guards/unregistered.txt` lists the
 older ones and only shrinks). CI's `guards` job seeds the Rust and script
-faults, and the `bindings` job the binding ones. A guard no fault can be seeded
-for, such as a live check, is still broken by hand, restored, and recorded in
-the PR.
+faults a pull request affects and, on every push to main, all of them; the
+`bindings` job seeds the binding ones. A guard no fault can be seeded for, such
+as a live check, is still broken by hand, restored, and recorded in the PR.
 
 Locally, `mise run guards:fire -- --jobs 4` seeds faults in four scratch worktrees at
 once and reports what a serial run reports, in the same order. `-- --affected` fires
 only the entries whose own files changed against origin/main (`--base <ref>` for
-another base) and names the ones it skips. It's a quick first pass, not the full fire:
-a change that reaches a guard through code the entry doesn't name, such as the type a
-clippy ban names, isn't seen. Run the full fire, or let CI's `guards` job, before you
-count on it.
+another base) and names the ones it skips. It's what CI's `guards` job runs on a pull
+request, and it isn't the full fire: a change that reaches a guard through code the
+entry doesn't name, such as the type a clippy ban names, isn't seen. (A change to the
+script, a build input such as Cargo.lock, a Cargo.toml or mise.toml, or ci.yml's `guards`
+job or top-level `env` selects every entry.) Main's push runs the full fire after the
+merge, with a 60-minute budget to the pull request's 30, so a fault only it catches turns
+main red. When your change reaches guards that way, run
+`mise run guards:fire -- --jobs 4` before you push. A red `seeded faults fire` on main is
+fixed before the next merge, because the next pull request that selects every entry
+fails on it as well. If your pull request fails an entry it didn't touch, look at main's
+last push run first.
 
 CI's `mutants` job runs cargo-mutants over the Rust a pull request changes, and
 `mise run mutants` runs it over your branch against origin/main. It isn't in
