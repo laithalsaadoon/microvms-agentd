@@ -52,7 +52,7 @@ hypotheses, 0 violated, 0 unknown (`mise.toml:224-226` at 9c462f0) — that task
 symspec v5 CLI at an absolute path, so it is deliberately outside `mise run check`
 (`mise.toml:222-227`). The runnable half is `stateright`, which restates the same invariants
 over every interleaving in
-`model/src/client.rs:554-569` and passes under `cargo test -p agentd-model`. The waivers are all
+`model/src/client.rs:554-570` and passes under `cargo test -p agentd-model`. The waivers are all
 `GTWR_R6_MISSING_UNITS`: against TRAP-5, because the linter's unit list does not include bytes,
 and against BIND-6 and BIND-10, whose 124 and 128 are POSIX exit statuses that carry no unit.
 
@@ -235,10 +235,10 @@ Z3 and `stateright` proofs proofs about *this struct's* reachable states
 | STATE-11: a terminated VM never returns to RUNNING, checked before the window check and before any call | Application, `Sandbox::resume` | `microvms-app/src/sandbox.rs:1535-1543` |
 | STATE-12: a resume past the launch-time suspended window is refused with the elapsed window named | Application, before `ResumeMicrovm` | `microvms-app/src/sandbox.rs:1551-1552`, `:1593-1626` |
 | The suspended-window clock is stamped after the suspend call and before the wait, and cleared on a successful resume | Application, `Sandbox` | `microvms-app/src/sandbox.rs:1468-1471`, `:1579-1582` |
-| The Z3-proved invariants hold over every interleaving: bootstrap at most once, no suspend outside RUNNING, a terminated VM never reaches RUNNING | `stateright` model | `model/src/client.rs:554-569` |
-| A locally refused call costs **zero** wire calls — resume after terminate, resume with the window closed, and the payload count matching the launch count are all checked as counters, not as end states | `stateright` model | `model/src/client.rs:584-598`, `:623-640` |
-| The installed token is never replaced and survives a suspend/resume cycle | `stateright` model | `model/src/client.rs:599-616` |
-| `image_exists` is true exactly when a launch was accepted, and a bootstrapped token implies one | `stateright` model | `model/src/client.rs:570-582` |
+| The Z3-proved invariants hold over every interleaving: bootstrap at most once, no suspend outside RUNNING, a terminated VM never reaches RUNNING | `stateright` model | `model/src/client.rs:554-570` |
+| A locally refused call costs **zero** wire calls: resume after terminate, resume with the window closed, and the payload count matching the launch count are all checked as counters, not as end states | `stateright` model | `model/src/client.rs:585-599`, `:625-642` |
+| The installed token is never replaced and survives a suspend/resume cycle | `stateright` model | `model/src/client.rs:600-617` |
+| `image_exists` is true exactly when a launch was accepted, and a bootstrapped token implies one | `stateright` model | `model/src/client.rs:571-583` |
 
 ### Daemon
 
@@ -410,7 +410,7 @@ be March-based, which puts February's variable length last; `719468` is the day 
 
 - **Local refusal before the wire, always.** Every S2 guard fires before the first control-plane
   call, and where the distinction is observable the test asserts the control-plane **call count**
-  rather than just the error. `microvms-app/src/sandbox.rs:29-32`; `model/src/client.rs:584-589`
+  rather than just the error. `microvms-app/src/sandbox.rs:29-32`; `model/src/client.rs:585-590`
   states it as a model property.
 
 - **One guard list, runnable before the artifact upload.** `create_image` runs after the caller

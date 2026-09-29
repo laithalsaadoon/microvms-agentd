@@ -706,6 +706,50 @@ impl Model for RunToCompletion {
     }
 }
 
+/// One row of [`posix_exit_code_rows`]: the daemon's status, the client's deadline, and the
+/// exit code [`posix_exit_code`] gives them.
+pub type ExitCodeRow = (Option<Status>, Option<ClientDeadline>, Option<i32>);
+
+/// Every status and client deadline the model distinguishes, each with its exit code: an exit
+/// code of zero or not, each signal the module names, with and without the daemon's deadline,
+/// and each kill answer with the result synthesized or not. `truncated` is left false, since
+/// the exit code doesn't read it.
+///
+/// `model-conformance` builds an `ExecResult` from each row and holds
+/// `microvms_app::session::exec::ExecResult::posix_exit_code` to it.
+pub fn posix_exit_code_rows() -> Vec<ExitCodeRow> {
+    let mut statuses = vec![None];
+    for exit_code in [None, Some(0), Some(3)] {
+        for signal in [None, Some(SIGKILL), Some(SIGSEGV), Some(SIGTERM)] {
+            for timed_out in [false, true] {
+                statuses.push(Some(Status {
+                    exit_code,
+                    signal,
+                    timed_out,
+                    truncated: false,
+                }));
+            }
+        }
+    }
+    let mut clients = vec![None];
+    for kill in [
+        KillAnswer::Signalled,
+        KillAnswer::AlreadyGone,
+        KillAnswer::Failed,
+    ] {
+        for synthesized in [false, true] {
+            clients.push(Some(ClientDeadline { kill, synthesized }));
+        }
+    }
+    let mut rows = Vec::new();
+    for status in &statuses {
+        for client in &clients {
+            rows.push((*status, *client, posix_exit_code(*status, *client)));
+        }
+    }
+    rows
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

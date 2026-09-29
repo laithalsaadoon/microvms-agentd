@@ -747,6 +747,34 @@ impl Model for Provisioning {
     }
 }
 
+/// One row of [`verification_rows`]: what the release does, and the verdict.
+pub type VerificationRow = (Release, Verdict);
+
+/// Every combination of what `gh` and `curl` do, each with the specified verdict.
+///
+/// `model-conformance` plays each row through a scripted release and holds
+/// `microvms_app::provision::fetch_release` to it, reading [`Gh`] and [`Curl`] as the module
+/// docs say.
+pub fn verification_rows() -> Vec<VerificationRow> {
+    let mut rows = Vec::new();
+    for gh in [Gh::Unavailable, Gh::Attested, Gh::Unattested] {
+        for curl in [
+            Curl::Fails,
+            Curl::NoSums,
+            Curl::SumsMatch,
+            Curl::SumsMismatch,
+        ] {
+            let release = Release {
+                gh,
+                curl,
+                arm: true,
+            };
+            rows.push((release, verify(Behavior::Specified, release)));
+        }
+    }
+    rows
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

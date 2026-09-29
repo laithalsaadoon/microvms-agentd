@@ -22,6 +22,10 @@ test_tool = "cargo"
 # the replay's `walk()` measured 17.0 s against 27.8 s at depth 11 and keeps the untaken-step
 # paths. Don't skip it under mutation: `model-conformance-restart-running` and
 # `model-conformance-restart-acked` are faults in exec.rs only the replay catches.
+# The app's side is different: `model-conformance` is its own crate (#296), so an app mutant
+# doesn't run its tables or its client lifecycle replay. A mutant in microvms-app/src/sandbox.rs
+# that only the replay kills, such as the one `model-conformance-client-suspend-skips-suspending`
+# seeds, reports MISSED, and the fix is an app test of its own.
 # The default, written down so a change to it is a reviewed diff.
 timeout_multiplier = 5.0
 # A floor on the timeout cargo-mutants sets from the baseline. CI runners are slower than the

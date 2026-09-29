@@ -56,6 +56,8 @@ from local test results.
 - `microvms-py/`, `microvms-js/`: thin PyO3 and napi-rs bindings.
 - `model/`, `spec/`, `conformance/`: portable model tests, formal requirements,
   and live AWS checks.
+- `model-conformance/`: unpublished, tests only; drives the app's policies and
+  `Sandbox` over the models' rows and paths.
 - `arch/placement.toml`, `ratchet/`: each crate's allowed dependencies and the
   drift count (see Architecture).
 
@@ -180,7 +182,8 @@ capabilities, or `parity/capabilities.toml` says why one doesn't.
 - Rebuild the release CLI before targeted live checks. Verify cleanup of VMs,
   images, and service-created log groups independently.
 - `spec:core` references a local symspec checkout; formal requirements are
-  separate from `check`. Portable state checks use `cargo test -p agentd-model`.
+  separate from `check`. Portable state checks use `cargo test -p agentd-model`;
+  `cargo test -p model-conformance` ties those models to the app.
 
 Publishing and version changes are documented in CONTRIBUTING.md. Do not
 change the stub generator's maturin pin without checking its output-path

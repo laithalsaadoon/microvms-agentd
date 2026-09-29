@@ -480,6 +480,24 @@ impl Model for WrapModel {
     }
 }
 
+/// One row of [`rows`]: a task, its options, and what [`specified`] answers for them.
+pub type Row = (Task, Opts, Wrap);
+
+/// Every task and option set the model enumerates, each with the specification's answer.
+///
+/// `model-conformance` renders each row as real Dockerfile text and drives
+/// `microvms_app::control::artifact::wrap_dockerfile` over it, so the app's function is held to
+/// this model rather than to a copy of its table.
+pub fn rows() -> Vec<Row> {
+    let mut rows = Vec::new();
+    for task in tasks() {
+        for opts in options() {
+            rows.push((task, opts, specified(task, opts)));
+        }
+    }
+    rows
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -178,8 +178,9 @@ REPO = Scope(
     root=ROOT,
     placement=ROOT / PLACEMENT,
     adapters=("microvms-cli", "microvms-py", "microvms-js"),
-    # `model/` is a proof harness: only agentd's tests depend on it, and it's never published.
-    non_shipping=frozenset({"agentd-model"}),
+    # `model/` is a proof harness, and `model-conformance/` holds only tests that drive the app
+    # over the model's rows. Only tests depend on either, and neither is ever published.
+    non_shipping=frozenset({"agentd-model", "model-conformance"}),
     # `microvms-edges` is the one crate the collector doesn't read below the adapters: it's
     # where port implementations belong.
     composed=("microvms-app",),

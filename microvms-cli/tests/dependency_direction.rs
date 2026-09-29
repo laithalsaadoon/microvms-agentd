@@ -223,7 +223,9 @@ fn edges_among_members(metadata: &cargo_metadata::Metadata, name: &str) -> BTree
 /// agentd's edge onto `agentd-model` is a proof dependency: `tests/model_conformance.rs` walks
 /// the model and replays each path against the daemon's routes. The guest image ships protocol
 /// and nothing else of ours, so [`DEV_ONLY_EDGES`] holds that edge to its dev kind.
-const MEMBER_EDGES: [(&str, &[&str]); 10] = [
+/// `model-conformance` is the app's proof crate: its tests drive the app's functions over the
+/// model's rows, so it sits above both, and nothing depends on it.
+const MEMBER_EDGES: [(&str, &[&str]); 11] = [
     ("microvms-protocol", &[]),
     ("agentd-model", &[]),
     ("agentd", &["agentd-model", "microvms-protocol"]),
@@ -245,6 +247,7 @@ const MEMBER_EDGES: [(&str, &[&str]); 10] = [
     ("microvms-cli", &["microvms-core"]),
     ("microvms-py", &["microvms-core", "microvms-protocol"]),
     ("microvms-js", &["microvms-core", "microvms-protocol"]),
+    ("model-conformance", &["agentd-model", "microvms-app"]),
 ];
 
 /// **ARCH-1, ARCH-6, ARCH-7 and ARCH-8.** Each workspace member depends on exactly the crates
@@ -326,6 +329,9 @@ fn the_workspace_members_are_the_crates_the_architecture_names() {
             // the workspace where the registry name is visible.
             "microvms-protocol",
             "microvms-py",
+            // Tests only: the app's functions driven over the model's rows. It can't live in
+            // the app, which is published and so can't take an edge onto the unpublished model.
+            "model-conformance",
         ],
         "a workspace member appeared or vanished. The dependency-direction assertions above are \
          equalities over the four crates ARCH-3/4/5 name, so a new member that depended on the \

@@ -563,6 +563,29 @@ impl Model for EnsureModel {
     }
 }
 
+/// One row of [`plan_rows`]: what a describe found, whether the caller forced, and the plan.
+pub type PlanRow = (Found, bool, Plan);
+
+/// Every describe result and force setting, each with what [`plan`] answers.
+///
+/// `model-conformance` drives `microvms_app::control::ensure::plan` over each row, so the
+/// app's decision table is held to this model rather than to a copy of it.
+pub fn plan_rows() -> Vec<PlanRow> {
+    let mut rows = Vec::new();
+    for found in [
+        Platform::Absent,
+        Platform::Building,
+        Platform::Ready,
+        Platform::Failed,
+        Platform::Deleting,
+    ] {
+        for force in [false, true] {
+            rows.push((found, force, plan(found, force)));
+        }
+    }
+    rows
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

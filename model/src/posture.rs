@@ -526,8 +526,8 @@ pub type Row = (bool, u8, bool, bool, Result<Posture, Refusal>);
 
 /// The decision table at [`WIRE_CEILING`].
 ///
-/// `microvms_core::control::egress_posture_for`'s unit test carries the same rows, so the
-/// model and the implementation are checked against one statement.
+/// `egress_posture_for`'s unit test in `microvms-app` carries the same rows, and
+/// `model-conformance` drives that function over [`rows`], which includes every one of them.
 pub const TABLE: [Row; 14] = [
     (false, 0, false, false, Ok(Posture::Unsealed)),
     (false, 0, false, true, Ok(Posture::BestEffort)),
@@ -544,6 +544,41 @@ pub const TABLE: [Row; 14] = [
     (true, 1, false, true, Err(Refusal::EgressWithDeny)),
     (true, 1, true, false, Err(Refusal::EgressWithConnectors)),
 ];
+
+/// Every launch the model can describe at [`WIRE_CEILING`] and one connector past it, each with
+/// what [`specified`] answers. [`TABLE`]'s rows are among them.
+///
+/// `model-conformance` drives `microvms_app::control::connector::egress_posture_for` over each
+/// row, so the app's function is held to this model rather than to a copy of its table.
+pub fn rows() -> Vec<Row> {
+    let mut rows = Vec::new();
+    for egress in [false, true] {
+        for connectors in 0..=WIRE_CEILING + 1 {
+            for malformed in [false, true] {
+                // A malformed connector needs a connector to be.
+                if malformed && connectors == 0 {
+                    continue;
+                }
+                for deny in [false, true] {
+                    let options = Options {
+                        egress,
+                        connectors,
+                        malformed,
+                        deny,
+                    };
+                    rows.push((
+                        egress,
+                        connectors,
+                        malformed,
+                        deny,
+                        specified(options, WIRE_CEILING),
+                    ));
+                }
+            }
+        }
+    }
+    rows
+}
 
 #[cfg(test)]
 mod tests {

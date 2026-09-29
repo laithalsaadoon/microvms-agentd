@@ -30,7 +30,7 @@ SCRIPT = Path(__file__).with_name("check-mutants.py")
 ROOT = SCRIPT.parent.parent
 
 # The workspace's members, as `cargo metadata` names them: the wrapper's `PACKAGES` and the
-# three it leaves out.
+# ones it leaves out.
 MEMBERS = [
     "agentd",
     "agentd-model",
@@ -42,6 +42,7 @@ MEMBERS = [
     "microvms-js",
     "microvms-protocol",
     "microvms-py",
+    "model-conformance",
 ]
 
 # Every `mutants::skip` in the tree, by file. The attribute drops every mutant under it with no
