@@ -40,6 +40,57 @@ transform = [
   { file = "microvms-cli/src/commands/lifecycle.rs", replace = "use std::time::Duration;\n", with = "use std::time::Duration;\n\nuse microvms_core::prelude::ControlPlaneExt as _;\n" },
 ]
 
+[[fault]]
+id = "doctor-region-credentials"
+guard = "guards::doctor_asks_every_check_about_the_region_its_flag_names"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::doctor_asks_every_check_about_the_region_its_flag_names"]
+expect = "test-failed"
+suite = "rust"
+note = "microvms-cli/src/guards.rs::doctor_asks_every_check_about_the_region_its_flag_names"
+transform = { file = "microvms-cli/src/commands/doctor.rs", replace = "    let region = match resolved {\n        Ok(region) => region.clone(),", with = "    let region = match &crate::seam::resolve_region(None, None, ctx.env) {\n        Ok(region) => region.clone()," }
+
+[[fault]]
+id = "doctor-region-managed-bases"
+guard = "guards::doctor_asks_every_check_about_the_region_its_flag_names"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::doctor_asks_every_check_about_the_region_its_flag_names"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "microvms-cli/src/commands/doctor.rs", replace = "    let Ok(region) = region else {", with = "    let Ok(region) = &crate::seam::resolve_region(None, None, ctx.env) else {" }
+
+[[fault]]
+id = "doctor-region-unresolved-reads-nothing"
+guard = "guards::doctor_reads_no_managed_base_when_the_region_does_not_resolve"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::doctor_reads_no_managed_base_when_the_region_does_not_resolve"]
+expect = "test-failed"
+suite = "rust"
+note = "microvms-cli/src/guards.rs::doctor_reads_no_managed_base_when_the_region_does_not_resolve"
+transform = { file = "microvms-cli/src/commands/doctor.rs", replace = "    let Ok(region) = region else {", with = "    let fallback = Region::UsEast1;\n    let Ok(region) = region.as_ref().or(Ok::<_, ()>(&fallback)) else {" }
+
+[[fault]]
+id = "doctor-region-unresolved-keeps-identity-fatal"
+guard = "guards::doctor_keeps_a_missing_identity_fatal_when_the_region_does_not_resolve"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::doctor_keeps_a_missing_identity_fatal_when_the_region_does_not_resolve"]
+expect = "test-failed"
+suite = "rust"
+note = "microvms-cli/src/guards.rs::doctor_keeps_a_missing_identity_fatal_when_the_region_does_not_resolve"
+transform = { file = "microvms-cli/src/commands/doctor.rs", replace = "        Err(_) => Region::UsEast1,", with = "        Err(_) => {\n            return Check::fail(\"credentials\", \"not checked\", \"see the region check above\")\n                .advisory();\n        }" }
+
+[[fault]]
+id = "doctor-region-unlisted"
+guard = "guards::doctor_asks_every_check_about_the_region_its_flag_names"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::doctor_asks_every_check_about_the_region_its_flag_names"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "microvms-cli/src/commands/doctor.rs", replace = "    let region = args.region.resolve(ctx.env);", with = "    let region = crate::seam::resolve_region(args.region.region.map(|r| r.region()), None, ctx.env);" }
+
+[[fault]]
+id = "doctor-region-unresolved-names-stand-in"
+guard = "guards::doctor_reads_no_managed_base_when_the_region_does_not_resolve"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::doctor_reads_no_managed_base_when_the_region_does_not_resolve"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "microvms-cli/src/commands/doctor.rs", replace = "    if resolved.is_err() {\n        check\n            .detail\n            .push_str(\"; us-east-1 stood in, because the region above didn't resolve\");\n    }\n", with = "" }
+
 # #277's falsifier: a char literal holding a quote used to blank the rest of the line. The
 # operation scan it was written against went with #273, so it's seeded under the print scan, which
 # reads the same lexer.
@@ -129,6 +180,347 @@ expect = "test-failed"
 suite = "rust"
 note = "microvms-cli/tests/thinness.rs::no_direct_dependency_is_a_second_path_to_aws"
 transform = { file = "microvms-cli/Cargo.toml", replace = "[dependencies]\n", with = "[dependencies]\nreqwest = { version = \"0.13\", default-features = false }\n" }
+
+# ── a caller's --artifact-uri (#249) ─────────────────────────────────────────
+
+[[fault]]
+id = "cli-artifact-uri-not-uploaded-over"
+guard = "guards::a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucket"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucket"]
+expect = "test-failed"
+suite = "rust"
+message = "build: a caller-supplied --artifact-uri must not be uploaded over"
+note = "microvms-cli/src/guards.rs::a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucket"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    if caller_uri.is_some() {\n", with = "    if caller_uri.is_some() && ctx.infra.bucket.is_none() {\n" }
+
+[[fault]]
+id = "cli-artifact-uri-run-arm"
+guard = "guards::a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucket"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucket"]
+expect = "test-failed"
+suite = "rust"
+message = "run: a caller-supplied --artifact-uri must not be uploaded over"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "upload_artifact(ctx, sandbox, &request, args.artifact_uri.as_deref())", with = "upload_artifact(ctx, sandbox, &request, None)" }
+
+[[fault]]
+id = "cli-artifact-uri-build-arm"
+guard = "guards::a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucket"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucket"]
+expect = "test-failed"
+suite = "rust"
+message = "build: a caller-supplied --artifact-uri must not be uploaded over"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "upload_artifact(ctx, &sandbox, &request, args.artifact_uri.as_deref())", with = "upload_artifact(ctx, &sandbox, &request, None)" }
+
+# The obvious break, deleting the `if let Some(bucket)` guard, leaves `{bucket}` unbound and
+# is a compile error. `.or(Some("none"))` keeps the binding and the type, so the line prints
+# with no bucket and the test is what goes red.
+[[fault]]
+id = "cli-artifact-uri-no-bucket-quiet"
+guard = "guards::a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucket"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucket"]
+expect = "test-failed"
+suite = "rust"
+message = "no bucket: with no bucket there's none to call unused"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "        if let Some(bucket) = ctx.infra.bucket.as_deref() {\n", with = "        if let Some(bucket) = ctx.infra.bucket.as_deref().or(Some(\"none\")) {\n" }
+
+[[fault]]
+id = "cli-bucket-build-uploads"
+guard = "guards::a_bucket_without_an_artifact_uri_uploads_to_the_derived_key"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_bucket_without_an_artifact_uri_uploads_to_the_derived_key"]
+expect = "test-failed"
+suite = "rust"
+message = "build: a bucket and no --artifact-uri uploads to the derived key"
+note = "microvms-cli/src/guards.rs::a_bucket_without_an_artifact_uri_uploads_to_the_derived_key"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    if ctx.infra.bucket.is_none() {\n", with = "    if ctx.infra.bucket.is_none() || caller_uri.is_none() {\n" }
+
+[[fault]]
+id = "cli-reuse-refuses-artifact-uri"
+guard = "guards::build_reuse_refuses_a_caller_artifact_uri_at_parse_time"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::build_reuse_refuses_a_caller_artifact_uri_at_parse_time"]
+expect = "test-failed"
+suite = "rust"
+message = "build --reuse --artifact-uri must not parse"
+note = "microvms-cli/src/guards.rs::build_reuse_refuses_a_caller_artifact_uri_at_parse_time"
+transform = { file = "microvms-cli/src/cli.rs", replace = "    #[arg(long, conflicts_with = \"artifact_uri\")]\n    pub reuse: bool,\n", with = "    #[arg(long)]\n    pub reuse: bool,\n" }
+
+# Round 1's falsifier: a skip that compares the caller's URI with the derived key passes every
+# arm whose URI differs from it, and uploads over a caller who keeps their artifact there.
+[[fault]]
+id = "cli-artifact-uri-derived-key"
+guard = "guards::a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucket"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucket"]
+expect = "test-failed"
+suite = "rust"
+message = "build, the derived key: a caller-supplied --artifact-uri must not be uploaded over"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    if caller_uri.is_some() {\n", with = "    if caller_uri.is_some_and(|uri| ctx.infra.bucket.as_deref().map(|b| format!(\"s3://{b}/{}.zip\", request.name)).as_deref() != Some(uri)) {\n" }
+
+[[fault]]
+id = "cli-run-artifact-uri-refuses-dockerfile"
+guard = "guards::artifact_uri_refuses_the_local_artifact_inputs_at_parse_time"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::artifact_uri_refuses_the_local_artifact_inputs_at_parse_time"]
+expect = "test-failed"
+suite = "rust"
+message = "run --artifact-uri --dockerfile must not parse"
+note = "microvms-cli/src/guards.rs::artifact_uri_refuses_the_local_artifact_inputs_at_parse_time"
+transform = { file = "microvms-cli/src/cli.rs", replace = "    #[arg(long, value_name = \"S3_URI\", conflicts_with = \"dockerfile\")]\n", with = "    #[arg(long, value_name = \"S3_URI\")]\n" }
+
+[[fault]]
+id = "cli-build-artifact-uri-refuses-dockerfile"
+guard = "guards::artifact_uri_refuses_the_local_artifact_inputs_at_parse_time"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::artifact_uri_refuses_the_local_artifact_inputs_at_parse_time"]
+expect = "test-failed"
+suite = "rust"
+message = "build --artifact-uri --dockerfile must not parse"
+transform = { file = "microvms-cli/src/cli.rs", replace = "conflicts_with_all = [\"dockerfile\", \"project\"]", with = "conflicts_with_all = [\"project\"]" }
+
+[[fault]]
+id = "cli-build-artifact-uri-refuses-project"
+guard = "guards::artifact_uri_refuses_the_local_artifact_inputs_at_parse_time"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::artifact_uri_refuses_the_local_artifact_inputs_at_parse_time"]
+expect = "test-failed"
+suite = "rust"
+message = "build --artifact-uri --project must not parse"
+transform = { file = "microvms-cli/src/cli.rs", replace = "conflicts_with_all = [\"dockerfile\", \"project\"]", with = "conflicts_with_all = [\"dockerfile\"]" }
+
+[[fault]]
+id = "cli-artifact-uri-build-no-provision"
+guard = "guards::a_caller_artifact_uri_provisions_no_daemon"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_caller_artifact_uri_provisions_no_daemon"]
+expect = "test-failed"
+suite = "rust"
+message = "this invocation must not fetch"
+note = "microvms-cli/src/guards.rs::a_caller_artifact_uri_provisions_no_daemon"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "        // No fetch beside a caller's --artifact-uri, for the reason `run` gives (#249).\n        None if args.artifact_uri.is_some() => None,\n", with = "" }
+
+[[fault]]
+id = "cli-artifact-uri-run-no-provision"
+guard = "guards::a_caller_artifact_uri_provisions_no_daemon"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_caller_artifact_uri_provisions_no_daemon"]
+expect = "test-failed"
+suite = "rust"
+message = "this invocation must not fetch"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "            // daemon as the image's (#249). `build_request_from` takes no binary here.\n            None if args.artifact_uri.is_some() => None,\n", with = "            // daemon as the image's (#249). `build_request_from` takes no binary here.\n" }
+
+# The live section's two checks, through the self-test's probes: a sentinel the check stops
+# reading lets an overwrite pass, and a report with nothing in it must still fail.
+[[fault]]
+id = "conformance-caller-artifact-gaps"
+guard = "conformance/run_rs.py --self-test"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  each caller-artifact check fails on the one gap it is about"
+transform = { file = "conformance/run_rs.py", replace = "    marked = (after.get(\"Metadata\") or {}).get(\"conformance-sentinel\") == sentinel\n", with = "    marked = True\n" }
+
+[[fault]]
+id = "conformance-caller-artifact-empty"
+guard = "conformance/run_rs.py --self-test"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  the caller-artifact checks fail on an empty report"
+transform = { file = "conformance/run_rs.py", replace = "    present = bool(before) and bool(after) and bool(sentinel)\n", with = "    present = True\n" }
+
+# Round 1: the driver and its cleanup, through the self-test's fake account. A build run with the
+# bucket dropped from its environment passes on the unfixed CLI, a check that stops reading the
+# build's stderr can't tell, and a cleanup that ignores the build's ARN trusts an empty listing.
+[[fault]]
+id = "conformance-caller-artifact-driver-bucket"
+guard = "conformance/run_rs.py --self-test"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  the caller-artifact driver and cleanup fail exactly where each account misleads them"
+transform = { file = "conformance/run_rs.py", replace = "            proc = cli.run_process(argv, 50 * 60)\n", with = "            proc = cli.run_process(argv, 50 * 60, {k: v for k, v in os.environ.items() if k != \"MICROVM_BUCKET\"})\n" }
+
+[[fault]]
+id = "conformance-caller-artifact-stderr-unread"
+guard = "conformance/run_rs.py --self-test"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  each caller-artifact check fails on the one gap it is about"
+transform = { file = "conformance/run_rs.py", replace = "        report.get(\"saidUnused\") is True,\n", with = "        True,\n" }
+
+[[fault]]
+id = "conformance-caller-artifact-arn-ignored"
+guard = "conformance/run_rs.py --self-test"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "a hidden image that won't delete: failed []"
+transform = { file = "conformance/run_rs.py", replace = "        by_arn = caller_artifact_image_state(plane, arn)\n        if by_arn is not None and arn:\n", with = "        by_arn = None\n        if by_arn is not None and arn:\n" }
+
+# ── every `--name` read through core's name rule (#251) ──────────────────────
+
+[[fault]]
+id = "names-region-flag-attach"
+guard = "guards::a_region_flag_that_disagrees_with_the_names_record_is_refused_before_any_door"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_region_flag_that_disagrees_with_the_names_record_is_refused_before_any_door"]
+expect = "test-failed"
+suite = "rust"
+message = "exec: seam-was-refused-a1b2c3: the attach_session door refused"
+note = "microvms-cli/src/guards.rs::a_region_flag_that_disagrees_with_the_names_record_is_refused_before_any_door"
+transform = { file = "microvms-cli/src/commands/attached.rs", replace = "names.resolve(name, explicit_region(region).as_ref())? else {", with = "names.resolve(name, None)? else {" }
+
+[[fault]]
+id = "names-region-flag-shell"
+guard = "guards::a_region_flag_that_disagrees_with_the_names_record_is_refused_before_any_door"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_region_flag_that_disagrees_with_the_names_record_is_refused_before_any_door"]
+expect = "test-failed"
+suite = "rust"
+message = "shell: seam-was-refused-a1b2c3: the control_plane door refused"
+transform = { file = "microvms-cli/src/commands/attached.rs", replace = "names.resolve(name, explicit_region(&args.region).as_ref())? else {", with = "names.resolve(name, None)? else {" }
+
+[[fault]]
+id = "names-region-flag-agent-up"
+guard = "guards::a_region_flag_that_disagrees_with_the_names_record_is_refused_before_any_door"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_region_flag_that_disagrees_with_the_names_record_is_refused_before_any_door"]
+expect = "test-failed"
+suite = "rust"
+message = "agent-up: seam-was-refused-a1b2c3: the attach_session door refused"
+transform = { file = "microvms-cli/src/commands/agent.rs", replace = "        crate::commands::explicit_region(&args.region).as_ref(),\n", with = "        None,\n" }
+
+[[fault]]
+id = "names-region-flag-attach-from"
+guard = "guards::a_region_flag_that_disagrees_with_the_names_record_is_refused_before_any_door"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_region_flag_that_disagrees_with_the_names_record_is_refused_before_any_door"]
+expect = "test-failed"
+suite = "rust"
+message = "attach: seam-was-refused-a1b2c3: the attach_session door refused"
+transform = { file = "microvms-cli/src/commands/attached.rs", replace = "                &shown(source),\n                explicit_region(&args.region).as_ref(),\n", with = "                &shown(source),\n                None,\n" }
+
+[[fault]]
+id = "names-region-flag-identifier"
+guard = "guards::a_region_flag_that_disagrees_with_the_names_record_is_refused_before_any_door"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_region_flag_that_disagrees_with_the_names_record_is_refused_before_any_door"]
+expect = "test-failed"
+suite = "rust"
+message = "suspend: seam-was-refused-a1b2c3: the control_plane door refused"
+transform = { file = "microvms-cli/src/commands/mod.rs", replace = "resolve(identifier, explicit_region(region).as_ref())?", with = "resolve(identifier, None)?" }
+
+[[fault]]
+id = "names-lifecycle-record-region"
+guard = "guards::a_lifecycle_command_by_name_asks_for_the_records_region_over_the_environments"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_lifecycle_command_by_name_asks_for_the_records_region_over_the_environments"]
+expect = "test-failed"
+suite = "rust"
+message = "terminate by name"
+note = "microvms-cli/src/guards.rs::a_lifecycle_command_by_name_asks_for_the_records_region_over_the_environments"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "        Some(region) => region,\n        None => args.region.resolve(ctx.env)?,\n    };\n    let ledger_root", with = "        Some(_) | None => args.region.resolve(ctx.env)?,\n    };\n    let ledger_root" }
+
+[[fault]]
+id = "names-keepalive-window-region"
+guard = "guards::keepalive_by_name_reads_the_idle_window_in_the_records_region"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::keepalive_by_name_reads_the_idle_window_in_the_records_region"]
+expect = "test-failed"
+suite = "rust"
+message = "exceeds half the 60s idle window"
+note = "microvms-cli/src/guards.rs::keepalive_by_name_reads_the_idle_window_in_the_records_region"
+transform = { file = "microvms-cli/src/commands/attached.rs", replace = "idle_window_of(ctx, region, &microvm_id)", with = "idle_window_of(ctx, args.region.resolve(ctx.env).unwrap_or(region), &microvm_id)" }
+
+[[fault]]
+id = "names-torn-record-refused"
+guard = "guards::a_torn_record_under_a_name_is_refused_before_any_door"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_torn_record_under_a_name_is_refused_before_any_door"]
+expect = "test-failed"
+suite = "rust"
+message = "health: no VM named \"x\""
+note = "microvms-cli/src/guards.rs::a_torn_record_under_a_name_is_refused_before_any_door"
+transform = { file = "microvms-cli/src/ledger.rs", replace = "let found = self.store.get(name)?;", with = "let found = self.store.get(name).unwrap_or(None);" }
+
+[[fault]]
+id = "names-torn-record-tunnel"
+guard = "guards::a_torn_record_under_a_name_is_refused_before_any_door"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_torn_record_under_a_name_is_refused_before_any_door"]
+expect = "test-failed"
+suite = "rust"
+message = "tunnel: the record for \"x\" carries no identity material"
+transform = { file = "microvms-cli/src/commands/attached.rs", replace = "let Some(record) = crate::ledger::Names::new(&root)\n                    .resolve(name, explicit_region(&args.region).as_ref())?\n                else {", with = "let Some(record) = crate::ledger::Names::new(&root).lookup(name) else {" }
+
+[[fault]]
+id = "names-torn-record-shell"
+guard = "guards::a_torn_record_under_a_name_is_refused_before_any_door"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_torn_record_under_a_name_is_refused_before_any_door"]
+expect = "test-failed"
+suite = "rust"
+message = "shell: seam-was-refused-a1b2c3: the control_plane door refused"
+transform = { file = "microvms-cli/src/commands/attached.rs", replace = "names.resolve(name, explicit_region(&args.region).as_ref())? else {", with = "names.lookup(name) else {" }
+
+[[fault]]
+id = "names-agent-up-torn-name-taken"
+guard = "guards::agent_up_over_a_torn_record_stays_name_taken_before_any_door"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::agent_up_over_a_torn_record_stays_name_taken_before_any_door"]
+expect = "test-failed"
+suite = "rust"
+message = "failed: agent-up: name record"
+note = "microvms-cli/src/guards.rs::agent_up_over_a_torn_record_stays_name_taken_before_any_door"
+transform = { file = "microvms-cli/src/commands/agent.rs", replace = "    match names.lookup(&args.vm_name) {", with = "    match names.resolve(&args.vm_name, None)? {" }
+
+[[fault]]
+id = "names-tunnel-free-name"
+guard = "guards::an_illegal_name_gets_cores_answer_and_a_free_one_the_not_found_answer"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::an_illegal_name_gets_cores_answer_and_a_free_one_the_not_found_answer"]
+expect = "test-failed"
+suite = "rust"
+message = "tunnel 18080:8080 --name free --verify-identity: the record for \"free\" carries no identity material"
+note = "microvms-cli/src/guards.rs::an_illegal_name_gets_cores_answer_and_a_free_one_the_not_found_answer"
+transform = { file = "microvms-cli/src/commands/attached.rs", replace = "                    return Err(unregistered_name(name, &root));\n                };\n                match record.identity_host_seed", with = "                    return Err(CliError::new(Exit::Precondition, format!(\"the record for {name:?} carries no identity material\")));\n                };\n                match record.identity_host_seed" }
+
+[[fault]]
+id = "names-illegal-name-core-answer"
+guard = "guards::an_illegal_name_gets_cores_answer_and_a_free_one_the_not_found_answer"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::an_illegal_name_gets_cores_answer_and_a_free_one_the_not_found_answer"]
+expect = "test-failed"
+suite = "rust"
+message = "exec true --name a/b: no VM named \"a/b\""
+transform = { file = "microvms-cli/src/ledger.rs", replace = "let found = self.store.get(name)?;", with = "if validate_name(name).is_err() {\n            return Ok(None);\n        }\n        let found = self.store.get(name)?;" }
+
+[[fault]]
+id = "names-region-flag-unlisted"
+guard = "guards::a_region_flag_that_disagrees_with_the_names_record_is_refused_before_any_door"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_region_flag_that_disagrees_with_the_names_record_is_refused_before_any_door"]
+expect = "test-failed"
+suite = "rust"
+message = "exec --unlisted-region: seam-was-refused-a1b2c3: the attach_session door refused"
+transform = { file = "microvms-cli/src/commands/mod.rs", replace = "            .unlisted_region\n            .as_deref()\n            .map(microvms_core::Region::unlisted)\n", with = "            .unlisted_region\n            .as_deref()\n            .filter(|_| false)\n            .map(microvms_core::Region::unlisted)\n" }
+
+[[fault]]
+id = "names-lifecycle-record-region-suspend"
+guard = "guards::a_lifecycle_command_by_name_asks_for_the_records_region_over_the_environments"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_lifecycle_command_by_name_asks_for_the_records_region_over_the_environments"]
+expect = "test-failed"
+suite = "rust"
+message = "suspend by name"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "        Some(region) => region,\n        None => args.region.resolve(ctx.env)?,\n    };\n    let plane = ctx.seam.control_plane(region).await?;\n", with = "        Some(_) | None => args.region.resolve(ctx.env)?,\n    };\n    let plane = ctx.seam.control_plane(region).await?;\n" }
+
+[[fault]]
+id = "names-lifecycle-record-region-resume"
+guard = "guards::a_lifecycle_command_by_name_asks_for_the_records_region_over_the_environments"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_lifecycle_command_by_name_asks_for_the_records_region_over_the_environments"]
+expect = "test-failed"
+suite = "rust"
+message = "resume by name"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "        Some(region) => region,\n        None => args.region.resolve(ctx.env)?,\n    };\n    let plane = ctx.seam.control_plane(region.clone()).await?;\n", with = "        Some(_) | None => args.region.resolve(ctx.env)?,\n    };\n    let plane = ctx.seam.control_plane(region.clone()).await?;\n" }
+
+[[fault]]
+id = "names-shell-record-region"
+guard = "guards::a_shell_or_agent_up_by_name_asks_for_the_records_region_over_the_environments"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_shell_or_agent_up_by_name_asks_for_the_records_region_over_the_environments"]
+expect = "test-failed"
+suite = "rust"
+message = "shell by name"
+note = "microvms-cli/src/guards.rs::a_shell_or_agent_up_by_name_asks_for_the_records_region_over_the_environments"
+transform = { file = "microvms-cli/src/commands/attached.rs", replace = "        let region = record.region();\n        (record.endpoint, record.microvm_id, region)\n", with = "        let region = args.region.resolve(ctx.env)?;\n        (record.endpoint, record.microvm_id, region)\n" }
+
+[[fault]]
+id = "names-agent-up-record-region"
+guard = "guards::a_shell_or_agent_up_by_name_asks_for_the_records_region_over_the_environments"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_shell_or_agent_up_by_name_asks_for_the_records_region_over_the_environments"]
+expect = "test-failed"
+suite = "rust"
+message = "agent-up by name"
+transform = { file = "microvms-cli/src/commands/agent.rs", replace = "    let region = record.region();\n    let session = ctx\n", with = "    let region = args.region.resolve(ctx.env)?;\n    let session = ctx\n" }
 
 # ── dependency_direction.rs: the crate graph and arch/placement.toml ─────────
 
@@ -958,6 +1350,118 @@ expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_an_empty_griffe_dump_fails_on_the_sentinels ("
 transform = { file = "scripts/check-parity.py", replace = "                        f\"sentinel {row_id}: {key}: {why}\"\n", with = "                        f\"{row_id}: {key}: {why}\"\n" }
+
+# ── TypeScript consumer types (#262): index.d.ts against the type probes ─────
+# The first entry is the regression itself: the source loses the `#[napi]` napi-derive reads the
+# stream's yield type from, and a rebuild writes the empty class again. The rest are the probe
+# gate's own floors, run on the committed file.
+
+[[fault]]
+id = "dts-consumer-exec-stream-attribute"
+guard = "scripts/check-dts-consumer.py"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "microvms-js"],
+  ["./scripts/check-dts-consumer.py"],
+]
+expect = "exit-nonzero"
+suite = "bindings"
+message = "TS2504"
+transform = { file = "microvms-js/src/exec.rs", replace = "#[napi]\nimpl AsyncGenerator for ExecStream {\n", with = "impl AsyncGenerator for ExecStream {\n" }
+
+# The index.d.ts anchors below are @napi-rs/cli 3.10.5's text. A CLI release that writes the member
+# differently fails the stale diff first, and the regenerate it forces fails `guards:list` on these
+# anchors in the same change, so they're refreshed together rather than going stale unseen.
+[[fault]]
+id = "dts-consumer-empty-class"
+guard = "scripts/check-dts-consumer.py"
+run = ["./scripts/check-dts-consumer.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "TS2504"
+transform = { file = "microvms-js/index.d.ts", replace = "export declare class ExecStream {\n\n  [globalThis.Symbol.asyncIterator](): globalThis.__NapiRsAsyncGenerator<ExecStream, StreamEvent, void, undefined>\n}\n", with = "export declare class ExecStream {}\n" }
+
+# A member that yields `any` type-checks every loop; the probe's `@ts-expect-error` goes unused.
+[[fault]]
+id = "dts-consumer-any-yield"
+guard = "scripts/check-dts-consumer.py"
+run = ["./scripts/check-dts-consumer.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "TS2578"
+transform = { file = "microvms-js/index.d.ts", replace = "__NapiRsAsyncGenerator<ExecStream, StreamEvent, void, undefined>", with = "__NapiRsAsyncGenerator<ExecStream, any, void, undefined>" }
+
+[[fault]]
+id = "dts-consumer-empty-dts"
+guard = "scripts/check-dts-consumer.py"
+run = ["./scripts/check-dts-consumer.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "is not a module"
+argv_fault = ["--dts", "parity/fixtures/empty.d.ts"]
+
+[[fault]]
+id = "dts-consumer-no-probes"
+guard = "scripts/check-dts-consumer.py"
+run = ["./scripts/check-dts-consumer.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "no type probes under"
+argv_fault = ["--probes", "{empty_dir}"]
+
+[[fault]]
+id = "dts-consumer-no-control"
+guard = "scripts/check-dts-consumer.py"
+run = ["./scripts/check-dts-consumer.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "has no @ts-expect-error control"
+transform = { file = "microvms-js/__test__/types/stream.ts", replace = "    // @ts-expect-error: an event is a StreamEvent, so this fails unless the stream yields `any`\n    const wrong: number = event\n    void wrong\n", with = "" }
+
+# #262 review round 1 (the falsifier's faults). A probe that names the directive only in prose has
+# no control, so a member yielding `any` passed; `@ts-nocheck` drops every diagnostic in the file,
+# so the original empty class passed; and a `.mts` probe was never compiled, with no word.
+[[fault]]
+id = "dts-consumer-control-in-prose"
+guard = "scripts/check-dts-consumer.py"
+run = ["./scripts/check-dts-consumer.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "has no @ts-expect-error control"
+transform = [
+  { file = "microvms-js/__test__/types/stream.ts", replace = "    // @ts-expect-error: an event is a StreamEvent, so this fails unless the stream yields `any`\n    const wrong: number = event\n    void wrong\n", with = "    // the @ts-expect-error control lived here\n" },
+  { file = "microvms-js/index.d.ts", replace = "__NapiRsAsyncGenerator<ExecStream, StreamEvent, void, undefined>", with = "__NapiRsAsyncGenerator<ExecStream, any, void, undefined>" },
+]
+
+[[fault]]
+id = "dts-consumer-nocheck"
+guard = "scripts/check-dts-consumer.py"
+run = ["./scripts/check-dts-consumer.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "turns type-checking off (@ts-nocheck)"
+transform = [
+  { file = "microvms-js/__test__/types/stream.ts", replace = "// SPDX-License-Identifier: Apache-2.0\n", with = "// SPDX-License-Identifier: Apache-2.0\n// @ts-nocheck\n" },
+  { file = "microvms-js/index.d.ts", replace = "export declare class ExecStream {\n\n  [globalThis.Symbol.asyncIterator](): globalThis.__NapiRsAsyncGenerator<ExecStream, StreamEvent, void, undefined>\n}\n", with = "export declare class ExecStream {}\n" },
+]
+
+[[fault]]
+id = "dts-consumer-stray-probe"
+guard = "scripts/check-dts-consumer.py"
+run = ["./scripts/check-dts-consumer.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "isn't compiled: a probe is a *.ts file directly under"
+patch = "guards/faults/dts-consumer-stray-probe.patch"
+
+# A `--listFiles` parse that reads nothing, so the check can't say what tsc compiled.
+[[fault]]
+id = "dts-consumer-lists-nothing"
+guard = "scripts/check-dts-consumer.py"
+run = ["./scripts/check-dts-consumer.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "tsc didn't read"
+transform = { file = "scripts/check-dts-consumer.py", replace = "and line.strip().endswith(\".ts\")", with = "and line.strip().endswith(\".tsx\")" }
 
 # ── wiring the table in (#271): the snapshot's format refusal, the ratchet's parity-gap ─
 
@@ -2226,6 +2730,72 @@ expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_root_guide_missing_a_kind_its_rules_use_fails_naming_it ("
 transform = { file = "scripts/check-agents-md.py", replace = "ROOT_KINDS = (\"task\", \"member\", \"path\", \"job\", \"symbol\")", with = "ROOT_KINDS = (\"task\", \"path\", \"job\", \"symbol\")" }
+
+[[fault]]
+id = "conformance-doctor-region-lines"
+guard = "conformance/run_rs.py --self-test"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  doctor_region_lines refuses a report that names the environment's region"
+transform = { file = "conformance/run_rs.py", replace = "    return ok, f\"credentials=", with = "    return True, f\"credentials=" }
+
+[[fault]]
+id = "conformance-doctor-region-other"
+guard = "conformance/run_rs.py --self-test"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  doctor_region_lines refuses a versions line on the environment's base ARN"
+transform = { file = "conformance/run_rs.py", replace = "        and not any(other in details.get(name, \"\") for name in DOCTOR_REGION_LINES)\n", with = "" }
+
+[[fault]]
+id = "conformance-doctor-region-credentials"
+guard = "conformance/run_rs.py --self-test"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  doctor_region_lines refuses a credentials line on a third region"
+transform = { file = "conformance/run_rs.py", replace = "        credentials.endswith(f\"for {region}\")\n        and f\" in {region}\" in bases\n", with = "        f\" in {region}\" in bases\n" }
+
+# #251: the named terminate's fallback runs on a leaked envelope and on an error envelope,
+# and only then.
+
+[[fault]]
+id = "conformance-terminate-fallback-leaked"
+guard = "conformance/run_rs.py --self-test"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  a named terminate that leaked the VM falls back to a terminate by id in its region"
+transform = { file = "conformance/run_rs.py", replace = "        and not gone.data.get(\"leaked\")\n    )\n    results.check(by_name, reached, detail)\n", with = "    )\n    results.check(by_name, reached, detail)\n" }
+
+[[fault]]
+id = "conformance-terminate-fallback-error"
+guard = "conformance/run_rs.py --self-test"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  a named terminate refused with an error envelope falls back the same way"
+transform = { file = "conformance/run_rs.py", replace = "    except KindError as exc:\n        detail = (\n            f\"environment={elsewhere} kind=", with = "    except EnvelopeError as exc:\n        detail = (\n            f\"environment={elsewhere} kind=" }
+
+[[fault]]
+id = "conformance-terminate-fallback-reached"
+guard = "conformance/run_rs.py --self-test"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  a named terminate that reached the VM runs no fallback"
+transform = { file = "conformance/run_rs.py", replace = "    if reached and gone is not None:\n        return gone\n", with = "    if False and gone is not None:\n        return gone\n" }
+
+[[fault]]
+id = "conformance-terminate-fallback-not-terminated"
+guard = "conformance/run_rs.py --self-test"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  a named terminate that never reached TERMINATED falls back the same way"
+transform = { file = "conformance/run_rs.py", replace = "        and gone.data.get(\"state\") == \"TERMINATED\"\n        and not gone.data.get(\"leaked\")\n", with = "        and not gone.data.get(\"leaked\")\n" }
 
 # ── this registry's own gate ─────────────────────────────────────────────────
 
@@ -4678,6 +5248,257 @@ expect = "test-failed"
 suite = "rust"
 transform = { file = "microvms-edges/src/session/http.rs", replace = "    !(200..300).contains(&status)", with = "    (200..300).contains(&status)" }
 
+# ── seconds flags that aren't durations (#268) ────────────────────────────────
+# The CLI's seconds flags parse through core's `duration_of_secs_f64` (`cli::parse_seconds`),
+# so a bad value is refused before any call, and each adapter's clippy.toml bans the panicking
+# float conversions. The first two seed the parser: today's panicking expression restored, then
+# a silent zero with no panic.
+
+[[fault]]
+id = "cli-seconds-flag-panics"
+guard = "guards::a_seconds_flag_that_is_not_a_duration_is_refused_before_any_call"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_seconds_flag_that_is_not_a_duration_is_refused_before_any_call"]
+expect = "test-failed"
+suite = "rust"
+message = "cannot convert float seconds to Duration"
+note = "microvms-cli/src/guards.rs::a_seconds_flag_that_is_not_a_duration_is_refused_before_any_call"
+transform = { file = "microvms-cli/src/cli.rs", replace = "microvms_core::cost::duration_of_secs_f64(seconds).map_err(|error| error.to_string())", with = "Ok(std::time::Duration::from_secs_f64(seconds.max(0.0)))" }
+
+[[fault]]
+id = "cli-seconds-flag-clamps"
+guard = "guards::a_seconds_flag_that_is_not_a_duration_is_refused_before_any_call"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::a_seconds_flag_that_is_not_a_duration_is_refused_before_any_call"]
+expect = "test-failed"
+suite = "rust"
+message = "exec --timeout=NaN: answered"
+note = "microvms-cli/src/guards.rs::a_seconds_flag_that_is_not_a_duration_is_refused_before_any_call"
+transform = { file = "microvms-cli/src/cli.rs", replace = "microvms_core::cost::duration_of_secs_f64(seconds).map_err(|error| error.to_string())", with = "Ok(std::time::Duration::try_from_secs_f64(seconds.max(0.0)).unwrap_or_default())" }
+
+[[fault]]
+id = "cli-seconds-parse-table"
+guard = "cli::tests::every_seconds_flag_refuses_what_is_not_a_duration"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "cli::tests::every_seconds_flag_refuses_what_is_not_a_duration"]
+expect = "test-failed"
+suite = "rust"
+message = "exec --timeout=inf parsed"
+note = "microvms-cli/src/cli.rs::every_seconds_flag_refuses_what_is_not_a_duration"
+transform = { file = "microvms-cli/src/cli.rs", replace = "microvms_core::cost::duration_of_secs_f64(seconds).map_err(|error| error.to_string())", with = "Ok(std::time::Duration::try_from_secs_f64(seconds.max(0.0)).unwrap_or_default())" }
+
+[[fault]]
+id = "cli-seconds-exit-code"
+guard = "a_seconds_flag_that_is_not_a_duration_exits_with_the_argument_error"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "exit_codes", "--", "--exact", "a_seconds_flag_that_is_not_a_duration_exits_with_the_argument_error"]
+expect = "test-failed"
+suite = "rust"
+message = "left: 101"
+note = "microvms-cli/tests/exit_codes.rs::a_seconds_flag_that_is_not_a_duration_exits_with_the_argument_error"
+transform = { file = "microvms-cli/src/cli.rs", replace = "microvms_core::cost::duration_of_secs_f64(seconds).map_err(|error| error.to_string())", with = "Ok(std::time::Duration::from_secs_f64(seconds.max(0.0)))" }
+
+[[fault]]
+id = "cli-ls-interval-too-large"
+guard = "commands::local::tests::a_spin_interval_or_an_empty_watch_is_refused"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "commands::local::tests::a_spin_interval_or_an_empty_watch_is_refused"]
+expect = "test-failed"
+suite = "rust"
+message = "1e300"
+note = "microvms-cli/src/commands/local.rs::a_spin_interval_or_an_empty_watch_is_refused"
+transform = { file = "microvms-cli/src/commands/local.rs", replace = "duration_of_secs_f64(args.interval_sec)", with = "duration_of_secs_f64(if args.interval_sec.is_finite() { args.interval_sec.min(60.0) } else { args.interval_sec })" }
+
+[[fault]]
+id = "cli-sync-client-wait"
+guard = "commands::attached::tests::a_sync_waits_its_budget_plus_the_delete_grace"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "commands::attached::tests::a_sync_waits_its_budget_plus_the_delete_grace"]
+expect = "test-failed"
+suite = "rust"
+message = "left: 30s"
+note = "microvms-cli/src/commands/attached.rs::a_sync_waits_its_budget_plus_the_delete_grace"
+transform = { file = "microvms-cli/src/commands/attached.rs", replace = "    budget + SYNC_DELETE_GRACE\n", with = "    budget - SYNC_DELETE_GRACE\n" }
+
+# An accepted figure has to arrive as typed: a fraction must not lose its sub-second part in
+# the parser, and `sync`'s budget is the one seconds flag that reaches the wire.
+
+[[fault]]
+id = "cli-seconds-parse-truncates"
+guard = "cli::tests::every_seconds_flag_refuses_what_is_not_a_duration"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "cli::tests::every_seconds_flag_refuses_what_is_not_a_duration"]
+expect = "test-failed"
+suite = "rust"
+message = "exec --timeout=0.5 parsed to Some(0ns)"
+note = "microvms-cli/src/cli.rs::every_seconds_flag_refuses_what_is_not_a_duration"
+transform = { file = "microvms-cli/src/cli.rs", replace = "microvms_core::cost::duration_of_secs_f64(seconds).map_err(|error| error.to_string())", with = "microvms_core::cost::duration_of_secs_f64(seconds).map(|whole| std::time::Duration::from_secs(whole.as_secs())).map_err(|error| error.to_string())" }
+
+[[fault]]
+id = "cli-sync-rm-deadline-dropped"
+guard = "guards::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"]
+expect = "test-failed"
+suite = "rust"
+message = "sync --timeout=60: the rm's timeout_sec was null"
+note = "microvms-cli/src/guards.rs::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
+transform = { file = "microvms-cli/src/commands/attached.rs", replace = ".with_timeout_sec(Some(delete_timeout.as_secs_f64())),", with = ".with_timeout_sec(None)," }
+
+[[fault]]
+id = "cli-sync-rm-deadline-truncated"
+guard = "guards::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"]
+expect = "test-failed"
+suite = "rust"
+message = "sync --timeout=0.5: the rm's timeout_sec was 0.0"
+note = "microvms-cli/src/guards.rs::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
+transform = { file = "microvms-cli/src/commands/attached.rs", replace = ".with_timeout_sec(Some(delete_timeout.as_secs_f64())),", with = ".with_timeout_sec(Some(delete_timeout.as_secs() as f64))," }
+
+# A figure every surface accepts, up to what a `Duration` holds, can be past what the clock can
+# add to now. Core's deadlines saturate; the unchecked add panicked after the exec had started.
+
+[[fault]]
+id = "app-wait-deadline-overflows"
+guard = "session::exec::tests::a_wait_longer_than_the_clock_can_hold_still_waits"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::exec::tests::a_wait_longer_than_the_clock_can_hold_still_waits"]
+expect = "test-failed"
+suite = "rust"
+message = "overflow when adding duration to instant"
+note = "microvms-app/src/session/exec.rs::a_wait_longer_than_the_clock_can_hold_still_waits"
+transform = { file = "microvms-app/src/session/mod.rs", replace = "    now.checked_add(after).unwrap_or_else(|| now + FAR_FUTURE)\n", with = "    now + after\n" }
+
+# Each of the other three deadline sites, put back to the unchecked add on its own, so a later
+# edit at one call site can't pass because the helper is still right.
+
+[[fault]]
+id = "app-ready-deadline-overflows"
+guard = "session::tests::a_ready_wait_longer_than_the_clock_can_hold_still_polls"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::tests::a_ready_wait_longer_than_the_clock_can_hold_still_polls"]
+expect = "test-failed"
+suite = "rust"
+message = "overflow when adding duration to instant"
+note = "microvms-app/src/session/mod.rs::a_ready_wait_longer_than_the_clock_can_hold_still_polls"
+transform = { file = "microvms-app/src/session/mod.rs", replace = "        let deadline = deadline_after(timeout);\n", with = "        let deadline = tokio::time::Instant::now() + timeout;\n" }
+
+[[fault]]
+id = "app-completion-deadline-overflows"
+guard = "session::complete::tests::a_client_deadline_longer_than_the_clock_can_hold_still_waits"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::complete::tests::a_client_deadline_longer_than_the_clock_can_hold_still_waits"]
+expect = "test-failed"
+suite = "rust"
+message = "overflow when adding duration to instant"
+note = "microvms-app/src/session/complete.rs::a_client_deadline_longer_than_the_clock_can_hold_still_waits"
+transform = { file = "microvms-app/src/session/complete.rs", replace = "        let deadline = super::deadline_after(self.deadline);\n", with = "        let deadline = tokio::time::Instant::now() + self.deadline;\n" }
+
+[[fault]]
+id = "app-completion-grace-overflows"
+guard = "session::complete::tests::a_client_grace_longer_than_the_clock_can_hold_still_acks"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::complete::tests::a_client_grace_longer_than_the_clock_can_hold_still_acks"]
+expect = "test-failed"
+suite = "rust"
+message = "overflow when adding duration to instant"
+note = "microvms-app/src/session/complete.rs::a_client_grace_longer_than_the_clock_can_hold_still_acks"
+transform = { file = "microvms-app/src/session/complete.rs", replace = "        let grace = super::deadline_after(self.options.client_grace);\n", with = "        let grace = tokio::time::Instant::now() + self.options.client_grace;\n" }
+
+[[fault]]
+id = "cli-huge-timeout-panics"
+guard = "guards::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"]
+expect = "test-failed"
+suite = "rust"
+message = "exec --timeout=1e19: panicked (overflow when adding duration to instant)"
+note = "microvms-cli/src/guards.rs::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
+transform = { file = "microvms-app/src/session/mod.rs", replace = "    now.checked_add(after).unwrap_or_else(|| now + FAR_FUTURE)\n", with = "    now + after\n" }
+
+# `run` waits on its exec after the launch, so the same panic there left the VM billing.
+
+[[fault]]
+id = "cli-huge-run-timeout-panics"
+guard = "guards::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"]
+expect = "test-failed"
+suite = "rust"
+message = "run --exec true --timeout=1e19: panicked (overflow when adding duration to instant)"
+transform = { file = "microvms-app/src/session/mod.rs", replace = "    now.checked_add(after).unwrap_or_else(|| now + FAR_FUTURE)\n", with = "    now + after\n" }
+
+[[fault]]
+id = "cli-huge-run-timeout-tears-down"
+guard = "guards::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"]
+expect = "test-failed"
+suite = "rust"
+message = "run --exec true --timeout=1e19: no teardown after"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let teardown = tear_down(ctx, &mut sandbox, &mut ledger, args.keep).await;\n", with = "    let teardown = tear_down(ctx, &mut sandbox, &mut ledger, true).await;\n" }
+
+# The refusal prints the figure as typed, so `1e300` doesn't read as 301 digits.
+
+[[fault]]
+id = "domain-duration-refusal-as-typed"
+guard = "cost::tests::a_refused_figure_is_named_as_typed_with_the_range_it_missed"
+run = ["cargo", "test", "-p", "microvms-domain", "--lib", "--", "--exact", "cost::tests::a_refused_figure_is_named_as_typed_with_the_range_it_missed"]
+expect = "test-failed"
+suite = "rust"
+message = "0000000000 seconds is not a duration"
+note = "microvms-domain/src/cost.rs::a_refused_figure_is_named_as_typed_with_the_range_it_missed"
+transform = { file = "microvms-domain/src/cost.rs", replace = "\"{seconds:?} seconds is not a duration", with = "\"{seconds} seconds is not a duration" }
+
+[[fault]]
+id = "cli-ls-interval-message-as-typed"
+guard = "commands::local::tests::a_spin_interval_or_an_empty_watch_is_refused"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "commands::local::tests::a_spin_interval_or_an_empty_watch_is_refused"]
+expect = "test-failed"
+suite = "rust"
+message = "at least 0.1: 0\n"
+note = "microvms-cli/src/commands/local.rs::a_spin_interval_or_an_empty_watch_is_refused"
+transform = { file = "microvms-cli/src/commands/local.rs", replace = "at least 0.1: {:?}\",", with = "at least 0.1: {}\"," }
+
+[[fault]]
+id = "clippy-cli-duration-from-secs-f64"
+guard = "microvms-cli clippy.toml: std::time::Duration::from_secs_f64"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `std::time::Duration::from_secs_f64`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = std::time::Duration::from_secs_f64(1.0);\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-duration-from-secs-f32"
+guard = "microvms-cli clippy.toml: std::time::Duration::from_secs_f32"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `std::time::Duration::from_secs_f32`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = std::time::Duration::from_secs_f32(1.0);\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-py-duration-from-secs-f64"
+guard = "microvms-py clippy.toml: std::time::Duration::from_secs_f64"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `std::time::Duration::from_secs_f64`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = std::time::Duration::from_secs_f64(1.0);\n" }
+
+[[fault]]
+id = "clippy-py-duration-from-secs-f32"
+guard = "microvms-py clippy.toml: std::time::Duration::from_secs_f32"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `std::time::Duration::from_secs_f32`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = std::time::Duration::from_secs_f32(1.0);\n" }
+
+[[fault]]
+id = "clippy-js-duration-from-secs-f64"
+guard = "microvms-js clippy.toml: std::time::Duration::from_secs_f64"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `std::time::Duration::from_secs_f64`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = std::time::Duration::from_secs_f64(1.0);\n" }
+
+[[fault]]
+id = "clippy-js-duration-from-secs-f32"
+guard = "microvms-js clippy.toml: std::time::Duration::from_secs_f32"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `std::time::Duration::from_secs_f32`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = std::time::Duration::from_secs_f32(1.0);\n" }
+
 # ── the bindings, rebuilt before each run (CI's bindings job) ────────────────
 
 [[fault]]
@@ -4712,6 +5533,110 @@ expect = "test-failed"
 suite = "bindings"
 note = "microvms-js/__test__/exec.mjs::a stream survives more events than the channel can hold"
 transform = { file = "microvms-js/src/exec.rs", replace = "match sender.send(Ok(event)).await {", with = "match sender.try_send(Ok(event)) {" }
+
+# `session.spawn()`'s stream rejections keep the code chain (#252): the gap branch, the drive-error
+# branch, and the stderr copy of one rejection each put back a bare `napi::Error`; the rest keep
+# the messages and send the two rejections at once.
+
+[[fault]]
+id = "js-spawn-gap-code-chain"
+guard = "a gap errors both streams by default and names the range to resume from"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "microvms-js/__test__/process.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "stdout: the ERR_ code is on the cause"
+note = "microvms-js/__test__/process.mjs::a gap errors both streams by default and names the range to resume from"
+transform = { file = "microvms-js/src/process.rs", replace = "                                    reject_both(\n                                        &out_tx,\n                                        &err_tx,\n                                        microvms_core::Error::wire(\n                                            microvms_core::WireKind::OutputGap,\n                                            message,\n                                        ),\n                                    )\n                                    .await;\n", with = "                                    let _ = out_tx\n                                        .send(Err(napi::Error::new(\n                                            napi::Status::GenericFailure,\n                                            message.clone(),\n                                        )))\n                                        .await;\n                                    let _ = err_tx\n                                        .send(Err(napi::Error::new(\n                                            napi::Status::GenericFailure,\n                                            message,\n                                        )))\n                                        .await;\n" }
+
+[[fault]]
+id = "js-spawn-gap-stderr-chain"
+guard = "a gap errors both streams by default and names the range to resume from"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "microvms-js/__test__/process.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "stderr: the ERR_ code is on the cause"
+transform = { file = "microvms-js/src/process.rs", replace = "err_tx.send(Err(copy))", with = "err_tx.send(Err(napi::Error::new(napi::Status::GenericFailure, copy.reason)))" }
+
+[[fault]]
+id = "js-spawn-budget-code-chain"
+guard = "an exhausted reconnect budget rejects both streams with its code"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "microvms-js/__test__/process.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "stdout: the ERR_ code is on the cause"
+note = "microvms-js/__test__/process.mjs::an exhausted reconnect budget rejects both streams with its code"
+transform = { file = "microvms-js/src/process.rs", replace = "                reject_both(&out_tx, &err_tx, error).await;\n", with = "                let message = error.to_string();\n                let _ = out_tx\n                    .send(Err(napi::Error::new(\n                        napi::Status::GenericFailure,\n                        message.clone(),\n                    )))\n                    .await;\n                let _ = err_tx\n                    .send(Err(napi::Error::new(napi::Status::GenericFailure, message)))\n                    .await;\n" }
+
+[[fault]]
+id = "js-spawn-refusal-code-chain"
+guard = "a refused reconnect rejects both streams with its code and wire kind"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "microvms-js/__test__/process.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "stdout: the ERR_ code is on the cause"
+note = "microvms-js/__test__/process.mjs::a refused reconnect rejects both streams with its code and wire kind"
+transform = { file = "microvms-js/src/process.rs", replace = "                reject_both(&out_tx, &err_tx, error).await;\n", with = "                let message = error.to_string();\n                let _ = out_tx\n                    .send(Err(napi::Error::new(\n                        napi::Status::GenericFailure,\n                        message.clone(),\n                    )))\n                    .await;\n                let _ = err_tx\n                    .send(Err(napi::Error::new(napi::Status::GenericFailure, message)))\n                    .await;\n" }
+
+[[fault]]
+id = "js-spawn-gap-stderr-message"
+guard = "a gap errors both streams by default and names the range to resume from"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "microvms-js/__test__/process.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "stderr: the message names the lost range"
+transform = { file = "microvms-js/src/process.rs", replace = "    let copy = rejection.try_clone().unwrap_or_else(|failed| failed);\n", with = "    let mut copy = rejection.try_clone().unwrap_or_else(|failed| failed);\n    copy.reason = String::new();\n" }
+
+[[fault]]
+id = "js-spawn-budget-message"
+guard = "an exhausted reconnect budget rejects both streams with its code"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "microvms-js/__test__/process.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "stdout: the message is the drive error text"
+transform = { file = "microvms-js/src/process.rs", replace = "                reject_both(&out_tx, &err_tx, error).await;\n", with = "                let error = match error.wire_kind() {\n                    Some(wire_kind) => {\n                        microvms_core::Error::wire(wire_kind, \"the output stream failed\")\n                    }\n                    None => microvms_core::Error::new(error.kind(), \"the output stream failed\"),\n                };\n                reject_both(&out_tx, &err_tx, error).await;\n" }
+
+[[fault]]
+id = "js-spawn-refusal-message"
+guard = "a refused reconnect rejects both streams with its code and wire kind"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "microvms-js/__test__/process.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "stdout: the message is the drive error text"
+transform = { file = "microvms-js/src/process.rs", replace = "                reject_both(&out_tx, &err_tx, error).await;\n", with = "                let error = match error.wire_kind() {\n                    Some(wire_kind) => {\n                        microvms_core::Error::wire(wire_kind, \"the output stream failed\")\n                    }\n                    None => microvms_core::Error::new(error.kind(), \"the output stream failed\"),\n                };\n                reject_both(&out_tx, &err_tx, error).await;\n" }
+
+[[fault]]
+id = "js-spawn-stderr-first-reader"
+guard = "a stderr reader gets the drive error while a stdout chunk sits unread"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "microvms-js/__test__/process.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "stderr never settled while stdout held a chunk"
+note = "microvms-js/__test__/process.mjs::a stderr reader gets the drive error while a stdout chunk sits unread"
+transform = { file = "microvms-js/src/process.rs", replace = "    let _ = tokio::join!(out_tx.send(Err(rejection)), err_tx.send(Err(copy)));\n", with = "    let _ = out_tx.send(Err(rejection)).await;\n    let _ = err_tx.send(Err(copy)).await;\n" }
 
 # The shared case corpus's binding runners (#272). The two wrap entries are core's regression
 # seen through each binding; the label entries fix a #255 drift without removing its marker;

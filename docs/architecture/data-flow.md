@@ -24,14 +24,14 @@ control plane together with its endpoint proxy.
 1. `commands::lifecycle::run` resolves region, size class, and image name, then requires every
    infra role before anything is created, so a missing role surfaces immediately rather than
    after a build (`microvms-cli/src/commands/lifecycle.rs:501`, guard at
-   `microvms-cli/src/commands/lifecycle.rs:618-668`).
+   `microvms-cli/src/commands/lifecycle.rs:618-672`).
 2. It opens a `Sandbox` through the library seam and races `launch_and_exec` against ctrl-c in a
    `tokio::select!`, with the sandbox owned outside the select so a cancelled launch still holds
-   the identifiers teardown needs (`microvms-cli/src/commands/lifecycle.rs:675-721`,
-   recovery at `microvms-cli/src/commands/lifecycle.rs:736-743`).
+   the identifiers teardown needs (`microvms-cli/src/commands/lifecycle.rs:679-725`,
+   recovery at `microvms-cli/src/commands/lifecycle.rs:740-747`).
 3. `launch_and_exec` preflights the build request, uploads the artifact, then `Sandbox::build_image`
    issues `CreateMicrovmImage` and waits for the image to become usable
-   (`microvms-cli/src/commands/lifecycle.rs:1060-1065`, `microvms-app/src/sandbox.rs:886`).
+   (`microvms-cli/src/commands/lifecycle.rs:1064-1069`, `microvms-app/src/sandbox.rs:886`).
 4. `Sandbox::run` refuses a second bootstrap on the same sandbox, mints the agent token, and
    wraps it with the launch env in a typed `RunHookPayload` that checks its 4096-byte budget
    before any call (`microvms-app/src/sandbox.rs:1028`, refusal at
@@ -50,8 +50,8 @@ control plane together with its endpoint proxy.
    (`microvms-app/src/sandbox.rs:1200-1202`).
 8. The optional workload runs through `Session::run_sync` — start, wait, ack — and `tear_down`
    plus `attach_cost` then run however the select ended
-   (`microvms-app/src/session/mod.rs:350`, `microvms-cli/src/commands/lifecycle.rs:1249`,
-   `microvms-cli/src/commands/lifecycle.rs:1299`).
+   (`microvms-app/src/session/mod.rs:350`, `microvms-cli/src/commands/lifecycle.rs:1253`,
+   `microvms-cli/src/commands/lifecycle.rs:1303`).
 
 ```mermaid
 sequenceDiagram
@@ -77,12 +77,12 @@ sequenceDiagram
 
 1. `commands::attached::exec` attaches a session from the identifier triple, builds the start
    request under a caller-supplied or minted `exec_id`, starts the command, then branches to
-   `stream_exec` (`microvms-cli/src/commands/attached.rs:103`, branch at
-   `microvms-cli/src/commands/attached.rs:163-165`).
+   `stream_exec` (`microvms-cli/src/commands/attached.rs:136`, branch at
+   `microvms-cli/src/commands/attached.rs:176-178`).
 2. `stream_exec` drives `ExecHandle::for_each_event` with a `FnMut(ExecEvent) -> ControlFlow<()>`
    callback, writes one NDJSON line plus the raw bytes per event, and reports `nextOffset` from
-   core's cursor rather than its own tally (`microvms-cli/src/commands/attached.rs:240`, cursor
-   read at `microvms-cli/src/commands/attached.rs:281`).
+   core's cursor rather than its own tally (`microvms-cli/src/commands/attached.rs:253`, cursor
+   read at `microvms-cli/src/commands/attached.rs:294`).
 3. `for_each_event` delegates to `for_each_event_async`, whose loop steps the `advance` state
    machine, reads the cursor off the machine, and reports `EndReason::Cut` when a body ends with
    no `exit` event (`microvms-app/src/session/exec.rs:355`, loop at
@@ -129,16 +129,16 @@ sequenceDiagram
 
 1. `commands::attached::cp` resolves the direction from the `vm:` prefix before opening
    anything, so two local paths or two remote paths are refused by name rather than guessed at
-   (`microvms-cli/src/commands/attached.rs:805`, resolver at
-   `microvms-cli/src/commands/attached.rs:902`).
+   (`microvms-cli/src/commands/attached.rs:821`, resolver at
+   `microvms-cli/src/commands/attached.rs:918`).
 2. It attaches through the helper every command in that file starts with, which resolves the
    region first because the region is what the proxy-token mint's ARN is derived for
    (`microvms-cli/src/commands/attached.rs:73`).
 3. The upload arm reads the local archive whole and sends it without inspecting it: the daemon's
    extractor is the only one in the system, and a client-side check would be a second set of
    member rules that could disagree with it
-   (`microvms-cli/src/commands/attached.rs:812-835`, stated at
-   `microvms-cli/src/commands/attached.rs:798-804`).
+   (`microvms-cli/src/commands/attached.rs:828-851`, stated at
+   `microvms-cli/src/commands/attached.rs:814-820`).
 4. `Session::upload_tar` delegates to `files::upload_tar`, which builds
    `PUT /v1/fs/tar?path=...` with `content-type: application/x-tar` and the archive bytes as the
    body (`microvms-app/src/session/mod.rs:386`, `microvms-app/src/session/files.rs:98`).

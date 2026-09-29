@@ -105,7 +105,7 @@ dependents, `microvms-py/src/cost.rs:488`), the `seconds` getter (6 dependents,
 `microvms-py/src/cost.rs:126`), `PyDuration` (5, `microvms-py/src/cost.rs:89`) and
 `PyRateTable` (5, `microvms-py/src/cost.rs:576`). The mitigation is real and it is dynamic:
 `microvms-py/tests/test_cost.py` holds 39 pytest functions over 753 lines, and the generated
-stubs are gated by `stubs:check` (`mise.toml:219-235`, listed in `check` at `mise.toml:425`).
+stubs are gated by `stubs:check` (`mise.toml:219-250`, listed in `check` at `mise.toml:448`).
 What no tier covers is a Rust-level refactor of the absences the module docs enumerate — a
 `__float__` accidentally reintroduced on `EstimatedUsd` is caught only if a Python test
 happens to assert its absence, after a full native rebuild.
@@ -205,7 +205,7 @@ deterministically by a `turmoil` tier that controls virtual time only. Since #28
 is in `microvms-core/src/prelude.rs:26` and the floor is the pure
 `CalendarDate::from_unix_secs` (`microvms-domain/src/cost.rs:255`), which takes the time.
 Second, `RateTable::retrieved` (`microvms-domain/src/cost.rs:856`) makes rate freshness a data property, which the separate
-`scripts/check-live-rates.py --twin-only` cross-check exists to verify (`mise.toml:575-577`)
+`scripts/check-live-rates.py --twin-only` cross-check exists to verify (`mise.toml:599-601`)
 rather than any Rust test tier.
 
 ### 5. `microvms-py/src/exec.rs`

@@ -116,7 +116,7 @@ follow.
 | `microvms-core/tests/turmoil_client.rs` | test | yes | 7 references; `:452` and `:726` assert `WireKind::Transport`, `:781` and `:1383` assert `WireKind::AuthTokenMint` |
 | `microvms-py/tests/test_smoke.py` | test | yes | `:412` asserts one exception per kind under one shared base; `:275` asserts `wire_kind is None` for a local reject |
 | `microvms-js/__test__/smoke.mjs` | test | yes | `:345` asserts the enumerable `ERR_*` codes are exactly one per `ErrorKind` (`:347`) |
-| `microvms-cli/src/seam.rs`, `commands/lifecycle.rs` | direct import | likely | 8 and 5 references on the classify-and-report path — `microvms-cli/src/seam.rs:315`, `:330`, `:340`; `microvms-cli/src/commands/lifecycle.rs:203`, `:741`, `:753` |
+| `microvms-cli/src/seam.rs`, `commands/lifecycle.rs` | direct import | likely | 8 and 5 references on the classify-and-report path — `microvms-cli/src/seam.rs:315`, `:330`, `:340`; `microvms-cli/src/commands/lifecycle.rs:203`, `:745`, `:757` |
 | `agentd/src/fs.rs`, `agentd/src/exec.rs`, `agentd/src/disk.rs`, `agentd/src/identity.rs`, `agentd/tests/turmoil_transport.rs` | indirect | no | these are `std::io::ErrorKind`, not core's — the name collides but the type does not |
 
 ### Blast-radius notes
@@ -343,8 +343,8 @@ Defined at: `microvms-domain/src/cost.rs:1018` (`pinned_rates`), returning the `
 Gate: an offline check and a live one, running at different times.
 `microvms-domain/src/cost.rs:2227 every_rate_byte_matches_the_python_literal` compares each field
 against a literal in the offline tier, and `./scripts/check-live-rates.py --twin-only` cross-checks
-the script's own pinned copy against the Rust source — offline and free, per `mise.toml:574`. The
-billable half, `mise.toml:547 [tasks."live:rates"]`, compares both against the live AWS Pricing API;
+the script's own pinned copy against the Rust source — offline and free, per `mise.toml:598`. The
+billable half, `mise.toml:571 [tasks."live:rates"]`, compares both against the live AWS Pricing API;
 it sits in `live` rather than `check` because it needs network and credentials (`:402`).
 
 The figures were read from the Lambda pricing page on 2026-08-07 in us-east-1
@@ -369,7 +369,7 @@ The figures were read from the Lambda pricing page on 2026-08-07 in us-east-1
   `scripts/check-live-rates.py:134` finds the function by the literal string
   `"pub fn pinned_rates()"`, and `:180` is the error raised when it cannot — an error that explicitly
   instructs the reader to repoint `TWIN_FN` rather than delete the check. The script's pinned figures
-  are a deliberate second copy (`mise.toml:574`), because a drift check that imported the values it
+  are a deliberate second copy (`mise.toml:598`), because a drift check that imported the values it
   checks would compare a table against itself.
 - **Money is always a `Decimal`, and the pinned figures carry ten significant digits.**
   The literals at `microvms-domain/src/cost.rs:1023`-`:1033` are `dec!()` values, not floats. Summing a
@@ -393,7 +393,7 @@ Gate: one file checks it from independent directions —
 `microvms-cli/tests/manifest.rs:46 every_command_the_manifest_lists_is_one_the_binary_routes`,
 `:90 every_published_domain_is_the_domain_the_parser_enforces`, and
 `:161 the_published_exit_table_agrees_with_what_the_binary_exits` — plus
-`conformance/run_rs.py:816`, which reads the manifest at runtime and drives every command it lists.
+`conformance/run_rs.py:832`, which reads the manifest at runtime and drives every command it lists.
 
 The manifest is generated and never hand-maintained (`microvms-cli/src/manifest.rs:4`). Because it is
 built from the same tables the binary runs on, it cannot drift from the binary's actual behavior, and

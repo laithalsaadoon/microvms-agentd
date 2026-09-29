@@ -20,7 +20,6 @@ use crate::cli::DoctorArgs;
 use crate::commands::{Ctx, Rendered, response_type};
 use crate::exit::{CliError, Exit};
 use crate::render::{Check, check_json, healthy, render_doctor};
-use crate::seam::resolve_region;
 
 /// `EM_AARCH64`, from the ELF specification: core's constant, the same one provisioning
 /// refuses every other binary against.
@@ -44,15 +43,17 @@ pub async fn doctor<O: std::io::Write, E: std::io::Write>(
 
     // The region first among the AWS-adjacent ones, because it is the value a connector ARN is
     // interpolated into and a wrong one produces a null-message denial that reads as IAM.
-    checks.push(check_region(
-        args.region.region.map(|r| r.region()),
-        args.region.unlisted_region.as_deref(),
-        ctx.env,
-    ));
+    // Resolved once, flags first, so every line below reports on the region this line names
+    // (#250). Each check used to resolve it again from the environment alone. A `microvm.toml`
+    // `region` isn't folded in here, where `run` puts it above the environment, so `doctor`
+    // reports on the environment's region in a project that pins one. That's a separate gap
+    // from the flags #250 is about, left for its own change.
+    let region = args.region.resolve(ctx.env);
+    checks.push(check_region(&region));
     // Then whether credentials resolve at all. Through the seam, so this command is covered by
     // the behavioral guard like every other AWS-touching one — and it is genuinely the
     // cheapest question that proves the chain resolves rather than that a file exists.
-    checks.push(check_credentials(ctx).await);
+    checks.push(check_credentials(ctx, &region).await);
     checks.extend(check_infra(ctx));
     checks.push(check_terraform(
         args.infra_dir
@@ -61,7 +62,7 @@ pub async fn doctor<O: std::io::Write, E: std::io::Write>(
     ));
     // The managed bases, once credentials are known to resolve. Read-only, two free GETs, and
     // the only place a caller can see what `--base-image-version` may be set to.
-    checks.extend(check_managed_bases(ctx).await);
+    checks.extend(check_managed_bases(ctx, &region).await);
     // The binary last, only because it is the one failure that costs a full build cycle rather
     // than a call — so it is the one a reader should still see after the others pass.
     checks.push(check_binary(args.binary.as_deref()));
@@ -152,12 +153,8 @@ fn check_config(flags: &crate::cli::ConfigFlags) -> Check {
 /// and AWS adds regions faster than a constant is re-read. The bindings' `preflight` keeps the
 /// unresolved case fatal, because a harness cannot launch without a region. The remedy names
 /// the five, so the reader can tell "typo" from "genuinely new".
-fn check_region(
-    flag: Option<Region>,
-    unlisted: Option<&str>,
-    env: &dyn Fn(&str) -> Option<String>,
-) -> Check {
-    microvms_core::preflight::region_check(&resolve_region(flag, unlisted, env)).advisory()
+fn check_region(region: &Result<Region, microvms_core::Error>) -> Check {
+    microvms_core::preflight::region_check(region).advisory()
 }
 
 /// Whether the credential chain resolves credentials for the resolved region: core's preflight
@@ -167,14 +164,26 @@ fn check_region(
 /// the default chain always has a provider, so a built client proves nothing about whether
 /// the chain holds an identity. It spends no API call, unlike the Python's
 /// `get_caller_identity`, so `doctor` cannot fail on a throttle.
-async fn check_credentials<O: std::io::Write, E: std::io::Write>(ctx: &mut Ctx<'_, O, E>) -> Check {
-    let region = match resolve_region(None, None, ctx.env) {
-        Ok(region) => region,
-        // Already reported by the region check; there is nothing to resolve credentials for.
+async fn check_credentials<O: std::io::Write, E: std::io::Write>(
+    ctx: &mut Ctx<'_, O, E>,
+    resolved: &Result<Region, microvms_core::Error>,
+) -> Check {
+    let region = match resolved {
+        Ok(region) => region.clone(),
+        // The region line has reported the failure. The chain is still checked, on us-east-1
+        // as before, so a machine with no identity keeps its fatal line. Resolving credentials
+        // sends no MicroVMs request, unlike the managed-base reads, which skip this case.
         Err(_) => Region::UsEast1,
     };
     let plane = ctx.seam.control_plane(region.clone()).await;
-    microvms_core::preflight::credentials_check(&plane, &region).await
+    let mut check = microvms_core::preflight::credentials_check(&plane, &region).await;
+    // The line names us-east-1 while the region line names something else, so it says why.
+    if resolved.is_err() {
+        check
+            .detail
+            .push_str("; us-east-1 stood in, because the region above didn't resolve");
+    }
+    check
 }
 
 /// The managed base images AWS publishes, and the versions of the one this client builds on.
@@ -202,12 +211,28 @@ async fn check_credentials<O: std::io::Write, E: std::io::Write>(ctx: &mut Ctx<'
 /// a new way to be wrong. A base this client does not know is advisory for the same reason
 /// `check_region` is — AWS adds things faster than a constant is re-read, and the remedy is to
 /// look, not to stop.
+///
+/// # The region is the one the region line names
+///
+/// Both reads go to the region `doctor` resolved once from the flags and the environment, and
+/// the known base ARN is built for it. When that didn't resolve, nothing is read: listing
+/// us-east-1's bases under another region's report is the two-regions output #250 fixed.
 async fn check_managed_bases<O: std::io::Write, E: std::io::Write>(
     ctx: &mut Ctx<'_, O, E>,
+    region: &Result<Region, microvms_core::Error>,
 ) -> Vec<Check> {
-    let region = resolve_region(None, None, ctx.env).unwrap_or(Region::UsEast1);
+    let Ok(region) = region else {
+        return vec![
+            Check::fail(
+                "managed-bases",
+                "the region did not resolve, so the managed base listing was not read",
+                "see the region check above",
+            )
+            .advisory(),
+        ];
+    };
     let known = microvms_core::control::BaseImage::al2023();
-    let known_arn = known.arn(&region);
+    let known_arn = known.arn(region);
 
     let Ok(plane) = ctx.seam.control_plane(region.clone()).await else {
         // Already reported by the credentials check; a second failure line about the same
@@ -491,6 +516,7 @@ pub fn elf_machine(path: &std::path::Path) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::seam::resolve_region;
 
     /// Writes a file and removes it on drop.
     struct TempFile(std::path::PathBuf, #[allow(dead_code)] tempfile::TempPath);
@@ -609,14 +635,14 @@ mod tests {
     #[test]
     fn an_unlisted_region_is_advisory_and_the_remedy_names_the_five() {
         let env = |_: &str| None;
-        let check = check_region(None, Some("eu-central-1"), &env);
+        let check = check_region(&resolve_region(None, Some("eu-central-1"), &env));
         assert!(!check.ok);
         assert!(!check.fatal, "{check:?}");
         assert!(check.remedy.contains("us-east-1"), "{check:?}");
         assert!(check.remedy.contains("ap-northeast-1"), "{check:?}");
 
         // And a listed one passes.
-        let listed = check_region(Some(Region::UsWest2), None, &env);
+        let listed = check_region(&resolve_region(Some(Region::UsWest2), None, &env));
         assert!(listed.ok, "{listed:?}");
     }
 
@@ -627,7 +653,7 @@ mod tests {
     #[test]
     fn an_unparseable_region_from_the_environment_is_reported_rather_than_raised() {
         let env = |name: &str| (name == "AWS_REGION").then(|| "not-a-region".to_string());
-        let check = check_region(None, None, &env);
+        let check = check_region(&resolve_region(None, None, &env));
         assert!(!check.ok);
         assert!(!check.fatal);
         assert!(check.detail.contains("not-a-region"), "{check:?}");

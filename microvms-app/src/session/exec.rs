@@ -371,7 +371,7 @@ impl ExecHandle {
     /// a connection occasionally, and the whole point of a read-only poll is that
     /// repeating it costs nothing. A fatal one ends the wait.
     pub async fn wait(&self, timeout: Duration) -> Result<ExecResult, Error> {
-        let deadline = tokio::time::Instant::now() + timeout;
+        let deadline = super::deadline_after(timeout);
         let mut last_phase: Option<protocol::exec::Phase> = None;
         loop {
             match self.poll().await {
@@ -1975,6 +1975,38 @@ mod tests {
                 cursor: 8,
             },
             "the ending must still name the exit event and the total"
+        );
+    }
+
+    /// A timeout too large for the clock to add to now still waits, rather than panicking with
+    /// the exec already started (#268): every surface accepts up to what a `Duration` holds,
+    /// and `Instant + Duration` overflows past about 9.2e18 seconds. The exec runs on the first
+    /// poll and exits on the second, so a deadline that saturated into the past would time out
+    /// between them instead of waiting.
+    ///
+    /// **Falsification**: `guards/faults.toml` entry `app-wait-deadline-overflows` restores the
+    /// unchecked `Instant::now() + after` in `deadline_after`, and the wait panics.
+    #[tokio::test(start_paused = true)]
+    async fn a_wait_longer_than_the_clock_can_hold_still_waits() {
+        let recorder = Recorder::with([
+            Reply::ok(serde_json::json!({"exec_id":"e1","phase":"running"})),
+            Reply::ok(serde_json::json!({
+                "exec_id":"e1","phase":"exited","exit_code":0,"signal":null,
+                "stdout":"","stderr":"","truncated":false,"writers_may_be_alive":false
+            })),
+        ]);
+        let (session, _, _) = session_with(Arc::clone(&recorder));
+
+        let result = session
+            .exec("e1")
+            .wait(Duration::MAX)
+            .await
+            .expect("a far deadline waits for the exit");
+        assert_eq!(result.exit_code(), Some(0));
+        assert_eq!(
+            recorder.requests().len(),
+            2,
+            "the wait polled past the running phase"
         );
     }
 }

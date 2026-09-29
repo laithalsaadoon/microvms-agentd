@@ -25,10 +25,10 @@ defended against rather than narration. The sources above are the history.
 Two operational facts before you start. `mise run check` is the free offline gate — lint,
 security, every Rust tier, schema, manifest, Python stub and TypeScript declaration
 freshness, model drift, publishability, live wiring, the release cross-compile, the background
-example, and the requirement traceability matrix (`mise.toml:417-433`). `mise run live` is
+example, and the requirement traceability matrix (`mise.toml:440-456`). `mise run live` is
 BILLABLE, takes about fifteen minutes against real AWS, and is never a first debugging step
-(`mise.toml:591-592`); after any live run, teardown is verified separately by
-`mise run live:verify-clean` (`mise.toml:579-589`), because the service creates log groups
+(`mise.toml:615-616`); after any live run, teardown is verified separately by
+`mise run live:verify-clean` (`mise.toml:603-613`), because the service creates log groups
 under `/aws/lambda-microvms/` that outlive `terraform destroy` (`docs/PLATFORM.md:100-105`).
 
 ## Failure-mode index
@@ -39,7 +39,7 @@ under `/aws/lambda-microvms/` that outlive `terraform destroy` (`docs/PLATFORM.m
 | Image stuck in `CREATING`; builds never start; `updatedAt` never advances past `createdAt` | The `clientToken` replay. A `clientToken` is a permanent idempotency key, so a create whose token repeats an earlier one is replayed as a no-op. The image cannot be deleted (`CREATING` forbids it) and its only version cannot be dropped either. Two were wedged about 15 hours | `ListMicrovmImageBuilds` — every build `PENDING` is the signature. Record the identifier and build under a fresh `--name`; waiting does not help | `docs/PLATFORM.md:247-257`, `microvms-app/src/control/image.rs:371-391`, `microvms-cli/src/exit.rs:354-357` |
 | A VM reaches a terminal state before `RUNNING`; the client reports a connection error | A lifecycle hook failed. `PENDING → RUNNING → SUSPENDING/SUSPENDED → TERMINATING → TERMINATED`; anything terminal before `RUNNING` died during startup, and the platform terminates it before forwarding any traffic | `GetMicrovm`'s `stateReason` — the only evidence that outlives the VM. The client already puts the state and the reason both in the message | `docs/PLATFORM.md:92-98`, `microvms-app/src/control/microvm.rs:482-499`, `microvms-cli/src/exit.rs:216-221` |
 | `CREATE_FAILED` with a fully green build log, every docker layer succeeding, and no error line anywhere | The guest's `AGENTD_PORT` disagrees with the create call's `hooks.port`. The build-time `ready` and `validate` hooks are dialled on the create call's port, so a daemon listening elsewhere answers none of them. An unset `AGENTD_PORT` is the same failure, with nothing in the Dockerfile to point at | Fetch `GetMicrovmImageVersion` and compare `hooks.port` against the Dockerfile's `ENV AGENTD_PORT`. `GetMicrovmImage` structurally cannot say why | `docs/PLATFORM.md:558-565`, `agentd/src/config.rs:116-120`, `.erpaval/solutions/architecture-patterns/an-absent-value-is-not-a-neutral-one.md:19-24` |
-| A 45-minute build ends as `Ready hook invocation timed out after PT5M`, saying nothing about architecture | A host-architecture daemon binary. MicroVMs are ARM64-only, so an x86-64 `CMD` cannot exec and surfaces only as the hook never answering | `microvm doctor --binary <path>`. It reads twenty bytes of ELF header and compares `e_machine` against `0xB7`; a script or wrapper is caught as "not an ELF binary" | `microvms-cli/src/commands/doctor.rs:8-15`, `microvms-cli/src/commands/doctor.rs:25-29`, `microvms-cli/src/commands/doctor.rs:422-436` |
+| A 45-minute build ends as `Ready hook invocation timed out after PT5M`, saying nothing about architecture | A host-architecture daemon binary. MicroVMs are ARM64-only, so an x86-64 `CMD` cannot exec and surfaces only as the hook never answering | `microvm doctor --binary <path>`. It reads twenty bytes of ELF header and compares `e_machine` against `0xB7`; a script or wrapper is caught as "not an ELF binary" | `microvms-cli/src/commands/doctor.rs:8-15`, `microvms-cli/src/commands/doctor.rs:24-28`, `microvms-cli/src/commands/doctor.rs:481-500` |
 | Every failed build reports `reason=unknown` and the log group holds nothing at all | The build role's log permissions, not a silent service. Logs go to `/aws/lambda-microvms/<image-name>`, not the plausible `/aws/lambda/microvms/*`. The caller's own policy is discarding the evidence | `microvm logs <image-name>` names the group; an empty group beside `reason=unknown` is the prefix signature. Unknown alone is not the same as empty | `docs/PLATFORM.md:259-264`, `microvms-app/src/control/image.rs:55`, `agentd/src/main.rs:84-87` |
 | A build says `The container image build failed.` and nothing else | `stateReason` lives on the **build** only. `GetMicrovmImage` reports `CREATE_FAILED` with no reason member at all, and `ListMicrovmImageVersions` reported `null` across three separate failures | `ListMicrovmImageBuilds`, and expect a **list**: each failed version produced two builds, one per Graviton generation, with identical reasons. Then read `snapshotBuild`'s shape — absent means the Dockerfile broke before anything installed, `codeInstallSizeInBytes` alone means code installed and the daemon never became ready | `docs/PLATFORM.md:278-287`, `docs/PLATFORM.md:533-546` |
 | Every control request answers 503 | Not bootstrapped. The run hook has not landed, so the control API is closed. Deliberately not 401 (which sends a client chasing credentials) and never 404 (which clients map onto "file not found") | `GET /v1/health` — unauthenticated on purpose so it answers in exactly this window — and read `bootstrapped`. `NotBootstrapped` is retryable: the platform is about to deliver the token | `agentd/src/auth.rs:69-80`, `microvms-domain/src/error.rs:244-248`, `protocol/src/health.rs:20` |
@@ -84,8 +84,8 @@ under `/aws/lambda-microvms/` that outlive `terraform destroy` (`docs/PLATFORM.m
 | Exit code in `$?` | The process. Append-only, `#[repr(u8)]` with explicit discriminants so a variant inserted in the middle cannot silently renumber the contract | The integer, then `Exit::row()`'s `meaning` and `finding`. Every non-zero code is distinct; no two rows share one | `microvms-cli/src/exit.rs:78-102`, `microvms-cli/src/exit.rs:173-258` |
 | Run ledger on disk | One JSON file per invocation under `$MICROVM_STATE_DIR`, else `~/.microvm/runs`. Written **before** each delete is attempted, and its file is refused deletion while `leaked` is non-empty | `leaked` — the operator's to-do list. For a `CREATING` image and a service-created log group the identifier *is* the remedy, because there is no second way to find them. A write failure is swallowed, so an unwritable state dir costs the `ls` entry and nothing else | `microvms-cli/src/ledger.rs:1-22`, `microvms-cli/src/ledger.rs:37-49`, `microvms-cli/src/seam.rs:474-483` |
 | `microvm ls` | stdout. Rows marked as alarms plus a trailing count | "N run(s), M with something still billing" | `microvms-cli/src/main.rs:210-248` |
-| `microvm doctor` | A **success** envelope with `ok: false` plus exit `ERR_PRECONDITION`, because the check succeeded — it found what was wrong | `checks[]` per named check. Advisory checks do not fail the run; the fatal ones do | `microvms-cli/src/commands/doctor.rs:62-83` |
-| `mise run live:verify-clean` | stdout, exit 0 clean and 1 leaked | Three outcomes, not two: **leak** (still billing and nothing intends to keep it), **standing** (the Terraform stack, possibly on purpose), **pending** (a delete in flight — re-run in a minute) | `scripts/verify-clean.py:7-28`, `mise.toml:579-589` |
+| `microvm doctor` | A **success** envelope with `ok: false` plus exit `ERR_PRECONDITION`, because the check succeeded — it found what was wrong | `checks[]` per named check. Advisory checks do not fail the run; the fatal ones do | `microvms-cli/src/commands/doctor.rs:70-91` |
+| `mise run live:verify-clean` | stdout, exit 0 clean and 1 leaked | Three outcomes, not two: **leak** (still billing and nothing intends to keep it), **standing** (the Terraform stack, possibly on purpose), **pending** (a delete in flight — re-run in a minute) | `scripts/verify-clean.py:7-28`, `mise.toml:603-613` |
 | Guest OOM counters | In-guest, readable with no extra privileges | `dmesg`, and `/sys/fs/cgroup/memory.events` → `oom`, `oom_kill`, `oom_group_kill`. Poll these rather than discovering a kill after the fact | `docs/PLATFORM.md:185-191` |
 
 ## First-checks ladder
@@ -112,12 +112,12 @@ money.
    `doctor` cannot fail on a throttle — then the Terraform outputs `s3_bucket`, `build_role_arn`, and `execution_role_arn` by name, then whether
    the stack is actually applied, then the managed bases, then the binary's architecture last
    because it is the one failure that costs a full build cycle.
-   `microvms-cli/src/commands/doctor.rs:36-60`
+   `microvms-cli/src/commands/doctor.rs:36-68`
 4. **Do not trust `terraform.tfstate` on disk as evidence the stack exists.** A destroyed
    stack leaves the file behind with an empty resource list, which is exactly the state that
    produces "bucket does not exist" three minutes into a build. `doctor` asks
    `terraform output` instead, which needs no credentials.
-   `microvms-cli/src/commands/doctor.rs:333-341`
+   `microvms-cli/src/commands/doctor.rs:409-412`
 5. **Run `microvm ls` before anything else touches the account.** A non-empty `leaked` list
    from an earlier invocation is both a bill and a clue — the ledger is written before each
    delete is attempted, so the identifiers survive a process that died inside the call.
@@ -128,7 +128,7 @@ money.
    `background:check`, and `trace:check`. A drifted generated artifact — the served schema,
    the CLI manifest, the Python stub, the TypeScript declarations, the traceability matrix, a
    hardcoded API constraint against botocore's model — fails here rather than in production.
-   `mise.toml:417-433`
+   `mise.toml:440-456`
 7. **If the VM is reachable: `GET /v1/health`.** One call answers several questions.
    `bootstrapped` false plus 503s everywhere means the run hook has not landed;
    `disk.under_pressure` means writes are about to be refused with 507; `identity_degraded`
@@ -151,7 +151,7 @@ money.
     fake more forgiving than the real daemon. Teardown reporting success and the account being
     clean are different questions, so the leak check runs independently of the code that did
     the cleanup, and expect to run `--delete` more than once because an image refuses deletion
-    while its VM is still terminating. `mise.toml:591-592`, `scripts/verify-clean.py:7-28`
+    while its VM is still terminating. `mise.toml:615-616`, `scripts/verify-clean.py:7-28`
 
 ## Known incident patterns
 

@@ -154,6 +154,94 @@ Versions are [semantic](https://semver.org/spec/v2.0.0.html); the wire contract 
   and a field the daemon adds reaches every client as its wire default. Build requests with
   `StartRequest::new(exec_id, command)` and the `with_*` setters. Reading the fields is
   unchanged, and so is the JSON on the wire. The Python and TypeScript APIs don't change.
+- **`--artifact-uri` refuses the flags it makes meaningless (#249). A usage error where
+  these used to parse.** `build --reuse` with it: the reuse name is a hash of the local build
+  inputs only, so an image built from a caller's object under it would later be handed to a
+  plain `build --reuse` of the same binary as if it were that binary's image. `--dockerfile` on
+  `run` and `build`, and `--project` on `build`: they only shape an artifact the CLI builds, and
+  beside a caller's URI it builds none, so they were dropped with nothing said, and an unused
+  Dockerfile could still fail the build's local checks. To keep a command that passed them,
+  drop `--artifact-uri` and let the CLI build and upload, or drop the other flag and bake it
+  into your own artifact.
+- **A `--name` gets `Sandbox.from_name`'s answers for a disagreeing region and an illegal
+  name (#251).** A `--region` or `--unlisted-region` that disagrees with the name's record
+  used to win over the record; it's now refused with `ERR_INVALID_ARG` before any AWS call. A
+  `--name` that breaks the name grammar (`a/b`, `mvm-1`) is now `ERR_INVALID_ARG` with the
+  grammar's reason instead of `ERR_PRECONDITION` "no VM named"; the lifecycle commands still
+  pass such an identifier through to the service. A script that passes the region it launched
+  in beside `--name` is unaffected.
+
+### Fixed
+
+- **`run` and `build` no longer upload over a caller's `--artifact-uri` (#249).** With a bucket
+  also set, by `--bucket` or `$MICROVM_BUCKET`, both commands built their own artifact and
+  uploaded it to the caller's URI, replacing the object there, so the image was built from the
+  CLI's bytes and not the caller's. A caller-supplied URI now means no upload whatever the
+  bucket says, and a progress line names the bucket that went unused. With no binary given, no
+  daemon is provisioned beside it either, so the build doesn't fetch a release asset it won't
+  use, and `build`'s envelope reports `agentd: null` rather than a daemon the image doesn't
+  hold. A build with a bucket and no `--artifact-uri` still uploads to `s3://<bucket>/<name>.zip`.
+  A script that passed `--artifact-uri` with a bucket and never uploaded there itself relied on
+  the bug: drop `--artifact-uri` to have the CLI upload, or upload first. The live suite checks
+  that the caller's object is unchanged after such a build.
+
+- **`doctor --region` and `--unlisted-region` reach the credentials and managed-base checks
+  (#250).** Those two checks resolved the region again from `$AWS_REGION` alone, so
+  `doctor --region us-west-2` listed another region's managed bases and named that region on
+  those lines. The region is now resolved once, and every line reports on the one the region
+  line names. When it doesn't resolve, the credentials check still runs, against us-east-1 as
+  before, and now says us-east-1 stood in, and `managed-bases` says it wasn't read instead of
+  listing us-east-1's bases.
+
+- **Every `--name` lookup follows core's name rule (#251).** The attached commands, `shell`,
+  `tunnel`, `keepalive`, `agent-up`'s refresh, `attach --from`, and `suspend`, `resume` and
+  `terminate` by name read a name through `microvms_core::names::resolve_record`, the rule
+  `Sandbox.from_name` uses. The VM's region comes from its record, so `terminate <name>` and
+  `keepalive --name` reach the VM from a shell whose `AWS_REGION` names another region, and
+  `keepalive` reads the idle window there. A torn record is refused with `ERR_PRECONDITION`
+  naming the file, instead of an attach with empty fields. `tunnel --verify-identity`
+  answers a free name with "no VM named" instead of "carries no identity material". The
+  exit-code changes this brings are under Changed.
+
+- **`session.spawn()` stream errors carry the error code chain (#252).** When a spawned
+  process's `stdout` or `stderr` rejected, on a gap under the default `gapPolicy: 'error'` or
+  on a drive error such as a spent reconnect budget or a refused reconnect, `err.cause` was
+  `undefined`. It's the documented chain now: `err.cause.message` is the `ERR_*` code and
+  `err.cause.cause.message` the wire kind. A spawn gap reports `ERR_PLATFORM` and
+  `OutputGap`, the same as `ExecHandle.stream({ errorOnGap: true })`. Both streams get their
+  rejection at once, so a caller reading `stderr` to the end before `stdout` no longer waits
+  forever when an unread `stdout` chunk is buffered. The messages don't change, and no AWS
+  request changes.
+
+- **`for await` over `ExecHandle.stream()` type-checks in TypeScript (#262).** `index.d.ts`
+  declared `ExecStream` with no `[Symbol.asyncIterator]()` member, because the binding's
+  `AsyncGenerator` impl lacked the `#[napi]` attribute napi-rs reads the yield type from, so
+  `tsc` rejected the loop the method's docs show. Each event is now typed `StreamEvent`. A
+  type-level probe (`microvms-js/__test__/types/`) compiled with `tsc --strict` against the
+  declarations runs in `dts:check` and in CI's bindings job.
+
+- **A seconds flag that isn't a duration is refused before anything runs (#268).**
+  `exec --timeout`, `run --timeout`, `suspend --timeout`, `resume --timeout`,
+  `sync --timeout`, `cost --compare --hold-sec`, `agent-prompt --timeout` and keepalive's
+  `--interval`, `--for` and `--idle-window` parse through core's `duration_of_secs_f64`, so
+  `inf`, `NaN`, a negative value or one too large for a duration is refused with
+  `ERR_INVALID_ARG` before any call. Before, `inf` panicked after the exec had started, the
+  VM had launched, or the suspend or resume had been sent, and a `run` that panicked left its
+  VM running with no teardown; `NaN` and a negative value meant zero.
+  `ls --watch --interval-sec 1e300` is refused instead of panicking. `0` still parses; `sync`
+  sends it to the daemon, which refuses a zero budget after the upload, as before. A `sync`
+  whose budget is under a second now waits that budget plus 30 s, not 31 s. The CLI's and
+  both bindings' `clippy.toml` ban `Duration::from_secs_f64` and `from_secs_f32`. No AWS call
+  changed.
+- **A wait longer than the clock can hold waits instead of panicking (#268).** Core's exec,
+  readiness and completion deadlines saturate thirty years out when `now + timeout` would
+  overflow, which it did past about 9.2e18 seconds, after the exec had started. That reached
+  every surface: `exec --timeout 1e19` on the CLI, and each binding's exec wait, which hands
+  core the same `Duration`.
+- **The seconds refusal names the figure as typed (#268).** Core's message is now
+  `1e300 seconds is not a duration: it must be finite, non-negative and below 2^64, ...` on
+  every surface, where `1e300` used to print as 301 digits and `inf` as `infs`.
+  `ls --watch --interval-sec` prints its refused figure the same way.
 
 ## [0.10.0] — 2026-09-25
 

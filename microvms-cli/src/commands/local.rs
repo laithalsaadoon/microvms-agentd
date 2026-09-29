@@ -448,15 +448,18 @@ pub async fn watch<O: std::io::Write, E: std::io::Write>(
     // A busy-loop is refused, not clamped: 0.1s of silence costs nothing, and a
     // caller who typed 0 was expressing "as fast as possible", which over a disk
     // read is a spin.
-    if !args.interval_sec.is_finite() || args.interval_sec < 0.1 {
-        return Err(
-            crate::exit::classify(&microvms_core::Error::invalid_arg(format!(
-                "a watch interval must be a finite number of seconds, at least 0.1: {}",
-                args.interval_sec
-            )))
-            .suggest("--interval-sec was the flag; the default is 2"),
-        );
-    }
+    let interval = match microvms_core::cost::duration_of_secs_f64(args.interval_sec) {
+        Ok(interval) if args.interval_sec >= 0.1 => interval,
+        _ => {
+            return Err(
+                crate::exit::classify(&microvms_core::Error::invalid_arg(format!(
+                    "a watch interval must be a finite number of seconds, at least 0.1: {:?}",
+                    args.interval_sec
+                )))
+                .suggest("--interval-sec was the flag; the default is 2"),
+            );
+        }
+    };
     if args.max_refreshes == Some(0) {
         return Err(crate::exit::classify(&microvms_core::Error::invalid_arg(
             "a watch of zero refreshes reads nothing and reports nothing",
@@ -489,7 +492,7 @@ pub async fn watch<O: std::io::Write, E: std::io::Write>(
                 interrupted = true;
                 break snapshot;
             }
-            () = tokio::time::sleep(std::time::Duration::from_secs_f64(args.interval_sec)) => {}
+            () = tokio::time::sleep(interval) => {}
         }
     };
 
@@ -546,13 +549,19 @@ pub fn history<O: std::io::Write, E: std::io::Write>(
     args: &HistoryArgs,
 ) -> Result<Rendered, CliError> {
     // A registered name resolves to its VM id here too, so the one identifier grammar holds
-    // across the whole surface. An *unregistered* name still reads as a clean empty history
-    // — `resolve_vm_identifier`'s miss is a failure, and this command's contract is that
-    // asking about an unseen VM is a question, not a mistake — so the miss is mapped back
-    // to the identifier itself and the empty read below answers honestly.
-    let microvm_id =
-        crate::commands::resolve_vm_identifier(ctx, &args.microvm_id, args.state_dir.clone())
-            .unwrap_or_else(|_| args.microvm_id.clone());
+    // across the whole surface. An *unregistered* or torn name still reads as a clean empty
+    // history — `resolve_vm_identifier`'s miss is a failure, and this command's contract is
+    // that asking about an unseen VM is a question, not a mistake — so the miss is mapped
+    // back to the identifier itself and the empty read below answers honestly. No region
+    // flag: history is a local read, so no region can disagree with the record.
+    let microvm_id = crate::commands::resolve_vm_identifier(
+        ctx,
+        &args.microvm_id,
+        args.state_dir.clone(),
+        &crate::cli::RegionFlags::default(),
+    )
+    .map(|(id, _)| id)
+    .unwrap_or_else(|_| args.microvm_id.clone());
     let root = state_dir(args.state_dir.clone(), ctx.env);
     let events = history::read_events(&root, &microvm_id);
 
@@ -1073,15 +1082,26 @@ mod tests {
 
     /// A spin interval and a zero-refresh watch are refused before the loop, with
     /// the flag named — ERR_INVALID_ARG, the local-refusal row.
+    ///
+    /// **Falsification**: `guards/faults.toml` entries `cli-ls-interval-too-large` (clamp a
+    /// finite interval to 60 s before core's conversion, and the `1e300` row is accepted) and
+    /// `cli-ls-interval-message-as-typed` (print the figure with `Display`, and `0.0` reads `0`).
     #[tokio::test]
     async fn a_spin_interval_or_an_empty_watch_is_refused() {
         let dir = tempfile::tempdir().expect("a temp dir");
-        for interval in [0.0, 0.05, -1.0, f64::NAN, f64::INFINITY] {
+        // `1e300` is finite and past 0.1, but no `Duration` holds it (#268). Rows and the
+        // message print with `Debug`, since `Display` spells it as a 1 and 300 zeros.
+        for interval in [0.0, 0.05, -1.0, f64::NAN, f64::INFINITY, 1e300] {
             let mut args = watch_args(dir.path(), Some(1));
             args.interval_sec = interval;
             let (result, _) = run_watch(args, crate::commands::lifecycle::never()).await;
-            let error = result.expect_err(&format!("{interval}"));
-            assert_eq!(error.code(), "ERR_INVALID_ARG", "{interval}");
+            let error = result.expect_err(&format!("{interval:?}"));
+            assert_eq!(error.code(), "ERR_INVALID_ARG", "{interval:?}");
+            assert!(
+                error.message.ends_with(&format!(": {interval:?}")),
+                "{}",
+                error.message
+            );
             assert!(
                 error
                     .suggestions

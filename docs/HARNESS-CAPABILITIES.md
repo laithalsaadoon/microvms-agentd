@@ -99,9 +99,9 @@ applies `env` per request, the bindings expose it, and `microvm exec` now
 takes it too: a repeatable `--env KEY=VALUE`, `--user`/`--group` as a name or
 a numeric id, `--shell`, and `--inherit-image-env`
 (`microvms-cli/src/cli.rs:1132-1171`), all copied into the start request
-(`microvms-cli/src/commands/attached.rs:211-227`). The empty `env` in
+(`microvms-cli/src/commands/attached.rs:224-240`). The empty `env` in
 `StartSpec::command` is now only the default a caller overrides
-(`microvms-cli/src/commands/lifecycle.rs:1897-1910`). Every harness passes
+(`microvms-cli/src/commands/lifecycle.rs:1924-1937`). Every harness passes
 env per exec (Harbor merges layers of it on every call), and the PATH
 failure the coding-agents example documents was this gap biting a real
 workload.

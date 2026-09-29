@@ -173,7 +173,7 @@ CLI-2 names, that every AWS call goes through `microvms-core`.
   `microvms_core::protocol::`, core's re-export, so the CLI has one door to everything below it
   (`microvms-cli/Cargo.toml:48-51`). Confirmed in the source: `microvms-cli/src` contains no
   bare `protocol::` path — every reference is qualified through core, as at
-  `microvms-cli/src/commands/attached.rs:178`.
+  `microvms-cli/src/commands/attached.rs:191`.
 - **Both bindings do have a direct `protocol` edge**, and it is live rather than vestigial:
   `microvms-py/src/session.rs:74` and `microvms-js/src/session.rs:144` name
   `protocol::health::Health` directly, and both build `protocol::exec::StartRequest`

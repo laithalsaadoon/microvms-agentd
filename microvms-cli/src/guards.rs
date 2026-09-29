@@ -269,7 +269,7 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
         ),
         (
             "run",
-            Command::Run(RunArgs {
+            Command::Run(Box::new(RunArgs {
                 binary: Some(binary.to_path_buf()),
                 image: None,
                 image_version: None,
@@ -291,7 +291,7 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 keep: false,
                 identity: false,
                 vm_name: None,
-                timeout: 30.0,
+                timeout: Duration::from_secs(30),
                 max_idle_sec: 600,
                 suspended_sec: 600,
                 auto_resume: false,
@@ -305,7 +305,7 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 region: region_flags(),
                 infra: InfraFlags::default(),
                 launch: Default::default(),
-            }),
+            })),
             Door::OpenSandbox,
         ),
         (
@@ -368,7 +368,7 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 execution_timeout: None,
                 reap_group_on_exit: false,
                 agent: Some(crate::cli::AgentArg::ClaudeCode),
-                timeout: 30.0,
+                timeout: Duration::from_secs(30),
                 detach: false,
                 exec_id: None,
                 attach: attach_flags(),
@@ -380,7 +380,7 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
             "exec",
             Command::Exec(ExecArgs {
                 command: Some("true".into()),
-                timeout: 30.0,
+                timeout: Duration::from_secs(30),
                 cwd: None,
                 env: Vec::new(),
                 user: None,
@@ -519,7 +519,7 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 dir: std::env::temp_dir(),
                 watch: false,
                 full: false,
-                timeout: 60.0,
+                timeout: Duration::from_secs(60),
                 attach: attach_flags(),
                 region: region_flags(),
             }),
@@ -569,7 +569,7 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
             "suspend",
             Command::Suspend(SuspendArgs {
                 microvm_id: "mvm-1".into(),
-                timeout: 30.0,
+                timeout: Duration::from_secs(30),
                 state_dir: Some(std::env::temp_dir().join("microvm-guard-history")),
                 region: region_flags(),
             }),
@@ -579,7 +579,7 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
             "resume",
             Command::Resume(ResumeArgs {
                 microvm_id: "mvm-1".into(),
-                timeout: 30.0,
+                timeout: Duration::from_secs(30),
                 state_dir: Some(std::env::temp_dir().join("microvm-guard-history")),
                 region: region_flags(),
             }),
@@ -796,7 +796,7 @@ async fn no_local_command_touches_a_seam_door() {
             build_sec: 0.0,
             image_gb: None,
             cycles: 1,
-            hold_sec: 3600.0,
+            hold_sec: Duration::from_secs(3600),
             // The budget gate is arithmetic over the same local report, so a gated
             // invocation is exercised here too: still no seam door.
             max_cost: Some("0.001".into()),
@@ -1407,7 +1407,7 @@ fn run_args_for_image(identifier: &str, state_dir: std::path::PathBuf) -> RunArg
         keep: false,
         identity: false,
         vm_name: None,
-        timeout: 30.0,
+        timeout: Duration::from_secs(30),
         max_idle_sec: 600,
         suspended_sec: 600,
         auto_resume: false,
@@ -1672,7 +1672,7 @@ async fn a_bare_image_name_is_resolved_to_its_arn_before_the_launch() {
         transport: Arc::clone(&transport),
         clock: Arc::new(YieldingClock::default()),
     };
-    let command = Command::Run(run_args_for_image("coding-agents", dir.0.clone()));
+    let command = Command::Run(Box::new(run_args_for_image("coding-agents", dir.0.clone())));
     let (result, stderr) = dispatch_with(&seam, &command, full_infra()).await;
     result.expect_err("the scripted RunMicrovm failure ends the run after resolution");
 
@@ -1716,7 +1716,7 @@ async fn an_arn_image_identifier_launches_with_no_listing_call() {
         clock: Arc::new(YieldingClock::default()),
     };
     let arn = "arn:aws:lambda:us-east-1:123456789012:microvm-image:img";
-    let command = Command::Run(run_args_for_image(arn, dir.0.clone()));
+    let command = Command::Run(Box::new(run_args_for_image(arn, dir.0.clone())));
     let (result, stderr) = dispatch_with(&seam, &command, full_infra()).await;
     result.expect_err("the scripted RunMicrovm failure ends the run");
 
@@ -1758,7 +1758,7 @@ async fn a_launch_from_an_existing_image_reports_that_images_name() {
     let arn = "arn:aws:lambda:us-east-1:123456789012:microvm-image:existing-one";
     // `run_args_for_image` sets `--name img`, the name a *build* would use; the launch must
     // not report it for an image it did not build.
-    let command = Command::Run(run_args_for_image(arn, dir.0.clone()));
+    let command = Command::Run(Box::new(run_args_for_image(arn, dir.0.clone())));
     let (result, _) = dispatch_with(&seam, &command, full_infra()).await;
     let failure = result.expect_err("the scripted RunMicrovm failure ends the run");
     let envelope = crate::envelope::error(&failure);
@@ -1799,7 +1799,7 @@ async fn a_launch_env_flag_reaches_the_run_hook_payload() {
         ),
         ("EMPTY".to_string(), String::new()),
     ];
-    let (result, _) = dispatch_with(&seam, &Command::Run(args), full_infra()).await;
+    let (result, _) = dispatch_with(&seam, &Command::Run(Box::new(args)), full_infra()).await;
     result.expect_err("the scripted RunMicrovm failure ends the run after the payload is built");
 
     let body = transport.first_body("RunMicrovm");
@@ -1838,10 +1838,10 @@ async fn a_run_without_a_launch_env_emits_no_env_key() {
         transport: Arc::clone(&transport),
         clock: Arc::new(YieldingClock::default()),
     };
-    let command = Command::Run(run_args_for_image(
+    let command = Command::Run(Box::new(run_args_for_image(
         "arn:aws:lambda:us-east-1:123456789012:microvm-image/img",
         dir.0.clone(),
-    ));
+    )));
     let (result, _) = dispatch_with(&seam, &command, full_infra()).await;
     result.expect_err("the scripted RunMicrovm failure ends the run");
 
@@ -1934,7 +1934,7 @@ CI = "0"
     args.explicit.max_idle_sec = true;
     args.launch_env = vec![("CI".to_string(), "1".to_string())];
 
-    let (result, _) = dispatch_with(&seam, &Command::Run(args), full_infra()).await;
+    let (result, _) = dispatch_with(&seam, &Command::Run(Box::new(args)), full_infra()).await;
     result.expect_err("the scripted RunMicrovm failure ends the run after the request is built");
 
     let body = transport.first_body("RunMicrovm");
@@ -1995,7 +1995,7 @@ async fn a_broken_config_file_is_refused_with_its_own_row_and_zero_doors() {
         no_config: false,
     };
 
-    let (result, _) = dispatch_with(&seam, &Command::Run(args), full_infra()).await;
+    let (result, _) = dispatch_with(&seam, &Command::Run(Box::new(args)), full_infra()).await;
     let failure = result.expect_err("a broken file refuses the run");
     assert_eq!(failure.exit, Exit::Config, "{failure:?}");
     assert_eq!(failure.code(), "ERR_CONFIG");
@@ -2047,7 +2047,7 @@ async fn deny_egress_reaches_the_launch_env_and_asks_the_platform_for_nothing() 
     );
     args.deny_egress = true;
 
-    let (result, _) = dispatch_with(&seam, &Command::Run(args), full_infra()).await;
+    let (result, _) = dispatch_with(&seam, &Command::Run(Box::new(args)), full_infra()).await;
     result.expect_err("the scripted RunMicrovm failure ends the run after the request is built");
 
     let body = transport.first_body("RunMicrovm");
@@ -2087,7 +2087,7 @@ async fn vpc_connector_reaches_the_launch_request() {
     );
     let connector = "arn:aws:lambda:us-east-1:123456789012:network-connector:private";
     args.egress_network_connectors = vec![connector.to_string()];
-    let (result, _) = dispatch_with(&seam, &Command::Run(args), full_infra()).await;
+    let (result, _) = dispatch_with(&seam, &Command::Run(Box::new(args)), full_infra()).await;
     result.expect_err("scripted stop after serializing the request");
     assert_eq!(
         transport.first_body("RunMicrovm")["egressNetworkConnectors"],
@@ -2349,7 +2349,7 @@ async fn an_unknown_image_name_fails_precondition_before_any_launch() {
         transport: Arc::clone(&transport),
         clock: Arc::new(YieldingClock::default()),
     };
-    let command = Command::Run(run_args_for_image("no-such-image", dir.0.clone()));
+    let command = Command::Run(Box::new(run_args_for_image("no-such-image", dir.0.clone())));
     let (result, _) = dispatch_with(&seam, &command, full_infra()).await;
 
     let failure = result.expect_err("nothing to launch from");
@@ -2399,7 +2399,7 @@ async fn resolution_reads_past_the_first_page_of_the_listing() {
         transport: Arc::clone(&transport),
         clock: Arc::new(YieldingClock::default()),
     };
-    let command = Command::Run(run_args_for_image("coding-agents", dir.0.clone()));
+    let command = Command::Run(Box::new(run_args_for_image("coding-agents", dir.0.clone())));
     let (result, _) = dispatch_with(&seam, &command, full_infra()).await;
     result.expect_err("the scripted RunMicrovm failure ends the run after resolution");
 
@@ -2885,7 +2885,7 @@ async fn a_locally_refused_dockerfile_costs_no_upload_and_no_call() {
     args.image = None;
     args.binary = Some(binary.0.clone());
     args.dockerfile = Some(dockerfile_path.clone());
-    let (result, _) = dispatch_with(&seam, &Command::Run(args), full_infra()).await;
+    let (result, _) = dispatch_with(&seam, &Command::Run(Box::new(args)), full_infra()).await;
     let error = result.expect_err("the run path refuses the same Dockerfile");
     assert_eq!(error.exit, Exit::InvalidArg, "{}", error.message);
     assert_eq!(
@@ -3173,7 +3173,7 @@ async fn a_pinned_image_version_reaches_the_run_body_from_the_run_flag() {
         dir.0.clone(),
     );
     args.image_version = Some("2.0".into());
-    let command = Command::Run(args);
+    let command = Command::Run(Box::new(args));
     // The launch **fails**, and that is deliberate rather than incidental. `GetMicrovm` answers
     // TERMINATED, so `wait_for_running` fails fast on TRAP-8 — which happens *after* `RunMicrovm`
     // emitted the body this test reads and *before* a session is built. Answering RUNNING instead
@@ -3212,10 +3212,10 @@ async fn a_pinned_image_version_reaches_the_run_body_from_the_run_flag() {
         transport: Arc::clone(&transport),
         clock: Arc::new(YieldingClock::default()),
     };
-    let command = Command::Run(run_args_for_image(
+    let command = Command::Run(Box::new(run_args_for_image(
         "arn:aws:lambda:us-east-1:123456789012:microvm-image:img",
         dir.0.clone(),
-    ));
+    )));
     let (result, _) = dispatch_with(&seam, &command, full_infra()).await;
     assert!(result.is_err(), "TERMINATED before RUNNING, as above");
     assert!(
@@ -3447,7 +3447,7 @@ async fn against_daemon(
 fn exec_command(shape: impl FnOnce(&mut ExecArgs)) -> Command {
     let mut args = ExecArgs {
         command: Some("true".into()),
-        timeout: 30.0,
+        timeout: Duration::from_secs(30),
         cwd: None,
         env: Vec::new(),
         user: None,
@@ -4377,7 +4377,7 @@ async fn exec_kill_on_timeout_kills_after_the_deadline_and_a_plain_timeout_names
         .reply(200, STARTED_BODY)
         .reply(200, r#"{"exec_id": "x-1", "killed": true}"#);
     let command = exec_command(|args| {
-        args.timeout = 0.0;
+        args.timeout = Duration::ZERO;
         args.kill_on_timeout = true;
         args.exec_id = Some("x-1".into());
     });
@@ -4401,7 +4401,7 @@ async fn exec_kill_on_timeout_kills_after_the_deadline_and_a_plain_timeout_names
     let plain = DaemonScript::new();
     plain.reply(200, STARTED_BODY).reply(200, STARTED_BODY);
     let command = exec_command(|args| {
-        args.timeout = 0.0;
+        args.timeout = Duration::ZERO;
         args.exec_id = Some("x-1".into());
     });
     let (result, _, _) = against_daemon(&plain, &command).await;
@@ -4595,7 +4595,7 @@ fn sync_command(dir: &std::path::Path, shape: impl FnOnce(&mut crate::cli::SyncA
         dir: dir.to_path_buf(),
         watch: false,
         full: false,
-        timeout: 60.0,
+        timeout: Duration::from_secs(60),
         attach: attach_flags(),
         region: region_flags(),
     };
@@ -5114,7 +5114,7 @@ async fn keepalive_polls_health_until_idle_and_names_the_window_it_assumed() {
         );
     }
     let command = Command::Keepalive(KeepaliveArgs {
-        interval: Some(1.0),
+        interval: Some(Duration::from_secs(1)),
         while_busy: true,
         for_sec: None,
         idle_window: None,
@@ -5140,7 +5140,7 @@ async fn keepalive_polls_health_until_idle_and_names_the_window_it_assumed() {
 async fn keepalive_refuses_an_interval_that_could_let_the_vm_suspend() {
     let script = DaemonScript::new();
     let command = Command::Keepalive(KeepaliveArgs {
-        interval: Some(31.0),
+        interval: Some(Duration::from_secs(31)),
         while_busy: false,
         for_sec: None,
         idle_window: None,
@@ -5171,10 +5171,10 @@ async fn keepalive_for_ends_it_even_while_busy() {
         );
     }
     let command = Command::Keepalive(KeepaliveArgs {
-        interval: Some(1.0),
+        interval: Some(Duration::from_secs(1)),
         while_busy: true,
-        for_sec: Some(2.5),
-        idle_window: Some(600.0),
+        for_sec: Some(Duration::from_millis(2500)),
+        idle_window: Some(Duration::from_secs(600)),
         attach: attach_flags(),
         region: region_flags(),
     });
@@ -5284,7 +5284,7 @@ async fn a_taken_vm_name_is_refused_before_any_door_with_its_own_row() {
     );
     args.keep = true;
     args.vm_name = Some("ci-runner".into());
-    let (result, _) = dispatch_with(&seam, &Command::Run(args), full_infra()).await;
+    let (result, _) = dispatch_with(&seam, &Command::Run(Box::new(args)), full_infra()).await;
 
     let failure = result.expect_err("a taken name is a refusal");
     assert_eq!(failure.exit, Exit::NameTaken);
@@ -5309,7 +5309,7 @@ async fn a_taken_vm_name_is_refused_before_any_door_with_its_own_row() {
     );
     args.keep = true;
     args.vm_name = Some("mvm-lookalike".into());
-    let (result, _) = dispatch_with(&seam, &Command::Run(args), full_infra()).await;
+    let (result, _) = dispatch_with(&seam, &Command::Run(Box::new(args)), full_infra()).await;
     let failure = result.expect_err("an id-shaped name is refused");
     assert_eq!(failure.exit, Exit::InvalidArg);
     assert_eq!(seam.doors(), Vec::<Door>::new(), "still before any door");
@@ -5367,7 +5367,7 @@ async fn a_name_resolves_on_the_lifecycle_wire_and_a_terminate_by_id_frees_it() 
     };
     let command = Command::Suspend(SuspendArgs {
         microvm_id: "ci-runner".into(),
-        timeout: 30.0,
+        timeout: Duration::from_secs(30),
         state_dir: Some(dir.0.clone()),
         region: region_flags(),
     });
@@ -5417,7 +5417,7 @@ async fn a_name_resolves_on_the_lifecycle_wire_and_a_terminate_by_id_frees_it() 
     };
     let command = Command::Suspend(SuspendArgs {
         microvm_id: "never-registered".into(),
-        timeout: 30.0,
+        timeout: Duration::from_secs(30),
         state_dir: Some(dir.0.clone()),
         region: region_flags(),
     });
@@ -5512,6 +5512,466 @@ async fn an_attached_command_by_name_carries_the_registered_triple() {
         region, "us-west-2",
         "with no --region flag, the record's launch region is the default"
     );
+}
+
+/// A record for `name` in us-west-2, the region every #251 guard's flag or environment
+/// disagrees with.
+fn register_in_us_west_2(dir: &std::path::Path, name: &str) {
+    crate::ledger::Names::new(dir)
+        .register(&crate::ledger::NameRecord {
+            name: name.into(),
+            microvm_id: "mvm-west".into(),
+            endpoint: "https://mvm-west.example".into(),
+            agent_token: "tok-west".into(),
+            region: "us-west-2".into(),
+            at: 1,
+            identity_host_seed: None,
+            identity_vm_public_key: None,
+            egress_posture: None,
+        })
+        .expect("registers");
+}
+
+/// **A `--region` that disagrees with the name's record is refused with core's message, before
+/// any door, on every command that reads a name (#251).**
+///
+/// `Sandbox.from_name` in both bindings refuses the same record through `names::resolve`, so
+/// the CLI giving the same answer is the parity claim. Before #251 each of these commands let
+/// the flag override the record and went on to mint or attach in the flag's region, where the
+/// VM doesn't exist.
+///
+/// **Falsification** (#251). Pass `None` instead of `explicit_region(region).as_ref()` to
+/// `names.resolve` in `resolve_attach` (the flag override's effect) and the `exec` row goes red
+/// with `(Platform, [AttachSession])`. Make `explicit_region` ignore `--unlisted-region` and the
+/// `exec --unlisted-region` row goes red the same way.
+#[tokio::test]
+async fn a_region_flag_that_disagrees_with_the_names_record_is_refused_before_any_door() {
+    use clap::Parser as _;
+    let dir = TempDir::new("name-region-flag");
+    register_in_us_west_2(&dir.0, "x");
+    let state = dir.0.to_string_lossy().to_string();
+    let record = dir.0.join("names").join("x.json");
+    let record = record.to_string_lossy().to_string();
+    let typed = ("--region", "us-east-1");
+    let rows: Vec<(Vec<&str>, (&str, &str))> = vec![
+        (vec!["exec", "true", "--name", "x"], typed),
+        (vec!["shell", "--name", "x"], typed),
+        (vec!["agent-up", "--vm-name", "x"], typed),
+        (vec!["attach", "--from", &record, "--name", "y"], typed),
+        (vec!["suspend", "x"], typed),
+        (vec!["resume", "x"], typed),
+        (vec!["terminate", "x"], typed),
+        // The other spelling of an explicit region: the rule reads both flags.
+        (
+            vec!["exec", "true", "--name", "x"],
+            ("--unlisted-region", "eu-south-9"),
+        ),
+    ];
+    for (row, (flag, value)) in rows {
+        let mut argv = vec!["microvm"];
+        argv.extend(row.iter().copied());
+        argv.extend(["--state-dir", &state, flag, value]);
+        let shown = if flag == "--region" {
+            row[0].to_string()
+        } else {
+            format!("{} {flag}", row[0])
+        };
+        let command = Cli::try_parse_from(&argv).expect("parses").command;
+        let seam = RefusingSeam::new();
+        let (result, _) = dispatch_with(&seam, &command, full_infra()).await;
+        let failure = result.expect_err("a region the record disagrees with is a refusal");
+        assert_eq!(
+            (failure.exit, seam.doors()),
+            (Exit::InvalidArg, Vec::<Door>::new()),
+            "{shown}: {}",
+            failure.message
+        );
+        assert!(
+            failure
+                .message
+                .contains(&format!("was registered in us-west-2, not {value}")),
+            "{shown}: core's message: {}",
+            failure.message
+        );
+    }
+}
+
+/// A seam that records the region each control plane or attach was asked for, then refuses.
+struct PlaneRegions {
+    asked: Mutex<Vec<String>>,
+}
+
+impl PlaneRegions {
+    fn record(&self, region: &Region) {
+        self.asked
+            .lock()
+            .expect("not poisoned")
+            .push(region.as_str().to_string());
+    }
+}
+
+impl CoreSeam for PlaneRegions {
+    fn control_plane(&self, region: Region) -> BoxFuture<'_, Result<ControlPlane, Error>> {
+        self.record(&region);
+        Box::pin(async move { Err(Error::new(ErrorKind::Platform, "recorded; stopping")) })
+    }
+    fn open_sandbox(
+        &self,
+        _region: Region,
+        _port: Option<u16>,
+    ) -> BoxFuture<'_, Result<Sandbox, Error>> {
+        panic!("no command here opens a sandbox")
+    }
+    fn attach_session(
+        &self,
+        region: Region,
+        _attach: Attach,
+    ) -> BoxFuture<'_, Result<Session, Error>> {
+        self.record(&region);
+        Box::pin(async move { Err(Error::new(ErrorKind::Platform, "recorded; stopping")) })
+    }
+    fn put_artifact(&self, _uri: &str, _bytes: Vec<u8>) -> BoxFuture<'_, Result<(), Error>> {
+        panic!("no artifact on this path")
+    }
+}
+
+/// **`suspend`, `resume` and `terminate` by name build their control plane in the record's
+/// region, whatever the environment says (#251).**
+///
+/// A VM id addresses nothing outside its own region, so a lifecycle call built for the
+/// shell's `AWS_REGION` would answer not-found for a VM that's running.
+///
+/// **Falsification** (#251). Make `terminate`'s region match `Some(_) | None =>
+/// args.region.resolve(ctx.env)?` and the `terminate by name` row goes red with
+/// `left: ["us-east-1"]`.
+#[tokio::test]
+async fn a_lifecycle_command_by_name_asks_for_the_records_region_over_the_environments() {
+    use clap::Parser as _;
+    let dir = TempDir::new("name-lifecycle-region");
+    register_in_us_west_2(&dir.0, "x");
+    let state = dir.0.to_string_lossy().to_string();
+    for verb in ["suspend", "resume", "terminate"] {
+        let argv = ["microvm", verb, "x", "--state-dir", &state];
+        let command = Cli::try_parse_from(argv).expect("parses").command;
+        let seam = PlaneRegions {
+            asked: Mutex::new(Vec::new()),
+        };
+        let _ = dispatch_with_env(&seam, &command, full_infra(), ("AWS_REGION", "us-east-1")).await;
+        assert_eq!(
+            *seam.asked.lock().expect("not poisoned"),
+            ["us-west-2"],
+            "{verb} by name"
+        );
+    }
+}
+
+/// **`shell --name` and `agent-up`'s refresh reach the VM in the record's region, whatever the
+/// environment says (#251).**
+///
+/// `shell` mints its token through the control plane, and `agent-up --vm-name` over a
+/// registered name attaches and then mints the Bedrock token, each in the region it read. A
+/// region taken from the shell's `AWS_REGION` would ask for a token for a VM that isn't there,
+/// or mint the Bedrock token somewhere the VM never calls.
+///
+/// **Falsification** (#251). Make `shell`'s region `args.region.resolve(ctx.env)?` instead of
+/// `record.region()` and the `shell` row goes red with `left: ["us-east-1"]`; the same change
+/// in `agent-up`'s refresh turns the `agent-up` row red.
+#[tokio::test]
+async fn a_shell_or_agent_up_by_name_asks_for_the_records_region_over_the_environments() {
+    use clap::Parser as _;
+    let dir = TempDir::new("name-shell-agent-region");
+    register_in_us_west_2(&dir.0, "x");
+    let state = dir.0.to_string_lossy().to_string();
+    let rows: Vec<Vec<&str>> = vec![
+        vec!["shell", "--name", "x"],
+        vec!["agent-up", "--vm-name", "x"],
+    ];
+    for row in rows {
+        let mut argv = vec!["microvm"];
+        argv.extend(row.iter().copied());
+        argv.extend(["--state-dir", &state]);
+        let command = Cli::try_parse_from(&argv).expect("parses").command;
+        let seam = PlaneRegions {
+            asked: Mutex::new(Vec::new()),
+        };
+        let _ = dispatch_with_env(&seam, &command, full_infra(), ("AWS_REGION", "us-east-1")).await;
+        assert_eq!(
+            *seam.asked.lock().expect("not poisoned"),
+            ["us-west-2"],
+            "{} by name",
+            row[0]
+        );
+    }
+}
+
+/// Control planes whose `GetMicrovm` reports a 600-second idle window in us-west-2 and a
+/// not-found everywhere else, over [`ScriptedSeam`]; sessions over [`ScriptedSessionSeam`].
+struct WindowInUsWest2 {
+    west: ScriptedSeam,
+    elsewhere: ScriptedSeam,
+    sessions: ScriptedSessionSeam,
+}
+
+impl CoreSeam for WindowInUsWest2 {
+    fn control_plane(&self, region: Region) -> BoxFuture<'_, Result<ControlPlane, Error>> {
+        if region.as_str() == "us-west-2" {
+            self.west.control_plane(region)
+        } else {
+            self.elsewhere.control_plane(region)
+        }
+    }
+    fn open_sandbox(
+        &self,
+        _region: Region,
+        _port: Option<u16>,
+    ) -> BoxFuture<'_, Result<Sandbox, Error>> {
+        panic!("keepalive never opens a sandbox")
+    }
+    fn attach_session(
+        &self,
+        region: Region,
+        attach: Attach,
+    ) -> BoxFuture<'_, Result<Session, Error>> {
+        self.sessions.attach_session(region, attach)
+    }
+    fn put_artifact(&self, _uri: &str, _bytes: Vec<u8>) -> BoxFuture<'_, Result<(), Error>> {
+        panic!("no artifact on this path")
+    }
+}
+
+/// **`keepalive --name` reads the idle window in the record's region (#251).**
+///
+/// A 60-second interval is legal only against the VM's real 600-second window. When the read
+/// misses, the command falls back to the platform's 60-second minimum, and half of that is
+/// under the interval, so a read in the wrong region turns into a refusal.
+///
+/// **Falsification** (#251). Pass `args.region.resolve(ctx.env).unwrap_or(region)` to
+/// `idle_window_of` in `keepalive` (the flag or environment region back) and this goes red
+/// with `refused: keepalive interval 60s exceeds half the 60s idle window`.
+#[tokio::test(start_paused = true)]
+async fn keepalive_by_name_reads_the_idle_window_in_the_records_region() {
+    use clap::Parser as _;
+    let dir = TempDir::new("name-keepalive-region");
+    register_in_us_west_2(&dir.0, "x");
+    let west = Arc::new(ScriptedTransport::new());
+    west.answer(
+        "GetMicrovm",
+        200,
+        r#"{"microvmId": "mvm-west", "state": "RUNNING",
+             "endpoint": "https://mvm-west.example",
+             "imageArn": "arn:aws:lambda:us-west-2:123456789012:microvm-image:img",
+             "imageVersion": "1", "maximumDurationInSeconds": 3600, "startedAt": 1,
+             "idlePolicy": {"maxIdleDurationSeconds": 600, "suspendedDurationSeconds": 600,
+                            "autoResumeEnabled": false}}"#,
+    );
+    let elsewhere = Arc::new(ScriptedTransport::new());
+    elsewhere.answer("GetMicrovm", 404, r#"{"message": "no such MicroVM here"}"#);
+    let script = DaemonScript::new();
+    script.reply(
+        200,
+        r#"{"version": "0.1.0", "bootstrapped": true, "disk": null,
+             "identity_degraded": false, "identity_repaired": true,
+             "busy": false, "execs": 0}"#,
+    );
+    let seam = WindowInUsWest2 {
+        west: ScriptedSeam {
+            transport: Arc::clone(&west),
+            clock: Arc::new(YieldingClock::default()),
+        },
+        elsewhere: ScriptedSeam {
+            transport: Arc::clone(&elsewhere),
+            clock: Arc::new(YieldingClock::default()),
+        },
+        sessions: ScriptedSessionSeam {
+            script: Arc::clone(&script),
+        },
+    };
+    let state = dir.0.to_string_lossy().to_string();
+    let argv = [
+        "microvm",
+        "keepalive",
+        "--name",
+        "x",
+        "--interval",
+        "60",
+        "--while-busy",
+        "--state-dir",
+        &state,
+    ];
+    let command = Cli::try_parse_from(argv).expect("parses").command;
+    let (result, stderr) =
+        dispatch_with_env(&seam, &command, full_infra(), ("AWS_REGION", "us-east-1")).await;
+    let rendered = result.unwrap_or_else(|failure| panic!("refused: {}", failure.message));
+    assert_eq!(rendered.data["idleWindowSec"], 600.0, "{stderr}");
+    assert_eq!(
+        west.called("GetMicrovm"),
+        1,
+        "one read in the record's region"
+    );
+    assert_eq!(elsewhere.called("GetMicrovm"), 0, "no read anywhere else");
+}
+
+/// **A torn record under a name is refused with the store's error, before any door (#251).**
+///
+/// `Names::lookup` reads a torn file as a record with empty fields. That's right for the
+/// collision check it was written for, and wrong for a read that goes on to use the record:
+/// an attach with a blank endpoint and token, a terminate of id `""`, or a tunnel that blames
+/// missing identity material. Each row names the file, which is the caller's remedy.
+///
+/// **Falsification** (#251). Make `Names::resolve` read `self.store.get(name).unwrap_or(None)`, and
+/// the `health` row goes red with `no VM named "x"`, a message that doesn't name `x.json`.
+#[tokio::test]
+async fn a_torn_record_under_a_name_is_refused_before_any_door() {
+    use clap::Parser as _;
+    let dir = TempDir::new("name-torn");
+    std::fs::create_dir_all(dir.0.join("names")).expect("mkdir");
+    std::fs::write(
+        dir.0.join("names").join("x.json"),
+        b"{\"name\": \"x\", \"micro",
+    )
+    .expect("writes a torn record");
+    let state = dir.0.to_string_lossy().to_string();
+    let rows: Vec<Vec<&str>> = vec![
+        vec!["health", "--name", "x"],
+        vec!["shell", "--name", "x"],
+        vec!["tunnel", "18080:8080", "--name", "x", "--verify-identity"],
+        vec!["terminate", "x"],
+    ];
+    for row in rows {
+        let mut argv = vec!["microvm"];
+        argv.extend(row.iter().copied());
+        argv.extend(["--state-dir", &state]);
+        let command = Cli::try_parse_from(&argv).expect("parses").command;
+        let seam = RefusingSeam::new();
+        let (result, _) =
+            dispatch_with_env(&seam, &command, full_infra(), ("AWS_REGION", "us-east-1")).await;
+        let failure = result.expect_err("a torn record is a refusal");
+        assert_eq!(
+            (failure.exit, seam.doors()),
+            (Exit::Precondition, Vec::<Door>::new()),
+            "{}: {}",
+            row[0],
+            failure.message
+        );
+        assert!(
+            failure.message.contains("x.json"),
+            "{}: {}",
+            row[0],
+            failure.message
+        );
+    }
+}
+
+/// **`agent-up` over a torn record under its name stays `ERR_NAME_TAKEN`, before any door
+/// (#251).**
+///
+/// `agent-up` reads the name to choose between a fresh launch and a refresh, so its read is a
+/// collision check, not a record read: a torn record is a name that's taken, as
+/// `docs/reference/cli.md` documents for `--vm-name`. Every other `--name` read now goes
+/// through `Names::resolve`, whose answer for the same file is `ERR_PRECONDITION`, so tidying
+/// `up` onto it would change this exit and no other guard would notice.
+///
+/// **Falsification** (#251). Make `up` read `names.resolve(&args.vm_name, None)?` instead of
+/// `names.lookup(&args.vm_name)` and this goes red with `left: (Precondition, [])`.
+#[tokio::test]
+async fn agent_up_over_a_torn_record_stays_name_taken_before_any_door() {
+    use clap::Parser as _;
+    let dir = TempDir::new("name-torn-agent-up");
+    std::fs::create_dir_all(dir.0.join("names")).expect("mkdir");
+    std::fs::write(
+        dir.0.join("names").join("x.json"),
+        b"{\"name\": \"x\", \"micro",
+    )
+    .expect("writes a torn record");
+    let state = dir.0.to_string_lossy().to_string();
+    let argv = [
+        "microvm",
+        "agent-up",
+        "--vm-name",
+        "x",
+        "--state-dir",
+        &state,
+    ];
+    let command = Cli::try_parse_from(argv).expect("parses").command;
+    let seam = RefusingSeam::new();
+    let (result, _) =
+        dispatch_with_env(&seam, &command, full_infra(), ("AWS_REGION", "us-east-1")).await;
+    let failure = result.expect_err("a torn record is a taken name");
+    assert_eq!(
+        (failure.exit, seam.doors()),
+        (Exit::NameTaken, Vec::<Door>::new()),
+        "agent-up: {}",
+        failure.message
+    );
+    assert!(
+        failure.message.contains("torn record"),
+        "agent-up: {}",
+        failure.message
+    );
+}
+
+/// **An illegal name gets core's grammar answer, and a free one the not-found answer (#251).**
+///
+/// `a/b` can't be a name at all, so "no VM named" is the wrong reason; core's store answers
+/// `ERR_INVALID_ARG` with the grammar's reason, which is what `Sandbox.from_name` says. A
+/// legal name this state directory never registered is "no VM named" on every command, the
+/// tunnel's identity read included, whose older answer blamed missing identity material.
+///
+/// **Falsification** (#251). Make `tunnel`'s free-name `else` return a "carries no identity
+/// material" refusal instead of `unregistered_name` and the `--name free` tunnel row goes red
+/// on its message.
+#[tokio::test]
+async fn an_illegal_name_gets_cores_answer_and_a_free_one_the_not_found_answer() {
+    use clap::Parser as _;
+    let dir = TempDir::new("name-illegal-free");
+    let state = dir.0.to_string_lossy().to_string();
+    let illegal = "is not a legal VM-name character";
+    let rows: Vec<(Vec<&str>, Exit, &str)> = vec![
+        (
+            vec!["exec", "true", "--name", "a/b"],
+            Exit::InvalidArg,
+            illegal,
+        ),
+        (vec!["shell", "--name", "a/b"], Exit::InvalidArg, illegal),
+        (
+            vec!["tunnel", "18080:8080", "--name", "a/b", "--verify-identity"],
+            Exit::InvalidArg,
+            illegal,
+        ),
+        (
+            vec![
+                "tunnel",
+                "18080:8080",
+                "--name",
+                "free",
+                "--verify-identity",
+            ],
+            Exit::Precondition,
+            "no VM named \"free\"",
+        ),
+    ];
+    for (row, exit, text) in rows {
+        let mut argv = vec!["microvm"];
+        argv.extend(row.iter().copied());
+        argv.extend(["--state-dir", &state]);
+        let command = Cli::try_parse_from(&argv).expect("parses").command;
+        let seam = RefusingSeam::new();
+        let (result, _) =
+            dispatch_with_env(&seam, &command, full_infra(), ("AWS_REGION", "us-east-1")).await;
+        let failure = result.expect_err("refused");
+        let shown = row.join(" ");
+        assert_eq!(
+            (failure.exit, seam.doors()),
+            (exit, Vec::<Door>::new()),
+            "{shown}: {}",
+            failure.message
+        );
+        assert!(
+            failure.message.contains(text),
+            "{shown}: {}",
+            failure.message
+        );
+    }
 }
 
 #[tokio::test]
@@ -6003,7 +6463,7 @@ async fn a_resume_polls_the_thawed_daemon_and_lands_its_hook_observations() {
     };
     let command = Command::Resume(ResumeArgs {
         microvm_id: "mvm-abc123".into(),
-        timeout: 30.0,
+        timeout: Duration::from_secs(30),
         state_dir: Some(dir.0.clone()),
         region: region_flags(),
     });
@@ -7175,7 +7635,7 @@ async fn run_dir_uploads_the_tree_execs_in_it_and_brings_back_matched_artifacts(
         no_config: false,
     };
 
-    let (result, _) = dispatch_with(&seam, &Command::Run(args), full_infra()).await;
+    let (result, _) = dispatch_with(&seam, &Command::Run(Box::new(args)), full_infra()).await;
     let rendered = result.expect("the sync run succeeds");
 
     // The upload: PUT /v1/fs/tar carrying the project, not the repository.
@@ -7314,7 +7774,7 @@ async fn a_failing_exec_still_brings_the_artifacts_back() {
         no_config: false,
     };
 
-    let (result, _) = dispatch_with(&seam, &Command::Run(args), full_infra()).await;
+    let (result, _) = dispatch_with(&seam, &Command::Run(Box::new(args)), full_infra()).await;
     let rendered = result.expect("a failing workload keeps its success envelope");
     assert_eq!(
         rendered.already_reported,
@@ -7343,7 +7803,7 @@ async fn a_sync_dir_without_an_image_is_refused_before_any_call() {
     args.image = None;
     args.config = no_config();
 
-    let (result, _) = dispatch_with(&seam, &Command::Run(args), full_infra()).await;
+    let (result, _) = dispatch_with(&seam, &Command::Run(Box::new(args)), full_infra()).await;
     let failure = result.expect_err("nothing to launch from");
     assert_eq!(failure.exit, Exit::Precondition);
     assert!(failure.message.contains("sync mode"), "{}", failure.message);
@@ -7407,7 +7867,7 @@ async fn a_client_token_run_sends_the_key_and_the_environments_agent_token() {
     };
     let mut args = interrupt_run_args(dir.0.clone());
     args.launch.client_token = Some("job-203".into());
-    let command = Command::Run(args.clone());
+    let command = Command::Run(Box::new(args.clone()));
     let (result, _) = dispatch_with_env(
         &seam,
         &command,
@@ -7452,7 +7912,7 @@ async fn a_client_token_run_sends_the_key_and_the_environments_agent_token() {
     };
     let (result, _) = dispatch_with_env(
         &seam,
-        &Command::Run(build),
+        &Command::Run(Box::new(build)),
         full_infra(),
         (crate::cli::AGENT_TOKEN_ENV, "agent-token-from-env"),
     )
@@ -7483,7 +7943,7 @@ async fn per_vm_logging_flags_reach_the_run_body() {
         let mut args = interrupt_run_args(dir.0.clone());
         args.launch.vm_log_group = group.map(str::to_string);
         args.launch.no_vm_logs = disabled;
-        let (result, _) = dispatch_with(&seam, &Command::Run(args), full_infra()).await;
+        let (result, _) = dispatch_with(&seam, &Command::Run(Box::new(args)), full_infra()).await;
         assert!(result.is_err(), "the fake VM terminates during startup");
         let body = transport.first_body("RunMicrovm");
         assert_eq!(
@@ -7517,6 +7977,365 @@ fn the_vm_logging_flags_refuse_contradictions_at_parse_time() {
         "/g",
     ];
     crate::cli::Cli::try_parse_from(argv).expect("agent-up takes the launch flags");
+}
+
+// ── a caller's --artifact-uri (#249) ─────────────────────────────────────────
+
+/// A transport that lets a build reach its create call and stops it there: a `--reuse` listing
+/// finds nothing and `CreateMicrovmImage` answers 400. The command fails, but the create body
+/// and any upload before it are on the record, and those are all these guards read.
+fn scripted_create_stop() -> Arc<ScriptedTransport> {
+    let transport = Arc::new(ScriptedTransport::new());
+    transport
+        .answer("ListMicrovmImages", 200, &list_images_body(&[], None))
+        .answer("CreateMicrovmImage", 400, r#"{"message": "scripted stop"}"#);
+    transport
+}
+
+/// `build <binary> --name img`, with `--artifact-uri` as given.
+fn artifact_uri_build_args(binary: &std::path::Path, artifact_uri: Option<&str>) -> BuildArgs {
+    BuildArgs {
+        binary: Some(binary.to_path_buf()),
+        state_dir: None,
+        base_image_version: None,
+        artifact_uri: artifact_uri.map(str::to_string),
+        name: Some("img".into()),
+        memory: MemoryMib::Mib2048,
+        dockerfile: None,
+        project: None,
+        repair_identity: false,
+        log_group: None,
+        log_stream: None,
+        reuse: false,
+        port: None,
+        region: region_flags(),
+        infra: InfraFlags::default(),
+    }
+}
+
+/// `run <binary> --name img`, taking `run`'s build arm, with `--artifact-uri` as given.
+fn artifact_uri_run_args(
+    binary: &std::path::Path,
+    state_dir: std::path::PathBuf,
+    artifact_uri: Option<&str>,
+) -> RunArgs {
+    let mut args = run_args_for_image("unused", state_dir);
+    args.image = None;
+    args.binary = Some(binary.to_path_buf());
+    args.artifact_uri = artifact_uri.map(str::to_string);
+    args
+}
+
+/// What `command` left on the record against [`scripted_create_stop`]: the URIs it uploaded
+/// to, the artifact URI its create call named, and its stderr.
+async fn upload_record(
+    command: &Command,
+    infra: Infra,
+) -> (Vec<String>, serde_json::Value, String) {
+    let transport = scripted_create_stop();
+    let seam = ScriptedSeam {
+        transport: Arc::clone(&transport),
+        clock: Arc::new(YieldingClock::default()),
+    };
+    let (result, stderr) = dispatch_with(&seam, command, infra).await;
+    assert!(result.is_err(), "the scripted create refuses every build");
+    let uri = transport.first_body("CreateMicrovmImage")["codeArtifact"]["uri"].clone();
+    (transport.uploads(), uri, stderr)
+}
+
+/// **Issue #249: a caller's `--artifact-uri` is never uploaded over, whatever the bucket
+/// says.** Both uploading paths, `build` and `run`'s build arm, with a bucket set, and `build`
+/// with none. One arm names the very key the CLI would derive, `s3://<bucket>/<name>.zip`: a
+/// caller may keep their own artifact there, and the skip has to follow from their naming a URI,
+/// not from the URI differing from the one the CLI would pick.
+///
+/// The flag says the object is already at that URI, and the image is built from it. The upload
+/// step used to decide from the bucket alone, and the bucket defaults to `$MICROVM_BUCKET`, so a
+/// shell that exported it for ordinary builds replaced the caller's object with the CLI's own
+/// artifact, and the create call then named that URI. The progress line is held too: with a
+/// bucket it names the bucket that went unused, so a caller who meant the bucket sees why
+/// nothing was uploaded, and with none it stays quiet.
+///
+/// **Falsification**, run 2026-09-28. Four breaks, each registered in guards/faults.toml. Skip
+/// the upload only when there's no bucket, main's old condition
+/// (`cli-artifact-uri-not-uploaded-over`): red on `build:` with the PUT recorded. Pass `None`
+/// for the caller's URI from `run`'s build arm (`cli-artifact-uri-run-arm`): red on `run:`. Pass
+/// `None` from `build` (`cli-artifact-uri-build-arm`): red on `build:`. Print the unused-bucket
+/// line with no bucket (`cli-artifact-uri-no-bucket-quiet`): red on `no bucket:`. Round 1's
+/// falsifier: skip only when the caller's URI differs from the derived key
+/// (`cli-artifact-uri-derived-key`): red on `build, the derived key:`.
+#[tokio::test]
+async fn a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucket() {
+    const THEIRS: &str = "s3://caller-bucket/theirs.zip";
+    // `full_infra()`'s bucket and the args' `--name img`.
+    const AT_THE_DERIVED_KEY: &str = "s3://a-bucket/img.zip";
+    let binary = FakeBinary::new("caller-uri-bin");
+    let ledgers = TempDir::new("caller-uri-ledger");
+    let no_bucket = Infra {
+        bucket: None,
+        ..full_infra()
+    };
+    let arms = [
+        (
+            "build",
+            THEIRS,
+            Command::Build(artifact_uri_build_args(&binary.0, Some(THEIRS))),
+            full_infra(),
+        ),
+        (
+            "run",
+            THEIRS,
+            Command::Run(Box::new(artifact_uri_run_args(
+                &binary.0,
+                ledgers.0.clone(),
+                Some(THEIRS),
+            ))),
+            full_infra(),
+        ),
+        (
+            "no bucket",
+            THEIRS,
+            Command::Build(artifact_uri_build_args(&binary.0, Some(THEIRS))),
+            no_bucket,
+        ),
+        (
+            "build, the derived key",
+            AT_THE_DERIVED_KEY,
+            Command::Build(artifact_uri_build_args(&binary.0, Some(AT_THE_DERIVED_KEY))),
+            full_infra(),
+        ),
+    ];
+    for (arm, theirs, command, infra) in arms {
+        let with_bucket = infra.bucket.is_some();
+        let (uploads, uri, stderr) = upload_record(&command, infra).await;
+        assert_eq!(
+            uploads,
+            Vec::<String>::new(),
+            "{arm}: a caller-supplied --artifact-uri must not be uploaded over"
+        );
+        assert_eq!(uri, theirs, "{arm}: the create call names the caller's URI");
+        assert!(
+            !stderr.contains("uploading "),
+            "{arm}: no upload progress line: {stderr}"
+        );
+        if with_bucket {
+            assert!(
+                stderr.contains("the bucket a-bucket is unused for this build"),
+                "{arm}: the unused bucket is named: {stderr}"
+            );
+        } else {
+            assert!(
+                !stderr.contains("is unused for this build"),
+                "{arm}: with no bucket there's none to call unused: {stderr}"
+            );
+        }
+    }
+}
+
+/// **Issue #249: a bucket with no `--artifact-uri` still uploads, to the derived key.** The
+/// other side of the guard above, through the same two paths.
+///
+/// Nothing else holds that a build uploads at all: every other guard that reads the uploads
+/// asserts there were none. Without this one, a fix that skipped the upload every time would
+/// pass the whole suite and then fail every real build on an empty S3 key.
+///
+/// **Falsification**, run 2026-09-28. Skip the upload whenever there's no caller URI as well as
+/// when there's no bucket (`cli-bucket-build-uploads`): red on `build:` with no upload recorded.
+#[tokio::test]
+async fn a_bucket_without_an_artifact_uri_uploads_to_the_derived_key() {
+    const DERIVED: &str = "s3://a-bucket/img.zip";
+    let binary = FakeBinary::new("bucket-only-bin");
+    let ledgers = TempDir::new("bucket-only-ledger");
+    let arms = [
+        (
+            "build",
+            Command::Build(artifact_uri_build_args(&binary.0, None)),
+        ),
+        (
+            "run",
+            Command::Run(artifact_uri_run_args(&binary.0, ledgers.0.clone(), None).into()),
+        ),
+    ];
+    for (arm, command) in arms {
+        let (uploads, uri, stderr) = upload_record(&command, full_infra()).await;
+        assert_eq!(
+            uploads,
+            vec![DERIVED.to_string()],
+            "{arm}: a bucket and no --artifact-uri uploads to the derived key"
+        );
+        assert_eq!(
+            uri, DERIVED,
+            "{arm}: the create call names the uploaded key"
+        );
+        assert!(
+            !stderr.contains("is unused for this build"),
+            "{arm}: the bucket was used: {stderr}"
+        );
+    }
+}
+
+/// **Issue #249: `build --reuse` refuses `--artifact-uri` at parse time.** The reuse name is a
+/// hash of the local build inputs (the binary, the Dockerfile, the project pair), never of the
+/// caller's object. An image built from that object under such a name would answer a later
+/// plain `build --reuse` of the same binary, which would then run the caller's bytes as if they
+/// were its own. The kind is checked, not just the error, so a pair that fails to parse for
+/// some other reason (a renamed flag) doesn't pass it.
+///
+/// **Falsification**, run 2026-09-28. Drop `conflicts_with = "artifact_uri"` from
+/// `BuildArgs::reuse` (`cli-reuse-refuses-artifact-uri`): the pair parses, red on
+/// `build --reuse --artifact-uri must not parse`.
+#[test]
+fn build_reuse_refuses_a_caller_artifact_uri_at_parse_time() {
+    use clap::Parser as _;
+    for alone in [
+        ["microvm", "build", "agentd", "--reuse"].as_slice(),
+        [
+            "microvm",
+            "build",
+            "agentd",
+            "--artifact-uri",
+            "s3://c/t.zip",
+        ]
+        .as_slice(),
+    ] {
+        crate::cli::Cli::try_parse_from(alone).unwrap_or_else(|error| panic!("{alone:?}: {error}"));
+    }
+    for both in [
+        [
+            "microvm",
+            "build",
+            "agentd",
+            "--reuse",
+            "--artifact-uri",
+            "s3://c/t.zip",
+        ],
+        [
+            "microvm",
+            "build",
+            "agentd",
+            "--artifact-uri",
+            "s3://c/t.zip",
+            "--reuse",
+        ],
+    ] {
+        let error = crate::cli::Cli::try_parse_from(both)
+            .map(|_| ())
+            .expect_err(&format!(
+                "build --reuse --artifact-uri must not parse: {both:?}"
+            ));
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::ArgumentConflict,
+            "{both:?}: {error}"
+        );
+    }
+}
+
+/// **Issue #249: `--artifact-uri` refuses the flags that only shape an artifact the CLI
+/// builds.** `--dockerfile` on `run` and `build`, and `--project` on `build`, reach the image
+/// only through the artifact `upload_artifact` builds, and it builds none beside a caller's
+/// URI. Accepted, they'd be dropped with nothing said, and a Dockerfile that was never used
+/// could still fail the command in `preflight`. The kind is checked, as in the `--reuse` guard
+/// above, and each flag parses on its own so the refusal is the pair's. `--port` stays legal
+/// beside the URI: it sets the create call's `hooks.port`, which names the port the caller's
+/// own daemon listens on, so it still reaches the image.
+///
+/// **Falsification**, run 2026-09-28. Drop `conflicts_with = "dockerfile"` from
+/// `RunArgs::artifact_uri` (`cli-run-artifact-uri-refuses-dockerfile`): red on
+/// `run --artifact-uri --dockerfile must not parse`. Leave only `"project"` in
+/// `BuildArgs::artifact_uri`'s list (`cli-build-artifact-uri-refuses-dockerfile`): red on
+/// `build --artifact-uri --dockerfile`. Leave only `"dockerfile"`
+/// (`cli-build-artifact-uri-refuses-project`): red on `build --artifact-uri --project`.
+#[test]
+fn artifact_uri_refuses_the_local_artifact_inputs_at_parse_time() {
+    use clap::Parser as _;
+    const URI: [&str; 2] = ["--artifact-uri", "s3://c/t.zip"];
+    let cases: [(&str, &str, [&str; 2]); 3] = [
+        (
+            "run",
+            "run --artifact-uri --dockerfile",
+            ["--dockerfile", "D"],
+        ),
+        (
+            "build",
+            "build --artifact-uri --dockerfile",
+            ["--dockerfile", "D"],
+        ),
+        (
+            "build",
+            "build --artifact-uri --project",
+            ["--project", "p"],
+        ),
+    ];
+    for (command, label, flag) in cases {
+        for alone in [URI, flag] {
+            let argv = [["microvm", command, "agentd"].as_slice(), &alone].concat();
+            crate::cli::Cli::try_parse_from(&argv)
+                .unwrap_or_else(|error| panic!("{argv:?}: {error}"));
+        }
+        for both in [[URI, flag].concat(), [flag, URI].concat()] {
+            let argv = [["microvm", command, "agentd"].as_slice(), &both].concat();
+            let error = crate::cli::Cli::try_parse_from(&argv)
+                .map(|_| ())
+                .expect_err(&format!("{label} must not parse: {argv:?}"));
+            assert_eq!(
+                error.kind(),
+                clap::error::ErrorKind::ArgumentConflict,
+                "{label}: {argv:?}: {error}"
+            );
+        }
+    }
+}
+
+/// **Issue #249: a caller's `--artifact-uri` with no binary provisions no daemon.** The
+/// caller's object already holds one. Fetching the release asset anyway cost a network fetch
+/// (and failed an offline build), and `build`'s envelope then reported that fetched, attested
+/// daemon as `agentd` for an image that doesn't contain it. Both paths run with the fetcher
+/// that panics on contact, `build` to a finished envelope and `run` to the scripted create stop.
+/// A binary the caller names is still read and not refused: `run`'s positional can be a sync
+/// directory and a config file's `binary` can supply it, so clap can't tell an unused one apart,
+/// and its envelope `agentd` is null already.
+///
+/// **Falsification**, run 2026-09-28. Delete `build`'s `None if args.artifact_uri.is_some()`
+/// arm (`cli-artifact-uri-build-no-provision`): the panicking fetcher is reached, red on its
+/// panic. The same in `run` (`cli-artifact-uri-run-no-provision`): red the same way.
+#[tokio::test]
+async fn a_caller_artifact_uri_provisions_no_daemon() {
+    const THEIRS: &str = "s3://caller-bucket/theirs.zip";
+    let dir = TempDir::new("caller-uri-no-prov");
+    let transport = Arc::new(ScriptedTransport::new());
+    script_prov_build(&transport);
+    let seam = ScriptedSeam {
+        transport: Arc::clone(&transport),
+        clock: Arc::new(YieldingClock::default()),
+    };
+    let mut args = build_args_without_binary(dir.0.clone());
+    args.artifact_uri = Some(THEIRS.into());
+    let (result, _) = dispatch_with(&seam, &Command::Build(args), full_infra()).await;
+    let rendered = result.expect("build: a caller's object builds with no daemon on hand");
+    assert_eq!(
+        rendered.data["agentd"],
+        serde_json::Value::Null,
+        "build: no daemon went into the image from here: {:?}",
+        rendered.data
+    );
+    assert_eq!(
+        transport.first_body("CreateMicrovmImage")["codeArtifact"]["uri"],
+        THEIRS,
+        "build: the create call names the caller's URI"
+    );
+    assert_eq!(
+        transport.uploads(),
+        Vec::<String>::new(),
+        "build: nothing uploaded"
+    );
+
+    let mut args =
+        artifact_uri_run_args(std::path::Path::new("unused"), dir.0.clone(), Some(THEIRS));
+    args.binary = None;
+    let (uploads, uri, _) = upload_record(&Command::Run(Box::new(args)), full_infra()).await;
+    assert_eq!(uri, THEIRS, "run: the create call names the caller's URI");
+    assert_eq!(uploads, Vec::<String>::new(), "run: nothing uploaded");
 }
 
 // ── CLI-8 and CLI-9: a reader that closes ────────────────────────────────────
@@ -7791,7 +8610,7 @@ async fn a_stream_whose_reader_leaves_stops_detaches_and_exits_interrupted() {
         };
         let command = Command::Exec(ExecArgs {
             command: Some("yes".into()),
-            timeout: 30.0,
+            timeout: Duration::from_secs(30),
             cwd: None,
             env: Vec::new(),
             user: None,
@@ -7903,7 +8722,7 @@ async fn the_run_envelope_and_the_launched_session_report_the_same_posture() {
         args.egress = egress;
         args.egress_network_connectors = connectors.clone();
         args.deny_egress = deny;
-        let (result, _) = dispatch_with(&seam, &Command::Run(args), full_infra()).await;
+        let (result, _) = dispatch_with(&seam, &Command::Run(Box::new(args)), full_infra()).await;
         let rendered = result.expect("the scripted run succeeds");
         let envelope = rendered.data["egressPosture"].clone();
 
@@ -8036,6 +8855,270 @@ async fn doctor_reports_a_credential_chain_that_resolves_nothing() {
             .is_some_and(|detail| detail.contains("resolved no credentials")),
         "{credentials}"
     );
+    assert_eq!(rendered.data["ok"], false);
+}
+
+/// A control plane that records the region each `control_plane` call asks for, over a
+/// scripted transport that answers the two managed-base reads `doctor` sends.
+struct RegionRecordingSeam {
+    transport: Arc<ScriptedTransport>,
+    regions: Mutex<Vec<String>>,
+}
+
+impl RegionRecordingSeam {
+    /// A listing that publishes the al2023 base in `published`, and one version of it.
+    fn publishing_in(published: &str) -> Self {
+        let arn = format!("arn:aws:lambda:{published}:aws:microvm-image:al2023-1");
+        let transport = Arc::new(ScriptedTransport::new());
+        transport
+            .answer(
+                "ListManagedMicrovmImages",
+                200,
+                &format!(r#"{{"items": [{{"imageArn": "{arn}", "createdAt": 1.0}}]}}"#),
+            )
+            .answer(
+                "ListManagedMicrovmImageVersions",
+                200,
+                &format!(
+                    r#"{{"items": [{{"imageArn": "{arn}", "imageVersion": "1", "createdAt": 1.0}}]}}"#
+                ),
+            );
+        Self {
+            transport,
+            regions: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn regions(&self) -> Vec<String> {
+        self.regions.lock().expect("not poisoned").clone()
+    }
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a fake seam, the test's stand-in for src/seam.rs: it builds its plane or session over a scripted transport"
+)]
+impl CoreSeam for RegionRecordingSeam {
+    fn control_plane(&self, region: Region) -> BoxFuture<'_, Result<ControlPlane, Error>> {
+        self.regions
+            .lock()
+            .expect("not poisoned")
+            .push(region.as_str().to_string());
+        let plane = ControlPlane::with_transport(
+            Arc::clone(&self.transport) as Arc<dyn Transport>,
+            region,
+            Arc::new(YieldingClock::default()) as Arc<dyn Clock>,
+        );
+        Box::pin(async move { Ok(plane) })
+    }
+
+    fn open_sandbox(
+        &self,
+        _region: Region,
+        _port: Option<u16>,
+    ) -> BoxFuture<'_, Result<Sandbox, Error>> {
+        Box::pin(async { Err(Error::new(ErrorKind::Platform, "doctor opens no sandbox")) })
+    }
+
+    fn attach_session(
+        &self,
+        _region: Region,
+        _attach: Attach,
+    ) -> BoxFuture<'_, Result<Session, Error>> {
+        Box::pin(async { Err(Error::new(ErrorKind::Platform, "doctor attaches nothing")) })
+    }
+
+    fn put_artifact(&self, _uri: &str, _bytes: Vec<u8>) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async { Err(Error::new(ErrorKind::Platform, "doctor uploads nothing")) })
+    }
+}
+
+fn doctor_in(region: RegionFlags) -> Command {
+    Command::Doctor(DoctorArgs {
+        binary: None,
+        infra_dir: Some(std::path::PathBuf::from("/definitely/not/a/stack")),
+        config: no_config(),
+        region,
+        infra: InfraFlags::default(),
+    })
+}
+
+fn doctor_line(rendered: &Rendered, name: &str) -> serde_json::Value {
+    rendered.data["checks"]
+        .as_array()
+        .expect("a check list")
+        .iter()
+        .find(|check| check["name"] == name)
+        .unwrap_or_else(|| panic!("no {name} line"))
+        .clone()
+}
+
+/// **#250: every line of `doctor` is about the region `--region` or `--unlisted-region`
+/// names.** For each flag, with no region in the environment and with `AWS_REGION` naming
+/// another one, the credentials check and both managed-base reads ask the seam for the flag's
+/// region, the credentials line names it, the versions read names that region's base ARN, and
+/// the `managed-bases` line names it.
+///
+/// **Falsification** 2026-09-28. Put `resolve_region(None, None, ctx.env)` back as the region
+/// `check_credentials` or `check_managed_bases` asks for, and the recorded regions read
+/// `us-east-1` (or `eu-west-1`) for that check. Resolve with
+/// `resolve_region(args.region.region.map(|r| r.region()), None, ctx.env)`, dropping
+/// `--unlisted-region`, and the ca-central-1 pass records `us-east-1`. Skip the versions read
+/// and its count reads 0. Restored.
+#[tokio::test]
+async fn doctor_asks_every_check_about_the_region_its_flag_names() {
+    let flags = [
+        (
+            RegionFlags {
+                region: Some(crate::cli::RegionArg::UsWest2),
+                unlisted_region: None,
+            },
+            "us-west-2",
+        ),
+        (
+            RegionFlags {
+                region: None,
+                unlisted_region: Some("ca-central-1".to_string()),
+            },
+            "ca-central-1",
+        ),
+    ];
+    for (flag, named) in flags {
+        for env in [None, Some(("AWS_REGION", "eu-west-1"))] {
+            let seam = RegionRecordingSeam::publishing_in(named);
+            let command = doctor_in(flag.clone());
+            let (result, _) = match env {
+                None => dispatch_with(&seam, &command, full_infra()).await,
+                Some(var) => dispatch_with_env(&seam, &command, full_infra(), var).await,
+            };
+            let rendered = result.expect("doctor reports rather than raises");
+            let case = format!("{named}, env {env:?}");
+            assert_eq!(
+                seam.regions(),
+                [named, named],
+                "{case}: the credentials check and the managed-base reads each ask for a plane"
+            );
+            let credentials = doctor_line(&rendered, "credentials");
+            assert!(
+                credentials["detail"]
+                    .as_str()
+                    .is_some_and(|detail| detail.ends_with(&format!("for {named}"))),
+                "{case}: {credentials}"
+            );
+            let bases = doctor_line(&rendered, "managed-bases");
+            assert_eq!(bases["ok"], true, "{case}: {bases}");
+            assert!(
+                bases["detail"]
+                    .as_str()
+                    .is_some_and(|detail| detail.contains(&format!("in {named}"))),
+                "{case}: {bases}"
+            );
+            assert_eq!(
+                seam.transport.called("ListManagedMicrovmImageVersions"),
+                1,
+                "{case}: the versions read is sent once"
+            );
+            let versions_paths = seam.transport.paths_of("ListManagedMicrovmImageVersions");
+            assert!(
+                versions_paths[0].contains(named),
+                "{case}: the versions read names the flag's base ARN: {versions_paths:?}"
+            );
+            let versions = doctor_line(&rendered, "base-image-versions");
+            assert_eq!(versions["ok"], true, "{case}: {versions}");
+        }
+    }
+}
+
+/// **#250, the unresolved case: no managed-base read goes to a region nobody chose.** A
+/// region the environment holds that the parser refuses is reported on the region line. The
+/// credentials line still resolves the chain, on us-east-1 as before, and the `managed-bases`
+/// line says it wasn't read instead of listing us-east-1's bases. The credentials line says
+/// us-east-1 stood in, so the report doesn't name two regions without saying why.
+///
+/// **Falsification** 2026-09-28. Fall back to `Region::UsEast1` in `check_managed_bases` when
+/// the region doesn't resolve, and a second plane is asked for. Skip the credentials check
+/// there, and none is. Drop the stand-in note from the credentials line and its detail
+/// doesn't say it. Restored.
+#[tokio::test]
+async fn doctor_reads_no_managed_base_when_the_region_does_not_resolve() {
+    let seam = RegionRecordingSeam::publishing_in("us-east-1");
+    let command = doctor_in(RegionFlags {
+        region: None,
+        unlisted_region: None,
+    });
+    let (result, _) = dispatch_with_env(
+        &seam,
+        &command,
+        full_infra(),
+        ("AWS_REGION", "not-a-region"),
+    )
+    .await;
+    let rendered = result.expect("doctor reports rather than raises");
+    assert_eq!(doctor_line(&rendered, "region")["ok"], false);
+    // The credentials check still asks, for us-east-1, and nothing else does.
+    assert_eq!(seam.regions(), ["us-east-1"]);
+    let credentials = doctor_line(&rendered, "credentials");
+    assert_eq!(credentials["ok"], true, "{credentials}");
+    // It names us-east-1 under a region line that doesn't, so it says us-east-1 stood in.
+    assert!(
+        credentials["detail"]
+            .as_str()
+            .is_some_and(|detail| detail.contains("us-east-1 stood in")),
+        "{credentials}"
+    );
+    assert_eq!(seam.transport.called("ListManagedMicrovmImages"), 0);
+    assert_eq!(seam.transport.called("ListManagedMicrovmImageVersions"), 0);
+    let bases = doctor_line(&rendered, "managed-bases");
+    assert_eq!(bases["ok"], false, "{bases}");
+    assert_eq!(bases["fatal"], false, "{bases}");
+    assert!(
+        bases["detail"]
+            .as_str()
+            .is_some_and(|detail| detail.contains("region")),
+        "{bases}"
+    );
+}
+
+/// **#250, the unresolved case keeps a missing identity fatal.** With `AWS_REGION` set to a
+/// name the parser refuses and no identity in the chain, the region line stays advisory, the
+/// credentials line still resolves the chain and fails fatally, and `doctor` isn't ok.
+///
+/// **Falsification** 2026-09-28. Skip the credentials check when the region doesn't resolve
+/// and there's no credentials line. Make its line advisory there and it isn't fatal. Restored.
+#[tokio::test]
+async fn doctor_keeps_a_missing_identity_fatal_when_the_region_does_not_resolve() {
+    let command = doctor_in(RegionFlags {
+        region: None,
+        unlisted_region: None,
+    });
+    let (result, _) = dispatch_with_env(
+        &NoCredentialsSeam,
+        &command,
+        full_infra(),
+        ("AWS_REGION", "not-a-region"),
+    )
+    .await;
+    let rendered = result.expect("doctor reports rather than raises");
+    let region = doctor_line(&rendered, "region");
+    assert_eq!(region["fatal"], false, "{region}");
+    let credentials = doctor_line(&rendered, "credentials");
+    assert_eq!(credentials["ok"], false, "{credentials}");
+    assert_eq!(credentials["fatal"], true, "{credentials}");
+    assert!(
+        credentials["detail"]
+            .as_str()
+            .is_some_and(|detail| detail.contains("resolved no credentials")),
+        "{credentials}"
+    );
+    // The credentials line is the one fatal failure, so it's what makes `doctor` not ok.
+    let fatal_failures: Vec<&serde_json::Value> = rendered.data["checks"]
+        .as_array()
+        .expect("a check list")
+        .iter()
+        .filter(|check| check["ok"] == false && check["fatal"] == true)
+        .map(|check| &check["name"])
+        .collect();
+    assert_eq!(fatal_failures, ["credentials"]);
     assert_eq!(rendered.data["ok"], false);
 }
 
@@ -8203,4 +9286,506 @@ async fn parity_daemon_status(case: &parity_corpus::Case) -> serde_json::Value {
         Ok(_) => serde_json::json!({"ok": true}),
         Err(failure) => parity_refusal(&failure),
     }
+}
+
+// ── #268: a seconds flag that isn't a duration ───────────────────────────────
+
+/// What one row of the seconds-flag guard records a dispatch against.
+#[derive(Clone)]
+enum SecondsRecorder {
+    /// A scripted daemon, for the attached commands (`exec`, `sync`).
+    Daemon(Arc<DaemonScript>),
+    /// A scripted control plane, for `run`, `suspend` and `resume`.
+    Plane(Arc<ScriptedTransport>),
+    /// A seam whose every door refuses, for `cost`, which should enter none.
+    Refusing(Arc<RefusingSeam>),
+    /// A scripted control plane and the daemon behind the session it launches, for `run
+    /// --exec`, which waits on its exec only after the launch.
+    Launch(Arc<ScriptedTransport>, Arc<DaemonScript>),
+}
+
+impl SecondsRecorder {
+    fn calls(&self) -> Vec<String> {
+        match self {
+            Self::Daemon(script) => script.paths(),
+            Self::Plane(transport) => transport.calls(),
+            Self::Launch(transport, script) => transport
+                .calls()
+                .into_iter()
+                .chain(script.paths())
+                .collect(),
+            Self::Refusing(seam) => seam
+                .doors()
+                .iter()
+                .map(|door| door.as_str().into())
+                .collect(),
+        }
+    }
+}
+
+/// How a bad row ended: refused by the parser, or dispatched to its recorder.
+enum SecondsOutcome {
+    Refused(clap::Error),
+    Answered(String),
+}
+
+/// Parses `argv` and, if the parse succeeds, dispatches it against `recorder`, on a thread of
+/// its own with its own runtime so a panic in either step is caught and the recorder can still
+/// be read afterwards.
+fn parse_and_dispatch(
+    argv: Vec<String>,
+    recorder: &SecondsRecorder,
+) -> Result<SecondsOutcome, String> {
+    use clap::Parser as _;
+    let recorder = recorder.clone();
+    std::thread::spawn(move || {
+        let command = match Cli::try_parse_from(&argv) {
+            Ok(cli) => cli.command,
+            Err(error) => return SecondsOutcome::Refused(error),
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        let result = runtime.block_on(async {
+            match &recorder {
+                SecondsRecorder::Daemon(script) => against_daemon(script, &command).await.0,
+                SecondsRecorder::Plane(transport) => {
+                    let seam = ScriptedSeam {
+                        transport: Arc::clone(transport),
+                        clock: Arc::new(YieldingClock::default()),
+                    };
+                    dispatch_with(&seam, &command, full_infra()).await.0
+                }
+                SecondsRecorder::Refusing(seam) => {
+                    dispatch_with(seam.as_ref(), &command, full_infra()).await.0
+                }
+                SecondsRecorder::Launch(transport, script) => {
+                    let seam = SyncSeam {
+                        transport: Arc::clone(transport),
+                        clock: Arc::new(YieldingClock::default()),
+                        daemon: Arc::clone(script),
+                    };
+                    dispatch_with(&seam, &command, full_infra()).await.0
+                }
+            }
+        });
+        SecondsOutcome::Answered(match result {
+            Ok(_) => "ok".into(),
+            Err(failure) => failure.code().into(),
+        })
+    })
+    .join()
+    .map_err(|panic| {
+        panic
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| panic.downcast_ref::<&str>().map(|text| (*text).to_string()))
+            .unwrap_or_default()
+    })
+}
+
+/// A daemon for a sync whose guest manifest orders one deletion, so a dispatched sync reaches
+/// the `rm` exec whose budget is the flag, and that exec exits and acks.
+fn seconds_sync_daemon(tree: &std::path::Path) -> Arc<DaemonScript> {
+    let mut remote = crate::sync::manifest(tree).expect("the tree manifests");
+    remote.files.insert("removed.txt".into(), "1".repeat(64));
+    let remote = String::from_utf8(serde_json::to_vec(&remote).expect("serializes")).expect("utf8");
+    let script = DaemonScript::new();
+    script
+        .reply(200, &remote)
+        .reply(200, STARTED_BODY)
+        .reply(200, &poll_body("exited", "0", "", false))
+        .reply(200, &poll_body("acked", "0", "", false))
+        .reply(200, "");
+    script
+}
+
+/// **#268: a seconds flag that isn't a duration is refused before any call.**
+///
+/// `exec`, `run`, `suspend`, `resume` and `sync` take `--timeout` in seconds, and `cost
+/// --compare` takes `--hold-sec`. Each used to convert with `Duration::from_secs_f64(x.max(0.0))`
+/// inside the handler, after the work had started: `inf` and `1e300` panicked after the exec
+/// start, the launch, the `SuspendMicrovm` or the `ResumeMicrovm` (a `run` that panicked left its
+/// VM billing with no teardown), and `NaN` or `=-5` silently meant zero. Each row here drives
+/// the real argv through the real parser and, if it parses, through the real dispatcher against
+/// a recorder, so a refusal is only a pass when clap gave it for the value and nothing reached a
+/// door, a daemon or the control plane.
+///
+/// Every value goes in the `=` form, because a bare `-5` is a clap error for a reason of its own
+/// (clap reads it as a flag). Each row has a valid twin, the same argv with the flag's default in
+/// the bad value's place, which must parse: `from_parse_error` maps every clap error to
+/// `ERR_INVALID_ARG`, so without the twin a row could pass on a parse failure it has for some
+/// other reason, such as a renamed subcommand. The `1e300` row's twin is `0`, since zero stays
+/// legal.
+///
+/// **Falsification**: `guards/faults.toml` entries `cli-seconds-flag-panics` (restore the old
+/// `from_secs_f64(seconds.max(0.0))` inside `cli::parse_seconds`, so each bad row panics) and
+/// `cli-seconds-flag-clamps` (turn the refusal into a silent zero, so each bad row is
+/// dispatched and answers after its calls).
+#[test]
+fn a_seconds_flag_that_is_not_a_duration_is_refused_before_any_call() {
+    use clap::Parser as _;
+    let state = TempDir::new("seconds-flag-state");
+    let state_dir = state.0.to_string_lossy().to_string();
+    let tree = TempDir::new("seconds-flag-tree");
+    std::fs::write(tree.0.join("same.txt"), b"unchanged").expect("writes");
+    let tree_dir = tree.0.to_string_lossy().to_string();
+
+    let attached = |command: &str| -> Vec<String> {
+        [
+            "microvm",
+            command,
+            "--endpoint",
+            "https://mvm-1.example",
+            "--agent-token",
+            "t",
+            "--microvm-id",
+            "mvm-1",
+            "--state-dir",
+            &state_dir,
+            "--region",
+            "us-east-1",
+        ]
+        .map(String::from)
+        .to_vec()
+    };
+    let exec = || {
+        let mut argv = attached("exec");
+        argv.extend(["--exec-id", "x-1", "true"].map(String::from));
+        argv
+    };
+    let sync = || {
+        let mut argv = attached("sync");
+        argv.push(tree_dir.clone());
+        argv
+    };
+    let run = || {
+        [
+            "microvm",
+            "run",
+            "--image",
+            "arn:aws:lambda:us-east-1:123456789012:microvm-image:img",
+            "--no-config",
+            "--state-dir",
+            &state_dir,
+            "--region",
+            "us-east-1",
+        ]
+        .map(String::from)
+        .to_vec()
+    };
+    let lifecycle = |command: &str| {
+        [
+            "microvm",
+            command,
+            "mvm-live",
+            "--state-dir",
+            &state_dir,
+            "--region",
+            "us-east-1",
+        ]
+        .map(String::from)
+        .to_vec()
+    };
+    let cost = || ["microvm", "cost", "--compare"].map(String::from).to_vec();
+
+    // A daemon that would carry an exec to its first poll, so a dispatched exec answers (a zero
+    // wait times out on the running poll) rather than dying on the script.
+    let exec_daemon = || {
+        let script = DaemonScript::new();
+        script.reply(200, STARTED_BODY).reply(200, STARTED_BODY);
+        SecondsRecorder::Daemon(script)
+    };
+    let sync_daemon = || SecondsRecorder::Daemon(seconds_sync_daemon(&tree.0));
+    let plane = || {
+        let transport = Arc::new(ScriptedTransport::new());
+        transport
+            .answer(
+                "GetMicrovm",
+                200,
+                r#"{"microvmId": "mvm-live", "state": "RUNNING",
+                    "endpoint": "https://mvm-live.example",
+                    "imageArn": "arn:aws:lambda:us-east-1:123456789012:microvm-image:img",
+                    "imageVersion": "1", "maximumDurationInSeconds": 3600, "startedAt": 1}"#,
+            )
+            .answer("SuspendMicrovm", 200, "{}")
+            .answer("ResumeMicrovm", 200, "{}")
+            .answer("RunMicrovm", 400, r#"{"message": "scripted stop"}"#);
+        SecondsRecorder::Plane(transport)
+    };
+    let refusing = || SecondsRecorder::Refusing(Arc::new(RefusingSeam::new()));
+
+    type Argv<'a> = Box<dyn Fn() -> Vec<String> + 'a>;
+    type Recorder<'a> = Box<dyn Fn() -> SecondsRecorder + 'a>;
+    let rows: Vec<(&str, Argv, &str, &str, &str, Recorder)> = vec![
+        (
+            "exec",
+            Box::new(exec),
+            "--timeout",
+            "inf",
+            "300",
+            Box::new(exec_daemon),
+        ),
+        (
+            "exec",
+            Box::new(exec),
+            "--timeout",
+            "NaN",
+            "300",
+            Box::new(exec_daemon),
+        ),
+        (
+            "exec",
+            Box::new(exec),
+            "--timeout",
+            "-5",
+            "300",
+            Box::new(exec_daemon),
+        ),
+        (
+            "exec",
+            Box::new(exec),
+            "--timeout",
+            "1e300",
+            "0",
+            Box::new(exec_daemon),
+        ),
+        (
+            "run",
+            Box::new(run),
+            "--timeout",
+            "inf",
+            "300",
+            Box::new(plane),
+        ),
+        (
+            "suspend",
+            Box::new(move || lifecycle("suspend")),
+            "--timeout",
+            "inf",
+            "300",
+            Box::new(plane),
+        ),
+        (
+            "resume",
+            Box::new(move || lifecycle("resume")),
+            "--timeout",
+            "inf",
+            "300",
+            Box::new(plane),
+        ),
+        (
+            "sync",
+            Box::new(sync),
+            "--timeout",
+            "inf",
+            "60",
+            Box::new(sync_daemon),
+        ),
+        (
+            "cost",
+            Box::new(cost),
+            "--hold-sec",
+            "inf",
+            "3600",
+            Box::new(refusing),
+        ),
+    ];
+
+    let mut misses = Vec::new();
+    for (command, argv, flag, bad, valid, recorder) in &rows {
+        let label = format!("{command} {flag}={bad}");
+
+        let mut twin = argv();
+        twin.push(format!("{flag}={valid}"));
+        if let Err(error) = Cli::try_parse_from(&twin) {
+            misses.push(format!(
+                "{command} {flag}={valid} (the valid twin) didn't parse: {}",
+                error.render()
+            ));
+            continue;
+        }
+
+        let mut bad_argv = argv();
+        bad_argv.push(format!("{flag}={bad}"));
+        let recorder = recorder();
+        match parse_and_dispatch(bad_argv, &recorder) {
+            Ok(SecondsOutcome::Refused(error)) => {
+                let rendering = error.render().to_string();
+                if error.kind() != clap::error::ErrorKind::ValueValidation
+                    || !rendering.contains(flag)
+                    || !rendering.contains(bad)
+                {
+                    misses.push(format!(
+                        "{label}: refused as {:?}, not as the value: {rendering}",
+                        error.kind()
+                    ));
+                } else if crate::exit::from_parse_error(&error).exit != Exit::InvalidArg {
+                    misses.push(format!("{label}: refused, but not as ERR_INVALID_ARG"));
+                }
+            }
+            Ok(SecondsOutcome::Answered(code)) => misses.push(format!(
+                "{label}: answered {code} after {:?}",
+                recorder.calls()
+            )),
+            Err(payload) => misses.push(format!(
+                "{label}: panicked ({payload}) after {:?}",
+                recorder.calls()
+            )),
+        }
+    }
+    assert!(misses.is_empty(), "{}", misses.join("\n"));
+}
+
+/// **#268: an accepted seconds flag reaches the wire as typed, and a huge one waits.**
+///
+/// The other half of the refusal guard above. A value the parser accepts has to arrive where
+/// it's used unchanged: `sync --timeout` is the one seconds flag that reaches the wire, as the
+/// in-guest `rm`'s `timeout_sec`, so a fraction has to go out as that fraction and not as zero
+/// (which the daemon refuses with 400 after the upload), and a whole figure has to go out at
+/// all. And a value past what the clock can add to now, about 9.2e18 seconds, still has to
+/// wait: core's deadlines saturate (`session::deadline_after`), where `Instant + Duration`
+/// used to panic after the exec, the `rm` or `run`'s launch had started. `run` then has to tear
+/// its VM down.
+///
+/// **Falsification**: `guards/faults.toml` entries `cli-huge-timeout-panics` and
+/// `cli-huge-run-timeout-panics` (restore the unchecked add in `deadline_after`; the exec and
+/// `run` rows panic), `cli-sync-rm-deadline-dropped` (send no `timeout_sec`) and
+/// `cli-sync-rm-deadline-truncated` (send whole seconds).
+#[test]
+fn an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits() {
+    let state = TempDir::new("seconds-accepted-state");
+    let state_dir = state.0.to_string_lossy().to_string();
+    let tree = TempDir::new("seconds-accepted-tree");
+    std::fs::write(tree.0.join("same.txt"), b"unchanged").expect("writes");
+    let tree_dir = tree.0.to_string_lossy().to_string();
+    let argv = |command: &str, tail: &[&str]| -> Vec<String> {
+        [
+            "microvm",
+            command,
+            "--endpoint",
+            "https://mvm-1.example",
+            "--agent-token",
+            "t",
+            "--microvm-id",
+            "mvm-1",
+            "--state-dir",
+            &state_dir,
+            "--region",
+            "us-east-1",
+        ]
+        .iter()
+        .chain(tail)
+        .map(|part| (*part).to_string())
+        .collect()
+    };
+
+    let mut misses = Vec::new();
+    let mut outcome =
+        |label: &str, argv: Vec<String>, recorder: &SecondsRecorder| match parse_and_dispatch(
+            argv, recorder,
+        ) {
+            Ok(SecondsOutcome::Answered(code)) if code == "ok" => true,
+            Ok(SecondsOutcome::Answered(code)) => {
+                misses.push(format!(
+                    "{label}: answered {code} after {:?}",
+                    recorder.calls()
+                ));
+                false
+            }
+            Ok(SecondsOutcome::Refused(error)) => {
+                misses.push(format!("{label}: refused: {}", error.render()));
+                false
+            }
+            Err(payload) => {
+                misses.push(format!(
+                    "{label}: panicked ({payload}) after {:?}",
+                    recorder.calls()
+                ));
+                false
+            }
+        };
+
+    let script = DaemonScript::new();
+    script
+        .reply(200, STARTED_BODY)
+        .reply(200, &poll_body("exited", "0", "", false))
+        .reply(200, &poll_body("acked", "0", "", false));
+    outcome(
+        "exec --timeout=1e19",
+        argv("exec", &["--exec-id", "x-1", "--timeout=1e19", "true"]),
+        &SecondsRecorder::Daemon(script),
+    );
+
+    // `run` waits on its exec after the launch, so a panic there left the VM billing with no
+    // teardown. The row has to answer, and the teardown has to go out.
+    const HEALTH: &str = r#"{"version": "0.1.0", "bootstrapped": true, "disk": null,
+                             "identity_degraded": false, "identity_repaired": true}"#;
+    let launch = sync_launch_script();
+    let daemon = DaemonScript::new();
+    daemon
+        .reply(200, HEALTH)
+        .reply(200, STARTED_BODY)
+        .reply(200, &poll_body("exited", "0", "", false))
+        .reply(200, &poll_body("acked", "0", "", false))
+        .reply(200, HEALTH);
+    let run_argv = [
+        "microvm",
+        "run",
+        "--image",
+        "arn:aws:lambda:us-east-1:123456789012:microvm-image:img",
+        "--no-config",
+        "--state-dir",
+        &state_dir,
+        "--region",
+        "us-east-1",
+        "--exec",
+        "true",
+        "--timeout=1e19",
+    ]
+    .map(String::from)
+    .to_vec();
+    let run_answered = outcome(
+        "run --exec true --timeout=1e19",
+        run_argv,
+        &SecondsRecorder::Launch(Arc::clone(&launch), daemon),
+    );
+
+    let mut sent = Vec::new();
+    for (value, wire) in [("60", 60.0), ("0.5", 0.5), ("1e19", 1e19)] {
+        let label = format!("sync --timeout={value}");
+        let script = seconds_sync_daemon(&tree.0);
+        let timeout = format!("--timeout={value}");
+        let recorder = SecondsRecorder::Daemon(Arc::clone(&script));
+        if !outcome(&label, argv("sync", &[&timeout, &tree_dir]), &recorder) {
+            continue;
+        }
+        let start = script
+            .requests()
+            .into_iter()
+            .find(|request| request.path == "/v1/exec/start");
+        let got = start.map(|start| {
+            let body: serde_json::Value =
+                serde_json::from_slice(&start.body).expect("the start body is JSON");
+            body["timeout_sec"].clone()
+        });
+        sent.push((label, got, wire));
+    }
+    for (label, got, wire) in sent {
+        match got {
+            Some(got) if got.as_f64() == Some(wire) => {}
+            Some(got) => misses.push(format!(
+                "{label}: the rm's timeout_sec was {got}, not {wire:?}"
+            )),
+            None => misses.push(format!("{label}: no rm started")),
+        }
+    }
+    if run_answered && !launch.calls().iter().any(|call| call == "TerminateMicrovm") {
+        misses.push(format!(
+            "run --exec true --timeout=1e19: no teardown after {:?}",
+            launch.calls()
+        ));
+    }
+    assert!(misses.is_empty(), "{}", misses.join("\n"));
 }

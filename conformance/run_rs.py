@@ -6,7 +6,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Live conformance run driving the **Rust** client stack through the `microvm` CLI.
 
-This is the only live suite, and it now expresses **every named check** — 227 of them, with
+This is the only live suite, and it now expresses **every named check** — 236 of them, with
 none recorded SKIP. `conformance/run.py` was the oracle — 56 checks through the Python
 client — and it went away with that client once both suites ran green against real AWS on
 the same commit (Python 56/56, this one 38/38 with 34 recorded SKIP). Those 34 were the
@@ -220,6 +220,21 @@ logged out and asserts the proof was the attestation, and that nothing ran a `gh
 on `PATH`. Live because only the real release's bundle, checked against Sigstore's real
 trusted root, can say a machine with no `gh` login gets provenance.
 
+229 rather than 227: `drive_named_vm` adds two for issue #251, which made every `--name`
+read take the VM's region from its record. `keepalive --name` and the terminate by name run
+from an environment whose `AWS_REGION` names another region: the keepalive has to read the
+VM's own idle window, and the terminate has to reach the VM. Live because only the real
+service can say a `GetMicrovm` or a `TerminateMicrovm` sent to the record's region finds the
+VM, where one sent to the environment's finds nothing.
+
+236 rather than 229: `drive_caller_artifact` adds six for issue #249: with the suite's bucket
+set, a caller's `--artifact-uri` object keeps its ETag, the image is built from that URI, the
+build says the bucket went unused, and the image, the object and the build log group are each
+deleted. `drive_doctor_region` adds one for issue #250: `doctor --region` names the flag's
+region on every line, whatever `AWS_REGION` says. Live because only the real object's ETag
+and the real service's answers can say the caller's bytes were used and the flag's region
+was the one asked.
+
 A hybrid driver, and both lanes are deliberate
 ----------------------------------------------
 
@@ -303,6 +318,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import unittest.mock
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
@@ -2036,6 +2052,29 @@ def drive_preflight(cli: Cli, results: Results) -> None:
     )
 
 
+def drive_doctor_region(cli: Cli, results: Results) -> None:
+    """#250: `doctor --region` reports on the flag's region on every line, against AWS.
+
+    One `doctor` call with `--region` set to the suite's region and `AWS_REGION` set to
+    another, so the flag and the environment disagree. The credentials line and the two
+    managed-base reads must follow the flag. Live because the scripted seam in `guards.rs`
+    only records which region was asked for; this is where the listing is signed for and
+    sent to that region, and where AWS answers it. The flag is the suite's region because
+    the account is known to answer there, so the check needs no access anywhere else. It
+    launches nothing and reads two free listings.
+    """
+    print("\n-- doctor --region (the credentials and managed-base lines) --")
+    other = "us-west-2" if cli.region != "us-west-2" else "us-east-1"
+    env = {**os.environ, "AWS_REGION": other, "AWS_DEFAULT_REGION": other}
+    report = cli.call("doctor", "--region", cli.region, "--no-config", env=env)
+    ok, detail = doctor_region_lines(report.data.get("checks", []), cli.region, other)
+    results.check(
+        "doctor --region names the flag's region on every line, whatever AWS_REGION says",
+        ok,
+        detail,
+    )
+
+
 def drive_exec_identity(cli: Cli, launched: Envelope, results: Results) -> None:
     """Exec identity: `--exec-id`, `--detach`, `--poll`, and `microvm ack`. Seven checks.
 
@@ -3463,13 +3502,79 @@ def drive_token_rotation(cli: Cli, launched: Envelope, results: Results) -> None
     )
 
 
+def terminate_by_name_from_elsewhere(
+    cli: "Cli",
+    results: "Results",
+    vm_name: str,
+    microvm_id: str,
+    state_dir: Path,
+    elsewhere: str,
+    elsewhere_env: dict[str, str],
+) -> Envelope:
+    """`drive_named_vm`'s terminate by name from another region's environment (#251), and
+    the terminate by id that stops a miss from leaking the VM.
+
+    A terminate that misses the VM doesn't raise. A failed `TerminateMicrovm` puts the id in
+    `leaked` on a success envelope (exit Platform), so the fallback reads the envelope as
+    well as the exception. Reading only the exception would skip it on the very regression
+    the check is for, and leave the VM billing until its maximum duration with its name
+    still registered. The check also needs the `--wait` state `TERMINATED`: nobody has
+    measured what the service answers to a `TerminateMicrovm` for an id another region
+    holds, and if it's a no-op success, a terminate sent to the wrong region reports the id
+    with nothing leaked. Its `--wait` then reads `GetMicrovm` in that region, misses, and
+    leaves `TERMINATING`, so the state tells the miss apart whatever the delete answered.
+    Returns the envelope the checks after this one read: the named terminate's when it
+    reached the VM, the fallback's otherwise.
+    """
+    by_name = "terminate by name from another region's environment reached the VM"
+    gone: Envelope | None = None
+    try:
+        gone = cli.call(
+            "terminate",
+            vm_name,
+            "--wait",
+            "--state-dir",
+            str(state_dir),
+            env=elsewhere_env,
+        )
+        detail = (
+            f"environment={elsewhere} microvm={gone.data.get('microvmId')} "
+            f"state={gone.data.get('state')} leaked={gone.data.get('leaked')}"
+        )
+    except KindError as exc:
+        detail = (
+            f"environment={elsewhere} kind={exc.kind} code={exc.code} "
+            f"error={exc.envelope.error!r}"
+        )
+    reached = (
+        gone is not None
+        and gone.data.get("microvmId") == microvm_id
+        and gone.data.get("state") == "TERMINATED"
+        and not gone.data.get("leaked")
+    )
+    results.check(by_name, reached, detail)
+    if reached and gone is not None:
+        return gone
+    # Terminate it by id in its own region, which releases the name too, so the checks
+    # after this one still read an envelope.
+    return cli.call(
+        "terminate",
+        microvm_id,
+        "--wait",
+        "--state-dir",
+        str(state_dir),
+        "--region",
+        cli.region,
+    )
+
+
 def drive_named_vm(
     cli: Cli, launched: Envelope, state_dir: Path, results: Results
 ) -> None:
     """Named VMs (issue #67): register at launch, address by name, collide, release —
     and adopt across state directories (issue #66).
 
-    Twelve checks against a VM this section launches and terminates itself, from the image
+    Checks against a VM this section launches and terminates itself, from the image
     the suite already built (`run --image`, no second build). Its own VM rather than the
     suite's because registration happens only at launch — the suite's VM was launched
     before any name existed to give it.
@@ -3482,9 +3587,23 @@ def drive_named_vm(
 
     `--state-dir` is this run's own temp dir, so the registry under test is this suite's
     and a developer's `~/.microvm/runs` is never touched.
+
+    Issue #251: a name's record carries its region, and every `--name` read takes it from
+    there. `keepalive --name` and the terminate by name run from an environment whose
+    `AWS_REGION` names another region, with no region flag, and must still reach the VM.
+    Before the fix the keepalive read the idle window in the environment's region, missed,
+    and refused its interval against the 60-second fallback; the terminate went to the
+    environment's region, where no such VM exists.
     """
     print("\n-- named VMs (register / resolve / collide / release) --")
     vm_name = f"conformance-named-{secrets.token_hex(4)}"
+    # Any region that isn't the VM's: the environment the #251 checks run from.
+    elsewhere = "us-west-2" if cli.region != "us-west-2" else "us-east-1"
+    elsewhere_env = {
+        **os.environ,
+        "AWS_REGION": elsewhere,
+        "AWS_DEFAULT_REGION": elsewhere,
+    }
     named = cli.call(
         "run",
         "--image",
@@ -3565,6 +3684,37 @@ def drive_named_vm(
             and "named" in (first.data.get("stdout") or ""),
             f"exit={first.data.get('exitCode')} stdout={first.data.get('stdout')!r}",
         )
+
+        # 120 s is legal only against the VM's own 600 s window: the 60 s fallback a
+        # read in the wrong region leaves would refuse it before any poll.
+        check = "keepalive --name from another region's environment read the VM's own idle window"
+        try:
+            held = cli.call(
+                "keepalive",
+                "--name",
+                vm_name,
+                "--state-dir",
+                str(state_dir),
+                "--interval",
+                "120",
+                "--for",
+                "5",
+                env=elsewhere_env,
+            )
+            results.check(
+                check,
+                held.data.get("idleWindowSec") == 600.0
+                and held.data.get("end") == "elapsed",
+                f"environment={elsewhere} idleWindowSec={held.data.get('idleWindowSec')!r} "
+                f"end={held.data.get('end')!r}",
+            )
+        except KindError as exc:
+            results.check(
+                check,
+                False,
+                f"environment={elsewhere} kind={exc.kind} code={exc.code} "
+                f"error={exc.envelope.error!r}",
+            )
 
         # Cross-machine adoption (issue #66), with a second state directory standing in
         # for the second machine: the file this launch wrote is the export format, and a
@@ -3669,14 +3819,10 @@ def drive_named_vm(
     finally:
         # Terminate **by the name**, which is itself the lifecycle-positional resolution
         # under test — and never `--delete-image`, because the image is the suite's own.
-        gone = cli.call(
-            "terminate",
-            vm_name,
-            "--wait",
-            "--state-dir",
-            str(state_dir),
-            "--region",
-            cli.region,
+        # No region flag and another region's environment (#251): the record's region is
+        # the only thing that can send it to the VM.
+        gone = terminate_by_name_from_elsewhere(
+            cli, results, vm_name, microvm_id, state_dir, elsewhere, elsewhere_env
         )
         results.check(
             "terminate accepted the name and reported the id it resolved to",
@@ -4118,6 +4264,34 @@ def gh_logged_out(root: Path, base: dict[str, str]) -> tuple[dict[str, str], Pat
     env["GH_CONFIG_DIR"] = str(config)
     env["PATH"] = os.pathsep.join([str(shim), base.get("PATH", "")])
     return env, shim / "gh.ran"
+
+
+#: The `doctor` lines whose detail can name a region: the ones #250's check reads.
+DOCTOR_REGION_LINES = ("region", "credentials", "managed-bases", "base-image-versions")
+
+
+def doctor_region_lines(
+    checks: list[dict[str, Any]], region: str, other: str
+) -> tuple[bool, str]:
+    """Whether a `doctor --region <region>` report is about that region, and not `other`.
+
+    #250: the credentials and managed-base checks resolved the region again from
+    `AWS_REGION` alone, so the lines below the region line named the environment's region.
+    The `credentials` line has to name `region`, the `managed-bases` line has to name it as
+    the region it listed (its "could not list" branch names none, so it fails here), and no
+    region-bearing line may name `other`. The bucket and role lines are left out, since a
+    bucket name can carry a region of its own. Kept apart from the live driver so the
+    self-test can make it fail, which a real run on a fixed binary never does.
+    """
+    details = {str(row.get("name")): str(row.get("detail", "")) for row in checks}
+    credentials = details.get("credentials", "")
+    bases = details.get("managed-bases", "")
+    ok = (
+        credentials.endswith(f"for {region}")
+        and f" in {region}" in bases
+        and not any(other in details.get(name, "") for name in DOCTOR_REGION_LINES)
+    )
+    return ok, f"credentials={credentials!r} managed-bases={bases!r}"
 
 
 def digest_record_agrees(
@@ -6423,6 +6597,100 @@ def check_closing_reader_helper(results: Results) -> None:
     )
 
 
+def check_terminate_fallback(results: "Results") -> None:
+    """The named terminate falls back to a terminate by id in the VM's region whenever it
+    misses: on a success envelope that leaked the VM, on one that never reached
+    `TERMINATED`, and on an error envelope. It runs nothing more when the terminate reached
+    the VM."""
+
+    class _ScriptedCli:
+        region = "us-east-1"
+
+        def __init__(self, first: Envelope | KindError) -> None:
+            self.answers: list[Envelope | KindError] = [first, ok({})]
+            self.calls: list[tuple[str, ...]] = []
+
+        def call(self, *args: str, env: dict[str, str] | None = None) -> Envelope:
+            self.calls.append(args)
+            answer = self.answers.pop(0)
+            if isinstance(answer, KindError):
+                raise answer
+            return answer
+
+    def ok(data: dict[str, Any]) -> Envelope:
+        return Envelope("ok", "1", "microvm.teardown", data)
+
+    state = Path("sd")
+    by_id = (
+        "terminate",
+        "mvm-1",
+        "--wait",
+        "--state-dir",
+        "sd",
+        "--region",
+        "us-east-1",
+    )
+    refused = KindError(
+        Envelope(
+            "error",
+            "1",
+            "",
+            {"kind": "NotFound"},
+            code="ERR_PROTOCOL",
+            exit_code=5,
+            error="no such MicroVM",
+        )
+    )
+    cases = [
+        (
+            "a named terminate that leaked the VM falls back to a terminate by id in its region",
+            # TERMINATED so this case holds the `leaked` clause on its own; the CLI skips the
+            # wait after a failed terminate, so a real leak also reads TERMINATING.
+            ok({"microvmId": "mvm-1", "state": "TERMINATED", "leaked": ["mvm-1"]}),
+            [by_id],
+        ),
+        (
+            "a named terminate that never reached TERMINATED falls back the same way",
+            ok({"microvmId": "mvm-1", "state": "TERMINATING", "leaked": []}),
+            [by_id],
+        ),
+        (
+            "a named terminate refused with an error envelope falls back the same way",
+            refused,
+            [by_id],
+        ),
+        (
+            "a named terminate that reached the VM runs no fallback",
+            ok({"microvmId": "mvm-1", "state": "TERMINATED", "leaked": []}),
+            [],
+        ),
+    ]
+    for name, first, fallback in cases:
+        probe = Results(probe=True)
+        fake = _ScriptedCli(first)
+        try:
+            terminate_by_name_from_elsewhere(
+                fake,
+                probe,
+                "x",
+                "mvm-1",
+                state,
+                "us-west-2",
+                {},  # type: ignore[arg-type]
+            )
+            raised = ""
+        except KindError as exc:
+            raised = repr(exc)
+        results.check(
+            name,
+            not raised
+            and fake.calls[:1] == [("terminate", "x", "--wait", "--state-dir", "sd")]
+            and fake.calls[1:] == fallback
+            and bool(probe.failed) == bool(fallback),
+            f"raised={raised!r} calls={fake.calls!r} failed={probe.failed!r}",
+        )
+
+
 def check_run_section(results: "Results") -> None:
     """A section's raise becomes one named FAIL with the envelope's message, and the run
     goes on; a section that returns hands its value back unchanged."""
@@ -6484,6 +6752,81 @@ def check_preflight_lines(results: "Results") -> None:
         "the preflight-line reader keys each run's check",
         preflight_lines(stderr),
         {"suite region": "ok", "suite service": "fail", "suite ok": "false"},
+    )
+
+
+def check_doctor_region_lines(results: "Results") -> None:
+    """`doctor_region_lines` passes the fixed report and refuses main's, an empty one, a
+    versions line on the environment's base ARN, a credentials line on a third region, and
+    a listing that didn't read."""
+
+    def report(region: str, bases: str) -> list[dict[str, Any]]:
+        return [
+            {"name": "region", "detail": "us-east-1 is a known MicroVMs region"},
+            {
+                "name": "credentials",
+                "detail": f"the default chain resolved credentials for {region}",
+            },
+            {"name": "bucket", "detail": "conformance-bucket-us-west-2"},
+            {"name": "managed-bases", "detail": bases},
+            {"name": "base-image-versions", "detail": "al2023: 1 - pass one"},
+        ]
+
+    def only(region: str) -> str:
+        return (
+            f"arn:aws:lambda:{region}:aws:microvm-image:al2023-1 is the only base AWS "
+            f"publishes in {region}"
+        )
+
+    fixed = report("us-east-1", only("us-east-1"))
+    ok, detail = doctor_region_lines(fixed, "us-east-1", "us-west-2")
+    results.check(
+        "doctor_region_lines passes a report that names the flag's region on every line",
+        ok,
+        detail,
+    )
+    # What main printed before #250: every line below the region line on AWS_REGION's.
+    unfixed = report("us-west-2", only("us-west-2"))
+    ok, detail = doctor_region_lines(unfixed, "us-east-1", "us-west-2")
+    results.check(
+        "doctor_region_lines refuses a report that names the environment's region",
+        not ok,
+        detail,
+    )
+    ok, detail = doctor_region_lines([], "us-east-1", "us-west-2")
+    results.check("doctor_region_lines refuses an empty report", not ok, detail)
+    # The versions read on AWS_REGION's base ARN, with the two lines above it right.
+    versions = [
+        row
+        if row["name"] != "base-image-versions"
+        else {
+            "name": "base-image-versions",
+            "detail": "arn:aws:lambda:us-west-2:aws:microvm-image:al2023-1 reports no "
+            "versions at all",
+        }
+        for row in fixed
+    ]
+    ok, detail = doctor_region_lines(versions, "us-east-1", "us-west-2")
+    results.check(
+        "doctor_region_lines refuses a versions line on the environment's base ARN",
+        not ok,
+        detail,
+    )
+    # A credentials line on a third region, with the listing right: the `other` clause
+    # can't see it, so only the credentials clause refuses it.
+    third = report("eu-central-1", only("us-east-1"))
+    ok, detail = doctor_region_lines(third, "us-east-1", "us-west-2")
+    results.check(
+        "doctor_region_lines refuses a credentials line on a third region",
+        not ok,
+        detail,
+    )
+    unread = report("us-east-1", "could not list the managed bases: denied")
+    ok, detail = doctor_region_lines(unread, "us-east-1", "us-west-2")
+    results.check(
+        "doctor_region_lines refuses a managed-bases line that listed nothing",
+        not ok,
+        detail,
     )
 
 
@@ -6776,6 +7119,595 @@ def check_ensure_image_section(results: "Results") -> None:
     )
 
 
+# ── a caller's --artifact-uri (#249) ─────────────────────────────────────────
+
+#: What `drive_caller_artifact` names its image and its S3 key prefix, with a fresh nonce per
+#: run. Under `microvm-cli`, one of `scripts/verify-clean.py`'s prefixes, so a leak this
+#: section's own cleanup misses still shows in `live:verify-clean`.
+CALLER_ARTIFACT_PREFIX = "microvm-cli-caller-artifact"
+CALLER_ARTIFACT_UNTOUCHED = (
+    "build --artifact-uri with a bucket set leaves the caller's S3 object untouched "
+    "(issue #249)"
+)
+CALLER_ARTIFACT_BUILT_FROM = (
+    "the caller-artifact image was built from the caller's URI (issue #249)"
+)
+
+
+CALLER_ARTIFACT_BUCKET_SET = (
+    "the caller-artifact build ran with the suite's bucket set and said it went unused "
+    "(issue #249)"
+)
+CALLER_ARTIFACT_IMAGE_GONE = "the caller-artifact image is deleted"
+CALLER_ARTIFACT_OBJECT_GONE = "the caller-artifact S3 object is deleted"
+CALLER_ARTIFACT_GROUP_GONE = "the caller-artifact build log group is deleted"
+
+
+def caller_artifact_checks(report: dict[str, Any], results: Results) -> None:
+    """The three #249 checks, read off `drive_caller_artifact`'s report.
+
+    Separate from the driver so the self-test can feed it reports and show each check fails
+    on its gap. Every read is defensive: a malformed report, or one a seeded fault leaves
+    half-filled, gets a wrong answer and a FAIL line rather than a `KeyError` that ends the
+    self-test before it prints anything.
+
+    The sentinel is metadata the section wrote with its copy. A re-upload of identical bytes
+    keeps the ETag, but `aws s3 cp` never carries custom metadata over, so a missing sentinel
+    is an overwrite even when the bytes match. `present` is what stops an empty report from
+    passing: without it every `.get` reads `None` on both sides and the comparisons agree.
+
+    `saidUnused` is what makes the section about #249 at all. Without a bucket in effect the
+    unfixed CLI never uploaded either, so an untouched object proves nothing unless the build
+    itself said it had a bucket and left it unused.
+    """
+    before = report.get("before") or {}
+    after = report.get("after") or {}
+    sentinel = report.get("sentinel")
+    present = bool(before) and bool(after) and bool(sentinel)
+    marked = (after.get("Metadata") or {}).get("conformance-sentinel") == sentinel
+    untouched = (
+        present
+        and marked
+        and before.get("ETag") == after.get("ETag")
+        and before.get("LastModified") == after.get("LastModified")
+    )
+    results.check(
+        CALLER_ARTIFACT_UNTOUCHED,
+        untouched,
+        f"ETag {before.get('ETag')!r} -> {after.get('ETag')!r}, LastModified "
+        f"{before.get('LastModified')!r} -> {after.get('LastModified')!r}, sentinel "
+        f"{sentinel!r} read back as "
+        f"{(after.get('Metadata') or {}).get('conformance-sentinel')!r}"
+        + (
+            f", build error: {report['buildError']}" if report.get("buildError") else ""
+        ),
+    )
+    results.eq(CALLER_ARTIFACT_BUILT_FROM, report.get("versionUri"), report.get("uri"))
+    results.check(
+        CALLER_ARTIFACT_BUCKET_SET,
+        report.get("saidUnused") is True,
+        f"bucket {report.get('bucket')!r}, unused-bucket line on stderr: "
+        f"{report.get('saidUnused')!r}",
+    )
+
+
+def caller_artifact_images(plane: Any, name: str) -> list[dict[str, Any]]:
+    """Every image named exactly `name`, across every page of the listing."""
+    return [
+        item
+        for page in plane.get_paginator("list_microvm_images").paginate()
+        for item in page.get("items", [])
+        if item.get("name") == name
+    ]
+
+
+def drive_caller_artifact(
+    cli: Cli,
+    launched: Envelope,
+    aws: Any,
+    results: Results,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> None:
+    """`build --artifact-uri` with a bucket set leaves the caller's object alone (#249).
+
+    The suite exports `MICROVM_BUCKET` for every call, which is the shell the issue is about:
+    the bucket is set without any `--bucket` flag. The caller's object is a copy of the
+    artifact the suite's own `run` uploaded, written under a key of this section's with a
+    sentinel in its metadata. The build passes no `--dockerfile`, so the CLI's own artifact
+    would differ from the copy (the suite's run used the conformance Dockerfile), and an
+    overwrite changes the ETag as well as dropping the sentinel. It passes no binary either,
+    since the caller's object holds the daemon and the CLI provisions none beside it.
+
+    The build runs without `--quiet`, the one call in the suite that does, because its
+    stderr is the evidence the bucket was in effect: the fixed CLI prints one line naming the
+    bucket it left unused. Only that fact is kept, never the stream.
+
+    A build that fails is still read: the upload this issue is about happens before the
+    create call, so what S3 holds afterward answers the question either way. Cleanup takes
+    the ARN when the build returned one, and the name and nonce chosen here otherwise, so a
+    build that created its image and then failed still has its image and log group deleted.
+    """
+    print("\n== build --artifact-uri with a bucket set (issue #249) ==")
+    s3 = aws.client("s3")
+    plane = aws.client(SERVICE)
+    bucket = os.environ["MICROVM_BUCKET"]
+    nonce = secrets.token_hex(4)
+    name = f"{CALLER_ARTIFACT_PREFIX}-{nonce}"
+    key = f"{CALLER_ARTIFACT_PREFIX}/{nonce}/artifact.zip"
+    uri = f"s3://{bucket}/{key}"
+    report: dict[str, Any] = {"uri": uri, "sentinel": nonce, "bucket": bucket}
+    arn = None
+    try:
+        s3.copy_object(
+            Bucket=bucket,
+            Key=key,
+            CopySource={"Bucket": bucket, "Key": f"{launched.data['imageName']}.zip"},
+            Metadata={"conformance-sentinel": nonce},
+            MetadataDirective="REPLACE",
+        )
+        report["before"] = s3.head_object(Bucket=bucket, Key=key)
+        argv = [
+            str(cli.binary),
+            "--json",
+            "build",
+            "--artifact-uri",
+            uri,
+            "--name",
+            name,
+            "--memory",
+            str(BASELINE_MEMORY_MIB),
+            "--region",
+            cli.region,
+        ]
+        cli.log.append(command_for_log(argv))
+        try:
+            proc = cli.run_process(argv, 50 * 60)
+            report["saidUnused"] = (
+                f"the bucket {bucket} is unused for this build" in proc.stderr
+            )
+            built = cli.parse_stdout(proc.stdout, argv)
+            if built.status == "error":
+                raise KindError(built)
+            arn = built.data.get("imageIdentifier")
+        except (KindError, EnvelopeError, subprocess.TimeoutExpired) as exc:
+            report["buildError"] = section_failure_detail(exc)
+        with contextlib.suppress(Exception):
+            report["after"] = s3.head_object(Bucket=bucket, Key=key)
+        if not arn:
+            with contextlib.suppress(Exception):
+                arn = next(iter(caller_artifact_images(plane, name)), {}).get(
+                    "imageArn"
+                )
+        if arn:
+            # `GetMicrovmImage` carries no artifact; the version does.
+            with contextlib.suppress(Exception):
+                version = plane.get_microvm_image(imageIdentifier=arn).get(
+                    "latestActiveImageVersion"
+                )
+                if version:
+                    described = plane.get_microvm_image_version(
+                        imageIdentifier=arn, imageVersion=version
+                    )
+                    report["versionUri"] = (described.get("codeArtifact") or {}).get(
+                        "uri"
+                    )
+        caller_artifact_checks(report, results)
+    finally:
+        caller_artifact_cleanup(name, arn, bucket, nonce, aws, results, sleep, clock)
+
+
+def caller_artifact_image_state(plane: Any, arn: str | None) -> str | None:
+    """The state `GetMicrovmImage` reports for `arn`, or None once it's gone (or never was).
+
+    Only `ResourceNotFoundException` reads as gone, as in `ensure_image_cleanup`. Any other
+    error is returned as its class name, so a call that can't answer never passes for one
+    that said the image is deleted.
+    """
+    if not arn:
+        return None
+    try:
+        return str(plane.get_microvm_image(imageIdentifier=arn).get("state"))
+    except Exception as exc:  # noqa: BLE001 - the error class is the finding
+        if type(exc).__name__ == "ResourceNotFoundException":
+            return None
+        return type(exc).__name__
+
+
+def caller_artifact_cleanup(
+    name: str,
+    arn: str | None,
+    bucket: str,
+    nonce: str,
+    aws: Any,
+    results: Results,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> None:
+    """Deletes what `drive_caller_artifact` created, found by its ARN and by its name.
+
+    The image is listed by its exact name as well as read by the ARN the build returned, and
+    the delete is retried until both say it's gone: an image still `CREATING` (a timed-out
+    build leaves one) refuses deletion, so a single attempt could report a leak as cleaned.
+    The name covers a build that failed before it returned an ARN. The ARN is what stops a
+    listing that reads nothing (a changed page shape, a name that no longer matches) from
+    passing for a deleted image when the build said one exists.
+    """
+    plane = aws.client(SERVICE)
+    s3 = aws.client("s3")
+    logs = aws.client("logs")
+
+    seen: list[str] = [arn] if arn else []
+    last: dict[str, str] = {}
+    remaining: list[dict[str, Any]] | None = None
+    by_arn: str | None = None
+    deadline = clock() + 10 * 60
+    while True:
+        try:
+            remaining = caller_artifact_images(plane, name)
+        except Exception as exc:  # noqa: BLE001 - the error class is the finding
+            last["listing"] = type(exc).__name__
+            remaining = None
+            break
+        for image in remaining:
+            listed = str(image.get("imageArn"))
+            if listed not in seen:
+                seen.append(listed)
+            last[listed] = str(image.get("state"))
+            if image.get("state") != "DELETING":
+                with contextlib.suppress(Exception):
+                    plane.delete_microvm_image(imageIdentifier=listed)
+        by_arn = caller_artifact_image_state(plane, arn)
+        if by_arn is not None and arn:
+            last[f"{arn} (by ARN)"] = by_arn
+            if by_arn != "DELETING":
+                with contextlib.suppress(Exception):
+                    plane.delete_microvm_image(imageIdentifier=arn)
+            by_arn = caller_artifact_image_state(plane, arn)
+        if (not remaining and by_arn is None) or clock() > deadline:
+            break
+        sleep(15)
+    results.check(
+        CALLER_ARTIFACT_IMAGE_GONE,
+        remaining == [] and by_arn is None,
+        f"name={name!r} found={seen!r} last={last!r}",
+    )
+
+    prefix = f"{CALLER_ARTIFACT_PREFIX}/{nonce}/"
+    try:
+        listed_keys = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+        keys = [item["Key"] for item in listed_keys.get("Contents") or []]
+        if keys:
+            s3.delete_objects(
+                Bucket=bucket, Delete={"Objects": [{"Key": key} for key in keys]}
+            )
+        left = s3.list_objects_v2(Bucket=bucket, Prefix=prefix).get("KeyCount", 0)
+        results.check(
+            CALLER_ARTIFACT_OBJECT_GONE,
+            left == 0,
+            f"deleted={keys!r} remaining={left}",
+        )
+    except Exception as exc:  # noqa: BLE001 - the error class is the finding
+        results.check(CALLER_ARTIFACT_OBJECT_GONE, False, type(exc).__name__)
+
+    group = f"/aws/lambda-microvms/{name}"
+    try:
+        with contextlib.suppress(Exception):
+            logs.delete_log_group(logGroupName=group)
+        groups = (
+            logs.describe_log_groups(logGroupNamePrefix=group).get("logGroups") or []
+        )
+        results.check(
+            CALLER_ARTIFACT_GROUP_GONE,
+            not [g for g in groups if g.get("logGroupName") == group],
+            f"group={group!r} remaining={[g.get('logGroupName') for g in groups]!r}",
+        )
+    except Exception as exc:  # noqa: BLE001 - the error class is the finding
+        results.check(CALLER_ARTIFACT_GROUP_GONE, False, type(exc).__name__)
+
+
+class ResourceNotFoundException(Exception):
+    """The fake plane's answer for a deleted image, named as boto3 names the real one."""
+
+
+class FakeCallerArtifactAws:
+    """S3, the MicroVM plane and CloudWatch Logs in one dict each, for the driver's self-test.
+
+    `cli` says which CLI the fake `build` plays: `fixed` builds from the caller's URI, says
+    the bucket went unused when `MICROVM_BUCKET` is in its environment, and uploads nothing;
+    `unfixed` is main before #249, which overwrote the object and said nothing. `blind` makes
+    the listing return no items, `undeletable` makes every image delete a no-op, and
+    `listing_raises` makes the paginator fail, which are the three ways cleanup can be misled.
+    """
+
+    def __init__(
+        self,
+        *,
+        cli: str = "fixed",
+        blind: bool = False,
+        undeletable: bool = False,
+        listing_raises: bool = False,
+    ) -> None:
+        self.cli = cli
+        self.blind = blind
+        self.undeletable = undeletable
+        self.listing_raises = listing_raises
+        self.objects: dict[str, dict[str, Any]] = {}
+        self.images: dict[str, dict[str, Any]] = {}
+        self.groups: set[str] = set()
+        self.stamp = datetime(2026, 9, 28, 12, 0, tzinfo=timezone.utc)
+        self.exceptions = type(
+            "Exceptions", (), {"ResourceNotFoundException": ResourceNotFoundException}
+        )
+
+    def client(self, _service: str) -> FakeCallerArtifactAws:
+        return self
+
+    # S3
+    def copy_object(self, **kwargs: Any) -> None:
+        self.objects[kwargs["Key"]] = {
+            "ETag": '"copy"',
+            "LastModified": self.stamp,
+            "Metadata": dict(kwargs.get("Metadata") or {}),
+        }
+
+    def head_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:
+        return dict(self.objects[Key])
+
+    def list_objects_v2(self, *, Bucket: str, Prefix: str) -> dict[str, Any]:
+        keys = [key for key in self.objects if key.startswith(Prefix)]
+        return {"Contents": [{"Key": key} for key in keys], "KeyCount": len(keys)}
+
+    def delete_objects(self, *, Bucket: str, Delete: dict[str, Any]) -> None:
+        for item in Delete["Objects"]:
+            self.objects.pop(item["Key"], None)
+
+    # the MicroVM plane
+    def get_paginator(self, _operation: str) -> FakeCallerArtifactAws:
+        return self
+
+    def paginate(self) -> list[dict[str, Any]]:
+        if self.listing_raises:
+            raise RuntimeError("scripted listing failure")
+        items = [] if self.blind else [dict(image) for image in self.images.values()]
+        return [{"items": items}]
+
+    def get_microvm_image(self, *, imageIdentifier: str) -> dict[str, Any]:
+        if imageIdentifier not in self.images:
+            raise ResourceNotFoundException(imageIdentifier)
+        return {**self.images[imageIdentifier], "latestActiveImageVersion": "1"}
+
+    def get_microvm_image_version(self, **kwargs: Any) -> dict[str, Any]:
+        return {"codeArtifact": {"uri": self.images[kwargs["imageIdentifier"]]["uri"]}}
+
+    def delete_microvm_image(self, *, imageIdentifier: str) -> None:
+        if not self.undeletable:
+            self.images.pop(imageIdentifier, None)
+
+    # CloudWatch Logs
+    def delete_log_group(self, *, logGroupName: str) -> None:
+        self.groups.discard(logGroupName)
+
+    def describe_log_groups(self, *, logGroupNamePrefix: str) -> dict[str, Any]:
+        return {
+            "logGroups": [
+                {"logGroupName": group}
+                for group in self.groups
+                if group.startswith(logGroupNamePrefix)
+            ]
+        }
+
+    # the `microvm` binary
+    def build(
+        self, argv: list[str], env: dict[str, str] | None
+    ) -> subprocess.CompletedProcess[str]:
+        effective = os.environ if env is None else env
+        uri = argv[argv.index("--artifact-uri") + 1]
+        name = argv[argv.index("--name") + 1]
+        key = uri.split("/", 3)[3]
+        stderr = f"building image {name} (2 GB)\n"
+        if self.cli == "fixed":
+            bucket = effective.get("MICROVM_BUCKET")
+            if bucket:
+                stderr += (
+                    "--artifact-uri names the artifact, so nothing is uploaded and the "
+                    f"bucket {bucket} is unused for this build\n"
+                )
+        else:
+            self.objects[key] = {
+                "ETag": '"cli"',
+                "LastModified": self.stamp + timedelta(seconds=5),
+                "Metadata": {},
+            }
+        arn = f"arn:aws:lambda:us-east-1:123456789012:microvm-image:{name}"
+        self.images[arn] = {
+            "imageArn": arn,
+            "name": name,
+            "state": "CREATED",
+            "uri": uri,
+        }
+        self.groups.add(f"/aws/lambda-microvms/{name}")
+        envelope = {
+            "status": "ok",
+            "apiVersion": "1",
+            "type": "microvm.build",
+            "data": {"imageIdentifier": arn, "imageName": name},
+        }
+        return subprocess.CompletedProcess(argv, 0, json.dumps(envelope), stderr)
+
+
+@dataclass
+class FakeCallerArtifactCli:
+    """`Cli`'s surface the driver reads, with `run_process` answered by the fake AWS."""
+
+    aws: FakeCallerArtifactAws
+    binary: Path = Path("microvm")
+    region: str = REGION
+    log: list[str] = field(default_factory=list)
+    parse_stdout = staticmethod(Cli.parse_stdout)
+
+    def run_process(
+        self, argv: list[str], timeout: float, env: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        return self.aws.build(argv, env)
+
+
+def check_caller_artifact_section(results: "Results") -> None:
+    """The caller-artifact checks pass on a complete report and each fails on its gap."""
+    uri = "s3://bucket/microvm-cli-caller-artifact/abcd1234/artifact.zip"
+    stamp = datetime(2026, 9, 28, 12, 0, tzinfo=timezone.utc)
+    head = {
+        "ETag": '"0123abcd"',
+        "LastModified": stamp,
+        "Metadata": {"conformance-sentinel": "abcd1234"},
+    }
+    complete: dict[str, Any] = {
+        "uri": uri,
+        "sentinel": "abcd1234",
+        "bucket": "bucket",
+        "before": head,
+        "after": dict(head),
+        "versionUri": uri,
+        "saidUnused": True,
+    }
+
+    def failures(report: dict[str, Any]) -> list[str]:
+        # A raise counts as every check failing, named by its type, so a crash inside the
+        # checks ends in this section's FAIL line and never in a traceback.
+        probe = Results(probe=True)
+        try:
+            caller_artifact_checks(report, probe)
+        except Exception as exc:  # noqa: BLE001 - a raise is the finding
+            return [f"raised {type(exc).__name__}"]
+        return [name for name, _ in probe.failed]
+
+    clean = failures(complete)
+    results.check(
+        "the caller-artifact checks pass on a complete report", not clean, repr(clean)
+    )
+    untouched, built_from = CALLER_ARTIFACT_UNTOUCHED, CALLER_ARTIFACT_BUILT_FROM
+    bucket_set = CALLER_ARTIFACT_BUCKET_SET
+    gaps: dict[str, tuple[dict[str, Any], str]] = {
+        "ETag changed": ({**complete, "after": {**head, "ETag": '"ffff"'}}, untouched),
+        "LastModified changed": (
+            {
+                **complete,
+                "after": {**head, "LastModified": stamp + timedelta(seconds=1)},
+            },
+            untouched,
+        ),
+        "sentinel missing": (
+            {**complete, "after": {**head, "Metadata": {}}},
+            untouched,
+        ),
+        "no Metadata key": (
+            {**complete, "after": {"ETag": head["ETag"], "LastModified": stamp}},
+            untouched,
+        ),
+        "versionUri different": (
+            {**complete, "versionUri": "s3://other/x.zip"},
+            built_from,
+        ),
+        "versionUri absent": (
+            {key: value for key, value in complete.items() if key != "versionUri"},
+            built_from,
+        ),
+        "no unused-bucket line": ({**complete, "saidUnused": False}, bucket_set),
+        "stderr never read": (
+            {key: value for key, value in complete.items() if key != "saidUnused"},
+            bucket_set,
+        ),
+    }
+    missed = [
+        f"{gap}: {failed!r}"
+        for gap, (report, expected) in gaps.items()
+        if (failed := failures(report)) != [expected]
+    ]
+    results.check(
+        "each caller-artifact check fails on the one gap it is about",
+        not missed,
+        "; ".join(missed),
+    )
+    empties: list[dict[str, Any]] = [{}, {"before": None, "after": None}, {"after": {}}]
+    unfailed = [
+        f"{report!r}: {failed!r}"
+        for report in empties
+        if sorted(failed := failures(report))
+        != sorted([untouched, built_from, bucket_set])
+    ]
+    results.check(
+        "the caller-artifact checks fail on an empty report",
+        not unfailed,
+        "; ".join(unfailed),
+    )
+    check_caller_artifact_driver(results)
+
+
+def check_caller_artifact_driver(results: "Results") -> None:
+    """The driver and its cleanup, end to end against `FakeCallerArtifactAws`.
+
+    The report checks above can't see the driver: a build run with `MICROVM_BUCKET` dropped
+    from its environment, or a cleanup that trusts an empty listing, would still leave them
+    green. Each scenario here runs `drive_caller_artifact` whole and names the checks it must
+    fail, none for the fixed CLI on a well-behaved account.
+    """
+    launched = Envelope(
+        status="ok", api_version="1", type="microvm.run", data={"imageName": "suite"}
+    )
+    every = [
+        CALLER_ARTIFACT_UNTOUCHED,
+        CALLER_ARTIFACT_BUILT_FROM,
+        CALLER_ARTIFACT_BUCKET_SET,
+        CALLER_ARTIFACT_IMAGE_GONE,
+        CALLER_ARTIFACT_OBJECT_GONE,
+        CALLER_ARTIFACT_GROUP_GONE,
+    ]
+    scenarios: dict[str, tuple[FakeCallerArtifactAws, list[str]]] = {
+        "the fixed CLI": (FakeCallerArtifactAws(), []),
+        "the CLI before #249": (
+            FakeCallerArtifactAws(cli="unfixed"),
+            [CALLER_ARTIFACT_UNTOUCHED, CALLER_ARTIFACT_BUCKET_SET],
+        ),
+        "a listing that reads nothing": (FakeCallerArtifactAws(blind=True), []),
+        "a hidden image that won't delete": (
+            FakeCallerArtifactAws(blind=True, undeletable=True),
+            [CALLER_ARTIFACT_IMAGE_GONE],
+        ),
+        "a listing that raises": (
+            FakeCallerArtifactAws(listing_raises=True),
+            [CALLER_ARTIFACT_IMAGE_GONE],
+        ),
+    }
+    wrong: list[str] = []
+    with unittest.mock.patch.dict(os.environ, {"MICROVM_BUCKET": "bucket"}):
+        for scenario, (aws, expected) in scenarios.items():
+            probe = Results(probe=True)
+            # Each sleep moves this clock instead of the process's, so the scenario whose
+            # image never goes runs the ten-minute poll to its deadline in no time.
+            elapsed = [0.0]
+            try:
+                drive_caller_artifact(
+                    FakeCallerArtifactCli(aws),
+                    launched,
+                    aws,
+                    probe,
+                    sleep=lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds),
+                    clock=lambda: elapsed[0],
+                )
+            except Exception as exc:  # noqa: BLE001 - a raise is the finding
+                wrong.append(f"{scenario}: raised {type(exc).__name__}: {exc}")
+                continue
+            failed = sorted(name for name, _ in probe.failed)
+            ran = sorted({*probe.passed, *failed})
+            if failed != sorted(expected) or ran != sorted(every):
+                wrong.append(f"{scenario}: failed {failed!r}, ran {ran!r}")
+    results.check(
+        "the caller-artifact driver and cleanup fail exactly where each account misleads them",
+        not wrong,
+        "; ".join(wrong),
+    )
+
+
 def check_gh_logged_out(results: "Results") -> None:
     """`gh_logged_out` strips every token, empties the config, and puts a recording shim
     first; the run file stays absent until something runs `gh`, then names what it ran."""
@@ -6864,10 +7796,13 @@ def self_test() -> int:
         check_log_privacy(cli, results, Path(tmp))
         check_closing_reader_helper(results)
         check_run_section(results)
+        check_terminate_fallback(results)
         check_bdd_outcome(results)
         check_posture_lines(results)
         check_preflight_lines(results)
+        check_doctor_region_lines(results)
         check_ensure_image_section(results)
+        check_caller_artifact_section(results)
         check_gh_logged_out(results)
 
         # -- the success side -------------------------------------------------
@@ -7490,6 +8425,8 @@ def main() -> int:
             run_section(results, "local_commands", drive_local_commands, cli, results)
             # Preflight (#223) before anything is launched: it launches nothing itself.
             run_section(results, "preflight", drive_preflight, cli, results)
+            # `doctor --region` (#250) launches nothing either.
+            run_section(results, "doctor_region", drive_doctor_region, cli, results)
             launched = drive_lifecycle(
                 cli,
                 binary,
@@ -7696,6 +8633,18 @@ def main() -> int:
                 binary,
                 Path(tmp) / "project",
                 aws.client("logs"),
+                results,
+            )
+            # `build --artifact-uri` with the suite's bucket set (#249), on its own build
+            # from a copy of the suite's artifact: the property is what S3 holds afterward,
+            # so it needs an object of its own to read back.
+            run_section(
+                results,
+                "caller_artifact",
+                drive_caller_artifact,
+                cli,
+                launched,
+                aws,
                 results,
             )
             # `Sandbox::ensure_image` (#221) on its own two builds and its own VM, through

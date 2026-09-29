@@ -45,7 +45,7 @@ use crate::cli::{
     PsArgs, RegionFlags, StdinArgs,
 };
 use crate::closed_output;
-use crate::commands::{Ctx, Rendered, STREAM_RESPONSE, response_type};
+use crate::commands::{Ctx, Rendered, STREAM_RESPONSE, explicit_region, response_type};
 use crate::exit::{CliError, Exit};
 use crate::history::{Event, History};
 use crate::seam::{Attach, state_dir};
@@ -80,11 +80,13 @@ const STDIN_CHUNK_BYTES: usize = 256 * 1024;
 ///
 /// A name resolves through the local registry (`ledger::Names`) with zero AWS calls: the record
 /// `run --keep --vm-name` wrote carries the endpoint, the agent token, the MicroVM id, *and the
-/// launch region* — so the caller types one word where they pasted four values. The record's
-/// region is used only when no `--region` flag was given: a flag is the caller overriding the
-/// record, which is the same precedence every other flag-versus-recorded-value pair here has.
-/// A name this state directory never registered fails with `ERR_PRECONDITION` naming the
-/// registry it looked in, because the record may simply live in another machine's state dir.
+/// launch region* — so the caller types one word where they pasted four values. The record is
+/// read through core's name rule (`Names::resolve`), the one `Sandbox.from_name` applies: the
+/// record's region is the region, and a `--region` that disagrees with it is refused with
+/// `ERR_INVALID_ARG` naming both, since a VM id addresses nothing in another region. A torn
+/// record is `ERR_PRECONDITION` naming its file. A name this state directory never registered
+/// fails with `ERR_PRECONDITION` naming the registry it looked in, because the record may simply
+/// live in another machine's state dir.
 ///
 /// The returned id is the one the session addresses, whichever spelling named it — the history
 /// append needs it, and reading it off the resolution here is what keeps a `--name` exec's
@@ -94,10 +96,41 @@ pub(crate) async fn attach<O: std::io::Write, E: std::io::Write>(
     region: &RegionFlags,
     flags: &AttachFlags,
 ) -> Result<(Session, String), CliError> {
+    let (session, microvm_id, _) = attach_in(ctx, region, flags).await?;
+    Ok((session, microvm_id))
+}
+
+/// [`attach`], also answering the region the session was attached in: the record's for a
+/// `--name`, so a later control-plane read about the same VM goes where the VM is.
+pub(crate) async fn attach_in<O: std::io::Write, E: std::io::Write>(
+    ctx: &Ctx<'_, O, E>,
+    region: &RegionFlags,
+    flags: &AttachFlags,
+) -> Result<(Session, String, microvms_core::Region), CliError> {
     let (attach, region) = resolve_attach(ctx, region, flags)?;
     let microvm_id = attach.microvm_id.clone();
-    let session = ctx.seam.attach_session(region, attach).await?;
-    Ok((session, microvm_id))
+    let session = ctx.seam.attach_session(region.clone(), attach).await?;
+    Ok((session, microvm_id, region))
+}
+
+/// The refusal for a legal name this state directory never registered, shared by every
+/// command that reads the registry through [`AttachFlags::name`].
+fn unregistered_name(name: &str, root: &std::path::Path) -> CliError {
+    CliError::new(
+        Exit::Precondition,
+        format!(
+            "no VM named {name:?} in {}. Names are local: `run --keep --vm-name {name}` \
+             registers one here, and a name registered on another machine lives in that \
+             machine's state directory.",
+            root.join("names").display(),
+        ),
+    )
+    .suggest("`microvm ls` shows this state directory's outstanding runs")
+    .suggest("pass the --endpoint/--agent-token/--microvm-id triple directly")
+    .suggest(
+        "`microvm attach --from <FILE>` adopts the record from the other machine's \
+         state directory, so `--name` works here from then on",
+    )
 }
 
 /// The triple and region an attach will use, from either spelling. Zero AWS calls.
@@ -112,30 +145,10 @@ fn resolve_attach<O: std::io::Write, E: std::io::Write>(
     if let Some(name) = &flags.name {
         let root = state_dir(flags.state_dir.clone(), ctx.env);
         let names = crate::ledger::Names::new(&root);
-        let Some(record) = names.lookup(name) else {
-            return Err(CliError::new(
-                Exit::Precondition,
-                format!(
-                    "no VM named {name:?} in {}. Names are local: `run --keep --vm-name {name}` \
-                     registers one here, and a name registered on another machine lives in that \
-                     machine's state directory.",
-                    root.join("names").display(),
-                ),
-            )
-            .suggest("`microvm ls` shows this state directory's outstanding runs")
-            .suggest("pass the --endpoint/--agent-token/--microvm-id triple directly")
-            .suggest(
-                "`microvm attach --from <FILE>` adopts the record from the other machine's \
-                 state directory, so `--name` works here from then on",
-            ));
+        let Some(record) = names.resolve(name, explicit_region(region).as_ref())? else {
+            return Err(unregistered_name(name, &root));
         };
-        // The flag wins over the record, so `exec --name x --region us-west-2` means what it
-        // says; the record's region is the default that makes the flag unnecessary.
-        let resolved_region = if region.region.is_some() || region.unlisted_region.is_some() {
-            region.resolve(ctx.env)?
-        } else {
-            microvms_core::Region::unlisted(&record.region)
-        };
+        let resolved_region = record.region();
         return Ok((
             Attach {
                 endpoint: record.endpoint,
@@ -248,7 +261,7 @@ pub async fn exec<O: std::io::Write, E: std::io::Write>(
         write_and_close(ctx, &handle, &bytes).await?;
     }
 
-    let timeout = Duration::from_secs_f64(args.timeout.max(0.0));
+    let timeout = args.timeout;
     if args.stream {
         return stream_exec(
             ctx,
@@ -707,11 +720,11 @@ pub async fn keepalive<O: std::io::Write, E: std::io::Write>(
     args: &KeepaliveArgs,
     interrupt: crate::commands::lifecycle::Interrupt<'_>,
 ) -> Result<Rendered, CliError> {
-    let (session, microvm_id) = attach(ctx, &args.region, &args.attach).await?;
-    let seconds = |value: f64| microvms_core::cost::duration_of_secs_f64(value);
+    let (session, microvm_id, region) = attach_in(ctx, &args.region, &args.attach).await?;
+    // Each seconds flag is already a `Duration`, refused at parse time (`cli::parse_seconds`).
     let idle_window = match args.idle_window {
-        Some(window) => Some(seconds(window)?),
-        None => match idle_window_of(ctx, &args.region, &microvm_id).await {
+        Some(window) => Some(window),
+        None => match idle_window_of(ctx, region, &microvm_id).await {
             Some(window) => Some(window),
             None => {
                 ctx.out.progress(
@@ -723,9 +736,9 @@ pub async fn keepalive<O: std::io::Write, E: std::io::Write>(
     };
     let mut policy = microvms_core::session::KeepAwake::new(idle_window)
         .while_busy(args.while_busy)
-        .max_duration(args.for_sec.map(seconds).transpose()?);
+        .max_duration(args.for_sec);
     if let Some(interval) = args.interval {
-        policy = policy.interval(seconds(interval)?);
+        policy = policy.interval(interval);
     }
     policy.validate()?;
     ctx.out.progress(&format!(
@@ -771,12 +784,15 @@ pub async fn keepalive<O: std::io::Write, E: std::io::Write>(
 }
 
 /// The VM's `maxIdleDurationSeconds`, or `None` when the control plane cannot say.
+///
+/// `region` is the one the session attached in, the record's for a `--name`: a read built from
+/// the flags or the environment would miss a VM registered elsewhere, and the 60-second
+/// fallback would then refuse an interval the VM's real window allows.
 async fn idle_window_of<O: std::io::Write, E: std::io::Write>(
     ctx: &mut Ctx<'_, O, E>,
-    region: &RegionFlags,
+    region: microvms_core::Region,
     microvm_id: &str,
 ) -> Option<std::time::Duration> {
-    let region = region.resolve(ctx.env).ok()?;
     let plane = ctx.seam.control_plane(region).await.ok()?;
     let policy = plane.get_microvm(microvm_id).await.ok()?.idle_policy?;
     Some(std::time::Duration::from_secs(u64::from(
@@ -1600,7 +1616,7 @@ async fn sync_pass<O: std::io::Write, E: std::io::Write>(
     session: &Session,
     dir: &std::path::Path,
     remote: Option<crate::sync::Manifest>,
-    delete_timeout: f64,
+    delete_timeout: Duration,
 ) -> Result<SyncPass, CliError> {
     let local = crate::sync::manifest(dir).map_err(sync_failure)?;
     let full = remote.is_none();
@@ -1665,8 +1681,8 @@ async fn sync_pass<O: std::io::Write, E: std::io::Write>(
             .run_sync(
                 microvms_core::protocol::exec::StartRequest::new(exec_id, command)
                     .with_cwd(Some(crate::sync::REMOTE_WORKDIR.into()))
-                    .with_timeout_sec(Some(delete_timeout)),
-                Duration::from_secs_f64(delete_timeout.max(1.0)) + SYNC_DELETE_GRACE,
+                    .with_timeout_sec(Some(delete_timeout.as_secs_f64())),
+                sync_client_wait(delete_timeout),
             )
             .await?;
         match result.outcome {
@@ -2028,7 +2044,6 @@ pub async fn attach_vm<O: std::io::Write, E: std::io::Write>(
 ) -> Result<Rendered, CliError> {
     let root = state_dir(args.state_dir.clone(), ctx.env);
     let names = crate::ledger::Names::new(&root);
-    let region_flag_given = args.region.region.is_some() || args.region.unlisted_region.is_some();
 
     let (mut record, region) = match &args.from {
         Some(source) => {
@@ -2048,13 +2063,17 @@ pub async fn attach_vm<O: std::io::Write, E: std::io::Write>(
             if let Some(name) = &args.name {
                 record.name = name.clone();
             }
-            // The flag wins over the record, the precedence every `--name` command uses;
-            // the record's launch region is the default that makes the flag unnecessary.
-            let region = if region_flag_given {
-                args.region.resolve(ctx.env)?
-            } else {
-                microvms_core::Region::unlisted(&record.region)
-            };
+            // Core's name rule, as every `--name` command reads a record: the VM is where the
+            // record says, and a disagreeing flag would only move the probe's token mint to a
+            // region where this VM doesn't exist.
+            let name = record.name.clone();
+            let mut record = microvms_core::names::resolve_record(
+                &name,
+                Some(record),
+                &shown(source),
+                explicit_region(&args.region).as_ref(),
+            )?;
+            let region = record.region();
             record.region = region.as_str().to_string();
             (record, region)
         }
@@ -2606,10 +2625,14 @@ pub async fn tunnel<O: std::io::Write, E: std::io::Write>(
             (Some(seed), Some(pin), _) => (seed.clone(), pin.clone()),
             (None, None, Some(name)) => {
                 let root = state_dir(args.attach.state_dir.clone(), ctx.env);
-                let record = crate::ledger::Names::new(&root).lookup(name);
-                match record
-                    .and_then(|record| record.identity_host_seed.zip(record.identity_vm_public_key))
-                {
+                // Core's read, not the collision check's: a torn record is its own refusal,
+                // naming the file, rather than a record that seems to lack the pair.
+                let Some(record) = crate::ledger::Names::new(&root)
+                    .resolve(name, explicit_region(&args.region).as_ref())?
+                else {
+                    return Err(unregistered_name(name, &root));
+                };
+                match record.identity_host_seed.zip(record.identity_vm_public_key) {
                     Some(pair) => pair,
                     None => {
                         return Err(CliError::new(
@@ -2876,7 +2899,7 @@ pub async fn shell<O: std::io::Write, E: std::io::Write>(
     let (endpoint, microvm_id, region) = if let Some(name) = &args.name {
         let root = state_dir(args.state_dir.clone(), ctx.env);
         let names = crate::ledger::Names::new(&root);
-        let Some(record) = names.lookup(name) else {
+        let Some(record) = names.resolve(name, explicit_region(&args.region).as_ref())? else {
             return Err(CliError::new(
                 Exit::Precondition,
                 format!(
@@ -2893,11 +2916,7 @@ pub async fn shell<O: std::io::Write, E: std::io::Write>(
                  state directory, so `--name` works here from then on",
             ));
         };
-        let region = if args.region.region.is_some() || args.region.unlisted_region.is_some() {
-            args.region.resolve(ctx.env)?
-        } else {
-            microvms_core::Region::unlisted(&record.region)
-        };
+        let region = record.region();
         (record.endpoint, record.microvm_id, region)
     } else {
         let expect = |value: &Option<String>, flag: &str| -> Result<String, CliError> {
@@ -3000,6 +3019,15 @@ pub async fn shell<O: std::io::Write, E: std::io::Write>(
 /// Re-exported so [`ErrorKind`] is nameable in this module's documentation.
 #[allow(unused_imports, reason = "named in the documentation above")]
 use ErrorKind as _DocsOnly;
+
+/// How long the client waits for a sync's `rm`: the daemon's own budget plus the grace for the
+/// answer to come back, so the daemon's deadline, not the client's, is what ends a slow one.
+///
+/// A function of its own so the arithmetic has a test: the sync guards run a 60 s budget
+/// against a daemon that answers at once, so nothing else would notice a `-` for the `+`.
+fn sync_client_wait(budget: Duration) -> Duration {
+    budget + SYNC_DELETE_GRACE
+}
 
 #[cfg(test)]
 mod tests {
@@ -3264,5 +3292,19 @@ mod tests {
         assert_eq!(rendered.data["outcome"]["exit_code"], 0);
         assert_eq!(rendered.data["outcome"]["timed_out"], true);
         assert_eq!(rendered.data["stdout"], "partial report");
+    }
+
+    /// A sync's `rm` waits its budget plus the delete grace, with no floor of its own: the
+    /// daemon's deadline is the budget, so a zero one is the daemon's to refuse.
+    ///
+    /// **Falsification**: `guards/faults.toml` entry `cli-sync-client-wait` turns the `+` into a
+    /// `-`, cargo-mutants' own mutant, and the 60 s row reads 30 s.
+    #[test]
+    fn a_sync_waits_its_budget_plus_the_delete_grace() {
+        assert_eq!(
+            sync_client_wait(Duration::from_secs(60)),
+            Duration::from_secs(90)
+        );
+        assert_eq!(sync_client_wait(Duration::ZERO), Duration::from_secs(30));
     }
 }

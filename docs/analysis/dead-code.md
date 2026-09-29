@@ -31,7 +31,7 @@ anywhere in the git-tracked tree. `contains` edges are excluded because every sy
 551 after dropping test files and `#[cfg(test)]` modules → 465 after dropping two whole-file
 test-only modules → 112 after the alias-aware reference search → 2 after removing 110 trait
 and language-protocol members → **1** after hand-dropping a trait associated type
-(`microvms-js/src/exec.rs:267`, `type Return = ()` inside
+(`microvms-js/src/exec.rs:273`, `type Return = ()` inside
 `impl AsyncGenerator for ExecStream`) that the automated filter missed because it matched
 trait methods but not associated types. No dead-code analyzer is integrated in this repo
 (no `cargo-udeps`, `cargo-machete`, `vulture`, or `knip` in `mise.toml`, `Cargo.toml`,
@@ -91,7 +91,7 @@ files that a basename search calls orphans, each cleared against its real invoca
 | `microvms-py/tests/test_stubs.py` | `pytest microvms-py/tests -q` at `.github/workflows/ci.yml:308`; pytest auto-discovers `test_*.py`, so no file names it |
 | `microvms-js/__test__/support/decimal.mjs` | `microvms-js/__test__/cost.mjs:40` |
 | `microvms-js/__test__/support/sse.mjs` | `microvms-js/__test__/cost.mjs:41`, `microvms-js/__test__/errors.mjs:40`, `microvms-js/__test__/exec.mjs:44`, `microvms-js/__test__/process.mjs:31`, `microvms-js/__test__/session.mjs:33` |
-| `conformance/infra/main.tf` | `terraform -chdir=conformance/infra` at `mise.toml:54`, `mise.toml:95`, `mise.toml:459`, `mise.toml:701` |
+| `conformance/infra/main.tf` | `terraform -chdir=conformance/infra` at `mise.toml:54`, `mise.toml:95`, `mise.toml:482`, `mise.toml:726` |
 
 Two files are compiled only under `cfg(test)` and are live test code, not dead source:
 `microvms-cli/src/guards.rs` (inner `#![cfg(test)]` at `microvms-cli/src/guards.rs:20`, plus
@@ -103,8 +103,8 @@ Two files are compiled only under `cfg(test)` and are live test code, not dead s
 
 | Path | Symbol | Imported from |
 | --- | --- | --- |
-| `microvms-cli/src/commands/lifecycle.rs:2445` | `_DocsOnly` (alias of `ControlPlane`) | `microvms_core::control::ControlPlane`, re-bound from `microvms-cli/src/commands/lifecycle.rs:69` |
-| `microvms-cli/src/commands/attached.rs:932` | `_DocsOnly` (alias of `ErrorKind`) | `microvms_core::ErrorKind`, re-bound from `microvms-cli/src/commands/attached.rs:40` |
+| `microvms-cli/src/commands/lifecycle.rs:2495` | `_DocsOnly` (alias of `ControlPlane`) | `microvms_core::control::ControlPlane`, re-bound from `microvms-cli/src/commands/lifecycle.rs:69` |
+| `microvms-cli/src/commands/attached.rs:948` | `_DocsOnly` (alias of `ErrorKind`) | `microvms_core::ErrorKind`, re-bound from `microvms-cli/src/commands/attached.rs:40` |
 
 **Confidence: high that nothing names `_DocsOnly`; do not delete either line on its own.**
 Both carry `#[allow(unused_imports, reason = …)]`, so `rustc` never reports them, and both
@@ -120,7 +120,7 @@ three-line construct (doc comment, attribute, `use`), and rebuilding:
 - `cargo doc --no-deps -p microvms-cli` emits the same eight warnings with or without the
   constructs, and neither `ControlPlane` nor `ErrorKind` appears among them. The stated
   reason — "Re-exported so `[ControlPlane]` is nameable in this module's docs"
-  (`microvms-cli/src/commands/lifecycle.rs:2443`) — is not the mechanism. The intra-doc link
+  (`microvms-cli/src/commands/lifecycle.rs:2493`) — is not the mechanism. The intra-doc link
   at `microvms-cli/src/commands/lifecycle.rs:10` resolves from the `:69` import directly.
 
 The two differ in whether the whole construct earns its place:

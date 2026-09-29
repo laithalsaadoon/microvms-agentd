@@ -140,7 +140,7 @@ impl CompletionPlan {
         handle: &ExecHandle,
         on_output: Option<OutputSink>,
     ) -> Result<ExecResult, Error> {
-        let deadline = tokio::time::Instant::now() + self.deadline;
+        let deadline = super::deadline_after(self.deadline);
         if let Some(sink) = on_output {
             match tokio::time::timeout_at(deadline, self.stream(handle, sink)).await {
                 Err(_elapsed) => return self.after_deadline(handle).await,
@@ -193,7 +193,7 @@ impl CompletionPlan {
             Ok(false) => KillAnswer::AlreadyGone,
             Err(error) => KillAnswer::Failed(error.to_string()),
         };
-        let grace = tokio::time::Instant::now() + self.options.client_grace;
+        let grace = super::deadline_after(self.options.client_grace);
         match wait_and_ack_until(handle, grace).await {
             Ok(mut result) => {
                 result.client_deadline = Some(ClientDeadline {
@@ -776,6 +776,80 @@ mod tests {
         assert!(
             recorder.requests().is_empty(),
             "a refused plan started an exec"
+        );
+    }
+
+    // ── #268: a deadline past what the clock can add to now ──────────────────
+
+    /// **#268: a client deadline too long for the clock to add to now still waits.** A binding's
+    /// `run_to_completion` takes any `timeout_sec` a `Duration` holds, and the plan adds the
+    /// grace to it, so `1e19` used to panic in `drive` with the exec already started.
+    ///
+    /// **Falsification**: `guards/faults.toml` entry `app-completion-deadline-overflows` puts
+    /// the unchecked `Instant::now() + self.deadline` back in `drive`, and the call panics.
+    #[tokio::test(start_paused = true)]
+    async fn a_client_deadline_longer_than_the_clock_can_hold_still_waits() {
+        let recorder = Recorder::with([
+            started(),
+            running(),
+            finished("exited", Some(0), None, "out"),
+            finished("acked", Some(0), None, "out"),
+        ]);
+        let (session, _, _) = session_with(Arc::clone(&recorder));
+
+        let result = session
+            .run_to_completion(request(Some(1e19)), options(60), None)
+            .await
+            .expect("a far deadline waits for the exit");
+        assert_eq!(result.stdout(), "out");
+        assert!(
+            result.client_deadline.is_none(),
+            "{:?}",
+            result.client_deadline
+        );
+    }
+
+    /// **#268: a client grace too long for the clock to add to now still acks.** With no
+    /// `timeout_sec` the deadline is the VM's longest life, and a binding's `client_grace_sec`
+    /// can be any figure a `Duration` holds, so once that deadline passed, the kill went out and
+    /// then the grace panicked. The plan is built here with its deadline already spent, which is
+    /// the state `drive` reaches after the ceiling.
+    ///
+    /// **Falsification**: `guards/faults.toml` entry `app-completion-grace-overflows` puts the
+    /// unchecked `Instant::now() + self.options.client_grace` back in `after_deadline`, and the
+    /// call panics after the kill.
+    #[tokio::test(start_paused = true)]
+    async fn a_client_grace_longer_than_the_clock_can_hold_still_acks() {
+        let recorder = Recorder::with([
+            started(),
+            running(),
+            killed(true),
+            finished("exited", None, Some(15), "partial"),
+            finished("acked", None, Some(15), "partial"),
+        ]);
+        let (session, _, _) = session_with(Arc::clone(&recorder));
+        let plan = CompletionPlan {
+            deadline: Duration::ZERO,
+            options: CompletionOptions {
+                client_grace: Duration::MAX,
+                ..options(0)
+            },
+        };
+
+        let handle = session.run(request(None)).await.expect("starts");
+        let result = plan
+            .drive(&handle, None)
+            .await
+            .expect("the killed exec's result");
+        assert_eq!(result.stdout(), "partial");
+        assert_eq!(
+            result.client_deadline.map(|deadline| deadline.kill),
+            Some(KillAnswer::Signalled)
+        );
+        assert!(
+            route(&recorder).iter().any(|r| r.ends_with("/kill")),
+            "{:?}",
+            route(&recorder)
         );
     }
 }

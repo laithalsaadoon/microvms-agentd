@@ -22,6 +22,12 @@
 # is one the other surfaces don't make, with retries they don't share. Paths are core's
 # re-exports, and clippy resolves a path to the item it names, so an import alias, a UFCS call
 # or a path through another re-export is refused the same way.
+#
+# `Duration::from_secs_f64` and `from_secs_f32` are banned (#268): they panic on an infinite or
+# too-large figure, and the `.max(0.0)` the CLI wrote in front of them turned `NaN` into zero.
+# Seconds from a caller go through `microvms_core::cost::duration_of_secs_f64`, which refuses
+# a negative, NaN, infinite or too-large figure with `ERR_INVALID_ARG`, the same way on every
+# surface.
 
 disallowed-types = [
   { path = "std::process::Command", reason = "a subprocess belongs below the adapter: behind a port in microvms-app, implemented in microvms-edges" },
@@ -45,4 +51,6 @@ disallowed-methods = [
   { path = "microvms_core::control::transport::Transport::send", reason = "a control-plane call belongs in microvms-app, which names the operation, builds the request and owns retries; call the ControlPlane method that wraps it" },
   { path = "microvms_core::control::ControlPlane::from_ports", reason = "a control plane over a hand-picked transport is a second path to AWS; core's ControlPlane::new wires the signed transport (the CLI gets it through src/seam.rs)" },
   { path = "microvms_core::prelude::ControlPlaneExt::with_transport", reason = "a control plane over a hand-picked transport is a second path to AWS; core's ControlPlane::new wires the signed transport (the CLI gets it through src/seam.rs)" },
+  { path = "std::time::Duration::from_secs_f64", reason = "seconds from a caller go through microvms_core::cost::duration_of_secs_f64, which refuses a negative, NaN, infinite or too-large figure with ERR_INVALID_ARG; this conversion panics on them (#268)" },
+  { path = "std::time::Duration::from_secs_f32", reason = "seconds from a caller go through microvms_core::cost::duration_of_secs_f64, which refuses a negative, NaN, infinite or too-large figure with ERR_INVALID_ARG; this conversion panics on them (#268)" },
 ]
