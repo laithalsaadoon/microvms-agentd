@@ -100,7 +100,7 @@ pub enum Command {
     /// The whole sequence as one command. Tears down by default: a CLI that leaves a
     /// billable VM running because someone closed a laptop is worse than no CLI. `--keep`
     /// opts out and prints the identifiers you have just taken responsibility for.
-    Run(RunArgs),
+    Run(Box<RunArgs>), // Boxed: RunArgs alone would size the whole enum (large_enum_variant).
 
     /// Zero to a live exec: provision the daemon, build, launch, run, report, tear down.
     ///
@@ -524,10 +524,10 @@ pub struct AttachFlags {
     ///
     /// Resolved through the local name registry (`--state-dir`, or $MICROVM_STATE_DIR, or
     /// ~/.microvm/runs) with zero AWS calls: the record carries the endpoint, the agent
-    /// token, the MicroVM id, and the launch region, so `exec --name ci-runner` is the
-    /// triple without the pasting. A name this state directory never registered fails
-    /// locally with ERR_PRECONDITION. Conflicts with the explicit triple, because a name
-    /// *is* the triple and a caller supplying both is two answers to "which VM".
+    /// token, the MicroVM id, and the region, so `exec --name ci-runner` is the triple
+    /// without the pasting. A name this directory never registered is ERR_PRECONDITION,
+    /// and a --region that disagrees with the record is ERR_INVALID_ARG. Conflicts with
+    /// the explicit triple: a name *is* the triple, and both are two answers to "which VM".
     #[arg(long, value_name = "NAME", conflicts_with_all = ["endpoint", "agent_token", "microvm_id"])]
     pub name: Option<String>,
 
@@ -746,10 +746,10 @@ pub struct RunArgs {
 
     /// Where the build artifact already is, as an s3:// URI.
     ///
-    /// microvms-core builds the artifact bytes and takes the URI; this command's create path
-    /// does not upload. Pass this when you have uploaded already; pass --bucket to have the
-    /// artifact uploaded with the `aws` CLI.
-    #[arg(long, value_name = "S3_URI")]
+    /// Nothing is uploaded to it, even with --bucket or $MICROVM_BUCKET set, and no daemon is
+    /// provisioned: the image is built from your object. --dockerfile is refused beside it, as
+    /// it only shapes an artifact the CLI builds; leave this out and pass --bucket for that.
+    #[arg(long, value_name = "S3_URI", conflicts_with = "dockerfile")]
     pub artifact_uri: Option<String>,
 
     /// A shell command to run in the VM.
@@ -916,8 +916,8 @@ pub struct RunArgs {
     pub launch: VmLaunchFlags,
 
     /// How long to wait for the exec, in seconds.
-    #[arg(long, default_value_t = 300.0)]
-    pub timeout: f64,
+    #[arg(long, default_value = "300", value_parser = parse_seconds)]
+    pub timeout: std::time::Duration,
 
     /// Suspend the VM after this much inbound-traffic idleness.
     #[arg(long, default_value_t = 600)]
@@ -1006,7 +1006,7 @@ pub struct BuildArgs {
     pub state_dir: Option<PathBuf>,
 
     /// Where the build artifact already is, as an s3:// URI. See `run --artifact-uri`.
-    #[arg(long, value_name = "S3_URI")]
+    #[arg(long, value_name = "S3_URI", conflicts_with_all = ["dockerfile", "project"])]
     pub artifact_uri: Option<String>,
 
     /// Image name. Defaults to a per-invocation name.
@@ -1081,10 +1081,10 @@ pub struct BuildArgs {
     /// clientToken replay in docs/PLATFORM.md). Keying the name to the content hash gives
     /// both properties at once: unchanged inputs reuse their image, changed inputs get a
     /// fresh name and therefore a fresh build. The match is on binary+Dockerfile (plus
-    /// the --project pair when given) —
-    /// `--memory` is not part of the identity, so a reused image keeps the size class it
-    /// was created with.
-    #[arg(long)]
+    /// the --project pair when given); `--memory` isn't part of it, so a reused image keeps
+    /// its size class. Refused with --artifact-uri: the hash covers only local inputs, and an
+    /// image built from your object under that name would answer a later plain --reuse.
+    #[arg(long, conflicts_with = "artifact_uri")]
     pub reuse: bool,
 
     /// The daemon's port inside the guest.
@@ -1105,8 +1105,8 @@ pub struct ExecArgs {
     pub command: Option<String>,
 
     /// How long to wait for the command, in seconds.
-    #[arg(long, default_value_t = 300.0)]
-    pub timeout: f64,
+    #[arg(long, default_value = "300", value_parser = parse_seconds)]
+    pub timeout: std::time::Duration,
 
     /// Working directory.
     ///
@@ -1278,20 +1278,20 @@ pub struct ExecArgs {
 #[derive(Args, Debug)]
 pub struct KeepaliveArgs {
     /// Seconds between health polls. Default: a third of the idle window, at most 20.
-    #[arg(long, value_name = "SECONDS")]
-    pub interval: Option<f64>,
+    #[arg(long, value_name = "SECONDS", value_parser = parse_seconds)]
+    pub interval: Option<std::time::Duration>,
 
     /// Stop once the daemon reports no running exec.
     #[arg(long)]
     pub while_busy: bool,
 
     /// Stop after this many seconds, busy or not.
-    #[arg(long = "for", value_name = "SECONDS")]
-    pub for_sec: Option<f64>,
+    #[arg(long = "for", value_name = "SECONDS", value_parser = parse_seconds)]
+    pub for_sec: Option<std::time::Duration>,
 
     /// The VM's `maxIdleDurationSeconds`. Read from the control plane when omitted.
-    #[arg(long, value_name = "SECONDS")]
-    pub idle_window: Option<f64>,
+    #[arg(long, value_name = "SECONDS", value_parser = parse_seconds)]
+    pub idle_window: Option<std::time::Duration>,
 
     #[command(flatten)]
     pub attach: AttachFlags,
@@ -1609,8 +1609,8 @@ pub struct SyncArgs {
     pub full: bool,
 
     /// How long the in-guest deletion of locally-removed paths may take, in seconds.
-    #[arg(long, default_value_t = 60.0)]
-    pub timeout: f64,
+    #[arg(long, default_value = "60", value_parser = parse_seconds)]
+    pub timeout: std::time::Duration,
 
     #[command(flatten)]
     pub attach: AttachFlags,
@@ -1696,9 +1696,9 @@ pub struct AttachArgs {
     #[arg(long)]
     pub state_dir: Option<PathBuf>,
 
-    /// The region the record stores and the probe mints against. With `--from`, the
-    /// record's own region is the default and a flag overrides it — the precedence every
-    /// `--name` command uses.
+    /// The region the record stores and the probe mints against. With `--from`, it's the
+    /// record's own region, and a flag that disagrees with it is refused with
+    /// ERR_INVALID_ARG, the answer every `--name` command gives.
     #[command(flatten)]
     pub region: RegionFlags,
 }
@@ -1710,8 +1710,8 @@ pub struct SuspendArgs {
     pub microvm_id: String,
 
     /// How long to wait for the state transition, in seconds.
-    #[arg(long, default_value_t = 300.0)]
-    pub timeout: f64,
+    #[arg(long, default_value = "300", value_parser = parse_seconds)]
+    pub timeout: std::time::Duration,
 
     /// Where the VM's history is appended. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs.
     #[arg(long)]
@@ -1728,8 +1728,8 @@ pub struct ResumeArgs {
     pub microvm_id: String,
 
     /// How long to wait for RUNNING, in seconds.
-    #[arg(long, default_value_t = 300.0)]
-    pub timeout: f64,
+    #[arg(long, default_value = "300", value_parser = parse_seconds)]
+    pub timeout: std::time::Duration,
 
     /// Where the VM's history is appended. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs.
     #[arg(long)]
@@ -1900,8 +1900,8 @@ pub struct CostArgs {
     pub cycles: u32,
 
     /// The hold to compare running against suspended over, in seconds.
-    #[arg(long, default_value_t = 3600.0)]
-    pub hold_sec: f64,
+    #[arg(long, default_value = "3600", value_parser = parse_seconds)]
+    pub hold_sec: std::time::Duration,
 
     /// A budget in USD the report's total is checked against (#77).
     ///
@@ -2141,8 +2141,8 @@ pub struct AgentPromptArgs {
     pub reap_group_on_exit: bool,
 
     /// Caller wait limit in seconds. Does not stop the agent when the wait expires.
-    #[arg(long, default_value_t = 900.0)]
-    pub timeout: f64,
+    #[arg(long, default_value = "900", value_parser = parse_seconds)]
+    pub timeout: std::time::Duration,
 
     /// Start the agent and return immediately, without waiting and without acking.
     ///
@@ -2206,6 +2206,21 @@ fn parse_env_pair(pair: &str) -> Result<(String, String), String> {
         ));
     }
     Ok((key.to_string(), value.to_string()))
+}
+
+/// A flag's seconds, as a duration, refused when they can't be one.
+///
+/// A parser rather than a conversion in the handler, because the refusal has to come before the
+/// work: `exec` converted after the command had started in the VM, `run` after the launch, and
+/// `suspend` and `resume` after the call was sent, so `inf` panicked with a VM running and `NaN`
+/// quietly meant zero (#268). The conversion is core's `duration_of_secs_f64`, the one both
+/// bindings call for their waits, so all three surfaces refuse the same values with the same
+/// message.
+fn parse_seconds(raw: &str) -> Result<std::time::Duration, String> {
+    let seconds: f64 = raw
+        .parse()
+        .map_err(|_| format!("{raw:?} is not a number of seconds"))?;
+    microvms_core::cost::duration_of_secs_f64(seconds).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -3227,5 +3242,103 @@ mod tests {
         assert_eq!(run.egress_network_connectors, ["arn:first", "arn:second"]);
         assert!(Cli::try_parse_from(args.into_iter().chain(["--egress"])).is_err());
         assert!(Cli::try_parse_from(args.into_iter().chain(["--deny-egress"])).is_ok());
+    }
+
+    /// The `Duration` a seconds flag parsed to, read off the parsed command by flag name.
+    fn parsed_seconds(command: &Command, flag: &str) -> Option<std::time::Duration> {
+        match (command, flag) {
+            (Command::Exec(args), "--timeout") => Some(args.timeout),
+            (Command::Run(args), "--timeout") => Some(args.timeout),
+            (Command::Sync(args), "--timeout") => Some(args.timeout),
+            (Command::Suspend(args), "--timeout") => Some(args.timeout),
+            (Command::Resume(args), "--timeout") => Some(args.timeout),
+            (Command::Cost(args), "--hold-sec") => Some(args.hold_sec),
+            (Command::AgentPrompt(args), "--timeout") => Some(args.timeout),
+            (Command::Keepalive(args), "--interval") => args.interval,
+            (Command::Keepalive(args), "--for") => args.for_sec,
+            (Command::Keepalive(args), "--idle-window") => args.idle_window,
+            _ => None,
+        }
+    }
+
+    /// **#268.** Every flag that takes seconds refuses, at parse time, a value that isn't a
+    /// duration: non-finite, negative, too large for one, or not a number. Zero, a fraction and
+    /// a whole figure parse to exactly that duration, and those rows are also what keep the
+    /// refusals from passing on an argv that fails for some other reason (a missing positional,
+    /// a renamed flag).
+    ///
+    /// **Falsification**: `guards/faults.toml` entries `cli-seconds-parse-table` (the refusal
+    /// becomes a silent zero, and every refused row but `abc` parses) and
+    /// `cli-seconds-parse-truncates` (a fraction loses its sub-second part, and `0.5` reads 0s).
+    #[test]
+    fn every_seconds_flag_refuses_what_is_not_a_duration() {
+        use std::time::Duration;
+        let attached = ["--endpoint", "https://mvm-1.example", "--agent-token", "t"];
+        let with_id =
+            |rest: &[&'static str]| [&attached[..], &["--microvm-id", "mvm-1"], rest].concat();
+        let flags: [(&str, Vec<&str>, &str); 10] = [
+            ("exec", with_id(&["true"]), "--timeout"),
+            ("run", vec!["--no-config"], "--timeout"),
+            ("sync", with_id(&["."]), "--timeout"),
+            ("suspend", vec!["mvm-1"], "--timeout"),
+            ("resume", vec!["mvm-1"], "--timeout"),
+            ("cost", vec!["--compare"], "--hold-sec"),
+            (
+                "agent-prompt",
+                vec!["--name", "review", "a task"],
+                "--timeout",
+            ),
+            ("keepalive", with_id(&[]), "--interval"),
+            ("keepalive", with_id(&[]), "--for"),
+            ("keepalive", with_id(&[]), "--idle-window"),
+        ];
+        let refused = ["inf", "infinity", "NaN", "-inf", "-5", "1e300", "abc"];
+        let accepted = [
+            ("0", Duration::ZERO),
+            ("0.5", Duration::from_millis(500)),
+            ("1.25", Duration::from_millis(1250)),
+            ("300", Duration::from_secs(300)),
+        ];
+
+        let mut misses = Vec::new();
+        for (command, rest, flag) in &flags {
+            let values = refused.iter().map(|value| (*value, None)).chain(
+                accepted
+                    .iter()
+                    .map(|(value, parsed)| (*value, Some(*parsed))),
+            );
+            for (value, expected) in values {
+                let assignment = format!("{flag}={value}");
+                let argv = ["microvm", command]
+                    .into_iter()
+                    .chain(rest.iter().copied())
+                    .chain([assignment.as_str()]);
+                let label = format!("{command} {assignment}");
+                match (Cli::try_parse_from(argv), expected) {
+                    (Ok(cli), Some(expected)) => {
+                        let parsed = parsed_seconds(&cli.command, flag);
+                        if parsed != Some(expected) {
+                            misses.push(format!("{label} parsed to {parsed:?}, not {expected:?}"));
+                        }
+                    }
+                    (Ok(_), None) => misses.push(format!("{label} parsed")),
+                    (Err(error), Some(_)) => {
+                        misses.push(format!("{label} refused: {}", error.render()));
+                    }
+                    (Err(error), None) => {
+                        let rendering = error.render().to_string();
+                        if error.kind() != clap::error::ErrorKind::ValueValidation
+                            || !rendering.contains(flag)
+                        {
+                            misses.push(format!(
+                                "{label} refused as {:?}: {rendering}",
+                                error.kind()
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(misses.is_empty(), "{}", misses.join("\n"));
     }
 }

@@ -28,7 +28,7 @@ import http from 'node:http';
 import { test } from 'node:test';
 
 import { GapPolicy, Session, sessionConstants } from '../index.js';
-import { exitFrame, gapFrame, outputFrame } from './support/sse.mjs';
+import { codeOf, exitFrame, gapFrame, outputFrame, wireKindOf } from './support/sse.mjs';
 
 /** A syntactically valid exec id, in the `x-<16 hex>` shape the client mints. */
 const EXEC_ID = 'x-00000000000000ff';
@@ -41,7 +41,9 @@ const EXEC_ID = 'x-00000000000000ff';
  * the shared helper's single-purpose shape is what makes `exec.mjs` readable.
  *
  * `scripts` is one array of frames per attach, so a two-element `scripts` expresses a **cut and
- * reconnect**: the first response ends with no `exit` frame.
+ * reconnect**: the first response ends with no `exit` frame. An entry `{ status: N }` in place of
+ * a frame array answers that attach with status `N` and a small JSON error body, which is how a
+ * test makes the daemon refuse a reconnect.
  */
 async function startSpawnServer(scripts, { pollPhases = [] } = {}) {
   const requestedPaths = [];
@@ -76,6 +78,15 @@ async function startSpawnServer(scripts, { pollPhases = [] } = {}) {
       // A script that ran out answers an empty body, which the core reads as a cut. Better
       // than hanging: a test that over-attaches should fail on its own assertion.
       const frames = scripts[attach++] ?? [];
+      if (!Array.isArray(frames)) {
+        const body = JSON.stringify({ error: 'unauthorized' });
+        response.writeHead(frames.status, {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(body),
+        });
+        response.end(body, streamServed);
+        return;
+      }
       const body = frames.join('');
       response.writeHead(200, {
         'content-type': 'text/event-stream',
@@ -341,6 +352,11 @@ test('a gap errors both streams by default and names the range to resume from', 
   // only behaviour — makes this red: both loops finish normally, `out.text` is
   // `'beforeafter'`, and a consumer reading it cannot tell that 894 bytes are missing.
   // Verified.
+  //
+  // **Falsification**: putting the bare `napi::Error::new(GenericFailure, message)` back in the
+  // drive's gap branch turns this red with `undefined` for the code, and so does a stderr copy
+  // of the rejection that drops its `cause`. A stderr copy that keeps the chain but blanks its
+  // reason turns it red on the stderr message.
   const server = await startSpawnServer([
     [
       outputFrame(0, 'before', 'stdout'),
@@ -371,6 +387,22 @@ test('a gap errors both streams by default and names the range to resume from', 
     // The bytes that did arrive are still delivered: an errored stream is not an empty one, and
     // a caller resuming at 900 needs to know it already has [0, 6).
     assert.equal(out.text, 'before', 'the bytes before the gap were discarded');
+    // Typed like `ExecHandle.stream({ errorOnGap: true })`'s gap, on both sides, so a caller can
+    // tell lost output from a transport failure it could retry.
+    for (const [name, side] of [['stdout', out], ['stderr', err]]) {
+      // stderr's rejection is a copy of stdout's, so its text is checked on its own.
+      assert.match(
+        side.error.message,
+        /\[6, 900\)/,
+        `${name}: the message names the lost range: ${side.error.message}`,
+      );
+      assert.equal(codeOf(side.error), 'ERR_PLATFORM', `${name}: the ERR_ code is on the cause`);
+      assert.equal(
+        wireKindOf(side.error),
+        'OutputGap',
+        `${name}: the wire kind is one level deeper`,
+      );
+    }
   } finally {
     await server.close();
   }
@@ -420,6 +452,126 @@ test('a gap advances the cursor so a reconnect does not ask for evicted bytes', 
       [0, 900],
       'the reconnect asked for bytes the daemon had already evicted',
     );
+  } finally {
+    await server.close();
+  }
+});
+
+// -- a drive error, typed like every other rejection --------------------------
+
+test('an exhausted reconnect budget rejects both streams with its code', async () => {
+  // A body that ends without an `exit` frame is a cut, and `maxReconnects: 0` spends the budget
+  // on the first one, so the drive itself fails. The code is what lets a caller tell a budget it
+  // could retry from a refusal it can't; no daemon status is involved, so there's no wire kind.
+  //
+  // **Falsification**: flattening the drive error to `error.to_string()` in a bare
+  // `napi::Error::new(GenericFailure, message)` turns this red with `undefined` for the code.
+  // Rebuilding the error with its kind but a message of the binding's own turns it red on the
+  // message, which must stay the drive error's own text.
+  const server = await startSpawnServer([[outputFrame(0, 'AA', 'stdout')]]);
+  try {
+    const proc = await spawnAgainst(server, { maxReconnects: 0 });
+    const [out, err] = await Promise.all([
+      readCatching(proc.stdout),
+      readCatching(proc.stderr),
+    ]);
+
+    assert.equal(out.text, 'AA', 'the bytes before the cut were discarded');
+    for (const [name, side] of [['stdout', out], ['stderr', err]]) {
+      assert.ok(side.error, `${name} finished normally after the budget ran out`);
+      assert.match(
+        side.error.message,
+        /last good offset 2/,
+        `${name}: the message is the drive error text: ${side.error.message}`,
+      );
+      assert.equal(
+        codeOf(side.error),
+        'ERR_RETRYABLE',
+        `${name}: the ERR_ code is on the cause`,
+      );
+      assert.equal(
+        wireKindOf(side.error),
+        undefined,
+        `${name}: a client-side budget has no wire kind`,
+      );
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test('a refused reconnect rejects both streams with its code and wire kind', async () => {
+  // The reconnect reaches the daemon and it answers 401, so both levels of the chain are there:
+  // the code a caller branches on and the daemon's status class under it.
+  //
+  // **Falsification**: flattening the drive error to `error.to_string()` in a bare
+  // `napi::Error::new(GenericFailure, message)` turns this red with `undefined` for the code.
+  // Rebuilding the error with its kind and wire kind but a message of the binding's own turns it
+  // red on the message, which must still name the request and the status.
+  const server = await startSpawnServer([[outputFrame(0, 'AA', 'stdout')], { status: 401 }]);
+  try {
+    const proc = await spawnAgainst(server);
+    const [out, err] = await Promise.all([
+      readCatching(proc.stdout),
+      readCatching(proc.stderr),
+    ]);
+
+    assert.deepEqual(
+      server.offsetsRequested(),
+      [0, 2],
+      'the refusal should come on the reconnect, at the cursor',
+    );
+    for (const [name, side] of [['stdout', out], ['stderr', err]]) {
+      assert.ok(side.error, `${name} finished normally after a refused reconnect`);
+      assert.match(
+        side.error.message,
+        /offset=2 -> 401/,
+        `${name}: the message is the drive error text: ${side.error.message}`,
+      );
+      assert.equal(
+        codeOf(side.error),
+        'ERR_CREDENTIALS',
+        `${name}: the ERR_ code is on the cause`,
+      );
+      assert.equal(
+        wireKindOf(side.error),
+        'Unauthorized',
+        `${name}: the wire kind is one level deeper`,
+      );
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test('a stderr reader gets the drive error while a stdout chunk sits unread', async () => {
+  // Each stream's channel holds one chunk. Here stdout's slot is full when the drive fails, and
+  // the caller reads stderr to the end before it touches stdout, the order a harness that
+  // collects stderr first uses. stderr's rejection must not wait on the stdout reader.
+  //
+  // **Falsification**: sending the two rejections one after the other, stdout first, turns this
+  // red: stdout's send parks on the unread chunk, so stderr's read never settles.
+  const server = await startSpawnServer([[outputFrame(0, 'AA', 'stdout')]]);
+  try {
+    const proc = await spawnAgainst(server, { maxReconnects: 0 });
+    const stderrRead = readCatching(proc.stderr);
+    let timer;
+    const first = await Promise.race([
+      stderrRead,
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve('timed out'), 3000);
+      }),
+    ]);
+    clearTimeout(timer);
+    // Drain stdout either way, so the drive can finish and a red run still ends.
+    const out = await readCatching(proc.stdout);
+    await stderrRead;
+
+    assert.notEqual(first, 'timed out', 'stderr never settled while stdout held a chunk');
+    assert.ok(first.error, 'stderr finished normally after the budget ran out');
+    assert.equal(codeOf(first.error), 'ERR_RETRYABLE', 'stderr: the ERR_ code is on the cause');
+    assert.equal(out.text, 'AA', 'the unread stdout chunk was lost');
+    assert.equal(codeOf(out.error), 'ERR_RETRYABLE', 'stdout: the ERR_ code is on the cause');
   } finally {
     await server.close();
   }

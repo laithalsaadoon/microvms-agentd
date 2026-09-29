@@ -1,0 +1,11 @@
+diff --git a/microvms-js/__test__/types/broken.mts b/microvms-js/__test__/types/broken.mts
+new file mode 100644
+--- /dev/null
++++ b/microvms-js/__test__/types/broken.mts
+@@ -0,0 +1,6 @@
++// SPDX-License-Identifier: Apache-2.0
++import type { ExecHandle } from '@theagenticguy/microvms'
++
++export function wrong(handle: ExecHandle): number {
++  return handle.stream()
++}

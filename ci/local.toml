@@ -136,6 +136,7 @@ steps = [
   "typed consumer checks against the built wheel",
   "node binding tests",
   "typescript declarations are not stale",
+  "typed consumer checks against the declarations",
   "the npm loader resolves its platform packages",
   "seeded binding faults fire",
 ]

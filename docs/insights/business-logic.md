@@ -208,7 +208,7 @@ class lives.
 | CLI-5: `--region` is a closed value set over the five MicroVM regions | CLI | `microvms-cli/src/cli.rs:417-435` | Unparseable. `--unlisted-region` is the named way out, declared `conflicts_with = "region"` once on a flattened struct so the relationship cannot be forgotten on a new command (`:466-499`) |
 | The domains are spelled out rather than generated, and a test asserts the enum equals the size table | CLI | `microvms-cli/src/cli.rs:13-19`, `microvms-cli/tests/manifest.rs:90` | A domain computed at runtime is invisible to `--help`, to shell completion, and to the manifest's `choices` field. A new size class that does not reach `cli.rs` fails the test rather than shipping unreachable |
 | No `--capabilities`, `--connector`, or `--architecture` flag exists; `--client-token` only on the launch commands `run` and `agent-up` | CLI | `microvms-cli/src/cli.rs:21-31` | Unwritable. Core has no such parameter for those flags, so there is nothing to forward. Absence asserted by the manifest cross-check |
-| A `microvm cp --mode` conflicts with `--tar`; `--poll` conflicts with every writing flag; `--detach` conflicts with the shapes that must not return early | CLI | `microvms-cli/src/cli.rs:1199`, `:1219`, `:1576` | Unparseable, pinned by `microvms-cli/src/cli.rs:2636`, `:2688` |
+| A `microvm cp --mode` conflicts with `--tar`; `--poll` conflicts with every writing flag; `--detach` conflicts with the shapes that must not return early | CLI | `microvms-cli/src/cli.rs:1199`, `:1219`, `:1576` | Unparseable, pinned by `microvms-cli/src/cli.rs:2651`, `:2703` |
 
 ## Invariants
 

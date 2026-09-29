@@ -511,13 +511,18 @@ pub const STREAM_RESPONSE: (&str, &[&str]) = (
     ],
 );
 
-/// The MicroVM id `identifier` names, through the local registry when it is a bare name.
+/// The MicroVM id `identifier` names, and the region its record was registered in when it is
+/// a bare name.
 ///
 /// The discrimination is total, and the name grammar is what makes it so: an identifier
 /// starting with `microvm-` (the real service's prefix) or `mvm-` (the fixtures') is an id shape (a legal name is refused those prefixes
 /// at registration), and anything that fails the name grammar — an ARN's `:`, a path's `/`
 /// — cannot be in the registry, so it passes through verbatim for the service to answer.
-/// Only a legal name is looked up, and a legal name the registry does not hold fails
+/// A passthrough has no recorded region (`None`), and the caller uses the flag or the
+/// environment as before. Only a legal name is looked up, through core's name rule: the
+/// record's region comes back so the lifecycle call goes where the VM is, a `--region` that
+/// disagrees with it is refused with core's `ERR_INVALID_ARG`, and a torn record is the
+/// store's `ERR_PRECONDITION` naming the file. A legal name the registry doesn't hold fails
 /// locally with `ERR_PRECONDITION` — the image-resolution precedent: the service's answer
 /// to a bare name is a 400 about malformed identifiers, which says nothing about names.
 ///
@@ -526,16 +531,20 @@ pub fn resolve_vm_identifier<O: Write, E: Write>(
     ctx: &Ctx<'_, O, E>,
     identifier: &str,
     state_dir_flag: Option<std::path::PathBuf>,
-) -> Result<String, crate::exit::CliError> {
+    region: &crate::cli::RegionFlags,
+) -> Result<(String, Option<microvms_core::Region>), crate::exit::CliError> {
     if identifier.starts_with("microvm-")
         || identifier.starts_with("mvm-")
         || crate::ledger::validate_name(identifier).is_err()
     {
-        return Ok(identifier.to_string());
+        return Ok((identifier.to_string(), None));
     }
     let root = crate::seam::state_dir(state_dir_flag, ctx.env);
-    match crate::ledger::Names::new(&root).lookup(identifier) {
-        Some(record) => Ok(record.microvm_id),
+    match crate::ledger::Names::new(&root).resolve(identifier, explicit_region(region).as_ref())? {
+        Some(record) => {
+            let region = record.region();
+            Ok((record.microvm_id, Some(region)))
+        }
         None => Err(crate::exit::CliError::new(
             Exit::Precondition,
             format!(
@@ -552,6 +561,21 @@ pub fn resolve_vm_identifier<O: Write, E: Write>(
              directory, so the name works here from then on",
         )),
     }
+}
+
+/// The region a flag names, or `None` when neither `--region` nor `--unlisted-region` was
+/// typed: the region a name's record is checked against.
+///
+/// The environment is never the expected region. A record in us-west-2 read from a shell whose
+/// `AWS_REGION` is us-east-1 is the case the record's region exists for, so only a region the
+/// caller typed can disagree with it.
+pub fn explicit_region(flags: &crate::cli::RegionFlags) -> Option<microvms_core::Region> {
+    flags.region.map(|region| region.region()).or_else(|| {
+        flags
+            .unlisted_region
+            .as_deref()
+            .map(microvms_core::Region::unlisted)
+    })
 }
 
 /// The `type` and `data` keys for `name`, or empty when the table has no row.

@@ -335,7 +335,13 @@ description = "Fail if the committed TypeScript declarations no longer match the
 # Built into a scratch directory rather than over the committed file, so a stale copy is reported
 # as a diff instead of silently repaired. `ci.yml`'s bindings job runs the same comparison with
 # `git diff` after the build it already does for the node tests.
-run = '''
+#
+# The diff proves the file matches the generator; `check-dts-consumer.py` proves the generator's
+# output lets a caller type what the docs show. The two differ: `ExecStream` was declared with no
+# `[Symbol.asyncIterator]()`, byte-identical to the build, and `tsc` rejected the `for await` loop
+# `stream()` documents (#262). The bindings job runs the second step on its own too.
+run = [
+  '''
 #!/usr/bin/env bash
 set -euo pipefail
 out=$(mktemp -d)
@@ -345,7 +351,9 @@ if ! diff -u microvms-js/index.d.ts "$out/index.d.ts"; then
   echo "microvms-js/index.d.ts is stale: run \`mise run dts\` and commit the result" >&2
   exit 1
 fi
-'''
+''',
+  "./scripts/check-dts-consumer.py",
+]
 
 [tasks.spec]
 description = "agentd.symspec.json: the daemon's six bootstrap and control-token requirements"
@@ -751,7 +759,7 @@ run = "terraform -chdir=conformance/infra init -input=false && terraform -chdir=
 # discovered them.
 
 [tasks."live:conformance-rs"]
-description = "The live suite through the Rust client: all 227 checks, no SKIP"
+description = "The live suite through the Rust client: all 236 checks, no SKIP"
 depends = ["build", "build:cli", "live:infra"]
 # Both binaries: `--binary` is the aarch64 daemon that gets baked into the image, and
 # `--microvm-binary` is the host-architecture CLI under test. Naming both is what makes the

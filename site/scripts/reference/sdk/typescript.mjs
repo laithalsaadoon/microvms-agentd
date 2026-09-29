@@ -68,7 +68,7 @@ const readPackageName = (repoRoot) =>
  *   page reaches an MDX parser on its way to the raw Markdown twin.
  * - `hidePageTitle`, `hidePageHeader`, `hideBreadcrumbs`: the title is Starlight's, from the
  *   frontmatter written by `gen-reference.mjs`, and the sidebar is the breadcrumb.
- * - `disableSources`: a "Defined in index.d.ts:142" line on every member, pointing at a file most
+ * - `disableSources`: a "Defined in index.d.ts:151" line on every member, pointing at a file most
  *   readers never open, is noise on a page generated from that file.
  * - `treatWarningsAsErrors`: a broken `{@link}` or an unresolved type is a build failure, not a
  *   warning scrolled past in CI.

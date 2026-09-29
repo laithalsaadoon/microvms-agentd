@@ -10,6 +10,15 @@
  */
 export declare const __napiBindingTarget: 'native' | 'wasm32-wasi' | 'wasm32-wasip1'
 
+declare global {
+  interface __NapiRsAsyncGenerator<TOwner, T, TReturn, TNext> {
+    next(...[value]: [] | [TNext]): globalThis.Promise<globalThis.IteratorResult<T, TReturn | undefined>>
+    return(...[value]: [] | [TReturn]): globalThis.Promise<globalThis.IteratorResult<T, TReturn | undefined>>
+    throw(exception?: unknown): globalThis.Promise<globalThis.IteratorResult<T, TReturn | undefined>>
+    [globalThis.Symbol.asyncIterator](): this
+  }
+}
+
 /**
  * One VM with coding agents in it: the sandbox plus the specs it is built for.
  *
@@ -419,6 +428,12 @@ export declare class ExecProcess {
 /**
  * A JS async iterator over an exec's output.
  *
+ * Loop over the stream itself: `for await (const event of handle.stream())`. The object
+ * `[Symbol.asyncIterator]()` returns has `next`, `return` and `throw` and no
+ * `[Symbol.asyncIterator]()` of its own, though its generated type, `__NapiRsAsyncGenerator`,
+ * declares one. So `for await` over that object type-checks, then throws a `TypeError`
+ * because it isn't async iterable (#262).
+ *
  * See the module docs for why this is a task and a bounded channel. The receiver is behind
  * a tokio `Mutex` because `AsyncGenerator::next` must answer a `Send + 'static` future, so
  * the guard is taken *inside* that future rather than borrowed from `&mut self`.
@@ -428,7 +443,10 @@ export declare class ExecProcess {
  *
  * @see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Iteration_protocols#the_async_iterator_and_async_iterable_protocols
  */
-export declare class ExecStream {}
+export declare class ExecStream {
+
+  [globalThis.Symbol.asyncIterator](): globalThis.__NapiRsAsyncGenerator<ExecStream, StreamEvent, void, undefined>
+}
 
 /**
  * A running keepalive. Call `stop()` when the work is done; `done()` resolves when it

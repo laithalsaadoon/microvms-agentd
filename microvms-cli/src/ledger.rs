@@ -258,7 +258,9 @@ impl Names {
         self.store.path_of(name)
     }
 
-    /// The record registered under `name`, or `None`.
+    /// The record registered under `name`, or `None`. For the collision checks only (`run
+    /// --vm-name`, `attach`'s holder check, `agent-up`'s fresh-or-refresh choice); a command
+    /// that goes on to use the record reads it through [`Names::resolve`].
     ///
     /// An unreadable file reads as registered — its name is taken by *something*, and
     /// treating a torn record as free would let a second VM claim a name whose first holder
@@ -282,6 +284,34 @@ impl Names {
                 egress_posture: None,
             }),
         }
+    }
+
+    /// The record registered under `name`, checked by core's rule, or `None` when the name is
+    /// free.
+    ///
+    /// The same rule `Sandbox.from_name` applies through `names::resolve`: a record registered
+    /// in another region than `expected_region` is `ERR_INVALID_ARG` naming both. Unlike
+    /// [`Names::lookup`] it doesn't pre-check the grammar, so an illegal name is the store's
+    /// `ERR_INVALID_ARG` with the grammar's reason, and a torn file is its `ERR_PRECONDITION`
+    /// naming the file rather than a record with empty fields. A free name comes back as
+    /// `None` rather than core's refusal because each command's not-found message names its
+    /// own remedies.
+    pub fn resolve(
+        &self,
+        name: &str,
+        expected_region: Option<&microvms_core::Region>,
+    ) -> Result<Option<NameRecord>, microvms_core::Error> {
+        let found = self.store.get(name)?;
+        found
+            .map(|record| {
+                microvms_core::names::resolve_record(
+                    name,
+                    Some(record),
+                    &self.store.describe(),
+                    expected_region,
+                )
+            })
+            .transpose()
     }
 
     /// Writes `record` under its name, owner-only from creation on Unix. The one registry

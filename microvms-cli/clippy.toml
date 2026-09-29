@@ -23,6 +23,14 @@
 # re-exports, and clippy resolves a path to the item it names, so an import alias, a UFCS call
 # or a path through another re-export is refused the same way.
 #
+# `Duration::from_secs_f64` and `from_secs_f32` are banned (#268): they panic on an infinite or
+# too-large figure, and the `.max(0.0)` the CLI wrote in front of them turned `NaN` into zero.
+# Seconds from a caller go through `microvms_core::cost::duration_of_secs_f64`, which refuses
+# a negative, NaN, infinite or too-large figure with `ERR_INVALID_ARG`, the same way on every
+# surface. The ban sees only those two calls: a silent zero spelled another way
+# (`try_from_secs_f64(x.max(0.0)).unwrap_or_default()`) or a `mul_f64` passes it, so every
+# seconds flag also has a row in `cli::tests::every_seconds_flag_refuses_what_is_not_a_duration`.
+#
 # The CLI alone also bans core's doors: every public constructor that resolves credentials and
 # builds a signed plane or session (`ControlPlane::new`, `Sandbox::new`, `adopt_in` and
 # `from_name` on `Sandbox` and `AgentVm`, `Session::connect`, `direct`, `attach`,
@@ -77,4 +85,6 @@ disallowed-methods = [
   { path = "microvms_core::preflight::preflight", reason = "the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens" },
   { path = "microvms_core::adapters::Adapters::http_backend", reason = "the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens" },
   { path = "microvms_core::adapters::Adapters::build_services", reason = "the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens" },
+  { path = "std::time::Duration::from_secs_f64", reason = "seconds from a caller go through microvms_core::cost::duration_of_secs_f64, which refuses a negative, NaN, infinite or too-large figure with ERR_INVALID_ARG; this conversion panics on them (#268)" },
+  { path = "std::time::Duration::from_secs_f32", reason = "seconds from a caller go through microvms_core::cost::duration_of_secs_f64, which refuses a negative, NaN, infinite or too-large figure with ERR_INVALID_ARG; this conversion panics on them (#268)" },
 ]

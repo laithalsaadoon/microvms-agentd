@@ -42,7 +42,7 @@ against real AWS, which is why these paths need live coverage.
 | exec identity (`--exec-id`, `--poll`) + `microvm ack` | 6 | ack accepted; double-ack 409; unknown id 404; retried start accepted / spawned no second child; pre-suspend exec record survives resume |
 | `microvm health` | 5 | identity repair completed every step / actually ran; 8 MiB cap trio (noisy exit 0, `truncated` flag, daemon survived — survival is the health probe) |
 
-Totals reconcile: 13+5+5+6+5 = 34 (29 UNSUPPORTED entries + 4 hostile archives + the pre-suspend exec record noted inline at run_rs.py:1034).
+Totals reconcile: 13+5+5+6+5 = 34 (29 UNSUPPORTED entries + 4 hostile archives + the pre-suspend exec record noted inline at run_rs.py:1050).
 
 ## Design constraints that carry over (not negotiable)
 

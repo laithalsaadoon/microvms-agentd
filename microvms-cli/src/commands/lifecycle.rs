@@ -645,6 +645,10 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
                 }
                 Some(binary.clone())
             }
+            // The caller's object already holds its daemon, so a fetch would cost seconds of
+            // network for bytes nothing reads, and the envelope would then report that
+            // daemon as the image's (#249). `build_request_from` takes no binary here.
+            None if args.artifact_uri.is_some() => None,
             None => {
                 let state = state_dir(args.state_dir.clone(), ctx.env);
                 let resolved = {
@@ -1054,14 +1058,14 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
         }
         None => {
             // Resolved by the caller: the typed positional, the config file's `binary`,
-            // or the provisioning chain — whichever won, the path is real by here.
-            let binary = daemon_binary.expect("checked by the caller");
+            // or the provisioning chain — whichever won, the path is real by here. None
+            // only beside a caller's --artifact-uri, which needs no daemon bytes (#249).
             ctx.out.progress(&format!("building image {name} ({size})"));
-            let request = build_request(ctx, args, name, size, binary)?;
+            let request = build_request(ctx, args, name, size, daemon_binary)?;
             // Before the upload, so a request core itself would refuse costs zero transport
             // calls — the guards inside `build_image` run after the S3 PUT (issue #47).
             sandbox.preflight(&request)?;
-            upload_artifact(ctx, sandbox, &request).await?;
+            upload_artifact(ctx, sandbox, &request, args.artifact_uri.as_deref()).await?;
             let image = sandbox.build_image(request).await?;
             let identifier = image.identifier.clone();
             outcome.image_identifier = Some(identifier.clone());
@@ -1143,7 +1147,7 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
     }
 
     let exec = args.exec.clone();
-    let timeout = Duration::from_secs_f64(args.timeout.max(0.0));
+    let timeout = args.timeout;
     if let Some(command) = exec {
         ctx.out.progress(&format!("exec: {command}"));
         // Widened at the call site rather than through a second constructor — the comment on
@@ -1380,7 +1384,7 @@ pub async fn build<O: std::io::Write, E: std::io::Write>(
     // this product's own knowledge. Role check first — it refuses in microseconds and the
     // fetch costs seconds of network.
     let mut agentd: Option<crate::provision::Resolved> = None;
-    let binary: std::path::PathBuf = match &args.binary {
+    let binary: Option<std::path::PathBuf> = match &args.binary {
         Some(binary) => {
             if !binary.exists() {
                 return Err(crate::exit::CliError::new(
@@ -1393,8 +1397,10 @@ pub async fn build<O: std::io::Write, E: std::io::Write>(
                      asset",
                 ));
             }
-            binary.clone()
+            Some(binary.clone())
         }
+        // No fetch beside a caller's --artifact-uri, for the reason `run` gives (#249).
+        None if args.artifact_uri.is_some() => None,
         None => {
             let state = state_dir(args.state_dir.clone(), ctx.env);
             let resolved = {
@@ -1409,7 +1415,7 @@ pub async fn build<O: std::io::Write, E: std::io::Write>(
             };
             let path = resolved.path.clone();
             agentd = Some(resolved);
-            path
+            Some(path)
         }
     };
     let size = args.memory.size_class();
@@ -1431,7 +1437,7 @@ pub async fn build<O: std::io::Write, E: std::io::Write>(
         BuildSpec {
             name: &seed,
             size,
-            binary: &binary,
+            binary: binary.as_deref(),
             dockerfile: args.dockerfile.as_deref(),
             project: args.project.as_deref(),
             repair_identity: args.repair_identity,
@@ -1446,9 +1452,9 @@ pub async fn build<O: std::io::Write, E: std::io::Write>(
     if args.reuse {
         let hash = sandbox.artifact_content_hash_for(&request);
         name = format!("{seed}-{}", &hash[..12]);
-        // The request was built under the seed; the derived name replaces it everywhere
-        // the seed landed — the name, the token label, and the derived artifact key (but
-        // not a caller-supplied --artifact-uri, which is theirs).
+        // The derived name replaces the seed in the name, the token label and the derived
+        // artifact key. clap refuses --reuse with --artifact-uri (#249), so from a command
+        // line the `is_none()` test below always holds; it only guards a hand-built `BuildArgs`.
         request.name = name.clone();
         request.token_scope = Some(name.clone());
         if args.artifact_uri.is_none()
@@ -1494,7 +1500,7 @@ pub async fn build<O: std::io::Write, E: std::io::Write>(
     // Before the upload, for the reason `run`'s build arm gives: a locally-refused request
     // must cost zero transport calls (issue #47).
     sandbox.preflight(&request)?;
-    upload_artifact(ctx, &sandbox, &request).await?;
+    upload_artifact(ctx, &sandbox, &request, args.artifact_uri.as_deref()).await?;
     let image = sandbox.build_image(request).await?;
     Ok(render_build(
         &image.identifier,
@@ -1596,8 +1602,9 @@ struct BuildSpec<'a> {
     /// The image name, which is also the token label and the derived artifact key.
     pub name: &'a str,
     pub size: microvms_core::SizeClass,
-    /// The aarch64 daemon binary to bake in as the image CMD.
-    pub binary: &'a std::path::Path,
+    /// The aarch64 daemon binary to bake in as the image CMD. None only with `artifact_uri`,
+    /// whose object already holds the daemon (#249).
+    pub binary: Option<&'a std::path::Path>,
     /// A Dockerfile to use instead of the library's default. Its FROM must match the base.
     pub dockerfile: Option<&'a std::path::Path>,
     /// A project directory whose manifest+lockfile pair bakes an environment layer (#74).
@@ -1631,7 +1638,7 @@ fn build_request<'a, O: std::io::Write, E: std::io::Write>(
     args: &'a RunArgs,
     name: &'a str,
     size: microvms_core::SizeClass,
-    binary: &'a std::path::Path,
+    binary: Option<&'a std::path::Path>,
 ) -> Result<CreateImageRequest, Error> {
     build_request_from(
         ctx,
@@ -1676,13 +1683,19 @@ fn build_request_from<O: std::io::Write, E: std::io::Write>(
         log_group,
         log_stream,
     } = spec;
-    let bytes = std::fs::read(binary).map_err(|error| {
-        Error::new(
-            ErrorKind::Precondition,
-            format!("could not read {}: {error}", binary.display()),
-        )
-        .with_source(error)
-    })?;
+    // No binary only beside a caller's --artifact-uri (#249). The image is built from their
+    // object, and nothing reads these bytes: `upload_artifact` returns before building an
+    // artifact, and clap refuses the --reuse whose hash would read them.
+    let bytes = match binary {
+        Some(binary) => std::fs::read(binary).map_err(|error| {
+            Error::new(
+                ErrorKind::Precondition,
+                format!("could not read {}: {error}", binary.display()),
+            )
+            .with_source(error)
+        })?,
+        None => Vec::new(),
+    };
     // Either the caller already uploaded, or a bucket was given and the artifact goes to a
     // derived key. See `seam::CoreSeam::put_artifact` for why the upload is not core's.
     let uri = match (artifact_uri, ctx.infra.bucket.as_deref()) {
@@ -1837,16 +1850,30 @@ fn read_project_files(dir: &std::path::Path) -> Result<ProjectFiles, Error> {
 
 /// Puts the artifact where the create request says it is, unless the caller already did.
 ///
-/// Skipped when `--artifact-uri` was given: the caller said the bytes are there, and
-/// re-uploading over a URI they own is not this command's business.
+/// A caller's `--artifact-uri` (`caller_uri`) means no upload, whatever the bucket says: the
+/// object there is theirs, and the image is built from it. The bucket defaults to
+/// `$MICROVM_BUCKET`, so deciding from the bucket alone replaced a caller's object in any shell
+/// that exported it for ordinary builds, with nothing on screen but the usual upload line
+/// (#249).
 async fn upload_artifact<O: std::io::Write, E: std::io::Write>(
     ctx: &mut Ctx<'_, O, E>,
     sandbox: &Sandbox,
     request: &CreateImageRequest,
+    caller_uri: Option<&str>,
 ) -> Result<(), Error> {
+    if caller_uri.is_some() {
+        // Said once, so a caller who meant the bucket sees why nothing went there.
+        if let Some(bucket) = ctx.infra.bucket.as_deref() {
+            ctx.out.progress(&format!(
+                "--artifact-uri names the artifact, so nothing is uploaded and the bucket \
+                 {bucket} is unused for this build"
+            ));
+        }
+        return Ok(());
+    }
     if ctx.infra.bucket.is_none() {
-        // The URI came from `--artifact-uri`; the bytes are the caller's problem and they said
-        // so explicitly.
+        // `build_request_from` refuses a build with neither a URI nor a bucket; this doesn't
+        // lean on its caller for that.
         return Ok(());
     }
     let bytes = sandbox.build_artifact_for(request)?;
@@ -1994,9 +2021,18 @@ pub async fn suspend<O: std::io::Write, E: std::io::Write>(
     ctx: &mut Ctx<'_, O, E>,
     args: &SuspendArgs,
 ) -> Result<Rendered, crate::exit::CliError> {
-    let region = args.region.resolve(ctx.env)?;
-    let microvm_id =
-        crate::commands::resolve_vm_identifier(ctx, &args.microvm_id, args.state_dir.clone())?;
+    // A name's record says where the VM is, whatever the environment says; an id has no
+    // record, so the flags and the environment pick the region as before.
+    let (microvm_id, recorded) = crate::commands::resolve_vm_identifier(
+        ctx,
+        &args.microvm_id,
+        args.state_dir.clone(),
+        &args.region,
+    )?;
+    let region = match recorded {
+        Some(region) => region,
+        None => args.region.resolve(ctx.env)?,
+    };
     let plane = ctx.seam.control_plane(region).await?;
     let current = plane.get_microvm(&microvm_id).await?;
     if current.state != "RUNNING" {
@@ -2064,9 +2100,16 @@ pub async fn resume<O: std::io::Write, E: std::io::Write>(
     ctx: &mut Ctx<'_, O, E>,
     args: &ResumeArgs,
 ) -> Result<Rendered, crate::exit::CliError> {
-    let region = args.region.resolve(ctx.env)?;
-    let microvm_id =
-        crate::commands::resolve_vm_identifier(ctx, &args.microvm_id, args.state_dir.clone())?;
+    let (microvm_id, recorded) = crate::commands::resolve_vm_identifier(
+        ctx,
+        &args.microvm_id,
+        args.state_dir.clone(),
+        &args.region,
+    )?;
+    let region = match recorded {
+        Some(region) => region,
+        None => args.region.resolve(ctx.env)?,
+    };
     let plane = ctx.seam.control_plane(region.clone()).await?;
     ctx.out.progress(&format!("resuming {}", microvm_id));
     plane.resume(&microvm_id).await?;
@@ -2135,9 +2178,16 @@ pub async fn terminate<O: std::io::Write, E: std::io::Write>(
     ctx: &mut Ctx<'_, O, E>,
     args: &TerminateArgs,
 ) -> Result<Rendered, crate::exit::CliError> {
-    let region = args.region.resolve(ctx.env)?;
-    let microvm_id =
-        crate::commands::resolve_vm_identifier(ctx, &args.microvm_id, args.state_dir.clone())?;
+    let (microvm_id, recorded) = crate::commands::resolve_vm_identifier(
+        ctx,
+        &args.microvm_id,
+        args.state_dir.clone(),
+        &args.region,
+    )?;
+    let region = match recorded {
+        Some(region) => region,
+        None => args.region.resolve(ctx.env)?,
+    };
     let ledger_root = state_dir(args.state_dir.clone(), ctx.env);
 
     // The kept run's own record, when this state directory launched the VM. It names the
@@ -2211,7 +2261,7 @@ pub async fn terminate<O: std::io::Write, E: std::io::Write>(
                 &microvm_id,
                 &["TERMINATED"],
                 &[],
-                wait_opts(DEFAULT_LIFECYCLE_TIMEOUT.as_secs_f64()),
+                wait_opts(DEFAULT_LIFECYCLE_TIMEOUT),
             )
             .await
         {
@@ -2423,9 +2473,9 @@ fn image_name_of(identifier: &str) -> String {
 }
 
 /// A lifecycle wait with the caller's deadline and core's poll interval.
-fn wait_opts(timeout_sec: f64) -> WaitOpts {
+fn wait_opts(timeout: Duration) -> WaitOpts {
     WaitOpts {
-        timeout: Duration::from_secs_f64(timeout_sec.max(0.0)),
+        timeout,
         poll_interval: LIFECYCLE_POLL_INTERVAL,
         // No stall grace: that is the image build's TRAP-2 probe, and a lifecycle transition
         // has no build list to probe.
@@ -2627,15 +2677,15 @@ mod tests {
         assert!(from_exec.exec_id.starts_with("x-"), "{}", from_exec.exec_id);
     }
 
-    /// The wait carries the caller's deadline and never a negative one.
+    /// The wait carries the caller's deadline and core's poll interval.
     ///
-    /// `Duration::from_secs_f64` panics on a negative, and `--timeout -1` is a thing someone
-    /// types.
+    /// A negative `--timeout` never reaches here: `cli::parse_seconds` refuses it at parse time
+    /// (#268), which `cli::tests::every_seconds_flag_refuses_what_is_not_a_duration` holds.
     #[test]
-    fn a_negative_timeout_becomes_zero_rather_than_a_panic() {
-        assert_eq!(wait_opts(-5.0).timeout, Duration::ZERO);
-        assert_eq!(wait_opts(300.0).timeout, Duration::from_secs(300));
-        assert_eq!(wait_opts(300.0).poll_interval, LIFECYCLE_POLL_INTERVAL);
+    fn a_lifecycle_wait_carries_the_callers_deadline_and_cores_poll_interval() {
+        let wait = wait_opts(Duration::from_secs(300));
+        assert_eq!(wait.timeout, Duration::from_secs(300));
+        assert_eq!(wait.poll_interval, LIFECYCLE_POLL_INTERVAL);
     }
 
     /// **#74, `--project` detection.** A directory with exactly one manifest+lockfile pair

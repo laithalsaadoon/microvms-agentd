@@ -20,10 +20,10 @@
 //! # The stream is a real async generator
 //!
 //! `#[napi(async_iterator)]` plus an `AsyncGenerator` impl gives JS `for await (const event
-//! of handle.stream())`. The trait's `next` must answer a `Send + 'static` future, so the
-//! stream's driver runs as a spawned task feeding a bounded channel and `next` awaits
-//! `recv` — the same shape as the Python iterator, for the same reason: a drive borrowing
-//! the handle cannot be held across a return into the host language.
+//! of handle.stream())`, and the `#[napi]` on that impl is what makes napi-derive declare
+//! `[Symbol.asyncIterator]()` in `index.d.ts` (#262). `next` must answer a `Send + 'static`
+//! future, so a spawned driver feeds a bounded channel that `next` awaits, as the Python
+//! iterator does and for its reason: a drive borrowing the handle can't span a return to JS.
 //!
 //! Capacity 1 on the channel is deliberate. The daemon's SSE body is the backpressure
 //! signal, and buffering a fast producer here would defeat the byte-offset cursor the core
@@ -227,6 +227,12 @@ impl StreamEvent {
 
 /// A JS async iterator over an exec's output.
 ///
+/// Loop over the stream itself: `for await (const event of handle.stream())`. The object
+/// `[Symbol.asyncIterator]()` returns has `next`, `return` and `throw` and no
+/// `[Symbol.asyncIterator]()` of its own, though its generated type, `__NapiRsAsyncGenerator`,
+/// declares one. So `for await` over that object type-checks, then throws a `TypeError`
+/// because it isn't async iterable (#262).
+///
 /// See the module docs for why this is a task and a bounded channel. The receiver is behind
 /// a tokio `Mutex` because `AsyncGenerator::next` must answer a `Send + 'static` future, so
 /// the guard is taken *inside* that future rather than borrowed from `&mut self`.
@@ -284,6 +290,7 @@ impl ExecStream {
     }
 }
 
+#[napi]
 impl AsyncGenerator for ExecStream {
     type Yield = StreamEvent;
     type Next = ();

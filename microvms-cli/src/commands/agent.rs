@@ -286,12 +286,17 @@ async fn refresh<O: std::io::Write, E: std::io::Write>(
     ));
     // Read before `record` is consumed field by field below.
     let record_posture = record.egress_posture.clone();
-    // The flag wins over the record, as every attached command reads it.
-    let region = if args.region.region.is_some() || args.region.unlisted_region.is_some() {
-        args.region.resolve(ctx.env)?
-    } else {
-        microvms_core::Region::unlisted(&record.region)
-    };
+    // Core's name rule, as every `--name` command reads a record: the region is the record's,
+    // and it picks the Bedrock mint below too, so the token and the VM agree. A disagreeing
+    // flag is refused before the attach.
+    let names_dir = state_dir(args.state_dir.clone(), ctx.env).join("names");
+    let record = microvms_core::names::resolve_record(
+        &args.vm_name,
+        Some(record),
+        &names_dir.display().to_string(),
+        crate::commands::explicit_region(&args.region).as_ref(),
+    )?;
+    let region = record.region();
     let session = ctx
         .seam
         .attach_session(
@@ -758,7 +763,7 @@ pub async fn prompt<O: std::io::Write, E: std::io::Write>(
              price of a model call.",
         ));
     }
-    let timeout = microvms_core::cost::duration_of_secs_f64(args.timeout)?;
+    let timeout = args.timeout;
     let options = prompt_options(args)?;
     let (session, microvm_id) = super::attached::attach(ctx, &args.region, &args.attach).await?;
     let spec = choose_spec(&session, args.agent).await?;
@@ -1005,7 +1010,7 @@ mod tests {
             panic!("prompt")
         };
         let options = prompt_options(&args).unwrap();
-        assert_eq!(args.timeout, 7.0);
+        assert_eq!(args.timeout, Duration::from_secs(7));
         assert_eq!(options.timeout, Some(Duration::from_secs(1200)));
         assert_eq!(
             options.permission_mode,

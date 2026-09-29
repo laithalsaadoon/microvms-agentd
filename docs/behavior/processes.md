@@ -95,7 +95,7 @@ Entry point: `microvms-app/src/sandbox.rs:1635`
 - `microvms-app/src/control/microvm.rs:782`
 - `microvms-app/src/sandbox.rs:456`
 - `microvms-app/src/sandbox.rs:525`
-- `microvms-cli/src/commands/lifecycle.rs:1249`
+- `microvms-cli/src/commands/lifecycle.rs:1253`
 - `microvms-cli/src/ledger.rs:172`
 
 ## Runtime hooks and one-shot bootstrap
@@ -209,22 +209,22 @@ Entry point: `agentd/src/fs.rs:1459`
 - Client-side wait-then-ack — entry at `microvms-app/src/session/exec.rs:811`. Returns the ack's own result rather than a post-ack poll, because the poll reports `acked` with no output.
 - CLI dispatch — entry at `microvms-cli/src/main.rs:73`. Reads `--json` and `--dense` off the raw tokens before the parse so an argument error still produces an envelope, and returns `ExitCode` rather than calling `exit` so `Sandbox`'s drop warning still runs.
 - CLI run — entry at `microvms-cli/src/commands/lifecycle.rs:501`. Build, launch, exec, report, tear down in one invocation, with the interrupt future passed in so the teardown guard is testable.
-- CLI build — entry at `microvms-cli/src/commands/lifecycle.rs:1371`. Builds without launching; `--reuse` content-keys the image name by hash, because recreating an image under a previously-used fixed name can serve a stale snapshot.
-- CLI attached suspend — entry at `microvms-cli/src/commands/lifecycle.rs:1992`. Spends one `GetMicrovm` to refuse locally from anything but RUNNING, which is how STATE-5's local half holds on a path that did not send the launch.
-- CLI attached resume — entry at `microvms-cli/src/commands/lifecycle.rs:2062`. Skips the suspended-window check, since a process that did not send the launch cannot know `suspendedDurationSeconds`, and relies on `fail_on: DEAD_STATES` instead.
-- CLI attached terminate — entry at `microvms-cli/src/commands/lifecycle.rs:2133`. VM, then image, then the log group last, and never fails on a teardown failure — it reports the identifier, which is the only remedy for a resource that would not delete.
-- CLI exec — entry at `microvms-cli/src/commands/attached.rs:179`. One subcommand covers start and wait, `--stream`, `--stdin`, and `--poll`, because they are one question asked at different points in an exec's life.
-- CLI exec stream — entry at `microvms-cli/src/commands/attached.rs:384`. Drives core's callback loop rather than a `Stream`, so the crate needs no `futures-util` dependency, and reports `nextOffset` from core's own cursor.
-- CLI health — entry at `microvms-cli/src/commands/attached.rs:810`. Warns about a degraded identity and disk pressure on stderr while keeping exit 0, because the daemon's contract is to serve anyway and draining is the operator's decision.
-- CLI ack — entry at `microvms-cli/src/commands/attached.rs:1018`. Issues the ack on its own for a detached caller; both 409 shapes collapse onto `ERR_PROTOCOL` while the daemon's `still_running` or `already_acked` detail rides in the message.
-- CLI stdin — entry at `microvms-cli/src/commands/attached.rs:1202`. Reads `-` from this process's stdin before writing, and surfaces the daemon's 409-versus-410 split through `data.kind`.
-- CLI cp — entry at `microvms-cli/src/commands/attached.rs:1369`. Resolves direction from the `vm:` prefix and inspects no archive, so the daemon's confined extractor stays the only extractor in the system and the only one under test.
-- CLI doctor — entry at `microvms-cli/src/commands/doctor.rs:33`. Region, credentials, managed bases, infra, Terraform, and the binary's ELF machine — the check that turns a host-architecture binary from a 45-minute mystery into a line of output.
+- CLI build — entry at `microvms-cli/src/commands/lifecycle.rs:1375`. Builds without launching; `--reuse` content-keys the image name by hash, because recreating an image under a previously-used fixed name can serve a stale snapshot.
+- CLI attached suspend — entry at `microvms-cli/src/commands/lifecycle.rs:2019`. Spends one `GetMicrovm` to refuse locally from anything but RUNNING, which is how STATE-5's local half holds on a path that did not send the launch.
+- CLI attached resume — entry at `microvms-cli/src/commands/lifecycle.rs:2098`. Skips the suspended-window check, since a process that did not send the launch cannot know `suspendedDurationSeconds`, and relies on `fail_on: DEAD_STATES` instead.
+- CLI attached terminate — entry at `microvms-cli/src/commands/lifecycle.rs:2176`. VM, then image, then the log group last, and never fails on a teardown failure — it reports the identifier, which is the only remedy for a resource that would not delete.
+- CLI exec — entry at `microvms-cli/src/commands/attached.rs:192`. One subcommand covers start and wait, `--stream`, `--stdin`, and `--poll`, because they are one question asked at different points in an exec's life.
+- CLI exec stream — entry at `microvms-cli/src/commands/attached.rs:397`. Drives core's callback loop rather than a `Stream`, so the crate needs no `futures-util` dependency, and reports `nextOffset` from core's own cursor.
+- CLI health — entry at `microvms-cli/src/commands/attached.rs:826`. Warns about a degraded identity and disk pressure on stderr while keeping exit 0, because the daemon's contract is to serve anyway and draining is the operator's decision.
+- CLI ack — entry at `microvms-cli/src/commands/attached.rs:1034`. Issues the ack on its own for a detached caller; both 409 shapes collapse onto `ERR_PROTOCOL` while the daemon's `still_running` or `already_acked` detail rides in the message.
+- CLI stdin — entry at `microvms-cli/src/commands/attached.rs:1218`. Reads `-` from this process's stdin before writing, and surfaces the daemon's 409-versus-410 split through `data.kind`.
+- CLI cp — entry at `microvms-cli/src/commands/attached.rs:1385`. Resolves direction from the `vm:` prefix and inspects no archive, so the daemon's confined extractor stays the only extractor in the system and the only one under test.
+- CLI doctor — entry at `microvms-cli/src/commands/doctor.rs:32`. Region, credentials, managed bases, infra, Terraform, and the binary's ELF machine — the check that turns a host-architecture binary from a 45-minute mystery into a line of output.
 - CLI ls — entry at `microvms-cli/src/commands/local.rs:52`. Reads the local ledger and lists what this CLI created and could not confirm it deleted.
-- CLI logs — entry at `microvms-cli/src/commands/local.rs:696`. Derives and names the build log group and exits `ERR_PRECONDITION` with the `aws logs` invocation, because `lines: []` is the wire shape for "the group exists and is empty".
-- CLI manifest — entry at `microvms-cli/src/commands/local.rs:785`. Derived from clap introspection and the exit table, so it cannot drift from what the binary accepts; a command with no response-type row fails `microvms-cli/tests/manifest.rs`.
-- CLI constants — entry at `microvms-cli/src/commands/local.rs:808`. Emits `microvms_core::constants::as_json()` verbatim for comparison against the pinned botocore model, with `--emit-json` writing the bare object the drift gate reads.
-- CLI dockerfile — entry at `microvms-cli/src/commands/local.rs:843`. Emits the stanza with the platform traps as comments — the `FROM` that must pair with `baseImageArn`, and the `WORKDIR` the managed al2023 base does not declare.
+- CLI logs — entry at `microvms-cli/src/commands/local.rs:705`. Derives and names the build log group and exits `ERR_PRECONDITION` with the `aws logs` invocation, because `lines: []` is the wire shape for "the group exists and is empty".
+- CLI manifest — entry at `microvms-cli/src/commands/local.rs:794`. Derived from clap introspection and the exit table, so it cannot drift from what the binary accepts; a command with no response-type row fails `microvms-cli/tests/manifest.rs`.
+- CLI constants — entry at `microvms-cli/src/commands/local.rs:817`. Emits `microvms_core::constants::as_json()` verbatim for comparison against the pinned botocore model, with `--emit-json` writing the bare object the drift gate reads.
+- CLI dockerfile — entry at `microvms-cli/src/commands/local.rs:852`. Emits the stanza with the platform traps as comments — the `FROM` that must pair with `baseImageArn`, and the `WORKDIR` the managed al2023 base does not declare.
 - CLI cost — entry at `microvms-cli/src/commands/cost.rs:27`. Renders a report from pinned rates, optionally beside the residency comparison, with unpriced line items kept distinct from zero.
 
 ## See also

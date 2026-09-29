@@ -400,7 +400,7 @@ impl Session {
         &self,
         timeout: Duration,
     ) -> Result<protocol::health::Health, Error> {
-        let deadline = tokio::time::Instant::now() + timeout;
+        let deadline = deadline_after(timeout);
         let mut last: Option<Error> = None;
         loop {
             match self.health().await {
@@ -653,6 +653,23 @@ impl SessionBuilder {
             clock,
         })
     }
+}
+
+/// How far out a deadline goes when the caller's own is past what the clock can hold: tokio's
+/// own `Instant::far_future`, thirty 365-day years, which no MicroVM outlives. Written out, since
+/// its exact value matters to nothing and cargo-mutants would mutate every operator of a product.
+const FAR_FUTURE: Duration = Duration::from_secs(946_080_000);
+
+/// The instant `after` from now, for a wait's deadline.
+///
+/// `Instant + Duration` panics when the sum passes the monotonic clock's range, about 9.2e18
+/// seconds on Linux and macOS, and every surface accepts a timeout up to about 1.8e19 (what a
+/// `Duration` holds). So a wait of `1e19` seconds would start the exec and then panic with no
+/// result (#268). Such a deadline is past any VM's life, so it saturates to [`FAR_FUTURE`]
+/// instead, as `tokio::time::sleep` does.
+pub(crate) fn deadline_after(after: Duration) -> tokio::time::Instant {
+    let now = tokio::time::Instant::now();
+    now.checked_add(after).unwrap_or_else(|| now + FAR_FUTURE)
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -1524,6 +1541,31 @@ mod tests {
         assert!(
             !rendered.contains("super-secret"),
             "the agent token reached a Debug string: {rendered}"
+        );
+    }
+
+    /// A ready wait too long for the clock to add to now still polls, rather than panicking
+    /// before the first health read (#268). Python's `wait_until_ready(timeout)` and
+    /// TypeScript's take any figure a `Duration` holds, and `Instant + Duration` overflows past
+    /// about 9.2e18 seconds.
+    ///
+    /// **Falsification**: `guards/faults.toml` entry `app-ready-deadline-overflows` puts the
+    /// unchecked `Instant::now() + timeout` back in `wait_until_ready`, and the wait panics.
+    #[tokio::test(start_paused = true)]
+    async fn a_ready_wait_longer_than_the_clock_can_hold_still_polls() {
+        let recorder =
+            Recorder::with([Reply::ok(health_body(false)), Reply::ok(health_body(true))]);
+        let (session, _, _) = session_with(Arc::clone(&recorder));
+
+        let health = session
+            .wait_until_ready(Duration::MAX)
+            .await
+            .expect("a far deadline waits for the bootstrap");
+        assert!(health.bootstrapped);
+        assert_eq!(
+            recorder.requests().len(),
+            2,
+            "the wait polled past the first not-bootstrapped answer"
         );
     }
 }

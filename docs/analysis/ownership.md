@@ -126,7 +126,7 @@ against an independent source: `schema:check` (`mise.toml:189`) asserts `docs/sc
 still describes what the daemon serves, `stubs:check` (`mise.toml:235`) asserts
 `microvms-py/microvms.pyi` still describes the pyo3 surface, `model:check` (`mise.toml:257`)
 asserts `microvms-core`'s hardcoded constants still match the pinned botocore service model,
-and `live:check` (`mise.toml:415`) asserts the live tier's own wiring, including `mise.toml`
+and `live:check` (`mise.toml:438`) asserts the live tier's own wiring, including `mise.toml`
 itself. A gate is stronger than a document because it fails rather than being unread.
 
 ### What that coverage does not reach

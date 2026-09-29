@@ -575,6 +575,13 @@ jobs:
             echo "::error file=microvms-js/index.d.ts::stale: run \`mise run dts\` and commit the result"
             exit 1
           fi
+      # The committed `index.d.ts` against a caller: `microvms-js/__test__/types/*.ts` compiled
+      # with `tsc --strict`. The diff above can't see a declaration the generator leaves out, and
+      # `ExecStream` once had no `[Symbol.asyncIterator]()`, so the `for await` its docs show didn't
+      # type-check (#262). Here rather than in the `rust` job because this is the job that just
+      # rebuilt and diffed the file. `mise run dts:check` runs it locally.
+      - name: typed consumer checks against the declarations
+        run: ./scripts/check-dts-consumer.py
       # The generated loader against the package name it will be published under. This is the
       # only job that builds the addon, so it is the only place the real `index.js` exists on a
       # pull request — and a loader generated for a stale package name passes every test above,

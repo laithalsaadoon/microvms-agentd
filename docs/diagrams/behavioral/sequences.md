@@ -33,8 +33,8 @@ sequenceDiagram
 Participants:
 
 - `microvm CLI` — the `exec`, `exec --stream`, and `ack` subcommands
-  (`microvms-cli/src/commands/attached.rs:103`, `microvms-cli/src/commands/attached.rs:240`,
-  `microvms-cli/src/commands/attached.rs:609`).
+  (`microvms-cli/src/commands/attached.rs:136`, `microvms-cli/src/commands/attached.rs:253`,
+  `microvms-cli/src/commands/attached.rs:622`).
 - `core session` — `Session` plus `ExecHandle`, banded because they share one module
   (`microvms-app/src/session/mod.rs:322`, `microvms-app/src/session/exec.rs:218`).
 - `ProxyAuth` — the proxy-token cache whose mint sits inside the request path
@@ -47,7 +47,7 @@ Participants:
 
 Edges in order:
 
-1. `run(argv)` — `microvms-cli/src/commands/attached.rs:152`.
+1. `run(argv)` — `microvms-cli/src/commands/attached.rs:165`.
 2. `headers()` — the mint runs inside `Transport::headers`, so every request re-checks freshness
    (`microvms-app/src/session/mod.rs:83`, `microvms-app/src/session/mod.rs:106`).
 3. `POST exec/start` — `microvms-app/src/session/mod.rs:324`; the handle is built from the id the
@@ -71,7 +71,7 @@ Edges in order:
 11. `bytes + cursor` — the cursor advances only past bytes handed over, and past a gap's `to`
     (`microvms-app/src/session/exec.rs:534`, `microvms-app/src/session/exec.rs:551`);
     the CLI writes an NDJSON line plus the raw bytes
-    (`microvms-cli/src/commands/attached.rs:268`).
+    (`microvms-cli/src/commands/attached.rs:281`).
 12. `exit event` — the terminal marker is written before the result slot, so a stream that sees
     `Finished` always finds an exit event (`agentd/src/exec.rs:535`,
     `agentd/src/exec.rs:1182`).
@@ -113,7 +113,7 @@ sequenceDiagram
 Participants:
 
 - `microvm cp --tar` — resolves direction from the `vm:` prefix and inspects no archive
-  (`microvms-cli/src/commands/attached.rs:805`, `microvms-cli/src/commands/attached.rs:809`).
+  (`microvms-cli/src/commands/attached.rs:821`, `microvms-cli/src/commands/attached.rs:825`).
 - `Transport` — `files::upload_tar` plus the shared send path
   (`microvms-app/src/session/files.rs:98`, `microvms-app/src/session/mod.rs:97`).
 - `agentd fs routes` — `write_tar` (`agentd/src/fs.rs:1433`).
@@ -125,7 +125,7 @@ Participants:
 
 Edges in order:
 
-1. `upload_tar()` — `microvms-cli/src/commands/attached.rs:829`.
+1. `upload_tar()` — `microvms-cli/src/commands/attached.rs:845`.
 2. `PUT /v1/fs/tar` — content type `application/x-tar`; the client does not inspect the archive,
    so the daemon's extractor stays the only implementation of the member rules
    (`microvms-app/src/session/files.rs:103`, `microvms-app/src/session/files.rs:94`).
@@ -154,7 +154,7 @@ Edges in order:
     `agentd/src/fs.rs:825`).
 12. `members count` — `agentd/src/fs.rs:1485`.
 13. `204 No Content` — `agentd/src/fs.rs:1487`.
-14. `bytes uploaded` — `microvms-cli/src/commands/attached.rs:835`.
+14. `bytes uploaded` — `microvms-cli/src/commands/attached.rs:851`.
 
 ## Daemon bootstrap through the run hook
 

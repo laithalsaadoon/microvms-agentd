@@ -215,7 +215,7 @@ same commit.
 **Consumer(s):**
 
 - `microvms-py/src/session.rs:8`, `microvms-py/src/exec.rs:482`, `microvms-py/src/runtime.rs:12`, `microvms-py/src/sandbox.rs:632`
-- `microvms-js/src/session.rs:7`, `microvms-js/src/exec.rs:319`, `microvms-js/src/process.rs:190`, `microvms-js/src/sandbox.rs:28`
+- `microvms-js/src/session.rs:7`, `microvms-js/src/exec.rs:326`, `microvms-js/src/process.rs:190`, `microvms-js/src/sandbox.rs:28`
 - `microvms-cli/src/seam.rs:18`, `microvms-cli/src/guards.rs:32`, `microvms-cli/src/commands/attached.rs:39`, `microvms-cli/tests/thinness.rs:247`
 - `microvms-app/src/sandbox.rs:822` (`session()`), `:1028` and `:1531` — `run` and `resume`
   hand back `&mut Session`; plus `microvms-app/src/control/ops.rs` and
@@ -431,7 +431,7 @@ no credentials because the model is a file inside botocore.
 
 - `agentd/src/exec.rs:87-90` (re-exported into the daemon's own namespace)
 - `microvms-app/src/session/sse.rs:243` — the `ExecEvent::Output` payload field.
-- `microvms-cli/src/commands/attached.rs:354-355` — the two-arm map to `"stdout"` / `"stderr"`.
+- `microvms-cli/src/commands/attached.rs:367-368` — the two-arm map to `"stdout"` / `"stderr"`.
 - `microvms-py/src/session.rs:601-604` — published as `streamKinds` from `StreamKind::ALL`.
 - `microvms-js/src/session.rs:1010-1014` — the same list, built as a JSON array.
 - `microvms-js/src/process.rs:172-174` — `is_stderr`.
@@ -496,7 +496,7 @@ impl StreamKind {
 
 - `agentd/src/exec.rs:87-90` (re-export)
 - `microvms-app/src/session/exec.rs:74` (`ExecResult::phase`), `:91-96` (`done()`), `:269-274`, `:697`
-- `microvms-cli/src/commands/attached.rs:442-448` (`phase_name`)
+- `microvms-cli/src/commands/attached.rs:455-461` (`phase_name`)
 - `microvms-py/src/session.rs:597-600` — published as `phases` from `Phase::ALL`
 - `microvms-js/src/session.rs:1005-1009` — the same list
 - `microvms-core/tests/turmoil_client.rs:954`
@@ -554,13 +554,13 @@ impl Phase {
 - **`as_str` is meant to be the only phase-name table, and some consumers spell their own
   anyway.** The bindings comply (`microvms-py/src/session.rs:597-600`,
   `microvms-js/src/session.rs:1005-1009`), but `microvms-app/src/session/exec.rs:269-274` and
-  `microvms-cli/src/commands/attached.rs:442-448` each hand-write every phase string. Those
+  `microvms-cli/src/commands/attached.rs:455-461` each hand-write every phase string. Those
   matches are exhaustive, so a new *variant* is a compile error — a renamed *wire spelling* is
   not, because `as_str` and serde would move together under the test at
   `protocol/src/exec.rs:319` while the hand-written copies keep emitting the old string.
 - **`ALL` is in lifecycle order**, and the CLI's `phase_name` deliberately avoids `Debug`
   because `Debug` emits `Running` where the wire carries `running`
-  (`microvms-cli/src/commands/attached.rs:437-441`).
+  (`microvms-cli/src/commands/attached.rs:450-454`).
 
 **Drift risk:** renaming a phase on the wire (a `#[serde(rename)]` on a variant) updates
 `as_str` under compiler pressure from `protocol/src/exec.rs:319` but leaves the
@@ -700,7 +700,7 @@ first release, and take `busy`'s doc comment (`protocol/src/health.rs:68-74`) as
 
 - `agentd/src/exec.rs:87-90` (re-export; the daemon's extractor target)
 - `microvms-app/src/session/mod.rs:322` — `pub async fn run(&self, req: protocol::exec::StartRequest)`
-- `microvms-cli/src/commands/lifecycle.rs:1927` — `pub fn start_request(spec: StartSpec<'_>) -> microvms_core::protocol::exec::StartRequest`
+- `microvms-cli/src/commands/lifecycle.rs:1954` — `pub fn start_request(spec: StartSpec<'_>) -> microvms_core::protocol::exec::StartRequest`
 - `microvms-py/src/session.rs:339`, `:401` — construction sites
 - `microvms-js/src/session.rs:281` — `fn into_request(self, command: Either<String, Vec<String>>) -> protocol::exec::StartRequest`
 
@@ -768,7 +768,7 @@ pinned client sends. Mitigation: `#[serde(default)]` on every field but `exec_id
 - `microvms-app/src/session/exec.rs:79-87` — `impl From<protocol::exec::PollResponse> for ExecResult`
 - `microvms-cli/src/guards.rs:1957` — the expected envelope shape is written out rather than
   serialized from `PollResponse`, "which is the whole point".
-- `microvms-cli/src/commands/attached.rs:1089`, `:1093` — constructs `Outcome` values for its render tests.
+- `microvms-cli/src/commands/attached.rs:1105`, `:1093` — constructs `Outcome` values for its render tests.
 - `microvms-core/tests/turmoil_client.rs:952`
 
 **Shape:**
@@ -843,7 +843,7 @@ set so a flatten added or removed shows up as a named failure.
   and re-exports the payload types at `:87-90`.
 - `microvms-app/src/session/sse.rs:272` — matches on `protocol::exec::EVENT_OUTPUT` /
   `EVENT_GAP`, and deserializes each payload into `ExecEvent` (`microvms-app/src/session/sse.rs:240-256`).
-- `microvms-cli/src/commands/attached.rs:253`, `:1027` — renders `ExitEvent` into the NDJSON stream.
+- `microvms-cli/src/commands/attached.rs:266`, `:1027` — renders `ExitEvent` into the NDJSON stream.
 - `microvms-core/tests/turmoil_client.rs:855`, `:870` — drives every event name under
   simulated faults.
 
@@ -926,11 +926,11 @@ name.
 - `conformance/run_rs.py:164-219` — the `Envelope` dataclass, which reads every failure field
   directly so a missing key is a `KeyError` rather than a `None` that flows into a passing
   assertion (`:168-172`).
-- `conformance/run_rs.py:226-253` — `KindError`, carrying kind, code, and exit code so a check
+- `conformance/run_rs.py:241-268` — `KindError`, carrying kind, code, and exit code so a check
   can assert at whichever granularity it means.
-- `conformance/run_rs.py:288-306` — cross-checks the process exit code against the envelope's
+- `conformance/run_rs.py:303-322` — cross-checks the process exit code against the envelope's
   own `exitCode`, because they are two independent renderings of one decision.
-- `conformance/run_rs.py:1697-1722` — the offline self-test's frozen envelope fixtures.
+- `conformance/run_rs.py:1713-1738` — the offline self-test's frozen envelope fixtures.
 - `microvms-cli/tests/exit_codes.rs:96`, `microvms-cli/tests/manifest.rs:205`.
 
 **Shape:**
@@ -978,7 +978,7 @@ pub fn error(failure: &CliError) -> Value {
 - **Exactly one JSON object reaches stdout, except on the streaming path.**
   `microvms-cli/src/envelope.rs:4-11` — progress goes to stderr always, and
   `microvms-cli/tests/thinness.rs:446` asserts no module but `envelope` and named `main`
-  exceptions writes to stdout. `conformance/run_rs.py:256-262` types a second document as an
+  exceptions writes to stdout. `conformance/run_rs.py:271-277` types a second document as an
   `EnvelopeError`, deliberately distinct from a protocol result, because it means the binary
   is wrong.
 - **The streaming exception is a different discriminant, not a relaxed rule.**
@@ -988,7 +988,7 @@ pub fn error(failure: &CliError) -> Value {
   line.
 - **`--quiet` cannot buy silence about a leak.** `microvms-cli/src/envelope.rs:13-18` — only
   `progress` is suppressed; a stale rate table and a leaked resource still reach `warn`.
-  `conformance/run_rs.py:272-275` relies on this to pass `--quiet` on every invocation.
+  `conformance/run_rs.py:287-290` relies on this to pass `--quiet` on every invocation.
 - **`data.kind` is the only place the daemon's fine status survives.**
   `microvms-cli/src/envelope.rs:27-31` names `conformance/run_rs.py` as the consumer that
   needs it, because `ERR_PROTOCOL` covers several `WireKind`s.
@@ -997,7 +997,7 @@ pub fn error(failure: &CliError) -> Value {
 
 **Drift risk:** the envelope is hand-built with `json!` and has no generated schema, so a
 renamed key breaks the Python oracle at runtime rather than at build time — and the offline
-half of that suite (`conformance/run_rs.py:1697-1722`) carries frozen fixtures that would
+half of that suite (`conformance/run_rs.py:1713-1738`) carries frozen fixtures that would
 need the same edit. Mitigation: `./conformance/run_rs.py --self-test` is free and offline and
 is already in `mise run check`'s neighbourhood; keep the fixtures and the `json!` literals
 edited in one commit.

@@ -47,6 +47,9 @@ pub fn cost<O: std::io::Write, E: std::io::Write>(
         ("--suspended-sec", args.suspended_sec),
         ("--build-sec", args.build_sec),
     ] {
+        // Only the sign is checked here, as the oracle does. NaN and infinity pass it and are
+        // refused where a phase becomes a duration (`measured` below, core's `estimate_run`);
+        // `--estimate` never reads `--build-sec`, so any figure there changes nothing.
         if seconds < 0.0 {
             // The message is the oracle's verbatim, `{seconds:?}` rather than `{seconds}`
             // because Rust's `Display` prints `-5` for `-5.0` where Python prints `-5.0`.
@@ -127,13 +130,7 @@ pub fn cost<O: std::io::Write, E: std::io::Write>(
     let mut comparison_json = Value::Null;
     let mut comparison_text = String::new();
     if args.compare {
-        let comparison = compare_residency(
-            size,
-            std::time::Duration::from_secs_f64(args.hold_sec.max(0.0)),
-            args.cycles,
-            &rates,
-            today,
-        )?;
+        let comparison = compare_residency(size, args.hold_sec, args.cycles, &rates, today)?;
         comparison_text = comparison.render()?;
         comparison_json = comparison_to_json(&comparison)?;
     }
@@ -328,7 +325,7 @@ mod tests {
             build_sec: 0.0,
             image_gb: None,
             cycles: 1,
-            hold_sec: 3600.0,
+            hold_sec: std::time::Duration::from_secs(3600),
             max_cost: None,
             on_breach: None,
         }
@@ -427,7 +424,7 @@ mod tests {
     fn compare_carries_its_own_counter_argument() {
         let mut with_compare = args(crate::cli::MemoryMib::Mib2048);
         with_compare.compare = true;
-        with_compare.hold_sec = 86_400.0;
+        with_compare.hold_sec = std::time::Duration::from_secs(86_400);
         let (rendered, _) = run_cost(with_compare);
 
         let comparison = &rendered.data["comparison"];

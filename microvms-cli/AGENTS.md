@@ -20,6 +20,11 @@ belongs in a lower layer (root `AGENTS.md`, Architecture).
   core's resolvers once; everything else takes the lookup it's given. A reviewed `#[expect]`
   is allowed only when it's listed in `LINT_EXCEPTIONS` in `scripts/test_ratchet.py` with its
   count, and moving the work down is the usual fix.
+- A flag that takes seconds parses through core's `duration_of_secs_f64`
+  (`cli::parse_seconds`), so a bad value is refused before the handler runs. `clippy.toml`
+  bans the panicking float conversions, `Duration::from_secs_f64` and `from_secs_f32`. A new
+  seconds flag gets a row in `cli::tests::every_seconds_flag_refuses_what_is_not_a_duration`,
+  since the ban doesn't see a silent zero spelled another way.
 - Known drift still lives here and each item has an issue: the `aws` upload in `seam.rs`
   (#258), the token minter in `seam.rs` (#270), and directory sync's `tar`, `globset`,
   `sha2` and `const-hex` (#260). Move work down; don't add to that list.

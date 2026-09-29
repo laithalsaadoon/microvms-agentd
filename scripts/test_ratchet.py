@@ -1709,7 +1709,7 @@ LINT_EXCEPTIONS = {
     ("microvms-cli/src/seam.rs", "clippy::disallowed_methods"): 2,
     # The test-only guards: each fake seam builds a plane or session over a scripted transport,
     # and each scripted transport names `Call`. `cfg(test)`, so none of it ships.
-    ("microvms-cli/src/guards.rs", "clippy::disallowed_methods"): 7,
+    ("microvms-cli/src/guards.rs", "clippy::disallowed_methods"): 8,
     ("microvms-cli/src/guards.rs", "clippy::disallowed_types"): 4,
     # `doctor`'s `terraform output`, a subprocess decision.
     ("microvms-cli/src/commands/doctor.rs", "clippy::disallowed_types"): 1,
@@ -1722,7 +1722,9 @@ LINT_EXCEPTIONS = {
 # environment read, and the control plane's transport (#273): a wire call built in an adapter
 # is one the other surfaces don't make, with retries they don't share. The CLI alone refuses
 # core's doors too, since it reaches AWS through `src/seam.rs` and nothing else; the bindings
-# call those doors legitimately. Paths are core's re-exports.
+# call those doors legitimately. Paths are core's re-exports. Every adapter also refuses std's
+# float-to-`Duration` conversions, which panic on an infinite or too-large figure: seconds from
+# a caller go through core's `duration_of_secs_f64` (#268).
 SUBPROCESS_TYPES = ["std::process::Command", "tokio::process::Command"]
 ENV_METHODS = [
     "std::env::var",
@@ -1730,6 +1732,10 @@ ENV_METHODS = [
     "std::env::vars",
     "std::env::vars_os",
     "microvms_core::env::process",
+]
+DURATION_METHODS = [
+    "std::time::Duration::from_secs_f64",
+    "std::time::Duration::from_secs_f32",
 ]
 TRANSPORT = "microvms_core::control::transport"
 TRANSPORT_TYPES = [f"{TRANSPORT}::Call"]
@@ -1772,7 +1778,12 @@ def banned(adapter):
     """`(types, methods)` the adapter's `clippy.toml` must list, exactly."""
     cli = adapter == "microvms-cli"
     types = SUBPROCESS_TYPES + TRANSPORT_TYPES + (DOOR_TYPES if cli else [])
-    methods = ENV_METHODS + TRANSPORT_METHODS + (DOOR_METHODS if cli else [])
+    methods = (
+        ENV_METHODS
+        + DURATION_METHODS
+        + TRANSPORT_METHODS
+        + (DOOR_METHODS if cli else [])
+    )
     return sorted(types), sorted(methods)
 
 
@@ -2233,6 +2244,12 @@ class AdapterLintTests(unittest.TestCase):
                             pub fn region_from_core() -> Option<String> {{
                                 microvms_core::env::process("AWS_REGION")
                             }}
+                            pub fn wait(seconds: f64) -> std::time::Duration {{
+                                std::time::Duration::from_secs_f64(seconds)
+                            }}
+                            pub fn wait_f32(seconds: f32) -> std::time::Duration {{
+                                std::time::Duration::from_secs_f32(seconds)
+                            }}
                         """,
                     },
                 )
@@ -2243,6 +2260,8 @@ class AdapterLintTests(unittest.TestCase):
                     "disallowed method `std::env::vars`",
                     "disallowed method `std::env::vars_os`",
                     "disallowed method `microvms_core::env::process`",
+                    "disallowed method `std::time::Duration::from_secs_f64`",
+                    "disallowed method `std::time::Duration::from_secs_f32`",
                 ]:
                     self.assertIn(message, out.stderr)
 

@@ -615,3 +615,24 @@ fn the_dense_cost_path_is_cuttable_and_marks_unpriced_lines() {
         outcome.stdout
     );
 }
+
+/// **#268 at the process boundary.** A `--hold-sec` that isn't a duration exits with the
+/// argument error and one envelope, rather than a Rust panic (exit 101, nothing on stdout) or a
+/// silent zero (exit 0).
+///
+/// `cost` is the driver because it's fully local: no credentials, no network, so the answer
+/// doesn't depend on the host. `src/guards.rs` holds the same refusal for every seconds flag
+/// in-process; this one asks whether it survives into `$?`. `inf` goes first so a panicking
+/// parser stops on the exit code before any envelope is read.
+///
+/// **Falsification**: `guards/faults.toml` entry `cli-seconds-exit-code` restores the old
+/// `from_secs_f64(seconds.max(0.0))` inside `cli::parse_seconds`, and the `inf` row exits 101.
+#[test]
+fn a_seconds_flag_that_is_not_a_duration_exits_with_the_argument_error() {
+    for value in ["inf", "NaN", "-5", "1e300"] {
+        let flag = format!("--hold-sec={value}");
+        let outcome = run(&["cost", "--compare", "--json", &flag], &[]);
+        assert_eq!(outcome.exit_code(), 2, "{flag}: {}", outcome.stderr);
+        assert_eq!(outcome.envelope()["code"], "ERR_INVALID_ARG", "{flag}");
+    }
+}

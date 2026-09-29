@@ -293,25 +293,25 @@ impl ExecProcess {
                                     // lost the bytes: the offset space is shared, so erroring
                                     // only one would leave the other looking complete when it
                                     // may be the truncated one. The message carries the range,
-                                    // so a caller can resume at `to`.
+                                    // so a caller can resume at `to`. The error is typed like
+                                    // `ExecHandle.stream`'s under `errorOnGap` (`ERR_PLATFORM`,
+                                    // `OutputGap`), so a caller can tell lost output from a
+                                    // transport failure it could retry.
                                     let message = format!(
                                         "output bytes [{from}, {to}) are unrecoverable: the \
                                          daemon evicted them before this client read them. \
                                          Resume from offset {to}, or pass gapPolicy: 'event' \
                                          to keep the surviving bytes instead."
                                     );
-                                    let _ = out_tx
-                                        .send(Err(napi::Error::new(
-                                            napi::Status::GenericFailure,
-                                            message.clone(),
-                                        )))
-                                        .await;
-                                    let _ = err_tx
-                                        .send(Err(napi::Error::new(
-                                            napi::Status::GenericFailure,
+                                    reject_both(
+                                        &out_tx,
+                                        &err_tx,
+                                        microvms_core::Error::wire(
+                                            microvms_core::WireKind::OutputGap,
                                             message,
-                                        )))
-                                        .await;
+                                        ),
+                                    )
+                                    .await;
                                     // Break, so nothing more is pushed into streams that have
                                     // already errored.
                                     std::ops::ControlFlow::Break(())
@@ -356,18 +356,11 @@ impl ExecProcess {
 
             // A drive error reaches the consumer as a stream error, so an exhausted reconnect
             // budget rejects the read rather than ending it — the same rule `exec.rs` states,
-            // and for the same reason: a silent end reads as complete output.
+            // and for the same reason: a silent end reads as complete output. It keeps its code
+            // chain, because the code is how a caller tells a budget it can retry
+            // (`ERR_RETRYABLE`) from a refusal it can't (`ERR_CREDENTIALS`, `Unauthorized`).
             if let Err(error) = end {
-                let message = error.to_string();
-                let _ = out_tx
-                    .send(Err(napi::Error::new(
-                        napi::Status::GenericFailure,
-                        message.clone(),
-                    )))
-                    .await;
-                let _ = err_tx
-                    .send(Err(napi::Error::new(napi::Status::GenericFailure, message)))
-                    .await;
+                reject_both(&out_tx, &err_tx, error).await;
             }
         });
 
@@ -424,6 +417,28 @@ impl ExecProcess {
         let stream = unsafe { ReadableStream::<Uint8Array>::from_napi_value(env.raw(), raw) };
         stream
     }
+}
+
+/// Errors both of a process's streams with one core error, code chain included.
+///
+/// Both streams need the error, and `microvms_core::Error` isn't `Clone`, so it's mapped once
+/// through `js_async` (the conversion that attaches `err.cause`) and the mapped error is copied.
+/// napi's `Error::try_clone` copies a Rust-built error's status, reason and whole `cause` chain.
+async fn reject_both(
+    out_tx: &tokio::sync::mpsc::Sender<napi::Result<Uint8Array>>,
+    err_tx: &tokio::sync::mpsc::Sender<napi::Result<Uint8Array>>,
+    error: microvms_core::Error,
+) {
+    let rejection: napi::Error = js_async(error).into();
+    // For an error with no JS reference, which is every error `js_async` builds, napi 3.13's
+    // `try_clone` always returns `Ok`, so this arm isn't reached. If a later napi could fail
+    // here, the failure itself still rejects stderr, which beats a stream that looks complete.
+    let copy = rejection.try_clone().unwrap_or_else(|failed| failed);
+    // Both sends at once, not one after the other. Each channel holds one chunk, so while a
+    // stdout chunk sits unread a stdout-first send parks, and a caller reading stderr to the end
+    // before stdout would wait forever for a rejection that's never sent. Send failures mean the
+    // reader is gone, and there's nobody left to tell.
+    let _ = tokio::join!(out_tx.send(Err(rejection)), err_tx.send(Err(copy)));
 }
 
 impl Drop for ExecProcess {
