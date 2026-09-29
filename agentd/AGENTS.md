@@ -11,7 +11,9 @@ changing a route.
   it. Bootstrap is defended by being one-shot, by refusing a hijack at the hook and at the
   control API, and by keeping the agent token out of exec'd children.
 - A change to bootstrap, auth or state transitions needs `cargo test -p agentd-model`, which
-  checks those properties over every interleaving of platform, client and in-VM attacker.
+  checks those properties over every interleaving of platform, client and in-VM attacker, and
+  `cargo test -p agentd --test model_conformance`, which replays the model's paths against the
+  routes and fails where the daemon answers or holds something the model doesn't.
 - Routes and payloads are generated from the handlers' serde types. After a wire change, run
   `mise run schema` to regenerate `docs/schema.json`; `schema:check` fails on a stale one, and
   the wire types themselves live in `protocol/`.

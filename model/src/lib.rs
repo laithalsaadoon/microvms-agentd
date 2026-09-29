@@ -463,14 +463,15 @@ impl Model for Agentd {
                     _ => true,
                 },
             ),
-            Property::<Self>::always("control API is closed before bootstrap", |_, state| {
-                match state.last {
+            Property::<Self>::always(
+                "AGENTD-1 control API is closed before bootstrap",
+                |_, state| match state.last {
                     Some((Action::Control { .. }, response)) => {
                         state.boot != Boot::Uninitialized || response == Response::Unavailable
                     }
                     _ => true,
-                }
-            }),
+                },
+            ),
             Property::<Self>::always("output is never released before ack", |_, state| {
                 !state.released_without_ack
                     && state

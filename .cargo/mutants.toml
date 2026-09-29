@@ -13,6 +13,15 @@ test_tool = "cargo"
 # 27.1.0 (every agentd mutant would run the app's, the edges' and core's tests too) and cost
 # 3.7x on release.rs, so the other option is a second cargo-mutants run for the app and the
 # edges. That's still open.
+#
+# agentd's own tests include `tests/model_conformance.rs` (#296), the bootstrap and exec model
+# replayed against the routes, so every agentd mutant runs it. It dominates agentd's test time
+# and it's load-sensitive: 22 to 28 s alone on the 16-core devbox, 76 s pinned to 4 cores at
+# load average 23, and `cargo test -p agentd` took 178 s with it against 35 s without it at load
+# 58. If an agentd-heavy change runs a shard past the job's timeout, `target_max_depth(10)` in
+# the replay's `walk()` measured 17.0 s against 27.8 s at depth 11 and keeps the untaken-step
+# paths. Don't skip it under mutation: `model-conformance-restart-running` and
+# `model-conformance-restart-acked` are faults in exec.rs only the replay catches.
 # The default, written down so a change to it is a reviewed diff.
 timeout_multiplier = 5.0
 # A floor on the timeout cargo-mutants sets from the baseline. CI runners are slower than the

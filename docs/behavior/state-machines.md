@@ -3,13 +3,13 @@
 Each machine below is declared once as a Rust enum. Boot, ExecPhase, and Lifecycle are also declared formally —
 twice over for the VM lifecycle — and the formal declaration is the authority: the `model/`
 crate holds `stateright` models whose properties hold over every interleaving
-(`model/src/lib.rs:433-517`, `model/src/client.rs:546-699`), and `spec/core.symspec.json`
+(`model/src/lib.rs:441-526`, `model/src/client.rs:546-699`), and `spec/core.symspec.json`
 carries a state model with a machine-readable transition effect per requirement
 (`spec/core.symspec.json:995-1041`).
 
 The models are ordinary `cargo test` targets in the `agentd-model` crate
 (`model/Cargo.toml:2`), driven by `.checker().spawn_bfs().join().assert_properties()`
-(`model/src/lib.rs:528-534`, `model/src/client.rs:710-716`) and run by `cargo test --all`
+(`model/src/lib.rs:536-543`, `model/src/client.rs:710-716`) and run by `cargo test --all`
 (`mise.toml:164`). The Z3 pass over the symspec is a separate task,
 `spec:core`, run with `--reachability-timeout-ms 5000` through `scripts/check-spec.sh`, which refuses a symspec CLI
 older than 1.0 (`mise.toml:279-292`), with the daemon's own requirements gated by
@@ -17,7 +17,10 @@ older than 1.0 (`mise.toml:279-292`), with the daemon's own requirements gated b
 
 Where a machine is mirrored across crates, the mirror is by convention rather than by a cargo
 dependency — `agentd-model` has no edge to `microvms-core` or to `agentd`
-(`model/src/client.rs:58-59`) — so each mirror is named beside its diagram.
+(`model/src/client.rs:58-59`) — so each mirror is named beside its diagram. The edge that does
+exist runs the other way: `agentd`'s tests depend on the model, and
+`agentd/tests/model_conformance.rs` replays the Boot and ExecPhase machine against the daemon's
+routes, step by step.
 
 ## Boot
 
@@ -60,13 +63,13 @@ Mirrors:
   reject a control request while the token is not installed (`spec/agentd.symspec.json:56`).
 
 These `always` properties hold over the whole reachable space: `bootstrap is one-shot`
-(`token_replacements == 0`, `model/src/lib.rs:446-448`) and `control API is closed before
-bootstrap` (`model/src/lib.rs:458-465`). `attacker never authorized`
-(`model/src/lib.rs:443-445`) is stated unconditionally rather than consulting the config it
+(`token_replacements == 0`, `model/src/lib.rs:454-456`) and `AGENTD-1 control API is closed
+before bootstrap` (`model/src/lib.rs:466-474`). `attacker never authorized`
+(`model/src/lib.rs:451-453`) is stated unconditionally rather than consulting the config it
 discriminates, and the model reports both halves of the deployment invariant: held, the attacker
-never gains authority (`model/src/lib.rs:527-534`); broken, `stateright` returns the concrete
-path by which it does (`model/src/lib.rs:540-558`). One-shot survives even a racing in-VM
-process (`model/src/lib.rs:562-569`).
+never gains authority (`model/src/lib.rs:536-543`); broken, `stateright` returns the concrete
+path by which it does (`model/src/lib.rs:549-567`). One-shot survives even a racing in-VM
+process (`model/src/lib.rs:571-578`).
 
 The launch environment travels in the same payload and is installed only on `Installed`
 (`agentd/src/state.rs:210`), under the token lock, so a caller who loses the token cannot win
@@ -133,13 +136,13 @@ Mirrors:
   `agentd/src/exec.rs:2363-2365`.
 
 These `always` properties hold over the whole reachable space: `output is never released before
-ack` (`model/src/lib.rs:466-472`), `a retried start never spawns twice` (`spawns == 1`,
-`model/src/lib.rs:473-475`), and `one exec entry per id` (`model/src/lib.rs:476-481`). The first
+ack` (`model/src/lib.rs:475-481`), `a retried start never spawns twice` (`spawns == 1`,
+`model/src/lib.rs:482-484`), and `one exec entry per id` (`model/src/lib.rs:485-490`). The first
 is audited against itself rather than asserted: the collect predicate flags any entry it would
 remove while `output_held` still holds, and acking is the only thing that releases output, so a
 collected entry with held output is exactly an exec destroyed without its caller's ack
-(`model/src/lib.rs:380-395`). Coverage properties confirm the checker reached `Acked` and a
-retried start (`model/src/lib.rs:504-509`).
+(`model/src/lib.rs:388-405`). Coverage properties confirm the checker reached `Acked` and a
+retried start (`model/src/lib.rs:513-518`).
 
 ```mermaid
 stateDiagram-v2

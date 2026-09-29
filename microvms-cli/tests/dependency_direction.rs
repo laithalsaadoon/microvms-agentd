@@ -220,10 +220,13 @@ fn edges_among_members(metadata: &cargo_metadata::Metadata, name: &str) -> BTree
 /// counts: a test-only edge from the app onto the edges would let the app's tests lean on I/O
 /// the app itself refuses, and a dev edge upward is the one cycle cargo allows. The edges' dev
 /// edge onto the app turns on the app's `test-support` feature; it isn't a new direction.
+/// agentd's edge onto `agentd-model` is a proof dependency: `tests/model_conformance.rs` walks
+/// the model and replays each path against the daemon's routes. The guest image ships protocol
+/// and nothing else of ours, so [`DEV_ONLY_EDGES`] holds that edge to its dev kind.
 const MEMBER_EDGES: [(&str, &[&str]); 10] = [
     ("microvms-protocol", &[]),
     ("agentd-model", &[]),
-    ("agentd", &["microvms-protocol"]),
+    ("agentd", &["agentd-model", "microvms-protocol"]),
     ("microvms-domain", &["microvms-protocol"]),
     ("microvms-app", &["microvms-domain", "microvms-protocol"]),
     (
@@ -700,6 +703,52 @@ fn each_layer_declares_exactly_the_features_it_is_allowed() {
             stale.is_empty(),
             "{layer}'s feature table records {stale:?}, which it no longer depends on. Take \
              the row out."
+        );
+    }
+}
+
+/// Edges among our crates that may exist only as dev-dependencies. A row here is also in
+/// [`MEMBER_EDGES`], which counts every kind; this is what tells a proof dependency from a
+/// shipped one.
+///
+/// agentd onto `agentd-model`: the model is a test oracle for the daemon. As a normal
+/// dependency it would link stateright into the guest binary, and every test above would
+/// still pass, since they count an edge of any kind.
+const DEV_ONLY_EDGES: [(&str, &str); 1] = [("agentd", "agentd-model")];
+
+/// Each edge in [`DEV_ONLY_EDGES`] is declared, and declared only under `[dev-dependencies]`.
+///
+/// **Falsification**: add `agentd-model = { path = "../model", version = "0.1.0" }` to agentd's
+/// `[dependencies]` and this fails naming the normal kind, while
+/// `each_member_depends_on_exactly_the_crates_of_ours_its_layer_allows` stays green.
+#[test]
+fn the_proof_edges_are_dev_dependencies_only() {
+    let metadata = metadata();
+    for (from, onto) in DEV_ONLY_EDGES {
+        let package = metadata
+            .packages
+            .iter()
+            .find(|package| package.name.as_str() == from)
+            .unwrap_or_else(|| panic!("{from} is a workspace member"));
+        let kinds: Vec<cargo_metadata::DependencyKind> = package
+            .dependencies
+            .iter()
+            .filter(|dependency| dependency.name == onto)
+            .map(|dependency| dependency.kind)
+            .collect();
+        assert!(
+            !kinds.is_empty(),
+            "{from} declares no edge onto {onto}, so there's nothing to hold to the dev kind. \
+             If the edge went on purpose, take its row out of DEV_ONLY_EDGES."
+        );
+        let shipped: Vec<_> = kinds
+            .iter()
+            .filter(|kind| **kind != cargo_metadata::DependencyKind::Development)
+            .collect();
+        assert!(
+            shipped.is_empty(),
+            "{from} depends on {onto} as {shipped:?}; the edge is a test oracle and may only be \
+             a dev-dependency, or {from}'s shipped build links it"
         );
     }
 }
