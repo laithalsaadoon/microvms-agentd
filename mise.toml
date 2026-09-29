@@ -579,7 +579,7 @@ description = "CI's `bindings` job, in a shallow clone of a worktree snapshot"
 run = "./scripts/ci-local.py bindings"
 
 [tasks."ci:guards"]
-description = "CI's `guards` job (every seeded fault), in a shallow clone of a worktree snapshot"
+description = "CI's `guards` job on a pull request (the seeded faults it affects), in a full clone of a worktree snapshot with origin/main"
 run = "./scripts/ci-local.py guards"
 
 [tasks."ci:build"]
@@ -615,7 +615,7 @@ description = "Every seeded fault in guards/faults.toml still applies, and every
 # The unit tests run first, for `trace:check`'s reason: they build throwaway repos with a fake
 # runner and drive every verdict through the real script, `fire` included.
 run = [
-  "uv run python -m unittest discover -s scripts -p 'test_check_guards_fire.py'",
+  "uv run --with 'pyyaml==6.0.3' python -m unittest discover -s scripts -p 'test_check_guards_fire.py'",
   "./scripts/check-guards-fire.py list",
 ]
 
@@ -633,8 +633,8 @@ description = "Seed each registered fault in a scratch worktree and require its 
 # `-- --jobs N` runs faults in N scratch worktrees at once with the serial run's verdicts
 # and output; each extra worker builds in its own target, removed when the run ends.
 # `-- --affected` fires only the entries whose own files or registry text changed against
-# origin/main: a rule, not a trace, so the full fire is still owed before a push. The script's
-# docstring has both.
+# origin/main: a rule, not a trace. It's what CI's `guards` job runs on a pull request, and the
+# full fire runs on every push to main (#323). The script's docstring has both.
 #
 # cargo-mutants is here for the `fuzz_extract` exclusion's entry, at the `mutants` task's pin.
 tools = { "cargo:cargo-mutants" = "27.1.0" }

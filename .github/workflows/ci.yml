@@ -331,7 +331,7 @@ jobs:
       # unregistered.txt may only shrink from the base, and a push to main compares with the
       # commit before it.
       - name: seeded-fault registry unit tests
-        run: uv run python -m unittest discover -s scripts -p 'test_check_guards_fire.py'
+        run: uv run --with 'pyyaml==6.0.3' python -m unittest discover -s scripts -p 'test_check_guards_fire.py'
       - name: seeded-fault registry
         env:
           BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
@@ -575,24 +575,44 @@ jobs:
       - name: seeded binding faults fire
         run: ./scripts/check-guards-fire.py fire --suite bindings --venv .venv-bindings --target-dir target
 
-  # `mise run guards:fire` (#274): every entry in guards/faults.toml is seeded into a scratch
-  # worktree and its guard must fail for the reason the entry names. Its own job because each
-  # fault is one more incremental build, which is why it isn't in `check` either. The script is
-  # called directly, since no job here installs mise. Ubuntu only: the guards it seeds are the
-  # same code on every platform, and the `rust` matrix already runs them unseeded.
+  # `mise run guards:fire` (#274): each entry in guards/faults.toml (every one on a push to main,
+  # the ones it affects on a pull request) is seeded into a scratch worktree, and its guard must
+  # fail for the reason the entry names. Its own job because each fault is one more incremental
+  # build, which is why it isn't in `check` either. The script is called directly, since no job
+  # here installs mise. Ubuntu only: the guards it seeds are the same code on every platform,
+  # and the `rust` matrix already runs them unseeded.
   #
   # Measured 2026-09-26 on 8f20924 plus this change, before this job's first run, on a shared
   # 16-core devbox: 6 min 20 s for the rust and script suites from a cold target, 121 s of it
   # the faults and 34 s the closing clean pass (4 min 17 s warm, 7 min 42 s under a load near
-  # 20). A hosted runner has four cores and starts from its own cache. The timeout is the
-  # budget: a job that nears it should run only the entries whose files a PR touches, with the
-  # full set on main.
+  # 20). A hosted runner has four cores and starts from its own cache.
+  #
+  # A pull request fires only the entries its diff affects (`--affected` against its base
+  # branch), and every push to main fires every entry (#323). The script's docstring has the
+  # selection rule; a change to the script itself, to a build input (such as Cargo.lock, a
+  # Cargo.toml or mise.toml), or to this job's steps or the workflow's top-level `env` still
+  # selects every entry. That's most pull requests: 13 of the 20 merges to main up to efaded2
+  # changed one of them, and 6 of the 7 that didn't were docs only. The cost is that a fault
+  # only a full fire catches shows up on main after the merge instead of on its pull request,
+  # and `mise run guards:fire -- --jobs 4` is the full fire before one. A red `seeded faults
+  # fire` on main is fixed before the next merge, since the next pull request that selects every
+  # entry fails on it too; one that fails an entry it didn't touch reads main's last push run
+  # first.
+  #
+  # The timeout is each leg's budget. A pull request keeps 30 minutes, so a registry that
+  # outgrows a full fire shows on the pull requests that still select every entry. Main's push
+  # always runs the full fire, and a timed-out run never fires the entries after the cutoff,
+  # so it gets 60. Measured on main's push at efaded2 (the full registry, 322 entries): 24 min
+  # 39 s, 619.2 s of faults and 270.6 s for the restored pass.
   guards:
     name: seeded faults fire
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 30 || 60 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # `--affected` diffs against the base branch, which a shallow clone doesn't have.
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: stable
@@ -610,8 +630,11 @@ jobs:
           node-version: '22'
       # The trace entries run `check-trace.py`, which parses with ast-grep: the `security` job's
       # install, same version and hash.
+      # Downloaded outside the checkout, so `--affected` doesn't count the archive as a changed
+      # file.
       - name: install ast-grep (pinned, checksummed)
         run: |
+          cd "$RUNNER_TEMP"
           curl -sSfL -o ast-grep.zip https://github.com/ast-grep/ast-grep/releases/download/0.43.0/app-x86_64-unknown-linux-gnu.zip
           echo "a26253a9c821d935f7e383e40f0de7c2ca62a4121de1f73a6d81ec32eae631e0  ast-grep.zip" | sha256sum -c -
           unzip -q ast-grep.zip ast-grep -d "$RUNNER_TEMP/ast-grep"
@@ -629,8 +652,16 @@ jobs:
       # A command's own timeout below the job's, so a hung fault prints its name and the
       # tail of its output instead of the runner cutting the log off. `--target-dir target`
       # for rust-cache, as in the bindings job: nothing here builds after `fire`. `--jobs 4`
-      # runs faults in four scratch worktrees; workers 2 to 4 build their own targets.
+      # runs faults in four scratch worktrees; workers 2 to 4 build their own targets. The two
+      # steps are one command, and the pull request's adds only the selection;
+      # test_check_guards_fire.py runs both as written here.
+      - name: the seeded faults a pull request affects fire
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: origin/${{ github.base_ref }}
+        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 4 --affected --base "$BASE"
       - name: every seeded fault fires
+        if: github.event_name != 'pull_request'
         run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 4
 
   # `mise run mutants` (#275), in shards: cargo-mutants changes the Rust a pull request

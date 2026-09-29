@@ -71,6 +71,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import math
 import re
 import shlex
 import sys
@@ -842,6 +843,22 @@ def plan_job(
             )
         )
     timeout = body.get("timeout-minutes")
+    if isinstance(timeout, str):
+        # A budget split by event (the guards job's, #323) is answered for a pull request,
+        # like every other expression. Dropping it would run the job with no timeout.
+        text = resolve(timeout, expressions, f"{where} timeout-minutes", problems)
+        try:
+            timeout = float(text)
+        except ValueError:
+            timeout = None
+        # `inf`, `nan` and `0` parse too, and ci-local.py runs each with no deadline.
+        if timeout is None or not (math.isfinite(timeout) and timeout > 0):
+            # `resolve` has already reported an expression with no value.
+            if not EXPRESSION.search(text):
+                problems.append(
+                    f"{where} timeout-minutes resolves to `{text}`, not a positive number"
+                )
+            timeout = None
     return Job(
         workflow=wf,
         name=job,

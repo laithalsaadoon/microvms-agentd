@@ -995,6 +995,52 @@ class ParityTests(unittest.TestCase):
         self.assertIsNone(typed.run)
         self.assertEqual(typed.note, "CI only")
 
+    def test_a_timeout_expression_takes_its_value_from_expressions(self):
+        # The guards job gives main's push its own budget (#323). ci:local answers for a pull
+        # request, as it does every expression, and a budget it can't read is a problem
+        # rather than a run with no timeout.
+        expr = "github.event_name == 'pull_request' && 30 || 60"
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, root)
+        (root / ".github/workflows").mkdir(parents=True)
+        (root / ".github/workflows/ci.yml").write_text(
+            edit(
+                CI,
+                "  drift:\n    runs-on: ubuntu-latest\n",
+                f"  drift:\n    runs-on: ubuntu-latest\n    timeout-minutes: ${{{{ {expr} }}}}\n",
+            )
+        )
+        import tomllib
+
+        def plan(answer: str | None) -> tuple[list, list[str]]:
+            local = LOCAL
+            if answer is not None:
+                local = edit(
+                    LOCAL, "[expressions]\n", f'[expressions]\n"{expr}" = "{answer}"\n'
+                )
+            problems: list[str] = []
+            return PARITY["plan"](root, tomllib.loads(local), problems), problems
+
+        jobs, problems = plan("30")
+        self.assertEqual(problems, [])
+        self.assertEqual({j.name: j for j in jobs}["drift"].timeout_minutes, 30)
+        _, problems = plan(None)
+        self.assertIn(
+            f"ci.yml job `drift` timeout-minutes uses `${{{{ {expr} }}}}`, which has no "
+            "value in ci/local.toml [expressions]",
+            problems,
+        )
+        # `inf`, `nan`, `0` and `-5` parse as floats, and none is a deadline ci-local.py keeps.
+        for answer in ("soon", "", "inf", "nan", "0", "-5"):
+            with self.subTest(answer=answer):
+                jobs, problems = plan(answer)
+                self.assertIn(
+                    f"ci.yml job `drift` timeout-minutes resolves to `{answer}`, not a "
+                    "positive number",
+                    problems,
+                )
+                self.assertIsNone({j.name: j for j in jobs}["drift"].timeout_minutes)
+
     # ── empty, missing and unparseable files ─────────────────────────────────
 
     def test_an_empty_ci_yml_fails(self):
