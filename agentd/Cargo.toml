@@ -145,6 +145,20 @@ cucumber = { version = "0.23", features = ["output-junit"] }
 # an ordinary `#[test]` on stable and as a coverage-guided target under `cargo bolero test`;
 # the same crate and line the CLI's output harness uses.
 bolero = "0.13"
+# The bootstrap and exec model (`tests/model_conformance.rs`): each path stateright walks is
+# replayed against the real routes, so a handler that stops making the model's transitions
+# fails here while `cargo test -p agentd-model` stays green. The version is what deny.toml's
+# wildcard ban asks of a path dependency; agentd is `publish = false`, so it never has to exist
+# on crates.io. Dev-only, so the guest binary doesn't link the model;
+# `the_proof_edges_are_dev_dependencies_only` in microvms-cli's dependency_direction.rs holds it.
+agentd-model = { path = "../model", version = "0.1.0" }
+# The checker that walks it: `PathRecorder` and the BFS are stateright's, on the line the model
+# itself is written against, so the lockfile resolves one copy.
+stateright = "0.31"
+# The Rust parser the key check reads `tests/model_conformance.rs` through, already in the graph
+# under the derive macros: the keys a test's doc claims for the trace come from the file's own
+# syntax tree, the same test-and-doc shape scripts/check-trace.py credits, not a copied list.
+syn = { version = "2.0.119", default-features = false, features = ["full", "parsing"] }
 
 [[test]]
 name = "bdd_exec_start"

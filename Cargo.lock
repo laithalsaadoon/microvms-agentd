@@ -22,6 +22,7 @@ dependencies = [
 name = "agentd"
 version = "0.1.0"
 dependencies = [
+ "agentd-model",
  "axum",
  "base64 0.23.1",
  "bolero",
@@ -42,7 +43,9 @@ dependencies = [
  "serde",
  "serde_json",
  "snow",
+ "stateright",
  "subtle",
+ "syn 2.0.119",
  "tar",
  "tempfile",
  "tokio",

@@ -5,8 +5,9 @@ edition = "2024"
 license.workspace = true
 repository.workspace = true
 # A proof harness, not a library: it exists so `cargo test -p agentd-model` can
-# explore every reachable bootstrap and exec state. There is nothing here for a
-# consumer to depend on.
+# explore every reachable bootstrap and exec state. Its one dependent is agentd's
+# `tests/model_conformance.rs`, a dev edge that replays the walked paths against
+# the daemon; there is nothing here for a shipping crate to depend on.
 publish = false
 
 [dependencies]

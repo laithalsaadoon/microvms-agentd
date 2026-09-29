@@ -251,9 +251,9 @@ Z3 and `stateright` proofs proofs about *this struct's* reachable states
 | An arbitrary archive never escapes its root and never panics | `proptest`, 256 cases | `agentd/tests/proptest_tar.rs:566` |
 | A symlink cannot redirect a member that arrives after it | `proptest` | `agentd/tests/proptest_tar.rs:600` |
 | Plain members and in-tree symlinks are always accepted | `proptest` | `agentd/tests/proptest_tar.rs:720` |
-| The attacker is never authorized; bootstrap is one-shot; only the installed token is accepted; the control API is closed before bootstrap | `stateright` model | `model/src/lib.rs:443-465` |
-| Output is never released before an ack; a retried start never spawns twice; there is one exec entry per id | `stateright` model | `model/src/lib.rs:466-481` |
-| Every safety property has a `sometimes` property beside it, so a green run cannot mean a state space that never reached the interesting states | `stateright` model | `model/src/lib.rs:482-515` |
+| The attacker is never authorized; bootstrap is one-shot; only the installed token is accepted; the control API is closed before bootstrap | `stateright` model | `model/src/lib.rs:451-474` |
+| Output is never released before an ack; a retried start never spawns twice; there is one exec entry per id | `stateright` model | `model/src/lib.rs:475-490` |
+| Every safety property has a `sometimes` property beside it, so a green run cannot mean a state space that never reached the interesting states | `stateright` model | `model/src/lib.rs:494-525` |
 
 ### Cross-crate and cost
 

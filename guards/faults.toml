@@ -163,6 +163,28 @@ note = "microvms-cli/tests/dependency_direction.rs::each_member_depends_on_exact
 message = "left: {\"microvms-domain\", \"microvms-edges\", \"microvms-protocol\"}"
 transform = { file = "microvms-app/Cargo.toml", replace = "[dev-dependencies]\n", with = "[dev-dependencies]\nmicrovms-edges = { path = \"../microvms-edges\" }\n" }
 
+# The model as a normal dependency of agentd: stateright in the guest binary. The member-edge
+# test counts every kind, so it stays green; only the kind check sees it.
+[[fault]]
+id = "deps-agentd-model-normal"
+guard = "the_proof_edges_are_dev_dependencies_only"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "the_proof_edges_are_dev_dependencies_only"]
+expect = "test-failed"
+suite = "rust"
+note = "microvms-cli/tests/dependency_direction.rs::the_proof_edges_are_dev_dependencies_only"
+message = "agentd depends on agentd-model as [Normal]"
+transform = { file = "agentd/Cargo.toml", replace = "[dependencies]\n", with = "[dependencies]\nagentd-model = { path = \"../model\", version = \"0.1.0\" }\n" }
+
+# The kind check's floor: an edge it can't find is one it can't hold.
+[[fault]]
+id = "deps-proof-edge-missing"
+guard = "the_proof_edges_are_dev_dependencies_only"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "the_proof_edges_are_dev_dependencies_only"]
+expect = "test-failed"
+suite = "rust"
+message = "agentd declares no edge onto agentd-model"
+transform = { file = "microvms-cli/tests/dependency_direction.rs", replace = ".filter(|dependency| dependency.name == onto)", with = ".filter(|dependency| dependency.name == onto && false)" }
+
 [[fault]]
 id = "deps-cli-lib"
 guard = "the_cli_exports_no_library_target_at_all"
@@ -1515,6 +1537,166 @@ expect = "test-failed"
 suite = "rust"
 note = "model/src/exec_start.rs::specified"
 transform = { file = "model/src/exec_start.rs", replace = "Layering::Specified => [image, identity, world.launch, request.env()],", with = "Layering::Specified => [image, world.launch, identity, request.env()]," }
+
+# ── model_conformance.rs: the bootstrap and exec model replayed against agentd (#296) ──
+
+# A step the per-state paths never take: every state a removing `Collect` reaches has a shorter
+# path, so only the walk's untaken-step paths drive it.
+[[fault]]
+id = "model-conformance-collect-keeps-acked"
+guard = "every_walked_path_of_the_model_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+expect = "test-failed"
+suite = "rust"
+message = "collect_expired removed 0 entries; the model collects 1"
+transform = { file = "agentd/src/exec.rs", replace = "            Some(at) => now.duration_since(at) < ttl,\n", with = "            Some(_) => true,\n" }
+
+# The floor: a recorder that records nothing replays nothing and would pass.
+[[fault]]
+id = "model-conformance-empty-walk"
+guard = "every_walked_path_of_the_model_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+expect = "test-failed"
+suite = "rust"
+message = "the walk recorded no path, so nothing was replayed"
+transform = { file = "agentd/tests/model_conformance.rs", replace = "accessor().into_iter().map(", with = "accessor().into_iter().filter(|_| false).map(" }
+
+# Without the untaken-step paths the walk skips the removing `Collect`, and the coverage floor
+# names it.
+[[fault]]
+id = "model-conformance-untaken-steps"
+guard = "every_walked_path_of_the_model_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+expect = "test-failed"
+suite = "rust"
+message = "the walk never takes [\"collect 200 removed\"]"
+transform = { file = "agentd/tests/model_conformance.rs", replace = "    paths.extend(untaken);\n", with = "    drop(untaken);\n" }
+
+# Acking a running exec succeeds and releases its output.
+# `exec::tests::acking_a_running_exec_is_a_conflict_not_a_silent_success` catches it too; the
+# replay reaches it on the shortest path that acks before the child exits.
+[[fault]]
+id = "model-conformance-ack-running"
+guard = "every_walked_path_of_the_model_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+expect = "test-failed"
+suite = "rust"
+message = "ExecAck(0) }): answered 200 OK; the model's response is 409 Conflict"
+transform = { file = "agentd/src/exec.rs", replace = "    if slot.is_none() {\n", with = "    if slot.is_none() && false {\n" }
+
+# Collection takes an exited entry nobody acked. `exec::tests::collection_takes_acked_entries_only`
+# catches it too.
+[[fault]]
+id = "model-conformance-collect-unacked-exited"
+guard = "every_walked_path_of_the_model_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+expect = "test-failed"
+suite = "rust"
+message = "collect_expired removed 1 entries; the model collects 0"
+transform = { file = "agentd/src/exec.rs", replace = "            Some(at) => now.duration_since(at) < ttl,\n            None => true,\n", with = "            Some(at) => now.duration_since(at) < ttl,\n            None => entry.shared.terminal.try_lock().map_or(true, |terminal| terminal.is_none()),\n" }
+
+# A retried start of an acked id spawns a second child, as if an acked id were free again. Only
+# the replay catches this one: every other agentd test passes with it seeded. The phase gives it
+# away (Running where the model has Acked) before the spawn count does.
+[[fault]]
+id = "model-conformance-restart-acked"
+guard = "every_walked_path_of_the_model_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+expect = "test-failed"
+suite = "rust"
+message = "the model's is Acked"
+transform = { file = "agentd/src/exec.rs", replace = "    let already_present = state.with_execs(|execs| execs.contains_key(&req.exec_id));\n", with = "    let already_present = state.with_execs(|execs| execs.get(&req.exec_id).is_some_and(|entry| entry.acked_at.is_none()));\n" }
+
+# A retried start of a running id spawns a second child and replaces the entry: the common
+# retry, a client that timed out while its child is still up. Nothing the daemon answers
+# changes, so only the spawn count shows it, and no other agentd test fails with it seeded
+# (`exec::tests::a_retried_start_does_not_spawn_a_second_child` retries after the exit).
+[[fault]]
+id = "model-conformance-restart-running"
+guard = "every_walked_path_of_the_model_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+expect = "test-failed"
+suite = "rust"
+note = "agentd/tests/model_conformance.rs::every_walked_path_of_the_model_replays_against_the_daemon"
+message = "spawned 2 children; the model spawned 1"
+transform = { file = "agentd/src/exec.rs", replace = "    let already_present = state.with_execs(|execs| execs.contains_key(&req.exec_id));\n", with = "    let already_present = state.with_execs(|execs| execs.get(&req.exec_id).is_some_and(|entry| entry.acked_at.is_some() || entry.shared.terminal.try_lock().map_or(true, |terminal| terminal.is_some())));\n" }
+
+# AGENTD-1 on the daemon: a control request presenting a token before bootstrap answers 401,
+# not 503. `turmoil_transport::an_unbootstrapped_daemon_answers_503_and_a_bad_token_answers_401`
+# catches it too; this entry is what shows the replay reaches auth.
+[[fault]]
+id = "model-conformance-auth-before-bootstrap"
+guard = "every_walked_path_of_the_model_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+expect = "test-failed"
+suite = "rust"
+message = "answered 401 Unauthorized; the model's response is 503 Service Unavailable"
+transform = { file = "agentd/src/auth.rs", replace = "            None => Some(StatusCode::SERVICE_UNAVAILABLE),\n", with = "            None => Some(StatusCode::UNAUTHORIZED),\n" }
+
+# The issue's own example: a second `/run` with a differing token replaces the installed one.
+# `state::tests::identical_replay_succeeds_and_a_different_token_conflicts` catches it too;
+# this entry is what shows the replay reaches the hook.
+[[fault]]
+id = "model-conformance-hook-replaces-token"
+guard = "every_walked_path_of_the_model_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+expect = "test-failed"
+suite = "rust"
+message = "answered 200 OK; the model's response is 409 Conflict"
+transform = { file = "agentd/src/state.rs", replace = "                } else {\n                    Bootstrap::Conflict\n                }\n", with = "                } else {\n                    *slot = Some(presented.to_vec());\n                    Bootstrap::Installed\n                }\n" }
+
+# The key floor: a model property that loses its key leaves the replay's claim with nothing
+# to back it, and trace:check can't see that while the key isn't in TRACED.
+[[fault]]
+id = "model-conformance-unkeyed-property"
+guard = "the_keys_the_replay_backs_name_safety_properties_of_the_model"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_model"]
+expect = "test-failed"
+suite = "rust"
+note = "agentd/tests/model_conformance.rs::the_keys_the_replay_backs_name_safety_properties_of_the_model"
+message = "no safety property of the model is named for [\"AGENTD-1\"]"
+transform = { file = "model/src/lib.rs", replace = "                \"AGENTD-1 control API is closed before bootstrap\",\n", with = "                \"control API is closed before bootstrap\",\n" }
+
+# The key floor's own floor: a model that states no property backs no key, and says so.
+[[fault]]
+id = "model-conformance-no-properties"
+guard = "the_keys_the_replay_backs_name_safety_properties_of_the_model"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_model"]
+expect = "test-failed"
+suite = "rust"
+message = "the model states no property, so no key can be checked against it"
+transform = { file = "agentd/tests/model_conformance.rs", replace = "deployment_invariant_held()).properties();\n", with = "deployment_invariant_held()).properties().into_iter().take(0).collect::<Vec<_>>();\n" }
+
+# A test's doc claims a key for the trace that no model property backs. check-trace.py credits
+# the test layer from that doc, so the key check has to read the same doc, not a list beside it.
+[[fault]]
+id = "model-conformance-doc-claims-unbacked-key"
+guard = "the_keys_the_replay_backs_name_safety_properties_of_the_model"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_model"]
+expect = "test-failed"
+suite = "rust"
+message = "no safety property of the model is named for [\"AGENTD-5\"]"
+transform = { file = "agentd/tests/model_conformance.rs", replace = "/// It's the daemon's side of AGENTD-1:", with = "/// It's the daemon's side of AGENTD-1 and AGENTD-5:" }
+
+# The key check on empty input: a source with no tests claims no key, and says so.
+[[fault]]
+id = "model-conformance-keys-empty-source"
+guard = "the_keys_the_replay_backs_name_safety_properties_of_the_model"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_model"]
+expect = "test-failed"
+suite = "rust"
+message = "no test in this file claims a requirement key"
+transform = { file = "agentd/tests/model_conformance.rs", replace = "syn::parse_file(include_str!(\"model_conformance.rs\"))", with = "syn::parse_file(\"\")" }
+
+# The key check with a parser that returns nothing.
+[[fault]]
+id = "model-conformance-keys-no-items"
+guard = "the_keys_the_replay_backs_name_safety_properties_of_the_model"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_model"]
+expect = "test-failed"
+suite = "rust"
+message = "no test in this file claims a requirement key"
+transform = { file = "agentd/tests/model_conformance.rs", replace = "claims(&source.items, ", with = "claims(&source.items[..0], " }
 
 # ── generated artifacts ──────────────────────────────────────────────────────
 
