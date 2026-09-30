@@ -1,0 +1,26 @@
+# ── the bindings' Sandbox.preflight (#264) ────────────────────────────────────
+#
+# A binding whose preflight stopped asking core accepts every request, and the refusal cases
+# go red while the passing ones stay green.
+
+[[fault]]
+id = "py-sandbox-preflight-unchecked"
+guard = "bindings/microvms-py/tests/test_build_preflight.py::test_preflight_raises_what_build_image_would[name]"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_build_preflight.py"],
+]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "bindings/microvms-py/src/sandbox.rs", replace = "        Ok(self.read(|sandbox| sandbox.preflight(&request))?)\n", with = "        let _ = request;\n        Ok(())\n" }
+
+[[fault]]
+id = "js-sandbox-preflight-unchecked"
+guard = "preflight rejects what buildImage would: name"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/build_preflight.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "bindings/microvms-js/src/sandbox.rs", replace = "        guard.preflight(&request).map_err(js_async)\n", with = "        let _ = (&guard, request);\n        Ok(())\n" }

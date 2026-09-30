@@ -51,10 +51,13 @@ runners restate the same rules. This file is the contract all of them follow.
   reason. The reason ends by naming the issue or trace id that holds the gap, as `(#N)` or
   `(IMAGE-12)`.
 
-A marker's issue and a skip's reference are checked for their shape only. Neither is
-ratcheted the way the table's exemptions are (`tools/ratchet.py` collects `parity-gap` from
-the table, not from this directory), so a new marker or skip is a new tracked gap, and review
-is what holds it.
+A marker's issue and a skip's reference are checked for their shape here. The ratchet counts
+both as `parity-drift` (#320): one finding per marked path, keyed
+`<area>/<case>/<surface>: known_drift <path>`, and one per skip, `<area>/<case>/<surface>: skip`.
+So a change can't add a marker or a skip the merge base doesn't have, and the change that fixes
+a surface deletes its marker and edits nothing else. A skip no open issue will close is a
+decision in `verify/ratchet/decisions.toml`, with the trace id it cites in its reason. A marker
+is counted beside the table's exemption for the same gap, not instead of it.
 
 Numbers compare by value, and nothing else is coerced.
 

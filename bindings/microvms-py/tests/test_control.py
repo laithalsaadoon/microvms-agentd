@@ -8,6 +8,8 @@ the wire; the live half is `conformance/run_rs.py`.
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 import microvms
@@ -91,3 +93,20 @@ def test_terminate_waits_for_a_bool_or_a_number_of_seconds() -> None:
         microvms.Sandbox(region()).terminate(wait_for_terminated=-1.0)
     with pytest.raises(TypeError):
         microvms.Sandbox(region()).terminate(wait_for_terminated="soon")  # type: ignore[arg-type]
+
+
+def test_the_lifecycle_wait_defaults_the_signature_states_are_cores() -> None:
+    """`wait_for_state` writes its defaults out, and they're core's (#266).
+
+    Written out so the stub shows them (a default named for a core constant prints as `...`),
+    which is what makes them a second copy; `session_constants()` publishes core's figures, and
+    this holds the copy to them. The other waits name core's constant, so they can't drift.
+    """
+    constants = microvms.session_constants()
+    parameters = inspect.signature(microvms.ControlPlane.wait_for_state).parameters
+    assert (
+        parameters["timeout"].default == constants["defaultLifecycleTimeoutSeconds"]
+    ), parameters["timeout"]
+    assert (
+        parameters["poll_interval"].default == constants["lifecyclePollIntervalSeconds"]
+    ), parameters["poll_interval"]

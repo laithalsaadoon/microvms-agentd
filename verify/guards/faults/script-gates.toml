@@ -69,7 +69,7 @@ guard = "tools/check-publishable.py"
 run = ["./tools/check-publishable.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "but not `-p microvms-cli` in .github/workflows/ci.yml"
+message = "but not `-p microvms-cli` in .config/mise/tasks/ci.toml"
 transform = { file = "tools/check-publishable.py", replace = "SELECTOR = re.compile(r\"(?:-p|--package)[ =]+([A-Za-z0-9_-]+)\")", with = "SELECTOR = re.compile(r\"(?:-p|--package)[ =]+([A-Za-z0-9_]+)\")" }
 
 [[fault]]

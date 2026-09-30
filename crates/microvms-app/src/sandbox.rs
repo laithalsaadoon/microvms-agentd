@@ -1245,11 +1245,7 @@ impl Sandbox {
                 self.lifecycle,
             )));
         }
-        let opts = WaitOpts {
-            timeout,
-            poll_interval: LIFECYCLE_POLL_INTERVAL,
-            stall_grace: Duration::MAX,
-        };
+        let opts = WaitOpts::for_lifecycle(timeout);
         let running = if self.launch_adoptable {
             self.control.wait_for_launch(&id, opts).await?
         } else {
@@ -1727,11 +1723,7 @@ impl Sandbox {
             if report.terminate_accepted
                 && let Some(timeout) = opts.wait_for_terminated
             {
-                let wait = WaitOpts {
-                    timeout,
-                    poll_interval: LIFECYCLE_POLL_INTERVAL,
-                    stall_grace: Duration::MAX,
-                };
+                let wait = WaitOpts::for_lifecycle(timeout);
                 match self
                     .control
                     .wait_for_state(&id, &["TERMINATED"], &[], wait)
@@ -1809,11 +1801,7 @@ impl Sandbox {
 
     /// Five minutes at five-second polls, for suspend, resume, and terminate.
     fn lifecycle_wait(&self) -> WaitOpts {
-        WaitOpts {
-            timeout: DEFAULT_LIFECYCLE_TIMEOUT,
-            poll_interval: LIFECYCLE_POLL_INTERVAL,
-            stall_grace: Duration::MAX,
-        }
+        WaitOpts::for_lifecycle(DEFAULT_LIFECYCLE_TIMEOUT)
     }
 }
 
@@ -1885,6 +1873,22 @@ mod tests {
             Arc::clone(&clock) as Arc<dyn crate::control::Clock>,
         );
         (Sandbox::with_control_plane(plane), recorder, clock)
+    }
+
+    /// Suspend, resume and terminate wait five minutes at five-second polls, with no stall
+    /// probe: core's lifecycle wait, not the image build's 45-minute default (#266).
+    #[test]
+    fn the_suspend_resume_and_terminate_waits_are_cores_lifecycle_wait() {
+        let (sandbox, _, _) = planted();
+        let wait = sandbox.lifecycle_wait();
+        assert_eq!(
+            (wait.timeout, wait.poll_interval, wait.stall_grace),
+            (
+                DEFAULT_LIFECYCLE_TIMEOUT,
+                LIFECYCLE_POLL_INTERVAL,
+                Duration::MAX
+            )
+        );
     }
 
     /// Queues everything a launch to RUNNING needs.

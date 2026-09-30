@@ -149,14 +149,24 @@ impl Default for WaitOpts {
 }
 
 impl WaitOpts {
-    /// Options for the launch wait: five minutes, five-second polls.
-    ///
-    /// `stall_grace` is set past the timeout rather than to zero, since a zero grace would
-    /// read as "probe immediately" — and there is nothing to probe on the launch path.
+    /// Options for the launch wait: [`crate::sandbox::DEFAULT_LIFECYCLE_TIMEOUT`] at
+    /// [`crate::sandbox::LIFECYCLE_POLL_INTERVAL`], five minutes at five-second polls.
     pub fn for_launch() -> Self {
+        Self::for_lifecycle(crate::sandbox::DEFAULT_LIFECYCLE_TIMEOUT)
+    }
+
+    /// Options for a lifecycle wait (a launch, suspend, resume or terminate) with the caller's
+    /// deadline: core's [`crate::sandbox::LIFECYCLE_POLL_INTERVAL`], and no stall probe.
+    ///
+    /// Every surface's lifecycle wait starts here, so what a lifecycle wait is lives in one
+    /// place (#266); a caller that polls at another rate sets `poll_interval` on the result.
+    /// `stall_grace` is set past any deadline rather than to zero, since a zero grace would
+    /// read as "probe immediately", and a lifecycle transition has no build list to probe
+    /// (TRAP-2 is the image build's).
+    pub fn for_lifecycle(timeout: Duration) -> Self {
         Self {
-            timeout: Duration::from_secs(300),
-            poll_interval: Duration::from_secs(5),
+            timeout,
+            poll_interval: crate::sandbox::LIFECYCLE_POLL_INTERVAL,
             stall_grace: Duration::MAX,
         }
     }
@@ -3987,5 +3997,35 @@ mod tests {
                 "five NonBlankString members refused {bad:?} locally"
             );
         }
+    }
+
+    /// A lifecycle wait is the caller's deadline at core's poll interval with no stall probe,
+    /// and the launch wait is one at core's default deadline (#266). Every surface's lifecycle
+    /// wait is built from `for_lifecycle`, so this is where those three values are held.
+    ///
+    /// **Falsification**: `verify/guards/faults/core-defaults.toml` entry
+    /// `app-lifecycle-wait-stall-probe` gives `for_lifecycle` the image build's stall grace,
+    /// and this goes red on `stall_grace`.
+    #[test]
+    fn a_lifecycle_wait_is_the_callers_deadline_at_cores_poll_with_no_stall_probe() {
+        let wait = WaitOpts::for_lifecycle(Duration::from_secs(42));
+        assert_eq!(
+            (wait.timeout, wait.poll_interval, wait.stall_grace),
+            (
+                Duration::from_secs(42),
+                crate::sandbox::LIFECYCLE_POLL_INTERVAL,
+                Duration::MAX
+            ),
+            "stall_grace, poll_interval or timeout"
+        );
+        let launch = WaitOpts::for_launch();
+        assert_eq!(
+            (launch.timeout, launch.poll_interval, launch.stall_grace),
+            (
+                crate::sandbox::DEFAULT_LIFECYCLE_TIMEOUT,
+                crate::sandbox::LIFECYCLE_POLL_INTERVAL,
+                Duration::MAX
+            )
+        );
     }
 }

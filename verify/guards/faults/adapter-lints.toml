@@ -108,7 +108,7 @@ run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p",
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_no_adapter_source_turns_the_lints_off_outside_its_listed_sites ("
-transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "/// A lifecycle wait with the caller's deadline and core's poll interval.\nfn wait_opts(", with = "/// A lifecycle wait with the caller's deadline and core's poll interval.\n#[expect(clippy::disallowed_methods, reason = \"x\")]\nfn wait_opts(" }
+transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "pub(crate) fn epoch_secs() -> u64 {\n", with = "#[expect(clippy::disallowed_methods, reason = \"x\")]\npub(crate) fn epoch_secs() -> u64 {\n" }
 
 [[fault]]
 id = "lint-exceptions-test-only-skip"
@@ -195,7 +195,7 @@ transform = { file = "verify/ratchet/rules/operation-literal.yml", replace = "|L
 [[fault]]
 id = "model-drift-operations-empty-parse"
 guard = "tools/test_model_drift.py"
-run = ["uv", "run", "--with", "boto3>=1.40", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_model_drift.py", "-k", "OperationRuleTests"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_model_drift.py", "-k", "OperationRuleTests"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_rule_the_parser_cant_read_is_an_error_not_an_empty_list ("
@@ -204,7 +204,7 @@ transform = { file = "tools/check-model-drift.py", replace = "    if not names o
 [[fault]]
 id = "model-drift-operations-repeated"
 guard = "tools/test_model_drift.py"
-run = ["uv", "run", "--with", "boto3>=1.40", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_model_drift.py", "-k", "OperationRuleTests"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_model_drift.py", "-k", "OperationRuleTests"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_repeated_name_is_drift ("
@@ -213,7 +213,7 @@ transform = { file = "tools/check-model-drift.py", replace = "    ours = tuple(s
 [[fault]]
 id = "model-drift-operations-rule-short"
 guard = "tools/test_model_drift.py"
-run = ["uv", "run", "--with", "boto3>=1.40", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_model_drift.py", "-k", "OperationRuleTests"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_model_drift.py", "-k", "OperationRuleTests"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_rule_missing_an_operation_is_drift ("
@@ -222,7 +222,7 @@ transform = { file = "tools/check-model-drift.py", replace = "        ours == th
 [[fault]]
 id = "model-drift-operations-rule-long"
 guard = "tools/test_model_drift.py"
-run = ["uv", "run", "--with", "boto3>=1.40", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_model_drift.py", "-k", "OperationRuleTests"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_model_drift.py", "-k", "OperationRuleTests"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_an_operation_only_the_rule_names_is_drift ("
