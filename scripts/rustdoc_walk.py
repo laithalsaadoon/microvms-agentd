@@ -137,15 +137,18 @@ def build(
     One `cargo doc` builds every package, and `--no-deps` keeps it to their own JSON.
     `--cap-lints allow` quiets rustdoc's doc-link warnings, which are the docs build's to
     report and would bury `--check`'s diff in a CI log.
+
+    The build gets a target directory of its own, `rustdoc-json` under cargo's target
+    directory unless `target_dir` names another. `RUSTC_BOOTSTRAP` is an input to the build
+    scripts that probe for nightly features (proc-macro2's, thiserror's and anyhow's
+    `rerun-if-env-changed`), so building with it in the shared target reran those scripts and
+    rebuilt everything downstream of proc-macro2 there, which the next `cargo test` or
+    `cargo clippy` then rebuilt again without it: 177 crates, measured 2026-09-30 at 74e2347.
+    `check` runs this beside `cargo test`, and in one target the two rebuilt the same crates
+    in turn.
     """
     env = dict(os.environ, RUSTC_BOOTSTRAP="1")
     env["RUSTDOCFLAGS"] = "-Z unstable-options --output-format json --cap-lints allow"
-    argv = ["cargo", "doc", "--no-deps", "--lib", "--quiet", "--color", "never"]
-    argv += [arg for package in packages for arg in ("-p", package)]
-    if target_dir is not None:
-        env.pop("CARGO_TARGET_DIR", None)
-        argv += ["--target-dir", str(target_dir)]
-    subprocess.run(argv, cwd=workspace, env=env, check=True)
     if target_dir is None:
         metadata = subprocess.run(
             ["cargo", "metadata", "--format-version", "1", "--no-deps"],
@@ -155,7 +158,14 @@ def build(
             capture_output=True,
             text=True,
         )
-        target_dir = Path(json.loads(metadata.stdout)["target_directory"])
+        target_dir = (
+            Path(json.loads(metadata.stdout)["target_directory"]) / "rustdoc-json"
+        )
+    env.pop("CARGO_TARGET_DIR", None)
+    argv = ["cargo", "doc", "--no-deps", "--lib", "--quiet", "--color", "never"]
+    argv += [arg for package in packages for arg in ("-p", package)]
+    argv += ["--target-dir", str(target_dir)]
+    subprocess.run(argv, cwd=workspace, env=env, check=True)
     return Path(target_dir) / "doc"
 
 
