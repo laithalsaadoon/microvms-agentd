@@ -3454,6 +3454,103 @@ transform = { file = "scripts/check-guards-fire.py", replace = "            work
 # as an expression.
 
 # The pull request's step loses its selection, so a pull request fires every entry again.
+# Warm workers: each extra worker's target starts as a copy of the first one's
+# dependency units, never a workspace member's, the copies keep their mtimes, an overlaid file
+# gets a fresh mtime, and `build` compiles without running.
+
+[[fault]]
+id = "guards-fire-seed-copies-workspace-units"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "WarmWorkers"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_seeded_target_holds_no_workspace_unit ("
+transform = { file = "scripts/check-guards-fire.py", replace = "    return not readings & local\n", with = "    return bool(readings)\n" }
+
+[[fault]]
+id = "guards-fire-seed-one-reading-of-lib"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "WarmWorkers"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_seeded_target_holds_no_workspace_unit ("
+transform = { file = "scripts/check-guards-fire.py", replace = "    readings = {stem, stem[3:]} if stem.startswith(\"lib\") else {stem}\n", with = "    readings = {stem}\n" }
+
+[[fault]]
+id = "guards-fire-seed-drops-mtimes"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "WarmWorkers"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_seeded_target_holds_no_workspace_unit ("
+transform = { file = "scripts/check-guards-fire.py", replace = "            shutil.copy2(src, dst, follow_symlinks=False)\n", with = "            shutil.copy(src, dst, follow_symlinks=False)\n" }
+
+[[fault]]
+id = "guards-fire-extra-workers-start-cold"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "WarmWorkers"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_each_extra_worker_starts_from_the_first_workers_dependencies ("
+transform = { file = "scripts/check-guards-fire.py", replace = "            print(seed_targets(first_target, extra_targets, local))\n", with = "            pass\n" }
+
+[[fault]]
+id = "guards-fire-overlay-old-mtime"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "WarmWorkers"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_overlaid_file_gets_a_fresh_mtime ("
+transform = { file = "scripts/check-guards-fire.py", replace = "                shutil.copy(source, target, follow_symlinks=False)\n", with = "                shutil.copy2(source, target, follow_symlinks=False)\n" }
+
+[[fault]]
+id = "guards-fire-build-runs-tests"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "BuildCommand"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_each_cargo_command_builds_once_without_running ("
+transform = { file = "scripts/check-guards-fire.py", replace = "        head.append(\"--no-run\")\n", with = "        pass\n" }
+
+# The fire steps build incrementally, and the legs restore the one dependency cache a push to
+# main saves.
+
+[[fault]]
+id = "guards-job-fire-not-incremental"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_fire_steps_build_incrementally ("
+transform = { file = ".github/workflows/ci.yml", replace = "          CARGO_INCREMENTAL: \"1\"\n        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n", with = "        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n" }
+
+[[fault]]
+id = "guards-job-bindings-not-incremental"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_fire_steps_build_incrementally ("
+transform = { file = ".github/workflows/ci.yml", replace = "          # See the `guards` job's fire steps.\n          CARGO_INCREMENTAL: \"1\"\n", with = "          # See the `guards` job's fire steps.\n          CARGO_INCREMENTAL: \"0\"\n" }
+
+[[fault]]
+id = "guards-job-legs-save-cache"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_legs_restore_the_one_cache_a_push_to_main_saves ("
+transform = { file = ".github/workflows/ci.yml", replace = "          # The `guards-cache` job's, restored and never saved here: see that job.\n          shared-key: guards-deps\n          save-if: false\n", with = "          # The `guards-cache` job's, restored and never saved here: see that job.\n          shared-key: guards-deps\n          save-if: ${{ github.ref == 'refs/heads/main' }}\n" }
+
+[[fault]]
+id = "guards-job-cache-saver-key"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_legs_restore_the_one_cache_a_push_to_main_saves ("
+transform = { file = ".github/workflows/ci.yml", replace = "          shared-key: guards-deps\n          save-if: ${{ github.ref == 'refs/heads/main' }}\n", with = "          shared-key: guards-cache\n          save-if: ${{ github.ref == 'refs/heads/main' }}\n" }
+
 [[fault]]
 id = "guards-job-pr-affected"
 guard = "test_check_guards_fire.py"
@@ -3581,7 +3678,7 @@ run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "disc
 expect = "exit-nonzero"
 suite = "script"
 message = " : the push step's --jobs"
-transform = { file = ".github/workflows/ci.yml", replace = "run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n      - name: every seeded fault fires\n        if: github.event_name != 'pull_request'\n        env:\n          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}\n        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n", with = "run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 1 --shard \"$SHARD\" --affected --base \"$BASE\"\n      - name: every seeded fault fires\n        if: github.event_name != 'pull_request'\n        env:\n          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}\n        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 1 --shard \"$SHARD\"\n" }
+transform = { file = ".github/workflows/ci.yml", replace = "run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n      - name: every seeded fault fires\n        if: github.event_name != 'pull_request'\n        env:\n          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}\n          CARGO_INCREMENTAL: \"1\"\n        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n", with = "run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 1 --shard \"$SHARD\" --affected --base \"$BASE\"\n      - name: every seeded fault fires\n        if: github.event_name != 'pull_request'\n        env:\n          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}\n          CARGO_INCREMENTAL: \"1\"\n        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 1 --shard \"$SHARD\"\n" }
 
 [[fault]]
 id = "guards-job-timeout"
@@ -3590,7 +3687,7 @@ run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "disc
 expect = "exit-nonzero"
 suite = "script"
 message = "AssertionError: None != '900' : the push step's --timeout"
-transform = { file = ".github/workflows/ci.yml", replace = "run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n      - name: every seeded fault fires\n        if: github.event_name != 'pull_request'\n        env:\n          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}\n        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n", with = "run: ./scripts/check-guards-fire.py fire --suite rust --suite script --target-dir target --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n      - name: every seeded fault fires\n        if: github.event_name != 'pull_request'\n        env:\n          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}\n        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --target-dir target --jobs 4 --shard \"$SHARD\"\n" }
+transform = { file = ".github/workflows/ci.yml", replace = "run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n      - name: every seeded fault fires\n        if: github.event_name != 'pull_request'\n        env:\n          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}\n          CARGO_INCREMENTAL: \"1\"\n        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n", with = "run: ./scripts/check-guards-fire.py fire --suite rust --suite script --target-dir target --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n      - name: every seeded fault fires\n        if: github.event_name != 'pull_request'\n        env:\n          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}\n          CARGO_INCREMENTAL: \"1\"\n        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --target-dir target --jobs 4 --shard \"$SHARD\"\n" }
 
 # The pull request's step stops diffing against its own base branch: a literal origin/main, or no
 # `BASE` at all, which the script reads as origin/main.

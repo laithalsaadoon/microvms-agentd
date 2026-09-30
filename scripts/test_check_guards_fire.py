@@ -44,13 +44,15 @@ GIT_ENV_LEAKS = (
     "GIT_PREFIX",
 )
 
-# One runner for all three names. It reads every `state*.txt` in the tree it runs in as
+# One runner for all three names. `cargo metadata` prints the tree's `metadata.json` (exit 101
+# without one). It reads every `state*.txt` in the tree it runs in as
 # `name=value` words: `build=E0599` breaks the build with that code, `<test>=fail` fails that
 # test, `color=yes` wraps each line in ANSI codes the way CI's `CARGO_TERM_COLOR=always` does,
 # `slow=N` sleeps N tenths of a second, and `hang=yes` sleeps past any timeout (with a child
 # that sleeps too, and both pids written under $FAKE_PIDS when it's set). With
 # CARGO_TARGET_DIR set, the runner stands in for a build there: `built.txt` records the state
-# it last ran on, `runs` counts runs, and `flaky=N` fails the Nth run. $FAKE_LOG, when set,
+# it last ran on, `runs` counts runs, and `flaky=N` fails the Nth run; $FAKE_DEPS, when set,
+# gets the target and the names in its `debug/deps` before each run. $FAKE_LOG, when set,
 # gets a line per run: the target, the venv, the tree, whether the tree was seeded, and the
 # arguments.
 FAKE_RUNNER = """\
@@ -64,6 +66,17 @@ import time
 texts = [p.read_text() for p in sorted(pathlib.Path(".").glob("state*.txt"))]
 state = dict(w.split("=", 1) for w in " ".join(texts).split())
 tool = pathlib.Path(sys.argv[0]).name
+if tool == "cargo" and sys.argv[1:2] == ["metadata"]:
+    meta = pathlib.Path("metadata.json")
+    if not meta.is_file():
+        sys.exit(101)
+    print(meta.read_text())
+    sys.exit(0)
+if os.environ.get("FAKE_DEPS") and os.environ.get("CARGO_TARGET_DIR"):
+    deps = pathlib.Path(os.environ["CARGO_TARGET_DIR"], "debug", "deps")
+    names = sorted(p.name for p in deps.iterdir()) if deps.is_dir() else []
+    with open(os.environ["FAKE_DEPS"], "a") as log:
+        log.write(os.environ["CARGO_TARGET_DIR"] + "\\t" + " ".join(names) + "\\n")
 
 
 def say(line):
@@ -1410,6 +1423,266 @@ ALL = set(ORDER)
 OWED = "the full fire runs on every push to main, or here without --affected"
 
 
+HASH = "0123456789abcdef"
+
+
+def fire_module() -> dict:
+    return runpy.run_path(str(SCRIPT), run_name="guards_fire")
+
+
+def fake_target(root: Path, names: list[str]) -> Path:
+    """A target whose dev profile holds `names` (each `kind/entry`, a trailing `/` for a
+    directory), every file an hour old."""
+    for name in names:
+        path = root / "debug" / name.rstrip("/")
+        if name.endswith("/"):
+            path.mkdir(parents=True, exist_ok=True)
+            (path / "inside").write_text(name)
+            os.utime(path / "inside", (time.time() - 3600,) * 2)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(name)
+            os.utime(path, (time.time() - 3600,) * 2)
+    return root
+
+
+def units(target: Path) -> set[str]:
+    return {
+        f"{kind}/{p.name}"
+        for kind in ("deps", "build", ".fingerprint", "incremental")
+        if (target / "debug" / kind).is_dir()
+        for p in (target / "debug" / kind).iterdir()
+    }
+
+
+# A dependency's units, and a workspace member's (`microvms-cli`, its `microvm` bin, and a
+# crate called `libc`-like `liblocal` to cover both readings of the `lib` prefix).
+DEPENDENCY = [
+    f"deps/libserde-{HASH}.rlib",
+    f"deps/libserde-{HASH}.rmeta",
+    f"deps/serde-{HASH}.d",
+    f"deps/liblibc-{HASH}.rlib",
+    f"deps/libc-{HASH}.d",
+    f".fingerprint/serde-{HASH}/",
+    f"build/aws-lc-sys-{HASH}/",
+    f".fingerprint/aws-lc-sys-{HASH}/",
+]
+WORKSPACE = [
+    f"deps/libmicrovms_cli-{HASH}.rlib",
+    f"deps/microvms_cli-{HASH}.d",
+    f"deps/microvm-{HASH}",
+    f"deps/liblocal-{HASH}.rlib",
+    f"deps/local-{HASH}.d",
+    f".fingerprint/microvms-cli-{HASH}/",
+    f"build/microvms-js-{HASH}/",
+    f"incremental/microvms_cli-{HASH}/",
+    "deps/libmicrovms.rlib",
+]
+LOCAL_NAMES = {
+    "microvms-cli",
+    "microvms_cli",
+    "microvm",
+    "microvms-js",
+    "microvms_js",
+    "local",
+}
+
+
+class WarmWorkers(unittest.TestCase):
+    """`fire --jobs N`'s extra workers start from the first target's dependency units and
+    never from a workspace member's: a copied member's unit is fresh against an
+    older tree and reads the tree it was built in through `env!("CARGO_MANIFEST_DIR")`."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.tmp = Path(directory.name)
+        self.m = fire_module()
+
+    def test_a_seeded_target_holds_no_workspace_unit(self):
+        first = fake_target(self.tmp / "first", DEPENDENCY + WORKSPACE)
+        other = self.tmp / "other"
+        line = self.m["seed_targets"](first, [other], LOCAL_NAMES)
+        self.assertEqual(units(other), {u.rstrip("/") for u in DEPENDENCY})
+        self.assertIn("start from the first target's", line)
+        # The copies keep their mtimes: cargo compares a unit's with its dep-info's.
+        source = first / "debug" / "deps" / f"libserde-{HASH}.rlib"
+        copy = other / "debug" / "deps" / f"libserde-{HASH}.rlib"
+        self.assertEqual(copy.stat().st_mtime, source.stat().st_mtime)
+
+    def test_cargo_not_answering_copies_nothing(self):
+        first = fake_target(self.tmp / "first", DEPENDENCY)
+        other = self.tmp / "other"
+        line = self.m["seed_targets"](first, [other], None)
+        self.assertFalse(other.exists())
+        self.assertIn("cargo metadata didn't answer", line)
+
+    def test_an_unparsed_name_is_not_shared(self):
+        self.assertFalse(self.m["dependency_unit"]("libmicrovms.so", set()))
+        self.assertFalse(self.m["dependency_unit"](f"serde-{HASH[:8]}.d", set()))
+        self.assertTrue(self.m["dependency_unit"](f"serde-{HASH}.d", set()))
+
+    def test_an_overlaid_file_gets_a_fresh_mtime(self):
+        # The caller's uncommitted file, a day old: its copy in the scratch tree is new, so
+        # an artifact built from other text at that path in an earlier run is stale to cargo.
+        repo = fire_repo(self, keyed("a", "g1", "g1"), state="g1=ok\n")
+        repo.write("new.txt", "uncommitted\n")
+        day_old = time.time() - 86400
+        os.utime(repo.root / "new.txt", (day_old, day_old))
+        tree = self.m["Tree"].make(repo.root)
+        self.addCleanup(tree.remove)
+        copied = tree.path / "new.txt"
+        self.assertEqual(copied.read_text(), "uncommitted\n")
+        self.assertGreater(copied.stat().st_mtime, day_old + 3600)
+
+    def test_local_packages_names_members_their_targets_and_path_dependencies(self):
+        root = self.tmp / "ws"
+        files = {
+            "Cargo.toml": '[workspace]\nmembers = ["a-crate"]\nresolver = "3"\n',
+            "a-crate/Cargo.toml": (
+                '[package]\nname = "a-crate"\nversion = "0.1.0"\nedition = "2024"\n'
+                '[dependencies]\nnear = { path = "../near" }\n'
+                '[[bin]]\nname = "a-tool"\npath = "src/main.rs"\n'
+            ),
+            "a-crate/src/lib.rs": "",
+            "a-crate/src/main.rs": "fn main() {}\n",
+            "a-crate/tests/t_one.rs": "",
+            "near/Cargo.toml": '[package]\nname = "near"\nversion = "0.1.0"\nedition = "2024"\n',
+            "near/src/lib.rs": "",
+        }
+        for path, text in files.items():
+            (root / path).parent.mkdir(parents=True, exist_ok=True)
+            (root / path).write_text(text)
+        names = self.m["local_packages"](root)
+        self.assertIsNotNone(names)
+        for name in ("a-crate", "a_crate", "a-tool", "a_tool", "t_one", "near"):
+            self.assertIn(name, names)
+
+    def test_each_extra_worker_starts_from_the_first_workers_dependencies(self):
+        # End to end: before any worker's first command, each extra target holds the first
+        # target's dependency unit and not the workspace member's.
+        seen = self.tmp / "deps.log"
+        repo = fire_repo(
+            self,
+            keyed("a", "g1", "g1"),
+            keyed("b", "g2", "g2"),
+            keyed("c", "g3", "g3"),
+            state="g1=ok g2=ok g3=ok\n",
+        )
+        repo.write(
+            "metadata.json",
+            json.dumps(
+                {
+                    "packages": [
+                        {
+                            "name": "fixture",
+                            "targets": [{"name": "fixture"}],
+                            "dependencies": [],
+                        }
+                    ]
+                }
+            ),
+        )
+        repo.commit("metadata")
+        first = repo.target / "guards-fire"
+        fake_target(
+            first, [f"deps/libthird-{HASH}.rlib", f"deps/libfixture-{HASH}.rlib"]
+        )
+        tmp = self.tmp / "scratch"
+        tmp.mkdir()
+        out = repo.run("fire", "--jobs", "3", TMPDIR=str(tmp), FAKE_DEPS=str(seen))
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertIn(
+            "guards: the other 2 workers start from the first target's 1 dependency units",
+            out.stdout,
+        )
+        runs = [line.split("\t") for line in seen.read_text().splitlines()]
+        extra = [(t, deps.split()) for t, deps in runs if t != str(first)]
+        self.assertTrue(extra, runs)
+        self.assertEqual(len({t for t, _ in extra}), 2, runs)
+        for target, deps in extra:
+            self.assertIn(f"libthird-{HASH}.rlib", deps, target)
+            self.assertNotIn(f"libfixture-{HASH}.rlib", deps, target)
+
+
+class BuildCommand(unittest.TestCase):
+    """`build` compiles what the selected entries' cargo commands compile, once each, and runs
+    nothing, so CI's `guards-cache` job saves every build the `guards` legs restore."""
+
+    def test_each_cargo_command_builds_once_without_running(self):
+        log = Path(tempfile.mkdtemp()) / "runs.log"
+        self.addCleanup(shutil.rmtree, log.parent, True)
+        repo = fire_repo(
+            self,
+            entry(
+                fid="t1", run=["cargo", "test", "-p", "x", "--", "--exact", "the_guard"]
+            ),
+            entry(
+                fid="t2",
+                guard="other",
+                run=["cargo", "test", "-p", "x", "--", "--exact", "other"],
+            ),
+            entry(
+                fid="lint",
+                expect="lint-error",
+                message="m",
+                run=[
+                    "cargo",
+                    "clippy",
+                    "-p",
+                    "x",
+                    "--all-targets",
+                    "--",
+                    "-D",
+                    "warnings",
+                ],
+            ),
+            entry(
+                fid="doc",
+                guard="x::doctest",
+                run=[
+                    "cargo",
+                    "test",
+                    "-p",
+                    "x",
+                    "--doc",
+                    "--",
+                    "--exact",
+                    "x::doctest",
+                ],
+            ),
+            entry(
+                fid="sc",
+                guard="g",
+                run=[sys.executable, "g.py"],
+                expect="exit-nonzero",
+                message="m",
+                suite="script",
+            ),
+        )
+        out = repo.run(
+            "build", "--suite", "rust", "--suite", "script", FAKE_LOG=str(log)
+        )
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        args = [line.split("\t")[4] for line in log.read_text().splitlines()]
+        self.assertEqual(
+            args, ["test -p x --no-run", "clippy -p x --all-targets"], out.stdout
+        )
+        self.assertIn("guards: 2 builds", out.stdout)
+
+    def test_a_build_that_fails_fails_the_command(self):
+        repo = fire_repo(self, entry(), state="the_guard=ok build=E0599\n")
+        out = repo.run("build")
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertIn("exits 101", out.stderr)
+
+    def test_no_cargo_command_selected_fails(self):
+        repo = fire_repo(self, entry())
+        out = repo.run("build", "--suite", "script")
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertIn("nothing to build", out.stderr)
+
+
 def selection(stdout: str) -> set[str]:
     return set(re.findall(r"^affected: ([a-z0-9-]+): ", stdout, re.MULTILINE))
 
@@ -2384,6 +2657,71 @@ class GuardsJob(unittest.TestCase):
         self.assertIn(
             "skip", jobs.get(name, {}), f"ci/local.toml runs the `{name}` job"
         )
+
+    def test_the_fire_steps_build_incrementally(self):
+        # dtolnay/rust-toolchain writes CARGO_INCREMENTAL=0 into the job's
+        # environment, and only a step's own `env` wins over it. Each fault is an edit and a
+        # rebuild of one crate, which is what incremental builds are for.
+        steps = [*self.fire_steps("pull_request"), *self.fire_steps("push")]
+        steps += [
+            s
+            for s in workflow_jobs()["bindings"].get("steps") or []
+            if "check-guards-fire.py fire" in s.get("run", "")
+        ]
+        self.assertEqual(len(steps), 3, "two guards fire steps and the bindings one")
+        for step in steps:
+            self.assertEqual(
+                (step.get("env") or {}).get("CARGO_INCREMENTAL"), "1", step.get("name")
+            )
+
+    def test_the_legs_restore_the_one_cache_a_push_to_main_saves(self):
+        # One job saves the guards' dependency cache, from every rust entry's
+        # builds, and only on main; the legs and the mutants shards restore it and never save.
+        jobs = workflow_jobs()
+
+        def cache(job: str) -> dict:
+            (step,) = [
+                s
+                for s in jobs[job].get("steps") or []
+                if s.get("uses", "").startswith("Swatinem/rust-cache@")
+            ]
+            return step
+
+        on_main = "${{ github.ref == 'refs/heads/main' }}"
+        key = (cache("guards").get("with") or {}).get("shared-key")
+        self.assertTrue(key, "the guards legs' cache has no shared-key")
+        for job in ("guards", "mutants"):
+            given = cache(job).get("with") or {}
+            self.assertEqual(given.get("shared-key"), key, job)
+            self.assertIs(given.get("save-if"), False, f"{job} saves its cache")
+        saver = jobs["guards-cache"]
+        self.assertEqual(saver.get("if"), "github.event_name == 'push'")
+        step = cache("guards-cache")
+        self.assertEqual(step.get("with"), {"shared-key": key, "save-if": on_main})
+        (build,) = [
+            s
+            for s in saver.get("steps") or []
+            if "check-guards-fire.py build" in s.get("run", "")
+        ]
+        argv = shlex.split(build["run"])
+        (push,) = self.fire_steps("push")
+        fire = shlex.split(push["run"])
+        suites = [b for a, b in zip(fire, fire[1:]) if a == "--suite"]
+        self.assertIn("rust", suites)
+        self.assertEqual(
+            [b for a, b in zip(argv, argv[1:]) if a == "--suite"], ["rust"]
+        )
+        self.assertEqual(dict(zip(argv, argv[1:])).get("--target-dir"), "target")
+        self.assertEqual(
+            build.get("if"), f"steps.{step.get('id')}.outputs.cache-hit != 'true'"
+        )
+        # No rust-cache step anywhere in the workflow saves from a pull request.
+        for name, job in jobs.items():
+            for s in job.get("steps") or []:
+                if s.get("uses", "").startswith("Swatinem/rust-cache@"):
+                    self.assertIn(
+                        (s.get("with") or {}).get("save-if"), (False, on_main), name
+                    )
 
     def test_every_shard_has_sixty_minutes_on_both_legs(self):
         # D35: one budget for a pull request's shards and main's push's, as a number, so a
