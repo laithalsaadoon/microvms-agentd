@@ -151,20 +151,19 @@ pub fn gb_decimal(gb: f64) -> Result<Decimal, Error> {
     })
 }
 
-/// Seconds from a float, refused when the float cannot be a duration.
+/// Seconds from a float for a figure on a report, refused when the float cannot be a duration.
 ///
-/// The complement of [`gb_decimal`] for the API boundary where seconds arrive as a
-/// number — a CLI flag, a JSON field. `Duration::try_from_secs_f64` is what rejects
-/// a negative or non-finite figure, which is why [`DurationP`] itself needs no
-/// validation: an inverted clock is refused here or it never becomes a duration.
+/// The complement of [`gb_decimal`] for the API boundary where a report's seconds arrive as a
+/// number: a [`DurationP`], or the hold a residency comparison prices. It's
+/// [`crate::duration::of_secs_f64`] with the reason a negative span matters here in the
+/// refusal, which is why [`DurationP`] itself needs no validation: an inverted clock is refused
+/// here or it never becomes a duration. A wait or a window converts through
+/// `duration::of_secs_f64`, whose refusal claims no report.
 pub fn duration_of_secs_f64(seconds: f64) -> Result<Duration, Error> {
-    Duration::try_from_secs_f64(seconds).map_err(|source| {
-        Error::invalid_arg(format!(
-            "{seconds:?} seconds is not a duration: it must be finite, non-negative and below \
-             2^64, and a negative one would silently produce a credit on the report"
-        ))
-        .with_source(source)
-    })
+    crate::duration::of_secs_f64_because(
+        seconds,
+        ", and a negative one would silently produce a credit on the report",
+    )
 }
 
 // ── display precision ────────────────────────────────────────────────────────
@@ -2458,29 +2457,6 @@ mod tests {
                 .seconds(),
             dec!(60.5)
         );
-    }
-
-    /// Every surface's waits refuse through `duration_of_secs_f64` too (#268), so its message
-    /// names the whole range, `1e300` included, and prints the figure with `Debug`: `Display`
-    /// spells `1e300` as a 1 and 300 zeros. The clause about the report stays, because it's why
-    /// a negative span matters to `DurationP` and both bindings' `Duration.measured(-1)` tests
-    /// read it.
-    ///
-    /// **Falsification**: `verify/guards/faults/seconds-flags.toml` entry
-    /// `domain-duration-refusal-as-typed` prints the figure with `Display`, and the `1e300` row
-    /// reads as 301 digits.
-    #[test]
-    fn a_refused_figure_is_named_as_typed_with_the_range_it_missed() {
-        for (seconds, shown) in [(1e300, "1e300"), (f64::INFINITY, "inf"), (-5.0, "-5.0")] {
-            let message = duration_of_secs_f64(seconds)
-                .expect_err("not a duration")
-                .to_string();
-            assert!(
-                message.starts_with(&format!("{shown} seconds is not a duration")),
-                "{message}"
-            );
-            assert!(message.contains("below 2^64"), "{message}");
-        }
     }
 
     /// COST-2's runtime half: the label is in `Display`, because a figure copied out of

@@ -1965,7 +1965,8 @@ pub fn start_request(spec: StartSpec<'_>) -> microvms_core::protocol::exec::Star
         .with_group(spec.group)
         // No `with_timeout_sec`: the client-side deadline is the caller's `--timeout`, applied
         // by `run_sync`. Sending it as the *daemon's* budget too would kill the child at a
-        // deadline the caller cannot see in the exit code.
+        // deadline the caller cannot see in the exit code. `exec --timeout-sec` sets the
+        // daemon's own deadline on the request this returns, and only then.
         //
         // Opt-in, and `run`'s exec never asks: a child holding an open stdin pipe nobody will
         // ever write to is a child that blocks forever the first time it reads. `exec --stdin`

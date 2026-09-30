@@ -443,6 +443,25 @@ impl std::fmt::Display for VersionStatus {
     }
 }
 
+impl std::str::FromStr for VersionStatus {
+    type Err = crate::Error;
+
+    /// The model's spelling and nothing else, so a binding or a flag that takes the status as
+    /// text refuses `"INACTIVATE"` or `"inactive"` here, with the core's message, before the
+    /// call rather than as a `ValidationException` in the middle of a rollback.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        [VersionStatus::Active, VersionStatus::Inactive]
+            .into_iter()
+            .find(|status| status.as_str() == text)
+            .ok_or_else(|| {
+                crate::Error::invalid_arg(format!(
+                    "unknown image version status {text:?}: UpdateMicrovmImageVersion takes {}.",
+                    crate::constants::IMAGE_VERSION_STATUSES.join(" or ")
+                ))
+            })
+    }
+}
+
 /// `CreateMicrovmAuthTokenRequest`'s body members. `microvmIdentifier` is a URI
 /// parameter and so is not in the body.
 #[derive(Clone, Debug, Serialize)]
@@ -2213,6 +2232,28 @@ mod tests {
             .map(|status| status.as_str())
             .collect();
         assert_eq!(typed, crate::constants::IMAGE_VERSION_STATUSES);
+    }
+
+    /// A status given as text parses from the model's spelling alone (#264): the bindings and
+    /// the CLI take it as a string, and a near miss is refused before the call, naming both
+    /// legal values.
+    #[test]
+    fn a_status_parses_from_the_models_spelling_only() {
+        for status in [VersionStatus::Active, VersionStatus::Inactive] {
+            assert_eq!(status.as_str().parse::<VersionStatus>().ok(), Some(status));
+        }
+        for text in ["INACTIVATE", "inactive", "Active", " ACTIVE", ""] {
+            let error = text.parse::<VersionStatus>().expect_err(text);
+            assert_eq!(
+                error.kind(),
+                crate::error::ErrorKind::InvalidArg,
+                "{text:?}"
+            );
+            assert!(
+                error.to_string().contains("ACTIVE or INACTIVE"),
+                "{text:?}: {error}"
+            );
+        }
     }
 
     // ── the managed listings ─────────────────────────────────────────────────

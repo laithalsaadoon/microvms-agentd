@@ -146,6 +146,19 @@ test('the start carries the run fields through unchanged', async (t) => {
   assert.equal(start.stdin, false);
 });
 
+test('reapGroupOnExit reaches the start, and is off by default', async (t) => {
+  // **Falsification**: drop `reap_group_on_exit` from `CompletionRequest::into_exec_options`
+  // and the start says `false` whatever the caller asked.
+  const server = await serve(streamed([], outcome('acked', 0)));
+  t.after(server.close);
+  await server.session.runToCompletion('true', { reapGroupOnExit: true, execId: 'x-rtc' });
+  await server.session.runToCompletion('true', { execId: 'x-rtc' });
+  assert.deepEqual(
+    server.starts.map((start) => start.reap_group_on_exit),
+    [true, false],
+  );
+});
+
 test('BIND-8: without a callback the call waits and acks', async (t) => {
   const server = await serve(streamed([], outcome('acked', 3, { stdout: 'x' })));
   t.after(server.close);

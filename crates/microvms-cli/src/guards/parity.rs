@@ -3,8 +3,9 @@
 //!
 //! `tests/parity_cases.rs` answers the corpus from a spawned binary; the cases here need the
 //! scripted control plane (`build --reuse` and `agent-up` name an image on the recorded
-//! `CreateMicrovmImage` call) or the scripted daemon (a status answered to `health`, `cp` and
-//! `sync`). Both tiers read `verify/parity/cases/` by the rules in
+//! `CreateMicrovmImage` call), the scripted daemon (a status answered to `health`, `cp` and
+//! `sync`), or a seam that refuses every door (a name read that must stop before one). Both
+//! tiers read `verify/parity/cases/` by the rules in
 //! `crates/microvms-core/tests/parity_corpus/mod.rs`.
 
 #![cfg(test)]
@@ -14,10 +15,10 @@ use std::sync::Arc;
 use microvms_core::testing::YieldingClock;
 
 use super::support::{
-    DaemonScript, ScriptedSeam, ScriptedTransport, TempDir, against_daemon, attach_flags,
-    dispatch_with, full_infra, list_images_body, region_flags, sync_command,
+    DaemonScript, RefusingSeam, ScriptedSeam, ScriptedTransport, TempDir, against_daemon,
+    attach_flags, dispatch_with, full_infra, list_images_body, region_flags, sync_command,
 };
-use crate::cli::{BuildArgs, Command, CpArgs, HealthArgs, InfraFlags};
+use crate::cli::{BuildArgs, Cli, Command, CpArgs, HealthArgs, InfraFlags};
 use crate::exit::{CliError, Exit};
 
 #[path = "../../../microvms-core/tests/parity_corpus/mod.rs"]
@@ -34,6 +35,7 @@ async fn the_cli_answers_the_shared_case_corpus_against_its_fakes() {
         let answer = match case.area.as_str() {
             "image-name" => parity_image_name(&case).await,
             "error" => parity_daemon_status(&case).await,
+            "names" => parity_names(&case).await,
             other => panic!(
                 "{}: parity_corpus::CLI_FAKE_AREAS gives the fakes tier area {other:?}, \
                  which it has no handler for",
@@ -175,5 +177,50 @@ async fn parity_daemon_status(case: &parity_corpus::Case) -> serde_json::Value {
     match against_daemon(&script, &command).await.0 {
         Ok(_) => serde_json::json!({"ok": true}),
         Err(failure) => parity_refusal(&failure),
+    }
+}
+
+/// The case's record written into a state directory's registry, then `exec --name` over it
+/// with `--region`, against a seam that refuses every door: the name read must answer before
+/// any of them, and a door reached is the seam's `ERR_PLATFORM`, which no case expects.
+async fn parity_names(case: &parity_corpus::Case) -> serde_json::Value {
+    use clap::Parser as _;
+    assert_eq!(
+        case.capability, "from-name",
+        "{}: a from-name case",
+        case.id
+    );
+    let state = TempDir::new("parity-names");
+    let name = case.input_str("name");
+    let names = state.0.join("names");
+    std::fs::create_dir_all(&names).expect("the names directory");
+    std::fs::write(
+        names.join(format!("{name}.json")),
+        case.input_str("record_text"),
+    )
+    .expect("writes the record");
+    let state_dir = state.0.to_string_lossy().to_string();
+    let argv = [
+        "microvm",
+        "exec",
+        "--name",
+        name,
+        "--region",
+        case.input_str("region"),
+        "--state-dir",
+        &state_dir,
+        "true",
+    ];
+    let command = Cli::try_parse_from(argv)
+        .unwrap_or_else(|error| panic!("{}: {}", case.id, error.render()))
+        .command;
+    let seam = RefusingSeam::new();
+    match dispatch_with(&seam, &command, full_infra()).await.0 {
+        Ok(rendered) => panic!("{}: exec answered {:?}", case.id, rendered.data),
+        Err(failure) => {
+            let mut answer = parity_refusal(&failure);
+            answer["message_mentions"] = case.message_mentions(&failure.message);
+            answer
+        }
     }
 }

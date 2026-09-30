@@ -14,6 +14,13 @@ that release's assets, each checked against the release's `SHA256SUMS`. That's i
 provenance: both come from the same release, and core's provisioning is where a Sigstore bundle
 is verified (BIND-18).
 
+Health's `version` is the daemon's own crate version (`agentd`'s `CARGO_PKG_VERSION`), which
+moves independently of the release tag: v0.10.0's daemon reports 0.1.0. So each pairing expects
+the version in `agentd`'s `Cargo.toml` at the tree its daemon was built from, read with git for
+the release (the manifest moved from `agentd/` to `crates/agentd/` in #374, so both paths are
+tried). While the two trees carry the same crate version, that check can't tell the daemons apart;
+the digest of `/agentd` read back from the VM does.
+
 The first pairing builds an image around the old daemon, so it's one of the sections with its
 own build. The second launches the suite's image (this tree's daemon) through the old CLI, so it
 builds nothing. Each pairing keeps its record in a state directory of its own.
@@ -26,6 +33,7 @@ import re
 import secrets
 import subprocess
 import tarfile
+import tomllib
 import urllib.request
 from collections.abc import Callable
 from io import BytesIO
@@ -41,6 +49,8 @@ RELEASES = "https://github.com/laithalsaadoon/microvms-agentd/releases/download"
 DAEMON_ASSET = "agentd"
 CLI_ASSET = "microvm-x86_64-unknown-linux-gnu.tar.gz"
 SUMS_LINE = re.compile(r"([0-9a-f]{64}) [ *]?(\S+)")
+#: Where `agentd`'s manifest is at a commit, newest layout first: `crates/` since #374.
+DAEMON_MANIFESTS = ("crates/agentd/Cargo.toml", "agentd/Cargo.toml")
 
 
 def git(*args: str) -> str:
@@ -61,6 +71,52 @@ def pick_previous(tags: list[tuple[str, str]], head: str) -> str:
         "no release tag other than HEAD's is reachable from HEAD, so there's no previous "
         "release to skew against. Fetch the tags: git fetch --tags"
     )
+
+
+def crate_version(text: str, where: str) -> str:
+    """`[package] version` in a Cargo manifest's text. A manifest without one is an error."""
+    try:
+        version = tomllib.loads(text).get("package", {}).get("version")
+    except tomllib.TOMLDecodeError as error:
+        raise RuntimeError(f"{where}: {error}") from None
+    if not isinstance(version, str) or not version:
+        raise RuntimeError(f"{where} has no [package] version")
+    return version
+
+
+def daemon_version(show: Callable[[str], str | None]) -> str:
+    """The `agentd` crate version at a tree, which is what its daemon's health reports.
+
+    `show` answers a path's text in that tree, or None when the tree has no such file.
+    """
+    for path in DAEMON_MANIFESTS:
+        text = show(path)
+        if text is not None:
+            return crate_version(text, path)
+    raise RuntimeError(f"none of {', '.join(DAEMON_MANIFESTS)} is in that tree")
+
+
+def shown_at(ref: str) -> Callable[[str], str | None]:
+    """A `show` for `daemon_version` over the tree at `ref`."""
+
+    def show(path: str) -> str | None:
+        done = subprocess.run(
+            ["git", "-C", str(REPO), "show", f"{ref}:{path}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return done.stdout if done.returncode == 0 else None
+
+    return show
+
+
+def in_worktree(path: str) -> str | None:
+    """A `show` for `daemon_version` over this checkout."""
+    try:
+        return (REPO / path).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
 
 
 def previous_release() -> str:
@@ -140,10 +196,10 @@ def pairing(
 ) -> None:
     """One pairing: launch, exec, a file up and back, health, and the teardown.
 
-    `daemon` is the binary the VM should be running. Its digest is compared with `/agentd`'s,
-    the file the image's `CMD` starts, read back through the pairing's own `cp`: the version
-    health reports can't tell the two apart while this tree still carries the last release's
-    version number.
+    `daemon` is the binary the VM should be running, and `daemon_version` the `agentd` crate
+    version it was built at, which health reports. Its digest is compared with `/agentd`'s, the
+    file the image's `CMD` starts, read back through the pairing's own `cp`: the version can't
+    tell two daemons apart while both trees carry the same crate version.
     """
     try:
         launched: Envelope = cli.call(
@@ -291,7 +347,7 @@ def drive_version_skew(
             str(dockerfile),
         ],
         old_daemon,
-        tag.removeprefix("v"),
+        daemon_version(shown_at(tag)),
         first / "state",
         first,
         logs,
@@ -306,7 +362,7 @@ def drive_version_skew(
         old_cli,
         ["--image", str(launched.data["imageIdentifier"])],
         binary,
-        cli.version(),
+        daemon_version(in_worktree),
         second / "state",
         second,
         logs,

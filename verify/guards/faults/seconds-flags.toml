@@ -1,6 +1,7 @@
 # ── seconds flags that aren't durations (#268) ────────────────────────────────
-# The CLI's seconds flags parse through core's `duration_of_secs_f64` (`cli::parse_seconds`),
-# so a bad value is refused before any call, and each adapter's clippy.toml bans the panicking
+# The CLI's seconds flags parse through core's `duration::of_secs_f64` (`cli::parse_seconds`),
+# and `cost --hold-sec` through `cost::duration_of_secs_f64` (`cli::parse_report_seconds`), so a
+# bad value is refused before any call, and each adapter's clippy.toml bans the panicking
 # float conversions. The first two seed the parser: today's panicking expression restored, then
 # a silent zero with no panic.
 
@@ -12,7 +13,7 @@ expect = "test-failed"
 suite = "rust"
 message = "cannot convert float seconds to Duration"
 note = "crates/microvms-cli/src/guards/seconds.rs::a_seconds_flag_that_is_not_a_duration_is_refused_before_any_call"
-transform = { file = "crates/microvms-cli/src/cli.rs", replace = "microvms_core::cost::duration_of_secs_f64(seconds).map_err(|error| error.to_string())", with = "Ok(std::time::Duration::from_secs_f64(seconds.max(0.0)))" }
+transform = { file = "crates/microvms-cli/src/cli.rs", replace = "microvms_core::duration::of_secs_f64(number_of_seconds(raw)?).map_err(|error| error.to_string())", with = "Ok(std::time::Duration::from_secs_f64(number_of_seconds(raw)?.max(0.0)))" }
 
 [[fault]]
 id = "cli-seconds-flag-clamps"
@@ -22,7 +23,7 @@ expect = "test-failed"
 suite = "rust"
 message = "exec --timeout=NaN: answered"
 note = "crates/microvms-cli/src/guards/seconds.rs::a_seconds_flag_that_is_not_a_duration_is_refused_before_any_call"
-transform = { file = "crates/microvms-cli/src/cli.rs", replace = "microvms_core::cost::duration_of_secs_f64(seconds).map_err(|error| error.to_string())", with = "Ok(std::time::Duration::try_from_secs_f64(seconds.max(0.0)).unwrap_or_default())" }
+transform = { file = "crates/microvms-cli/src/cli.rs", replace = "microvms_core::duration::of_secs_f64(number_of_seconds(raw)?).map_err(|error| error.to_string())", with = "Ok(std::time::Duration::try_from_secs_f64(number_of_seconds(raw)?.max(0.0)).unwrap_or_default())" }
 
 [[fault]]
 id = "cli-seconds-parse-table"
@@ -32,7 +33,7 @@ expect = "test-failed"
 suite = "rust"
 message = "exec --timeout=inf parsed"
 note = "crates/microvms-cli/src/cli.rs::every_seconds_flag_refuses_what_is_not_a_duration"
-transform = { file = "crates/microvms-cli/src/cli.rs", replace = "microvms_core::cost::duration_of_secs_f64(seconds).map_err(|error| error.to_string())", with = "Ok(std::time::Duration::try_from_secs_f64(seconds.max(0.0)).unwrap_or_default())" }
+transform = { file = "crates/microvms-cli/src/cli.rs", replace = "microvms_core::duration::of_secs_f64(number_of_seconds(raw)?).map_err(|error| error.to_string())", with = "Ok(std::time::Duration::try_from_secs_f64(number_of_seconds(raw)?.max(0.0)).unwrap_or_default())" }
 
 [[fault]]
 id = "cli-seconds-exit-code"
@@ -42,7 +43,7 @@ expect = "test-failed"
 suite = "rust"
 message = "left: 101"
 note = "crates/microvms-cli/tests/exit_codes.rs::a_seconds_flag_that_is_not_a_duration_exits_with_the_argument_error"
-transform = { file = "crates/microvms-cli/src/cli.rs", replace = "microvms_core::cost::duration_of_secs_f64(seconds).map_err(|error| error.to_string())", with = "Ok(std::time::Duration::from_secs_f64(seconds.max(0.0)))" }
+transform = { file = "crates/microvms-cli/src/cli.rs", replace = "    microvms_core::cost::duration_of_secs_f64(number_of_seconds(raw)?)\n        .map_err(|error| error.to_string())\n", with = "    Ok(std::time::Duration::from_secs_f64(number_of_seconds(raw)?.max(0.0)))\n" }
 
 [[fault]]
 id = "cli-ls-interval-too-large"
@@ -52,7 +53,7 @@ expect = "test-failed"
 suite = "rust"
 message = "1e300"
 note = "crates/microvms-cli/src/commands/local.rs::a_spin_interval_or_an_empty_watch_is_refused"
-transform = { file = "crates/microvms-cli/src/commands/local.rs", replace = "duration_of_secs_f64(args.interval_sec)", with = "duration_of_secs_f64(if args.interval_sec.is_finite() { args.interval_sec.min(60.0) } else { args.interval_sec })" }
+transform = { file = "crates/microvms-cli/src/commands/local.rs", replace = "duration::of_secs_f64(args.interval_sec)", with = "duration::of_secs_f64(if args.interval_sec.is_finite() { args.interval_sec.min(60.0) } else { args.interval_sec })" }
 
 [[fault]]
 id = "cli-sync-client-wait"
@@ -75,7 +76,7 @@ expect = "test-failed"
 suite = "rust"
 message = "exec --timeout=0.5 parsed to Some(0ns)"
 note = "crates/microvms-cli/src/cli.rs::every_seconds_flag_refuses_what_is_not_a_duration"
-transform = { file = "crates/microvms-cli/src/cli.rs", replace = "microvms_core::cost::duration_of_secs_f64(seconds).map_err(|error| error.to_string())", with = "microvms_core::cost::duration_of_secs_f64(seconds).map(|whole| std::time::Duration::from_secs(whole.as_secs())).map_err(|error| error.to_string())" }
+transform = { file = "crates/microvms-cli/src/cli.rs", replace = "microvms_core::duration::of_secs_f64(number_of_seconds(raw)?).map_err(|error| error.to_string())", with = "microvms_core::duration::of_secs_f64(number_of_seconds(raw)?).map(|whole| std::time::Duration::from_secs(whole.as_secs())).map_err(|error| error.to_string())" }
 
 [[fault]]
 id = "cli-sync-rm-deadline-dropped"
@@ -177,13 +178,36 @@ transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = 
 
 [[fault]]
 id = "domain-duration-refusal-as-typed"
-guard = "cost::tests::a_refused_figure_is_named_as_typed_with_the_range_it_missed"
-run = ["cargo", "test", "-p", "microvms-domain", "--lib", "--", "--exact", "cost::tests::a_refused_figure_is_named_as_typed_with_the_range_it_missed"]
+guard = "duration::tests::a_refused_figure_is_named_as_typed_with_the_range_it_missed"
+run = ["cargo", "test", "-p", "microvms-domain", "--lib", "--", "--exact", "duration::tests::a_refused_figure_is_named_as_typed_with_the_range_it_missed"]
 expect = "test-failed"
 suite = "rust"
 message = "0000000000 seconds is not a duration"
-note = "crates/microvms-domain/src/cost.rs::a_refused_figure_is_named_as_typed_with_the_range_it_missed"
-transform = { file = "crates/microvms-domain/src/cost.rs", replace = "\"{seconds:?} seconds is not a duration", with = "\"{seconds} seconds is not a duration" }
+note = "crates/microvms-domain/src/duration.rs::a_refused_figure_is_named_as_typed_with_the_range_it_missed"
+transform = { file = "crates/microvms-domain/src/duration.rs", replace = "\"{seconds:?} seconds is not a duration", with = "\"{seconds} seconds is not a duration" }
+
+# A wait's refusal claims no report (#338): only a span a report prices says why a negative one
+# matters there. Each entry puts the cost refusal back on the waits at one layer.
+
+[[fault]]
+id = "domain-wait-refusal-names-a-credit"
+guard = "duration::tests::a_wait_refusal_names_no_report_and_a_cost_refusal_still_does"
+run = ["cargo", "test", "-p", "microvms-domain", "--lib", "--", "--exact", "duration::tests::a_wait_refusal_names_no_report_and_a_cost_refusal_still_does"]
+expect = "test-failed"
+suite = "rust"
+message = "-1.0 seconds is not a duration"
+note = "crates/microvms-domain/src/duration.rs::a_wait_refusal_names_no_report_and_a_cost_refusal_still_does"
+transform = { file = "crates/microvms-domain/src/duration.rs", replace = "    of_secs_f64_because(seconds, \"\")\n", with = "    of_secs_f64_because(seconds, \", and a negative one would silently produce a credit on the report\")\n" }
+
+[[fault]]
+id = "cli-seconds-wait-names-a-credit"
+guard = "cli::tests::every_seconds_flag_refuses_what_is_not_a_duration"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "cli::tests::every_seconds_flag_refuses_what_is_not_a_duration"]
+expect = "test-failed"
+suite = "rust"
+message = "exec --timeout=inf refused with"
+note = "crates/microvms-cli/src/cli.rs::every_seconds_flag_refuses_what_is_not_a_duration"
+transform = { file = "crates/microvms-cli/src/cli.rs", replace = "microvms_core::duration::of_secs_f64(number_of_seconds(raw)?).map_err(|error| error.to_string())", with = "microvms_core::cost::duration_of_secs_f64(number_of_seconds(raw)?).map_err(|error| error.to_string())" }
 
 [[fault]]
 id = "cli-ls-interval-message-as-typed"
