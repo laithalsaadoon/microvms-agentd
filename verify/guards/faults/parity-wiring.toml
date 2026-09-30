@@ -242,18 +242,19 @@ message = "FAIL: test_rule_3_points_an_untraced_entry_at_traced ("
 transform = { file = "tools/ratchet.py", replace = "NOT_IN_BASE_FIX.get(category, LAYERING_NOT_IN_BASE_FIX)", with = "LAYERING_NOT_IN_BASE_FIX" }
 
 # A traced entry that waives every layer passes trace:check with nothing checking it, so it stays
-# untraced. On the real tree: TRAP-1 waived six times and its entry gone, as `update` would leave
-# it. In the collector: the waiver check off, which the sentinel's GATE-4 catches.
+# untraced. On the real tree: an untraced key waived six times and its entry gone, as `update`
+# would leave it; COST-10, since #301 traced the TRAP key this used. In the collector: the waiver
+# check off, which the sentinel's GATE-4 catches.
 [[fault]]
 id = "ratchet-untraced-all-waived"
 guard = "verify/ratchet/drift.json"
 run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
-message = "new drift: [untraced] TRAP-1. Trace the requirement"
+message = "new drift: [untraced] COST-10. Trace the requirement"
 transform = [
-  { file = "verify/spec/traced/TRAP.toml", replace = "# The TRAP group's traced requirements. The format and the rules are in tools/check-trace.py.\n", with = "# The TRAP group's traced requirements. The format and the rules are in tools/check-trace.py.\n\n[TRAP-1]\nissue = \"#301\"\nwaive.model = \"s\"\nwaive.gherkin = \"s\"\nwaive.fuzz = \"s\"\nwaive.test = \"s\"\nwaive.impl = \"s\"\nwaive.live = \"s\"\n" },
-  { file = "verify/ratchet/drift.json", replace = "    { \"category\": \"untraced\", \"key\": \"TRAP-1\", \"issue\": 301 },\n", with = "" },
+  { file = "verify/spec/traced/COST.toml", replace = "# The COST group's traced requirements. The format and the rules are in tools/check-trace.py.\n", with = "# The COST group's traced requirements. The format and the rules are in tools/check-trace.py.\n\n[COST-10]\nissue = \"#303\"\nwaive.model = \"s\"\nwaive.gherkin = \"s\"\nwaive.fuzz = \"s\"\nwaive.test = \"s\"\nwaive.impl = \"s\"\nwaive.live = \"s\"\n" },
+  { file = "verify/ratchet/drift.json", replace = "    { \"category\": \"untraced\", \"key\": \"COST-10\", \"issue\": 303 },\n", with = "" },
 ]
 
 [[fault]]
