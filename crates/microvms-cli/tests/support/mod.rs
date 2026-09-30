@@ -72,11 +72,17 @@ impl Run {
 /// `HOME` is set to a nonexistent path by default so a stray ledger write cannot land in the real
 /// `~/.microvm/runs` — an integration test that littered a developer's home directory would be
 /// its own small incident.
+///
+/// Instance metadata is off too. A cleared environment leaves the credential chain one source,
+/// IMDS, and on a host with an instance role that source answers: a command that mints a proxy
+/// token then signs a real call to AWS (#338 measured `exec --stream` doing it). Off, the chain
+/// finds nothing and the command stops at the credential lookup, offline on every host.
 pub fn run(args: &[&str], env: &[(&str, &str)]) -> Run {
     let mut command = Command::new(binary());
     command.args(args);
     command.env_clear();
     command.env("HOME", "/nonexistent-microvm-test-home");
+    command.env("AWS_EC2_METADATA_DISABLED", "true");
     // A terminal-independent answer: the child's stdout is a pipe either way, so
     // `IsTerminal::is_terminal` is false and the plain path is what runs. That is what makes the
     // "piped invocation produces deterministic text" assertions mean something.

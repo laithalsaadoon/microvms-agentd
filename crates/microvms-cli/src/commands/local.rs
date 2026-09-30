@@ -448,7 +448,7 @@ pub async fn watch<O: std::io::Write, E: std::io::Write>(
     // A busy-loop is refused, not clamped: 0.1s of silence costs nothing, and a
     // caller who typed 0 was expressing "as fast as possible", which over a disk
     // read is a spin.
-    let interval = match microvms_core::cost::duration_of_secs_f64(args.interval_sec) {
+    let interval = match microvms_core::duration::of_secs_f64(args.interval_sec) {
         Ok(interval) if args.interval_sec >= 0.1 => interval,
         _ => {
             return Err(
