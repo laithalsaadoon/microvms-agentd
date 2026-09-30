@@ -1293,6 +1293,14 @@ pub struct KeepaliveArgs {
     #[arg(long, value_name = "SECONDS", value_parser = parse_seconds)]
     pub idle_window: Option<std::time::Duration>,
 
+    /// Retryable poll failures in a row to retry, a second apart, before giving up.
+    #[arg(
+        long,
+        value_name = "N",
+        default_value_t = microvms_core::session::keepalive::DEFAULT_TOLERATED_ERRORS
+    )]
+    pub tolerated_errors: u32,
+
     #[command(flatten)]
     pub attach: AttachFlags,
 
