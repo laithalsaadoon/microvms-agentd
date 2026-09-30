@@ -78,6 +78,7 @@ BASELINE = [
         "bindings/microvms-js/src/control.rs: literal-default: options.timeout.unwrap_or(300.0)",
     ),
     ("parity-gap", "wait-until-running/cli"),
+    ("parity-drift", "cost/estimate-with-running-time/py: known_drift label"),
     ("untraced", "TRAP-1"),
 ]
 
@@ -1252,6 +1253,146 @@ class ParityGapTests(unittest.TestCase):
         )
 
 
+class ParityDriftTests(unittest.TestCase):
+    """The parity-drift collector: each marked path and each skip in the case corpus (#320)."""
+
+    #: What the sentinel's corpus holds: one marker over two paths and a skip in one case, a
+    #: case with neither, and a marker in a second area.
+    SENTINEL_DRIFT = (
+        "cost/marked/py: known_drift label",
+        "cost/marked/py: known_drift total",
+        "cost/marked/ts: skip",
+        "error/marked/cli: known_drift error.code",
+    )
+
+    def corpus(self, cases):
+        """A scope over a throwaway corpus of `{"<area>/<case>": case}`."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        for name, case in cases.items():
+            path = root / f"{name}.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(case if isinstance(case, str) else json.dumps(case))
+        return RATCHET["SENTINEL"]._replace(parity_cases=root)
+
+    def test_the_fixture_corpus_yields_one_finding_per_path_and_per_skip(self):
+        self.assertEqual(
+            RATCHET["parity_drift"](RATCHET["SENTINEL"]),
+            found(*(("parity-drift", key) for key in self.SENTINEL_DRIFT)),
+        )
+
+    def test_the_sentinel_expects_the_same_keys(self):
+        expected = json.loads(
+            (RATCHET["SENTINEL"].root / "expected.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(sorted(expected["parity-drift"]), list(self.SENTINEL_DRIFT))
+
+    def test_a_case_with_neither_is_not_drift(self):
+        scope = self.corpus({"size-class/cpu-only": {"capability": "x", "expect": {}}})
+        self.assertEqual(RATCHET["parity_drift"](scope), Counter())
+
+    def test_an_empty_corpus_is_an_error(self):
+        # Every marker would otherwise read as fixed. A file beside the areas isn't a case.
+        scope = self.corpus({})
+        (scope.parity_cases / "README.md").write_text("not a case\n")
+        with self.assertRaisesRegex(SystemExit, "holds no case"):
+            RATCHET["parity_drift"](scope)
+
+    def test_a_marker_or_skip_the_collector_cannot_read_is_an_error(self):
+        for name, case, message in (
+            (
+                "keys-a-string",
+                {"known_drift": {"py": {"issue": "#1", "keys": "label"}}},
+                r"known_drift\.py\.keys must be a non-empty list of dot paths",
+            ),
+            (
+                "keys-empty",
+                {"known_drift": {"py": {"issue": "#1", "keys": []}}},
+                r"known_drift\.py\.keys must be a non-empty list",
+            ),
+            (
+                "marker-a-list",
+                {"known_drift": ["py"]},
+                "known_drift and skip are objects keyed by surface",
+            ),
+            ("skip-blank", {"skip": {"ts": " "}}, r"skip\.ts needs a reason"),
+            ("not-json", "{", "cost/not-json.json"),
+        ):
+            with self.subTest(name):
+                scope = self.corpus({f"cost/{name}": case})
+                with self.assertRaisesRegex(SystemExit, message):
+                    RATCHET["parity_drift"](scope)
+
+    def test_a_scope_without_a_corpus_has_no_parity_drift(self):
+        ws = Workspace(self).crate("adapter")
+        self.assertEqual(RATCHET["parity_drift"](ws.scope()), Counter())
+
+    def test_the_repo_scope_reads_the_real_corpus(self):
+        self.assertEqual(
+            RATCHET["REPO"].parity_cases, ROOT / "verify" / "parity" / "cases"
+        )
+
+    def test_a_new_marker_is_new_drift_and_removing_one_passes(self):
+        marked = {
+            "capability": "estimate",
+            "known_drift": {"py": {"issue": "#255", "keys": ["label"]}},
+        }
+        before = self.corpus({"cost/a": marked})
+        head = found(*RATCHET["parity_drift"](before).elements())
+        grown = self.corpus(
+            {
+                "cost/a": {
+                    **marked,
+                    "known_drift": {
+                        "py": {"issue": "#255", "keys": ["label", "total"]}
+                    },
+                }
+            }
+        )
+        drift = [*BASELINE, *RATCHET["parity_drift"](grown).elements()]
+        failures = rules(tree(drift), base([*BASELINE, *head.elements()]))
+        self.assertEqual(
+            failures,
+            [
+                "new drift: [parity-drift] cost/a/py: known_drift total. Make the surface "
+                "give the case's answer rather than marking or skipping it there. A skip no "
+                "open issue will close takes a decision naming the trace id it cites, with "
+                "its reason, in verify/ratchet/decisions.toml."
+            ],
+        )
+        # The fix deletes the marker and edits nothing else.
+        self.assertEqual(rules(tree(BASELINE), base([*BASELINE, *head.elements()])), [])
+
+    def test_a_renamed_case_is_new_drift_rather_than_a_move(self):
+        # The key names a case and a path, not a place in the code, so it never pairs.
+        old = [("parity-drift", "cost/a/py: known_drift label")]
+        new = [("parity-drift", "cost/b/py: known_drift label")]
+        failures = rules(tree([*BASELINE, *new]), base([*BASELINE, *old]))
+        self.assertEqual(kinds(failures), ["new drift"])
+
+    def test_a_decided_skip_is_not_drift_and_a_stale_one_fails(self):
+        key = "image-name/ensure-image-name/py: skip"
+        decided = tree(
+            BASELINE, decisions=[("parity-drift", key, "IMAGE-12: no offline call")]
+        )
+        self.assertNotIn(("parity-drift", key), decided.drift)
+        self.assertEqual(rules(decided, base()), [])
+        stale = Tree(
+            Counter(BASELINE),
+            decisions_file([("parity-drift", key, "IMAGE-12: no offline call")]),
+            {},
+            Counter(BASELINE),
+        )
+        self.assertEqual(
+            rules(stale, base()),
+            [
+                f"stale decision: [parity-drift] {key} decides a finding the tree doesn't "
+                "have. Delete it from verify/ratchet/decisions.toml."
+            ],
+        )
+
+
 class UntracedTests(unittest.TestCase):
     """The untraced collector: every spec key that no group file in `verify/spec/traced/` lists."""
 
@@ -1471,6 +1612,7 @@ class SentinelTests(unittest.TestCase):
             "port-impl",
             "adapter-logic",
             "parity-gap",
+            "parity-drift",
             "untraced",
         ):
             self.assertTrue(

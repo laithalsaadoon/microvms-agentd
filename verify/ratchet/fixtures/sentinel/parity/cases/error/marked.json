@@ -1,0 +1,6 @@
+{
+  "capability": "health",
+  "input": { "status": 503 },
+  "expect": { "error": { "code": "ERR_RETRYABLE" } },
+  "known_drift": { "cli": { "issue": "#256", "keys": ["error.code"] } }
+}

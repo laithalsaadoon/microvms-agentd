@@ -26,7 +26,7 @@ const THIS_FILE = "site/scripts/reference/drift.mjs"
 
 /**
  * What an entry in each category records, and the kind of drift that makes it. The file mixes kinds
- * since #271 and #295, so the page can't say one thing about every entry. A category the ratchet
+ * since #271, #295 and #320, so the page can't say one thing about every entry. A category the ratchet
  * collects and this table doesn't name fails `validateHistory`: the page would describe it wrongly.
  *
  * @type {Record<string, { kind: string, meaning: string }>}
@@ -52,6 +52,10 @@ export const CATEGORIES = {
   "parity-gap": {
     kind: "parity",
     meaning: `a capability one surface lacks until an issue closes it: an exemption in ${code("verify/parity/capabilities.toml")} that names the issue`
+  },
+  "parity-drift": {
+    kind: "parity",
+    meaning: `an answer one surface gives wrongly, or can't give offline, in the shared case corpus: a ${code("known_drift")} path or a ${code("skip")} in ${code("verify/parity/cases/")}`
   },
   untraced: {
     kind: "traceability",

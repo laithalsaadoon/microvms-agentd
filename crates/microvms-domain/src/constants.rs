@@ -754,7 +754,7 @@ pub fn as_json() -> Value {
 mod tests {
     use super::*;
 
-    /// The key set the drift gate reads, pinned.
+    /// **TRAP-12.** The key set the drift gate reads, pinned.
     ///
     /// This is the guard for the one failure mode a rename here produces: the script
     /// looks a key up, does not find it, and either crashes or — worse, depending on
