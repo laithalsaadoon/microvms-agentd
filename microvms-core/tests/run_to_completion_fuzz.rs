@@ -19,7 +19,7 @@
 //!   note saying so.
 //! * BIND-6: the POSIX exit code equals [`model_posix`], a literal copy of the specification
 //!   in `model/src/run.rs` (`posix_exit_code`). Core cannot depend on the model crate for the
-//!   reason `microvms-cli/src/closed_output_fuzz.rs` gives: `deny.toml` refuses the wildcard.
+//!   reason `microvms-cli/src/closed_output_fuzz.rs` gives: `.cargo/deny.toml` refuses the wildcard.
 //! * BIND-7: one note per condition, and none for a clean result.
 
 #[allow(dead_code)]

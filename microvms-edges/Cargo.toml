@@ -74,7 +74,7 @@ sha2 = "0.11"
 # crate refused every one. Pinned exactly: it's pre-1.0 and ships minors often, so each bump is a
 # reviewed change. Default features off and never `tuf`: the trusted root is the one embedded in
 # `sigstore-trust-root`, so verifying needs no network, and `tuf` brings in an MPL-2.0 crate
-# `deny.toml` doesn't allow. A Sigstore key rotation reaches this crate as a version bump, and
+# `.cargo/deny.toml` doesn't allow. A Sigstore key rotation reaches this crate as a version bump, and
 # `tests/release_bundle.rs`, run by `release.yml` before it publishes, is what says one is due.
 sigstore-verify = { version = "=0.13.0", default-features = false }
 sigstore-trust-root = { version = "=0.13.0", default-features = false }

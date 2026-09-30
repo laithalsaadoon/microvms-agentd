@@ -236,7 +236,7 @@ def check_marker_path(report: list[str]) -> None:
     # The textual half. The behavioral half proves *this script* is right and says nothing
     # about whether the consumers call it; a regression here is someone re-inlining the
     # literal, which is how it got into two files.
-    for name in ("mise.toml", "lefthook.yml"):
+    for name in ("mise.toml", ".config/lefthook.yml"):
         text = (repo() / name).read_text(encoding="utf-8")
         # In a comment the literal is describing the bug, which both files now do at
         # length. Only a live line can reintroduce it.

@@ -1179,7 +1179,11 @@ class Tree:
         reset between faults return to the caller's tree rather than to HEAD. The scratch
         worktree has its own index; nothing here writes the caller's.
         """
-        changed = git(self.root, "diff", "--name-only", "-z", "HEAD").stdout.split("\0")
+        # `--no-renames`: a staged `git mv` is otherwise one rename, listed by its new path
+        # alone, and the file would stay at its old path here as well.
+        changed = git(
+            self.root, "diff", "--no-renames", "--name-only", "-z", "HEAD"
+        ).stdout.split("\0")
         untracked = git(
             self.root, "ls-files", "--others", "--exclude-standard", "-z"
         ).stdout.split("\0")

@@ -147,7 +147,7 @@ cucumber = { version = "0.23", features = ["output-junit"] }
 bolero = "0.13"
 # The bootstrap and exec model (`tests/model_conformance.rs`): each path stateright walks is
 # replayed against the real routes, so a handler that stops making the model's transitions
-# fails here while `cargo test -p agentd-model` stays green. The version is what deny.toml's
+# fails here while `cargo test -p agentd-model` stays green. The version is what .cargo/deny.toml's
 # wildcard ban asks of a path dependency; agentd is `publish = false`, so it never has to exist
 # on crates.io. Dev-only, so the guest binary doesn't link the model;
 # `the_proof_edges_are_dev_dependencies_only` in microvms-cli's dependency_direction.rs holds it.

@@ -145,7 +145,7 @@ description = "Semgrep + secrets + license headers + dependency licenses + workf
 # scans the whole git history, not just the tree — a secret that was committed
 # and then deleted is published the moment the repo is. The header check is a
 # closed set over tracked sources, so an unlicensed file cannot land quietly.
-# cargo-deny is the dependency-license policy (deny.toml: measured allowlist,
+# cargo-deny is the dependency-license policy (.cargo/deny.toml: measured allowlist,
 # yanked crates, untrusted registries) — `mise run vuln` covers CVEs, this
 # covers what a CVE scanner cannot. actionlint is the only linter that reads
 # the workflows; before it, a workflow mistake was found by the workflow
@@ -185,7 +185,7 @@ depends = ["sbom"]
 # reads the lockfiles against OSV directly. Every accepted finding lives in
 # .vex/microvms-agentd.openvex.json (dependency vulnerabilities; grype reads it
 # through --vex and trivy through TRIVY_VEX, exactly as ci.yml passes them) or in
-# .trivyignore.yaml / osv-scanner.toml WITH its reason — an ignore without a
+# .config/trivyignore.yaml / osv-scanner.toml WITH its reason — an ignore without a
 # reason is a finding someone silenced. The VEX flags were absent here until the
 # first npm acceptance landed (2026-09-05), so this task failed on a finding CI
 # accepted; the two invocations now agree. trivy skips the same installed trees the
@@ -195,7 +195,7 @@ depends = ["sbom"]
 # describe nothing this repository installs or ships.
 run = [
   "grype sbom:sbom/microvms-agentd.cdx.json --fail-on high -q --vex .vex/microvms-agentd.openvex.json",
-  "TRIVY_VEX=.vex/microvms-agentd.openvex.json trivy fs --scanners vuln,misconfig,secret --skip-dirs conformance/infra/.terraform --skip-dirs target --skip-dirs site/node_modules --skip-dirs site/dist --skip-dirs microvms-js/node_modules --exit-code 1 --severity HIGH,CRITICAL --ignorefile .trivyignore.yaml -q .",
+  "TRIVY_VEX=.vex/microvms-agentd.openvex.json trivy fs --scanners vuln,misconfig,secret --skip-dirs conformance/infra/.terraform --skip-dirs target --skip-dirs site/node_modules --skip-dirs site/dist --skip-dirs microvms-js/node_modules --exit-code 1 --severity HIGH,CRITICAL --ignorefile .config/trivyignore.yaml -q .",
   # `--config` is required, not decorative: osv-scanner applies a config file only to the
   # lockfiles in its own directory, so without it the root file governs Cargo.lock and
   # nothing governs site/pnpm-lock.yaml (measured 2026-09-05: the extract-zip ignore was
@@ -1315,7 +1315,7 @@ depends = ["docs:build"]
 # so a human running it sees the failure; `.github/workflows/links.yml` is what declines to
 # gate.
 tools = { "aqua:lycheeverse/lychee" = "0.24.2" }
-run = "lychee --config lychee.toml 'site/dist/**/*.html'"
+run = "lychee --config .config/lychee.toml 'site/dist/**/*.html'"
 
 [tasks."docs:check"]
 description = "The docs site's fast definition of done: install, lint, spell, build, typecheck, node probes"

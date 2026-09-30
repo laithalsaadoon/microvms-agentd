@@ -294,7 +294,7 @@ jobs:
           for m in $(git ls-files '*/Cargo.toml'); do
             grep -Eq 'license(\.workspace)?[[:space:]]*=' "$m" || { echo "$m declares no license"; exit 1; }
           done
-      # The dependency-license policy (deny.toml): a measured allowlist of the
+      # The dependency-license policy (.cargo/deny.toml): a measured allowlist of the
       # licenses actually in the tree, copyleft absent by construction, yanked
       # crates and unknown registries denied. The "every dep is permissive
       # today" claim the previous comment made is now a gate instead of an
@@ -392,7 +392,7 @@ jobs:
       #   - dependency VULNERABILITIES: .vex/microvms-agentd.openvex.json
       #     (OpenVEX, consumed by grype via --vex and trivy via TRIVY_VEX;
       #     osv-scanner can't read VEX, so its osv-scanner.toml mirrors it)
-      #   - MISCONFIG/secret findings: .trivyignore.yaml (VEX has no identity
+      #   - MISCONFIG/secret findings: .config/trivyignore.yaml (VEX has no identity
       #     for these)
       # Either way the rule holds: every accepted finding carries its reason.
       - name: validate the VEX document's shape
@@ -440,7 +440,7 @@ jobs:
           skip-dirs: conformance/infra/.terraform,target
           # Misconfig/secret acceptances only; vulnerability overrides come
           # from the VEX document via TRIVY_VEX below.
-          trivyignores: .trivyignore.yaml
+          trivyignores: .config/trivyignore.yaml
         env:
           TRIVY_VEX: .vex/microvms-agentd.openvex.json
       - name: osv-scanner (lockfiles against OSV; pinned, checksummed)

@@ -50,7 +50,7 @@ The path census holds the files that run things to the same standard, since a st
 doesn't fail: a hook's glob that matches nothing turns the hook off, and a script a task names
 fails only when someone runs the task. Each path must match a tracked or new file or directory:
 
-- lefthook.yml: each job's and command's `glob` and `exclude`, one brace alternative at a time
+- .config/lefthook.yml: each job's and command's `glob` and `exclude`, one brace alternative at a time
   under lefthook's own matcher (`glob_regex`), its `root`, and the paths its `run` and `files`
   commands name;
 - mise.toml and each TOML file its `[task_config] includes` names, read with `tomllib` rather
@@ -504,7 +504,7 @@ class Scalar(str):
 def load_yaml(text: str, name: str) -> object:
     """Block mappings and sequences of plain, quoted, block and one-level flow scalars.
 
-    That's every construct lefthook.yml, the workflows and dependabot.yml use, read into
+    That's every construct .config/lefthook.yml, the workflows and dependabot.yml use, read into
     dicts, lists and `Scalar` strings (no scalar is typed: `true` stays text). Anything else
     (an anchor, an alias, a tag, a directive, a tab) raises rather than reading as something
     it isn't.
@@ -834,7 +834,7 @@ def _flow_node(text: str, at: int, line: int) -> tuple[object, int]:
     return Scalar(match.group(0).strip(), line), match.end()
 
 
-LEFTHOOK = "lefthook.yml"
+LEFTHOOK = ".config/lefthook.yml"
 WORKFLOWS = ".github/workflows"
 DEPENDABOT = ".github/dependabot.yml"
 SCRIPT_GLOB = "scripts/*.py"
@@ -911,7 +911,7 @@ class Named:
     """A path one of the census's sources names."""
 
     source: str
-    # Where it's written, for the message: `lefthook.yml:36`.
+    # Where it's written, for the message: `.config/lefthook.yml:36`.
     where: str
     # As written, which is what `CENSUS_NOT_PATHS` and the sentinels match.
     text: str

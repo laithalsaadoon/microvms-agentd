@@ -49,7 +49,7 @@ wildcards = "deny"
 
 [advisories]
 # Advisory scanning is grype/trivy/osv-scanner's lane (three databases, every
-# accepted finding recorded with its reason in .trivyignore.yaml or
+# accepted finding recorded with its reason in .config/trivyignore.yaml or
 # osv-scanner.toml). Running RustSec here too would give findings a fourth
 # place to be silenced; yanked crates are checked because none of the other
 # three scanners sees them.
