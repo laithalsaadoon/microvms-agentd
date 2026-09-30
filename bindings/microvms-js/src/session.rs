@@ -389,6 +389,16 @@ type OutputCallback = napi::threadsafe_function::ThreadsafeFunction<
     false,
 >;
 
+/// The line range `downloadFile` reads, 1-based and inclusive. Both absent reads the file.
+#[napi(object)]
+#[derive(Default)]
+pub struct DownloadFileOptions {
+    /// The first line to read. Absent means line 1.
+    pub start_line: Option<f64>,
+    /// The last line to read. Absent, or past the last line, means through EOF.
+    pub end_line: Option<f64>,
+}
+
 /// How a `spawn` should behave: the exec's own options, plus the stream's.
 ///
 /// Nested rather than flattened onto [`ExecOptions`], and the reason is that the two sets are
@@ -871,15 +881,30 @@ impl Session {
             .map_err(js_async)
     }
 
-    /// Reads one file.
+    /// Reads one file, or lines `startLine` through `endLine` of it.
+    ///
+    /// The range is 1-based and inclusive, and the daemon slices the file, so reading lines 40
+    /// to 60 of a large log reads those lines alone. Either bound may be left out (line 1,
+    /// through EOF), and an `endLine` past the last line reads through EOF. Line 0 and an end
+    /// before the start reject with `ERR_INVALID_ARG` before any request.
     #[napi]
     pub async fn download_file(
         &self,
         path: String,
+        options: Option<DownloadFileOptions>,
     ) -> Result<napi::bindgen_prelude::Buffer, AsyncError> {
+        let options = options.unwrap_or_default();
+        let start_line =
+            crate::numbers::optional_line(options.start_line, "startLine").map_err(js_async)?;
+        let end_line =
+            crate::numbers::optional_line(options.end_line, "endLine").map_err(js_async)?;
         let live = self.live().await;
         let session = live.session().map_err(js_async)?;
-        Ok(session.download_file(&path).await.map_err(js_async)?.into())
+        Ok(session
+            .download_file_lines(&path, start_line, end_line)
+            .await
+            .map_err(js_async)?
+            .into())
     }
 
     /// Whether a path exists, distinguishing absence from every other refusal.

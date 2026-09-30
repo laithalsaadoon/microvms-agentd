@@ -66,6 +66,16 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | CLI-7 | 1 | 1 | 1 | 3 | 8 | 1 |
 | CLI-8 | 1 | 1 | 1 | 2 | 3 | 1 |
 | CLI-9 | 1 | 1 | 1 | 2 | 3 | 1 |
+| COST-1 | waived | waived | waived | 1 | 3 | 1 |
+| COST-2 | waived | waived | waived | 2 | 3 | waived |
+| COST-3 | waived | waived | waived | 1 | 3 | 1 |
+| COST-4 | waived | waived | waived | 3 | 5 | 1 |
+| COST-5 | waived | waived | waived | 3 | 2 | waived |
+| COST-6 | waived | waived | waived | 1 | 1 | waived |
+| COST-7 | waived | waived | waived | 1 | 1 | waived |
+| COST-8 | waived | waived | waived | 1 | 1 | waived |
+| COST-9 | waived | waived | waived | 3 | 4 | waived |
+| COST-10 | waived | waived | waived | 4 | 3 | 1 |
 | IMAGE-1 | 1 | 1 | 1 | 1 | 1 | waived |
 | IMAGE-2 | 1 | 1 | 1 | 1 | 1 | 1 |
 | IMAGE-3 | 1 | 1 | 1 | 1 | 1 | waived |
@@ -751,6 +761,116 @@ If the stdout reader of a streaming command closes, then the CLI crate shall sto
 - **test:** `crates/microvms-cli/src/closed_output_fuzz.rs`, `crates/microvms-cli/src/guards/closed_output.rs`
 - **impl:** `crates/microvms-cli/src/closed_output.rs`, `crates/microvms-cli/src/commands/attached.rs`, `crates/microvms-cli/src/envelope.rs`
 - **live:** `conformance/lanes/closed_output.py`
+
+## COST-1
+
+The cost engine shall carry a provenance label of measured or projected on each duration, with no unlabelled constructor.
+
+- **model:** waived: a rule over values and one pure function of a usage and a pinned rate table, not a state
+- **gherkin:** waived: no behavior to script: a duration has no unlabelled constructor, and the tests build each label
+- **fuzz:** waived: the input is a choice of two labels and a number, which the tests enumerate at the boundaries
+- **test:** `crates/microvms-domain/src/cost.rs`
+- **impl:** `bindings/microvms-js/src/cost.rs`, `bindings/microvms-py/src/cost.rs`, `crates/microvms-domain/src/cost.rs`
+- **live:** `conformance/lanes/lifecycle.py`
+
+## COST-2
+
+The cost engine shall not expose an implicit coercion from an estimated dollar amount to a bare float.
+
+- **model:** waived: a rule over values and one pure function of a usage and a pinned rate table, not a state
+- **gherkin:** waived: no behavior to script: a property of the types' constructors and trait impls, which the compiler holds and a doctest shows failing to compile
+- **fuzz:** waived: there is no input stream; the rule is over the type's impls
+- **test:** `bindings/microvms-py/tests/test_smoke.py`, `crates/microvms-domain/src/cost.rs`
+- **impl:** `bindings/microvms-js/src/cost.rs`, `bindings/microvms-py/src/cost.rs`, `crates/microvms-domain/src/cost.rs`
+- **live:** waived: a coercion that doesn't compile can't show up at runtime; the live suite reads dollar figures only as strings
+
+## COST-3
+
+The cost engine shall represent an unpriced quantity as a distinct Unpriced variant carrying the reason, rather than as zero dollars.
+
+- **model:** waived: a rule over values and one pure function of a usage and a pinned rate table, not a state
+- **gherkin:** waived: no behavior to script: the tests build every unpriced line and assert it carries its reason and no figure
+- **fuzz:** waived: the unpriced lines are a fixed set the tests enumerate, and the COST-4 property test mixes them with priced ones
+- **test:** `crates/microvms-domain/src/cost.rs`
+- **impl:** `bindings/microvms-js/src/cost.rs`, `bindings/microvms-py/src/cost.rs`, `crates/microvms-domain/src/cost.rs`
+- **live:** `conformance/lanes/lifecycle.py`
+
+## COST-4
+
+If an Unpriced amount is summed with an estimated amount, then the cost engine shall produce a lower-bound total that names its unpriced line items rather than a plain sum.
+
+- **model:** waived: a rule over values and one pure function of a usage and a pinned rate table, not a state
+- **gherkin:** waived: no behavior to script: the proptest over every mix of priced and unpriced lines is the specification
+- **fuzz:** waived: the proptest `a_total_is_a_lower_bound_exactly_when_something_is_unpriced` searches that space; a coverage-guided harness would search the same one
+- **test:** `bindings/microvms-py/tests/test_cost.py`, `bindings/microvms-py/tests/test_smoke.py`, `crates/microvms-domain/src/cost.rs`
+- **impl:** `bindings/microvms-js/src/cost.rs`, `bindings/microvms-py/src/cost.rs`, `crates/microvms-cli/src/cli.rs`, `crates/microvms-cli/src/commands/cost.rs`, `crates/microvms-domain/src/cost.rs`
+- **live:** `conformance/lanes/lifecycle.py`
+
+## COST-5
+
+The cost engine shall compute each compute line item from the size class baseline rather than from the peak the guest reports.
+
+- **model:** waived: a rule over values and one pure function of a usage and a pinned rate table, not a state
+- **gherkin:** waived: no behavior to script: the tests price every size class from its baseline and compare with the peak
+- **fuzz:** waived: the size classes are a closed table the tests walk row by row
+- **test:** `bindings/microvms-py/tests/test_cost.py`, `bindings/microvms-py/tests/test_smoke.py`, `crates/microvms-domain/src/cost.rs`
+- **impl:** `crates/microvms-domain/src/cost.rs`, `crates/microvms-domain/src/sizing.rs`
+- **live:** waived: a pure function of the usage and the pinned rate table; it makes no AWS call, and the unit tests cover it
+
+## COST-6
+
+The cost engine shall perform money arithmetic in decimal representation, converting each float exactly once at the boundary.
+
+- **model:** waived: a rule over values and one pure function of a usage and a pinned rate table, not a state
+- **gherkin:** waived: no behavior to script: the float boundaries are two functions the tests call directly
+- **fuzz:** waived: the proptest `compute_figures_are_exactly_the_decimal_reference` drives the whole arithmetic over generated quantities and checks every figure exactly
+- **test:** `crates/microvms-domain/src/cost.rs`
+- **impl:** `crates/microvms-domain/src/cost.rs`
+- **live:** waived: a pure function of the usage and the pinned rate table; it makes no AWS call, and the unit tests cover it
+
+## COST-7
+
+While the pinned rate table is older than the staleness window, the cost engine shall attach a staleness warning to each report computed from the stale table.
+
+- **model:** waived: a rule over values and one pure function of a usage and a pinned rate table, not a state
+- **gherkin:** waived: no behavior to script: staleness is a date comparison the tests make on each side of the window
+- **fuzz:** waived: the proptest `staleness_is_the_ninety_day_verdict_and_carries_the_age` covers every age; the window is one threshold
+- **test:** `crates/microvms-domain/src/cost.rs`
+- **impl:** `crates/microvms-domain/src/cost.rs`
+- **live:** waived: the pinned table's age is today minus a committed date, which a live run can't move; the tests pass `today` in
+
+## COST-8
+
+The cost engine shall apply the one-week minimum retention floor to each snapshot storage line item.
+
+- **model:** waived: a rule over values and one pure function of a usage and a pinned rate table, not a state
+- **gherkin:** waived: no behavior to script: the tests price snapshot storage below, at and above the one-week floor
+- **fuzz:** waived: the proptest `storage_bills_the_greater_of_the_hold_and_the_retention_floor` covers every hold; the floor is one threshold
+- **test:** `crates/microvms-domain/src/cost.rs`
+- **impl:** `crates/microvms-domain/src/cost.rs`
+- **live:** waived: a pure function of the usage and the pinned rate table; it makes no AWS call, and the unit tests cover it
+
+## COST-9
+
+The cost engine shall price compute from the ARM rate only, rejecting a catalog whose ARM line is missing rather than substituting the x86 rate.
+
+- **model:** waived: a rule over values and one pure function of a usage and a pinned rate table, not a state
+- **gherkin:** waived: no behavior to script: the tests parse catalogs with and without the ARM line and assert the refusal
+- **fuzz:** waived: a catalog is a fixed set of named lines, and the tests drop each one the parser needs
+- **test:** `bindings/microvms-py/tests/test_cost.py`, `bindings/microvms-py/tests/test_smoke.py`, `crates/microvms-domain/src/cost.rs`
+- **impl:** `bindings/microvms-js/src/cost.rs`, `bindings/microvms-py/src/cost.rs`, `crates/microvms-domain/src/constants.rs`, `crates/microvms-domain/src/cost.rs`
+- **live:** waived: the rate table is pinned and parsed offline; the Pricing API is never called at runtime
+
+## COST-10
+
+The cost engine shall mark each duration in a plan estimate as projected, so that the resulting report is distinguishable from a measured report.
+
+- **model:** waived: a rule over values and one pure function of a usage and a pinned rate table, not a state
+- **gherkin:** waived: no behavior to script: the tests build a plan and assert every duration on its report is projected
+- **fuzz:** waived: the proptest `every_duration_in_a_plan_is_projected` generates the plans; a coverage-guided harness would search the same space
+- **test:** `bindings/microvms-py/tests/test_cost.py`, `bindings/microvms-py/tests/test_smoke.py`, `crates/microvms-cli/src/commands/cost.rs`, `crates/microvms-domain/src/cost.rs`
+- **impl:** `bindings/microvms-js/src/cost.rs`, `bindings/microvms-py/src/cost.rs`, `crates/microvms-domain/src/cost.rs`
+- **live:** `conformance/lanes/local.py`
 
 ## IMAGE-1
 

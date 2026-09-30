@@ -516,6 +516,19 @@ impl Session {
         files::download_file(&self.transport, path).await
     }
 
+    /// Reads lines `start_line` through `end_line` of one file, 1-based and inclusive, sliced
+    /// by the daemon. Either bound may be absent (line 1, through EOF), and both absent is
+    /// [`Self::download_file`]'s request. Line 0 and an inverted range are refused with
+    /// `ERR_INVALID_ARG` before any request.
+    pub async fn download_file_lines(
+        &self,
+        path: &str,
+        start_line: Option<u64>,
+        end_line: Option<u64>,
+    ) -> Result<Vec<u8>, Error> {
+        files::download_file_lines(&self.transport, path, start_line, end_line).await
+    }
+
     /// Whether a path exists, distinguishing absence from every other refusal.
     pub async fn file_exists(&self, path: &str) -> Result<bool, Error> {
         files::file_exists(&self.transport, path).await
