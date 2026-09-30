@@ -62,7 +62,7 @@ guard = "guards::doctor::doctor_asks_every_check_about_the_region_its_flag_names
 run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::doctor::doctor_asks_every_check_about_the_region_its_flag_names"]
 expect = "test-failed"
 suite = "rust"
-transform = { file = "crates/microvms-cli/src/commands/doctor.rs", replace = "    let region = args.region.resolve(ctx.env);", with = "    let region = crate::seam::resolve_region(args.region.region.map(|r| r.region()), None, ctx.env);" }
+transform = { file = "crates/microvms-cli/src/commands/doctor.rs", replace = "    let region = merged.flags.resolve(ctx.env);", with = "    let region = crate::seam::resolve_region(merged.flags.region.map(|r| r.region()), None, ctx.env);" }
 
 [[fault]]
 id = "doctor-region-unresolved-names-stand-in"
@@ -71,6 +71,28 @@ run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact
 expect = "test-failed"
 suite = "rust"
 transform = { file = "crates/microvms-cli/src/commands/doctor.rs", replace = "    if resolved.is_err() {\n        check\n            .detail\n            .push_str(\"; us-east-1 stood in, because the region above didn't resolve\");\n    }\n", with = "" }
+
+# #336: `doctor` resolves its region through `run`'s chain, so a `microvm.toml` `region` sits
+# above the environment, and the region line names the layer that chose it.
+
+[[fault]]
+id = "doctor-region-ignores-config"
+guard = "guards::doctor::doctor_asks_every_check_about_the_region_run_would_launch_in"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::doctor::doctor_asks_every_check_about_the_region_run_would_launch_in"]
+expect = "test-failed"
+suite = "rust"
+message = "left: [\"us-east-1\", \"us-east-1\"]"
+note = "crates/microvms-cli/src/guards/doctor.rs::doctor_asks_every_check_about_the_region_run_would_launch_in"
+transform = { file = "crates/microvms-cli/src/commands/doctor.rs", replace = "    let region = merged.flags.resolve(ctx.env);", with = "    let region = args.region.resolve(ctx.env);" }
+
+[[fault]]
+id = "doctor-region-names-no-source"
+guard = "guards::doctor::doctor_asks_every_check_about_the_region_run_would_launch_in"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::doctor::doctor_asks_every_check_about_the_region_run_would_launch_in"]
+expect = "test-failed"
+suite = "rust"
+message = "is a known MicroVMs region\""
+transform = { file = "crates/microvms-cli/src/commands/doctor.rs", replace = "    check.detail.push_str(&format!(\"; set by {chosen_by}\"));\n", with = "    let _ = chosen_by;\n" }
 
 # #277's falsifier: a char literal holding a quote used to blank the rest of the line. The
 # operation scan it was written against went with #273, so it's seeded under the print scan, which
