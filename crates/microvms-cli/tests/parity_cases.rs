@@ -2,8 +2,8 @@
 //! The CLI's answers to the shared case corpus (`verify/parity/cases/`, #272), from a spawned
 //! `microvm`.
 //!
-//! This tier takes the areas a process can answer with no AWS call and no fake: `cost --json`
-//! and the launch refusals `run` makes before any call. The areas that need a scripted control
+//! This tier takes the areas a process can answer with no AWS call and no fake: `cost --json`,
+//! the launch refusals `run` makes before any call, and `dockerfile --wrap`. The areas that need a scripted control
 //! plane or daemon are `src/guards/parity.rs`, which reads the same corpus by
 //! the same rules (`crates/microvms-core/tests/parity_corpus/mod.rs`).
 
@@ -15,7 +15,7 @@ mod parity_corpus;
 
 use parity_corpus::{CLI_FAKE_AREAS, CLI_PROCESS_AREAS, Case, Run};
 use serde_json::{Value, json};
-use support::run;
+use support::{TempDir, run};
 
 const IMAGE_ARN: &str = "arn:aws:lambda:us-east-1:123456789012:microvm-image:img";
 
@@ -26,6 +26,7 @@ fn the_cli_process_answers_the_shared_case_corpus() {
         let answer = match case.area.as_str() {
             "cost" => cost(&case),
             "egress" => egress(&case),
+            "wrap-dockerfile" => wrap(&case),
             other => panic!(
                 "{}: parity_corpus::CLI_PROCESS_AREAS gives the process tier area {other:?}, \
                  which it has no handler for",
@@ -114,4 +115,22 @@ fn egress(case: &Case) -> Value {
         args.push("--deny-egress");
     }
     answer_of(&args).0
+}
+
+/// `dockerfile --wrap` over the case's task, written to a file the way a caller has one.
+fn wrap(case: &Case) -> Value {
+    assert_eq!(case.capability, "wrap-dockerfile", "{}", case.id);
+    let dir = TempDir::new("parity-wrap");
+    let task = dir.0.join("Dockerfile");
+    std::fs::write(&task, case.input_str("task")).expect("the task Dockerfile writes");
+    let task = task.to_str().expect("a utf8 path");
+    let (answer, envelope) = answer_of(&["--json", "dockerfile", "--wrap", task]);
+    if answer.get("error").is_some() {
+        return answer;
+    }
+    let dockerfile = answer
+        .get("stanza")
+        .cloned()
+        .unwrap_or_else(|| panic!("{}: no data.stanza in {envelope}", case.id));
+    json!({"dockerfile": dockerfile})
 }
