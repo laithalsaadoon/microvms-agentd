@@ -2,7 +2,7 @@
 //
 // The error contract: `src/errors.rs`.
 //
-// `smoke.mjs` asserts the two enumerations have thirteen entries each. This file asserts the part a
+// `smoke.mjs` asserts the size of the two enumerations. This file asserts the part a
 // caller actually depends on: **where the code lands**, on both the sync and async paths, and that
 // the rule is the same one on each.
 //
@@ -31,13 +31,14 @@ import {
   BuildHookTimeout,
   Duration,
   errorCodes,
+  isRetryable,
   Region,
   RunHookTimeout,
   Session,
   SizeClass,
   wireKinds,
 } from '../index.js';
-import { codeOf, wireKindOf } from './support/sse.mjs';
+import { codeOf, startSseServer, wireKindOf } from './support/sse.mjs';
 
 // -- the enumerations are the taxonomy ----------------------------------------
 
@@ -58,8 +59,8 @@ test('every wire kind is a distinct identifier-shaped name', () => {
   // These are the `err.cause.cause.message` values, and the conformance oracle asserts on exactly
   // these spellings — so a rename here is a wire-contract change rather than a tidy-up.
   const kinds = wireKinds();
-  assert.equal(kinds.length, 13);
-  assert.equal(new Set(kinds).size, 13);
+  assert.equal(kinds.length, 14);
+  assert.equal(new Set(kinds).size, 14);
   for (const kind of kinds) {
     assert.match(kind, /^[A-Z][A-Za-z]*$/, kind);
   }
@@ -275,4 +276,87 @@ test('every thrown value is a real Error, so a stack and instanceof both work', 
       return true;
     },
   );
+});
+
+// -- whether to retry ----------------------------------------------------------
+
+/** The status answered to one `uploadFile`, as the rejection it produces. */
+async function uploadRejection(status, body) {
+  const server = await startSseServer([[body]], { status });
+  try {
+    const session = Session.direct(server.endpoint, 'agent-token');
+    return await session.uploadFile('/workspace/big.bin', new Uint8Array(Buffer.from('x'))).then(
+      () => assert.fail(`a ${status} was not a rejection`),
+      (error) => error,
+    );
+  } finally {
+    await server.close();
+  }
+}
+
+test('a disk-pressure 507 is InsufficientStorage, ERR_PLATFORM, and not retryable', async () => {
+  // The daemon answers 507 when a write would take the disk under its reserve, and it chose 507
+  // over 500 because a client retries a 500. Read as a 5xx, it was ERR_RETRYABLE here (#256).
+  const error = await uploadRejection(
+    507,
+    'refusing to write /workspace: 4096 bytes available on the target filesystem, below the ' +
+      '1048576 byte reserve',
+  );
+  assert.equal(codeOf(error), 'ERR_PLATFORM');
+  assert.equal(wireKindOf(error), 'InsufficientStorage');
+  assert.ok(wireKinds().includes('InsufficientStorage'));
+  assert.equal(isRetryable(error), false, 'a full disk refuses an identical retry the same way');
+  assert.match(error.message, /4096 bytes available/, 'the byte counts reach the caller');
+});
+
+test('isRetryable answers what Python\'s .retryable answers, from the chain', async () => {
+  // The TypeScript spelling of `.retryable`. The code is on the cause, and core decides which
+  // codes are retryable, so this is `true` for exactly the ERR_RETRYABLE conditions.
+  const bootstrapping = await uploadRejection(503, 'the run hook has not landed');
+  assert.equal(codeOf(bootstrapping), 'ERR_RETRYABLE');
+  assert.equal(isRetryable(bootstrapping), true, 'a daemon about to bootstrap is worth a retry');
+
+  const defect = await uploadRejection(500, 'spawn failed');
+  assert.equal(wireKindOf(defect), 'ServerError');
+  assert.equal(isRetryable(defect), true, 'every other 5xx is still retryable');
+
+  const unauthorized = await uploadRejection(401, 'unauthorized');
+  assert.equal(codeOf(unauthorized), 'ERR_CREDENTIALS');
+  assert.equal(isRetryable(unauthorized), false, 'a wrong token stays wrong');
+
+  // An exec handle is local until it's used, so nothing needs to listen for this one.
+  const refused = await Session.direct('http://127.0.0.1:9', 'agent-token')
+    .exec('x-0000000000000001')
+    .then((handle) => handle.wait(Number.NaN))
+    .then(
+      () => assert.fail('a NaN wait was not refused'),
+      (error) => error,
+    );
+  assert.equal(codeOf(refused), 'ERR_INVALID_ARG');
+  assert.equal(isRetryable(refused), false, 'repeating a refused argument changes nothing');
+
+  assert.throws(
+    () => Region.parse('nope-1'),
+    (error) => {
+      assert.equal(isRetryable(error), false, 'a synchronous refusal reads the same chain');
+      return true;
+    },
+  );
+});
+
+test('isRetryable is false for anything this library did not raise', () => {
+  // No cause, a cause that is no ERR_ code, or not an error at all: nothing says a retry would
+  // land differently, and a throw here would turn a caller's catch block into a second failure.
+  for (const value of [
+    undefined,
+    null,
+    'ERR_RETRYABLE',
+    42,
+    new Error('plain'),
+    new Error('wrapped', { cause: 'ERR_RETRYABLE' }),
+    new Error('wrapped', { cause: new Error('ERR_NOT_A_CODE') }),
+    { cause: { message: 17 } },
+  ]) {
+    assert.equal(isRetryable(value), false, String(value));
+  }
 });
