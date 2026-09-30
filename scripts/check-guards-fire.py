@@ -31,7 +31,7 @@ Three subcommands:
             whose note is gone, sharing its path or its name, is a move and passes. A base
             with no copy of the file is the bootstrap, and that rule is skipped.
 
-  `fire`  (CI's `guards` job and the bindings job; `mise run guards:fire`) makes a detached
+  `fire`  (CI's `guards` job; `mise run guards:fire`) makes a detached
           temporary git worktree at HEAD, copies the caller's uncommitted changes into it,
           and runs every selected entry's command once on that clean tree. A command that's
           already red there proves nothing when it goes red again, so the run stops before
@@ -44,8 +44,9 @@ Three subcommands:
           `--jobs N` runs the same passes in N scratch worktrees at once. Each command's
           clean run goes to one worker, each fault starts on the worker that built its
           command clean, and a worker with nothing left takes a fault from the end of
-          another's queue. Bindings entries all run on the first worker, since they share
-          `--venv`. Every worker then runs each command it ran again, clean, so each tree is
+          another's queue. With `--venv DIR` the bindings entries all run on the first worker,
+          since they share that environment; with `--venv-per-worker` they spread like the
+          others. Every worker then runs each command it ran again, clean, so each tree is
           shown to come back. The lines print in registry order whatever order they finish
           in, so the output and the summary are the serial run's. Only the first worker
           builds in `--target-dir`; the others build in a target beside their worktree, and
@@ -56,10 +57,12 @@ Three subcommands:
           Each extra target starts, before any worker builds, as a copy of the first
           target's dependency units, so the workers don't each build every dependency: a
           dependency's artifact is the same in any tree. A local package's never is (it has
-          its tree's path compiled in), so none is copied, however it got there. Nothing is
-          copied back: a unit another worker built was compiled against that worker's builds
-          of its dependencies, and rustc refuses to mix it with the first target's
-          (`can't find crate`), so the first target stays one worker's builds.
+          its tree's path compiled in), so none is copied, however it got there. The copy
+          takes the dev profile's units (`debug`) and a target triple's (`<triple>/debug`),
+          where `napi build` builds, since it passes `--target`. Nothing is copied back: a
+          unit another worker built was compiled against that worker's builds of its
+          dependencies, and rustc refuses to mix it with the first target's (`can't find
+          crate`), so the first target stays one worker's builds.
 
           `--affected` selects the entries whose own files changed: the registry text of the
           entry changed or is new, or a file it names changed between the merge base of HEAD
@@ -87,7 +90,8 @@ Three subcommands:
           shard holds whole commands, so a command's clean and restored runs happen once across
           the matrix. Each command weighs the sum of its entries' rough CI seconds
           (`entry_cost`: 16 for an entry that builds the CLI, 14 for another Rust entry, 6 for
-          a script one), and commands go heaviest first onto the lightest shard, a tie in
+          a script one, 18 for a bindings entry that builds the Node addon and 6 for another
+          bindings one), and commands go heaviest first onto the lightest shard, a tie in
           weight to the command that comes first in the registry and a tie in load to the lower
           shard; a shard's entries keep registry order. A cost, not a count, because a Rust
           entry costs about twice a script entry's time and the CLI's entries sit together:
@@ -111,14 +115,33 @@ Three subcommands:
           <crate>` ran the scratch tree's last faulted build, and a test that reads its
           sources through `env!("CARGO_MANIFEST_DIR")` read the deleted scratch tree and
           found nothing. CI passes `--target-dir target`, since `fire` is its job's last
-          step. The last clean pass reinstalls the clean extension into `--venv`, which
-          no target dir separates. A run stopped before it (a signal, a timeout) says so
-          on stderr.
+          step.
+
+          A bindings entry also builds into the environment it runs in (`maturin develop`
+          installs into the active one), which no target dir separates. `--venv DIR` is one
+          environment every bindings entry shares, the caller's, and the last clean pass
+          reinstalls the clean extension into it; a run stopped before that (a signal, a
+          timeout) says so on stderr. `--venv-per-worker` gives each worker its own instead,
+          made with `uv venv` beside its worktree and holding `VENV_PACKAGES` (pytest, pinned
+          exactly), and removed with the worktree; each worker's restored pass reinstalls the
+          clean extension into its own. It installs each package the entries' `npx -p`
+          commands name once, before any worker starts, since npm's extraction into a cold
+          cache collides when several npx calls install one package at once (#347), and the
+          workers' first `napi build`s start together. CI's `guards` job passes it. With
+          neither, `fire` skips the bindings entries.
 
   `build` (CI's `guards-cache` job, on a push to main) compiles what the selected entries'
           cargo commands compile (each command before `--`, with `--no-run` for a test run)
           into `--target-dir` and runs nothing, so the dependency cache the `guards` job
           restores holds every build its commands need rather than one leg's first worker's.
+          A bindings entry's extension builds (each command before its last: `maturin
+          develop`, `napi build`) run as written, once each, in a scratch worktree with an
+          environment of its own, because they compile what no cargo command here does:
+          microvms-py's dependencies under its own features, and microvms-js's whole graph
+          under `napi build`'s `--target`. Without them a worker's first `napi build`
+          compiled 235 crates, 90.8 s against 45.3 s with them, and its first `maturin
+          develop` 35 crates, 22.1 s against 17.8 s (four pinned cores of a shared devbox,
+          18645c2 plus this change, 2026-09-30).
 
 What counts as fired, by `expect`:
 
@@ -156,8 +179,9 @@ An entry, in `guards/faults.toml`:
 
 Every cargo test run passes `--exact` (cargo's filter is a substring match). A bindings entry
 rebuilds the extension first (`maturin develop`, `napi build`), or the test loads the stale
-artifact; `fire` refuses to run one without `--venv`, because `maturin develop` installs into
-whatever environment is active. One fault that several guards catch is one entry per guard.
+artifact; `fire` refuses to run one without `--venv` or `--venv-per-worker`, because `maturin
+develop` installs into whatever environment is active. One fault that several guards catch is
+one entry per guard.
 
 A `message` is matched after ANSI color codes are stripped, since CI sets
 `CARGO_TERM_COLOR=always`.
@@ -1184,7 +1208,7 @@ class Worker:
 @dataclass
 class Task:
     key: object
-    pinned: bool  # bindings share one venv, so worker 1 runs them all
+    pinned: bool  # bindings sharing `--venv` stay on worker 1, which holds it
 
 
 class Board:
@@ -1274,7 +1298,12 @@ def entry_cost(fault: Fault) -> int:
     builds the CLI (its argv names microvms-cli) about 16, another Rust entry (a cargo build)
     about 14, and a script entry about 6. Measured per fault on main's push at 6a868e9 (cargo
     13.7 s, the rest 5.8 s) and on #340's second round (entries naming microvms-cli 17.8 s).
-    The module docstring's `--shard` says why a cost and not a count."""
+    A bindings entry that builds the Node addon (`napi build`) about 18, and another bindings
+    one about 6: the bindings job's per-fault seconds on main's push at 74e2347 (run
+    36622110872: `napi build` entries 17.9 s, `maturin develop` ones 6.1 s), one worker to
+    the runner. The module docstring's `--shard` says why a cost and not a count."""
+    if fault.suite == "bindings":
+        return 18 if any("napi" in argv for argv in fault.run) else 6
     if any("microvms-cli" in arg for argv in fault.run for arg in argv):
         return 16
     return 14 if fault.suite == "rust" else 6
@@ -1299,17 +1328,18 @@ def spread(
     return out
 
 
-def assign(selected: list[Fault], jobs: int) -> list[list[tuple]]:
+def assign(selected: list[Fault], jobs: int, pin: bool) -> list[list[tuple]]:
     """Each worker's commands for the clean pass, heaviest first onto the lightest worker.
 
-    Bindings commands go to worker 1, which holds `--venv`. Within a worker, commands keep
+    With `pin`, bindings commands go to worker 1, which holds the one `--venv`; each worker
+    with an environment of its own takes them like any other. Within a worker, commands keep
     the registry's order, so the main thread's in-order printing waits as little as it can.
     """
     weight = command_weights(selected)
     order = {key: index for index, key in enumerate(weight)}
-    pinned = [k for k in weight if k[0] == "bindings"]
+    pinned = [k for k in weight if pin and k[0] == "bindings"]
     load = [sum(weight[k] for k in pinned)] + [0] * (jobs - 1)
-    queues = spread({k: w for k, w in weight.items() if k[0] != "bindings"}, jobs, load)
+    queues = spread({k: w for k, w in weight.items() if k not in pinned}, jobs, load)
     queues[0] = pinned + queues[0]
     return [sorted(q, key=order.__getitem__) for q in queues]
 
@@ -1616,6 +1646,10 @@ def affected(
 UNIT_DIRS = ("deps", "build", ".fingerprint")
 # A unit's file or directory name: `<name>-<16 hex>`, plus an extension in `deps/`.
 UNIT_NAME = re.compile(r"^(.+)-[0-9a-f]{16}(?:\.[^/]*)?$")
+# A target triple (`x86_64-unknown-linux-gnu`): a build that passes `--target`, as `napi build`
+# does, keeps its dev profile in `<triple>/debug` rather than `debug`. Three parts or more, so
+# a directory like `guards-fire` (another target, nested in the caller's) isn't read as one.
+TRIPLE = re.compile(r"^[a-z0-9_]+(?:-[a-z0-9_.]+){2,}$")
 
 
 def local_packages(tree: Path) -> set[str] | None:
@@ -1676,17 +1710,33 @@ def dependency_unit(name: str, local: set[str]) -> bool:
     return not readings & local
 
 
+def profile_dirs(target: Path) -> list[Path]:
+    """`target`'s dev profile directories, relative to it: `debug`, and `<triple>/debug` for
+    each triple a build named. A worker's first `napi build` compiles its whole graph under the
+    triple, so an extra worker that got only `debug` would build all of it again (the module
+    docstring's `build` has what that costs)."""
+    if not target.is_dir():
+        return []
+    triples = [
+        Path(entry.name, "debug")
+        for entry in sorted(target.iterdir(), key=lambda e: e.name)
+        if TRIPLE.match(entry.name) and (entry / "debug").is_dir()
+    ]
+    return ([Path("debug")] if (target / "debug").is_dir() else []) + triples
+
+
 def dependency_units(target: Path, local: set[str]) -> list[Path]:
-    """The dependency units in `target`'s dev profile, relative to `target`."""
+    """The dependency units in `target`'s dev profiles, relative to `target`."""
     out: list[Path] = []
-    for kind in UNIT_DIRS:
-        base = target / "debug" / kind
-        if base.is_dir():
-            out += [
-                Path("debug", kind, entry.name)
-                for entry in sorted(base.iterdir(), key=lambda e: e.name)
-                if dependency_unit(entry.name, local)
-            ]
+    for profile in profile_dirs(target):
+        for kind in UNIT_DIRS:
+            base = target / profile / kind
+            if base.is_dir():
+                out += [
+                    profile / kind / entry.name
+                    for entry in sorted(base.iterdir(), key=lambda e: e.name)
+                    if dependency_unit(entry.name, local)
+                ]
     return out
 
 
@@ -1730,6 +1780,110 @@ def seed_targets(first: Path, others: list[Path], local: set[str] | None) -> str
         f"{len(units)} dependency units, without the workspace's own "
         f"({time.monotonic() - started:.1f} s)"
     )
+
+
+# ── bindings environments ────────────────────────────────────────────────────
+
+# What a bindings environment this script makes holds, pinned exactly: the Python tests' one
+# dependency besides the extension, which `maturin develop` installs. maturin and napi's CLI
+# arrive through `uvx` and `npx`, pinned in the entries' own argvs.
+VENV_PACKAGES = ("pytest==9.1.1",)
+
+
+def make_venv(path: Path, env: dict[str, str]) -> None:
+    """A fresh environment at `path` holding VENV_PACKAGES, through uv. Run from `path`'s
+    parent, so uv reads no project the directory it was called from happens to have."""
+    for argv in (
+        ["uv", "venv", "--quiet", str(path)],
+        [
+            "uv",
+            "pip",
+            "install",
+            "--quiet",
+            "--python",
+            str(path / "bin" / "python"),
+            *VENV_PACKAGES,
+        ],
+    ):
+        try:
+            done = subprocess.run(
+                argv, cwd=path.parent, env=env, capture_output=True, text=True
+            )
+        except FileNotFoundError:
+            raise SystemExit("guards: uv isn't on PATH, so no bindings environment")
+        if done.returncode != 0:
+            raise SystemExit(
+                f"guards: `{' '.join(argv)}` exits {done.returncode}\n"
+                f"{tail(done.stdout + done.stderr)}"
+            )
+
+
+def activated(env: dict[str, str], venv: Path) -> dict[str, str]:
+    """`env` with `venv` active, as its `bin/activate` would leave it."""
+    out = dict(env)
+    out["VIRTUAL_ENV"] = str(venv)
+    out["PATH"] = os.pathsep.join([str(venv / "bin"), env.get("PATH", "")])
+    return out
+
+
+def npx_packages(faults: list[Fault]) -> list[str]:
+    """Each package spec the entries' `npx -p` (or `--package`) commands install, in
+    registry order. Only npx's own options count, the ones before the command it runs: the
+    `--package microvms-js` after `napi build` is napi's."""
+    out: dict[str, None] = {}
+    for fault in faults:
+        for argv in fault.run:
+            if not argv or Path(argv[0]).name != "npx":
+                continue
+            rest = iter(argv[1:])
+            for arg in rest:
+                if arg in ("-p", "--package"):
+                    out.setdefault(next(rest, ""))
+                elif arg.startswith("--package="):
+                    out.setdefault(arg.split("=", 1)[1])
+                elif arg in ("-c", "--call"):
+                    next(rest, None)
+                elif arg == "--" or not arg.startswith("-"):
+                    break
+    out.pop("", None)
+    return list(out)
+
+
+def fetch_npx(specs: list[str], cwd: Path, env: dict[str, str]) -> str:
+    """Install each npx package into npm's cache, one at a time, and run nothing from it; the
+    line to print. The module docstring's `--venv-per-worker` says why before the workers."""
+    started = time.monotonic()
+    for spec in specs:
+        argv = ["npx", "--yes", "--package", spec, "--", "node", "-e", "0"]
+        try:
+            done = subprocess.run(
+                argv, cwd=cwd, env=env, capture_output=True, text=True
+            )
+        except FileNotFoundError:
+            raise SystemExit(
+                "guards: npx isn't on PATH, so no bindings entry can build"
+            )
+        if done.returncode != 0:
+            raise SystemExit(
+                f"guards: `{' '.join(argv)}` exits {done.returncode}\n"
+                f"{tail(done.stdout + done.stderr)}"
+            )
+    return (
+        f"guards: installed {', '.join(specs)} for npx once, before the workers "
+        f"({time.monotonic() - started:.1f} s)"
+    )
+
+
+def extension_builds(faults: list[Fault]) -> list[list[str]]:
+    """The bindings entries' extension builds, once each in registry order: every command
+    before an entry's last, which is its test run. An entry with one command builds inside its
+    own check and has none to run alone."""
+    out: dict[tuple[str, ...], None] = {}
+    for fault in faults:
+        if fault.suite == "bindings":
+            for argv in fault.run[:-1]:
+                out.setdefault(tuple(argv))
+    return [list(argv) for argv in out]
 
 
 def fire_target(root: Path, env: dict[str, str], given: str | None) -> str:
@@ -1780,28 +1934,56 @@ def cmd_build(root: Path, args: argparse.Namespace) -> int:
         for argv in fault.run:
             if (built := build_argv(argv)) is not None:
                 builds.setdefault(tuple(built))
-    if not builds:
+    extensions = extension_builds(selected)
+    count = len(builds) + len(extensions)
+    if not count:
         print(
-            "guards: no selected entry runs cargo, so nothing to build", file=sys.stderr
+            "guards: no selected entry runs cargo or builds an extension, so nothing to "
+            "build",
+            file=sys.stderr,
         )
         return 1
     env = clean_env()
     env["CARGO_TARGET_DIR"] = fire_target(root, env, args.target_dir)
     env.pop("VIRTUAL_ENV", None)
     print(
-        f"guards: building what {len(selected)} entries' cargo commands compile, "
-        f"{len(builds)} builds, CARGO_TARGET_DIR={env['CARGO_TARGET_DIR']}"
+        f"guards: building what {len(selected)} entries' commands compile, "
+        f"{count} builds, CARGO_TARGET_DIR={env['CARGO_TARGET_DIR']}"
     )
-    total = time.monotonic()
-    for argv in builds:
+
+    def built(argv: list[str], cwd: Path, benv: dict[str, str]) -> bool:
         started = time.monotonic()
         print(f"$ {' '.join(argv)}")
-        code = subprocess.run(list(argv), cwd=root, env=env).returncode
+        code = subprocess.run(argv, cwd=cwd, env=benv).returncode
         if code != 0:
             print(f"guards: `{' '.join(argv)}` exits {code}", file=sys.stderr)
-            return 1
+            return False
         print(f"guards: built in {time.monotonic() - started:.1f} s")
-    print(f"guards: {len(builds)} builds ({time.monotonic() - total:.1f} s)")
+        return True
+
+    def stop(signum: int, _frame: object) -> None:
+        raise SystemExit(128 + signum)
+
+    # So a signal still removes the scratch tree below.
+    signal.signal(signal.SIGTERM, stop)
+    total = time.monotonic()
+    for argv in builds:
+        if not built(list(argv), root, env):
+            return 1
+    if extensions:
+        # A scratch tree, since `napi build` writes the addon and its declarations into the
+        # tree it runs in, and an environment of the build's own for `maturin develop` to
+        # install into. The dependencies compile the same from any tree.
+        tree = Tree.make(root)
+        try:
+            venv = tree.scratch / "venv"
+            make_venv(venv, env)
+            for argv in extensions:
+                if not built(argv, tree.path, activated(env, venv)):
+                    return 1
+        finally:
+            tree.remove()
+    print(f"guards: {count} builds ({time.monotonic() - total:.1f} s)")
     return 0
 
 
@@ -1858,19 +2040,19 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
         print("guards: --base is for --affected", file=sys.stderr)
         return 1
     venv = Path(args.venv).resolve() if args.venv else None
-    if venv is None:
+    if venv is None and not args.venv_per_worker:
         bindings = [f for f in selected if f.suite == "bindings"]
         if bindings and (args.only or args.suite):
             print(
                 "guards: bindings entries rebuild the extension into the active "
-                "environment; pass --venv DIR",
+                "environment; pass --venv-per-worker, or --venv DIR",
                 file=sys.stderr,
             )
             return 1
         if bindings:
             print(
                 f"guards: skipping {len(bindings)} bindings entries; they run with "
-                "`--suite bindings --venv DIR` (CI's bindings job)"
+                "`--venv-per-worker` (CI's guards job) or `--venv DIR`"
             )
         selected = [f for f in selected if f.suite != "bindings"]
     if not selected and args.affected:
@@ -1917,7 +2099,12 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
     workers: list[Worker] = []
     threads: list[threading.Thread] = []
     jobs = min(args.jobs, len(selected))
+    # One shared `--venv` keeps the bindings entries on worker 1; environments of the
+    # workers' own let them go anywhere.
+    pin = venv is not None
+    own_venvs = args.venv_per_worker and any(f.suite == "bindings" for f in selected)
     try:
+        making = 0.0
         for number in range(1, jobs + 1):
             tree = Tree.make(root)
             wenv = dict(env)
@@ -1925,18 +2112,25 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
                 # Its own target, removed with its tree: cargo's build lock would otherwise
                 # queue every worker behind one build.
                 wenv["CARGO_TARGET_DIR"] = str(tree.scratch / "target")
-            benv = dict(wenv)
+            worker = Worker(number, tree, wenv, dict(wenv))
+            # Listed before its environment is made, so `finally` removes the tree if uv
+            # fails.
+            workers.append(worker)
             if venv is not None:
-                benv["VIRTUAL_ENV"] = str(venv)
-                benv["PATH"] = os.pathsep.join(
-                    [str(venv / "bin"), wenv.get("PATH", "")]
-                )
-            workers.append(Worker(number, tree, wenv, benv))
+                worker.binding_env = activated(wenv, venv)
+            elif own_venvs:
+                # Beside the worktree rather than in it, so the reset between faults leaves
+                # it alone; removed with the worktree.
+                own = tree.scratch / "venv"
+                started = time.monotonic()
+                make_venv(own, env)
+                making += time.monotonic() - started
+                worker.binding_env = activated(wenv, own)
         first = workers[0].tree
         first_target = Path(env["CARGO_TARGET_DIR"])
         extra_targets = [Path(w.env["CARGO_TARGET_DIR"]) for w in workers[1:]]
         # Nothing to copy from a first target no build has used (a cold cache).
-        warm = bool(extra_targets) and (first_target / "debug").is_dir()
+        warm = bool(extra_targets) and bool(profile_dirs(first_target))
         local = local_packages(first.path) if warm else None
         changed = git(first.path, "diff", "--cached", "--name-only", "HEAD").stdout
         print(
@@ -1949,6 +2143,14 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
                 "in the directory above, the others in a target beside their worktree, "
                 "removed when the run ends"
             )
+        if own_venvs:
+            print(
+                f"guards: each worker's bindings entries build into and test from its own "
+                f"environment beside its worktree, holding {', '.join(VENV_PACKAGES)}, "
+                f"removed when the run ends ({making:.1f} s)"
+            )
+            if specs := npx_packages(selected):
+                print(fetch_npx(specs, first.path, env))
         if warm:
             # Before the first build of this run: see `dependency_unit` for why only a
             # dependency's units are copied.
@@ -1980,7 +2182,8 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
         for fault in selected:
             by_key.setdefault(command_key(fault), fault)
         clean_queues = [
-            [Task(k, k[0] == "bindings") for k in q] for q in assign(selected, jobs)
+            [Task(k, pin and k[0] == "bindings") for k in q]
+            for q in assign(selected, jobs, pin)
         ]
         counts = dict.fromkeys(by_key, 1)
         board = phase(clean_queues, True, run_clean("clean"))
@@ -1993,7 +2196,7 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
         fault_queues: list[list[Task]] = [[] for _ in workers]
         for index, fault in enumerate(selected):
             fault_queues[owner[command_key(fault)]].append(
-                Task(index, fault.suite == "bindings")
+                Task(index, pin and fault.suite == "bindings")
             )
 
         def run_fault(worker: Worker, task: Task) -> tuple[str, bool]:
@@ -2094,8 +2297,17 @@ def main(argv: list[str] | None = None) -> int:
     fire = sub.add_parser("fire", help="seed each fault and require its guard to fail")
     fire.add_argument("--only", action="append", default=[], metavar="ID")
     fire.add_argument("--suite", action="append", default=[], choices=SUITES)
-    fire.add_argument(
-        "--venv", help="the environment bindings entries build into and test from"
+    environments = fire.add_mutually_exclusive_group()
+    environments.add_argument(
+        "--venv",
+        help="the one environment every bindings entry builds into and tests from, which "
+        "keeps them all on worker 1",
+    )
+    environments.add_argument(
+        "--venv-per-worker",
+        action="store_true",
+        help="give each worker its own environment for the bindings entries, made with uv "
+        "beside its worktree and removed with it",
     )
     fire.add_argument("--logs", help="write each command's output here")
     fire.add_argument(

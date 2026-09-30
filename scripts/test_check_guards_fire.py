@@ -44,8 +44,12 @@ GIT_ENV_LEAKS = (
     "GIT_PREFIX",
 )
 
-# One runner for all three names. `cargo metadata` prints the tree's `metadata.json` (exit 101
-# without one). It reads every `state*.txt` in the tree it runs in as
+# One runner for every name. `uv venv P` makes P/bin, `uv pip install --python P/bin/python ...`
+# does nothing, and `npx` builds nothing and passes; each writes a line to $FAKE_TOOLS when it's
+# set (the tool, the directory it ran in, VIRTUAL_ENV, CARGO_TARGET_DIR, the arguments), and
+# `uv` exits $FAKE_UV_EXIT (0 by default). None of them touches the target. `cargo metadata`
+# prints the tree's `metadata.json` (exit 101 without one). It reads every `state*.txt` in the
+# tree it runs in as
 # `name=value` words: `build=E0599` breaks the build with that code, `<test>=fail` fails that
 # test, `color=yes` wraps each line in ANSI codes the way CI's `CARGO_TERM_COLOR=always` does,
 # `slow=N` sleeps N tenths of a second, and `hang=yes` sleeps past any timeout (with a child
@@ -66,6 +70,23 @@ import time
 texts = [p.read_text() for p in sorted(pathlib.Path(".").glob("state*.txt"))]
 state = dict(w.split("=", 1) for w in " ".join(texts).split())
 tool = pathlib.Path(sys.argv[0]).name
+if tool in ("uv", "npx"):
+    if os.environ.get("FAKE_TOOLS"):
+        with open(os.environ["FAKE_TOOLS"], "a") as log:
+            log.write("\\t".join([
+                tool,
+                os.getcwd(),
+                os.environ.get("VIRTUAL_ENV", ""),
+                os.environ.get("CARGO_TARGET_DIR", ""),
+                " ".join(sys.argv[1:]),
+            ]) + "\\n")
+    if tool == "uv":
+        if int(os.environ.get("FAKE_UV_EXIT", "0")):
+            print("uv broke")
+            sys.exit(int(os.environ["FAKE_UV_EXIT"]))
+        if sys.argv[1:2] == ["venv"]:
+            pathlib.Path(sys.argv[-1], "bin").mkdir(parents=True)
+    sys.exit(0)
 if tool == "cargo" and sys.argv[1:2] == ["metadata"]:
     meta = pathlib.Path("metadata.json")
     if not meta.is_file():
@@ -158,10 +179,17 @@ def toml_argv(argv: list[str]) -> str:
     return "[" + ", ".join(toml_str(a) for a in argv) + "]"
 
 
+def toml_run(run: list) -> str:
+    """One argv, or a list of them."""
+    if run and isinstance(run[0], list):
+        return "[" + ", ".join(toml_argv(a) for a in run) + "]"
+    return toml_argv(run)
+
+
 def entry(
     fid: str = "one",
     guard: str = "the_guard",
-    run: list[str] | None = None,
+    run: list | None = None,
     expect: str = "test-failed",
     fault: str = 'transform = { file = "state.txt", replace = "the_guard=ok", with = "the_guard=fail" }',
     suite: str = "rust",
@@ -171,7 +199,7 @@ def entry(
         "[[fault]]",
         f"id = {toml_str(fid)}",
         f"guard = {toml_str(guard)}",
-        f"run = {toml_argv(run or CARGO)}",
+        f"run = {toml_run(run or CARGO)}",
         f"expect = {toml_str(expect)}",
         f"suite = {toml_str(suite)}",
         fault,
@@ -189,7 +217,7 @@ class Repo:
         self.root = Path(directory.name) / "repo"
         self.bin = Path(directory.name) / "bin"
         self.bin.mkdir()
-        for tool in ("cargo", "pytest", "node"):
+        for tool in ("cargo", "pytest", "node", "uv", "npx"):
             path = self.bin / tool
             path.write_text(FAKE_RUNNER.format(python=sys.executable))
             path.chmod(path.stat().st_mode | stat.S_IXUSR)
@@ -610,7 +638,13 @@ class FireVerdicts(unittest.TestCase):
         repo = fire_repo(self, entry(suite="bindings"))
         out = repo.run("fire", "--suite", "bindings")
         self.assertEqual(out.returncode, 1)
-        self.assertIn("pass --venv DIR", out.stderr)
+        self.assertIn("pass --venv-per-worker, or --venv DIR", out.stderr)
+
+    def test_one_venv_and_a_venv_per_worker_are_refused_together(self):
+        repo = fire_repo(self, entry(suite="bindings"))
+        out = repo.run("fire", "--venv", str(repo.tmp / "v"), "--venv-per-worker")
+        self.assertEqual(out.returncode, 2, out.stdout + out.stderr)
+        self.assertIn("not allowed with argument", out.stderr)
 
 
 def notes_repo(
@@ -1235,10 +1269,8 @@ class FireInParallel(unittest.TestCase):
             kinds = [k for _, _, w, k in runs if w == tree]
             self.assertEqual(kinds[-1], "clean", runs)
 
-    def test_bindings_entries_all_run_in_the_first_workers_target_and_venv(self):
-        tmp = self.scratch_tmp()
-        log = tmp.parent / (tmp.name + ".log")
-        self.addCleanup(lambda: log.unlink(missing_ok=True))
+    def bindings_repo(self, count: int, **extra: str) -> Repo:
+        """`count` bindings entries, each its own pytest command, and one rust entry."""
         entries = [
             entry(
                 fid=f"py{n}",
@@ -1247,14 +1279,22 @@ class FireInParallel(unittest.TestCase):
                 suite="bindings",
                 fault=f'transform = {{ file = "state.txt", replace = "tests/t.py::t{n}=ok", with = "tests/t.py::t{n}=fail" }}',
             )
-            for n in range(3)
+            for n in range(count)
         ]
-        repo = fire_repo(
-            self,
-            *entries,
-            keyed("r", "g1", "g1"),
-            state="tests/t.py::t0=ok tests/t.py::t1=ok tests/t.py::t2=ok g1=ok\n",
+        state = " ".join(f"tests/t.py::t{n}=ok" for n in range(count))
+        return fire_repo(
+            self, *entries, keyed("r", "g1", "g1"), state=f"{state} g1=ok\n", **extra
         )
+
+    def test_with_one_venv_bindings_entries_all_run_in_the_first_workers_target_and_venv(
+        self,
+    ):
+        # `--venv DIR` is one environment, so the entries that install into it can't run at
+        # once: all of them stay on worker 1, which builds in the first target.
+        tmp = self.scratch_tmp()
+        log = tmp.parent / (tmp.name + ".log")
+        self.addCleanup(lambda: log.unlink(missing_ok=True))
+        repo = self.bindings_repo(3)
         venv = tmp / "venv"
         out = repo.run(
             "fire",
@@ -1270,6 +1310,134 @@ class FireInParallel(unittest.TestCase):
         bound = {(t, w) for t, v, w, _ in runs if v == str(venv)}
         self.assertEqual(len(bound), 1, runs)
         self.assertEqual(next(iter(bound))[0], str(repo.target / "guards-fire"))
+
+    def test_with_a_venv_per_worker_bindings_entries_spread_each_in_its_own_venv(self):
+        # Each worker makes its own environment beside its worktree, so the bindings
+        # entries go to any worker; no two workers share one, each holds the pinned
+        # packages, and each worker's restored pass reinstalls into its own.
+        tmp = self.scratch_tmp()
+        log = tmp.parent / (tmp.name + ".log")
+        tools = tmp.parent / (tmp.name + ".tools")
+        self.addCleanup(lambda: log.unlink(missing_ok=True))
+        self.addCleanup(lambda: tools.unlink(missing_ok=True))
+        repo = self.bindings_repo(4)
+        out = repo.run(
+            "fire",
+            "--jobs",
+            "4",
+            "--venv-per-worker",
+            TMPDIR=str(tmp),
+            FAKE_LOG=str(log),
+            FAKE_TOOLS=str(tools),
+        )
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertIn(
+            "guards: each worker's bindings entries build into and test from its own "
+            "environment beside its worktree, holding pytest==",
+            out.stdout,
+        )
+        rows = [line.split("\t") for line in log.read_text().splitlines()]
+        bindings = [r for r in rows if r[4].startswith("-rA ")]
+        trees = {tree for _, _, tree, _, _ in bindings}
+        self.assertGreater(
+            len(trees), 1, f"every bindings entry ran in one tree: {rows}"
+        )
+        venvs = {tree: {v for _, v, t, _, _ in bindings if t == tree} for tree in trees}
+        for tree, found in venvs.items():
+            (venv,) = found
+            # Beside its own worktree, where the reset between faults doesn't reach.
+            self.assertEqual(Path(venv), Path(tree).parent / "venv", rows)
+        self.assertEqual(len({v for (v,) in venvs.values()}), len(trees), venvs)
+        made = [line.split("\t") for line in tools.read_text().splitlines()]
+        for (venv,) in venvs.values():
+            self.assertIn(
+                ["uv", "venv", "--quiet", venv], [[m[0], *m[4].split()] for m in made]
+            )
+            installs = [
+                m[4].split()
+                for m in made
+                if m[0] == "uv" and f"--python {venv}/bin/python" in m[4]
+            ]
+            self.assertEqual(len(installs), 1, made)
+            pins = installs[0][installs[0].index(f"{venv}/bin/python") + 1 :]
+            self.assertTrue(pins and all("==" in p for p in pins), pins)
+        # A rust entry never runs in an environment.
+        self.assertEqual(
+            {v for _, v, _, _, a in rows if not a.startswith("-rA ")}, {""}
+        )
+        # Each tree's last run of each command it ran is clean, so each environment ends on
+        # the clean extension; and every environment went with its worktree.
+        for tree in trees:
+            for command in {r[4] for r in rows if r[2] == tree}:
+                last = [r[3] for r in rows if r[2] == tree and r[4] == command][-1]
+                self.assertEqual(last, "clean", (tree, command, rows))
+        self.assertEqual(list(tmp.iterdir()), [])
+        self.assertEqual(repo.worktrees(), 1)
+
+    def test_npx_packages_install_once_before_any_worker_runs_one(self):
+        # npm's extraction into a cold cache collides when several npx calls install one
+        # package at once (#347), so each package goes in once before the workers start.
+        # The `--package` after the command it runs is that command's, not npx's.
+        tmp = self.scratch_tmp()
+        tools = tmp.parent / (tmp.name + ".tools")
+        self.addCleanup(lambda: tools.unlink(missing_ok=True))
+        build = [
+            "npx",
+            "-y",
+            "-p",
+            "@x/cli@3",
+            "x",
+            "build",
+            "--package",
+            "local-crate",
+        ]
+        entries = [
+            entry(
+                fid=f"js{n}",
+                guard=f"t{n}",
+                run=[build, ["node", "--test", "--test-reporter=tap", f"t{n}"]],
+                suite="bindings",
+                fault=f'transform = {{ file = "state.txt", replace = "t{n}=ok", with = "t{n}=fail" }}',
+            )
+            for n in range(3)
+        ]
+        repo = fire_repo(self, *entries, state="t0=ok t1=ok t2=ok\n")
+        out = repo.run(
+            "fire",
+            "--jobs",
+            "3",
+            "--venv-per-worker",
+            TMPDIR=str(tmp),
+            FAKE_TOOLS=str(tools),
+        )
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        calls = [line.split("\t")[4] for line in tools.read_text().splitlines()]
+        npx = [c for c in calls if c.startswith(("-y ", "--yes "))]
+        fetch = "--yes --package @x/cli@3 -- node -e 0"
+        self.assertEqual(npx[0], fetch, calls)
+        self.assertEqual(npx.count(fetch), 1, calls)
+        self.assertFalse([c for c in npx if "local-crate --" in c], calls)
+        self.assertIn(
+            "guards: installed @x/cli@3 for npx once, before the workers", out.stdout
+        )
+
+    def test_a_uv_that_fails_ends_the_run_and_leaves_no_tree(self):
+        tmp = self.scratch_tmp()
+        repo = self.bindings_repo(2)
+        out = repo.run(
+            "fire",
+            "--jobs",
+            "2",
+            "--venv-per-worker",
+            TMPDIR=str(tmp),
+            FAKE_UV_EXIT="3",
+        )
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertIn("guards: `uv venv --quiet ", out.stderr)
+        self.assertIn("uv broke", out.stderr)
+        self.assertNotIn("clean run for", out.stdout)
+        self.assertEqual(list(tmp.iterdir()), [])
+        self.assertEqual(repo.worktrees(), 1)
 
     def test_a_red_clean_run_stops_every_worker_before_any_fault(self):
         repo = fire_repo(
@@ -1605,6 +1773,36 @@ class WarmWorkers(unittest.TestCase):
         copy = other / "debug" / "deps" / f"libserde-{HASH}.rlib"
         self.assertEqual(copy.stat().st_mtime, source.stat().st_mtime)
 
+    def test_a_target_triples_dependency_units_are_seeded_too(self):
+        # `napi build` passes `--target`, so its whole graph sits under `<triple>/debug`; an
+        # extra worker without it builds that graph again. Another target nested in this one
+        # (`guards-fire`, the fire's own default under the caller's) isn't a triple.
+        triple = "x86_64-unknown-linux-gnu"
+        first = fake_target(self.tmp / "first", DEPENDENCY[:1])
+        fake_target(
+            first / triple,
+            [
+                f"deps/libnapi-{HASH}.rlib",
+                f".fingerprint/napi-{HASH}/",
+                f"build/napi-sys-{HASH}/",
+                f"deps/libmicrovms_js-{HASH}.so",
+                f".fingerprint/microvms-js-{HASH}/",
+            ],
+        )
+        fake_target(first / "guards-fire", [f"deps/libserde-{HASH}.rlib"])
+        other = self.tmp / "other"
+        self.m["seed_targets"](first, [other], LOCAL_NAMES)
+        self.assertEqual(
+            units(other / triple),
+            {
+                f"deps/libnapi-{HASH}.rlib",
+                f".fingerprint/napi-{HASH}",
+                f"build/napi-sys-{HASH}",
+            },
+        )
+        self.assertEqual(units(other), {DEPENDENCY[0]})
+        self.assertFalse((other / "guards-fire").exists())
+
     def test_cargo_not_answering_copies_nothing(self):
         first = fake_target(self.tmp / "first", DEPENDENCY)
         other = self.tmp / "other"
@@ -1776,6 +1974,62 @@ class BuildCommand(unittest.TestCase):
         out = repo.run("build", "--suite", "script")
         self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
         self.assertIn("nothing to build", out.stderr)
+
+    def test_each_extension_build_runs_once_in_a_scratch_tree_with_its_own_venv(self):
+        # A bindings entry's commands before its test run are its extension build (`napi
+        # build`, `maturin develop`): each runs once, into the target, in a scratch worktree
+        # (napi writes into the tree it builds in) with an environment made for it. The test
+        # runs don't, and neither does a one-command entry, whose build is inside its check.
+        tools = Path(tempfile.mkdtemp()) / "tools.log"
+        self.addCleanup(shutil.rmtree, tools.parent, True)
+        napi = ["npx", "-y", "-p", "@x/cli@3", "x", "build"]
+        repo = fire_repo(
+            self,
+            *(
+                entry(
+                    fid=f"js{n}",
+                    guard=f"t{n}",
+                    run=[napi, ["node", "--test", "--test-reporter=tap", f"t{n}"]],
+                    suite="bindings",
+                )
+                for n in range(2)
+            ),
+            entry(
+                fid="stub",
+                guard="check.py",
+                run=["npx", "--yes", "-p", "@x/check@1", "check"],
+                expect="exit-nonzero",
+                message="m",
+                suite="bindings",
+            ),
+        )
+        target = repo.tmp / "cache"
+        ran = tools.parent / "runs.log"
+        out = repo.run(
+            "build",
+            "--suite",
+            "bindings",
+            "--target-dir",
+            str(target),
+            FAKE_TOOLS=str(tools),
+            FAKE_LOG=str(ran),
+        )
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        rows = [line.split("\t") for line in tools.read_text().splitlines()]
+        builds = [r for r in rows if r[0] == "npx"]
+        self.assertEqual([r[4] for r in builds], [" ".join(napi[1:])], rows)
+        (tool, cwd, venv, built_in, _) = builds[0]
+        self.assertNotEqual(Path(cwd), repo.root)
+        self.assertEqual(Path(venv), Path(cwd).parent / "venv")
+        self.assertIn(
+            ["uv", "venv", "--quiet", venv], [[r[0], *r[4].split()] for r in rows]
+        )
+        self.assertEqual(built_in, str(target))
+        self.assertIn("guards: 1 builds", out.stdout)
+        self.assertFalse(ran.exists(), "a test run ran")
+        # The scratch tree and its environment are gone.
+        self.assertEqual(repo.worktrees(), 1)
+        self.assertEqual([p for p in repo.tmp.iterdir() if p != target], [])
 
 
 def selection(stdout: str) -> set[str]:
@@ -2520,14 +2774,42 @@ class FireSharded(unittest.TestCase):
             "the shards aren't split by the entries' cost",
         )
 
+    def test_a_bindings_entry_weighs_what_its_extension_build_costs(self):
+        # On CI's runner a `napi build` entry took about three times a `maturin develop` one
+        # (run 36622110872), and neither is a Rust entry's cost.
+        napi = ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build"]
+        maturin = ["uvx", "maturin@1.14.1", "develop", "-q"]
+        registry = "".join(
+            [
+                entry(
+                    fid="js",
+                    guard="t",
+                    run=[napi, ["node", "--test", "--test-reporter=tap", "t"]],
+                    suite="bindings",
+                ),
+                entry(
+                    fid="py",
+                    guard="t.py::t",
+                    run=[maturin, ["pytest", "-rA", "t.py::t"]],
+                    suite="bindings",
+                ),
+                entry(fid="rs"),
+            ]
+        )
+        repo = Repo(self, {"guards/faults.toml": registry, "state.txt": "x=ok\n"})
+        script = runpy.run_path(str(SCRIPT))
+        faults, problems = script["load"](repo.root)
+        self.assertEqual(problems, [])
+        self.assertEqual([script["entry_cost"](f) for f in faults], [18, 6, 14])
+
     def test_the_registrys_own_shards_partition_it(self):
-        # The split CI makes, on the registry it makes it of: the rust and script entries in
-        # CI's three shards.
+        # The split CI makes, on the registry it makes it of: every suite's entries in CI's
+        # three shards.
         script = runpy.run_path(str(SCRIPT))
         faults, problems = script["load"](HERE.parent)
         self.assertEqual(problems, [])
-        selected = [f for f in faults if f.suite in ("rust", "script")]
-        self.assertTrue(selected, "the registry has no rust or script entry to split")
+        selected = [f for f in faults if f.suite in ("rust", "script", "bindings")]
+        self.assertTrue(selected, "the registry has no entry of CI's suites to split")
         key = script["command_key"]
         shards = [script["shard"](selected, k, 3) for k in range(3)]
         ids = [f.id for s in shards for f in s]
@@ -2654,8 +2936,8 @@ class GuardsJob(unittest.TestCase):
     def test_a_pull_request_fires_the_entries_it_affects_and_a_push_fires_every_entry(
         self,
     ):
-        # One entry of each other suite beside the fixture's rust ones: this job fires rust
-        # and script, and the bindings job fires bindings.
+        # One entry of each other suite beside the fixture's rust ones: this job fires all
+        # three, each worker's bindings entries in an environment of its own.
         script = entry(
             fid="sc",
             guard="sgate.py",
@@ -2668,7 +2950,7 @@ class GuardsJob(unittest.TestCase):
         binding = entry(
             fid="bi",
             guard="t",
-            run=["node", "--test", "--test-reporter=tap", "t.mjs"],
+            run=["node", "--test", "--test-reporter=tap", "t"],
             suite="bindings",
             fault='transform = { file = "state-js.txt", replace = "t=ok", with = "t=fail" }',
         )
@@ -2708,23 +2990,24 @@ class GuardsJob(unittest.TestCase):
             self.assertEqual(set(ids), want, f"{event}: the shards together")
 
         (pr,) = self.fire_steps("pull_request")
-        each_shard("pull_request", pr, {"a", "sc"}, {"a", "sc"})
+        each_shard("pull_request", pr, {"a", "sc", "bi"}, {"a", "sc", "bi"})
 
         (push,) = self.fire_steps("push")
         self.assertNotIn("--affected", push["run"])
         self.assertNotIn("--only", push["run"])
-        each_shard("push", push, set(), {*ORDER, "sc"})
+        each_shard("push", push, set(), {*ORDER, "sc", "bi"})
 
     def test_the_pull_request_step_is_the_push_step_plus_the_selection(self):
-        # So the two legs can't drift apart in a flag (a lost suite, or a bindings suite this
-        # job has no toolchain for), and neither can leave the worker count and per-command
-        # timeout the budgets were measured with: four workers on the four-vCPU runner, and
-        # a hung fault stopped well inside the job's time.
+        # So the two legs can't drift apart in a flag (a lost suite, or bindings entries with
+        # no environment to build into, which `fire` skips), and neither can leave the worker
+        # count and per-command timeout the budgets were measured with: four workers on the
+        # four-vCPU runner, and a hung fault stopped well inside the job's time.
         (pr,) = self.fire_steps("pull_request")
         (push,) = self.fire_steps("push")
         pr_argv, push_argv = shlex.split(pr["run"]), shlex.split(push["run"])
         suites = [b for a, b in zip(push_argv, push_argv[1:]) if a == "--suite"]
-        self.assertEqual(suites, ["rust", "script"], push["run"])
+        self.assertEqual(suites, ["rust", "script", "bindings"], push["run"])
+        self.assertIn("--venv-per-worker", push_argv, "the push step's environments")
         options = dict(zip(push_argv, push_argv[1:]))
         for flag, want in (("--jobs", "4"), ("--timeout", "900")):
             self.assertEqual(options.get(flag), want, f"the push step's {flag}")
@@ -2758,16 +3041,24 @@ class GuardsJob(unittest.TestCase):
         # environment, and only a step's own `env` wins over it. Each fault is an edit and a
         # rebuild of one crate, which is what incremental builds are for.
         steps = [*self.fire_steps("pull_request"), *self.fire_steps("push")]
-        steps += [
-            s
-            for s in workflow_jobs()["bindings"].get("steps") or []
-            if "check-guards-fire.py fire" in s.get("run", "")
-        ]
-        self.assertEqual(len(steps), 3, "two guards fire steps and the bindings one")
+        self.assertEqual(len(steps), 2, "the pull request's fire step and the push's")
         for step in steps:
             self.assertEqual(
                 (step.get("env") or {}).get("CARGO_INCREMENTAL"), "1", step.get("name")
             )
+
+    def test_the_guards_legs_are_the_one_place_faults_fire(self):
+        # The bindings job fired the bindings suite on one worker for ten of its thirteen
+        # minutes (run 36622110872); the legs fire it now, so a second fire anywhere repeats
+        # every build.
+        firing = [
+            (name, s.get("name"))
+            for name, job in workflow_jobs().items()
+            for s in job.get("steps") or []
+            if "check-guards-fire.py fire" in s.get("run", "")
+        ]
+        self.assertTrue(firing, "no step in ci.yml fires a seeded fault")
+        self.assertEqual({name for name, _ in firing}, {"guards"}, firing)
 
     def test_the_legs_restore_the_one_cache_a_push_to_main_saves(self):
         # One job saves the guards' dependency cache, from every rust entry's
@@ -2803,9 +3094,22 @@ class GuardsJob(unittest.TestCase):
         fire = shlex.split(push["run"])
         suites = [b for a, b in zip(fire, fire[1:]) if a == "--suite"]
         self.assertIn("rust", suites)
+        self.assertIn("bindings", suites)
+        # Every suite the legs fire that builds anything: a script entry runs no cargo
+        # command and has no extension to build.
         self.assertEqual(
-            [b for a, b in zip(argv, argv[1:]) if a == "--suite"], ["rust"]
+            [b for a, b in zip(argv, argv[1:]) if a == "--suite"],
+            [s for s in suites if s != "script"],
         )
+        # `napi build` runs through npx, on the Node the legs run it on.
+        node = [
+            [s.get("uses"), (s.get("with") or {}).get("node-version")]
+            for job in ("guards", "guards-cache")
+            for s in jobs[job].get("steps") or []
+            if s.get("uses", "").startswith("actions/setup-node@")
+        ]
+        self.assertEqual(len(node), 2, node)
+        self.assertEqual(node[0], node[1])
         self.assertEqual(dict(zip(argv, argv[1:])).get("--target-dir"), "target")
         self.assertEqual(
             build.get("if"), f"steps.{step.get('id')}.outputs.cache-hit != 'true'"

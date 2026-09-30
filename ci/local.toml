@@ -28,8 +28,9 @@
 # `[expressions]` answers for a pull request only. A push to main (the `BASE` expression's
 # `HEAD^` side) isn't modeled, so `ci:guards` runs the pull request's `--affected` selection,
 # never main's full fire. It runs it as shard 0 of 1, the whole selection in one run under the
-# job's 60 minutes, where CI splits it across the matrix; `mise run guards:fire -- --jobs 4` is
-# the full fire here, and `-- --affected --shard k/3` one CI leg's share.
+# job's 60 minutes, where CI splits it across the matrix; `mise run guards:fire -- --jobs 4
+# --venv-per-worker` is the full fire here, and `-- --venv-per-worker --affected --shard k/3`
+# one CI leg's share.
 
 workflows = ["ci.yml", "fuzz.yml"]
 
@@ -139,7 +140,6 @@ steps = [
   "typescript declarations are not stale",
   "typed consumer checks against the declarations",
   "the npm loader resolves its platform packages",
-  "seeded binding faults fire",
 ]
 
 [job."ci.yml".guards]
