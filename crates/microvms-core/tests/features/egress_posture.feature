@@ -44,7 +44,7 @@ Feature: The egress posture a harness can read before and after a launch
         | true   | 1          | false | INTERNET_EGRESS cannot be    |
         | false  | 11         | false | NetworkConnectorList ceiling |
 
-    @BIND-13
+    @BIND-13 @TRAP-4
     Scenario: a connector that is not a connector ARN in the launch region
       Given launch options with one VPC connector "arn:aws:lambda:us-west-2:123456789012:network-connector:private"
       When the harness asks for their egress posture in us-east-1
