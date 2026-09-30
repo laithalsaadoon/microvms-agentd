@@ -824,6 +824,212 @@ cli = "manifest"
 py = { exempt = "the stub is the contract" }
 ts = { exempt = "index.d.ts is the contract" }
 
+# ── defaults: every default a surface states, held to core's (#300) ─────────────
+#
+# `core` names a key of the manifest's `clientDefaults` (`microvms_core::defaults`), and each
+# surface default the row names must state that value. `tools/check-parity.py`'s docstring has
+# the rules; a default no row names fails there.
+
+[[default]]
+id = "exec-wait"
+sentinel = true
+core = "execWaitSeconds"
+cli = ["exec --timeout", "run --timeout"]
+py = ["ExecHandle.wait(timeout)", "ExecHandle.wait_and_ack(timeout)", "Session.run_sync(timeout)"]
+
+[[default]]
+id = "lifecycle-wait"
+core = "lifecycleTimeoutSeconds"
+cli = ["suspend --timeout", "resume --timeout"]
+py = "ControlPlane.wait_for_state(timeout)"
+
+[[default]]
+id = "lifecycle-poll"
+core = "lifecyclePollIntervalSeconds"
+py = "ControlPlane.wait_for_state(poll_interval)"
+
+[[default]]
+id = "ready-wait"
+core = "readyTimeoutSeconds"
+py = "Session.wait_until_ready(timeout)"
+
+[[default]]
+id = "prompt-wait"
+core = "promptTimeoutSeconds"
+cli = "agent-prompt --timeout"
+py = "AgentVm.prompt_sync(timeout)"
+
+[[default]]
+id = "client-grace"
+core = "clientGraceSeconds"
+py = "Session.run_to_completion(client_grace_sec)"
+
+[[default]]
+id = "size"
+core = "sizeMib"
+cli = ["run --memory", "build --memory", "cost --memory"]
+
+[[default]]
+id = "agent-size"
+core = "agentSizeMib"
+cli = "agent-up --memory"
+
+[[default]]
+id = "max-idle"
+core = "launch.maxIdleSeconds"
+cli = ["run --max-idle-sec", "agent-up --max-idle-sec"]
+
+[[default]]
+id = "suspended-window"
+core = "launch.suspendedSeconds"
+cli = ["run --suspended-sec", "agent-up --suspended-sec"]
+
+[[default]]
+id = "max-duration"
+core = "launch.maxDurationSeconds"
+cli = ["run --max-duration-sec", "agent-up --max-duration-sec"]
+
+[[default]]
+id = "bedrock-token-ttl"
+core = "bedrockTokenTtlHours"
+cli = "agent-up --token-ttl-hours"
+
+[[default]]
+id = "agent-port"
+core = "agentPort"
+cli = "dockerfile --port"
+
+[[default]]
+id = "residency-cycles"
+core = "residencyCycles"
+cli = "cost --cycles"
+py = "compare_residency(cycles)"
+
+[[default]]
+id = "keepalive-tolerated-errors"
+core = "keepAwakeToleratedErrors"
+cli = "keepalive --tolerated-errors"
+
+[[default]]
+id = "launch-auto-resume"
+core = "launch.autoResume"
+py = ["Sandbox.run(auto_resume)", "AgentVm.launch(auto_resume)"]
+
+[[default]]
+id = "launch-egress"
+core = "launch.egress"
+py = ["Sandbox.run(egress)", "egress_posture_for(egress)"]
+
+[[default]]
+id = "launch-deny-egress"
+core = "launch.denyEgress"
+py = ["Sandbox.run(deny_egress)", "egress_posture_for(deny_egress)"]
+
+[[default]]
+id = "launch-shell"
+core = "launch.shell"
+py = "Sandbox.run(shell)"
+
+[[default]]
+id = "launch-wait"
+core = "launch.wait"
+py = "Sandbox.run(wait)"
+
+[[default]]
+id = "launch-logging"
+core = "launch.loggingDisabled"
+py = ["Sandbox.run(disable_logging)", "AgentVm.launch(disable_logging)"]
+
+[[default]]
+id = "exec-shell"
+core = "exec.shell"
+py = ["Session.run(shell)", "Session.run_sync(shell)", "Session.run_to_completion(shell)", "Session.spawn(shell)"]
+
+[[default]]
+id = "exec-stdin"
+core = "exec.stdin"
+py = ["Session.run(stdin)", "Session.run_sync(stdin)", "Session.spawn(stdin)"]
+
+[[default]]
+id = "exec-reap"
+core = "exec.reapGroupOnExit"
+py = ["Session.run(reap_group_on_exit)", "Session.run_sync(reap_group_on_exit)", "Session.run_to_completion(reap_group_on_exit)", "Session.spawn(reap_group_on_exit)"]
+
+[[default]]
+id = "exec-inherit-env"
+core = "exec.inheritImageEnv"
+py = ["Session.run(inherit_image_env)", "Session.run_sync(inherit_image_env)", "Session.run_to_completion(inherit_image_env)", "Session.spawn(inherit_image_env)"]
+
+[[default]]
+id = "stream-reconnect"
+core = "stream.reconnect"
+py = ["ExecHandle.stream(reconnect)", "Session.spawn(reconnect)"]
+
+[[default]]
+id = "stream-gap"
+core = "stream.errorOnGap"
+py = "ExecHandle.stream(error_on_gap)"
+
+[[default]]
+id = "teardown-delete-image"
+core = "teardown.deleteImage"
+py = ["Sandbox.terminate(delete_image)", "AgentVm.terminate(delete_image)"]
+
+[[default]]
+id = "teardown-delete-log-group"
+core = "teardown.deleteLogGroup"
+py = ["Sandbox.terminate(delete_log_group)", "AgentVm.terminate(delete_log_group)"]
+
+[[default]]
+id = "teardown-wait"
+core = "teardown.waitForTerminated"
+py = ["Sandbox.terminate(wait_for_terminated)", "AgentVm.terminate(wait_for_terminated)"]
+
+[[default]]
+id = "prompt-reap"
+core = "prompt.reapGroupOnExit"
+py = ["AgentVm.prompt(reap_group_on_exit)", "AgentVm.prompt_sync(reap_group_on_exit)", "prompt_agent(reap_group_on_exit)"]
+
+[[default]]
+id = "image-inherit-workdir"
+core = "image.inheritWorkdir"
+py = ["Sandbox.build_artifact(inherit_workdir)", "Sandbox.build_image(inherit_workdir)", "Sandbox.preflight(inherit_workdir)", "wrap_dockerfile(inherit_workdir)"]
+
+[[default]]
+id = "image-repair-identity"
+core = "image.repairGuestIdentity"
+py = ["Sandbox.build_image(repair_guest_identity)", "Sandbox.preflight(repair_guest_identity)"]
+
+[[default]]
+id = "image-force"
+core = "image.force"
+py = "Sandbox.ensure_image(force)"
+
+[[default]]
+id = "sync-delete-budget"
+exempt = "how long a sync pass's in-guest delete may take; directory sync is CLI code until #260 moves it into core, which then owns the figure"
+cli = "sync --timeout"
+
+[[default]]
+id = "watch-interval"
+exempt = "how often `ls --watch` redraws, a terminal affordance with no counterpart below the CLI"
+cli = "ls --interval-sec"
+
+[[default]]
+id = "compare-hold"
+exempt = "the hold `cost --compare` prices when none is given; core's and both bindings' compare_residency take the hold as a required argument"
+cli = "cost --hold-sec"
+
+[[default]]
+id = "keep-awake-while-busy"
+exempt = "the binding passes it to core's KeepAwake::while_busy on every call, and the policy doesn't read its own setting back to compare with"
+py = "Session.keep_awake(while_busy)"
+
+[[default]]
+id = "stdin-eof"
+exempt = "whether this one write closes stdin: an argument of the call, with no default anywhere else"
+py = "ExecHandle.write_stdin(eof)"
+
 # ── types whose members pair across the bindings ─────────────────────────────
 
 [[type]]
