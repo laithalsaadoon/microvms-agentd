@@ -1060,38 +1060,70 @@ transform = { file = ".github/workflows/ci.yml", replace = "        run: mise ru
 [[fault]]
 id = "guards-job-save-on-pr"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_each_leg_reads_the_record_its_leg_saves_on_main"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_each_leg_reads_every_legs_record_and_saves_its_own"]
 expect = "exit-nonzero"
 suite = "script"
-message = "FAIL: test_each_leg_reads_the_record_its_leg_saves_on_main ("
+message = "FAIL: test_each_leg_reads_every_legs_record_and_saves_its_own ("
 transform = { file = ".github/workflows/ci.yml", replace = "      - name: save the record for pull requests\n        if: github.event_name != 'pull_request'\n", with = "      - name: save the record for pull requests\n        if: github.event_name == 'pull_request'\n" }
 
 [[fault]]
 id = "guards-job-restore-other-leg"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_each_leg_reads_the_record_its_leg_saves_on_main"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_each_leg_reads_every_legs_record_and_saves_its_own"]
 expect = "exit-nonzero"
 suite = "script"
-message = "FAIL: test_each_leg_reads_the_record_its_leg_saves_on_main ("
-transform = { file = ".github/workflows/ci.yml", replace = "          restore-keys: guards-verdicts-${{ matrix.shard }}-of-${{ strategy.job-total }}-\n", with = "          restore-keys: guards-verdicts-\n" }
+message = "FAIL: test_each_leg_reads_every_legs_record_and_saves_its_own ("
+transform = { file = ".github/workflows/ci.yml", replace = "          restore-keys: guards-verdicts-0-of-${{ strategy.job-total }}-\n", with = "          restore-keys: guards-verdicts-\n" }
 
 [[fault]]
 id = "guards-job-restore-path"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_each_leg_reads_the_record_its_leg_saves_on_main"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_each_leg_reads_every_legs_record_and_saves_its_own"]
 expect = "exit-nonzero"
 suite = "script"
-message = "FAIL: test_each_leg_reads_the_record_its_leg_saves_on_main ("
-transform = { file = ".github/workflows/ci.yml", replace = "          path: ${{ runner.temp }}/guards-verdicts\n          key: guards-verdicts-${{ matrix.shard }}-of-${{ strategy.job-total }}-${{ github.event.pull_request.base.sha }}\n", with = "          path: guards-verdicts\n          key: guards-verdicts-${{ matrix.shard }}-of-${{ strategy.job-total }}-${{ github.event.pull_request.base.sha }}\n" }
+message = "FAIL: test_each_leg_reads_every_legs_record_and_saves_its_own ("
+transform = { file = ".github/workflows/ci.yml", replace = "          path: ${{ runner.temp }}/guards-verdicts\n          key: guards-verdicts-0-of-${{ strategy.job-total }}-${{ github.event.pull_request.base.sha }}\n", with = "          path: guards-verdicts\n          key: guards-verdicts-0-of-${{ strategy.job-total }}-${{ github.event.pull_request.base.sha }}\n" }
 
 [[fault]]
 id = "guards-job-strace-push-only"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_each_leg_reads_the_record_its_leg_saves_on_main"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_each_leg_reads_every_legs_record_and_saves_its_own"]
 expect = "exit-nonzero"
 suite = "script"
-message = "FAIL: test_each_leg_reads_the_record_its_leg_saves_on_main ("
+message = "FAIL: test_each_leg_reads_every_legs_record_and_saves_its_own ("
 transform = { file = ".github/workflows/ci.yml", replace = "      - name: strace\n        run: command -v strace", with = "      - name: strace\n        if: github.event_name != 'pull_request'\n        run: command -v strace" }
+
+# A pull request's leg stops reading one leg's record, and every command that leg recorded fires
+# wherever the split puts it.
+[[fault]]
+id = "guards-job-restore-every-leg"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_each_leg_reads_every_legs_record_and_saves_its_own"]
+expect = "exit-nonzero"
+suite = "script"
+message = "the legs whose records a pull request reads"
+transform = { file = ".github/workflows/ci.yml", replace = "      - name: main's record of what each verdict read, leg 5\n        if: github.event_name == 'pull_request'\n        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0\n        with:\n          path: ${{ runner.temp }}/guards-verdicts\n          key: guards-verdicts-5-of-${{ strategy.job-total }}-${{ github.event.pull_request.base.sha }}\n          restore-keys: guards-verdicts-5-of-${{ strategy.job-total }}-\n", with = "" }
+
+# A leg reads its own leg's record where it read leg 1's, as every leg once did: a command leg 1
+# recorded fires on the leg a new entry moved it to (#416).
+[[fault]]
+id = "guards-job-restore-own-leg"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_push_records_every_entry_and_a_pull_request_fires_what_it_cant_keep"]
+expect = "exit-nonzero"
+suite = "script"
+message = "pull_request: the shards together"
+transform = { file = ".github/workflows/ci.yml", replace = "          key: guards-verdicts-1-of-${{ strategy.job-total }}-${{ github.event.pull_request.base.sha }}\n          restore-keys: guards-verdicts-1-of-${{ strategy.job-total }}-\n", with = "          key: guards-verdicts-${{ matrix.shard }}-of-${{ strategy.job-total }}-${{ github.event.pull_request.base.sha }}\n          restore-keys: guards-verdicts-${{ matrix.shard }}-of-${{ strategy.job-total }}-\n" }
+
+# `--reuse` reads one of the records in its directory, so a command another leg recorded fires.
+[[fault]]
+id = "guards-fire-reuse-every-record"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_command_one_leg_recorded_keeps_its_verdict_on_another"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_command_one_leg_recorded_keeps_its_verdict_on_another ("
+transform = { file = "tools/check-guards-fire.py", replace = "    for path in sorted(directory.glob(\"*.json\")):\n", with = "    for path in sorted(directory.glob(\"*.json\"))[:1]:\n" }
 
 # One failed shard cancels the others.
 [[fault]]

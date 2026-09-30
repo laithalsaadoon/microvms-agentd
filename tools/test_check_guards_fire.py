@@ -3078,6 +3078,49 @@ class VerdictCache(unittest.TestCase):
         )
         self.fires(self.reuse(repo, where), {})
 
+    def test_a_command_one_leg_recorded_keeps_its_verdict_on_another(self):
+        # A new entry on b's command makes it as heavy as a's, and the split moves c from leg 1
+        # to leg 0 and p from leg 0 to leg 1. Each leg reads both legs' records and keeps the
+        # verdicts of the commands the other leg recorded; one that had only its own leg's
+        # record would fire them.
+        repo = cache_repo(self)
+        where = self.record(repo, "--shard", "0/2")
+        self.record(repo, "--shard", "1/2")
+        script = fire_module()
+
+        def legs() -> dict[str, int]:
+            faults, _ = script["load"](repo.root)
+            return {f.id: k for k in (0, 1) for f in script["shard"](faults, k, 2)}
+
+        before = legs()
+        text = (repo.root / REGISTRY).read_text()
+        repo.write(
+            REGISTRY,
+            text
+            + entry(
+                fid="b2",
+                guard="gb",
+                run=["cargo", "test", "--", "--exact", "gb"],
+                fault='transform = { file = "state-b.txt", replace = "gb=ok", with = "gb=ok gb=fail" }',
+            ),
+        )
+        repo.commit()
+        after = legs()
+        self.assertEqual((before["c"], after["c"]), (1, 0), "the premise: c moves")
+        self.assertEqual((before["p"], after["p"]), (0, 1), "the premise: p moves")
+        kept = {
+            k: reused(self.reuse(repo, where, "--shard", f"{k}/2").stdout)
+            for k in (0, 1)
+        }
+        self.assertIn("c", kept[0], "leg 0 fires c, which leg 1 recorded")
+        self.assertIn("p", kept[1], "leg 1 fires p, which leg 0 recorded")
+        self.assertEqual(sorted(kept[0] + kept[1]), sorted(set(CACHE)))
+        own = repo.tmp.parent / "own"
+        own.mkdir()
+        shutil.copy(where / "shard-0-of-2.json", own)
+        out = self.reuse(repo, own, "--shard", "0/2")
+        self.assertEqual(firing(out.stdout).get("c"), "no record has its command")
+
     def test_a_shard_keeps_its_slice_whatever_record_it_reads(self):
         # The slice is cut before --reuse, so a leg that restored another record, or none,
         # still fires within its own slice and never another's.
@@ -4028,35 +4071,140 @@ class GuardsJob(unittest.TestCase):
             )
             return ids
 
+        # Each leg on a runner of its own: its temp directory, and the cache ci.yml's steps save
+        # into and restore from, by their own keys, paths and prefixes.
+        cache: dict[str, Path] = {}
         (push,) = self.fire_steps("push")
-        main = repo.tmp.parent / "main-temp"
-        fired = each_leg("push", push, lambda shard: main)
-        self.assertEqual(set(fired), {*ORDER, "sc", "bi"}, "push: the shards together")
-        records = main / "guards-verdicts"
+        fired = []
+        for shard in legs:
+            temp = repo.tmp.parent / f"main-temp-{shard}"
+            out = self.run_step(repo, push, shard, len(legs), temp)
+            self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+            fired += fired_ids(out.stdout)
+            self.assertEqual(
+                sorted(p.name for p in (temp / "guards-verdicts").glob("*.json")),
+                [f"shard-{shard}-of-{len(legs)}.json"],
+                "push: each leg writes its own record",
+            )
+            for step in self.cache_steps("actions/cache/save", "push"):
+                given = step["with"]
+                key = self.render(given["key"], shard, len(legs), temp)
+                cache[key] = Path(self.render(given["path"], shard, len(legs), temp))
         self.assertEqual(
-            sorted(p.name for p in records.glob("*.json")),
-            sorted(f"shard-{k}-of-{len(legs)}.json" for k in legs),
-            "push: each leg writes its own record",
+            len(fired), len(set(fired)), f"push: an entry fires twice: {fired}"
         )
+        self.assertEqual(set(fired), {*ORDER, "sc", "bi"}, "push: the shards together")
         # HEAD plays the pull request's merge commit: one rust, one script and one bindings
-        # entry's files change, and each leg restores its own leg's record from main.
+        # entry's files change, and a new entry on `crate`'s command makes it heavier, which
+        # moves most commands to another leg, as a pull request that adds a fault does (#416).
+        script_module = fire_module()
+        before = self.slices(script_module, repo, len(legs))
         for path in ("state-a.txt", "state-s.txt", "state-js.txt"):
             repo.write(path, (repo.root / path).read_text() + "extra=ok\n")
+        repo.write(
+            REGISTRY,
+            (repo.root / REGISTRY).read_text()
+            + entry(
+                fid="crate2",
+                guard="tests::the_d_guard",
+                run=[
+                    "cargo",
+                    "test",
+                    "-p",
+                    "fixture",
+                    "--",
+                    "--exact",
+                    "tests::the_d_guard",
+                ],
+                fault='transform = { file = "state-d.txt", replace = "tests::the_d_guard=ok", with = "tests::the_d_guard=ok tests::the_d_guard=fail" }',
+            ),
+        )
         repo.commit()
+        after = self.slices(script_module, repo, len(legs))
+        # The premise: an entry nothing changed for, whose command another leg recorded.
+        self.assertNotEqual(
+            before["lint"], after["lint"], "lint's command stayed on its leg"
+        )
 
         def restored(shard: int) -> Path:
             temp = repo.tmp.parent / f"pr-temp-{shard}"
-            (temp / "guards-verdicts").mkdir(parents=True, exist_ok=True)
-            shutil.copy(
-                records / f"shard-{shard}-of-{len(legs)}.json", temp / "guards-verdicts"
-            )
+            for step in self.cache_steps("actions/cache/restore", "pull_request"):
+                given = step["with"]
+                key = self.render(given["key"], shard, len(legs), temp)
+                # One prefix a line, as the action reads them.
+                prefixes = [
+                    line.strip()
+                    for line in self.render(
+                        given.get("restore-keys") or "", shard, len(legs), temp
+                    ).splitlines()
+                    if line.strip()
+                ]
+                hit = key if key in cache else None
+                hit = hit or next(
+                    (
+                        k
+                        for k in sorted(cache)
+                        if any(k.startswith(p) for p in prefixes)
+                    ),
+                    None,
+                )
+                if hit is not None:
+                    into = Path(self.render(given["path"], shard, len(legs), temp))
+                    into.mkdir(parents=True, exist_ok=True)
+                    for record in cache[hit].iterdir():
+                        shutil.copy(record, into)
             return temp
 
         (pr,) = self.fire_steps("pull_request")
         fired = each_leg("pull_request", pr, restored)
+        # Only what the change can move fires: the three entries whose files changed and the
+        # new one, on whichever leg their commands landed and whichever leg recorded them.
         self.assertEqual(
-            set(fired), {"a", "sc", "bi"}, "pull_request: the shards together"
+            set(fired), {"a", "sc", "bi", "crate2"}, "pull_request: the shards together"
         )
+
+    def slices(self, script: dict, repo: Repo, total: int) -> dict[str, int]:
+        """Each entry's leg under the script's split of the fixture's registry."""
+        faults, problems = script["load"](repo.root)
+        self.assertEqual(problems, [])
+        return {
+            fault.id: k
+            for k in range(total)
+            for fault in script["shard"](faults, k, total)
+        }
+
+    def render(self, text: object, shard: int, total: int, temp: Path) -> str:
+        """A cache step's `with` value as the runner of leg `shard` renders it."""
+        answers = {
+            **EXPRESSIONS,
+            "matrix.shard": str(shard),
+            "strategy.job-total": str(total),
+            "runner.temp": str(temp),
+            "github.sha": "the-push",
+            "github.event.pull_request.base.sha": "the-base",
+        }
+
+        def value(match: re.Match) -> str:
+            self.assertIn(
+                match.group(1), answers, f"unmodeled `${{{{ {match.group(1)} }}}}`"
+            )
+            return answers[match.group(1)]
+
+        return EXPRESSION.sub(value, str(text))
+
+    def cache_steps(self, action: str, event: str) -> list[dict]:
+        """The guards job's `action` steps that run on `event`."""
+        chosen = []
+        for step in guards_job().get("steps") or []:
+            if not str(step.get("uses", "")).startswith(action + "@"):
+                continue
+            condition = step.get("if")
+            if condition is None or (condition == ON_PULL_REQUEST) == (
+                event == "pull_request"
+            ):
+                chosen.append(step)
+        self.assertTrue(chosen, f"the guards job has no {action} step on {event}")
+        return chosen
 
     def test_the_pull_request_step_is_the_push_step_reusing_what_it_records(self):
         # So the two legs can't drift apart in a flag (a lost suite, or bindings entries with
@@ -4083,32 +4231,42 @@ class GuardsJob(unittest.TestCase):
         self.assertEqual(push_argv[-2:], ["--record", VERDICTS])
         self.assertEqual(pr_argv, [*push_argv[:-2], "--reuse", VERDICTS])
 
-    def test_each_leg_reads_the_record_its_leg_saves_on_main(self):
-        # The pull request's leg restores under the key main's same leg saves, by its prefix,
-        # into the directory both fire steps name, after strace is there; main never restores
-        # one, a pull request never saves one, and nothing else in the workflow caches it.
+    def test_each_leg_reads_every_legs_record_and_saves_its_own(self):
+        # A pull request's leg restores every leg's record, each under the key that leg saves on
+        # main and by its prefix, into the directory both fire steps name, after strace is
+        # there: a leg's slice moves when the registry's weights do, so a leg that read only its
+        # own leg's record found most of its commands in none (#416). Main never restores one,
+        # a pull request never saves one, and nothing else in the workflow caches it.
         steps = guards_job().get("steps") or []
-
-        def only(action: str) -> dict:
-            found = [
-                s for s in steps if str(s.get("uses", "")).startswith(action + "@")
-            ]
-            self.assertEqual(
-                len(found), 1, f"the guards job has {len(found)} {action} steps"
-            )
-            return found[0]
-
-        restore, save = only("actions/cache/restore"), only("actions/cache/save")
-        self.assertEqual(restore.get("if"), ON_PULL_REQUEST)
+        restores = self.cache_steps("actions/cache/restore", "pull_request")
+        (save,) = self.cache_steps("actions/cache/save", "push")
+        self.assertEqual(
+            [s for s in steps if str(s.get("uses", "")).startswith("actions/cache")],
+            [*restores, save],
+            "a cache step runs on both legs",
+        )
+        for step in restores:
+            self.assertEqual(step.get("if"), ON_PULL_REQUEST)
         self.assertEqual(save.get("if"), ON_PUSH)
-        for step in (restore, save):
+        for step in (*restores, save):
             self.assertEqual((step.get("with") or {}).get("path"), VERDICTS_PATH)
         self.assertEqual(save["with"].get("key"), VERDICTS_KEY + "${{ github.sha }}")
+        legs = self.legs()
+        read = []
+        for step in restores:
+            prefix = str(step["with"].get("restore-keys"))
+            match = re.fullmatch(
+                r"guards-verdicts-(\d+)-of-\$\{\{ strategy\.job-total \}\}-", prefix
+            )
+            self.assertIsNotNone(match, f"a restore of no one leg's record: {prefix}")
+            read.append(int(match.group(1)))
+            self.assertEqual(
+                step["with"].get("key"),
+                prefix + "${{ github.event.pull_request.base.sha }}",
+            )
         self.assertEqual(
-            restore["with"].get("key"),
-            VERDICTS_KEY + "${{ github.event.pull_request.base.sha }}",
+            sorted(read), legs, "the legs whose records a pull request reads"
         )
-        self.assertEqual(restore["with"].get("restore-keys"), VERDICTS_KEY)
         (strace,) = [
             s for s in steps if "apt-get install -y strace" in s.get("run", "")
         ]
@@ -4116,17 +4274,18 @@ class GuardsJob(unittest.TestCase):
         (pr,) = self.fire_steps("pull_request")
         (push,) = self.fire_steps("push")
         at = steps.index
-        self.assertLess(at(strace), at(restore))
-        self.assertLess(at(restore), at(pr))
+        for step in restores:
+            self.assertLess(at(strace), at(step))
+            self.assertLess(at(step), at(pr))
         self.assertLess(at(push), at(save))
         caches = [
-            (name, s.get("uses"))
+            name
             for name, job in workflow_jobs().items()
             for s in job.get("steps") or []
             if str(s.get("uses", "")).startswith("actions/cache")
             and "guards-verdicts" in json.dumps(s.get("with") or {})
         ]
-        self.assertEqual([name for name, _ in caches], ["guards", "guards"], caches)
+        self.assertEqual(caches, ["guards"] * (len(restores) + 1), caches)
 
     def test_ci_local_answers_the_guards_job_as_a_pull_request(self):
         # ci:local runs one leg, the pull request's, as one run of its whole selection. Its
