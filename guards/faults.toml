@@ -305,51 +305,51 @@ transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "      
 # reading lets an overwrite pass, and a report with nothing in it must still fail.
 [[fault]]
 id = "conformance-caller-artifact-gaps"
-guard = "conformance/run_rs.py --self-test"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/caller_artifact.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL  each caller-artifact check fails on the one gap it is about"
-transform = { file = "conformance/run_rs.py", replace = "    marked = (after.get(\"Metadata\") or {}).get(\"conformance-sentinel\") == sentinel\n", with = "    marked = True\n" }
+transform = { file = "conformance/lanes/caller_artifact.py", replace = "    marked = (after.get(\"Metadata\") or {}).get(\"conformance-sentinel\") == sentinel\n", with = "    marked = True\n" }
 
 [[fault]]
 id = "conformance-caller-artifact-empty"
-guard = "conformance/run_rs.py --self-test"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/caller_artifact.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL  the caller-artifact checks fail on an empty report"
-transform = { file = "conformance/run_rs.py", replace = "    present = bool(before) and bool(after) and bool(sentinel)\n", with = "    present = True\n" }
+transform = { file = "conformance/lanes/caller_artifact.py", replace = "    present = bool(before) and bool(after) and bool(sentinel)\n", with = "    present = True\n" }
 
 # Round 1: the driver and its cleanup, through the self-test's fake account. A build run with the
 # bucket dropped from its environment passes on the unfixed CLI, a check that stops reading the
 # build's stderr can't tell, and a cleanup that ignores the build's ARN trusts an empty listing.
 [[fault]]
 id = "conformance-caller-artifact-driver-bucket"
-guard = "conformance/run_rs.py --self-test"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/caller_artifact.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL  the caller-artifact driver and cleanup fail exactly where each account misleads them"
-transform = { file = "conformance/run_rs.py", replace = "            proc = cli.run_process(argv, 50 * 60)\n", with = "            proc = cli.run_process(argv, 50 * 60, {k: v for k, v in os.environ.items() if k != \"MICROVM_BUCKET\"})\n" }
+transform = { file = "conformance/lanes/caller_artifact.py", replace = "            proc = cli.run_process(argv, 50 * 60)\n", with = "            proc = cli.run_process(argv, 50 * 60, {k: v for k, v in os.environ.items() if k != \"MICROVM_BUCKET\"})\n" }
 
 [[fault]]
 id = "conformance-caller-artifact-stderr-unread"
-guard = "conformance/run_rs.py --self-test"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/caller_artifact.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL  each caller-artifact check fails on the one gap it is about"
-transform = { file = "conformance/run_rs.py", replace = "        report.get(\"saidUnused\") is True,\n", with = "        True,\n" }
+transform = { file = "conformance/lanes/caller_artifact.py", replace = "        report.get(\"saidUnused\") is True,\n", with = "        True,\n" }
 
 [[fault]]
 id = "conformance-caller-artifact-arn-ignored"
-guard = "conformance/run_rs.py --self-test"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/caller_artifact.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
 message = "a hidden image that won't delete: failed []"
-transform = { file = "conformance/run_rs.py", replace = "        by_arn = caller_artifact_image_state(plane, arn)\n        if by_arn is not None and arn:\n", with = "        by_arn = None\n        if by_arn is not None and arn:\n" }
+transform = { file = "conformance/lanes/caller_artifact.py", replace = "        by_arn = caller_artifact_image_state(plane, arn)\n        if by_arn is not None and arn:\n", with = "        by_arn = None\n        if by_arn is not None and arn:\n" }
 
 # ── every `--name` read through core's name rule (#251) ──────────────────────
 
@@ -2908,39 +2908,39 @@ transform = { file = "scripts/check-publishable.py", replace = "SELECTOR_SURFACE
 
 [[fault]]
 id = "conformance-eq-refuses-none"
-guard = "conformance/run_rs.py --self-test"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/suite.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL  eq() fails when either side is None"
-transform = { file = "conformance/run_rs.py", replace = "        if actual is None or expected is None:\n", with = "        if False:\n" }
+transform = { file = "conformance/harness/results.py", replace = "        if actual is None or expected is None:\n", with = "        if False:\n" }
 
 [[fault]]
 id = "conformance-eq-positive-controls"
-guard = "conformance/run_rs.py --self-test"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/suite.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL  eq() still compares empty strings"
-transform = { file = "conformance/run_rs.py", replace = "        if actual is None or expected is None:\n", with = "        if not actual or not expected:\n" }
+transform = { file = "conformance/harness/results.py", replace = "        if actual is None or expected is None:\n", with = "        if not actual or not expected:\n" }
 
 [[fault]]
 id = "conformance-absent"
-guard = "conformance/run_rs.py --self-test"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/suite.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL  absent() fails on any value that isn't None"
-transform = { file = "conformance/run_rs.py", replace = "return self.check(name, value is None, f\"expected nothing, got {value!r}\")", with = "return self.check(name, True, f\"expected nothing, got {value!r}\")" }
+transform = { file = "conformance/harness/results.py", replace = "return self.check(name, value is None, f\"expected nothing, got {value!r}\")", with = "return self.check(name, True, f\"expected nothing, got {value!r}\")" }
 
 [[fault]]
 id = "conformance-bind19-record"
-guard = "conformance/run_rs.py --self-test"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/suite.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL  the digest record check refuses a proof absent from both sides"
-transform = { file = "conformance/run_rs.py", replace = "        and record.get(\"verification\") is not None\n", with = "" }
+transform = { file = "conformance/lanes/quickstart.py", replace = "        and record.get(\"verification\") is not None\n", with = "" }
 
 # ── agents:check: what the contributor docs name exists (#278) ───────────────
 
@@ -2978,8 +2978,8 @@ guard = "scripts/check-agents-md.py"
 run = ["./scripts/check-agents-md.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "`results.absent` isn't a method of Results in conformance/run_rs.py"
-transform = { file = "conformance/run_rs.py", replace = "    def absent(self, name: str, value: Any) -> bool:\n", with = "    def absent_value(self, name: str, value: Any) -> bool:\n" }
+message = "`results.absent` isn't a method of Results in conformance/harness/results.py"
+transform = { file = "conformance/harness/results.py", replace = "    def absent(self, name: str, value: Any) -> bool:\n", with = "    def absent_value(self, name: str, value: Any) -> bool:\n" }
 
 [[fault]]
 id = "agents-md-not-paths-stale"
@@ -3033,7 +3033,7 @@ guard = "scripts/check-agents-md.py"
 run = ["./scripts/check-agents-md.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "no class Results in conformance/run_rs.py"
+message = "no class Results in conformance/harness/results.py"
 transform = { file = "scripts/check-agents-md.py", replace = "node.name == SYMBOL_CLASS", with = "node.name == SYMBOL_CLASS.lower()" }
 
 # The unit suite: a blank line inside `jobs:` ended the block in the first draft, and the real
@@ -3388,69 +3388,142 @@ transform = { file = "scripts/check-agents-md.py", replace = "        if key and
 
 [[fault]]
 id = "conformance-doctor-region-lines"
-guard = "conformance/run_rs.py --self-test"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/local.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL  doctor_region_lines refuses a report that names the environment's region"
-transform = { file = "conformance/run_rs.py", replace = "    return ok, f\"credentials=", with = "    return True, f\"credentials=" }
+transform = { file = "conformance/lanes/local.py", replace = "    return ok, f\"credentials=", with = "    return True, f\"credentials=" }
 
 [[fault]]
 id = "conformance-doctor-region-other"
-guard = "conformance/run_rs.py --self-test"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/local.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL  doctor_region_lines refuses a versions line on the environment's base ARN"
-transform = { file = "conformance/run_rs.py", replace = "        and not any(other in details.get(name, \"\") for name in DOCTOR_REGION_LINES)\n", with = "" }
+transform = { file = "conformance/lanes/local.py", replace = "        and not any(other in details.get(name, \"\") for name in DOCTOR_REGION_LINES)\n", with = "" }
 
 [[fault]]
 id = "conformance-doctor-region-credentials"
-guard = "conformance/run_rs.py --self-test"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/local.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL  doctor_region_lines refuses a credentials line on a third region"
-transform = { file = "conformance/run_rs.py", replace = "        credentials.endswith(f\"for {region}\")\n        and f\" in {region}\" in bases\n", with = "        f\" in {region}\" in bases\n" }
+transform = { file = "conformance/lanes/local.py", replace = "        credentials.endswith(f\"for {region}\")\n        and f\" in {region}\" in bases\n", with = "        f\" in {region}\" in bases\n" }
 
 # #251: the named terminate's fallback runs on a leaked envelope and on an error envelope,
 # and only then.
 
 [[fault]]
 id = "conformance-terminate-fallback-leaked"
-guard = "conformance/run_rs.py --self-test"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/names.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL  a named terminate that leaked the VM falls back to a terminate by id in its region"
-transform = { file = "conformance/run_rs.py", replace = "        and not gone.data.get(\"leaked\")\n    )\n    results.check(by_name, reached, detail)\n", with = "    )\n    results.check(by_name, reached, detail)\n" }
+transform = { file = "conformance/lanes/names.py", replace = "        and not gone.data.get(\"leaked\")\n    )\n    results.check(by_name, reached, detail)\n", with = "    )\n    results.check(by_name, reached, detail)\n" }
 
 [[fault]]
 id = "conformance-terminate-fallback-error"
-guard = "conformance/run_rs.py --self-test"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/names.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL  a named terminate refused with an error envelope falls back the same way"
-transform = { file = "conformance/run_rs.py", replace = "    except KindError as exc:\n        detail = (\n            f\"environment={elsewhere} kind=", with = "    except EnvelopeError as exc:\n        detail = (\n            f\"environment={elsewhere} kind=" }
+# The wrong exception class: `EnvelopeError` is a malformed stdout, not an error envelope, and
+# the lane imports it for the fault, since only the fault names it there.
+transform = [
+  { file = "conformance/lanes/names.py", replace = "from harness.envelope import Envelope, KindError\n", with = "from harness.envelope import Envelope, EnvelopeError, KindError\n" },
+  { file = "conformance/lanes/names.py", replace = "    except KindError as exc:\n        detail = (\n            f\"environment={elsewhere} kind=", with = "    except EnvelopeError as exc:\n        detail = (\n            f\"environment={elsewhere} kind=" },
+]
 
 [[fault]]
 id = "conformance-terminate-fallback-reached"
-guard = "conformance/run_rs.py --self-test"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/names.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL  a named terminate that reached the VM runs no fallback"
-transform = { file = "conformance/run_rs.py", replace = "    if reached and gone is not None:\n        return gone\n", with = "    if False and gone is not None:\n        return gone\n" }
+transform = { file = "conformance/lanes/names.py", replace = "    if reached and gone is not None:\n        return gone\n", with = "    if False and gone is not None:\n        return gone\n" }
 
 [[fault]]
 id = "conformance-terminate-fallback-not-terminated"
-guard = "conformance/run_rs.py --self-test"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/names.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL  a named terminate that never reached TERMINATED falls back the same way"
-transform = { file = "conformance/run_rs.py", replace = "        and gone.data.get(\"state\") == \"TERMINATED\"\n        and not gone.data.get(\"leaked\")\n", with = "        and not gone.data.get(\"leaked\")\n" }
+transform = { file = "conformance/lanes/names.py", replace = "        and gone.data.get(\"state\") == \"TERMINATED\"\n        and not gone.data.get(\"leaked\")\n", with = "        and not gone.data.get(\"leaked\")\n" }
+
+# ── changelog:check: the fragments in changelog.d/ and the branch rule ────────
+
+# The rule: a branch that changes shipped code and adds no fragment passes once the fragment
+# test always holds. The unit case builds that branch in a throwaway repo, so the entry fires
+# whatever the branch it runs on holds.
+[[fault]]
+id = "changelog-no-fragment"
+guard = "test_changelog.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_changelog.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_shipped_change_with_no_fragment_fails ("
+transform = { file = "scripts/changelog.py", replace = "    if added:\n", with = "    if True:\n" }
+
+# A fragment of a type towncrier.toml doesn't define, added to this tree. `--base HEAD` holds
+# the branch rule to the fault's own change, so the clean run passes on any branch.
+[[fault]]
+id = "changelog-unknown-type"
+guard = "scripts/changelog.py"
+run = ["./scripts/changelog.py", "check", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "changelog.d/1.adedd.md: `adedd` isn't a type"
+patch = "guards/faults/changelog-unknown-type.patch"
+
+# The Dependabot skip is one exact login: a skip that took every bot login would pass
+# bonk-ai's pull requests with no fragment.
+[[fault]]
+id = "changelog-dependabot-only"
+guard = "test_changelog.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_changelog.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_dependabot_skip_is_for_dependabot_only ("
+transform = { file = "scripts/changelog.py", replace = "    if author == DEPENDABOT:\n", with = "    if author and author.endswith(\"[bot]\"):\n" }
+
+# The shipped set's floor, on this tree: a file listing that comes back empty would leave
+# every change outside the set, and the branch rule would pass over nothing.
+[[fault]]
+id = "changelog-shipped-floor"
+guard = "scripts/changelog.py"
+run = ["./scripts/changelog.py", "check", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "SHIPPED names protocol/src/, which matches no file in the tree"
+transform = { file = "scripts/changelog.py", replace = "    files = listing.splitlines()\n", with = "    files = []\n" }
+
+# Its sentinel: a crate whose source moves out from under its SHIPPED path.
+[[fault]]
+id = "changelog-shipped-path-moved"
+guard = "scripts/changelog.py"
+run = ["./scripts/changelog.py", "check", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "SHIPPED names protocol/source/, which matches no file in the tree"
+transform = { file = "scripts/changelog.py", replace = "    \"protocol/src/\",\n", with = "    \"protocol/source/\",\n" }
+
+# NOT_SHIPPED leaves the fuzz harnesses out as test-only, and holds each to its
+# `#[cfg(test)]`: a harness compiled into the daemon is shipped code the exclusion would hide.
+[[fault]]
+id = "changelog-exclusion-ships"
+guard = "scripts/changelog.py"
+run = ["./scripts/changelog.py", "check", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "NOT_SHIPPED covers agentd/src/exec_start_fuzz.rs, and no `#[cfg(test)] mod exec_start_fuzz;`"
+transform = { file = "agentd/src/lib.rs", replace = "#[cfg(test)]\nmod exec_start_fuzz;\n", with = "mod exec_start_fuzz;\n" }
 
 # ── this registry's own gate ─────────────────────────────────────────────────
 
@@ -4609,6 +4682,27 @@ expect = "exit-nonzero"
 suite = "script"
 message = "the live collector found no requirement key"
 transform = { file = "scripts/check-trace.py", replace = "results\\.(?:check|eq|absent)\\(", with = "results\\.(?:never)\\(" }
+
+# The live layer reads every module of the suite under conformance/, not only its entry point.
+# The floor: an enumeration that yields nothing. The sentinel: a key whose only live check is
+# in a lane module stops counting when that check loses its key.
+[[fault]]
+id = "trace-live-suite-floor"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "the live collector found no requirement key"
+transform = { file = "scripts/check-trace.py", replace = "LIVE_SUITE.relative_to(ROOT)).rglob(\"*.py\"))", with = "LIVE_SUITE.relative_to(ROOT)).rglob(\"*.pyx\"))" }
+
+[[fault]]
+id = "trace-live-lane-key"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: AGENTD-10 has no live layer"
+transform = { file = "conformance/lanes/exec.py", replace = "\"AGENTD-10 without --inherit-image-env", with = "\"without --inherit-image-env" }
 
 [[fault]]
 id = "trace-sentinel"

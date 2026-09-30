@@ -34,7 +34,7 @@ nothing. What counts as a reference, all inside backticks:
   key the docs name must still be spelled somewhere else.
 - `` `<name>` job ``, against the job ids and display names in .github/workflows/ci.yml.
 - `Results.<name>` or `results.<name>`, with or without call parentheses, against the methods
-  of `Results` in conformance/run_rs.py, read with stdlib `ast`.
+  of `Results` in conformance/harness/results.py, read with stdlib `ast`.
 
 A check over nothing reports nothing, so it also fails when the docs, the tasks, the jobs, the
 fault ids or the `Results` methods come back empty, when no reference of some kind was found
@@ -99,7 +99,7 @@ WORKFLOW = ".github/workflows/ci.yml"
 REGISTRY = "guards/faults.toml"
 # The class whose helpers the docs cite by name, and the file it lives in.
 SYMBOL_CLASS = "Results"
-SYMBOL_FILE = "conformance/run_rs.py"
+SYMBOL_FILE = "conformance/harness/results.py"
 # A reference every healthy tree has, so a pass means the task extractor and mise.toml's
 # parser both worked on this tree. It's also the task "in `check`" means.
 SENTINEL = "check"

@@ -10,7 +10,7 @@ behavior and [Trust](docs/TRUST.md) before changing authentication or execution.
 ```bash
 mise install
 mise run install       # install git hooks
-mise run check         # code, security, tests, schema, stubs and declarations, surface parity, API drift, packaging, build, traceability, the drift ratchet, seeded-fault registry, doc references and config paths
+mise run check         # code, security, tests, schema, stubs and declarations, surface parity, API drift, packaging, build, traceability, the drift ratchet, seeded-fault registry, doc references and config paths, changelog fragments
 mise run ci:local      # CI's Linux jobs, each in a clone shaped like its checkout; before a push
 mise tasks             # all available tasks
 ```
@@ -262,6 +262,40 @@ build that release CLI. `--keep` retains resources and their charges. Inspect
 MicroVMs, images, and service-created `/aws/lambda-microvms/` log groups after
 cleanup; Terraform does not own every resource the service creates.
 
+## Changelog
+
+A change a user of the crates, the CLI or the bindings can observe gets a changelog entry. The
+next release's entries are fragments in `changelog.d/`, a file each, named for the issue and a
+Keep a Changelog type: `changelog.d/<issue>.<type>.md`, where the type is `added`, `changed`,
+`deprecated`, `removed`, `fixed` or `security`, and the issue is the pull request's number when
+there's no issue. Another fragment of the same issue and type is `<issue>.<type>.1.md`, which is
+what `towncrier create` names it. Write each entry as it will read in CHANGELOG.md: a Markdown
+list item with a bold lead that names the issue, its later lines indented two spaces.
+
+```markdown
+- **`run` and `build` no longer upload over a caller's `--artifact-uri` (#249).** With a bucket
+  also set, both commands uploaded their own artifact to the caller's URI.
+```
+
+A fragment can hold several entries of its type, in the order they should read, and a release
+lists each type's fragments in issue order. `mise run changelog:draft` prints the next release's
+section as it will read. Two pull requests can't conflict over their entries, because each adds
+its own file; that's why CHANGELOG.md isn't edited for a new entry, and the check doesn't count
+an edit there as one.
+
+`changelog:check` in `check`, and CI's `security` job on a pull request, fail a branch that
+changes shipped code and adds no fragment. Shipped code is the source directory of each
+published crate, the daemon and both bindings, plus `microvms.pyi` and `index.d.ts`; the fuzz
+harnesses and the CLI's guards in those directories compile only into tests and don't count.
+`scripts/changelog.py` holds the set and says why each part is in it. A change there that no
+user can observe, such as a unit test beside the code or a lint attribute, takes
+`changelog.d/<issue>.internal.md` instead: a line saying why, which no release renders and the
+release build removes with the rest. A change to scripts, CI, guards, docs or manifests needs no
+fragment, and a Dependabot pull request needs none either: the check skips the `dependabot[bot]`
+author and no other. It also fails a file in `changelog.d/` that isn't a fragment, a type
+`towncrier.toml` doesn't define, an entry that isn't a bold-lead list item, and fragments that
+don't build.
+
 ## Releases and reviews
 
 The release workflow publishes `microvms-protocol`, `microvms-domain`,
@@ -285,14 +319,22 @@ runs it.
 
 ```bash
 mise run publish:check
-mise run publish:dry-run     # registry access and a committed tree required
-mise run release:tag vX.Y.Z  # creates/pushes a release tag; publishes artifacts
+mise run publish:dry-run        # registry access and a committed tree required
+mise run release:prepare X.Y.Z  # writes changelog.d/ into CHANGELOG.md as X.Y.Z; in the release PR
+mise run release:tag vX.Y.Z     # creates/pushes a release tag; publishes artifacts
 ```
 
-Before a release, synchronize the Cargo, Python, and Node versions, regenerate
-the Python stub, and check the tag with
-`./scripts/check-publishable.py --tag=vX.Y.Z`. Use the release task rather
-than manually pushing an old tag. Registry versions are immutable.
+A release starts with a pull request that synchronizes the Cargo, Python, and
+Node versions, regenerates the Python stub, and runs
+`mise run release:prepare X.Y.Z`. That task runs
+`towncrier build --version X.Y.Z --yes`, which writes the fragments into
+CHANGELOG.md as that version, below `## Unreleased`, removes them, and stages
+both. It refuses a malformed fragment and a build with nothing to render, which
+is what a second run finds. Read the section it wrote, commit it with the bump,
+and check the tag with `./scripts/check-publishable.py --tag=vX.Y.Z`. Once that
+pull request merges, tag main's tip with `mise run release:tag vX.Y.Z`. Use the
+release task rather than manually pushing an old tag. Registry versions are
+immutable.
 
 PRs should explain the problem, the resulting behavior, validation, and any
 remaining uncertainty. Keep scheduling and pooling in consumer applications;

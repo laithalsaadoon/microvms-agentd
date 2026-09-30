@@ -1,0 +1,6 @@
+diff --git a/changelog.d/1.adedd.md b/changelog.d/1.adedd.md
+new file mode 100644
+--- /dev/null
++++ b/changelog.d/1.adedd.md
+@@ -0,0 +1 @@
++- **A fragment whose type is misspelled (#1).** No release section would list it.

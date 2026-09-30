@@ -271,6 +271,20 @@ jobs:
         run: uv run python -m unittest discover -s scripts -p 'test_check_agents_md.py'
       - name: agents check
         run: ./scripts/check-agents-md.py
+      # `mise run changelog:check`: every fragment in changelog.d/ is well named and builds, and
+      # a pull request that changes shipped code adds one, which Dependabot's don't have to. On
+      # pull requests only, since a push to main has no pull request to hold to it. Here because
+      # the job is required, has uv, and has the base branch in its full checkout. The author
+      # goes through `env`, not into the command, because a login is the pull request's input.
+      # Its unit tests first, for the reason the header check gives.
+      - name: changelog unit tests
+        run: uv run python -m unittest discover -s scripts -p 'test_changelog.py'
+      - name: changelog fragments
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: origin/${{ github.base_ref }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: ./scripts/changelog.py check --base "$BASE" --author "$AUTHOR"
       # The LICENSE file itself, and the crate manifests agreeing with it. The
       # dependency-license audit is cargo-deny, two steps down; this asserts the
       # repo's own claim is consistent.
