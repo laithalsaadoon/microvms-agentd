@@ -563,7 +563,7 @@ ts = "promptAgent"
 
 [[capability]]
 id = "agent-prompt-sync"
-core = { exempt = "both bindings compose it themselves", issue = "#266" }
+core = ["microvms_core::agents::prompt_sync", "microvms_core::agents::AgentVm::prompt_sync"]
 cli = "agent-prompt"
 py = "AgentVm.prompt_sync"
 ts = "AgentVm.promptSync"
