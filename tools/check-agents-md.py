@@ -865,8 +865,11 @@ DECISION_SENTINEL = "D35"
 CENSUS_NOT_PATHS = {
     "p/rust": "a Semgrep registry ruleset, `semgrep --config p/rust` (mise.toml, ci.yml)",
     "p/secrets": "a Semgrep registry ruleset, `semgrep --config p/secrets` (mise.toml, ci.yml)",
-    "cli-dist/": "where release.yml's `github-release` job downloads the CLI archives",
-    "staging/": "where release.yml's `github-release` job gathers the release assets",
+    "cli-dist/": "where release.yml's `draft` job downloads the CLI archives",
+    "staging/": "where release.yml's `draft` job gathers the release assets",
+    "release-sums/": "where release.yml's `live-gate` and `github-release` jobs download the draft's SHA256SUMS",
+    "draft/": "where release.yml's `github-release` job downloads the draft to check it",
+    "draft-release/": "where live-conformance.yml's tag run puts the draft release's assets and CLI",
     "lychee/": "where links.yml's lychee step writes its report",
     "mise/tasks": "a file-task directory mise reads by default; the tree has none",
     ".mise/tasks": "a file-task directory mise reads by default; the tree has none",

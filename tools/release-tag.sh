@@ -50,3 +50,10 @@ echo
 echo "tagging $(git rev-parse --short HEAD) as $TAG"
 git tag -a "$TAG" -m "$TAG"
 git push origin "refs/tags/$TAG"
+
+# The tag publishes nothing by itself: release.yml drafts the release and waits at `live-gate`
+# for a live run on the tag (CONTRIBUTING.md, "Releases and reviews").
+echo
+echo "release.yml is building and drafting $TAG. Next, once the draft exists:"
+echo "  gh workflow run live-conformance.yml --ref $TAG"
+echo "then approve live-gate when that run is green, and the publishing jobs after it."

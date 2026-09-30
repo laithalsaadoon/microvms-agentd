@@ -13,7 +13,9 @@
 //! 1. a caller-supplied path: [`Request::binary`], else `$MICROVM_AGENTD` (a path, for the
 //!    caller who manages the binary themselves);
 //! 2. the cache entry for the requested version under the state directory;
-//! 3. a fetch of this repository's GitHub release asset for that version.
+//! 3. a fetch of this repository's GitHub release asset for that version, or, with
+//!    `$MICROVM_RELEASE_DIR` set, a read of that release's assets from the directory it
+//!    names, proven the same way ([`RELEASE_DIR_VARIABLE`]).
 //!
 //! The version defaults to [`crate::VERSION`], the core's own. The daemon and the client
 //! share one workspace version, so `v{VERSION}` is the one tag whose protocol this client
@@ -94,7 +96,8 @@ pub use microvms_app::provision::{
 
 mod release;
 pub use release::{
-    BUNDLE_ASSET, GitHubRelease, HttpsFetch, PolicyFetch, SigstoreVerifier, TOKEN_VARIABLE,
+    BUNDLE_ASSET, GitHubRelease, HttpsFetch, PolicyFetch, RELEASE_DIR_VARIABLE, SigstoreVerifier,
+    TOKEN_VARIABLE,
 };
 
 /// The environment variable naming a caller-managed binary, used when a request carries

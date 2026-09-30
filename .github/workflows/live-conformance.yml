@@ -9,6 +9,14 @@ name: live conformance
 # The `environment:` below is the actual gate. Configure it in repository settings
 # with a required reviewer, and no fork, no bot, and no compromised token can
 # spend money here without a human approving the run.
+#
+# Dispatched on a release tag (`gh workflow run live-conformance.yml --ref vX.Y.Z`), it's the
+# live run `release.yml`'s `live-gate` waits for. It then tests the tag's draft release rather
+# than a build: the daemon baked into the suite's images is the draft's `agentd`, the CLI under
+# test is the draft's Linux archive, and `$MICROVM_RELEASE_DIR` points the quickstart section's
+# fetch at the draft's assets, which it verifies against their attestation as it would the
+# published release's. When every step passes it uploads the `live-verified` marker the gate
+# reads. Dispatched on a branch, it builds both binaries from that branch as it always has.
 on:
   workflow_dispatch:
     inputs:
@@ -33,14 +41,44 @@ concurrency:
 
 permissions:
   contents: read
-  id-token: write # for OIDC; no long-lived key is stored
 
 jobs:
+  # On a tag only. A draft release is visible only with push access, so the download gets a job
+  # of its own: this one holds `contents: write` and runs nothing from the repository, and the
+  # job below, which builds and runs the suite with AWS credentials, keeps `contents: read`.
+  draft:
+    name: the tag's draft release
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # lists and downloads a draft release
+    steps:
+      - name: download the draft's assets and check them against its SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "draft-release/$TAG"
+          (cd "draft-release/$TAG" && sha256sum -c SHA256SUMS)
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: draft-release
+          path: draft-release
+          if-no-files-found: error
+
   live:
     name: real AWS
+    needs: draft
+    # A branch run skips `draft` and runs this on its own build; a tag run runs it only once the
+    # draft downloaded.
+    if: ${{ !cancelled() && (needs.draft.result == 'success' || needs.draft.result == 'skipped') }}
     runs-on: ubuntu-latest
     environment: live-aws
     timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write # for OIDC; no long-lived key is stored
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -76,6 +114,7 @@ jobs:
           aws-region: ${{ inputs.region }}
 
       - name: build the shipping binary
+        if: github.ref_type != 'tag'
         run: cargo build --release -p agentd --target aarch64-unknown-linux-musl
 
       # The host-architecture CLI, which is the client the suite drives. NOT the
@@ -83,7 +122,40 @@ jobs:
       # guest, and a CLI built for the guest's architecture could not execute on
       # this runner.
       - name: build the microvm CLI
+        if: github.ref_type != 'tag'
         run: cargo build --release -p microvms-cli
+
+      - name: the binaries under test are the ones just built
+        if: github.ref_type != 'tag'
+        run: |
+          {
+            echo "AGENTD=target/aarch64-unknown-linux-musl/release/agentd"
+            echo "MICROVM=target/release/microvm"
+          } >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: github.ref_type == 'tag'
+        with:
+          name: draft-release
+          path: draft-release
+
+      # The release's own binaries, the ones a user downloads, not a rebuild of the tag.
+      # `$MICROVM_RELEASE_DIR` is read by every provisioning fetch, and only the quickstart
+      # section fetches: the others pass `--binary`, which outranks it.
+      - name: the binaries under test are the draft's
+        if: github.ref_type == 'tag'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p draft-release/bin
+          tar -xzf "draft-release/$TAG/microvm-x86_64-unknown-linux-gnu.tar.gz" -C draft-release/bin
+          chmod +x "draft-release/$TAG/agentd" draft-release/bin/microvm
+          {
+            echo "AGENTD=draft-release/$TAG/agentd"
+            echo "MICROVM=draft-release/bin/microvm"
+            echo "MICROVM_RELEASE_DIR=$PWD/draft-release"
+          } >> "$GITHUB_ENV"
 
       - name: apply the conformance stack
         env:
@@ -100,10 +172,7 @@ jobs:
       - name: conformance suite
         env:
           AWS_REGION: ${{ inputs.region }}
-        run: |
-          ./conformance/run_rs.py \
-            --binary target/aarch64-unknown-linux-musl/release/agentd \
-            --microvm-binary target/release/microvm
+        run: ./conformance/run_rs.py --binary "$AGENTD" --microvm-binary "$MICROVM"
 
       # Free, creates nothing, and the only thing here that can tell you a price
       # this repo publishes has gone wrong. Runs after the suite so a rate that
@@ -136,3 +205,21 @@ jobs:
         env:
           AWS_REGION: ${{ inputs.region }}
         run: ./tools/verify-clean.py
+
+      # Last, and only when every step above passed (an `if:` without a status function
+      # implies `success()`). The SHA256SUMS is the draft's, which `release.yml`'s `live-gate`
+      # compares with the one its run wrote, so this marker vouches for this draft only.
+      - name: record that the tag's draft passed
+        if: github.ref_type == 'tag'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          jq -n --arg tag "$TAG" --arg commit "$GITHUB_SHA" --rawfile sums "draft-release/$TAG/SHA256SUMS" \
+            '{tag: $tag, commit: $commit, sha256sums: $sums}' > live-verified.json
+          cat live-verified.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: github.ref_type == 'tag'
+        with:
+          name: live-verified
+          path: live-verified.json
+          if-no-files-found: error

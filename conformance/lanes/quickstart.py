@@ -89,10 +89,13 @@ def drive_provisioned_quickstart(
     one got the checksum. So the proof asserted here is `attestation`, not either proof,
     and a `gh` shim first on `PATH` records whether anything tried the tool.
 
-    The fetch targets `v{CLI version}`, so between a version bump landing on main and
-    that version's release publishing, this section fails with the fetch error naming
-    the missing tag. That failure is the calendar, not the code — run the suite again
-    once the release exists.
+    The fetch targets `v{CLI version}`. On a release tag, `live-conformance.yml` sets
+    `$MICROVM_RELEASE_DIR` to the tag's draft release, so the fetch reads the draft's
+    assets and proves them by the same attestation, and the release's live gate can pass
+    before anything is public. On main, between a version bump landing and that version's
+    release publishing, this section fails with the fetch error naming the missing tag.
+    That failure is the calendar, not the code: run the suite again once the release
+    exists.
 
     Its own build (~3 minutes): provisioning fires only when building, so no launch
     from the suite's image can carry it. Teardown is quickstart's default, and the
