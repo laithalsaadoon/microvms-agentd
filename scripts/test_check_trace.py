@@ -31,6 +31,8 @@ collect = TRACE["collect"]
 gaps = TRACE["gaps"]
 enumerator_floors = TRACE["enumerator_floors"]
 layer_floors = TRACE["layer_floors"]
+load_traced = TRACE["load_traced"]
+Traced = TRACE["Traced"]
 
 # Keys from the real specs' prefixes, so the key and name patterns are the ones the tree gets.
 PATTERNS = Patterns(
@@ -44,6 +46,11 @@ RUST_SOURCE = "microvms-cli/src/case.rs"
 PY_TEST = "microvms-py/tests/test_case.py"
 JS_TEST = "microvms-js/__test__/case.mjs"
 FUZZ = "microvms-core/tests/case_fuzz.rs"
+
+
+def traced(*keys: str) -> dict:
+    """A traced table listing `keys`, each with no waiver."""
+    return {key: Traced("#276", {}, "spec/traced/test.toml") for key in keys}
 
 
 class Tree:
@@ -69,13 +76,13 @@ class TestLayerCountsOnlyNamedTests(unittest.TestCase):
         tree = Tree(self, {path: text})
         self.assertEqual(tree.layers(key).get("test", set()), set())
         found = collect(PATTERNS, tree.root)
-        self.assertIn(f"{key} has no test layer", gaps(found, {key: "#276"}))
+        self.assertIn(f"{key} has no test layer", gaps(found, traced(key)))
 
     def assert_tested(self, path: str, text: str, key: str = "IMAGE-5") -> None:
         tree = Tree(self, {path: text})
         self.assertEqual(tree.layers(key).get("test"), {path})
         found = collect(PATTERNS, tree.root)
-        self.assertNotIn(f"{key} has no test layer", gaps(found, {key: "#276"}))
+        self.assertNotIn(f"{key} has no test layer", gaps(found, traced(key)))
 
     def test_a_rust_line_comment_does_not_count(self):
         self.assert_untested(
@@ -759,13 +766,165 @@ class InputFloors(unittest.TestCase):
                 JS_TEST: "// IMAGE-5\n",
             },
         )
-        problems = layer_floors(collect(PATTERNS, tree.root))
+        problems = layer_floors(collect(PATTERNS, tree.root), traced("CLI-7"))
         self.assertIn(
             "the test collector found no requirement key in any file it read", problems
         )
         self.assertIn(
             "the entry microvms-js/__test__ (*.mjs) yields files but no requirement key",
             problems,
+        )
+
+
+# The groups the loader tests' files are named for, and a directory of them that loads.
+GROUPS = {"CLI", "IMAGE", "TRAP"}
+CLI_FILE = """\
+# The CLI group's traced requirements.
+
+[CLI-9]
+issue = "#216"
+
+[CLI-10]
+issue = "#216"
+waive.live = "a pure function"
+"""
+
+
+class TracedFiles(unittest.TestCase):
+    """The group files load through one loader, which refuses any file it can't read whole."""
+
+    def load(self, files: dict[str, str]) -> dict:
+        tree = Tree(self, {f"spec/traced/{name}": text for name, text in files.items()})
+        (tree.root / "spec" / "traced").mkdir(parents=True, exist_ok=True)
+        return load_traced(tree.root / "spec" / "traced", GROUPS, tree.root)
+
+    def assert_refused(self, files: dict[str, str], *fragments: str) -> None:
+        with self.assertRaises(SystemExit) as raised:
+            self.load(files)
+        for fragment in fragments:
+            self.assertIn(fragment, str(raised.exception))
+
+    def test_the_real_files_load_with_the_sentinel(self):
+        sentences = TRACE["spec_keys"]()
+        loaded = load_traced(
+            TRACE["TRACED_DIR"], {key.rsplit("-", 1)[0] for key in sentences}
+        )
+        self.assertEqual(loaded[TRACE["SENTINEL"]].file, "spec/traced/CLI.toml")
+        self.assertEqual(loaded[TRACE["SENTINEL"]].issue, "#216")
+        # Every file is named for a group, so every key sits in its own group's file.
+        for key, entry in loaded.items():
+            self.assertEqual(entry.file, f"spec/traced/{key.rsplit('-', 1)[0]}.toml")
+
+    def test_a_table_without_the_sentinel_is_reported(self):
+        problems = layer_floors({}, traced("CLI-8"))
+        self.assertIn("the sentinel CLI-7 is not in spec/traced/CLI.toml", problems)
+        self.assertNotIn(
+            "the sentinel CLI-7 is not in spec/traced/CLI.toml",
+            layer_floors({}, traced("CLI-7")),
+        )
+
+    def test_entries_load_in_key_order_with_their_waivers(self):
+        # CLI-10 after CLI-9, and the groups by name, whatever order the files hold them in.
+        loaded = self.load(
+            {
+                "TRAP.toml": '[TRAP-2]\nissue = "#301"\n',
+                "CLI.toml": CLI_FILE.replace("[CLI-9]", "[CLI-11]"),
+                "IMAGE.toml": '[IMAGE-1]\nissue = "#220"\n',
+            }
+        )
+        self.assertEqual(list(loaded), ["CLI-10", "CLI-11", "IMAGE-1", "TRAP-2"])
+        self.assertEqual(
+            loaded["CLI-10"],
+            Traced("#216", {"live": "a pure function"}, "spec/traced/CLI.toml"),
+        )
+        self.assertEqual(loaded["TRAP-2"].waive, {})
+
+    def test_a_group_file_with_no_entry_loads_nothing(self):
+        # A group no issue has traced yet keeps its file, which lists nothing.
+        loaded = self.load({"CLI.toml": CLI_FILE, "TRAP.toml": "# Nothing yet.\n"})
+        self.assertEqual(list(loaded), ["CLI-9", "CLI-10"])
+
+    def test_a_key_in_another_groups_file_is_refused(self):
+        self.assert_refused(
+            {"CLI.toml": CLI_FILE + '\n[TRAP-1]\nissue = "#301"\n'},
+            "trace: spec/traced/CLI.toml: TRAP-1 isn't in the CLI group",
+        )
+
+    def test_a_key_that_isnt_a_group_and_a_number_is_refused(self):
+        for key in ("cli-9", "CLI-9a", "CLI", "CLI-"):
+            with self.subTest(key=key):
+                self.assert_refused(
+                    {"CLI.toml": f'["{key}"]\nissue = "#216"\n'},
+                    f"spec/traced/CLI.toml: {key} isn't in the CLI group",
+                )
+
+    def test_a_key_listed_twice_in_one_file_is_refused(self):
+        self.assert_refused(
+            {"CLI.toml": CLI_FILE + '\n[CLI-9]\nissue = "#216"\n'},
+            "trace: spec/traced/CLI.toml doesn't parse: Cannot declare ('CLI-9',) twice",
+        )
+
+    def test_a_key_listed_in_two_files_is_refused(self):
+        self.assert_refused(
+            {"CLI.toml": CLI_FILE, "IMAGE.toml": '[CLI-9]\nissue = "#216"\n'},
+            "trace: CLI-9 is listed in more than one file: spec/traced/CLI.toml, "
+            "spec/traced/IMAGE.toml",
+        )
+
+    def test_a_malformed_entry_is_refused(self):
+        for entry in (
+            'CLI-9 = "#216"',
+            "[CLI-9]",
+            '[CLI-9]\nissue = "216"',
+            "[CLI-9]\nissue = 216",
+            '[CLI-9]\nissues = "#216"',
+            '[CLI-9]\nissue = "#216"\nwaives.live = "a pure function"',
+            '[CLI-9]\nissue = "#216"\nwaive = "live"',
+            '[CLI-9]\nissue = "#216"\nwaive.live = 1',
+        ):
+            with self.subTest(entry=entry):
+                self.assert_refused(
+                    {"CLI.toml": entry + "\n"},
+                    "trace: spec/traced/CLI.toml: CLI-9 is malformed",
+                )
+
+    def test_a_file_named_for_no_group_is_refused(self):
+        for name in ("GATE.toml", "cli.toml", "CLI.tml", "README.md"):
+            with self.subTest(name=name):
+                self.assert_refused(
+                    {"CLI.toml": CLI_FILE, name: '[GATE-1]\nissue = "#1"\n'},
+                    f"trace: spec/traced/{name} isn't named for a requirement group the specs "
+                    "define: a group file is <GROUP>.toml, for one of CLI, IMAGE, TRAP",
+                )
+
+    def test_a_directory_in_the_traced_directory_is_refused(self):
+        tree = Tree(self, {"spec/traced/CLI.toml": CLI_FILE, "spec/traced/TRAP/x": ""})
+        with self.assertRaises(SystemExit) as raised:
+            load_traced(tree.root / "spec" / "traced", GROUPS, tree.root)
+        self.assertIn(
+            "spec/traced/TRAP isn't named for a requirement group",
+            str(raised.exception),
+        )
+
+    def test_no_group_file_is_refused(self):
+        # The floor: an empty or missing directory reads as nothing traced, which would pass
+        # every per-key check vacuously.
+        self.assert_refused({}, "trace: spec/traced holds no group file")
+        tree = Tree(self, {})
+        with self.assertRaises(SystemExit) as raised:
+            load_traced(tree.root / "spec" / "traced", GROUPS, tree.root)
+        self.assertIn("spec/traced holds no group file", str(raised.exception))
+
+    def test_every_problem_is_reported_together(self):
+        self.assert_refused(
+            {
+                "CLI.toml": '[CLI-9]\nissues = "#216"\n',
+                "GATE.toml": "",
+                "IMAGE.toml": '[IMAGE-1]\nissue = "#220"\n\n[IMAGE-1]\n',
+            },
+            "spec/traced/CLI.toml: CLI-9 is malformed",
+            "spec/traced/GATE.toml isn't named for a requirement group",
+            "spec/traced/IMAGE.toml doesn't parse",
         )
 
 

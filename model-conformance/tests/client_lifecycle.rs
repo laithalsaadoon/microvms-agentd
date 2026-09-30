@@ -764,8 +764,9 @@ const KEYED: [&str; 4] = [
 ///
 /// The claimed keys are read from this file's own source, as the trace reads a test file,
 /// rather than from a list that could drift from the docs. `trace:check` doesn't read this
-/// crate's tests and the STATE keys aren't in its `TRACED` yet (#302), so this is what notices
-/// a property that loses its key, or a key that moves onto a property stating another rule.
+/// crate's tests and `spec/traced/STATE.toml` lists no STATE key yet (#302), so this is what
+/// notices a property that loses its key, or a key that moves onto a property stating another
+/// rule.
 ///
 /// **Falsification**: drop `STATE-8` from the name of the model's "a resume completion drops
 /// the proxy token" property and this fails, while `cargo test -p agentd-model` stays green.

@@ -142,10 +142,10 @@ describe("the Architecture drift page", () => {
     expect(meaning).not.toContain("is a place where a driving adapter")
     expect(meaning).toMatch(/^\| `placement` \| layering \| /m)
     expect(meaning).toMatch(/^\| `parity-gap` \| parity \| /m)
-    expect(meaning).toMatch(/^\| `untraced` \| traceability \| .*`TRACED`/m)
+    expect(meaning).toMatch(/^\| `untraced` \| traceability \| .*`spec\/traced\/`/m)
     expect(page.description).not.toContain("How much layering drift")
     expect(section(page.body, "Provenance")).toContain(
-      "trace the requirement in `TRACED` in `scripts/check-trace.py`"
+      "trace the requirement in its group's file in `spec/traced/`"
     )
   })
 

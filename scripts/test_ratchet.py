@@ -181,15 +181,16 @@ class RuleTests(unittest.TestCase):
         )
 
     def test_rule_1_an_untraced_requirement_points_at_traced(self):
-        # A requirement with no trace isn't work in the wrong layer either: the fix is a TRACED
-        # entry and the layers it names.
+        # A requirement with no trace isn't work in the wrong layer either: the fix is an entry
+        # in its group's traced file and the layers it names.
         now = BASELINE_FOUND + found(("untraced", "TRAP-14"))
         self.assertEqual(
             compare(now, ratchet(BASELINE), ratchet(BASELINE), "main"),
             [
-                "new drift: [untraced] TRAP-14. Trace the requirement: list its key in TRACED "
-                "in scripts/check-trace.py, give it each layer or a waiver with its reason (a key "
-                "that waives every layer stays untraced), and run ./scripts/check-trace.py --write."
+                "new drift: [untraced] TRAP-14. Trace the requirement: list its key in its "
+                "group's file, spec/traced/<GROUP>.toml, give it each layer or a waiver with its "
+                "reason (a key that waives every layer stays untraced), and run "
+                "./scripts/check-trace.py --write."
             ],
         )
 
@@ -258,8 +259,8 @@ class RuleTests(unittest.TestCase):
         self.assertTrue(failures[0].startswith("not in the base: [untraced] TRAP-14"))
         self.assertTrue(
             failures[0].endswith(
-                "Entries can only be removed: trace the requirement in TRACED in "
-                "scripts/check-trace.py instead."
+                "Entries can only be removed: trace the requirement in its group's file, "
+                "spec/traced/<GROUP>.toml, instead."
             ),
             failures[0],
         )
@@ -476,7 +477,7 @@ class FileTests(unittest.TestCase):
         with self.assertRaisesRegex(
             SystemExit,
             r"\[untraced\] TRAP-14 can't be a decision: a requirement that can't carry a "
-            "layer waives that layer in TRACED",
+            "layer waives that layer in its group's file, spec/traced/<GROUP>.toml",
         ):
             ratchet(BASELINE, [("untraced", "TRAP-14", "not worth a test")])
 
@@ -1318,9 +1319,9 @@ class ParityGapTests(unittest.TestCase):
 
 
 class UntracedTests(unittest.TestCase):
-    """The untraced collector: every spec key that check-trace.py's `TRACED` doesn't list."""
+    """The untraced collector: every spec key that no group file in `spec/traced/` lists."""
 
-    #: The keys the sentinel's two specs define that its `traced.py` doesn't list: one spec
+    #: The keys the sentinel's two specs define that its group files don't list: one spec
     #: each at least, so a collector that read only the first spec would miss one.
     SENTINEL_UNTRACED = ("DAEMON-2", "GATE-2", "GATE-3", "GATE-4")
 
@@ -1387,16 +1388,13 @@ class UntracedTests(unittest.TestCase):
     def test_a_fully_traced_spec_fails_the_sentinel(self):
         # The fixture exists to have untraced keys; one that has none proves nothing.
         root, scope = self.copy()
-        text = scope.traced.read_text(encoding="utf-8")
-        scope.traced.write_text(
-            text.replace(
-                "TRACED = {",
-                'TRACED = {\n    "GATE-2": "#3",\n    "GATE-3": "#3",'
-                '\n    "DAEMON-2": "#3",',
-            ).replace(
-                '("#3", {layer: "nothing checks it" for layer in LAYERS})', '"#3"'
+        for group, count in (("GATE", 4), ("DAEMON", 2)):
+            (scope.traced / f"{group}.toml").write_text(
+                "".join(
+                    f'[{group}-{n}]\nissue = "#3"\n\n' for n in range(1, count + 1)
+                ),
+                encoding="utf-8",
             )
-        )
         self.assertEqual(RATCHET["untraced"](scope), Counter())
         failures = sentinel(scope)
         self.assertIn(
@@ -1406,24 +1404,35 @@ class UntracedTests(unittest.TestCase):
         )
 
     def test_an_empty_traced_is_refused(self):
-        # An empty table reads as every key untraced, which is new drift, but a TRACED the
-        # script lost is a broken read, not a hundred new requirements.
+        # Group files that list nothing read as every key untraced, which is new drift, but
+        # files the loader got no entry from are a broken read, not a hundred new requirements.
         root, scope = self.copy()
-        scope.traced.write_text("TRACED = {}\n")
-        with self.assertRaisesRegex(SystemExit, "TRACED is empty"):
+        for path in scope.traced.iterdir():
+            path.write_text("# emptied\n", encoding="utf-8")
+        with self.assertRaisesRegex(SystemExit, "spec/traced lists no traced key"):
             RATCHET["untraced"](scope)
 
-    def test_a_script_without_traced_is_refused(self):
+    def test_a_missing_traced_directory_is_refused(self):
+        # The loader's own floor, through the collector: no group file is no read at all.
         root, scope = self.copy()
-        scope.traced.write_text("TRACKED = {'GATE-1': '#1'}\n")
-        with self.assertRaisesRegex(SystemExit, "has no TRACED dict"):
+        shutil.rmtree(scope.traced)
+        with self.assertRaisesRegex(SystemExit, "spec/traced holds no group file"):
             RATCHET["untraced"](scope)
 
-    def test_traced_is_read_by_running_the_script(self):
-        # `TRACED` names module constants (`INTERLEAVINGS`), so a literal read can't take it;
-        # the fixture's waiver does the same, and the key it waives stays traced.
-        text = RATCHET["SENTINEL"].traced.read_text(encoding="utf-8")
-        self.assertRegex(text, r'"DAEMON-1": \([^)]*\bREASON\b')
+    def test_the_files_are_read_with_check_traces_loader(self):
+        # The collector reads what trace:check reads, so a file the loader refuses fails here
+        # too, with the loader's message, rather than being read some other way.
+        root, scope = self.copy()
+        with (scope.traced / "GATE.toml").open("a", encoding="utf-8") as handle:
+            handle.write('\n[DAEMON-2]\nissue = "#2"\n')
+        with self.assertRaisesRegex(
+            SystemExit, "spec/traced/GATE.toml: DAEMON-2 isn't in the GATE group"
+        ):
+            RATCHET["untraced"](scope)
+
+    def test_a_key_that_waives_one_layer_is_traced(self):
+        entry = self.sentinel_entry("DAEMON", "DAEMON-1")
+        self.assertEqual(set(entry["waive"]), {"live"})
         self.assertNotIn(
             ("untraced", "DAEMON-1"), RATCHET["untraced"](RATCHET["SENTINEL"])
         )
@@ -1431,33 +1440,39 @@ class UntracedTests(unittest.TestCase):
     def test_a_key_that_waives_every_layer_stays_untraced(self):
         # trace:check passes a listed key whose every layer is waived, with nothing checking
         # it; counting it as traced would let the backlog shrink by a waiver.
-        text = RATCHET["SENTINEL"].traced.read_text(encoding="utf-8")
-        self.assertRegex(
-            text, r'"GATE-4": \("#3", \{layer: [^}]* for layer in LAYERS\}\)'
+        layers = runpy.run_path(str(RATCHET["CHECK_TRACE"]))["LAYERS"]
+        self.assertEqual(
+            set(self.sentinel_entry("GATE", "GATE-4")["waive"]), set(layers)
         )
         self.assertIn(("untraced", "GATE-4"), RATCHET["untraced"](RATCHET["SENTINEL"]))
 
     def test_a_key_that_waives_all_but_one_layer_is_traced(self):
         root, scope = self.copy()
-        text = scope.traced.read_text(encoding="utf-8")
-        scope.traced.write_text(
-            text.replace(
-                "for layer in LAYERS}", 'for layer in LAYERS if layer != "test"}'
-            )
+        path = scope.traced / "GATE.toml"
+        text = path.read_text(encoding="utf-8")
+        self.assertIn('waive.test = "nothing checks it"\n', text)
+        path.write_text(
+            text.replace('waive.test = "nothing checks it"\n', ""), encoding="utf-8"
         )
         self.assertNotIn(("untraced", "GATE-4"), RATCHET["untraced"](scope))
 
     def test_a_script_without_layers_is_refused(self):
         # Without LAYERS every key would read as waiving all of them, or none.
         root, scope = self.copy()
-        text = scope.traced.read_text(encoding="utf-8")
-        scope.traced.write_text(
-            text.replace("LAYERS = (", "LAYER_NAMES = (").replace(
-                "for layer in LAYERS}", "for layer in LAYER_NAMES}"
-            )
+        script = root / "trace.py"
+        script.write_text(
+            "def load_traced(directory, groups, root):\n    return {}\n",
+            encoding="utf-8",
         )
         with self.assertRaisesRegex(SystemExit, "has no LAYERS tuple"):
-            RATCHET["untraced"](scope)
+            RATCHET["untraced"](scope._replace(trace=script))
+
+    def test_a_script_without_the_loader_is_refused(self):
+        root, scope = self.copy()
+        script = root / "trace.py"
+        script.write_text('LAYERS = ("model", "test")\n', encoding="utf-8")
+        with self.assertRaisesRegex(SystemExit, "has no load_traced"):
+            RATCHET["untraced"](scope._replace(trace=script))
 
     def test_a_requirement_without_a_key_is_refused(self):
         # check-trace.py skips it too, so neither gate would count or name it.
@@ -1476,7 +1491,7 @@ class UntracedTests(unittest.TestCase):
                 self.assertRaisesRegex(
                     SystemExit,
                     "agentd.symspec.json: requirement 00000000-0000-4000-8000-000000000019 has "
-                    "no key, so TRACED can't list it",
+                    "no key, so no traced file can list it",
                 ),
             ):
                 RATCHET["untraced"](scope)
@@ -1493,13 +1508,21 @@ class UntracedTests(unittest.TestCase):
 
     def test_the_repo_scope_reads_every_spec_check_trace_reads(self):
         trace = runpy.run_path(str(HERE / "check-trace.py"))
-        self.assertEqual(RATCHET["REPO"].traced, HERE / "check-trace.py")
+        self.assertEqual(RATCHET["REPO"].trace, HERE / "check-trace.py")
+        self.assertEqual(RATCHET["REPO"].traced, trace["TRACED_DIR"])
         self.assertEqual(RATCHET["REPO"].specs, trace["SPECS"])
+        # The sentinel's files go through the same loader.
+        self.assertEqual(RATCHET["SENTINEL"].trace, HERE / "check-trace.py")
         # A spec file check-trace.py doesn't list would be outside both scripts.
         self.assertEqual(
             sorted(RATCHET["REPO"].specs),
             sorted((ROOT / "spec").glob("*.symspec.json")),
         )
+
+    @staticmethod
+    def sentinel_entry(group: str, key: str) -> dict:
+        path = RATCHET["SENTINEL"].traced / f"{group}.toml"
+        return tomllib.loads(path.read_text(encoding="utf-8"))[key]
 
 
 class SentinelTests(unittest.TestCase):

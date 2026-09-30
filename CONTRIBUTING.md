@@ -119,16 +119,19 @@ than wall-clock sleeps: child processes and the simulator use different clocks.
 
 `mise run ratchet:check` holds `ratchet/drift.json` equal to the drift its
 collectors find, such as an adapter dependency outside `arch/placement.toml`, a
-subprocess in a shipping crate, or a spec requirement `TRACED` doesn't list. A
-new finding fails, and so does a fix the file still lists: run `mise run
-ratchet:update` and commit the file. The check refuses an entry the base branch
-doesn't have, and a crate added to a set the base already has, so new drift
-moves to the layer whose job it is or goes under `decisions` with its reason. An
-untraced requirement can't be a decision: it gets a `TRACED` entry, with a
-waiver for any layer it can't carry. Moving recorded drift to another file or
-crate isn't a fix: re-key its entry in the same change. A re-keyed entry keeps
-its issue and changes its path or its text, not both, so a move and a rename
-land in separate PRs.
+subprocess in a shipping crate, or a spec requirement no file in `spec/traced/`
+lists. A new finding fails, and so does a fix the file still lists: run
+`mise run ratchet:update` and commit the file. The check refuses an entry the
+base branch doesn't have, and a crate added to a set the base already has, so
+new drift moves to the layer whose job it is or goes under `decisions` with its
+reason. An untraced requirement can't be a decision: it gets an entry in its
+group's file (`spec/traced/TRAP.toml` for a TRAP key), with a waiver for any
+layer it can't carry. Each group has its own file, so the changes that trace
+different groups don't edit one table; `scripts/check-trace.py` loads them all
+and refuses a key in the wrong group's file or listed twice. Moving recorded
+drift to another file or crate isn't a fix: re-key its entry in the same
+change. A re-keyed entry keeps its issue and changes its path or its text, not
+both, so a move and a rename land in separate PRs.
 
 `mise run parity:check` holds `parity/capabilities.toml` to the four surfaces
 (core through `parity/core-api.json`, the CLI through `docs/manifest.json`, and
