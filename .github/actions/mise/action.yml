@@ -1,0 +1,75 @@
+name: mise and its tools
+description: >-
+  mise at the version mise.toml's `min_version` names, and mise.lock's tools installed with
+  `--locked`, out of the tools cache the `guards-cache` job saves on main.
+
+# Every job in ci.yml and fuzz.yml takes its tools from here and then runs one `mise run
+# ci:<job>`, so CI and a contributor run the same tasks under the same tools and `[env]`.
+#
+# The version is read from mise.toml rather than written here, so the mise CI runs and the
+# oldest one a contributor may run are one value. It's exact, and it's also what makes
+# mise-action's `minimum_release_age` inert: the action applies that age only when it picks a
+# version itself. v5 made its default 24 hours, and it's written out below so that removing the
+# version would fall back to a delay this file chose rather than one a future release of the
+# action chooses.
+#
+# mise-action runs `mise install --locked` when it finds mise.lock (its source, at the pinned
+# commit, adds the flag itself), so every tool comes from the URL and checksum the lock records.
+# Its own cache is off. It saves right after that install, so a task's own tools, which `mise
+# run` installs later, never reach it, and it would save on pull requests, whose copies push the
+# repository's caches past their cap and evict main's. The tools cache here is keyed on the two
+# files that decide what gets installed, mise.toml (which pins the tasks' own tools in `[vars]`)
+# and mise.lock. Only the `guards-cache` job saves it, on a push to main, after installing the
+# tasks' tools too; every other job restores it, or with `restore-keys` the newest entry for
+# this platform when the key is new, and `mise install` adds whatever that one lacks.
+
+inputs:
+  install_args:
+    description: >-
+      The tools to install when a job runs only some of them: the rust job's macOS and Windows
+      legs install Rust alone. Empty installs every tool mise.lock holds.
+    default: ''
+  tools-cache:
+    description: >-
+      `restore` (the default): the tools cache for this mise.toml and mise.lock, or the newest
+      one for this platform. `exact`: that key only, for the job that saves it, so an entry
+      doesn't carry forward every tool version an older one held. `none`: no cache.
+    default: restore
+
+outputs:
+  tools-cache-key:
+    description: The tools cache's key for this mise.toml and mise.lock.
+    value: ${{ steps.key.outputs.key }}
+  tools-cache-hit:
+    description: Whether the tools cache held that exact key.
+    value: ${{ steps.cache.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - id: key
+      shell: bash
+      run: |
+        # Not anchored at the line's end: a Windows checkout ends each line with a carriage return.
+        version=$(sed -n 's/^min_version = "\([0-9.]*\)".*/\1/p' mise.toml)
+        [ -n "$version" ] || { echo "::error file=mise.toml::mise.toml has no min_version = \"X.Y.Z\" line"; exit 1; }
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "key=mise-tools-$RUNNER_OS-$RUNNER_ARCH-$(cat mise.toml mise.lock | sha256sum | cut -c1-64)" >> "$GITHUB_OUTPUT"
+    - id: cache
+      if: inputs.tools-cache != 'none'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.local/share/mise
+        key: ${{ steps.key.outputs.key }}
+        restore-keys: ${{ inputs.tools-cache == 'restore' && format('mise-tools-{0}-{1}-', runner.os, runner.arch) || '' }}
+    - uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+      with:
+        version: ${{ steps.key.outputs.version }}
+        minimum_release_age: 24h
+        install_args: ${{ inputs.install_args }}
+        cache: false
+    # A job that installs only some tools must not have `mise run` install the rest: it would,
+    # before every task, since a task runs under the whole `[tools]` set.
+    - if: inputs.install_args != ''
+      shell: bash
+      run: echo "MISE_TASK_RUN_AUTO_INSTALL=false" >> "$GITHUB_ENV"

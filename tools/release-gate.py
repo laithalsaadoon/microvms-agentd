@@ -17,8 +17,8 @@ run on the release commit could only fail until the release it was meant to gate
 
 Two subcommands:
 
-  `graph`   (`mise run release:check`, in `check`; release.yml's `guard` job) reads
-            release.yml and fails when:
+  `graph`   (`mise run release:check`, in `check` and CI's `security` job; release.yml's
+            `guard` job) reads release.yml and fails when:
             - a job that publishes doesn't name `live-gate` in its own `needs`. Transitive
               isn't enough: a job that needs another publisher would lose the gate the day
               that one's `needs` changed;

@@ -1,0 +1,5 @@
+{
+  "capability": "estimate",
+  "input": { "size_mib": 1024, "running_seconds": 60 },
+  "expect": { "label": "estimate" }
+}

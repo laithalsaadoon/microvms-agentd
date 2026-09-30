@@ -3,9 +3,9 @@
 [fmt]
 description = "Format everything (writes)"
 # `ruff format .` rather than a path list, and the whole repo rather than four named
-# directories, because `ruff.toml` now carries the discovery. See `lint` below for the
-# trap that made the list necessary and the `.py` rename that retired it — this line has to
-# stay the same shape as the `--check` one there, or `fmt` would leave work for `lint` to
+# directories, because pyproject.toml's `[tool.ruff]` now carries the discovery. See `lint`
+# below for the trap that made the list necessary and the `.py` rename that retired it: this line
+# has to stay the same shape as the `--check` one there, or `fmt` would leave work for `lint` to
 # find.
 run = [
   "cargo fmt --all",
@@ -17,8 +17,8 @@ run = [
 [lint]
 description = "Format check + clippy + ruff, no writes"
 # `ruff check .` and `ruff format --check .`, one path each, because the file selection now
-# lives in `ruff.toml` where a config can be reasoned about — and because this line spent its
-# whole life not linting most of the repo.
+# lives in pyproject.toml's `[tool.ruff]` where a config can be reasoned about, and because this
+# line spent its whole life not linting most of the repo.
 #
 # ruff discovers files by **extension** when it walks a directory, and every gate in
 # `tools/` *used to be* an extensionless PEP 723 script. So `ruff check scripts` reported
@@ -29,7 +29,7 @@ description = "Format check + clippy + ruff, no writes"
 # script explicitly surfaced F401s in it immediately.
 #
 # Two fixes were tried, and the second is why this comment is shorter than it was. Naming each
-# script here worked for exactly the files someone remembered. `ruff.toml`'s
+# script here worked for exactly the files someone remembered. The ruff config's
 # `extend-include = ["tools/*"]` was structural but taught only ruff — the same blindness
 # then turned up in `check-license-headers.py`, which at the time enumerated only
 # `git ls-files "*.rs" "*.py"` (it covers six extensions now)

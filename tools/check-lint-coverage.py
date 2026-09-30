@@ -16,7 +16,7 @@ silent checks is the failure mode" — and it hid real findings, since the first
 named explicitly turned out to have unused imports in it.
 
 The fix is now the file names: the gates are `tools/*.py`, so ruff finds them the ordinary
-way. `ruff.toml`'s `extend-include = ["tools/*"]` was the earlier fix and is gone, because
+way. The ruff config's `extend-include = ["tools/*"]` was the earlier fix and is gone, because
 it taught only ruff — the identical blindness showed up next in
 `tools/check-license-headers.py`, which enumerated with `git ls-files "*.rs" "*.py"` at the
 time (it covers six extensions now) and had therefore never seen these scripts either
@@ -49,10 +49,11 @@ Two further assertions, each about a way the comparison itself could go quiet:
   2. The formatter is counted separately from the linter, because `ruff format` resolves its
      own `exclude` and can therefore go blind over a file the linter still reads. Its
      inspected count comes off the summary line it prints, and the deliberately unformatted
-     files are read out of `ruff.toml` rather than repeated here. What this catches is
-     format-side blindness the config does not account for; **widening** `[format] exclude`
-     lowers both sides and passes, by design — that is a config edit visible in a diff, and
-     `ruff.toml` is where each entry states its reason.
+     files are read out of the ruff config (pyproject.toml's `[tool.ruff]`) rather than
+     repeated here. What this catches is format-side blindness the config does not account
+     for; **widening** `[tool.ruff.format] exclude` lowers both sides and passes, by design:
+     that is a config edit visible in a diff, and the config is where each entry states its
+     reason.
 
 There used to be a third, and it went away with `extend-include`. That glob claimed every file
 under `tools/` was Python, so a shell helper dropped there was handed to ruff and reported as
@@ -92,7 +93,7 @@ import tomllib
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-CONFIG = REPO / "ruff.toml"
+CONFIG = REPO / "pyproject.toml"
 
 #: A floor on the enumerator, not on the repo. See assertion 1 in the docstring: this
 #: number exists so that `git ls-files` answering nothing is a failure rather than a
@@ -206,7 +207,7 @@ def inspected(root: str) -> set[Path]:
 
 
 def format_excluded() -> set[Path]:
-    """`[format] exclude` from `ruff.toml`, read rather than restated.
+    """`[tool.ruff.format] exclude` from pyproject.toml, read rather than restated.
 
     Repeating the list here would let the two drift, and a coverage gate that disagrees
     with the config about what is deliberately skipped reports the config as a defect.
@@ -215,7 +216,8 @@ def format_excluded() -> set[Path]:
         return set()
     with CONFIG.open("rb") as handle:
         settings = tomllib.load(handle)
-    return {Path(p) for p in settings.get("format", {}).get("exclude", [])}
+    ruff = settings.get("tool", {}).get("ruff", {})
+    return {Path(p) for p in ruff.get("format", {}).get("exclude", [])}
 
 
 def format_inspected(root: str) -> int:

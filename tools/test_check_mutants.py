@@ -15,6 +15,7 @@ The last cases read this tree: every `mutants::skip` is a listed site, and every
 import json
 import os
 import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -492,7 +493,16 @@ class WrapperTests(unittest.TestCase):
         for step in gated:
             with self.subTest(step=step.get("name") or step.get("uses")):
                 self.assertIn("steps.diff.outputs.rust == 'true'", step.get("if", ""))
-        (mutate,) = [s for s in gated if "check-mutants.py" in s.get("run", "")]
+        (mutate,) = [s for s in gated if "mise run ci:mutants" in s.get("run", "")]
+        # The step runs `mise run ci:mutants <arguments>`: the task's command with the step's
+        # arguments after it, as mise runs it (test_check_ci_parity.py holds mise to that).
+        tasks = runpy.run_path(str(ROOT / "tools/check-ci-parity.py"))["load_tasks"](
+            ROOT
+        )
+        task = tasks["ci:mutants"]
+        self.assertIsInstance(task.get("run"), str, "`ci:mutants` isn't one command")
+        args = mutate["run"].split("mise run ci:mutants", 1)[1]
+        mutate = {"run": task["run"] + args}
 
         # The steps run the checkout's own scripts; a copy stands in, untracked, so it
         # isn't in the diff. `python3` and `cargo` are this interpreter and the fake.
