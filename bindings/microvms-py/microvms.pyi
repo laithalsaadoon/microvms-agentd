@@ -2474,7 +2474,7 @@ class Session:
         """
         Start, wait, ack. The one-shot shape, for when output is all you want.
         """
-    def run_to_completion(self, /, command: Sequence[str] |str, *, on_output: Any |None = None, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, exec_id: str |None = None, inherit_image_env: bool = False, client_grace_sec: float = ...) -> ExecResult:
+    def run_to_completion(self, /, command: Sequence[str] |str, *, on_output: Any |None = None, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, exec_id: str |None = None, reap_group_on_exit: bool = False, inherit_image_env: bool = False, client_grace_sec: float = ...) -> ExecResult:
         """
         Start, stream, and collect one command: exactly one `ExecResult` back (BIND-6..10).
         
@@ -2488,8 +2488,9 @@ class Session:
         
         An exception from `on_output` stops delivery; the exec is still waited for and acked
         so nothing is left behind, and then the exception is re-raised. `shell`, `user`,
-        `group`, and `inherit_image_env` mean what they mean on `run()`: `shell="bash"` with a
-        script string runs it under bash, which dash-based images need for `pipefail`.
+        `group`, `reap_group_on_exit` and `inherit_image_env` mean what they mean on `run()`:
+        `shell="bash"` with a script string runs it under bash, which dash-based images need for
+        `pipefail`.
         """
     def spawn(self, /, command: Sequence[str] |str, *, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, inherit_image_env: bool = False, offset: int = 0, reconnect: bool = True, max_reconnects: int |None = None, idle_timeout: float |None = None, gap_policy: str |None = None) -> ExecProcess:
         """

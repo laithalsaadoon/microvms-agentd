@@ -216,6 +216,18 @@ def test_the_start_carries_the_run_fields_through_unchanged(exec_server) -> None
     assert start["stdin"] is False
 
 
+def test_reap_group_on_exit_reaches_the_start(exec_server) -> None:
+    """`reap_group_on_exit` reaches the wire as `run()` sends it, and is off by default (#267).
+
+    **Falsification**: drop `.with_reap_group_on_exit(reap_group_on_exit)` from
+    `run_to_completion` and the start says `false` whatever the caller asked.
+    """
+    server = exec_server(streamed([], outcome("acked", 0)))
+    server.session.run_to_completion("true", reap_group_on_exit=True, exec_id="x-rtc")
+    server.session.run_to_completion("true", exec_id="x-rtc")
+    assert [start["reap_group_on_exit"] for start in server.starts] == [True, False]
+
+
 def test_without_a_callback_it_waits_and_acks(exec_server) -> None:
     """BIND-8: no callback, no stream: one wait and one ack."""
     server = exec_server(streamed([], outcome("acked", 3, stdout="x")))

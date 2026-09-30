@@ -474,15 +474,15 @@ impl ExecHandle {
 
 /// A `Duration` from a caller's number of seconds, for a synchronous function.
 ///
-/// The core's `duration_of_secs_f64` is what refuses a negative or non-finite figure — this
+/// The core's `duration::of_secs_f64` is what refuses a negative or non-finite figure. This
 /// is a call, not a check, which is the BIND-2 rule: the refusal and its message stay in one
-/// place. It matters more here than in Python, because JS has `NaN` and `Infinity` as
+/// place, and a wait's names no cost report (#338). It matters more here than in Python, because JS has `NaN` and `Infinity` as
 /// ordinary values a caller reaches by accident.
 pub(crate) fn seconds(value: f64) -> napi::Result<std::time::Duration, String> {
-    microvms_core::cost::duration_of_secs_f64(value).map_err(js)
+    microvms_core::duration::of_secs_f64(value).map_err(js)
 }
 
 /// [`seconds`] for an async function, whose error type must be the local newtype.
 pub(crate) fn seconds_async(value: f64) -> Result<std::time::Duration, AsyncError> {
-    microvms_core::cost::duration_of_secs_f64(value).map_err(js_async)
+    microvms_core::duration::of_secs_f64(value).map_err(js_async)
 }

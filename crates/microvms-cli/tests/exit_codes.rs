@@ -263,9 +263,11 @@ fn a_success_with_progress_enabled_writes_one_json_document_on_stdout() {
 /// `conformance/run_rs.py` asserts that against real AWS; this asserts the *failure* half of it
 /// locally, which is the half a live run cannot reach cheaply.
 ///
-/// The driver is a stream that never gets a session: `exec --stream` against an endpoint that does
-/// not resolve fails before the first event, so stdout carries exactly one document — the failure
-/// envelope. That is the property under test. A streaming command that emitted a partial NDJSON
+/// The driver is a stream that never gets a session: `exec --stream` fails before the first event,
+/// so stdout carries exactly one document, the failure envelope. That is the property under test.
+/// It fails at the proxy-token mint, the attach's first step, and the mint stops at the credential
+/// lookup: `support::run` clears the environment and turns instance metadata off, so the chain
+/// finds nothing on any host and no signed request leaves it (#338). A streaming command that emitted a partial NDJSON
 /// record before failing, or a progress line on stdout because "the stream path is different", would
 /// both break the parse here.
 ///
@@ -276,8 +278,11 @@ fn a_success_with_progress_enabled_writes_one_json_document_on_stdout() {
 /// drives it against a real one. What this file adds is the claim only a spawned child can make:
 /// that the shape survives into real file descriptors with progress interleaved on the other one.
 ///
-/// **Falsification** — write a `println!` of the event count into `stream_exec` and this goes red on
-/// the parse. Verified; see the packet's guard proofs.
+/// **Falsification**: `verify/guards/faults/cli-exit-codes.toml` entries `cli-exit-stream-stray-print`
+/// (a `println!` in `exec` before the attach, and this goes red on the parse) and
+/// `cli-exit-stream-mints-offline` (the child gets credentials and a proxy nothing listens on,
+/// which is what a host with an instance role looked like before `support::run` turned metadata
+/// off, and this goes red on the mint's error).
 #[test]
 fn a_streamed_exec_that_fails_before_any_event_writes_one_document_on_stdout() {
     let outcome = run(
@@ -286,8 +291,7 @@ fn a_streamed_exec_that_fails_before_any_event_writes_one_document_on_stdout() {
             "true",
             "--stream",
             "--endpoint",
-            // A port nothing listens on, so the attach fails at the transport rather than at a
-            // credential — no account is involved and the test is deterministic offline.
+            // A port nothing listens on, which the stream never reaches: the mint fails first.
             "http://127.0.0.1:1",
             "--agent-token",
             "t",
@@ -305,6 +309,14 @@ fn a_streamed_exec_that_fails_before_any_event_writes_one_document_on_stdout() {
     // *is* the assertion; `envelope()` panics with both streams on any stray write.
     let envelope = outcome.envelope();
     assert_eq!(envelope["status"], "error", "{envelope}");
+    // Offline: the mint found no credentials, so it never signed a request. With an instance
+    // role's credentials it used to reach the service and report its 404 for `mvm-1`.
+    assert!(
+        envelope["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("could not resolve credentials")),
+        "the attach went past the credential lookup: {envelope}"
+    );
     assert_ne!(outcome.exit_code(), 0);
     // And the envelope's own code agrees with `$?`, which is CLI-3 holding on the streaming path
     // too — the one path where the failure envelope is written by a different branch of `report`.
@@ -626,7 +638,8 @@ fn the_dense_cost_path_is_cuttable_and_marks_unpriced_lines() {
 /// parser stops on the exit code before any envelope is read.
 ///
 /// **Falsification**: `verify/guards/faults/seconds-flags.toml` entry `cli-seconds-exit-code` restores the
-/// old `from_secs_f64(seconds.max(0.0))` inside `cli::parse_seconds`, and the `inf` row exits 101.
+/// old `from_secs_f64(seconds.max(0.0))` inside `cli::parse_report_seconds`, `--hold-sec`'s
+/// parser, and the `inf` row exits 101.
 #[test]
 fn a_seconds_flag_that_is_not_a_duration_exits_with_the_argument_error() {
     for value in ["inf", "NaN", "-5", "1e300"] {
