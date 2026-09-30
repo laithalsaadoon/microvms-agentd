@@ -1,0 +1,12 @@
+# ── the drift gate's key set in the domain (TRAP-12, #301) ──────────────────
+
+# A key renamed in `as_json` is one the drift gate looks up and doesn't find, and the gate's
+# script can't see that from its side. The pinned key set fails first.
+[[fault]]
+id = "trap-12-constant-key-renamed"
+guard = "constants::tests::as_json_carries_every_key_the_drift_gate_reads"
+run = ["cargo", "test", "-p", "microvms-domain", "--lib", "--", "--exact", "constants::tests::as_json_carries_every_key_the_drift_gate_reads"]
+expect = "test-failed"
+suite = "rust"
+message = "MAX_HOOK_PORTS"
+transform = { file = "crates/microvms-domain/src/constants.rs", replace = "(\"MAX_HOOK_PORT\", json!(MAX_HOOK_PORT)),", with = "(\"MAX_HOOK_PORTS\", json!(MAX_HOOK_PORT))," }

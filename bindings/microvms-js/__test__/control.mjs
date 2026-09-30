@@ -66,3 +66,20 @@ test('an agent VM takes VPC connectors and checks them locally', async () => {
   );
   await refused(vm.launch({ imageIdentifier: 'arn:image', logStream: 's' }), /pass log_group/);
 });
+
+test('terminate waits for a boolean or a number of seconds', async () => {
+  // A sandbox that launched nothing has no VM to wait for, so each report comes back at once:
+  // what's asserted is that both shapes reach the core's teardown options, and that a number no
+  // duration can be is refused before the teardown runs.
+  //
+  // **Falsification**: map a number to the core's default wait in `TeardownOptions::into_opts`
+  // (drop the seconds on their way to `TeardownOpts`) and the negative wait is no longer refused.
+  for (const waitForTerminated of [false, true, 0.5, 120]) {
+    const sandbox = await Sandbox.create(region());
+    const report = await sandbox.terminate({ waitForTerminated });
+    assert.equal(report.terminateAccepted, false);
+    assert.equal(report.leaked, false);
+  }
+  const sandbox = await Sandbox.create(region());
+  await refused(sandbox.terminate({ waitForTerminated: -1 }));
+});

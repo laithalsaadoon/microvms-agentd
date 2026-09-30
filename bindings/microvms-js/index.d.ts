@@ -2286,9 +2286,10 @@ export interface TeardownOptions {
   /**
    * `false` by default: the caller is on the way out, and a teardown that blocked five
    * minutes on a state nobody reads is five minutes of a CI job. The report then honestly
-   * ends in `"TERMINATING"`.
+   * ends in `"TERMINATING"`. `true` waits for TERMINATED up to the core's lifecycle default;
+   * a number of seconds waits up to that instead.
    */
-  waitForTerminated?: boolean
+  waitForTerminated?: boolean | number
 }
 
 /** What a teardown did, and what it left behind. */
