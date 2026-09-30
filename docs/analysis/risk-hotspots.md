@@ -46,13 +46,14 @@ records rather than verified call sites, and the direction of the bias on `error
 toward understating them. Fourth, ownership carries no bus-factor information: one
 human authors 87 of 114 commits under two identities and a `bgagent` bot the other 27, every
 file has one or two distinct authors, and a `bgagent` top-owner share marks a file that
-arrived inside a large squashed commit rather than one with a second maintainer. Two files
+arrived inside a large squashed commit rather than one with a second maintainer. Two modules
 are excluded from scoring because they are test code that lives under `src/`:
-`microvms-cli/src/guards.rs` (`#![cfg(test)]` at `microvms-cli/src/guards.rs:20`, declared at
-`microvms-cli/src/main.rs:36-37`) and `microvms-app/src/control/fake.rs` (declared at
-`microvms-app/src/control/mod.rs:900-901`). That exclusion matters: `guards.rs` is the
-joint-highest-churn source file in the repository at 13 commits, so a churn-only ranking puts
-a file that never ships in a binary at the top.
+`microvms-cli/src/guards/` (`#![cfg(test)]` at `microvms-cli/src/guards/mod.rs:25` and in each
+file under it, declared at `microvms-cli/src/main.rs:36-37`) and
+`microvms-app/src/control/fake.rs` (declared at
+`microvms-app/src/control/mod.rs:900-901`). That exclusion mattered: before it was split by
+command area, `guards.rs` was the joint-highest-churn source file in the repository at 13
+commits, so a churn-only ranking put a file that never ships in a binary at the top.
 
 | File | Trend | Open findings | Top owner | Citation |
 | --- | --- | --- | --- | --- |

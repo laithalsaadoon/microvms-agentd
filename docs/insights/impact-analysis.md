@@ -111,7 +111,7 @@ follow.
 | `microvms-app/src/control/image.rs` | direct import | likely | 29 references, all classifying at the point of raise; `:289`-`:290` document `BuildWedged`, `Platform`, and `Timeout` as three distinct build outcomes |
 | `microvms-app/src/control/microvm.rs` | direct import | likely | 23 references; `:303`-`:304` record that a missing proxy-auth key is `ErrorKind::Retryable` via `WireKind::AuthTokenMint` because minting sits inside the retry path |
 | `microvms-app/src/sandbox.rs`, `session/mod.rs`, `control/mod.rs`, `session/proxy.rs`, `control/artifact.rs`, `session/exec.rs`, `cost.rs`, `session/sse.rs`, `session/files.rs` | direct import | likely | (further direct imports, 4-17 references each, all raise sites under `microvms-core/src/`) |
-| `microvms-cli/src/guards.rs` | test | yes | 23 references; the classification half of the exit catalogue, inducing each failure at the seam (`:71`, `:108`, `:723`) |
+| `microvms-cli/src/guards/` | test | yes | 23 references; the classification half of the exit catalogue, inducing each failure at the seam (`microvms-cli/src/guards/support.rs:62`, `:99`, `:421`) |
 | `conformance/run_rs.py` | test | yes | `:191` documents `data.kind` as a `microvms_core::WireKind` and `:226` asserts `Conflict` and `NotFound` are distinguishable by exception type |
 | `microvms-core/tests/turmoil_client.rs` | test | yes | 7 references; `:452` and `:726` assert `WireKind::Transport`, `:781` and `:1383` assert `WireKind::AuthTokenMint` |
 | `microvms-py/tests/test_smoke.py` | test | yes | `:412` asserts one exception per kind under one shared base; `:275` asserts `wire_kind is None` for a local reject |
@@ -160,7 +160,7 @@ agent reading the `--json` envelope's `code`, and the conformance oracle reading
 | `microvms-cli/src/commands/lifecycle.rs`, `attached.rs`, `local.rs`, `cost.rs`, `doctor.rs`, `mod.rs` | direct import | likely | (further direct imports under `microvms-cli/src/commands/`; every command constructs a `CliError` carrying an `Exit`, the shape declared at `microvms-cli/src/exit.rs:78`) |
 | `microvms-cli/tests/exit_codes.rs` | test | yes | `:29` asserts integer, code, and finding together over every locally reachable row; `:122` pins the shared argument-error code; `:286` pins the streaming exception |
 | `microvms-cli/tests/manifest.rs` | test | yes | `:161 the_published_exit_table_agrees_with_what_the_binary_exits` |
-| `microvms-cli/src/guards.rs` | test | yes | the classification half — induces the rows an invocation cannot reach without an account, asserting the row directly (`:948` `Exit::Interrupted`, `:1183` `Exit::Precondition`) |
+| `microvms-cli/src/guards/` | test | yes | the classification half — induces the rows an invocation cannot reach without an account, asserting the row directly (`microvms-cli/src/guards/interrupt.rs:162` `Exit::Interrupted`, `microvms-cli/src/guards/run.rs:254` `Exit::Precondition`) |
 | `conformance/run_rs.py` | test | yes | `:287` cross-checks the process exit code against the envelope's own `exitCode`, and `:302` names CLI-3 as the claim that they agree; `:384` repeats it on the streaming path |
 | `docs/PLATFORM.md` | config | likely | rows carry a `finding` naming a section of it (`microvms-cli/src/exit.rs:62`, `:127`, `:312`; the module docs at `:10` state each platform code names a different finding) |
 
@@ -312,7 +312,7 @@ botocore calls that look like substitutes disagree with each other (`microvms-do
 | `microvms-app/src/control/connector.rs`, `control/microvm.rs`, `control/artifact.rs`, `control/image.rs`, `sandbox.rs` | direct import | likely | (further direct imports under `microvms-core/src/`) |
 | `microvms-js/src/sandbox.rs`, `microvms-py/src/sandbox.rs` | direct import | likely | `create`/`new` takes a `Region` object rather than a string, which is what keeps the closure |
 | `microvms-cli/src/commands/doctor.rs` | direct import | yes | lists the supported names and falls back to `Region::UsEast1` |
-| `microvms-cli/src/guards.rs` | test | likely | the injected seams are region-parameterized (`:82`, `:89`, `:98`) |
+| `microvms-cli/src/guards/` | test | likely | the injected seams are region-parameterized (`microvms-cli/src/guards/support.rs:73`, `:80`, `:89`) |
 | `microvms-py/tests/test_smoke.py`, `microvms-js/__test__/smoke.mjs` | test | yes | `microvms-js/__test__/smoke.mjs:251` asserts the five names; `microvms-js/__test__/smoke.mjs:232` and `microvms-py/tests/test_smoke.py:270` each assert `eu-central-1` is refused, `microvms-py/tests/test_smoke.py:264` naming the 2026-08-07 removal |
 | `microvms-cli/src/cli.rs` (tests) | test | yes | `:1061` asserts the flag domain equals the measured five; `:1102` asserts the unlisted escape hatch conflicts with the closed set |
 

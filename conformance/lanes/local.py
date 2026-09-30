@@ -209,7 +209,7 @@ def drive_doctor_region(cli: Cli, results: Results) -> None:
 
     One `doctor` call with `--region` set to the suite's region and `AWS_REGION` set to
     another, so the flag and the environment disagree. The credentials line and the two
-    managed-base reads must follow the flag. Live because the scripted seam in `guards.rs`
+    managed-base reads must follow the flag. Live because the scripted seam in `guards/doctor.rs`
     only records which region was asked for; this is where the listing is signed for and
     sent to that region, and where AWS answers it. The flag is the suite's region because
     the account is known to answer there, so the check needs no access anywhere else. It

@@ -192,6 +192,44 @@ class ChangelogTests(unittest.TestCase):
         output = self.assert_check(1)
         self.assertIn("NOT_SHIPPED covers microvms-domain/src/sizing_fuzz.rs", output)
 
+    def test_a_file_that_marks_itself_test_only_needs_no_fragment(self):
+        # The CLI's guards: `guards/mod.rs` declares each file with no `cfg`, and each file's
+        # own `#![cfg(test)]`, after its docs, is what keeps it out of the binary.
+        self.write("microvms-cli/src/main.rs", "#[cfg(test)]\nmod guards;\n")
+        self.write("microvms-cli/src/guards/mod.rs", "#![cfg(test)]\n\nmod area;\n")
+        area = (
+            "// SPDX-License-Identifier: Apache-2.0\n//! A guard.\n\n#![cfg(test)]\n\n"
+        )
+        self.write("microvms-cli/src/guards/area.rs", f"{area}fn f() {{}}\n")
+        self.commit("the guards")
+        git(self.repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        self.write("microvms-cli/src/guards/area.rs", f"{area}fn g() {{}}\n")
+        output = self.assert_check(0)
+        self.assertIn("changes no shipped code", output)
+
+    def test_a_mod_rs_is_declared_under_its_directorys_name(self):
+        # `guards/mod.rs` is module `guards`, declared from `src/`, not a module named `mod`.
+        self.write("microvms-cli/src/main.rs", "#[cfg(test)]\nmod guards;\n")
+        self.write("microvms-cli/src/guards/mod.rs", "mod area;\n")
+        self.write("microvms-cli/src/guards/area.rs", "#![cfg(test)]\n")
+        self.commit("the guards")
+        git(self.repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        self.write("microvms-cli/src/guards/mod.rs", "mod area;\nmod other;\n")
+        self.write("microvms-cli/src/guards/other.rs", "#![cfg(test)]\n")
+        output = self.assert_check(0)
+        self.assertIn("changes no shipped code", output)
+
+    def test_a_guards_file_with_no_cfg_of_its_own_fails(self):
+        self.write("microvms-cli/src/main.rs", "#[cfg(test)]\nmod guards;\n")
+        self.write("microvms-cli/src/guards/mod.rs", "#![cfg(test)]\n\nmod area;\n")
+        # An item comes first, so the attribute below it is no longer the file's own.
+        self.write("microvms-cli/src/guards/area.rs", "fn f() {}\n#![cfg(test)]\n")
+        output = self.assert_check(1)
+        self.assertIn(
+            "NOT_SHIPPED covers microvms-cli/src/guards/area.rs, and no `#[cfg(test)] mod area;`",
+            output,
+        )
+
     def test_a_hand_edit_of_the_changelog_is_not_a_fragment(self):
         self.change_shipped()
         self.write("CHANGELOG.md", CHANGELOG + "- **An entry written by hand (#7).**\n")

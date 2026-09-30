@@ -146,11 +146,11 @@ is a first-class consumer, so `microvm manifest` emits the whole command tree wi
 domains, exit codes, and envelope schema generated from the parser, and every command writes
 exactly one envelope object to stdout with progress on stderr
 (`microvms-cli/src/main.rs:17-21`). There is no lib target, which is why the modules are declared
-in `main.rs`, and `guards.rs` — the crate's largest file — holds the guards that have to
+in `main.rs`, and `guards/`, one file per command area, holds the guards that have to
 inject a refusing seam from inside the crate and so compiles only under `cfg(test)`
-(`microvms-cli/src/main.rs:23-28`, `microvms-cli/src/guards.rs:12-20`).
+(`microvms-cli/src/main.rs:23-28`, `microvms-cli/src/guards/mod.rs:12-25`).
 
-- `microvms-cli/src/guards.rs`
+- `microvms-cli/src/guards/`
 - `microvms-cli/src/cli.rs`
 - `microvms-cli/src/exit.rs`
 - `microvms-cli/src/commands/attached.rs`

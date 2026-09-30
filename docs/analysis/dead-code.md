@@ -49,7 +49,7 @@ builder has a caller: `with_minter` (`microvms-app/src/session/mod.rs:421`) from
 `microvms-cli/src/seam.rs`, `microvms-app/src/sandbox.rs`, and
 `microvms-core/tests/turmoil_client.rs`; `with_proxy_auth`
 (`microvms-app/src/session/mod.rs:429`) from `microvms-core/tests/turmoil_client.rs`;
-`with_backend` (`microvms-app/src/session/mod.rs:436`) from `microvms-cli/src/guards.rs`
+`with_backend` (`microvms-app/src/session/mod.rs:436`) from `microvms-cli/src/guards/`
 and `microvms-core/tests/turmoil_client.rs`; `with_port`
 (`microvms-app/src/session/mod.rs:443`) from `microvms-cli/src/seam.rs` and
 `microvms-app/src/sandbox.rs`.
@@ -93,9 +93,9 @@ files that a basename search calls orphans, each cleared against its real invoca
 | `microvms-js/__test__/support/sse.mjs` | `microvms-js/__test__/cost.mjs:41`, `microvms-js/__test__/errors.mjs:40`, `microvms-js/__test__/exec.mjs:44`, `microvms-js/__test__/process.mjs:31`, `microvms-js/__test__/session.mjs:33` |
 | `conformance/infra/main.tf` | `terraform -chdir=conformance/infra` at `mise.toml:54`, `mise.toml:95`, `mise.toml:482`, `mise.toml:726` |
 
-Two files are compiled only under `cfg(test)` and are live test code, not dead source:
-`microvms-cli/src/guards.rs` (inner `#![cfg(test)]` at `microvms-cli/src/guards.rs:20`, plus
-`#[cfg(test)] mod guards;` at `microvms-cli/src/main.rs:36-37`) and
+Two modules are compiled only under `cfg(test)` and are live test code, not dead source:
+`microvms-cli/src/guards/` (inner `#![cfg(test)]` at `microvms-cli/src/guards/mod.rs:25` and in
+each file under it, plus `#[cfg(test)] mod guards;` at `microvms-cli/src/main.rs:36-37`) and
 `microvms-app/src/control/fake.rs` (`#[cfg(test)] pub(crate) mod fake;` at
 `microvms-app/src/control/mod.rs:900-901`).
 

@@ -9,7 +9,7 @@ The runners:
 
 - core: `microvms-core/tests/parity_cases.rs`, under `cargo test`.
 - CLI: `microvms-cli/tests/parity_cases.rs` for what a spawned `microvm` answers, and the
-  `parity` section of `microvms-cli/src/guards.rs` for the cases that need a scripted control
+  `microvms-cli/src/guards/parity.rs` for the cases that need a scripted control
   plane or daemon.
 - Python: `microvms-py/tests/test_parity_cases.py`, under pytest.
 - TypeScript: `microvms-js/__test__/parity_cases.mjs`, under `node --test`.
