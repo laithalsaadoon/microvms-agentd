@@ -475,3 +475,30 @@ expect = "test-failed"
 suite = "bindings"
 message = "\"phase\":\"launch\""
 transform = { file = "bindings/microvms-js/src/cost.rs", replace = "    plan.launched = options.launched.unwrap_or_else(|| plan.infer_launched());\n", with = "    plan.launched = options.launched.unwrap_or(true);\n" }
+
+# Each binding's budget gate passes the caller's judgement to core (#270): one that fixed it
+# at `abort` would refuse a report the caller only wanted warned about.
+
+[[fault]]
+id = "py-budget-ignores-the-judgement"
+guard = "bindings/microvms-py/tests/test_cost.py::test_a_breach_aborts_only_when_the_caller_said_abort"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_cost.py::test_a_breach_aborts_only_when_the_caller_said_abort"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "assert not"
+transform = { file = "bindings/microvms-py/src/cost.rs", replace = "cost::EstimatedUsd::parse(max_usd)?, on_breach.parse()?);", with = "cost::EstimatedUsd::parse(max_usd)?, cost::OnBreach::Abort);" }
+
+[[fault]]
+id = "ts-budget-ignores-the-judgement"
+guard = "a breach aborts only when the caller said abort"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/cost.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "true !== false"
+transform = { file = "bindings/microvms-js/src/cost.rs", replace = "        on_breach.parse().map_err(js)?,\n", with = "        { let _ = on_breach; cost::OnBreach::Abort },\n" }

@@ -290,6 +290,69 @@ class BearerToken:
         """
 
 @final
+class BudgetVerdict:
+    """
+    A report's total judged against a budget: core's `Budget::check`, the verdict
+    `microvm cost --max-cost` renders.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def aborts(self, /) -> bool:
+        """
+        Whether the caller's judgement refuses the report: breached, under `"abort"`.
+        """
+    @property
+    def basis(self, /) -> str:
+        """
+        `"exact"` or `"lower-bound"`.
+        """
+    @property
+    def breached(self, /) -> bool:
+        """
+        Whether the floor is over the ceiling. At the ceiling is within it.
+        """
+    @property
+    def floor(self, /) -> EstimatedUsd:
+        """
+        The total's floor: the whole estimate unless `is_lower_bound`.
+        """
+    @property
+    def is_lower_bound(self, /) -> bool:
+        """
+        Whether the floor is a lower bound, because a line is unpriced.
+        """
+    @property
+    def max_usd(self, /) -> EstimatedUsd:
+        """
+        The ceiling, as the caller wrote it.
+        """
+    @property
+    def on_breach(self, /) -> str:
+        """
+        `"warn"` or `"abort"`: what the caller said a breach does.
+        """
+    @property
+    def overage(self, /) -> EstimatedUsd |None:
+        """
+        How far over the ceiling the floor is, when breached; at least that much for a lower
+        bound.
+        """
+    def render(self, /) -> str:
+        """
+        One line for a human, the one `microvm cost --max-cost` prints.
+        """
+    def to_dict(self, /) -> dict:
+        """
+        Core's JSON shape for the verdict, as a dict: `maxUsd`, `onBreach`, `basis`, `breached`,
+        `overageAtLeastUsd`.
+        """
+    @property
+    def unpriced_phases(self, /) -> list[str]:
+        """
+        The phases whose lines are unpriced, sorted.
+        """
+
+@final
 class BuildHookTimeout:
     """
     A timeout for the `ready` or `validate` image-build hook: 1..=3600 seconds.
@@ -2728,6 +2791,16 @@ def agent_constants() -> dict:
 def build_unpriced_reason() -> str:
     """
     Why the image build has no price, as the reason that lands on the line item.
+    """
+
+def check_budget(report: CostReport, max_usd: str, on_breach: str) -> BudgetVerdict:
+    """
+    Judges `report`'s total against a ceiling of `max_usd` (a decimal string, such as
+    `"1.50"`), with `on_breach` (`"warn"` or `"abort"`) saying what a breach does.
+    
+    `on_breach` has no default, because a breach of a lower-bound total has already been
+    exceeded by an unknown margin, and whether that warns or refuses is the caller's call.
+    Core's `Budget::check`, the gate `microvm cost --max-cost` applies.
     """
 
 def compare_residency(size: SizeClass, hold_seconds: float, cycles: int = 1, *, rates: RateTable |None = None) -> ResidencyComparison:
