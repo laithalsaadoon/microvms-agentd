@@ -244,6 +244,40 @@ mod tests {
         assert_eq!(err.wire_kind(), Some(WireKind::TooLarge));
     }
 
+    /// The daemon's disk-pressure 507 on either upload route is `InsufficientStorage`,
+    /// `ERR_PLATFORM` and not retryable (#256), with the daemon's byte counts in the
+    /// message. The 5xx fallback made it a retryable `ServerError`, so a caller's retry
+    /// loop repeated a write the full disk refuses the same way each time.
+    #[tokio::test]
+    async fn a_disk_pressure_507_upload_is_insufficient_storage_and_not_retryable() {
+        let body = b"refusing to write /workspace: 4096 bytes available on the target \
+                     filesystem, below the 1048576 byte reserve";
+        let recorder = Recorder::with([
+            Reply::Body(507, body.to_vec()),
+            Reply::Body(507, body.to_vec()),
+        ]);
+        let (session, _, _) = session_with(recorder);
+
+        let file = session
+            .upload_file("/workspace/big.bin", b"...", None)
+            .await
+            .expect_err("507");
+        let tar = session
+            .upload_tar("/workspace", b"...")
+            .await
+            .expect_err("507");
+        for err in [file, tar] {
+            assert_eq!(
+                err.wire_kind(),
+                Some(WireKind::InsufficientStorage),
+                "{err}"
+            );
+            assert_eq!(err.code(), "ERR_PLATFORM", "{err}");
+            assert!(!err.retryable(), "a full disk is not retryable: {err}");
+            assert!(err.to_string().contains("4096 bytes available"), "{err}");
+        }
+    }
+
     /// The encoder leaves unreserved characters alone, so an ordinary path stays
     /// readable in a log.
     #[test]

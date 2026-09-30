@@ -283,7 +283,7 @@ PROMOTE = {
     # hard gate, since a finding without a decision is drift, and an enforced category can't
     # carry any. Not semgrep: #281 measured that its `impl $T for $U` matches every impl, and it
     # can't skip inline test modules.
-    "port-impl": "verify/ratchet/rules/port-impl.yml as a hard gate, once #270 clears its drift",
+    "port-impl": "verify/ratchet/rules/port-impl.yml as a hard gate (#270)",
     "adapter-logic": (
         "verify/ratchet/rules/operation-literal.yml and literal-default.yml as a hard gate (#273)"
     ),
