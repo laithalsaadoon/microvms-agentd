@@ -5,13 +5,15 @@
 //!
 //! A consumer building a product depends on `microvms-core`; a consumer who wants a VM to run a
 //! test suite in *now* runs `microvm run ./agentd --exec pytest`. This binary is the second door
-//! onto the first room — it parses, it renders, and it exits with a code. Each control-plane and
-//! endpoint-proxy operation it runs is a `microvms-core` call (ARCH-3). Every AWS call and
+//! onto the first room — it parses, it renders, and it exits with a code. Every AWS call and
 //! every trap guard belongs to the library, and that is a **checked** property rather than an
 //! intention: `tests/thinness.rs` asserts that no direct dependency is an HTTP or AWS crate,
 //! that no source file here names a transport or a control-plane operation, and that
 //! every AWS-touching command fails when the library seam is made to refuse. Any one of those
 //! alone is defeatable, which is why there are three.
+//!
+//! Each control-plane and endpoint-proxy operation this binary runs is a `microvms-core` call
+//! (ARCH-3), and core is its one edge among the workspace's crates.
 //!
 //! # A coding agent is a first-class consumer
 //!
