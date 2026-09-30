@@ -239,8 +239,7 @@ assertion rather than the resulting state:
   falling back to the `idlePolicy` that `GetMicrovm` reported, and with no window from either
   source, or with the suspend stamp missing, the check passes, because this sandbox cannot know
   how long the VM has been suspended and guessing would refuse a resume the service would honour
-  (`crates/microvms-app/src/sandbox.rs:1598-1608`; see
-  `.erpaval/solutions/architecture-patterns/an-absent-value-is-not-a-neutral-one.md`).
+  (`crates/microvms-app/src/sandbox.rs:1598-1608`).
 - `suspended_at` is cleared on a successful resume, so the next cycle's window is measured from
   the next suspend rather than accumulating every suspension into one total —
   `crates/microvms-app/src/sandbox.rs:1579-1582`.

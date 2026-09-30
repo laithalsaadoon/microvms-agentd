@@ -24,6 +24,8 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | AGENTD-16 | 1 | 1 | 1 | 4 | 4 | 1 |
 | AGENTD-17 | waived | waived | waived | 2 | 1 | waived |
 | AGENTD-18 | waived | waived | waived | 1 | 1 | 1 |
+| AGENTD-19 | waived | waived | waived | 1 | 1 | waived |
+| AGENTD-20 | waived | waived | waived | 2 | 1 | waived |
 | ARCH-1 | waived | waived | waived | 1 | 2 | waived |
 | ARCH-2 | waived | waived | waived | 1 | 4 | waived |
 | ARCH-3 | waived | waived | waived | 1 | 1 | waived |
@@ -49,9 +51,10 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | BIND-17 | 1 | 1 | 1 | 2 | 4 | 1 |
 | BIND-18 | 1 | 1 | 1 | 4 | 3 | 1 |
 | BIND-19 | 1 | 1 | 1 | 2 | 1 | 1 |
-| BIND-20 | 1 | 1 | 1 | 2 | 3 | 1 |
+| BIND-20 | 1 | 1 | 1 | 6 | 4 | 1 |
 | BIND-21 | waived | waived | waived | 1 | 1 | 1 |
 | BIND-22 | waived | waived | 1 | 1 | 1 | waived |
+| BIND-23 | waived | waived | waived | 1 | 1 | 1 |
 | CLI-1 | waived | waived | waived | 1 | 2 | waived |
 | CLI-2 | waived | waived | waived | 1 | 5 | waived |
 | CLI-3 | waived | waived | waived | 2 | 1 | 2 |
@@ -271,6 +274,28 @@ While the handshake of an identity-verified tunnel has not completed, the agentd
 - **test:** `crates/agentd/tests/tunnel_relay.rs`
 - **impl:** `crates/agentd/src/tunnel.rs`
 - **live:** `conformance/lanes/tunnel.py`
+
+## AGENTD-19
+
+When the guest side of an identity-verified tunnel reaches the end of the guest stream, the agentd shall send the end of stream inside the Noise session before the agentd closes the tunnel.
+
+- **model:** waived: #297 adds a stateright model of the tunnel handshake and its end of stream; until then the relay tests and the daemon-against-client tests hold the key
+- **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
+- **fuzz:** waived: #297 adds a harness over the daemon's tunnel frame read
+- **test:** `crates/agentd/tests/tunnel_relay.rs`
+- **impl:** `crates/agentd/src/tunnel.rs`
+- **live:** waived: the live suite's BIND-23 check observes it: the client reads Closed through the real proxy only when this end of stream crossed it
+
+## AGENTD-20
+
+If an identity-verified tunnel whose caller offered the end of stream ends without the caller's end of stream, then the agentd shall reset the guest connection rather than close the guest connection.
+
+- **model:** waived: #297 adds a stateright model of the tunnel handshake and its end of stream; until then the relay tests and the daemon-against-client tests hold the key
+- **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
+- **fuzz:** waived: #297 adds a harness over the daemon's tunnel frame read
+- **test:** `crates/agentd/tests/tunnel_relay.rs`, `crates/microvms-edges/tests/tunnel_end_of_stream.rs`
+- **impl:** `crates/agentd/src/tunnel.rs`
+- **live:** waived: a live run can't cut the endpoint proxy's connection mid-stream or withhold one frame, so no live check presents a caller end without its end of stream; the relay tests drive the daemon's real route
 
 ## ARCH-1
 
@@ -554,8 +579,8 @@ If a caller-supplied or fetched agentd binary is not an aarch64 ELF executable, 
 - **model:** `crates/model/src/provision.rs`
 - **gherkin:** `crates/microvms-core/tests/features/provision.feature`
 - **fuzz:** `crates/microvms-edges/src/provision_fuzz.rs`
-- **test:** `bindings/microvms-js/__test__/provision.mjs`, `crates/microvms-edges/src/provision.rs`
-- **impl:** `bindings/microvms-js/src/provision.rs`, `bindings/microvms-py/src/provision.rs`, `crates/microvms-edges/src/provision.rs`
+- **test:** `bindings/microvms-js/__test__/image_daemon.mjs`, `bindings/microvms-js/__test__/provision.mjs`, `crates/microvms-app/src/control/artifact.rs`, `crates/microvms-app/src/control/image.rs`, `crates/microvms-cli/src/guards/build.rs`, `crates/microvms-edges/src/provision.rs`
+- **impl:** `bindings/microvms-js/src/provision.rs`, `bindings/microvms-py/src/provision.rs`, `crates/microvms-domain/src/provision.rs`, `crates/microvms-edges/src/provision.rs`
 - **live:** `conformance/lanes/quickstart.py`
 
 ## BIND-21
@@ -579,6 +604,17 @@ If a daemon event stream carries bytes that are not well-formed server-sent even
 - **test:** `crates/microvms-app/src/session/sse.rs`
 - **impl:** `crates/microvms-app/src/session/sse.rs`
 - **live:** waived: a live daemon sends well-formed events, so a live run can't present hostile bytes
+
+## BIND-23
+
+If the far end of an identity-verified tunnel whose daemon offered the end of stream closes the tunnel without the daemon's end of stream, then the microvms-core shall report the tunnel as truncated rather than closed.
+
+- **model:** waived: #297 adds a stateright model of the tunnel handshake and its end of stream; until then the stand-in tests and the daemon-against-client tests hold the key
+- **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
+- **fuzz:** waived: #297 adds a harness over the client's tunnel frame read
+- **test:** `crates/microvms-edges/tests/tunnel_end_of_stream.rs`
+- **impl:** `crates/microvms-edges/src/session/tunnel.rs`
+- **live:** `conformance/lanes/tunnel.py`
 
 ## CLI-1
 
@@ -826,4 +862,4 @@ trace it.
 | A guest streams hostile server-sent events to the client | BIND-22 | `crates/microvms-app/src/session/sse.rs::an_unterminated_stream_is_refused_at_the_pending_ceiling`, `crates/microvms-app/src/session/sse.rs::an_unrecognized_or_unparseable_frame_is_dropped_rather_than_raised`, `crates/microvms-app/src/session/sse_fuzz.rs::hostile_stream_bytes_stay_bounded_and_every_event_round_trips` | guarded |
 | A replaced or tampered daemon release asset | BIND-18 | `crates/microvms-edges/src/provision/release.rs::another_signer_identity_is_refused`, `crates/microvms-edges/src/provision/release.rs::one_flipped_byte_in_the_asset_is_refused` | guarded |
 | A release directory (`$MICROVM_RELEASE_DIR`) holding an asset and a matching `SHA256SUMS` but no bundle, or another release's files under the requested tag | BIND-18 | `crates/microvms-edges/src/provision/release.rs::a_release_directory_without_its_bundle_is_refused_despite_a_matching_checksum`, `crates/microvms-edges/src/provision/release.rs::another_releases_files_under_the_requested_tag_are_refused` | guarded |
-| An on-path party ends a verified tunnel early, with a plaintext close frame or by dropping the connection | none | none | known gap, #342: the close frame is plaintext, and the client reads a transport error or a hangup after the handshake as a clean end too, so a stream cut short looks complete |
+| An on-path party ends a verified tunnel early, with a plaintext close frame or by dropping the connection | BIND-23, AGENTD-19, AGENTD-20 | `crates/model-conformance/tests/tunnel_end_of_stream.rs::bind_23_a_close_frame_forged_mid_stream_ends_truncated`, `crates/model-conformance/tests/tunnel_end_of_stream.rs::bind_23_a_connection_dropped_mid_stream_ends_truncated`, `crates/model-conformance/tests/tunnel_end_of_stream.rs::bind_23_the_daemons_end_of_stream_withheld_ends_truncated`, `crates/model-conformance/tests/tunnel_end_of_stream.rs::agentd_20_the_clients_end_of_stream_withheld_resets_the_guest`, `crates/agentd/tests/tunnel_relay.rs::agentd_19_a_guest_eof_reaches_the_caller_as_the_end_of_stream` | guarded; a tunnel into a daemon from before #342 has no end of stream to check, so it ends `ClosedUnproven` and `microvm tunnel` warns |

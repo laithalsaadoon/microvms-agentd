@@ -37,7 +37,7 @@ run = ["./tools/check-trace.py", "--check"]
 expect = "exit-nonzero"
 suite = "script"
 message = "a known gap names the issue that closes it"
-transform = { file = "docs/TRUST.md", replace = "| known gap, #342: the close frame", with = "| known gap: the close frame" }
+transform = { file = "docs/TRUST.md", replace = "| known gap, #297: both frame reads", with = "| known gap: both frame reads" }
 
 # The floor on empty input: a blank line after the header leaves a table with no rows.
 [[fault]]

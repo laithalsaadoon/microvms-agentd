@@ -15,8 +15,8 @@ anyone's head:
 - Trap messages in the library. `microvms-core` writes the finding into the message itself, so
   the failure explains itself without a doc lookup — see
   `crates/microvms-app/src/control/image.rs:376-391`.
-- `.erpaval/solutions/` — compounded lessons, each the conclusion of a real debugging
-  session.
+- Doc comments at the defended site. A rule with a defect behind it says so where the code
+  enforces it, and the incident patterns below cite those sites.
 
 No `.rs` or `.py` file in the workspace carries a `TODO`, `FIXME`, `HACK`, `INCIDENT`, or
 `POSTMORTEM` marker; the repo convention is that comments record constraints and defects
@@ -38,7 +38,7 @@ under `/aws/lambda-microvms/` that outlive `terraform destroy` (`docs/PLATFORM.m
 | `AccessDeniedException` whose `message` field is null | Not IAM. The region does not price MicroVMs — only five do. The service model's `endpointPrefix` is `lambda`, so a client constructs and resolves for any region and the first API call is the only reporter | Read the `message` field. A real denial names the principal and the action; this one is `None`. Then `microvm doctor`, whose region check runs first for exactly this reason | `docs/PLATFORM.md:59-70`, `crates/microvms-domain/src/region.rs:73`, `crates/microvms-cli/src/exit.rs:340-344` |
 | Image stuck in `CREATING`; builds never start; `updatedAt` never advances past `createdAt` | The `clientToken` replay. A `clientToken` is a permanent idempotency key, so a create whose token repeats an earlier one is replayed as a no-op. The image cannot be deleted (`CREATING` forbids it) and its only version cannot be dropped either. Two were wedged about 15 hours | `ListMicrovmImageBuilds` — every build `PENDING` is the signature. Record the identifier and build under a fresh `--name`; waiting does not help | `docs/PLATFORM.md:247-257`, `crates/microvms-app/src/control/image.rs:371-391`, `crates/microvms-cli/src/exit.rs:354-357` |
 | A VM reaches a terminal state before `RUNNING`; the client reports a connection error | A lifecycle hook failed. `PENDING → RUNNING → SUSPENDING/SUSPENDED → TERMINATING → TERMINATED`; anything terminal before `RUNNING` died during startup, and the platform terminates it before forwarding any traffic | `GetMicrovm`'s `stateReason` — the only evidence that outlives the VM. The client already puts the state and the reason both in the message | `docs/PLATFORM.md:92-98`, `crates/microvms-app/src/control/microvm.rs:482-499`, `crates/microvms-cli/src/exit.rs:216-221` |
-| `CREATE_FAILED` with a fully green build log, every docker layer succeeding, and no error line anywhere | The guest's `AGENTD_PORT` disagrees with the create call's `hooks.port`. The build-time `ready` and `validate` hooks are dialled on the create call's port, so a daemon listening elsewhere answers none of them. An unset `AGENTD_PORT` is the same failure, with nothing in the Dockerfile to point at | Fetch `GetMicrovmImageVersion` and compare `hooks.port` against the Dockerfile's `ENV AGENTD_PORT`. `GetMicrovmImage` structurally cannot say why | `docs/PLATFORM.md:558-565`, `crates/agentd/src/config.rs:116-120`, `.erpaval/solutions/architecture-patterns/an-absent-value-is-not-a-neutral-one.md:19-24` |
+| `CREATE_FAILED` with a fully green build log, every docker layer succeeding, and no error line anywhere | The guest's `AGENTD_PORT` disagrees with the create call's `hooks.port`. The build-time `ready` and `validate` hooks are dialled on the create call's port, so a daemon listening elsewhere answers none of them. An unset `AGENTD_PORT` is the same failure, with nothing in the Dockerfile to point at | Fetch `GetMicrovmImageVersion` and compare `hooks.port` against the Dockerfile's `ENV AGENTD_PORT`. `GetMicrovmImage` structurally cannot say why | `docs/PLATFORM.md:558-565`, `crates/agentd/src/config.rs:116-120`, `crates/microvms-app/src/control/artifact.rs:930-936` |
 | A 45-minute build ends as `Ready hook invocation timed out after PT5M`, saying nothing about architecture | A host-architecture daemon binary. MicroVMs are ARM64-only, so an x86-64 `CMD` cannot exec and surfaces only as the hook never answering | `microvm doctor --binary <path>`. It reads twenty bytes of ELF header and compares `e_machine` against `0xB7`; a script or wrapper is caught as "not an ELF binary" | `crates/microvms-cli/src/commands/doctor.rs:8-15`, `crates/microvms-cli/src/commands/doctor.rs:24-28`, `crates/microvms-cli/src/commands/doctor.rs:481-500` |
 | Every failed build reports `reason=unknown` and the log group holds nothing at all | The build role's log permissions, not a silent service. Logs go to `/aws/lambda-microvms/<image-name>`, not the plausible `/aws/lambda/microvms/*`. The caller's own policy is discarding the evidence | `microvm logs <image-name>` names the group; an empty group beside `reason=unknown` is the prefix signature. Unknown alone is not the same as empty | `docs/PLATFORM.md:259-264`, `crates/microvms-app/src/control/image.rs:55`, `crates/agentd/src/main.rs:84-87` |
 | A build says `The container image build failed.` and nothing else | `stateReason` lives on the **build** only. `GetMicrovmImage` reports `CREATE_FAILED` with no reason member at all, and `ListMicrovmImageVersions` reported `null` across three separate failures | `ListMicrovmImageBuilds`, and expect a **list**: each failed version produced two builds, one per Graviton generation, with identical reasons. Then read `snapshotBuild`'s shape — absent means the Dockerfile broke before anything installed, `codeInstallSizeInBytes` alone means code installed and the daemon never became ready | `docs/PLATFORM.md:278-287`, `docs/PLATFORM.md:533-546` |
@@ -49,7 +49,7 @@ under `/aws/lambda-microvms/` that outlive `terraform destroy` (`docs/PLATFORM.m
 | A long-running trial dies mid-flight with what looks like a dead daemon | An expired proxy token. The service caps a JWE at sixty minutes, shorter than a long agent run, and the rejection is indistinguishable from a daemon that died | Minting happens inside the request path and `DEFAULT_REFRESH_AFTER` is thirty minutes — half the ceiling rather than marginally under it, so a request in flight across the rollover still holds about thirty minutes of life. A mint failure is retryable on purpose | `docs/PLATFORM.md:229-232`, `crates/microvms-app/src/session/proxy.rs:21-37`, `crates/microvms-app/src/session/proxy.rs:111` |
 | Writes are refused with **507** naming byte counts | Disk pressure past the configured reserve. 507 rather than 500 deliberately: a 500 is indistinguishable from a daemon defect, so a client retries it, which is correct for a defect and actively harmful for a full disk | Read the free-space numbers in the response body, then `GET /v1/health` → `disk.under_pressure`. `disk: null` means unmeasurable, which is deliberately not zero | `crates/agentd/src/fs.rs:97-124`, `crates/agentd/src/disk.rs:142-159`, `crates/protocol/src/health.rs:21-34` |
 | An exec result carries `truncated: true` | The per-stream output cap. Default 8 MiB, sized well under a 512 MiB baseline VM, because an OOM-killed daemon is unrecoverable — there is no supervisor inside the VM to restart it | `AGENTD_MAX_OUTPUT_BYTES` against the volume the command emits. Past the cap the daemon keeps reading and discarding rather than stopping, so the writer never blocks in the kernel | `crates/agentd/src/config.rs:25-27`, `crates/agentd/src/config.rs:87`, `crates/protocol/src/exec.rs:66-73` |
-| An exec result carries `writers_may_be_alive: true` and the output looks cut short | A grandchild still holds the inherited pipe past `output_linger`. EOF arrives when the *last* writer closes, so a command that backgrounds a server or a log tailer keeps writing after the direct child exits | `AGENTD_OUTPUT_LINGER_SECS` (default 5). Under a simulated-time test this flag is a false positive — see the two-clocks incident below | `crates/agentd/src/config.rs:28-31`, `crates/agentd/src/exec.rs:1259-1296`, `.erpaval/solutions/best-practices/pipes-not-tempfiles-for-subprocess-output.md:11-27` |
+| An exec result carries `writers_may_be_alive: true` and the output looks cut short | A grandchild still holds the inherited pipe past `output_linger`. EOF arrives when the *last* writer closes, so a command that backgrounds a server or a log tailer keeps writing after the direct child exits | `AGENTD_OUTPUT_LINGER_SECS` (default 5). Under a simulated-time test this flag is a false positive: see the two-clocks incident below | `crates/agentd/src/config.rs:28-31`, `crates/agentd/src/exec.rs:1259-1296`, `crates/agentd/src/exec.rs:10-15` |
 | A stream delivers a `gap` event with `from`/`to` offsets | The subscriber lagged the bounded broadcast channel, or the replay ring evicted the bytes. Classified `ERR_PLATFORM` and not retryable — the bytes are gone. The gap is a typed event rather than a log line precisely so a cursor cannot advance silently past dropped data | Re-GET from the last offset actually received. Then check `AGENTD_STREAM_CHANNEL_CAPACITY` and `AGENTD_STREAM_BUFFER_BYTES` against the output rate | `crates/agentd/src/exec.rs:617-630`, `crates/microvms-domain/src/error.rs:265-267`, `crates/microvms-domain/src/error.rs:395` |
 | A stdin write answers 409, or 410, or 408 — and the three mean different things | 409 `Conflict` is "you did not ask for stdin", fixed at start time. 410 `StdinClosed` is a lifecycle fact: EOF already arrived or the child stopped reading, and a retry never succeeds. 408 `RequestTimeout` is the child not draining within the write timeout — retryable, and some bytes may already have landed | Read `data.kind`, not the exit code: all three collapse onto `ERR_PROTOCOL` except 408, which is `ERR_RETRYABLE`. The daemon keeps its stdin handle open across a 408 so a retry can succeed | `crates/microvms-domain/src/error.rs:229-243`, `crates/agentd/src/config.rs:58-62`, `crates/protocol/src/exec.rs:277-287` |
 | A tar upload answers 400 naming one member | That member violated the data-filter contract — an escaping path, a symlink out of the root, a refused type. The refused name travels with the refusal, because a 400 saying only "bad archive" sends the caller re-reading their whole tree | Read the member name in the body. 413 is a different answer (over `max_tar_members` or `max_tar_bytes`) and 507 a third (the filesystem filled partway through) | `crates/agentd/src/fs.rs:126-142`, `crates/agentd/src/fs.rs:158-182`, `crates/agentd/src/config.rs:37-40` |
@@ -60,7 +60,7 @@ under `/aws/lambda-microvms/` that outlive `terraform destroy` (`docs/PLATFORM.m
 | A client sees a transport error it cannot tell from a dead VM | A panicking handler. Without the outermost `CatchPanicLayer` the panic reaches hyper and the connection drops; with it the client gets a 500 and the connection survives. It does not undo the panic — any `std::sync::Mutex` the handler held is now poisoned | Grep the daemon log for `recovering a poisoned lock`. Locks recover rather than propagate, because `.expect()` on a poisoned token lock closes the whole control API forever | `crates/agentd/src/routes.rs:86-101`, `crates/agentd/src/state.rs:73-92`, `crates/agentd/tests/panic_guard.rs:11-26` |
 | A connection is refused a second or two after the VM reaches `RUNNING` | Expected. The endpoint proxy path is not wired up the instant the state flips. Classified `Transport`, retryable because it says nothing about the daemon's state | Retry. If it persists past a few attempts, go to the terminal-state row and read `stateReason` | `crates/microvms-domain/src/error.rs:251-256` |
 | `resume` returns 200 but the control API stays closed | The VM resumed without an installed token, which contradicts the measured suspend/resume behavior — the in-memory token, the filesystem, exec records, and backgrounded processes all survive a normal cycle | Grep the daemon log for `resumed WITHOUT an installed token`. That line means the resume behaved like a cold start and every in-flight exec record is gone | `crates/agentd/src/routes.rs:276-290`, `docs/PLATFORM.md:197-206` |
-| A Node caller reads `err.code` and gets `GenericFailure` | napi-rs types the async path over its own closed `Status` enum, so a custom code survives a synchronous throw and is collapsed on a Promise rejection. Nearly every binding method is async | Read `err.cause.message` for the `ERR_*` code and `err.cause.cause.message` for the fine-grained wire kind | `.erpaval/solutions/api-patterns/napi-async-collapses-error-codes.md:11-19` |
+| A Node caller reads `err.code` and gets `GenericFailure` | napi-rs types the async path over its own closed `Status` enum, so a custom code survives a synchronous throw and is collapsed on a Promise rejection. Nearly every binding method is async | Read `err.cause.message` for the `ERR_*` code and `err.cause.cause.message` for the fine-grained wire kind | `bindings/microvms-js/src/errors.rs:15-43` |
 | `terraform destroy` reports success and the account is still billing | The service creates `/aws/lambda-microvms/<image-name>` itself, so Terraform never owns it. Separately, an image refuses deletion while its VM is still terminating, so one teardown pass is not enough | `mise run live:verify-clean` asks the account directly and separates leak / standing / pending. `microvm ls` alarms on every run whose ledger has a non-empty `leaked` list | `docs/PLATFORM.md:100-104`, `tools/verify-clean.py:7-28`, `crates/microvms-cli/src/main.rs:223-247` |
 
 ## Log and error surfaces
@@ -155,7 +155,8 @@ money.
 
 ## Known incident patterns
 
-These recur. Each is recorded in `.erpaval/solutions/` or in `docs/PLATFORM.md` with a date.
+These recur. Each is recorded in `docs/PLATFORM.md` with a date, or in the doc comment at the
+code that now defends against it.
 
 - **The green run that measured nothing:** the most common pattern in this project's history.
   The first OOM probe allocated with `python3`, which `amazonlinux:2023-minimal` does not have;
@@ -169,7 +170,8 @@ These recur. Each is recorded in `.erpaval/solutions/` or in `docs/PLATFORM.md` 
   passed because a filesystem walk cannot see it — the archive landed entirely inside the root.
   Signal: a policy test that only checks where files ended up. Mitigation: compute the expected
   status from the generated member and assert on it, which makes the same break shrink to a
-  one-member archive. `.erpaval/solutions/test-failures/proptest-and-dst-tiers-need-verdict-assertions.md:11-33`
+  one-member archive. `crates/agentd/tests/proptest_tar.rs:32-35`,
+  `crates/agentd/tests/proptest_tar.rs:595-598`
 - **The guard never watched failing:** distinct shapes, all found in one session. A bare
   `compile_fail` block passes for any build error including a typo in the doctest, so each is
   pinned to a measured rustc error code. A fake that models the failure *event* cannot catch
@@ -178,7 +180,9 @@ These recur. Each is recorded in `.erpaval/solutions/` or in `docs/PLATFORM.md` 
   almost never land in the narrow band where a rounding bug lives. And a guard can require
   the very divergence it should catch. Signal: a guard you have never seen red. Mitigation:
   break the invariant, watch that specific test fail, restore.
-  `.erpaval/solutions/test-failures/guards-that-passed-against-broken-code.md:13-37`
+  `crates/microvms-core/src/lib.rs:52-56`, `crates/microvms-domain/src/cost.rs:364-365`,
+  `crates/microvms-core/tests/turmoil_client.rs:155-166`,
+  `crates/microvms-domain/src/sizing.rs:617-624`, `crates/microvms-cli/tests/exit_codes.rs:570-571`
 - **The ordering defect no guard can see:** every guard fired and every refusal test passed,
   yet the S3 upload ran *before* the guards refused, so a rejected request still cost a PUT. A
   test asserting "the bad request is refused", or even "zero control-plane calls", stays green
@@ -187,7 +191,7 @@ These recur. Each is recorded in `.erpaval/solutions/` or in `docs/PLATFORM.md` 
   effect its own recorder — a separate `uploads` vec, deliberately not mixed into `calls` — and
   assert it is empty on a request the library refuses. Falsification is a pure reorder, and
   each call site needs the break run separately.
-  `.erpaval/solutions/best-practices/ordering-defects-need-their-own-recorder-channel.md:9-30`
+  `crates/microvms-cli/src/guards/build.rs:357-365`, `crates/microvms-cli/src/guards/support.rs:248-251`
 - **The fake more forgiving than the real server:** the fake-backed tests were green over a
   client whose auth-header injection replaced the request headers, stripping content-type,
   where the real daemon's typed extractor answered 400. Separately, the `run` envelope
@@ -196,7 +200,8 @@ These recur. Each is recorded in `.erpaval/solutions/` or in `docs/PLATFORM.md` 
   accepts. Mitigation: run the live tier before trusting a transport that has only ever spoken
   to fakes, because a fake that accepts what the real server rejects converts integration bugs
   into production bugs.
-  `.erpaval/solutions/test-failures/guards-that-passed-against-broken-code.md:39-47`
+  `crates/microvms-app/src/session/mod.rs:129-133`,
+  `crates/microvms-cli/src/commands/lifecycle.rs:1194-1197`
 - **Two clocks in one test:** under a virtual-time simulator everything inside the simulation
   runs on the paused clock and a spawned child does not — measured here, 2 real seconds of child
   sleep elapsed while the simulation advanced 30 virtual ones. A server-side deadline measured
@@ -206,7 +211,7 @@ These recur. Each is recorded in `.erpaval/solutions/` or in `docs/PLATFORM.md` 
   that looks like a daemon defect. Mitigation: never pace a child with `sleep` in a simulated
   test — make it block on `read` released by an explicit stdin write, so the harness is the
   clock. Loosening the assertion to match would encode the artifact as expected behavior.
-  `.erpaval/solutions/test-failures/simulated-time-and-real-children-are-two-clocks.md:13-39`
+  `crates/agentd/tests/turmoil_transport.rs:54-78`, `CONTRIBUTING.md:123-124`
 - **The absent value that is not neutral:** an agreement guard has to decide separately what a
   missing value means, and the deciding question is what the *consumer* does with absence. A
   consumer that errors out makes absence safe to pass; a consumer with a silent fallback makes
@@ -215,7 +220,9 @@ These recur. Each is recorded in `.erpaval/solutions/` or in `docs/PLATFORM.md` 
   "four times the daemon's fifteen-second SSE keepalive". Mitigation: grep docstrings for
   "twice the", "four times", "matching the", "same as the daemon's"; and treat an
   *unparseable* value wherever the absent one lands, since `env_parse` warns and keeps the
-  default. `.erpaval/solutions/architecture-patterns/an-absent-value-is-not-a-neutral-one.md:12-37`
+  default. `crates/microvms-app/src/control/artifact.rs:930-936`,
+  `crates/microvms-app/src/control/artifact.rs:938-940`,
+  `crates/microvms-app/src/control/artifact.rs:1029-1031`, `crates/microvms-app/src/session/exec.rs:53`
 - **A constructor that only ever ran under a fake:** `aws-config` built with
   `default-features = false` looks right when you have hand-rolled an HTTP client, and it is
   wrong — the credential chain does its own HTTP for IMDS, SSO, and STS, and `load()` panics
@@ -223,24 +230,24 @@ These recur. Each is recorded in `.erpaval/solutions/` or in `docs/PLATFORM.md` 
   because every test constructed through the injectable transport, and the one constructor
   that talks to the world had no test at all. Signal: a `new()` that touches the real
   environment with no test calling it. Mitigation: `default-https-client` stays on
-  (`crates/microvms-core/Cargo.toml:59-62`), and a test constructs the real transport and accepts
+  (`crates/microvms-edges/Cargo.toml:34-40`), and a test constructs the real transport and accepts
   either `Result` flavor — a panic is the bug
-  (`crates/microvms-app/src/control/transport.rs:590-599`).
-  `.erpaval/solutions/api-patterns/aws-config-needs-its-own-http-client.md:11-22`
+  (`crates/microvms-edges/src/control/transport.rs:326-335`).
 - **The credential in a derived `Debug`:** some token-carrying types in this workspace
   leaked secrets through `#[derive(Debug)]` while their siblings hand-wrote redaction —
   the invariant was known and still missed sites, because a derive is the default and
   nothing flags it. Signal: any struct holding a token, an `Authorization` header, or a hook
   payload. Mitigation: hand-write `Debug` printing names and lengths only, add a per-type guard
   that formats with `{:?}` and asserts the secret absent, and redact *all* header values rather
-  than an allowlist. `.erpaval/solutions/best-practices/credential-structs-never-derive-debug.md:10-20`
+  than an allowlist. `crates/microvms-app/src/control/microvm.rs:73-77`,
+  `crates/microvms-app/src/session/http.rs:71-79`
 - **The golden figure taken from the plan:** the plan pinned a 2 GB break-even at about 1357s
   and the oracle prints 1371.2916483478837. A golden test built from the plan's number would
   have been the one check that agreed with a plausible wrong answer, since the port and its test
   derived from the same mistaken source. Signal: a pinned figure or output-contract string whose
   provenance is a document rather than an execution. Mitigation: capture every golden by running
   the oracle, paste it verbatim, and cite it.
-  `.erpaval/solutions/best-practices/run-the-oracle-never-rederive-goldens.md:10-19`
+  `crates/microvms-domain/src/cost.rs:3781-3788`
 - **The tokio traps in the exec path:** `child.id()` returns `None` once the child has been
   polled to completion, so a pgid read lazily in the kill path yields `None`, the group signal
   never goes out, and a kill test asserting only on the HTTP status still passes while the
@@ -249,14 +256,14 @@ These recur. Each is recorded in `.erpaval/solutions/` or in `docs/PLATFORM.md` 
   `std::sync::Mutex` guard is never held across an await. Signal: a kill that reports success
   over a live process tree. Mitigation: capture the pgid immediately after spawn and assert on
   the observable kill outcome.
-  `.erpaval/solutions/best-practices/pipes-not-tempfiles-for-subprocess-output.md:32-47`
+  `crates/agentd/src/exec.rs:16-21`, `crates/agentd/src/exec.rs:205-209`
 - **The simulator that needs two specific bounds:** making the serve path generic over
   `axum::serve::Listener` costs nothing in production and buys deterministic network simulation
   — but omitting `L::Addr: Debug` fails with an E0277 saying `Serve<L, Router, Router> is not a
   future`, which points nowhere near the missing bound, and `turmoil::Builder::enable_tokio_io()`
   is required whenever the served code registers a signal handler or graceful shutdown panics
   inside the host. Signal: either of those two errors while adding a simulated test.
-  `.erpaval/solutions/api-patterns/axum-listener-trait-enables-turmoil.md:36-42`
+  `crates/agentd/src/serve.rs:16-18`, `crates/agentd/tests/turmoil_transport.rs:184-189`
 - **The security control that breaks the platform:** both the platform's lifecycle hooks and the
   harness's control requests arrive from `127.0.0.1`, because the endpoint proxy terminates
   outside the VM and forwards over loopback. A source-address rule rejecting loopback callers on

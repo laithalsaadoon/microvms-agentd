@@ -93,3 +93,11 @@ issue = "#297"
 waive.model = "one stream read by one parser has no interleavings to explore; its input space is bytes"
 waive.gherkin = "hostile bytes aren't a scenario a caller drives; the parser's tests feed it directly"
 waive.live = "a live daemon sends well-formed events, so a live run can't present hostile bytes"
+
+# The verified tunnel's end of stream, BIND-23 here and AGENTD-19 and AGENTD-20 in AGENTD.toml,
+# share their waivers.
+[BIND-23]
+issue = "#342"
+waive.model = "#297 adds a stateright model of the tunnel handshake and its end of stream; until then the stand-in tests and the daemon-against-client tests hold the key"
+waive.gherkin = "no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate"
+waive.fuzz = "#297 adds a harness over the client's tunnel frame read"
