@@ -56,15 +56,21 @@ message = "Listed but unused: [\"reqwest\"]"
 transform = { file = "verify/arch/placement.toml", replace = "[microvms-cli]\nnormal = [\"microvms-core\", \"clap\", \"ratatui\", \"serde\", \"serde_json\", \"tokio\", \"toml\", \"unicode-width\"]\n", with = "[microvms-cli]\nnormal = [\"microvms-core\", \"clap\", \"ratatui\", \"serde\", \"serde_json\", \"tokio\", \"toml\", \"unicode-width\"]\n\n[microvms-cli.drift]\nnormal = [\"reqwest\"]\n" }
 
 # The records readers' floors: a reader that finds no drift, or no placement decision, allows the
-# CLI none of it, so the CLI's exact set fails naming each crate it read nothing for.
+# CLI none of it, so the CLI's exact set fails naming each crate it read nothing for. No crate
+# carries drift since #260, so the drift floor's fault seeds a record and the crate it allows, then
+# breaks the reader.
 [[fault]]
 id = "deps-drift-floor"
 guard = "each_adapter_depends_on_exactly_its_allowed_set"
 run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_adapter_depends_on_exactly_its_allowed_set"]
 expect = "test-failed"
 suite = "rust"
-message = "Outside the set: [\"const-hex\", \"globset\", \"sha2\", \"tar\"]"
-transform = { file = "crates/microvms-cli/tests/dependency_direction.rs", replace = "let Some(drift) = table.get(\"drift\") else", with = "let Some(drift) = table.get(\"drifts\") else" }
+message = "Outside the set: [\"tar\"]"
+transform = [
+  { file = "verify/arch/placement.toml", replace = "[microvms-cli]\nnormal = [\"microvms-core\", \"clap\", \"ratatui\", \"serde\", \"serde_json\", \"tokio\", \"toml\", \"unicode-width\"]\n", with = "[microvms-cli]\nnormal = [\"microvms-core\", \"clap\", \"ratatui\", \"serde\", \"serde_json\", \"tokio\", \"toml\", \"unicode-width\"]\n\n[microvms-cli.drift]\nnormal = [\"tar\"]\n" },
+  { file = "crates/microvms-cli/Cargo.toml", replace = "[dependencies]\n", with = "[dependencies]\ntar = \"0.4.46\"\n" },
+  { file = "crates/microvms-cli/tests/dependency_direction.rs", replace = "let Some(drift) = table.get(\"drift\") else", with = "let Some(drift) = table.get(\"drifts\") else" },
+]
 
 [[fault]]
 id = "deps-decisions-floor"
