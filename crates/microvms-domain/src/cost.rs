@@ -1767,7 +1767,35 @@ impl RunUsage {
             ..RunUsage::default()
         }
     }
+
+    /// Whether this usage implies a launch: running time, or an image of non-zero size.
+    ///
+    /// The rule every surface applies when its caller doesn't say (#255). A launch reads a
+    /// snapshot, so claiming one that didn't happen adds a transfer line. A zero-sized image
+    /// isn't one: `Some(0.0)` claims no snapshot read the run never paid for, which is the
+    /// retired Python CLI's `bool(running_sec or image_gb)`.
+    pub fn infer_launched(&self) -> bool {
+        self.running
+            .is_some_and(|running| !running.duration().is_zero())
+            || implies_an_image(self.image_gb)
+    }
 }
+
+/// Whether `image_gb` names an image that was built: set, and not zero.
+fn implies_an_image(image_gb: Option<f64>) -> bool {
+    image_gb.is_some_and(|gb| gb != 0.0)
+}
+
+/// The label a run's report carries when its caller names none: the CLI's `cost` and both
+/// bindings' `run_report`.
+pub const DEFAULT_RUN_LABEL: &str = "run";
+
+/// The label an estimate carries when its caller names none: the CLI's `cost --estimate` and
+/// both bindings' `estimate_run` (#255).
+///
+/// Not "plan": the label is the report's own name for itself, a consumer reads it to tell a
+/// plan from a receipt, and the surfaces' reports have to be substitutable.
+pub const DEFAULT_ESTIMATE_LABEL: &str = "estimate";
 
 /// Per-phase attribution for one sandbox's lifecycle.
 ///
@@ -1887,6 +1915,14 @@ impl PlanUsage {
             launched: true,
             ..PlanUsage::default()
         }
+    }
+
+    /// Whether this plan implies a launch: running time, or an image of non-zero size.
+    ///
+    /// [`RunUsage::infer_launched`]'s rule over seconds: suspended time alone is a VM that
+    /// was already running, so it reads no launch snapshot.
+    pub fn infer_launched(&self) -> bool {
+        self.running_seconds > 0.0 || implies_an_image(self.image_gb)
     }
 }
 
@@ -2117,6 +2153,135 @@ pub fn compare_residency(
         suspended,
         rates: rates.clone(),
     })
+}
+
+// ── the report as JSON ───────────────────────────────────────────────────────
+//
+// One shape for every surface: the CLI's `cost --json` report, Python's `to_dict` and
+// TypeScript's `toJson` all come from these (#255). They used to be written three times and had
+// drifted: only the CLI's carried `size.headroomMib`.
+//
+// Two rules make the shape load-bearing rather than conventional.
+//
+// An unpriced line has **no `usd` key at all**, not a null: a null is summed as zero by
+// anything permissive, and a consumer summing the column would produce an invoice that
+// flatters us. It's the same decision `Amount::estimate` makes by returning `Option` instead of
+// defaulting to zero.
+//
+// Every **dollar** figure crosses as a string, never a number: `Decimal` to `f64` is a lossy
+// step for a figure whose exactness is the point of the type. Every **seconds** figure crosses
+// as a number (`breakEvenSeconds`, a line's `duration.seconds`, a comparison's `holdSeconds`),
+// through an accessor named `_f64` so the lossy step is visible. The split is which consumer is
+// protected: a caller summing dollars must not do float arithmetic on money, and a caller
+// comparing a duration with a timeout must not find it quoted.
+//
+// A dollar string prints at the scale the arithmetic produced (`Decimal::to_string`), so its
+// trailing zeros can differ from the retired Python client's for the same figure. The values
+// are equal, and a consumer comparing two reports parses both sides as decimals. Rescaling to
+// fixed places would round a figure whose exactness is why it's a string; the fixed-places
+// rendering the human column wants is `render_amount`. A **rate** is the exception, asserted
+// byte for byte by `every_rate_byte_matches_the_python_literal`, because a rate is a
+// transcription and a derived figure isn't.
+
+impl LineItem {
+    /// The line as JSON: `phase`, `line`, `quantity`, `unit`, `amount`, `duration`, `note`.
+    ///
+    /// The keys are the retired Python client's `_line_to_dict`, because the live suite reads
+    /// them and every surface's output has to be substitutable. `amount` is
+    /// `{"kind": "estimated-usd", "usd": "<decimal>"}` or `{"kind": "unpriced", "reason":
+    /// "..."}`, with no `usd` key.
+    pub fn to_json(&self) -> serde_json::Value {
+        let amount = match &self.amount {
+            Amount::Estimated(usd) => serde_json::json!({
+                "kind": "estimated-usd",
+                "usd": usd.amount().to_string(),
+            }),
+            Amount::Unpriced { reason } => serde_json::json!({
+                "kind": "unpriced",
+                "reason": reason,
+            }),
+        };
+        serde_json::json!({
+            "phase": self.phase.as_str(),
+            "line": self.line.map(|line| line.as_str()),
+            "quantity": self.quantity.to_string(),
+            "unit": self.unit,
+            "amount": amount,
+            "duration": self.duration.map(|duration| serde_json::json!({
+                // A number, for the reason the section comment gives.
+                "seconds": duration.seconds_f64(),
+                "provenance": duration.provenance().as_str(),
+            })),
+            "note": self.note,
+        })
+    }
+}
+
+impl CostReport {
+    /// The report as JSON, keeping every label it carries.
+    ///
+    /// The keys are the retired Python client's `report_to_dict` verbatim, plus one added
+    /// since (#99): `size.headroomMib`. A new key is safe where a rename isn't, because the
+    /// live suite asserts presence, never absence.
+    pub fn to_json(&self) -> serde_json::Value {
+        let size = self.size;
+        let total = self.total();
+        serde_json::json!({
+            "label": self.label,
+            "size": {
+                "baselineMib": size.baseline_mib(),
+                "baselineVcpu": size.baseline_vcpu(),
+                "peakMib": size.peak_mib(),
+                "peakVcpu": size.peak_vcpu(),
+                // Static, from the table row: the headroom is provisioned from the start, so it
+                // is a property of the class, read through the accessor for TRAP-13's reason
+                // (the 4x regularity is AWS's, not ours).
+                "headroomMib": size.headroom_mib(),
+                // `Display` names both numbers or neither: naming only the peak invites
+                // budgeting for memory nobody is billed for.
+                "describe": size.to_string(),
+            },
+            "rates": {
+                "region": self.rates.region().as_str(),
+                "retrieved": self.rates.retrieved().to_string(),
+                "sourceUrl": self.rates.source_url(),
+            },
+            // Not "cost": these are estimates derived from published rates, and the field name
+            // is the only place that distinction survives a copy-paste.
+            "estimated": true,
+            "fullyMeasured": self.fully_measured(),
+            "complete": self.is_complete(),
+            "staleness": self.staleness(),
+            "items": self.items.iter().map(LineItem::to_json).collect::<Vec<_>>(),
+            "total": {
+                // The floor, as a string. `AtLeast`'s floor and `Exact`'s figure are the same
+                // field on purpose: a consumer that ignores `isLowerBound` gets a number that
+                // is never an over-statement.
+                "priced": total.floor().amount().to_string(),
+                "isLowerBound": total.is_lower_bound(),
+                "render": total.to_string(),
+            },
+        })
+    }
+}
+
+impl ResidencyComparison {
+    /// The comparison as JSON: both reports in [`CostReport::to_json`]'s shape, with the
+    /// per-cycle cost and the break-even hold that keep the argument honest.
+    pub fn to_json(&self) -> Result<serde_json::Value, Error> {
+        Ok(serde_json::json!({
+            "holdSeconds": self.hold.seconds_f64(),
+            "cycles": self.cycles,
+            "running": self.running.to_json(),
+            "suspended": self.suspended.to_json(),
+            "ratio": self.ratio().to_string(),
+            "perCycleUsd": self.per_cycle()?.amount().to_string(),
+            // The one f64 figure that isn't a line's seconds, through the accessor named for
+            // its lossy step.
+            "breakEvenSeconds": self.break_even_seconds_f64()?,
+            "render": self.render()?,
+        }))
+    }
 }
 
 #[cfg(test)]
@@ -4198,5 +4363,452 @@ mod tests {
                 "{date} is not a calendar day"
             );
         }
+    }
+
+    // ── the report as JSON (#255) ─────────────────────────────────────────
+
+    /// A create-and-destroy run: timed running and build, and an image whose retention
+    /// nobody timed.
+    fn a_create_and_destroy_report() -> CostReport {
+        run_report(
+            SizeClass::Mib2048,
+            &RunUsage {
+                running: Some(DurationP::Measured(Duration::from_secs(3600))),
+                image_gb: Some(2.0),
+                image_build: Some(DurationP::Measured(Duration::from_secs(600))),
+                ..RunUsage::launched()
+            },
+            &pinned_rates(),
+            fresh_day(),
+            "run img",
+        )
+        .expect("a report")
+    }
+
+    /// Running time or a non-zero image implies a launch, and nothing else does: suspended
+    /// time alone is a VM that was already up, and a zero-sized image is no image (#255).
+    ///
+    /// **Falsification**: `verify/guards/faults/cost-defaults.toml` entry
+    /// `domain-infer-launched-zero-image` counts `Some(0.0)` as an image, and the zero-image
+    /// rows go red.
+    #[test]
+    fn a_launch_is_inferred_from_running_time_or_a_real_image_only() {
+        let plans = [
+            (PlanUsage::default(), false),
+            (
+                PlanUsage {
+                    running_seconds: 60.0,
+                    ..PlanUsage::default()
+                },
+                true,
+            ),
+            (
+                PlanUsage {
+                    suspended_seconds: 3600.0,
+                    ..PlanUsage::default()
+                },
+                false,
+            ),
+            (
+                PlanUsage {
+                    suspend_resume_cycles: 2,
+                    ..PlanUsage::default()
+                },
+                false,
+            ),
+            (
+                PlanUsage {
+                    image_gb: Some(2.0),
+                    ..PlanUsage::default()
+                },
+                true,
+            ),
+            (
+                PlanUsage {
+                    image_gb: Some(0.0),
+                    ..PlanUsage::default()
+                },
+                false,
+            ),
+        ];
+        for (plan, launched) in plans {
+            assert_eq!(plan.infer_launched(), launched, "{plan:?}");
+        }
+        let runs = [
+            (RunUsage::default(), false),
+            (
+                RunUsage {
+                    running: Some(DurationP::Measured(Duration::from_secs(60))),
+                    ..RunUsage::default()
+                },
+                true,
+            ),
+            (
+                RunUsage {
+                    running: Some(DurationP::Measured(Duration::ZERO)),
+                    ..RunUsage::default()
+                },
+                false,
+            ),
+            (
+                RunUsage {
+                    suspended: Some(DurationP::Measured(Duration::from_secs(60))),
+                    ..RunUsage::default()
+                },
+                false,
+            ),
+            (
+                RunUsage {
+                    image_gb: Some(2.0),
+                    ..RunUsage::default()
+                },
+                true,
+            ),
+            (
+                RunUsage {
+                    image_gb: Some(0.0),
+                    ..RunUsage::default()
+                },
+                false,
+            ),
+        ];
+        for (usage, launched) in runs {
+            assert_eq!(usage.infer_launched(), launched, "{usage:?}");
+        }
+    }
+
+    /// **The unpriced line has no `usd` key at all.**
+    ///
+    /// Not a null, which anything permissive sums as zero, and the build is the one phase
+    /// AWS does not publish a rate for, so this is the field that stops a create-and-destroy
+    /// report from reading as compute-only.
+    ///
+    /// **Falsification**: `verify/guards/faults/cost-defaults.toml` entry
+    /// `domain-report-json-usd-null` emits `"usd": null` for the unpriced arm, and this test is
+    /// red on the key's presence while every total still looks right.
+    #[test]
+    fn an_unpriced_line_omits_the_usd_key_rather_than_reporting_zero() {
+        let json = a_create_and_destroy_report().to_json();
+        let items = json["items"].as_array().expect("items");
+        let build = items
+            .iter()
+            .find(|item| item["phase"] == "image-build")
+            .expect("the build line is always present when an image is");
+        assert_eq!(build["amount"]["kind"], "unpriced");
+        assert!(
+            build["amount"].get("usd").is_none(),
+            "a null would be summed as zero: {build}"
+        );
+        assert!(
+            build["amount"]["reason"]
+                .as_str()
+                .expect("a reason")
+                .contains("does not publish"),
+            "{build}"
+        );
+        // And the total says it is a floor rather than a figure.
+        assert_eq!(json["total"]["isLowerBound"], true);
+        assert!(
+            json["total"]["render"]
+                .as_str()
+                .expect("a render")
+                .contains("at least"),
+            "{}",
+            json["total"]["render"]
+        );
+        assert_eq!(json["complete"], false);
+    }
+
+    /// Every dollar figure is a string, and every priced line has one. Every *seconds*
+    /// figure is a number.
+    ///
+    /// A JSON number for a dollar figure is a `Decimal` that went through an f64, which is the
+    /// exactness the type exists to hold. Asserted over every item so a single unconverted
+    /// field fails.
+    ///
+    /// The seconds half is the same assertion pointed the other way, and it is pinned here
+    /// rather than left implicit because the two rules look contradictory side by side and the
+    /// natural "tidy-up" is to make them agree. The Python oracle's `cli.py:743` emitted
+    /// `duration.seconds` as a float, so a string here is a field a consumer has to branch on
+    /// by client, which is exactly the substitutability `breakEvenSeconds` was already a
+    /// number to preserve.
+    ///
+    /// The oracle's recorded output for `cost --json --running-sec=3600`, read off
+    /// `data.report.items[0].duration.seconds`:
+    ///
+    /// ```text
+    /// 3600.0
+    /// ```
+    ///
+    /// A transcript rather than a command, because that client was deleted once this one had
+    /// driven the live suite green. The figure is what it printed; git history is where the
+    /// code that printed it is.
+    ///
+    /// **Falsification**: put `.to_string()` back on either seconds field and the matching
+    /// arm here is red while every dollar assertion stays green, which is what says the two
+    /// halves are independent. `verify/guards/faults/cost-defaults.toml` entry
+    /// `domain-report-json-seconds-string` does it to a line's seconds.
+    #[test]
+    fn every_dollar_is_a_string_and_every_seconds_figure_is_a_number() {
+        let json = a_create_and_destroy_report().to_json();
+        let mut durations = 0;
+        for item in json["items"].as_array().expect("items") {
+            if let Some(usd) = item["amount"].get("usd") {
+                assert!(usd.is_string(), "{item}");
+                usd.as_str()
+                    .expect("a string")
+                    .parse::<f64>()
+                    .expect("still parses as a figure");
+            }
+            assert!(item["quantity"].is_string(), "{item}");
+            if !item["duration"].is_null() {
+                durations += 1;
+                assert!(
+                    item["duration"]["seconds"].is_number(),
+                    "a number, matching cli.py:743: {item}"
+                );
+            }
+        }
+        assert!(
+            durations > 0,
+            "vacuous unless a duration was present: {json}"
+        );
+        assert!(json["total"]["priced"].is_string());
+
+        // The exact values, so this is parity rather than merely a type check. Checked against
+        // the oracle on this same report shape (`600` for the timed build and `604800.0` for
+        // the retention floor), read through `as_f64` because the oracle's build figure is a
+        // JSON int where its retention figure is a float, and both are numbers.
+        let seconds: Vec<f64> = json["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .filter(|item| !item["duration"].is_null())
+            .map(|item| item["duration"]["seconds"].as_f64().expect("a number"))
+            .collect();
+        assert!(seconds.contains(&600.0), "{seconds:?}");
+        assert!(seconds.contains(&604_800.0), "{seconds:?}");
+
+        // And `holdSeconds` on the comparison, which is the second field `cli.py` (`:2189`)
+        // emits as a number and the one a scheduler compares against a timeout.
+        let comparison = compare_residency(
+            SizeClass::Mib2048,
+            Duration::from_secs(3600),
+            1,
+            &pinned_rates(),
+            fresh_day(),
+        )
+        .expect("a comparison")
+        .to_json()
+        .expect("renders");
+        assert_eq!(comparison["holdSeconds"].as_f64(), Some(3600.0));
+        assert!(comparison["breakEvenSeconds"].is_number());
+        // The money beside it stays a string, which is the whole point of the split.
+        assert!(comparison["perCycleUsd"].is_string());
+    }
+
+    /// A measured run labels the phases a clock timed measured, and the one nobody timed
+    /// projected.
+    ///
+    /// The mixed case is the interesting one and my first draft got it wrong by asserting every
+    /// duration on a measured report is measured. It is not: `image-storage`'s duration defaults
+    /// to the documented one-week minimum retention, and core marks it
+    /// `Projected` because, in its own words, "nobody timed that week either". So a
+    /// create-and-destroy report is honestly a mixture, and `fullyMeasured` is `false` for it.
+    ///
+    /// Worth pinning precisely because the wrong version reads better: "a measured report is
+    /// measured" is the assertion someone would write, and it would force the retention default
+    /// to lie about a week nobody observed.
+    #[test]
+    fn a_measured_report_labels_the_timed_phases_measured_and_the_retention_projected() {
+        let measured = a_create_and_destroy_report().to_json();
+        let labelled: Vec<(&str, &str)> = measured["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .filter(|item| !item["duration"].is_null())
+            .map(|item| {
+                (
+                    item["phase"].as_str().unwrap_or_default(),
+                    item["duration"]["provenance"].as_str().unwrap_or_default(),
+                )
+            })
+            .collect();
+        assert!(
+            labelled.contains(&("running", "measured")),
+            "a clock timed the run: {labelled:?}"
+        );
+        assert!(
+            labelled.contains(&("image-build", "measured")),
+            "a clock timed the build: {labelled:?}"
+        );
+        assert!(
+            labelled.contains(&("image-storage", "projected")),
+            "nobody timed the one-week retention floor: {labelled:?}"
+        );
+        assert_eq!(
+            measured["fullyMeasured"], false,
+            "a report carrying a projected retention is not fully measured"
+        );
+
+        let estimate = estimate_run(
+            SizeClass::Mib2048,
+            &PlanUsage {
+                running_seconds: 3600.0,
+                ..PlanUsage::launched()
+            },
+            &pinned_rates(),
+            fresh_day(),
+            DEFAULT_ESTIMATE_LABEL,
+        )
+        .expect("an estimate");
+        let json = estimate.to_json();
+        assert_eq!(json["fullyMeasured"], false);
+        // *Every* duration, with no exception, which is the difference from the measured report
+        // above: an estimate has nothing a clock touched.
+        for item in json["items"].as_array().expect("items") {
+            if !item["duration"].is_null() {
+                assert_eq!(item["duration"]["provenance"], "projected", "{item}");
+            }
+        }
+
+        // And a report whose only phase *was* timed is fully measured, so the flag is a real
+        // comparison rather than something that is always false.
+        let timed_only = run_report(
+            SizeClass::Mib2048,
+            &RunUsage {
+                running: Some(DurationP::Measured(Duration::from_secs(60))),
+                ..RunUsage::launched()
+            },
+            &pinned_rates(),
+            fresh_day(),
+            "run",
+        )
+        .expect("a report");
+        assert_eq!(timed_only.to_json()["fullyMeasured"], true);
+        // And `estimated: true` is on both, because dollars are always estimates.
+        assert_eq!(measured["estimated"], true);
+        assert_eq!(json["estimated"], true);
+    }
+
+    /// The report's key set is `cli.py`'s `report_to_dict` key for key, plus the one
+    /// addition since that client retired: `headroomMib` (issue #99).
+    ///
+    /// Pinned because the conformance oracle reads these names: a rename here is a driver
+    /// that reports every cost check as missing rather than as wrong. It's every surface's
+    /// shape since #255, when the bindings' hand-written copies lacked `headroomMib`.
+    ///
+    /// **Falsification**: `verify/guards/faults/cost-defaults.toml` entry
+    /// `domain-report-json-headroom` drops `headroomMib`, and the size keys go red.
+    #[test]
+    fn the_report_json_carries_the_pythons_key_set() {
+        let json = a_create_and_destroy_report().to_json();
+        let mut keys: Vec<&String> = json.as_object().expect("object").keys().collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            [
+                "complete",
+                "estimated",
+                "fullyMeasured",
+                "items",
+                "label",
+                "rates",
+                "size",
+                "staleness",
+                "total",
+            ]
+        );
+        let mut size_keys: Vec<&String> =
+            json["size"].as_object().expect("object").keys().collect();
+        size_keys.sort();
+        assert_eq!(
+            size_keys,
+            [
+                "baselineMib",
+                "baselineVcpu",
+                "describe",
+                "headroomMib",
+                "peakMib",
+                "peakVcpu"
+            ]
+        );
+        let mut item_keys: Vec<&String> = json["items"][0]
+            .as_object()
+            .expect("object")
+            .keys()
+            .collect();
+        item_keys.sort();
+        assert_eq!(
+            item_keys,
+            [
+                "amount", "duration", "line", "note", "phase", "quantity", "unit"
+            ]
+        );
+    }
+
+    /// A comparison carries its own counter-argument: the per-cycle cost and the break-even
+    /// hold.
+    ///
+    /// Without them "100x cheaper suspended" reads as "suspend constantly", and a pool that
+    /// churns every few seconds spends more on transitions than it saves on residency.
+    #[test]
+    fn a_comparison_carries_the_per_cycle_cost_and_the_break_even_hold() {
+        let comparison = compare_residency(
+            SizeClass::Mib2048,
+            Duration::from_secs(3600),
+            1,
+            &pinned_rates(),
+            fresh_day(),
+        )
+        .expect("a comparison");
+        let json = comparison.to_json().expect("renders");
+        assert!(json["perCycleUsd"].is_string());
+        assert!(
+            json["ratio"].is_string(),
+            "the ratio is not money but is decimal"
+        );
+        let break_even = json["breakEvenSeconds"].as_f64().expect("a number");
+        assert!(break_even > 0.0, "{break_even}");
+        assert!(
+            json["render"]
+                .as_str()
+                .expect("a render")
+                .contains("avoid churn"),
+            "the conclusion the numbers support has to travel with them"
+        );
+    }
+
+    /// A staleness warning survives into the envelope.
+    ///
+    /// The warning has to reach whatever renders it: a library caller with a log filter and a
+    /// CLI that only wrote stderr would each lose it on their own, which is why core carries
+    /// it on the report.
+    #[test]
+    fn a_stale_rate_table_puts_its_warning_in_the_envelope() {
+        let rates = pinned_rates();
+        let retrieved = rates.retrieved();
+        // A day past the ninety-day window, computed from the table's own date so this test
+        // cannot go stale.
+        let stale_day =
+            CalendarDate::try_from_ymd(retrieved.year() + 1, retrieved.month(), retrieved.day())
+                .expect("a real day one year on");
+        let report = run_report(
+            SizeClass::Mib2048,
+            &RunUsage {
+                running: Some(DurationP::Measured(Duration::from_secs(60))),
+                ..RunUsage::launched()
+            },
+            &rates,
+            stale_day,
+            "run",
+        )
+        .expect("a report");
+        let json = report.to_json();
+        assert!(json["staleness"].is_string(), "{json}");
+        assert!(
+            json["staleness"].as_str().expect("text").contains("days"),
+            "{json}"
+        );
     }
 }
