@@ -41,8 +41,8 @@ use microvms_core::{Error, ErrorKind};
 use serde_json::{Map, Value, json};
 
 use crate::cli::{
-    AckArgs, AttachArgs, AttachFlags, CpArgs, ExecArgs, HealthArgs, KeepaliveArgs, KillArgs,
-    PsArgs, RegionFlags, StdinArgs,
+    AckArgs, AttachArgs, AttachFlags, CpArgs, ExecArgs, ExistsArgs, HealthArgs, KeepaliveArgs,
+    KillArgs, PsArgs, RegionFlags, StdinArgs,
 };
 use crate::closed_output;
 use crate::commands::{Ctx, Rendered, STREAM_RESPONSE, explicit_region, response_type};
@@ -1562,6 +1562,35 @@ fn resolve_paths(src: &str, dst: &str) -> Result<(Direction, String, String), Cl
         )
         .suggest("download to a local file, then upload it to the other VM")),
     }
+}
+
+// ── exists ───────────────────────────────────────────────────────────────────
+
+/// `microvm exists PATH`: core's `Session::file_exists`, whose one `false` is the daemon's 404.
+///
+/// Exit 0 whether the path exists or not, because the answer is data rather than a failure,
+/// and a new exit row for "absent" would be one more code every consumer has to learn. A shell
+/// branches on `--json` and `.data.exists`, and any refusal other than not-found still fails with
+/// its own code.
+pub async fn exists<O: std::io::Write, E: std::io::Write>(
+    ctx: &mut Ctx<'_, O, E>,
+    args: &ExistsArgs,
+) -> Result<Rendered, CliError> {
+    let (session, microvm_id) = attach(ctx, &args.region, &args.attach).await?;
+    let exists = session.file_exists(&args.path).await?;
+
+    let mut data = Map::new();
+    data.insert("microvmId".into(), json!(microvm_id));
+    data.insert("path".into(), json!(args.path));
+    data.insert("exists".into(), json!(exists));
+    let text = if exists {
+        format!("{} exists", args.path)
+    } else {
+        format!("{} does not exist", args.path)
+    };
+    let dense = format!("{exists}\t{}", args.path);
+    let (kind, _) = response_type("exists");
+    Ok(Rendered::ok(kind, data, text, dense))
 }
 
 // ── sync ─────────────────────────────────────────────────────────────────────

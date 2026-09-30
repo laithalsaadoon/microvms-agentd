@@ -1,0 +1,11 @@
+# ── `microvm exists`, core's `Session::file_exists` on the CLI (#269) ────────────
+
+# The handler answers `true` without reading core's answer, so a 404 reports a present file.
+[[fault]]
+id = "cli-exists-ignores-the-answer"
+guard = "guards::files::exists_reports_the_daemons_answer_for_the_path"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::files::exists_reports_the_daemons_answer_for_the_path"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/microvms-cli/src/guards/files.rs::exists_reports_the_daemons_answer_for_the_path"
+transform = { file = "crates/microvms-cli/src/commands/attached.rs", replace = "    let exists = session.file_exists(&args.path).await?;\n", with = "    let _ = session.file_exists(&args.path).await?;\n    let exists = true;\n" }
