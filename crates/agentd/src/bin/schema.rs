@@ -99,3 +99,26 @@ pub fn artifact_path() -> PathBuf {
         .expect("the agentd crate sits two levels below the workspace root")
         .join("docs/schema.json")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::artifact_path;
+
+    /// The file the binary writes and `--check` compares is the committed schema at the
+    /// workspace root, however deep the crate sits below it.
+    #[test]
+    fn the_artifact_is_the_committed_schema_at_the_workspace_root() {
+        let path = artifact_path();
+        assert!(path.ends_with("docs/schema.json"), "{}", path.display());
+        assert!(path.is_file(), "{} is no file", path.display());
+        let root = path
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("docs/ sits under the root");
+        assert!(
+            root.join("Cargo.lock").is_file(),
+            "{} isn't the workspace root",
+            root.display()
+        );
+    }
+}

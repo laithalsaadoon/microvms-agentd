@@ -1092,6 +1092,23 @@ mod tests {
         );
     }
 
+    /// A 400 is the service refusing a value this client should have refused first, so the
+    /// message names the validation refusal and the local checks it got past, not the
+    /// catch-all for a status the model doesn't declare.
+    #[test]
+    fn a_400_names_the_validation_refusal_and_the_local_checks_it_passed() {
+        let reply = Reply {
+            status: 400,
+            body: br#"{"message": "1 validation error detected"}"#.to_vec(),
+        };
+        let error = classify_failure("RunMicrovm", &reply);
+        assert_eq!(error.kind(), ErrorKind::Platform);
+        let message = error.to_string();
+        assert!(message.contains("ValidationException"), "{message}");
+        assert!(message.contains("checked locally"), "{message}");
+        assert!(!message.contains("unmodeled status"), "{message}");
+    }
+
     /// Only the throttle and the 5xx family are retryable. A retried 409 would spin
     /// against an image in CREATING, and a retried 400 would send the same rejected value
     /// five more times.
