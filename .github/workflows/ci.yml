@@ -638,18 +638,15 @@ jobs:
   # selection (whole commands, weighted by their entries' rough CI seconds; the script's
   # docstring has the rule) and has 60 minutes, on a pull request and on main's push alike.
   # The legs report under their own names, and `guards-result` below carries the required
-  # check's. Three shards, from measurement: main's push at 6a868e9 fired the full registry
-  # (439 entries) in one leg in 33 min 30 s, past a pull request's old 30 minutes. Modeled with
-  # this split on that run's per-command and per-fault seconds, the slowest of three legs takes
-  # about 12 minutes for the registry at this change, and about 15 with #340's entries added,
-  # against about 20 and 21 for two legs. Those are floors: the model counts the cold build
-  # each worker pays once across the whole run, and every leg's workers pay their own, a few
-  # more minutes a leg. A fourth leg gains little, since the largest commands can't be split,
-  # and pays one more setup and more cold builds. That leaves each leg room for the registry to
-  # grow about threefold. The legs restore the dependency cache the `guards-cache` job saves,
+  # check's. Six shards, from measurement: run 36673442938 fired all 714 entries in three legs of
+  # 13.5, 11.7 and 8.3 minutes, and its per-command seconds (`command_overhead`, `entry_cost`)
+  # model the registry at this change as about 9.3 minutes of work a leg for three, 7.0 for
+  # four, 5.6 for five and 4.7 for six, plus about two minutes of setup and seeding a leg. Six
+  # puts the legs level with the ubuntu tier (6.5 minutes in that run), and the account ran 40
+  # jobs at once on 2026-09-30, so a pull request's 22 jobs fit with room. The legs restore the dependency cache the `guards-cache` job saves,
   # which holds what every leg's commands compile, and never save one of their own. Each leg's
   # workers 2 to 4 start from a copy of it, without the workspace's own crates (the script's
-  # docstring has why). `mise run guards:fire -- --venv-per-worker --affected --shard 1/3` runs
+  # docstring has why). `mise run guards:fire -- --venv-per-worker --affected --shard 1/6` runs
   # one pull request leg's share locally.
   #
   # Every suite fires here, the bindings one included. It used to fire in the bindings job, all
@@ -664,7 +661,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2]
+        shard: [0, 1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

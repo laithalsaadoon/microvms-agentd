@@ -144,23 +144,21 @@ Three subcommands:
           commands. CI's `guards` job runs one shard a leg (#345). The N shards partition the
           selection, and shard k of N of the same tree and base is always the same entries. A
           shard holds whole commands, so a command's clean and restored runs happen once across
-          the matrix. Each command weighs the sum of its entries' rough cost in a CI shard
-          (`entry_cost`, in units that give a Rust entry 14: 24 for an entry that builds the
-          CLI, 17 for a script one, 119 for a bindings entry that builds the Node addon and 53
-          for another bindings one), and commands go heaviest first onto the lightest shard, a
-          tie in weight to the command that comes first in the registry and a tie in load to
-          the lower shard; a shard's entries keep registry order. A cost, not a count, because
-          an entry's cost spans an order of magnitude and a command's entries sit together:
-          one `napi build` entry costs about eight Rust ones. Modeled on the per-command seconds
-          of run 36663996459, which fired every entry in three legs, these weights split it
-          into about 12.8, 12.3 and 11.7 minutes of work a worker, where that run's own weights
-          (the bindings entries at their one-worker cost, and the Rust and script ones from
-          before #351's incremental builds) had given 16.3, 13.6 and 7.0. Commands stay whole
-          because splitting one repeats its clean and restored runs in each shard that holds
-          part of it. It prints which shard
+          the matrix. Each command weighs its clean and restored runs (`command_overhead`) plus
+          the sum of its entries' rough cost in a CI shard (`entry_cost`, in units that give a
+          Rust entry 14: 24 for an entry that builds the CLI, 17 for a script one, 2 for a
+          lint entry, which fires in its command's batch, 119 for a bindings entry that builds
+          the Node addon and 53 for another bindings one), and commands go heaviest first onto
+          the lightest shard, a tie in weight to the command that comes first in the registry
+          and a tie in load to the lower shard; a shard's entries keep registry order. A cost,
+          not a count, because an entry's cost spans an order of magnitude and a command's
+          entries sit together: one `napi build` entry costs about eight Rust ones, and a
+          command's own runs cost several of its entries. Commands stay whole because splitting
+          one repeats its clean and restored runs in each shard that holds part of it. It
+          prints which shard
           it is and how much of the selection it keeps, and a shard with nothing in its slice
           exits 0.
-          `mise run guards:fire -- --affected --shard 1/3` runs one pull request leg's share
+          `mise run guards:fire -- --affected --shard 1/6` runs one pull request leg's share
           here.
 
           Cargo builds into `--target-dir`, by default `guards-fire` under the caller's
@@ -1548,9 +1546,33 @@ def entry_cost(fault: Fault) -> int:
     not a count."""
     if fault.suite == "bindings":
         return 119 if any("napi" in argv for argv in fault.run) else 53
+    if fault.expect == "lint-error":
+        # A lint entry fires in its command's batch (`plan_batch`), one clippy run for all of
+        # them: run 36673442938 fired 60 of them in about 15 s of batches.
+        return 2
     if any("microvms-cli" in arg for argv in fault.run for arg in argv):
         return 24
     return 14 if fault.suite == "rust" else 17
+
+
+def command_overhead(fault: Fault) -> int:
+    """What a command costs its shard before and after its faults, in `entry_cost`'s units:
+    its clean run and its restored run, about one and a half clean runs. Measured on run
+    36673442938 (four workers to a runner, every entry fired), the mean clean run was 7.6 s for
+    a script command, 13.3 s for a Rust one, 17.4 s for one that builds the CLI, 10.1 s for a
+    clippy command, and 45.3 s for a `maturin develop` one; a `napi build` command's was
+    168 s with its target graph cold and is taken at the `maturin` figure, since
+    `check-guards-fire.py build` puts that graph in the dependency cache. In units of 0.24 s (a
+    Rust entry's 3.39 s is 14), a script command is 47, a Rust one 83, a CLI one 108, a clippy
+    one 63, and a bindings one 280. A command's entries sit together in one shard, so without
+    this a shard of many cheap commands looked lighter than it ran."""
+    if fault.suite == "bindings":
+        return 280
+    if fault.expect == "lint-error":
+        return 63
+    if any("microvms-cli" in arg for argv in fault.run for arg in argv):
+        return 108
+    return 83 if fault.suite == "rust" else 47
 
 
 def spread(
@@ -1602,10 +1624,14 @@ def parse_shard(text: str) -> tuple[int, int] | None:
 
 
 def shard(selected: list[Fault], k: int, n: int) -> list[Fault]:
-    """Shard `k` of `n` (from 0) of `selected`, in registry order: whole commands, weighted by
-    `entry_cost` and spread by `spread` over `n` bins. The module docstring's `--shard` says
-    why."""
+    """Shard `k` of `n` (from 0) of `selected`, in registry order: whole commands, each weighted
+    by its entries' `entry_cost` plus its `command_overhead`, spread by `spread` over `n` bins.
+    The module docstring's `--shard` says why."""
     weights = command_weights(selected, entry_cost)
+    first: dict[tuple, Fault] = {}
+    for fault in selected:
+        first.setdefault(command_key(fault), fault)
+    weights = {key: w + command_overhead(first[key]) for key, w in weights.items()}
     keep = set(spread(weights, n)[k])
     return [fault for fault in selected if command_key(fault) in keep]
 

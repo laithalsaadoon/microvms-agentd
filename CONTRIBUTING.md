@@ -65,13 +65,14 @@ edit one file; an id is still unique across every file. `check` runs
 tree, when a test gains a `**Falsification**` note with no entry
 (`guards/unregistered.txt` lists the older ones and only shrinks), and when the
 single file the registry used to be, guards/faults.toml, comes back: nothing
-reads it. CI's `guards` job seeds the Rust and script
-faults a pull request affects and, on every push to main, all of them; the
-`bindings` job seeds the binding ones. A guard no fault can be seeded for, such
+reads it. CI's `guards` job seeds the Rust, script and binding
+faults a pull request affects and, on every push to main, all of them; each of its
+workers builds the bindings into its own Python environment (`--venv-per-worker`). A guard no fault can be seeded for, such
 as a live check, is still broken by hand, restored, and recorded in the PR.
 
 Locally, `mise run guards:fire -- --jobs 4` seeds faults in four scratch worktrees at
-once and reports what a serial run reports, in the same order. `-- --affected` fires
+once and reports what a serial run reports, in the same order; add `--venv-per-worker`
+to fire the binding entries too. `-- --affected` fires
 only the entries whose own files changed against origin/main (`--base <ref>` for
 another base) and names the ones it skips. It's what CI's `guards` job runs on a pull
 request, and it isn't the full fire: a change that reaches a guard through code the
@@ -81,9 +82,9 @@ job or top-level `env` selects every entry.) Main's push runs the full fire afte
 merge, so a fault only it catches turns main red. Both run as a matrix of shards, each
 firing its share of the selection within 60 minutes, and the required
 `seeded faults fire` check is their combined result;
-`mise run guards:fire -- --affected --shard=1/3` runs one pull request leg's share here.
+`mise run guards:fire -- --affected --shard=1/6` runs one pull request leg's share here.
 When your change reaches guards that way, run
-`mise run guards:fire -- --jobs 4` before you push. A red `seeded faults fire` on main is
+`mise run guards:fire -- --jobs 4 --venv-per-worker` before you push. A red `seeded faults fire` on main is
 fixed before the next merge, because the next pull request that selects every entry
 fails on it as well. If your pull request fails an entry it didn't touch, look at main's
 last push run first.

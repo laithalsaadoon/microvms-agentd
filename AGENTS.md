@@ -12,7 +12,7 @@ Rust client stack and guest daemon for AWS Lambda MicroVMs. Start with
 mise run check         # local code, security, tests, contracts, drift, packaging, build
 mise run ci:local      # CI's Linux jobs in CI-shaped clones, before a push
 mise run docs:check    # documentation build and checks
-mise run guards:fire   # re-prove the seeded faults (bindings ones need --venv); CI runs it
+mise run guards:fire   # re-prove the seeded faults (bindings ones need --venv-per-worker or --venv); CI runs it
 mise run live          # billable AWS verification
 mise run live:verify-clean
 ```
@@ -213,9 +213,9 @@ check that holds it, or says that review does.
   fail, in its owner's file in `guards/faults/` (a new owner starts a file).
   A scanner's floor (an empty input) and its sentinel get a fault each. Review
   holds that a new check has its entries; CI holds that every entry fires.
-  The `guards` job seeds the Rust and script faults and the `bindings` job
-  seeds the binding ones, as `mise run guards:fire` does locally, and each
-  fails when a fault doesn't fire. `guards:list` in `check` fails on an entry
+  The `guards` job seeds the Rust, script and binding faults (each worker with
+  its own Python environment, `--venv-per-worker`), as `mise run guards:fire`
+  does locally, and it fails when a fault doesn't fire. `guards:list` in `check` fails on an entry
   that no longer applies to the tree, and on a new Falsification note that has
   no entry and no line in `guards/unregistered.txt`.
 - Tests assert the verdict, not only that something ran or stayed contained.

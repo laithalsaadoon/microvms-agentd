@@ -3360,71 +3360,83 @@ class FireSharded(unittest.TestCase):
                 self.assertEqual(fired_ids(out.stdout), [])
 
     def test_a_shard_weighs_an_entry_by_what_it_builds(self):
-        # One command of each kind, in registry order: a CLI entry (24), a Rust one (14), a
-        # script one (17), a `napi build` one (119), and two `maturin develop` ones (53 each).
-        # By cost the napi command goes first to shard 0, the maturin one to shard 1, and the
-        # rest fill in around them. A count, a CLI entry priced as another Rust one, a script
-        # entry priced as a Rust one, a napi entry priced as a maturin one, or a bindings entry
-        # priced as a script one each gives other slices.
+        # One command of each kind, in registry order: a CLI command with two entries (24 each,
+        # 108 for the command), a Rust one (14, 83), a script one with two (17 each, 47), a
+        # `napi build` one (119, 280), a `maturin develop` one (53, 280) and a clippy command
+        # with four lint entries, which fire in one batch (2 each, 63). Over three shards the
+        # napi command is one shard, the maturin and clippy commands a second, and the rest the
+        # third. A count, an entry priced without its command's clean and restored runs, or a
+        # CLI, script, bindings, napi or lint entry priced as another kind each gives other
+        # slices.
         napi = ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build"]
         maturin = ["uvx", "maturin@1.14.1", "develop", "-q"]
+        clippy = ["cargo", "clippy", "-p", "x", "--all-targets", "--", "-D", "warnings"]
         spec = [
             (
                 "c",
                 "rust",
                 ["cargo", "test", "-p", "microvms-cli", "--", "--exact", "c"],
-                1,
+                "exit-nonzero",
+                2,
             ),
-            ("r", "rust", ["cargo", "test", "--", "--exact", "r"], 1),
-            ("s", "script", ["python3", "s.py"], 1),
+            ("r", "rust", ["cargo", "test", "--", "--exact", "r"], "exit-nonzero", 1),
+            ("s", "script", ["python3", "s.py"], "exit-nonzero", 2),
             (
                 "n",
                 "bindings",
                 [napi, ["node", "--test", "--test-reporter=tap", "n"]],
+                "exit-nonzero",
                 1,
             ),
-            ("o", "bindings", [maturin, ["pytest", "-rA", "t.py::o"]], 2),
+            (
+                "o",
+                "bindings",
+                [maturin, ["pytest", "-rA", "t.py::o"]],
+                "exit-nonzero",
+                1,
+            ),
+            ("l", "rust", clippy, "lint-error", 4),
         ]
         registry = "".join(
             entry(
                 fid=f"{name}{i}",
                 guard=name,
                 run=run,
-                expect="exit-nonzero",
+                expect=expect,
                 suite=suite,
                 message="no",
                 fault=f'transform = {{ file = "state.txt", replace = "{name}{i}=ok", with = "{name}{i}=bad" }}',
             )
-            for name, suite, run, size in spec
+            for name, suite, run, expect, size in spec
             for i in range(size)
         )
-        state = " ".join(f"{n}{i}=ok" for n, _, _, size in spec for i in range(size))
+        state = " ".join(f"{n}{i}=ok" for n, _, _, _, size in spec for i in range(size))
         repo = Repo(self, {REGISTRY: registry, "state.txt": state + "\n"})
         script = runpy.run_path(str(SCRIPT))
         faults, problems = script["load"](repo.root)
         self.assertEqual(problems, [])
         self.assertEqual(
-            [[f.id for f in script["shard"](faults, k, 2)] for k in (0, 1)],
-            [["s0", "n0"], ["c0", "r0", "o0", "o1"]],
-            "the shards aren't split by the entries' cost",
+            [[f.id for f in script["shard"](faults, k, 3)] for k in (0, 1, 2)],
+            [["n0"], ["o0", "l0", "l1", "l2", "l3"], ["c0", "c1", "r0", "s0", "s1"]],
+            "the shards aren't split by the commands' cost",
         )
 
     def test_the_registrys_own_shards_partition_it(self):
         # The split CI makes, on the registry it makes it of: every suite's entries in CI's
-        # three shards.
+        # six shards.
         script = runpy.run_path(str(SCRIPT))
         faults, problems = script["load"](HERE.parent)
         self.assertEqual(problems, [])
         selected = [f for f in faults if f.suite in ("rust", "script", "bindings")]
         self.assertTrue(selected, "the registry has no entry of CI's suites to split")
         key = script["command_key"]
-        shards = [script["shard"](selected, k, 3) for k in range(3)]
+        shards = [script["shard"](selected, k, 6) for k in range(6)]
         ids = [f.id for s in shards for f in s]
         self.assertEqual(sorted(ids), sorted(f.id for f in selected))
         self.assertEqual(len(ids), len(set(ids)))
         owners: dict[tuple, set[int]] = {}
         for number, part in enumerate(shards):
-            self.assertTrue(part, f"shard {number} of 3 is empty")
+            self.assertTrue(part, f"shard {number} of 6 is empty")
             for fault in part:
                 owners.setdefault(key(fault), set()).add(number)
         self.assertEqual([k for k, o in owners.items() if len(o) > 1], [])

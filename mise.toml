@@ -828,10 +828,10 @@ run = [
 [tasks."guards:fire"]
 description = "Seed each registered fault in a scratch worktree and require its guard to catch it"
 # Not in `check`: every entry is one more build with its fault in, and the pre-push hook runs
-# `check` on every push. CI's `guards` job runs the rust and script suites, and the bindings job
-# runs `--suite bindings --venv .venv-bindings` after its own builds. Extra arguments pass
-# through: `mise run guards:fire -- --only agentd-fs-pop`. Bindings entries are skipped without
-# `--venv`, because `maturin develop` installs into whatever environment is active. It builds
+# `check` on every push. CI's `guards` job runs every suite, bindings included, with
+# `--venv-per-worker`. Extra arguments pass through: `mise run guards:fire -- --only
+# agentd-fs-pop`. Bindings entries are skipped without `--venv-per-worker` or `--venv DIR`,
+# because `maturin develop` installs into whatever environment is active. It builds
 # into target/guards-fire, not target/, so a later narrow cargo run never picks up a scratch
 # build (the script's docstring has the two ways that went wrong); that's a second build's
 # worth of disk.
