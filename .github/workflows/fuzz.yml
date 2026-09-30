@@ -51,6 +51,14 @@ on:
       - 'crates/microvms-app/src/session/sse.rs'
       - 'crates/microvms-app/src/session/sse_fuzz.rs'
       - 'crates/microvms-app/src/session/mod.rs'
+      # The verified tunnel's handshake and frame reads on both sides, which read bytes a guest
+      # or the path can write (#297), the offer and end-of-stream rules they share, and the
+      # module files whose `mod tunnel_fuzz;` compiles each harness.
+      - 'crates/agentd/src/tunnel*.rs'
+      - 'crates/agentd/src/lib.rs'
+      - 'crates/microvms-edges/src/session/tunnel*.rs'
+      - 'crates/microvms-edges/src/session/mod.rs'
+      - 'crates/protocol/src/identity.rs'
       - '.github/workflows/fuzz.yml'
 
 permissions:
@@ -143,7 +151,10 @@ jobs:
   # rests on (BIND-17..BIND-20), thirty seconds each; the app's egress-posture harness
   # (BIND-11..13; #227): the request-side answer against the launch over arbitrary options; and
   # its event-stream harness (BIND-22; #297): `SseParser::feed` and `decode` over hostile bytes,
-  # floods past the pending-bytes ceiling included.
+  # floods past the pending-bytes ceiling included; and the verified tunnel's four (AGENTD-17,
+  # AGENTD-20, AGENTD-21, BIND-21, BIND-23, BIND-24; #297), a minute each: each side's handshake
+  # read over hostile messages and its frame read over a path that drops, replays, swaps, flips
+  # and forges.
   daemon-edges-app:
     name: fuzz (daemon, edges and app harnesses, bounded)
     runs-on: ubuntu-latest
@@ -175,7 +186,8 @@ jobs:
           cargo +nightly bolero test exec_start_fuzz::start_resolution -p agentd --runs 1
           cargo +nightly bolero test provision_fuzz::version -p microvms-edges --runs 1
           cargo +nightly bolero test control::posture_fuzz::posture_matches_the_launch -p microvms-app --runs 1
-      # See the `cli-core` job. Four two-minute harnesses, then the four provisioning parsers.
+      # See the `cli-core` job. Four two-minute harnesses, then the four provisioning parsers,
+      # then the tunnel's four.
       - name: fuzz the harnesses side by side
         run: |
           logs=$(mktemp -d) status=0
@@ -201,6 +213,11 @@ jobs:
             start "provision-$target" cargo +nightly bolero test "provision_fuzz::$target" -p microvms-edges -T 30s
           done
           finish
+          start tunnel-hello cargo +nightly bolero test tunnel_fuzz::a_handshake_opens_only_from_the_launching_host -p agentd -T 60s
+          start tunnel-frames cargo +nightly bolero test tunnel_fuzz::frames_open_in_order_and_the_callers_end_only_after_every_chunk -p agentd -T 60s
+          start tunnel-reply cargo +nightly bolero test session::tunnel_fuzz::a_reply_opens_only_from_the_pinned_vm -p microvms-edges -T 60s
+          start tunnel-client-frames cargo +nightly bolero test session::tunnel_fuzz::frames_open_in_order_and_the_daemons_end_only_after_every_chunk -p microvms-edges -T 60s
+          finish
           exit "$status"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: failure()
@@ -210,6 +227,7 @@ jobs:
             crates/agentd/fuzz/artifacts/
             crates/agentd/src/__fuzz__/
             crates/microvms-edges/src/__fuzz__/
+            crates/microvms-edges/src/session/__fuzz__/
             crates/microvms-app/src/control/__fuzz__/
             crates/microvms-app/src/session/__fuzz__/
           if-no-files-found: ignore

@@ -91,7 +91,7 @@ run = ["cargo", "test", "-p", "agentd", "--test", "tunnel_relay", "--", "--exact
 expect = "test-failed"
 suite = "rust"
 message = "an older caller's close is its end, as it always was"
-transform = { file = "crates/agentd/src/tunnel.rs", replace = "let caller_proves_end = protocol::identity::offers_end_of_stream(&scratch[..offer]);", with = "let caller_proves_end = protocol::identity::offers_end_of_stream(&protocol::identity::HANDSHAKE_PAYLOAD);" }
+transform = { file = "crates/agentd/src/tunnel.rs", replace = "Ok(protocol::identity::offers_end_of_stream(&scratch[..offer]))", with = "Ok(protocol::identity::offers_end_of_stream(&scratch[..offer]) || offer == 0)" }
 
 # The client reads a verified tunnel's unproven end as a clean one, which is #342's defect: a
 # close frame forged mid-stream through a real daemon reads as a finished download.
@@ -210,7 +210,7 @@ run = ["cargo", "test", "-p", "agentd", "--test", "tunnel_relay", "--", "--exact
 expect = "test-failed"
 suite = "rust"
 message = "the daemon ends the guest connection"
-transform = { file = "crates/agentd/src/tunnel.rs", replace = "                Err(error) => {\n                    Inbound::Failed(format!(\"a tunnel frame did not authenticate: {error}\"))\n                }", with = "                Err(_) => Inbound::Bytes(Vec::new())," }
+transform = { file = "crates/agentd/src/tunnel.rs", replace = "Err(error) => Inbound::Failed(format!(\"a tunnel frame did not authenticate: {error}\")),", with = "Err(_) => Inbound::Bytes(Vec::new())," }
 
 # The client skips a frame that doesn't authenticate instead of failing the tunnel.
 [[fault]]
@@ -220,4 +220,66 @@ run = ["cargo", "test", "-p", "microvms-edges", "--test", "tunnel_end_of_stream"
 expect = "test-failed"
 suite = "rust"
 message = "the relay ends the local connection"
-transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "                            })?;\n                            // The daemon's end of stream", with = "                            }).unwrap_or(usize::MAX);\n                            if count == usize::MAX {\n                                continue;\n                            }\n                            // The daemon's end of stream" }
+transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "    })?;\n    Ok(if protocol::identity::is_end_of_stream(&scratch[..count]) {", with = "    })\n    .unwrap_or(usize::MAX);\n    if count == usize::MAX {\n        return Ok(Frame::Chunk(0));\n    }\n    Ok(if protocol::identity::is_end_of_stream(&scratch[..count]) {" }
+
+# ── the tunnel's fuzz harnesses (#297) ─────────────────────────────────────────
+
+# The daemon's handshake read takes a message that doesn't open as one that offers nothing.
+[[fault]]
+id = "agentd-tunnel-fuzz-refused-hello-opens"
+guard = "tunnel_fuzz::a_handshake_opens_only_from_the_launching_host"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "tunnel_fuzz::a_handshake_opens_only_from_the_launching_host"]
+expect = "test-failed"
+suite = "rust"
+message = "the launching host's rule says None"
+transform = { file = "crates/agentd/src/tunnel.rs", replace = "let offer = responder.read_message(first, scratch)?;", with = "let offer = responder.read_message(first, scratch).unwrap_or(0);" }
+
+# The daemon's frame read skips a frame that doesn't open instead of failing it.
+[[fault]]
+id = "agentd-tunnel-fuzz-bad-frame-skipped"
+guard = "tunnel_fuzz::frames_open_in_order_and_the_callers_end_only_after_every_chunk"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "tunnel_fuzz::frames_open_in_order_and_the_callers_end_only_after_every_chunk"]
+expect = "test-failed"
+suite = "rust"
+message = "not the caller's next chunk"
+transform = { file = "crates/agentd/src/tunnel.rs", replace = "Err(error) => Inbound::Failed(format!(\"a tunnel frame did not authenticate: {error}\")),", with = "Err(_) => Inbound::Bytes(Vec::new())," }
+
+# A one-byte chunk reads as the end of stream, so the caller's end opens before its chunks.
+[[fault]]
+id = "agentd-tunnel-fuzz-end-opens-early"
+guard = "tunnel_fuzz::frames_open_in_order_and_the_callers_end_only_after_every_chunk"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "tunnel_fuzz::frames_open_in_order_and_the_callers_end_only_after_every_chunk"]
+expect = "test-failed"
+suite = "rust"
+message = "the caller's end opened before every chunk"
+transform = { file = "crates/protocol/src/identity.rs", replace = "    plaintext.is_empty()\n}", with = "    plaintext.len() < 2\n}" }
+
+# The client reads every reply as offering the end of stream, whatever its payload says.
+[[fault]]
+id = "bind21-fuzz-offer-ignored"
+guard = "session::tunnel_fuzz::a_reply_opens_only_from_the_pinned_vm"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::tunnel_fuzz::a_reply_opens_only_from_the_pinned_vm"]
+expect = "test-failed"
+suite = "rust"
+message = "right: false"
+transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "let daemon_proves_end = protocol::identity::offers_end_of_stream(&scratch[..offer]);", with = "let daemon_proves_end = protocol::identity::offers_end_of_stream(&protocol::identity::HANDSHAKE_PAYLOAD);" }
+
+# The client's frame read takes a frame that doesn't open as an empty chunk instead of failing.
+[[fault]]
+id = "bind24-fuzz-bad-frame-read-as-a-chunk"
+guard = "session::tunnel_fuzz::frames_open_in_order_and_the_daemons_end_only_after_every_chunk"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::tunnel_fuzz::frames_open_in_order_and_the_daemons_end_only_after_every_chunk"]
+expect = "test-failed"
+suite = "rust"
+message = "not the guest's next chunk"
+transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "    })?;\n    Ok(if protocol::identity::is_end_of_stream(&scratch[..count]) {", with = "    })\n    .unwrap_or(usize::MAX);\n    if count == usize::MAX {\n        return Ok(Frame::Chunk(0));\n    }\n    Ok(if protocol::identity::is_end_of_stream(&scratch[..count]) {" }
+
+# A one-byte chunk reads as the end of stream, so the daemon's end opens before its chunks.
+[[fault]]
+id = "bind23-fuzz-end-opens-early"
+guard = "session::tunnel_fuzz::frames_open_in_order_and_the_daemons_end_only_after_every_chunk"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::tunnel_fuzz::frames_open_in_order_and_the_daemons_end_only_after_every_chunk"]
+expect = "test-failed"
+suite = "rust"
+message = "the daemon's end opened before every chunk"
+transform = { file = "crates/protocol/src/identity.rs", replace = "    plaintext.is_empty()\n}", with = "    plaintext.len() < 2\n}" }
