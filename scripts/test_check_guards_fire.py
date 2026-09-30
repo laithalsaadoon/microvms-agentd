@@ -959,16 +959,27 @@ class UnregisteredOnlyShrinks(unittest.TestCase):
 
 
 class RegistryShape(unittest.TestCase):
-    def check(self, registry: str, message: str) -> None:
+    def listed(
+        self, registry: str, files: dict[str, str] | None
+    ) -> subprocess.CompletedProcess[str]:
         repo = notes_repo(
             self,
-            {"src/lib.rs": RUST_NOTE},
+            {"src/lib.rs": RUST_NOTE, **(files or {})},
             faults=registry,
             unregistered="src/lib.rs::the_guard\n",
         )
-        out = repo.run("list")
+        return repo.run("list")
+
+    def check(
+        self, registry: str, message: str, files: dict[str, str] | None = None
+    ) -> None:
+        out = self.listed(registry, files)
         self.assertEqual(out.returncode, 1, out.stdout)
         self.assertIn(message, out.stderr)
+
+    def passes(self, registry: str, files: dict[str, str] | None = None) -> None:
+        out = self.listed(registry, files)
+        self.assertEqual(out.returncode, 0, out.stderr)
 
     def test_an_empty_registry_fails(self):
         self.check("# nothing\n", "has no [[fault]] entry")
@@ -1005,6 +1016,90 @@ class RegistryShape(unittest.TestCase):
 
     def test_an_unknown_key_fails(self):
         self.check(entry(guards="x"), "unknown key 'guards'")
+
+    def test_a_sha_in_a_message_fails(self):
+        # The step name ci:parity prints carries the action's SHA, which Dependabot bumps.
+        sha = "bec219d24cd3e171d82865faccec33120bb574f4"
+        self.check(
+            entry(
+                expect="exit-nonzero",
+                run=["./gate"],
+                message=f"step `astral-sh/setup-uv@{sha}` has no `version` input",
+            ),
+            f"`message` carries {sha}, a SHA or digest",
+        )
+
+    def test_a_tree_version_in_a_message_fails(self):
+        # The fault writes `the_guard=fail`; 0.15.22 is a pin the tree owns.
+        self.check(
+            entry(
+                expect="exit-nonzero",
+                run=["./gate"],
+                message="the_guard=fail, and mise.toml pins 0.15.22",
+            ),
+            "`message` carries 0.15.22, a version its fault doesn't write",
+        )
+
+    def test_a_version_the_anchor_carries_into_the_fault_is_the_trees(self):
+        # `with` repeats the anchor's version: the fault adds a key, not the version.
+        kept = (
+            'transform = { file = "ci.txt", replace = "run: uvx ruff@0.15.22 format", '
+            'with = "run: uvx ruff@0.15.22 format continue-on-error" }'
+        )
+        self.check(
+            entry(
+                expect="exit-nonzero",
+                run=["./gate"],
+                fault=kept,
+                message="step `uvx ruff@0.15.22 format` sets `continue-on-error`",
+            ),
+            "`message` carries 0.15.22, a version its fault doesn't write",
+            files={"ci.txt": "run: uvx ruff@0.15.22 format\n"},
+        )
+
+    def test_a_version_the_fault_seeds_passes(self):
+        # One entry for each place a fault writes a version: a transform's `with`, a patch's
+        # added lines, and `argv_fault`.
+        patch = textwrap.dedent(
+            """\
+            --- a/uv.txt
+            +++ b/uv.txt
+            @@ -1 +1 @@
+            -uv=0.12.13
+            +uv=0.12.14
+            """
+        )
+        registry = (
+            entry(
+                fid="by-transform",
+                expect="exit-nonzero",
+                run=["./gate"],
+                fault='transform = { file = "ruff.txt", replace = "ruff=0.15.22", with = "ruff=0.15.21" }',
+                message="runs 0.15.21, and mise.toml pins",
+            )
+            + entry(
+                fid="by-patch",
+                expect="exit-nonzero",
+                run=["./gate"],
+                fault='patch = "guards/faults/by-patch.patch"',
+                message="and mise.toml pins 0.12.14",
+            )
+            + entry(
+                fid="by-argv",
+                expect="exit-nonzero",
+                run=["./gate"],
+                fault='argv_fault = ["--pin", "2.0.1"]',
+                message="pins 2.0.1, which nothing installs",
+            )
+        )
+        self.passes(
+            registry,
+            {
+                "ruff.txt": "ruff=0.15.22\n",
+                "uv.txt": "uv=0.12.13\n",
+                "guards/faults/by-patch.patch": patch,
+            },
+        )
 
 
 TIMING = re.compile(r"\(\d+\.\d s(?: of faults)?\)")
