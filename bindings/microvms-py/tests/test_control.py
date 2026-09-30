@@ -39,9 +39,52 @@ def test_the_control_plane_checks_identifiers_before_the_wire() -> None:
 
 
 def test_service_shapes_come_only_from_the_service() -> None:
-    for cls in (microvms.Microvm, microvms.MicrovmSummary, microvms.IdlePolicy):
+    for cls in (
+        microvms.Microvm,
+        microvms.MicrovmSummary,
+        microvms.IdlePolicy,
+        microvms.ImageSummary,
+        microvms.ImageVersion,
+        microvms.ImageBuild,
+    ):
         with pytest.raises(TypeError):
             cls()  # type: ignore[call-arg]
+
+
+def test_image_administration_checks_its_arguments_before_the_wire() -> None:
+    """#264: core's identifier and version checks, reached through the binding."""
+    plane = microvms.ControlPlane(region())
+    with pytest.raises(microvms.InvalidArgError, match="imageIdentifier"):
+        plane.list_image_versions("")
+    with pytest.raises(microvms.InvalidArgError, match="imageIdentifier"):
+        plane.list_image_builds("", "1.0")
+    with pytest.raises(microvms.InvalidArgError, match="imageVersion"):
+        plane.list_image_builds("arn:image", "")
+    with pytest.raises(microvms.InvalidArgError, match="buildId"):
+        plane.get_image_build("arn:image", "1.0", "")
+    with pytest.raises(microvms.InvalidArgError, match="imageVersion"):
+        plane.set_image_version_status("arn:image", "2.0\n", "INACTIVE")
+
+
+def test_a_version_status_is_the_models_spelling() -> None:
+    """#264: the status is parsed by core before the call. A near miss is refused naming
+    both values; a legal one gets past the parse to the identifier check behind it."""
+    plane = microvms.ControlPlane(region())
+    for status in ("INACTIVATE", "inactive", ""):
+        with pytest.raises(microvms.InvalidArgError, match="ACTIVE or INACTIVE"):
+            plane.set_image_version_status("arn:image", "2.0", status)
+    for status in ("ACTIVE", "INACTIVE"):
+        with pytest.raises(microvms.InvalidArgError, match="imageIdentifier"):
+            plane.set_image_version_status("", "2.0", status)
+
+
+def test_deleting_an_image_the_service_would_refuse_answers_false() -> None:
+    """#264: `delete_image` doesn't raise, and an identifier the service can't accept is a
+    `False` before any call. A backoff that isn't a duration is refused before it."""
+    plane = microvms.ControlPlane(region())
+    assert plane.delete_image("") is False
+    with pytest.raises(microvms.InvalidArgError):
+        plane.delete_image("arn:image", backoff=-1.0)
 
 
 @pytest.mark.parametrize(

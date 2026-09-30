@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-//! MicroVM lifecycle by ID, for a process that holds only an identifier.
+//! MicroVM lifecycle and image administration by ID, for a process that holds only an
+//! identifier.
 //!
 //! A thin wrapper over the core's `ControlPlane`: every call is one of the core's own, with
 //! its identifier checks and retries. It carries no lifecycle state and so enforces none of
@@ -9,8 +10,11 @@
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
-use microvms_core::control::{ControlPlane, Microvm, MicrovmFilter, WaitOpts};
+use std::collections::BTreeMap;
+
+use microvms_core::control::{ControlPlane, Microvm, MicrovmFilter, WaitOpts, ops};
 use microvms_core::prelude::*;
+use microvms_core::sandbox::{DEFAULT_DELETE_ATTEMPTS, DEFAULT_DELETE_BACKOFF};
 use pyo3::prelude::*;
 
 use crate::errors::PyCoreResult;
@@ -175,7 +179,269 @@ impl PyMicrovmSummary {
     }
 }
 
-/// MicroVM lifecycle by ID: get, list, suspend, resume, terminate, and wait.
+/// One `ListMicrovmImages` item: an image's ARN, name and state.
+#[pyclass(frozen, name = "ImageSummary", module = "microvms")]
+pub struct PyImageSummary {
+    inner: ops::MicrovmImageSummaryWire,
+}
+
+#[pymethods]
+impl PyImageSummary {
+    #[getter]
+    fn image_arn(&self) -> &str {
+        &self.inner.image_arn
+    }
+
+    #[getter]
+    fn name(&self) -> &str {
+        &self.inner.name
+    }
+
+    /// As the service spells it, such as `"CREATING"` or `"CREATED"`.
+    #[getter]
+    fn state(&self) -> &str {
+        &self.inner.state
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ImageSummary(name={:?}, state={:?})",
+            self.inner.name, self.inner.state
+        )
+    }
+}
+
+/// One image version as `ListMicrovmImageVersions` or `UpdateMicrovmImageVersion` reads it
+/// back: its build state, whether `RunMicrovm` launches it, and what it was built with.
+#[pyclass(frozen, name = "ImageVersion", module = "microvms")]
+pub struct PyImageVersion {
+    inner: ops::MicrovmImageVersionSummaryWire,
+}
+
+#[pymethods]
+impl PyImageVersion {
+    #[getter]
+    fn image_arn(&self) -> &str {
+        &self.inner.image_arn
+    }
+
+    #[getter]
+    fn image_version(&self) -> &str {
+        &self.inner.image_version
+    }
+
+    /// The version's build state, as the service spells it.
+    #[getter]
+    fn state(&self) -> &str {
+        &self.inner.state
+    }
+
+    /// `"ACTIVE"` (`RunMicrovm` launches it) or `"INACTIVE"` (it refuses; running VMs keep
+    /// running).
+    #[getter]
+    fn status(&self) -> &str {
+        &self.inner.status
+    }
+
+    /// Whether `RunMicrovm` launches this version.
+    #[getter]
+    fn is_active(&self) -> bool {
+        self.inner.is_active()
+    }
+
+    /// Why the version is in this state, when the service said. A failed build's reason is on
+    /// its build (`list_image_builds`), and this one is usually absent.
+    #[getter]
+    fn state_reason(&self) -> Option<&str> {
+        self.inner.state_reason.as_deref()
+    }
+
+    /// Unix seconds.
+    #[getter]
+    fn created_at(&self) -> f64 {
+        self.inner.created_at
+    }
+
+    /// Unix seconds, when the service reported it.
+    #[getter]
+    fn updated_at(&self) -> Option<f64> {
+        self.inner.updated_at
+    }
+
+    #[getter]
+    fn base_image_arn(&self) -> &str {
+        &self.inner.base_image_arn
+    }
+
+    /// The base version the build used, as the service spells it (`"1.0"` where the managed
+    /// base lists `"1"`). A record of the build, not a value to pass back as a pin.
+    #[getter]
+    fn base_image_version(&self) -> Option<&str> {
+        self.inner.base_image_version.as_deref()
+    }
+
+    #[getter]
+    fn build_role_arn(&self) -> &str {
+        &self.inner.build_role_arn
+    }
+
+    /// `codeArtifact.uri`: the artifact the version was built from.
+    #[getter]
+    fn code_artifact_uri(&self) -> &str {
+        &self.inner.code_artifact.uri
+    }
+
+    #[getter]
+    fn description(&self) -> Option<&str> {
+        self.inner.description.as_deref()
+    }
+
+    /// `resources[0].minimumMemoryInMiB`, the list's one member: the size class the version
+    /// was built for, and the only place a built image reports it.
+    #[getter]
+    fn minimum_memory_mib(&self) -> Option<u32> {
+        self.inner
+            .resources
+            .as_ref()
+            .and_then(|resources| resources.first())
+            .map(|resources| resources.minimum_memory_in_mib)
+    }
+
+    #[getter]
+    fn egress_network_connectors(&self) -> Option<Vec<String>> {
+        self.inner.egress_network_connectors.clone()
+    }
+
+    #[getter]
+    fn additional_os_capabilities(&self) -> Option<Vec<String>> {
+        self.inner.additional_os_capabilities.clone()
+    }
+
+    #[getter]
+    fn environment_variables(&self) -> Option<BTreeMap<String, String>> {
+        self.inner.environment_variables.clone()
+    }
+
+    #[getter]
+    fn tags(&self) -> Option<BTreeMap<String, String>> {
+        self.inner.tags.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("ImageVersion({})", self.inner.describe())
+    }
+}
+
+/// One build of an image version: one per Graviton generation, so a version's builds differ
+/// in `chipset_generation`. `get_image_build` adds the snapshot sizes the listing lacks.
+#[pyclass(frozen, name = "ImageBuild", module = "microvms")]
+pub struct PyImageBuild {
+    inner: ops::GetImageBuildResponseWire,
+}
+
+impl From<ops::MicrovmImageBuildSummaryWire> for PyImageBuild {
+    fn from(build: ops::MicrovmImageBuildSummaryWire) -> Self {
+        PyImageBuild {
+            inner: ops::GetImageBuildResponseWire {
+                image_arn: build.image_arn,
+                image_version: build.image_version,
+                build_id: build.build_id,
+                build_state: build.build_state,
+                architecture: build.architecture,
+                chipset: build.chipset,
+                chipset_generation: build.chipset_generation,
+                created_at: build.created_at,
+                state_reason: build.state_reason,
+                snapshot_build: None,
+            },
+        }
+    }
+}
+
+#[pymethods]
+impl PyImageBuild {
+    #[getter]
+    fn image_arn(&self) -> &str {
+        &self.inner.image_arn
+    }
+
+    #[getter]
+    fn image_version(&self) -> &str {
+        &self.inner.image_version
+    }
+
+    /// What `get_image_build` takes, and nothing else in the API mints one.
+    #[getter]
+    fn build_id(&self) -> &str {
+        &self.inner.build_id
+    }
+
+    /// `buildState`, as the service spells it.
+    #[getter]
+    fn build_state(&self) -> &str {
+        &self.inner.build_state
+    }
+
+    #[getter]
+    fn architecture(&self) -> &str {
+        &self.inner.architecture
+    }
+
+    #[getter]
+    fn chipset(&self) -> &str {
+        &self.inner.chipset
+    }
+
+    #[getter]
+    fn chipset_generation(&self) -> &str {
+        &self.inner.chipset_generation
+    }
+
+    /// Unix seconds.
+    #[getter]
+    fn created_at(&self) -> f64 {
+        self.inner.created_at
+    }
+
+    /// Why the build is in this state, when the service said: where a failed build's reason
+    /// lives.
+    #[getter]
+    fn state_reason(&self) -> Option<&str> {
+        self.inner.state_reason.as_deref()
+    }
+
+    /// `snapshotBuild.memorySnapshotSizeInBytes`, from `get_image_build` only, and only when
+    /// the service reported it.
+    #[getter]
+    fn memory_snapshot_size_in_bytes(&self) -> Option<u64> {
+        self.inner
+            .snapshot_build
+            .and_then(|sizes| sizes.memory_snapshot_size_in_bytes)
+    }
+
+    /// `snapshotBuild.codeInstallSizeInBytes`, from `get_image_build` only.
+    #[getter]
+    fn code_install_size_in_bytes(&self) -> Option<u64> {
+        self.inner
+            .snapshot_build
+            .and_then(|sizes| sizes.code_install_size_in_bytes)
+    }
+
+    /// `snapshotBuild.diskSnapshotSizeInBytes`, from `get_image_build` only.
+    #[getter]
+    fn disk_snapshot_size_in_bytes(&self) -> Option<u64> {
+        self.inner
+            .snapshot_build
+            .and_then(|sizes| sizes.disk_snapshot_size_in_bytes)
+    }
+
+    fn __repr__(&self) -> String {
+        format!("ImageBuild({})", self.inner.describe())
+    }
+}
+
+/// MicroVM lifecycle by ID (get, list, suspend, resume, terminate, and wait) and image
+/// administration (list, delete, versions and their status, builds).
 ///
 /// Holds no lifecycle state, so it checks nothing a `Sandbox` would (STATE-5, STATE-7,
 /// STATE-12): a suspend of a SUSPENDED VM is the service's to refuse. Use it when a
@@ -287,6 +553,113 @@ impl PyControlPlane {
                 .await
         })?;
         Ok(PyMicrovm { inner })
+    }
+
+    /// `ListMicrovmImages`, every page: every image in the account and region.
+    fn list_images(&self, py: Python<'_>) -> PyCoreResult<Vec<PyImageSummary>> {
+        let plane = Arc::clone(&self.inner);
+        let items = runtime::block_on(py, async move { plane.list_images().await })?;
+        Ok(items
+            .into_iter()
+            .map(|inner| PyImageSummary { inner })
+            .collect())
+    }
+
+    /// Deletes the image, its extra versions first, retrying while it refuses (an image still
+    /// `CREATING`, or one a terminating VM holds).
+    ///
+    /// Returns `True` once the service took the deletion and `False` when every attempt failed
+    /// or `identifier` is not one the service accepts. It doesn't raise, as a teardown's delete
+    /// shouldn't. `attempts` and `backoff` (seconds) default to the core's teardown figures.
+    #[pyo3(signature = (identifier, *, attempts=None, backoff=None))]
+    fn delete_image(
+        &self,
+        py: Python<'_>,
+        identifier: String,
+        attempts: Option<u32>,
+        backoff: Option<f64>,
+    ) -> PyCoreResult<bool> {
+        let attempts = attempts.unwrap_or(DEFAULT_DELETE_ATTEMPTS);
+        let backoff = match backoff {
+            Some(backoff) => seconds(backoff)?,
+            None => DEFAULT_DELETE_BACKOFF,
+        };
+        let plane = Arc::clone(&self.inner);
+        Ok(runtime::block_on(py, async move {
+            Ok::<_, microvms_core::Error>(plane.delete_image(&identifier, attempts, backoff).await)
+        })?)
+    }
+
+    /// `ListMicrovmImageVersions`, every page: each version, its status, and its build
+    /// configuration.
+    fn list_image_versions(
+        &self,
+        py: Python<'_>,
+        identifier: String,
+    ) -> PyCoreResult<Vec<PyImageVersion>> {
+        let plane = Arc::clone(&self.inner);
+        let items = runtime::block_on(
+            py,
+            async move { plane.list_image_versions(&identifier).await },
+        )?;
+        Ok(items
+            .into_iter()
+            .map(|inner| PyImageVersion { inner })
+            .collect())
+    }
+
+    /// `UpdateMicrovmImageVersion`: `status` is `"ACTIVE"` or `"INACTIVE"`.
+    ///
+    /// `INACTIVE` is the non-destructive retire: `RunMicrovm` refuses the version, running VMs
+    /// keep running, and the version's readback stays. Returns the readback, and raises when it
+    /// doesn't carry the status asked for, so a 200 that didn't take isn't a rollback.
+    fn set_image_version_status(
+        &self,
+        py: Python<'_>,
+        identifier: String,
+        version: String,
+        status: &str,
+    ) -> PyCoreResult<PyImageVersion> {
+        let status: ops::VersionStatus = status.parse()?;
+        let plane = Arc::clone(&self.inner);
+        let inner = runtime::block_on(py, async move {
+            plane
+                .set_image_version_status(&identifier, &version, status)
+                .await
+        })?;
+        Ok(PyImageVersion { inner })
+    }
+
+    /// `ListMicrovmImageBuilds` for one version, every page: one build per Graviton
+    /// generation. Each `build_id` is what `get_image_build` takes.
+    fn list_image_builds(
+        &self,
+        py: Python<'_>,
+        identifier: String,
+        version: String,
+    ) -> PyCoreResult<Vec<PyImageBuild>> {
+        let plane = Arc::clone(&self.inner);
+        let items = runtime::block_on(py, async move {
+            plane.list_image_builds(&identifier, &version).await
+        })?;
+        Ok(items.into_iter().map(PyImageBuild::from).collect())
+    }
+
+    /// `GetMicrovmImageBuild`: one build, with the snapshot sizes the listing doesn't carry.
+    fn get_image_build(
+        &self,
+        py: Python<'_>,
+        identifier: String,
+        version: String,
+        build_id: String,
+    ) -> PyCoreResult<PyImageBuild> {
+        let plane = Arc::clone(&self.inner);
+        let inner = runtime::block_on(py, async move {
+            plane
+                .get_image_build(&identifier, &version, &build_id)
+                .await
+        })?;
+        Ok(PyImageBuild { inner })
     }
 
     fn __repr__(&self) -> String {
