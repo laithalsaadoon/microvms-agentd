@@ -24,8 +24,9 @@ fn an_artifact_built_a_second_later_is_the_same_bytes() {
         },
     ])
     .expect("valid entries");
+    let daemon = microvms_app::testing::aarch64_daemon(b"daemon");
     let build =
-        || build_artifact_with_context(b"daemon", "FROM x\n", None, Some(&context)).expect("zips");
+        || build_artifact_with_context(&daemon, "FROM x\n", None, Some(&context)).expect("zips");
     let first = build();
     std::thread::sleep(std::time::Duration::from_millis(2100));
     assert_eq!(first, build(), "IMAGE-7: equal inputs, identical bytes");

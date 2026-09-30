@@ -408,10 +408,12 @@ fn the_context_hash_extends_the_legacy_one_and_follows_every_entry() {
             );
             assert_ne!(hash(&context), legacy, "IMAGE-6: a context is identity");
 
-            // IMAGE-7: equal inputs zip to equal bytes.
+            // IMAGE-7: equal inputs zip to equal bytes. The zip carries the binary behind an
+            // aarch64 ELF header, since an artifact refuses any other daemon (#257).
+            let daemon = microvms_app::testing::aarch64_daemon(&case.binary);
             let zip = |context: &BuildContext| {
                 build_artifact_with_context(
-                    &case.binary,
+                    &daemon,
                     &case.dockerfile,
                     project.as_ref(),
                     Some(context),
