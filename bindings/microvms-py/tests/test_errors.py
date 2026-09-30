@@ -281,3 +281,43 @@ def test_each_exception_documents_the_condition_it_stands_for() -> None:
         assert len(doc) > len(code) + 20, (
             f"{exception.__name__} has no real explanation"
         )
+
+
+# -- a daemon status, through a loopback server ---------------------------------
+
+
+def test_a_disk_pressure_507_is_a_platform_error_and_not_retryable(
+    sse_server: object,
+) -> None:
+    """A 507 is `InsufficientStorage` on `.wire_kind`, `ERR_PLATFORM`, and `.retryable` False.
+
+    The daemon answers 507 when a write would take the disk under its reserve, and it chose 507
+    over 500 because a client retries a 500. Read as one more 5xx, it was a `RetryableError`
+    here, so a loop keyed on `.retryable` repeated a write the full disk refuses (#256).
+    """
+    body = (
+        b"refusing to write /workspace: 4096 bytes available on the target filesystem, "
+        b"below the 1048576 byte reserve"
+    )
+    server = sse_server([[body]], 507)  # type: ignore[operator]
+    session = microvms.Session.direct(server.endpoint, "agent-token")
+
+    with pytest.raises(microvms.PlatformError) as raised:
+        session.upload_file("/workspace/big.bin", b"x")
+
+    assert raised.value.code == "ERR_PLATFORM"
+    assert raised.value.wire_kind == "InsufficientStorage"
+    assert raised.value.retryable is False
+    assert "4096 bytes available" in str(raised.value)
+
+
+def test_every_other_five_hundred_is_still_retryable(sse_server: object) -> None:
+    """A 500 stays `ServerError` and retryable: only the status the daemon chose on purpose moved."""
+    server = sse_server([[b"spawn failed"]], 500)  # type: ignore[operator]
+    session = microvms.Session.direct(server.endpoint, "agent-token")
+
+    with pytest.raises(microvms.RetryableError) as raised:
+        session.upload_file("/workspace/f", b"x")
+
+    assert raised.value.wire_kind == "ServerError"
+    assert raised.value.retryable is True

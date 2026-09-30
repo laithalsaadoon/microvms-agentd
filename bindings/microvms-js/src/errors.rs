@@ -47,6 +47,12 @@
 //! One string per level, each level's message being exactly that string — so reading it is a
 //! field access rather than parsing.
 //!
+//! # Whether to retry
+//!
+//! [`is_retryable`] is the TypeScript spelling of the Python binding's `.retryable`: it reads
+//! the code off the chain and asks core's `ErrorKind::retryable`, so the rule stays in core and
+//! a caller doesn't keep a list of retryable codes (#256).
+//!
 //! # No validation lives here
 //!
 //! Every error crossing this boundary originated in `microvms-core`. This file translates; it
@@ -61,7 +67,9 @@
 //! satisfied` at every signature that used it. Measured, not guessed. Each signature says the
 //! type out loud.
 
-use microvms_core::Error;
+use microvms_core::{Error, ErrorKind};
+use napi::ValueType;
+use napi::bindgen_prelude::{FromNapiValue, JsObjectValue, Object, Unknown};
 
 /// The chain that carries the code, and the wire kind under it.
 ///
@@ -155,4 +163,30 @@ pub fn wire_kinds() -> Vec<String> {
         .iter()
         .map(|wire| wire.as_str().to_string())
         .collect()
+}
+
+/// Whether retrying the identical call could plausibly succeed, for an error this library raised.
+///
+/// The TypeScript spelling of Python's `.retryable`, read off the chain every error here
+/// carries: `err.cause.message` is the `ERR_*` code, and core answers for its kind. A
+/// transient condition (a refused connection, a mint failure, a daemon not yet bootstrapped)
+/// is `true`; a full disk, a credential, or a refused argument is `false`. Anything that
+/// isn't a library error (no cause, or a cause whose message is no `ERR_*` code) is `false`,
+/// because nothing says a retry would land differently.
+#[napi_derive::napi]
+pub fn is_retryable(error: Unknown<'_>) -> bool {
+    code_of(error)
+        .and_then(|code| ErrorKind::ALL.into_iter().find(|kind| kind.code() == code))
+        .is_some_and(ErrorKind::retryable)
+}
+
+/// `error.cause.message`, when `error` is an object whose cause is one with a string message.
+fn code_of(error: Unknown<'_>) -> Option<String> {
+    if error.get_type().ok()? != ValueType::Object {
+        return None;
+    }
+    // Only an object reaches this point, which is what `Object`'s conversion expects.
+    let error = Object::from_unknown(error).ok()?;
+    let cause = error.get_named_property::<Option<Object>>("cause").ok()??;
+    cause.get_named_property::<Option<String>>("message").ok()?
 }
