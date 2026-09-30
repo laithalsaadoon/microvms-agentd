@@ -42,8 +42,8 @@ use std::sync::Arc;
 use microvms_core::prelude::*;
 use microvms_core::sandbox::Sandbox;
 use microvms_core::session::{
-    CompletionOptions, CompletionPlan, DEFAULT_CLIENT_GRACE, OutputFlow, OutputSink, Session,
-    mint_exec_id,
+    CompletionOptions, CompletionPlan, DEFAULT_CLIENT_GRACE, GapPolicy, OutputFlow, OutputSink,
+    Session, StreamOptions, mint_exec_id,
 };
 use microvms_core::{Error, ErrorKind};
 use pyo3::prelude::*;
@@ -746,6 +746,105 @@ impl PySession {
         })?))
     }
 
+    /// Starts a command and returns it as two byte iterators, a `wait()`, and a `kill()`.
+    ///
+    /// The **process** shape, as against `run`'s handle: the same start request and keyword
+    /// arguments, so `spawn` and `run` with one `exec_id` address one server-side child.
+    /// `proc.stdout` and `proc.stderr` iterate `bytes`, split out of the one stream the
+    /// daemon sends, which reconnects at the byte cursor after a cut, so a suspend and resume
+    /// doesn't end them early. Read both sides, from two threads when a command writes much
+    /// to both: each holds one unread chunk, like a pipe.
+    ///
+    /// `gap_policy` is what an evicted byte range does. `"error"`, the default when it's
+    /// `None`, raises `PlatformError` (wire kind `OutputGap`) from both iterators naming the
+    /// range, since the wire can't say which side lost the bytes; `"event"` records it on
+    /// `proc.gaps` and keeps both going. `offset`, `reconnect`, `max_reconnects` and
+    /// `idle_timeout` are `ExecHandle.stream()`'s.
+    // The start request's keyword defaults restate the wire's, for the reason `run` gives.
+    // `offset` and `reconnect` restate `StreamOptions::default()`'s, as `ExecHandle.stream()`
+    // does. `gap_policy` is `None` rather than `"error"`, so core's default stays the one copy.
+    #[pyo3(signature = (
+        command,
+        *,
+        shell=ShellArg::Flag(false),
+        cwd=None,
+        env=None,
+        user=None,
+        group=None,
+        timeout_sec=None,
+        stdin=false,
+        exec_id=None,
+        reap_group_on_exit=false,
+        inherit_image_env=false,
+        offset=0,
+        reconnect=true,
+        max_reconnects=None,
+        idle_timeout=None,
+        gap_policy=None,
+    ))]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the run() signature plus the stream's options, deliberately"
+    )]
+    fn spawn(
+        &self,
+        py: Python<'_>,
+        command: Command,
+        shell: ShellArg,
+        cwd: Option<String>,
+        env: Option<std::collections::HashMap<String, String>>,
+        user: Option<Principal>,
+        group: Option<Principal>,
+        timeout_sec: Option<f64>,
+        stdin: bool,
+        exec_id: Option<String>,
+        reap_group_on_exit: bool,
+        inherit_image_env: bool,
+        offset: u64,
+        reconnect: bool,
+        max_reconnects: Option<u32>,
+        idle_timeout: Option<f64>,
+        gap_policy: Option<&str>,
+    ) -> PyResult<crate::process::PyExecProcess> {
+        // Every argument is checked before anything starts, so a bad policy or idle timeout
+        // costs no exec.
+        let policy: GapPolicy = gap_policy
+            .map(str::parse)
+            .transpose()
+            .map_err(CoreError)?
+            .unwrap_or_default();
+        let defaults = StreamOptions::default();
+        let options = StreamOptions {
+            offset,
+            reconnect,
+            max_reconnects: max_reconnects.unwrap_or(defaults.max_reconnects),
+            idle_timeout: match idle_timeout {
+                Some(idle) => seconds(idle).map_err(CoreError)?,
+                None => defaults.idle_timeout,
+            },
+            ..defaults
+        };
+        let request = protocol::exec::StartRequest::new(
+            exec_id.unwrap_or_else(mint_exec_id),
+            command.into_argv(),
+        )
+        .with_shell(shell)
+        .with_cwd(cwd)
+        .with_env(env.unwrap_or_default())
+        .with_user(user.map(Into::into))
+        .with_group(group.map(Into::into))
+        .with_timeout_sec(timeout_sec)
+        .with_stdin(stdin)
+        .with_reap_group_on_exit(reap_group_on_exit)
+        .with_inherit_image_env(inherit_image_env);
+        let handle = self
+            .detached(py, move |session| {
+                runtime::block_on_detached(session.run(request))
+            })
+            .map_err(CoreError)?;
+        crate::process::PyExecProcess::start(py, handle, options, policy)
+    }
+
     /// A handle for an exec started earlier, possibly by another process.
     ///
     /// The reattach path. Nothing is checked against the daemon here — the handle is an
@@ -1146,6 +1245,25 @@ pub(crate) fn session_constants<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyD
     dict.set_item(
         "defaultRefreshAfterSeconds",
         microvms_core::session::DEFAULT_REFRESH_AFTER.as_secs(),
+    )?;
+    // The waits' defaults, core's (#266): the stub prints a default named for a core constant as
+    // `...`, so a caller reads the figure here, and a signature that states one is tested
+    // against it.
+    dict.set_item(
+        "defaultExecWaitSeconds",
+        microvms_core::session::DEFAULT_EXEC_WAIT.as_secs_f64(),
+    )?;
+    dict.set_item(
+        "defaultReadyTimeoutSeconds",
+        microvms_core::session::DEFAULT_READY_TIMEOUT.as_secs_f64(),
+    )?;
+    dict.set_item(
+        "defaultLifecycleTimeoutSeconds",
+        microvms_core::sandbox::DEFAULT_LIFECYCLE_TIMEOUT.as_secs_f64(),
+    )?;
+    dict.set_item(
+        "lifecyclePollIntervalSeconds",
+        microvms_core::sandbox::LIFECYCLE_POLL_INTERVAL.as_secs_f64(),
     )?;
     // The closed sets come from the protocol enums rather than being spelled here: a
     // phase added to `protocol::exec::Phase` appears in this list without an edit.

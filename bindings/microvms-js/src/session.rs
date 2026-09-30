@@ -421,12 +421,8 @@ impl SpawnOptions {
 
     /// The core's stream options.
     ///
-    /// `errorOnGap` is deliberately **not** set from `gapPolicy`, and that is the one
-    /// non-obvious mapping here. Core's `error_on_gap` ends the drive with a typed error, which
-    /// would lose the byte range's attribution and would stop `gaps` from ever being populated;
-    /// this handle needs to *see* the gap event in order to error both streams with the range in
-    /// the message under `'error'`, and to record it under `'event'`. So the gap always arrives
-    /// as an event from core and the policy is applied one layer up, in the drive.
+    /// `error_on_gap` isn't set from `gapPolicy`: core's split replaces it with the gap
+    /// policy, which it applies to the gap event itself (`ExecHandle::split`).
     fn stream_options(&self) -> Result<StreamOptions, AsyncError> {
         let defaults = StreamOptions::default();
         Ok(StreamOptions {
@@ -1022,6 +1018,9 @@ pub fn session_constants() -> String {
             // asserted its own copy would assert that the copy is self-consistent.
             r#""wsSubprotocol":"{}","wsAuthSubprotocolPrefix":"{}","#,
             r#""wsPortSubprotocolPrefix":"{}","#,
+            // The waits' defaults, core's (#266), for a caller who leaves a timeout out.
+            r#""defaultExecWaitSeconds":{},"defaultReadyTimeoutSeconds":{},"#,
+            r#""defaultLifecycleTimeoutSeconds":{},"lifecyclePollIntervalSeconds":{},"#,
             r#""phases":[{}],"streamKinds":[{}]}}"#,
         ),
         microvms_core::session::DEFAULT_AGENT_PORT,
@@ -1032,6 +1031,10 @@ pub fn session_constants() -> String {
         microvms_core::session::WS_SUBPROTOCOL,
         microvms_core::session::WS_AUTH_SUBPROTOCOL_PREFIX,
         microvms_core::session::WS_PORT_SUBPROTOCOL_PREFIX,
+        microvms_core::session::DEFAULT_EXEC_WAIT.as_secs_f64(),
+        microvms_core::session::DEFAULT_READY_TIMEOUT.as_secs_f64(),
+        microvms_core::sandbox::DEFAULT_LIFECYCLE_TIMEOUT.as_secs_f64(),
+        microvms_core::sandbox::LIFECYCLE_POLL_INTERVAL.as_secs_f64(),
         phases,
         stream_kinds,
     )
