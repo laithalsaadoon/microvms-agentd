@@ -609,15 +609,15 @@ pub(crate) fn read_reply(
 ) -> Result<Verified, Error> {
     let offer = initiator.read_message(reply, scratch).map_err(|_| {
         // *Our* verification failed on the daemon's reply: the far end is not the VM the pin
-        // was minted for. This is the diagnosis the daemon cannot make — it does not know
-        // which key we pinned — and the one the caller most needs, because the likely cause is
+        // was minted for. This is the diagnosis the daemon cannot make, since it does not know
+        // which key we pinned, and the one the caller most needs, because the likely cause is
         // a record replayed from another VM.
         Error::new(
             ErrorKind::Unexpected,
             format!(
                 "the identity handshake reply did not verify against the pinned key for this \
                  VM. The far end holds a different seed than the one this record was created \
-                 with — a record copied from another VM, or a VM relaunched with a fresh seed, \
+                 with: a record copied from another VM, or a VM relaunched with a fresh seed, \
                  would both do this. (guest port {guest_port})"
             ),
         )
