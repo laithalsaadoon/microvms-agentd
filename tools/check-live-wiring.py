@@ -43,8 +43,9 @@ available, so `live`'s body is a sequence with one — and this guard asserts th
 there and that it fires, rather than trusting the comment saying so.
 
 The sequencing half is behavioral: it builds a throwaway repo whose `live` task body is
-**the real one, read out of `mise.toml`**, with the three suite members stubbed, and runs
-it green and red. A textual assertion would keep passing against a body that had stopped
+**the real one, read out of the task file that defines it** (through tools/mise_config.py, the
+loader every gate that reads the tasks shares), with the suite members stubbed, and runs it
+green and red. A textual assertion would keep passing against a body that had stopped
 working, which is the failure mode this whole file exists to answer.
 
 Usage:
@@ -54,12 +55,15 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+import mise_config
 
 MARKER = "agentd-last-live-run"
 
@@ -87,7 +91,7 @@ def members() -> tuple[tuple[str, str], ...]:
         exit_var = MEMBER_EXIT_VARS.get(name)
         if exit_var is None:
             raise SystemExit(
-                f"check-live-wiring: [tasks.live] invokes {name}, which this harness has "
+                f"check-live-wiring: `live` invokes {name}, which this harness has "
                 f"no stub for. Add it to MEMBER_EXIT_VARS so the harness can drive it."
             )
         found.append((name, exit_var))
@@ -235,21 +239,28 @@ def check_marker_path(report: list[str]) -> None:
 
     # The textual half. The behavioral half proves *this script* is right and says nothing
     # about whether the consumers call it; a regression here is someone re-inlining the
-    # literal, which is how it got into two files.
-    for name in ("mise.toml", ".config/lefthook.yml"):
-        text = (repo() / name).read_text(encoding="utf-8")
-        # In a comment the literal is describing the bug, which both files now do at
-        # length. Only a live line can reintroduce it.
+    # literal, which is how it got into two files. Every file mise reads tasks from counts,
+    # since the writer is a task and any task could spell it.
+    for label, names in (
+        ("no mise config file inlines the .git/ literal", config().files),
+        (
+            ".config/lefthook.yml does not inline the .git/ literal",
+            [".config/lefthook.yml"],
+        ),
+    ):
+        # In a comment the literal is describing the bug, which the writer and the reader
+        # both do at length. Only a live line can reintroduce it.
         offenders = [
-            line
-            for line in text.splitlines()
+            f"{name}: {line.strip()}"
+            for name in names
+            for line in (repo() / name).read_text(encoding="utf-8").splitlines()
             if f".git/{MARKER}" in line and not line.lstrip().startswith("#")
         ]
         say(
             report,
             not offenders,
-            f"{name} does not inline the .git/ literal",
-            "ok" if not offenders else f"spells it: {offenders[0].strip()}",
+            label,
+            "ok" if not offenders else f"spells it: {offenders[0]}",
         )
 
 
@@ -261,24 +272,30 @@ def round_trip_named(at: Path, label: str) -> tuple[bool, str, str]:
 # ── 2 and 3. the sequencing, and the trap that survives a failure ────────────
 
 
-def live_body() -> str:
-    """`[tasks.live]`'s `run` body, read out of the real `mise.toml`.
+def config() -> mise_config.Config:
+    """This repo's mise config, its tasks read wherever they're defined."""
+    try:
+        return mise_config.load(repo())
+    except mise_config.Unreadable as error:
+        raise SystemExit(f"check-live-wiring: {error}") from None
 
-    Read rather than re-described, so the harness exercises the shipped text. A
-    hand-written imitation would keep passing after the real body stopped working, which
-    is the one thing this file must not do.
+
+def live_body() -> str:
+    """`live`'s `run` body, read out of the real task file.
+
+    Read rather than re-described, so the harness exercises the shipped text: the string
+    mise runs, as the loader parses it. A hand-written imitation would keep passing after
+    the real body stopped working, which is the one thing this file must not do.
     """
-    text = (repo() / "mise.toml").read_text(encoding="utf-8")
-    after = text[text.index("[tasks.live]\n") + len("[tasks.live]\n") :]
-    block = after[: after.index("\n[tasks.")]
-    match = re.search(r'^run = """\n(.*?)^"""$', block, flags=re.M | re.S)
-    if match is None:
+    task = config().tasks.get("live")
+    body = task.table.get("run") if task is not None else None
+    if not isinstance(body, str) or "\n" not in body.strip():
         raise SystemExit(
-            "check-live-wiring: [tasks.live] has no multi-line `run` body.\n"
+            "check-live-wiring: `live` has no multi-line `run` body.\n"
             "  The sequencing has moved back into `depends`, which is defects 2 and 3\n"
             "  again — see this script's docstring for what each one cost."
         )
-    return match.group(1)
+    return body
 
 
 def harness(at: Path) -> None:
@@ -309,8 +326,13 @@ def harness(at: Path) -> None:
     copy = at / "tools" / mine.name
     copy.write_bytes(mine.read_bytes())
     copy.chmod(0o755)
+    # It imports the task loader, so the copy needs its sibling beside it.
+    loader = Path(mise_config.__file__).resolve()
+    (at / "tools" / loader.name).write_bytes(loader.read_bytes())
+    # The body is written back as a JSON string, which TOML reads as the same basic string,
+    # so a backslash or a quote in it can't change what the harness runs.
     (at / "mise.toml").write_text(
-        f'{stubs}[tasks.live]\nrun = """\n{live_body()}"""\n', encoding="utf-8"
+        f"{stubs}[tasks.live]\nrun = {json.dumps(live_body())}\n", encoding="utf-8"
     )
 
 
@@ -334,7 +356,7 @@ def run_live(at: Path, **overrides: str) -> tuple[int, str]:
 def check_sequencing(report: list[str]) -> None:
     """The order, the trap, and the marker's dependence on success.
 
-    **Guard proof, each breakage applied to `mise.toml` and observed:**
+    **Guard proof, each breakage applied to the `live` task and observed:**
 
     - `trap verify_clean EXIT INT TERM` deleted: the suite-fails case reports **0** leak
       checks instead of 1. Verified. This is defect 3, and it is the whole reason the body
