@@ -989,32 +989,11 @@ fn file_read_query(request: &Request) -> Result<FileReadQuery, (StatusCode, &'st
 /// exist and an end before a start is not a window. A caller who saw 416 would go
 /// looking at the file.
 fn line_range(query: &FileReadQuery) -> Result<Option<LineSlicer>, String> {
-    if query.start_line.is_none() && query.end_line.is_none() {
-        return Ok(None);
-    }
-
-    // Defaulted rather than required, matching the harness contract: `startLine`
-    // absent is 1, `endLine` absent is through EOF.
-    let start = query.start_line.unwrap_or(1);
-    if start == 0 {
-        return Err(
-            "start_line is 1-based, so 0 is not a line. Line 1 is the first line; a caller \
-             working from 0-based offsets wants start_line=1."
-                .to_string(),
-        );
-    }
-    if let Some(end) = query.end_line
-        && end < start
-    {
-        return Err(format!(
-            "end_line {end} is before start_line {start}. Both bounds are 1-based and \
-             inclusive, so end_line must be at least start_line. An end_line past the last \
-             line is fine and reads through EOF — this refusal is for an inverted range, \
-             which no file can satisfy."
-        ));
-    }
-
-    Ok(Some(LineSlicer::new(start, query.end_line)))
+    // The rule and its wording are `FileReadQuery::line_window`'s, which the client checks
+    // before sending too, so the two can't disagree on which ranges no file can satisfy.
+    Ok(query
+        .line_window()?
+        .map(|(start, end)| LineSlicer::new(start, end)))
 }
 
 /// Keeps a byte-oriented read inside a line-oriented window, one chunk at a time.
