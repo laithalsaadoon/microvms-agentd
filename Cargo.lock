@@ -2989,12 +2989,17 @@ dependencies = [
 name = "model-conformance"
 version = "0.1.0"
 dependencies = [
+ "agentd",
  "agentd-model",
+ "futures-util",
  "microvms-app",
+ "microvms-edges",
+ "microvms-protocol",
  "serde_json",
  "stateright",
  "syn 3.0.6",
  "tokio",
+ "tokio-tungstenite 0.30.0",
 ]
 
 [[package]]
