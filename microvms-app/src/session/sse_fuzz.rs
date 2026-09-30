@@ -484,7 +484,7 @@ fn check_round_trip(frame: &Frame) {
 /// `MAX_PENDING_BYTES` held between reads, a flood past the ceiling is refused exactly when the
 /// undelimited bytes pass it, and every frame and event round-trips its framing.
 ///
-/// Seeded as `sse-fuzz-ceiling-removed` in `guards/faults.toml`: delete the ceiling check in
+/// Seeded as `sse-fuzz-ceiling-removed` in `guards/faults/sse.toml`: delete the ceiling check in
 /// `SseParser::feed` and the first flood over the ceiling holds more than it, which fails the
 /// bound after that feed. One input in eight carries a flood and all but a few floods pass the
 /// ceiling, so the `ITERATIONS` inputs a stable `cargo test` runs meet about sixteen, and the

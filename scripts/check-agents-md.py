@@ -19,8 +19,9 @@ nothing. What counts as a reference, all inside backticks:
 - A task followed by "in `check`" or "in `mise run check`", against the tasks `check`
   depends on, directly or through a task it depends on. The doc says the local gate runs it.
 - The id after `--only` and after `fired:` (`guards:fire -- --only agentd-fs-pop`), against
-  the `id` of each `[[fault]]` in guards/faults.toml.
-- A word with a `/` in it (`guards/faults.toml`, `src/lib.rs`, `site/authored/`), inline
+  the `id` of each `[[fault]]` in the registry's files (guards/faults/*.toml), read by
+  check-guards-fire.py's loader, so this and `guards:list` can't read different entries.
+- A word with a `/` in it (`guards/unregistered.txt`, `src/lib.rs`, `site/authored/`), inline
   only, against the tracked and untracked files git knows, resolved from the doc's own
   directory first and then the root. A `:line` or `:line:col` suffix is dropped first. A glob
   (`docs/*.md`) must match some file. A path .gitignore names (the live tier's Terraform
@@ -81,6 +82,7 @@ import ast
 import fnmatch
 import posixpath
 import re
+import runpy
 import subprocess
 import tomllib
 from dataclasses import dataclass, field
@@ -96,7 +98,10 @@ DOC_PATHSPECS = (
 ROOT_DOC = "AGENTS.md"
 MISE = "mise.toml"
 WORKFLOW = ".github/workflows/ci.yml"
-REGISTRY = "guards/faults.toml"
+# The fault registry's loader is check-guards-fire.py's: its files, their order and what makes
+# one unreadable are that script's to say.
+GUARDS = runpy.run_path(str(Path(__file__).with_name("check-guards-fire.py")))
+REGISTRY = GUARDS["REGISTRY"]
 # The class whose helpers the docs cite by name, and the file it lives in.
 SYMBOL_CLASS = "Results"
 SYMBOL_FILE = "conformance/harness/results.py"
@@ -313,11 +318,10 @@ def gated(tasks: dict[str, dict], top: str) -> set[str]:
 
 
 def fault_ids(root: Path) -> set[str]:
-    path = root / REGISTRY
-    if not path.is_file():
-        return set()
-    faults = tomllib.loads(path.read_text(encoding="utf-8")).get("fault", [])
-    return {f["id"] for f in faults if isinstance(f, dict) and "id" in f}
+    """The ids the registry's entries carry. A registry file the loader refuses is
+    `guards:list`'s to report; the ids of the others still count here."""
+    tables, _ = GUARDS["registry_tables"](root)
+    return {t.data["id"] for t in tables if isinstance(t.data, dict) and "id" in t.data}
 
 
 def ci_jobs(root: Path) -> set[str]:
@@ -390,9 +394,15 @@ def spelled(root: Path, words: set[str], docs: list[str]) -> set[str]:
 
 def code_text(name: str, text: str) -> str:
     """The part of a file that isn't prose about the code."""
-    if name == REGISTRY:
-        faults = tomllib.loads(text).get("fault", [])
-        return repr([{k: v for k, v in f.items() if k != "transform"} for f in faults])
+    if GUARDS["registry_file"](name):
+        tables, _ = GUARDS["parse_registry"]({name: text})
+        return repr(
+            [
+                {k: v for k, v in t.data.items() if k != "transform"}
+                for t in tables
+                if isinstance(t.data, dict)
+            ]
+        )
     if name.endswith(".py"):
         return python_code(text)
     if name.endswith(SLASH_COMMENTS):
@@ -839,13 +849,13 @@ CENSUS_SOURCES = {
 }
 # A path each source always names, so a pass means its reader parsed this tree: the workflow
 # lint hook's glob, this check's own script in its task and in CI's `security` job, the fuzz
-# crate's lockfile directory, and the registry the gate scripts read.
+# crate's lockfile directory, and the registry's directory check-guards-fire.py reads.
 CENSUS_SENTINELS = {
     "lefthook": ".github/workflows/*.yml",
     "mise": "scripts/check-agents-md.py",
     "workflows": "scripts/check-agents-md.py",
     "dependabot": "agentd/fuzz",
-    "constants": "guards/faults.toml",
+    "constants": "guards/faults",
 }
 # A decision id cited in the tree, for the same reason: the `guards` job's shards in ci.yml.
 DECISION_SENTINEL = "D35"

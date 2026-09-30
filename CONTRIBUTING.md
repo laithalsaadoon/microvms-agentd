@@ -56,11 +56,16 @@ Python builds with maturin and tests under `microvms-py/tests/`. Node builds
 with `npm run build` and tests with `npm test` in `microvms-js/`.
 
 For a new invariant guard, register the fault that proves it catches its
-failure in `guards/faults.toml`, and show `mise run guards:fire -- --only <id>`
-printing `fired` for it. `check` runs `guards:list`, which fails when an entry's
-anchor or patch no longer matches the tree, and when a test gains a
-`**Falsification**` note with no entry (`guards/unregistered.txt` lists the
-older ones and only shrinks). CI's `guards` job seeds the Rust and script
+failure in its owner's file in `guards/faults/` (a gate's, a crate's, or one
+issue's guards; a new owner starts a file), and show
+`mise run guards:fire -- --only <id>` printing `fired` for it. The registry is
+split by owner so that pull requests adding guards for different owners don't
+edit one file; an id is still unique across every file. `check` runs
+`guards:list`, which fails when an entry's anchor or patch no longer matches the
+tree, when a test gains a `**Falsification**` note with no entry
+(`guards/unregistered.txt` lists the older ones and only shrinks), and when the
+single file the registry used to be, guards/faults.toml, comes back: nothing
+reads it. CI's `guards` job seeds the Rust and script
 faults a pull request affects and, on every push to main, all of them; the
 `bindings` job seeds the binding ones. A guard no fault can be seeded for, such
 as a live check, is still broken by hand, restored, and recorded in the PR.

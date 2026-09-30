@@ -30,9 +30,9 @@ message here: name what was measured, and admit what is unverified. -->
 ## Guards
 
 **If this adds a guard, register the deliberate break that proves it fires.** Add its
-entry to `guards/faults.toml` (the schema is in `scripts/check-guards-fire.py`) and paste
-the line `mise run guards:fire -- --only <id>` printed for it. A test that passes either
-way gives a false answer.
+entry to its owner's file in `guards/faults/` (the schema is in `scripts/check-guards-fire.py`)
+and paste the line `mise run guards:fire -- --only <id>` printed for it. A test that passes
+either way gives a false answer.
 
 For a guard no fault can be seeded for mechanically, such as a live check: what you broke,
 that the check failed, and that it passed again after you restored the code.

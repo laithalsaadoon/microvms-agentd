@@ -2466,8 +2466,9 @@ mod tests {
     /// a negative span matters to `DurationP` and both bindings' `Duration.measured(-1)` tests
     /// read it.
     ///
-    /// **Falsification**: `guards/faults.toml` entry `domain-duration-refusal-as-typed` prints
-    /// the figure with `Display`, and the `1e300` row reads as 301 digits.
+    /// **Falsification**: `guards/faults/seconds-flags.toml` entry
+    /// `domain-duration-refusal-as-typed` prints the figure with `Display`, and the `1e300` row
+    /// reads as 301 digits.
     #[test]
     fn a_refused_figure_is_named_as_typed_with_the_range_it_missed() {
         for (seconds, shown) in [(1e300, "1e300"), (f64::INFINITY, "inf"), (-5.0, "-5.0")] {

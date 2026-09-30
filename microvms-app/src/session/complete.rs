@@ -785,8 +785,9 @@ mod tests {
     /// `run_to_completion` takes any `timeout_sec` a `Duration` holds, and the plan adds the
     /// grace to it, so `1e19` used to panic in `drive` with the exec already started.
     ///
-    /// **Falsification**: `guards/faults.toml` entry `app-completion-deadline-overflows` puts
-    /// the unchecked `Instant::now() + self.deadline` back in `drive`, and the call panics.
+    /// **Falsification**: `guards/faults/seconds-flags.toml` entry
+    /// `app-completion-deadline-overflows` puts the unchecked `Instant::now() + self.deadline` back
+    /// in `drive`, and the call panics.
     #[tokio::test(start_paused = true)]
     async fn a_client_deadline_longer_than_the_clock_can_hold_still_waits() {
         let recorder = Recorder::with([
@@ -815,9 +816,9 @@ mod tests {
     /// then the grace panicked. The plan is built here with its deadline already spent, which is
     /// the state `drive` reaches after the ceiling.
     ///
-    /// **Falsification**: `guards/faults.toml` entry `app-completion-grace-overflows` puts the
-    /// unchecked `Instant::now() + self.options.client_grace` back in `after_deadline`, and the
-    /// call panics after the kill.
+    /// **Falsification**: `guards/faults/seconds-flags.toml` entry `app-completion-grace-overflows`
+    /// puts the unchecked `Instant::now() + self.options.client_grace` back in `after_deadline`,
+    /// and the call panics after the kill.
     #[tokio::test(start_paused = true)]
     async fn a_client_grace_longer_than_the_clock_can_hold_still_acks() {
         let recorder = Recorder::with([

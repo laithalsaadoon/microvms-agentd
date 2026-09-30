@@ -89,13 +89,13 @@ async fn upload_record(
 /// bucket it names the bucket that went unused, so a caller who meant the bucket sees why
 /// nothing was uploaded, and with none it stays quiet.
 ///
-/// **Falsification**, run 2026-09-28. Four breaks, each registered in guards/faults.toml. Skip
-/// the upload only when there's no bucket, main's old condition
-/// (`cli-artifact-uri-not-uploaded-over`): red on `build:` with the PUT recorded. Pass `None`
-/// for the caller's URI from `run`'s build arm (`cli-artifact-uri-run-arm`): red on `run:`. Pass
-/// `None` from `build` (`cli-artifact-uri-build-arm`): red on `build:`. Print the unused-bucket
-/// line with no bucket (`cli-artifact-uri-no-bucket-quiet`): red on `no bucket:`. Round 1's
-/// falsifier: skip only when the caller's URI differs from the derived key
+/// **Falsification**, run 2026-09-28. Four breaks, each registered in
+/// guards/faults/cli-artifact-uri.toml. Skip the upload only when there's no bucket, main's old
+/// condition (`cli-artifact-uri-not-uploaded-over`): red on `build:` with the PUT recorded. Pass
+/// `None` for the caller's URI from `run`'s build arm (`cli-artifact-uri-run-arm`): red on `run:`.
+/// Pass `None` from `build` (`cli-artifact-uri-build-arm`): red on `build:`. Print the
+/// unused-bucket line with no bucket (`cli-artifact-uri-no-bucket-quiet`): red on `no bucket:`.
+/// Round 1's falsifier: skip only when the caller's URI differs from the derived key
 /// (`cli-artifact-uri-derived-key`): red on `build, the derived key:`.
 #[tokio::test]
 async fn a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucket() {
