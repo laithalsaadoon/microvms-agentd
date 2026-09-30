@@ -706,7 +706,7 @@ impl PySession {
     // `reap_group_on_exit` and `inherit_image_env`, because a Python signature shows a value: `Option<bool> = None`
     // would turn the stub's `bool = False` into `bool | None`, an API change. So these setters
     // are called unconditionally, and a wire default that changes has to change here too.
-    // #300's surface check is where that's caught.
+    // `parity:check`'s `[[default]]` rows are where that's caught (#300).
     #[pyo3(signature = (
         command,
         *,
