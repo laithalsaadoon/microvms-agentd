@@ -243,6 +243,9 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 30] = [
             "stdout",
             "stderr",
             "truncated",
+            "posixExitCode",
+            "notes",
+            "synthesized",
         ],
     ),
     (
@@ -255,6 +258,9 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 30] = [
             "stderr",
             "truncated",
             "phase",
+            "posixExitCode",
+            "notes",
+            "synthesized",
         ],
     ),
     (

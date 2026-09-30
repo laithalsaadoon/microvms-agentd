@@ -155,6 +155,9 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
             Command::Exec(ExecArgs {
                 command: Some("true".into()),
                 timeout: Duration::from_secs(30),
+                timeout_sec: None,
+                complete: false,
+                client_grace: None,
                 cwd: None,
                 env: Vec::new(),
                 user: None,

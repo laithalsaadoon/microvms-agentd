@@ -1113,8 +1113,38 @@ pub struct ExecArgs {
     pub command: Option<String>,
 
     /// How long to wait for the command, in seconds.
+    ///
+    /// A client-side deadline: past it this process stops waiting and the command keeps
+    /// running in the guest. --timeout-sec is the daemon's deadline for the command itself.
     #[arg(long, default_value = "300", value_parser = parse_seconds)]
     pub timeout: std::time::Duration,
+
+    /// The daemon's deadline for the command, in seconds: `timeout_sec` on the start request.
+    ///
+    /// Past it the daemon sends the process group SIGTERM, then SIGKILL, and the result reads
+    /// `timedOut: true`, `posixExitCode: 124` and `ERR_TIMEOUT`. Omitted, the daemon sets
+    /// none and the command runs until it exits or the VM ends. The daemon refuses zero.
+    #[arg(long, value_name = "SECONDS", value_parser = parse_seconds, conflicts_with = "poll")]
+    pub timeout_sec: Option<std::time::Duration>,
+
+    /// Wait for exactly one result, the way the SDKs' `run_to_completion` does (BIND-8 to
+    /// BIND-10).
+    ///
+    /// The client deadline is --timeout-sec plus --client-grace, or the VM's maximum lifetime
+    /// without --timeout-sec, so it replaces --timeout. Past it the process group is killed
+    /// and the result collected within the grace. When even that fails the result is
+    /// synthesized: `posixExitCode` 124, `synthesized: true`, a note naming both failures, and
+    /// `ERR_TIMEOUT`, as for any deadline that ended the command.
+    #[arg(long, conflicts_with_all = ["poll", "detach", "stream", "timeout", "kill_on_timeout"])]
+    pub complete: bool,
+
+    /// With --complete, the seconds past --timeout-sec before the kill, and then for its result.
+    ///
+    /// Omitted, core's client grace (`DEFAULT_CLIENT_GRACE`, 60 seconds): the daemon escalates
+    /// a timed-out group from SIGTERM to SIGKILL after ten seconds, and the rest covers a slow
+    /// proxy.
+    #[arg(long, value_name = "SECONDS", value_parser = parse_seconds, requires = "complete")]
+    pub client_grace: Option<std::time::Duration>,
 
     /// Working directory.
     ///
@@ -3297,6 +3327,8 @@ mod tests {
     fn parsed_seconds(command: &Command, flag: &str) -> Option<std::time::Duration> {
         match (command, flag) {
             (Command::Exec(args), "--timeout") => Some(args.timeout),
+            (Command::Exec(args), "--timeout-sec") => args.timeout_sec,
+            (Command::Exec(args), "--client-grace") => args.client_grace,
             (Command::Run(args), "--timeout") => Some(args.timeout),
             (Command::Sync(args), "--timeout") => Some(args.timeout),
             (Command::Suspend(args), "--timeout") => Some(args.timeout),
@@ -3331,8 +3363,10 @@ mod tests {
         let attached = ["--endpoint", "https://mvm-1.example", "--agent-token", "t"];
         let with_id =
             |rest: &[&'static str]| [&attached[..], &["--microvm-id", "mvm-1"], rest].concat();
-        let flags: [(&str, Vec<&str>, &str); 11] = [
+        let flags: [(&str, Vec<&str>, &str); 13] = [
             ("exec", with_id(&["true"]), "--timeout"),
+            ("exec", with_id(&["true"]), "--timeout-sec"),
+            ("exec", with_id(&["--complete", "true"]), "--client-grace"),
             ("run", vec!["--no-config"], "--timeout"),
             ("sync", with_id(&["."]), "--timeout"),
             ("suspend", vec!["mvm-1"], "--timeout"),

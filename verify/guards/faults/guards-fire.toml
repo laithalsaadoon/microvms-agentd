@@ -620,7 +620,7 @@ run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p",
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_the_guards_legs_are_the_one_place_faults_fire ("
-transform = { file = ".config/mise/tasks/ci.toml", replace = "  { task = \"npm:loader\" },\n]\n", with = "  { task = \"npm:loader\" },\n  { task = \"guards:fire\" },\n]\n" }
+transform = { file = ".config/mise/tasks/ci.toml", replace = "  { task = \"npm:package\" },\n]\n", with = "  { task = \"npm:package\" },\n  { task = \"guards:fire\" },\n]\n" }
 
 [[fault]]
 id = "guards-job-fire-census-empty"

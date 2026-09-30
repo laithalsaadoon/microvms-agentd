@@ -1,0 +1,21 @@
+# ── exec's daemon deadline and run-to-completion wait (#259) ─────────────────
+
+[[fault]]
+id = "cli-exec-timeout-sec-dropped"
+guard = "guards::exec::exec_timeout_sec_puts_the_daemons_deadline_on_the_start_body"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::exec::exec_timeout_sec_puts_the_daemons_deadline_on_the_start_body"]
+expect = "test-failed"
+suite = "rust"
+message = "must reach the wire as the daemon's own key"
+note = "crates/microvms-cli/src/guards/exec.rs::exec_timeout_sec_puts_the_daemons_deadline_on_the_start_body"
+transform = { file = "crates/microvms-cli/src/commands/attached.rs", replace = "        .with_timeout_sec(args.timeout_sec.map(|budget| budget.as_secs_f64()));\n", with = "        .with_timeout_sec(None);\n" }
+
+[[fault]]
+id = "cli-exec-complete-deadline-exit"
+guard = "guards::exec::exec_complete_synthesizes_124_with_a_note_when_the_kill_and_the_ack_both_fail"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::exec::exec_complete_synthesizes_124_with_a_note_when_the_kill_and_the_ack_both_fail"]
+expect = "test-failed"
+suite = "rust"
+message = "a deadline ended the command, so the exit says so"
+note = "crates/microvms-cli/src/guards/exec.rs::exec_complete_synthesizes_124_with_a_note_when_the_kill_and_the_ack_both_fail"
+transform = { file = "crates/microvms-cli/src/commands/attached.rs", replace = "    if result.deadline_ended() {\n", with = "    if result.outcome.as_ref().is_some_and(|outcome| outcome.timed_out) {\n" }

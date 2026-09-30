@@ -144,21 +144,32 @@ impl ExecResult {
     ///
     /// `None` only when there is nothing to report: a running exec with no client deadline.
     pub fn posix_exit_code(&self) -> Option<i32> {
-        if let Some(deadline) = &self.client_deadline
-            && (deadline.ack_error.is_some()
-                || deadline.kill == super::complete::KillAnswer::Signalled)
-        {
+        if self.deadline_ended() {
             return Some(TIMED_OUT_EXIT_CODE);
         }
         let outcome = self.outcome.as_ref()?;
-        if outcome.timed_out {
-            return Some(TIMED_OUT_EXIT_CODE);
-        }
         match (outcome.exit_code, outcome.signal) {
             (Some(code), _) => Some(code),
             (None, Some(signal)) => Some(128 + signal),
             (None, None) => None,
         }
+    }
+
+    /// Whether a deadline ended the command, which is when [`Self::posix_exit_code`] is 124
+    /// (BIND-6): the daemon's own (`timed_out`), the client's kill of a live process group
+    /// after its deadline, or a result synthesized because nothing came back after that kill.
+    ///
+    /// A kill that found the group already gone doesn't count: the command ended by itself,
+    /// and its own exit status is the answer.
+    pub fn deadline_ended(&self) -> bool {
+        let client = self.client_deadline.as_ref().is_some_and(|deadline| {
+            deadline.ack_error.is_some() || deadline.kill == super::complete::KillAnswer::Signalled
+        });
+        client
+            || self
+                .outcome
+                .as_ref()
+                .is_some_and(|outcome| outcome.timed_out)
     }
 
     /// Human-readable annotations on how to read this result, one per condition (BIND-7).
@@ -1441,7 +1452,14 @@ mod tests {
         ];
         for (result, expected) in rows {
             assert_eq!(result.posix_exit_code(), expected, "{result:?}");
+            // Each 124 in the table is a deadline's, and `deadline_ended` is that condition.
+            assert_eq!(result.deadline_ended(), expected == Some(124), "{result:?}");
         }
+        // A command that exits 124 by itself reports 124 and ended on no deadline, which is
+        // why the CLI reads `deadline_ended` and not the code.
+        let by_itself = finished(Some(124), None, false, None);
+        assert_eq!(by_itself.posix_exit_code(), Some(124));
+        assert!(!by_itself.deadline_ended());
     }
 
     /// **BIND-7: one note per condition, and none for a clean result.**
