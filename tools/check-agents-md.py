@@ -12,10 +12,11 @@ it, CONTRIBUTING.md and the pull request template, and fails on a reference that
 nothing. What counts as a reference, all inside backticks:
 
 - `mise run <task>`, in an inline span or a fenced block, and a bare task name with a colon
-  (`guards:list`), against the tasks of mise.toml and of the TOML files its
-  `[task_config] includes` names (`mise_task_files`). A name holding a placeholder
-  (`ci:<job>`) isn't one, and a bare name that isn't a task and starts with a mise tool
-  backend or Node's module scheme (`cargo:cargo-mutants`, `node:test`) is that, not a task.
+  (`guards:list`), against the tasks of mise.toml and of the files its `[task_config]
+  includes` name, read by tools/mise_config.py, the loader every gate that reads the tasks
+  shares. A name holding a placeholder (`ci:<job>`) isn't one, and a bare name that isn't a
+  task and starts with a mise tool backend or Node's module scheme (`cargo:cargo-mutants`,
+  `node:test`) is that, not a task.
 - A task followed by "in `check`" or "in `mise run check`", against the tasks `check`
   depends on, directly or through a task it depends on. The doc says the local gate runs it.
 - The id after `--only` and after `fired:` (`guards:fire -- --only agentd-fs-pop`), against
@@ -38,10 +39,12 @@ nothing. What counts as a reference, all inside backticks:
   of `Results` in conformance/harness/results.py, read with stdlib `ast`.
 
 A check over nothing reports nothing, so it also fails when the docs, the tasks, the jobs, the
-fault ids or the `Results` methods come back empty, when no reference of some kind was found
-at all (an extractor that stopped matching reads that way), when a doc yields no reference or
-the root AGENTS.md lacks one of the kinds its rules use, when a fence is never closed (the
-rest of that doc would read as code), when the root AGENTS.md isn't among the docs, and when
+fault ids or the `Results` methods come back empty, when the sentinel task `check`, which only
+an included file defines, isn't among the tasks (a loader that stopped following the includes
+reads that way), when no reference of some kind was found at all (an extractor that stopped
+matching reads that way), when a doc yields no reference or the root AGENTS.md lacks one of
+the kinds its rules use, when a fence is never closed (the rest of that doc would read as
+code), when the root AGENTS.md isn't among the docs, and when
 the sentinel `mise run check` isn't among the task references. The job names are read with a
 regex over ci.yml's `jobs:` block; the job ids sit at a fixed indent that actionlint already
 holds.
@@ -53,9 +56,10 @@ fails only when someone runs the task. Each path must match a tracked or new fil
 - .config/lefthook.yml: each job's and command's `glob` and `exclude`, one brace alternative at a time
   under lefthook's own matcher (`glob_regex`), its `root`, and the paths its `run` and `files`
   commands name;
-- mise.toml and each TOML file its `[task_config] includes` names, read with `tomllib` rather
-  than `mise tasks ls`, since CI's `security` job runs this without mise: every task's `dir`,
-  `file`, `sources` and `outputs`, and the paths its `run` names, relative to its `dir`;
+- mise.toml and each file its `[task_config] includes` name, through the same loader, which
+  reads the TOML rather than asking `mise tasks ls`, since CI's `security` job runs this
+  without mise: each include, and every task's `dir`, `file`, `sources` and `outputs`, and the
+  paths its `run` names, relative to its `dir`;
 - each workflow: `paths` and `paths-ignore`, under GitHub's filter syntax; every
   `working-directory`; a local `uses`; and the paths each step's `run` and `with` values name,
   relative to the step's working directory;
@@ -88,6 +92,8 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import mise_config
+
 DOC_PATHSPECS = (
     "AGENTS.md",
     "*/AGENTS.md",
@@ -96,7 +102,9 @@ DOC_PATHSPECS = (
 )
 # The file every rule starts from. A doc set without it came from the wrong tree.
 ROOT_DOC = "AGENTS.md"
-MISE = "mise.toml"
+MISE = mise_config.MISE
+# What the task set is read from, for the messages.
+TASKS = f"{MISE} or the files it includes"
 WORKFLOW = ".github/workflows/ci.yml"
 # The fault registry's loader is check-guards-fire.py's: its files, their order and what makes
 # one unreadable are that script's to say.
@@ -105,8 +113,9 @@ REGISTRY = GUARDS["REGISTRY"]
 # The class whose helpers the docs cite by name, and the file it lives in.
 SYMBOL_CLASS = "Results"
 SYMBOL_FILE = "conformance/harness/results.py"
-# A reference every healthy tree has, so a pass means the task extractor and mise.toml's
-# parser both worked on this tree. It's also the task "in `check`" means.
+# A reference every healthy tree has, so a pass means the task extractor and the task loader
+# both worked on this tree. It's also the task "in `check`" means, and a task only an included
+# file defines, so a loader that stopped following the includes loses it.
 SENTINEL = "check"
 KINDS = ("task", "member", "fault", "path", "file", "identifier", "job", "symbol")
 # The kinds the root guide's own rules name. Losing one there means its text stopped being
@@ -294,9 +303,9 @@ def is_path(word: str) -> bool:
 
 
 def mise_tasks(root: Path) -> dict[str, dict]:
-    """mise.toml's tasks and those of the TOML files its `[task_config] includes` names."""
+    """mise.toml's tasks and those of the files its `[task_config] includes` name."""
     tasks, _, _ = mise_task_files(root)
-    return {name: task for _, name, task in tasks}
+    return {task.name: task.table for task in tasks}
 
 
 def gated(tasks: dict[str, dict], top: str) -> set[str]:
@@ -842,7 +851,7 @@ DECISIONS = "docs/decisions.toml"
 # What each census source reads, for the floor's message.
 CENSUS_SOURCES = {
     "lefthook": LEFTHOOK,
-    "mise": MISE,
+    "mise": f"{MISE} and the files it includes",
     "workflows": f"{WORKFLOWS}/*.yml",
     "dependabot": DEPENDABOT,
     "constants": SCRIPT_GLOB,
@@ -863,17 +872,16 @@ DECISION_SENTINEL = "D35"
 # `/` covers every word under that directory. An entry no source names any more fails, so the
 # list can't outlive its reason.
 CENSUS_NOT_PATHS = {
-    "p/rust": "a Semgrep registry ruleset, `semgrep --config p/rust` (mise.toml, ci.yml)",
-    "p/secrets": "a Semgrep registry ruleset, `semgrep --config p/secrets` (mise.toml, ci.yml)",
+    "p/rust": "a Semgrep registry ruleset, `semgrep --config p/rust` (`security`, ci.yml)",
+    "p/secrets": "a Semgrep registry ruleset, `semgrep --config p/secrets` (`security`, ci.yml)",
     "cli-dist/": "where release.yml's `draft` job downloads the CLI archives",
     "staging/": "where release.yml's `draft` job gathers the release assets",
     "release-sums/": "where release.yml's `live-gate` and `github-release` jobs download the draft's SHA256SUMS",
     "draft/": "where release.yml's `github-release` job downloads the draft to check it",
     "draft-release/": "where live-conformance.yml's tag run puts the draft release's assets and CLI",
     "lychee/": "where links.yml's lychee step writes its report",
-    "mise/tasks": "a file-task directory mise reads by default; the tree has none",
-    ".mise/tasks": "a file-task directory mise reads by default; the tree has none",
-    ".config/mise/tasks": "a file-task directory mise reads by default; the tree has none",
+    "mise/tasks": "a task directory mise reads by default; the tree has none",
+    ".mise/tasks": "a task directory mise reads by default; the tree has none",
 }
 # A cited decision id: `D` and digits as a word, not inside a URL, a hex color or a path, so
 # the `-D97757?` of a badge color in README.md isn't one.
@@ -895,14 +903,6 @@ RUN_SPLIT = re.compile(r"[\s;|&()<>'\"`]+")
 RUN_PART = re.compile(r"[=:#]|,(?![^{}]*\})")
 PATH_CHARS = re.compile(r"^[A-Za-z0-9._/*?{},+@-]+$")
 UPPER = re.compile(r"^_?[A-Z][A-Z0-9_]*$")
-# The directories mise reads file tasks from when `[task_config] includes` isn't set.
-MISE_TASK_DIRS = (
-    "mise-tasks",
-    ".mise-tasks",
-    "mise/tasks",
-    ".mise/tasks",
-    ".config/mise/tasks",
-)
 
 
 class CensusError(ValueError):
@@ -1105,80 +1105,44 @@ def lefthook_names(root: Path) -> list[Named]:
     return out
 
 
-def toml_line(text: str, header: str, needle: str) -> int:
-    """The line of `needle` in the table `header` opens, or of the header, or 1."""
+def table_line(text: str, start: int, needle: str) -> int:
+    """The line of `needle` in the table whose header is line `start`, or `start`."""
     lines = text.splitlines()
-    start = next((n for n, line in enumerate(lines) if line.strip() == header), None)
-    if start is None:
-        return 1
-    for n in range(start + 1, len(lines)):
+    for n in range(start, len(lines)):
         if lines[n].startswith("["):
             break
         if needle in lines[n] and not lines[n].lstrip().startswith("#"):
             return n + 1
-    return start + 1
-
-
-def task_header(name: str, prefix: str) -> str:
-    quoted = name if re.fullmatch(r"[A-Za-z0-9_-]+", name) else f'"{name}"'
-    return f"[{prefix}{quoted}]"
+    return start
 
 
 def mise_task_files(
     root: Path,
-) -> tuple[list[tuple[str, str, dict]], list[Named], list[str]]:
-    """Every task as (file, name, table), the includes it read, and what it couldn't read.
+) -> tuple[list[mise_config.Task], list[Named], list[str]]:
+    """Every task, the includes it read, and what the loader refused.
 
-    The tasks are mise.toml's `[tasks]` and the tables of each TOML file its
-    `[task_config] includes` names, the shape mise gives an included file: a task per
-    top-level table. An include that's a directory holds file tasks, which this doesn't
-    read, so it's refused by name, and so is a remote one. With no includes, a default
-    task directory with files in it is refused the same way.
+    tools/mise_config.py reads them, as every gate that reads the tasks does, so this and
+    they can't read different tasks. A config it refuses (an include that matches nothing,
+    a task two files define, a directory of file tasks) gives no tasks here, and each of
+    its problems, by file and line, is this check's.
     """
-    path = root / MISE
-    if not path.is_file():
+    if not (root / MISE).is_file():
         return [], [], []
-    data = tomllib.loads(path.read_text(encoding="utf-8"))
-    tasks = data.get("tasks", {})
-    found = (
-        [(MISE, n, t) for n, t in tasks.items() if isinstance(t, dict)]
-        if isinstance(tasks, dict)
-        else []
-    )
-    names: list[Named] = []
-    refused: list[str] = []
-    config = data.get("task_config", {})
-    includes = config.get("includes") if isinstance(config, dict) else None
-    if includes is None:
-        for directory in MISE_TASK_DIRS:
-            if listed(root, f"{directory}/"):
-                refused.append(
-                    f"agents:check: {MISE}: mise reads file tasks from `{directory}/`, which"
-                    " the census doesn't; teach mise_task_files in tools/check-agents-md.py"
-                    " to read them"
-                )
-    for include in includes if isinstance(includes, list) else []:
-        line = toml_line(
-            path.read_text(encoding="utf-8"), "[task_config]", str(include)
+    try:
+        config = mise_config.load(root)
+    except mise_config.Unreadable as error:
+        return [], [], error.problems
+    names = [
+        Named(
+            "mise",
+            f"{MISE}:{include.line}",
+            include.pattern,
+            clean(include.pattern) or include.pattern,
+            "doublestar",
         )
-        where = f"{MISE}:{line}"
-        if not isinstance(include, str) or "::" in include or "://" in include:
-            refused.append(
-                f"{where}: the include `{include}` isn't a file in this tree"
-            )
-            continue
-        included = clean(include)
-        names.append(Named("mise", where, include, included or include))
-        if included and (root / included).is_dir():
-            refused.append(
-                f"{where}: the include `{include}` is a directory of file tasks, which the"
-                " census doesn't read; name its TOML files instead, or teach"
-                " mise_task_files to read file tasks"
-            )
-        elif included and (root / included).is_file():
-            table = tomllib.loads((root / included).read_text(encoding="utf-8"))
-            found += [(included, n, t) for n, t in table.items() if isinstance(t, dict)]
-    return found, names, refused
+        for include in config.includes
+    ]
+    return list(config.tasks.values()), names, []
 
 
 def mise_names(root: Path) -> tuple[list[Named], list[str]]:
@@ -1189,12 +1153,12 @@ def mise_names(root: Path) -> tuple[list[Named], list[str]]:
     """
     tasks, out, refused = mise_task_files(root)
     texts: dict[str, str] = {}
-    for file, name, task in tasks:
+    for entry in tasks:
+        file, name, task = entry.file, entry.name, entry.table
         text = texts.setdefault(file, (root / file).read_text(encoding="utf-8"))
-        header = task_header(name, "tasks." if file == MISE else "")
 
         def where(needle: str) -> str:
-            return f"{file}:{toml_line(text, header, needle)}"
+            return f"{file}:{table_line(text, entry.line, needle)}"
 
         base = ""
         if isinstance(directory := task.get("dir"), str):
@@ -1725,10 +1689,15 @@ def check(root: Path) -> list[str]:
 
     tasks = mise_tasks(root)
     if not tasks:
-        problems.append(f"agents:check: found no tasks in {MISE}")
+        problems.append(f"agents:check: found no tasks in {TASKS}")
+    if SENTINEL not in tasks:
+        problems.append(
+            f"agents:check: the sentinel task `{SENTINEL}` isn't among the tasks of {TASKS};"
+            " the loader lost it"
+        )
     in_check = gated(tasks, SENTINEL)
     if tasks and not in_check:
-        problems.append(f"agents:check: `{SENTINEL}` depends on no task in {MISE}")
+        problems.append(f"agents:check: `{SENTINEL}` depends on no task in {TASKS}")
     faults = fault_ids(root)
     if not faults:
         problems.append(f"agents:check: found no fault ids in {REGISTRY}")
@@ -1748,11 +1717,11 @@ def check(root: Path) -> list[str]:
         if ref.kind == "task" and tasks and ref.text not in tasks:
             bare = ref.shown == ref.text
             if not (bare and ref.text.split(":", 1)[0] in NOT_TASK_PREFIXES):
-                problems.append(f"{where} `{ref.shown}` names no task in {MISE}")
+                problems.append(f"{where} `{ref.shown}` names no task in {TASKS}")
         elif ref.kind == "member" and in_check and ref.text not in in_check:
             problems.append(
                 f"{where} `{ref.text}` isn't in `{SENTINEL}`: no task `{SENTINEL}` depends on"
-                f" in {MISE} is it or reaches it"
+                f" in {TASKS} is it or reaches it"
             )
         elif ref.kind == "fault" and faults and ref.text not in faults:
             problems.append(f"{where} `{ref.text}` is no fault id in {REGISTRY}")

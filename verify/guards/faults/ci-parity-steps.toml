@@ -92,7 +92,7 @@ run = ["./tools/check-ci-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "`ci:local` doesn't depend on `ci:fuzz`"
-transform = { file = "mise.toml", replace = "  \"ci:fuzz\",\n]\nrun = \"./tools/ci-local.py summary\"\n", with = "]\nrun = \"./tools/ci-local.py summary\"\n" }
+transform = { file = ".config/mise/tasks/ci.toml", replace = "  \"ci:fuzz\",\n]\nrun = \"./tools/ci-local.py summary\"\n", with = "]\nrun = \"./tools/ci-local.py summary\"\n" }
 
 [[fault]]
 id = "ci-parity-check-runs-ci-local"
@@ -101,7 +101,7 @@ run = ["./tools/check-ci-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "`check` depends on `ci:local`"
-transform = { file = "mise.toml", replace = "  \"ci:parity\",\n]\n", with = "  \"ci:parity\",\n  \"ci:local\",\n]\n" }
+transform = { file = ".config/mise/tasks/check.toml", replace = "  \"ci:parity\",\n]\n", with = "  \"ci:parity\",\n  \"ci:local\",\n]\n" }
 
 # The unit suite catching a coverage rule that stopped comparing.
 [[fault]]

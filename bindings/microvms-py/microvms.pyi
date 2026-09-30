@@ -146,6 +146,9 @@ class AgentVm:
         default to the core's figures (ten-minute idle and suspended windows, a one-hour
         ceiling); a multi-hour session raises `max_duration_sec` and polls `health` from
         outside to stay awake.
+        
+        `image_identifier` is an image ARN or a bare image name; the core resolves a name with
+        one `ListMicrovmImages` read and raises `PreconditionError` for a name no image carries.
         """
     def prompt(self, /, agent: str, task: str, *, timeout_sec: float |None = None, exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecHandle:
         """
@@ -1882,6 +1885,10 @@ class Sandbox:
     def run(self, /, *, image_identifier: str |None = None, image_version: str |None = None, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, launch_env: dict[str, str] |None = None, egress: bool = False, egress_network_connectors: Sequence[str] |None = None, deny_egress: bool = False, shell: bool = False, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None, ready_timeout: float |None = None, token_scope: str |None = None, wait: bool = True, log_group: str |None = None, log_stream: str |None = None, disable_logging: bool = False) -> Session:
         """
         Launches a MicroVM, waits for RUNNING, and returns its session.
+        
+        `image_identifier` is an image ARN or a bare image name, or omitted for the image
+        `build_image` built. The core resolves a name to its ARN with one `ListMicrovmImages`
+        read, and a name no image carries raises `PreconditionError` before anything launches.
         
         `egress` requests the managed INTERNET_EGRESS connector. Omission does not block
         outbound traffic. For no egress, pass existing VPC connector ARNs through

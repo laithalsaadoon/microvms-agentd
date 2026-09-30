@@ -506,7 +506,10 @@ pub struct EnsuredImage {
 #[derive(Default)]
 #[napi(object)]
 pub struct RunOptions {
-    /// The image to launch, or omitted for the one `buildImage` built.
+    /// The image to launch, as an ARN or a bare image name, or omitted for the one
+    /// `buildImage` built. The core resolves a name to its ARN with one `ListMicrovmImages`
+    /// read, and a name no image carries is refused with `ERR_PRECONDITION` before anything
+    /// launches.
     pub image_identifier: Option<String>,
     /// `imageVersion`, or omitted for the image's own latest active version.
     ///

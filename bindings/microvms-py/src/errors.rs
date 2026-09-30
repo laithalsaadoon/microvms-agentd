@@ -191,36 +191,19 @@ impl From<CoreError> for PyErr {
 /// The result every fallible binding method answers with.
 pub(crate) type PyCoreResult<T> = Result<T, CoreError>;
 
-/// Registers the hierarchy on the module.
+/// Registers the hierarchy on the module: the base, then the class [`exception_for`] maps each
+/// kind to, under its own name.
+///
+/// Iterated from `ErrorKind::ALL` rather than listed, so the exhaustive `match` is the one list:
+/// a kind core adds fails to compile there until it has a class, and once it has one it's
+/// importable (#266). A hand-kept list here could leave a class raised yet not importable, so
+/// `except microvms.NewError` would be an `AttributeError`.
 pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
-    module.add("MicrovmError", module.py().get_type::<MicrovmError>())?;
-    module.add("UnexpectedError", module.py().get_type::<UnexpectedError>())?;
-    module.add("InvalidArgError", module.py().get_type::<InvalidArgError>())?;
-    module.add("RetryableError", module.py().get_type::<RetryableError>())?;
-    module.add(
-        "CredentialsError",
-        module.py().get_type::<CredentialsError>(),
-    )?;
-    module.add("ProtocolError", module.py().get_type::<ProtocolError>())?;
-    module.add(
-        "BuildWedgedError",
-        module.py().get_type::<BuildWedgedError>(),
-    )?;
-    module.add("LaunchDiedError", module.py().get_type::<LaunchDiedError>())?;
-    module.add(
-        "WindowClosedError",
-        module.py().get_type::<WindowClosedError>(),
-    )?;
-    module.add("PlatformError", module.py().get_type::<PlatformError>())?;
-    module.add("TimeoutError", module.py().get_type::<TimeoutError>())?;
-    module.add(
-        "InterruptedError",
-        module.py().get_type::<InterruptedError>(),
-    )?;
-    module.add(
-        "PreconditionError",
-        module.py().get_type::<PreconditionError>(),
-    )?;
-    module.add("ExecFailedError", module.py().get_type::<ExecFailedError>())?;
+    let py = module.py();
+    module.add("MicrovmError", py.get_type::<MicrovmError>())?;
+    for kind in ErrorKind::ALL {
+        let class = exception_for(py, kind);
+        module.add(class.name()?, class)?;
+    }
     Ok(())
 }

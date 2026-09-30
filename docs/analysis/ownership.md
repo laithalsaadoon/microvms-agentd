@@ -64,7 +64,7 @@ contains.** It accrued 70 file-touches, 8% of all churn, and then left:
 the discovery instrument becomes git history". 28 files lived under `clients/python/`,
 12 of them under `tests/` and 10 of those test modules covering SSE reconnect, proxy auth,
 pricing, sizing, and cost.
-`mise.toml:166-169` records what that suite was worth: 83 client-library tests against a fake
+`.config/mise/tasks/test.toml:7-11` records what that suite was worth: 83 client-library tests against a fake
 daemon over a real loopback socket, and both suites passing against real AWS on the same
 commit — Python oracle 56/56, Rust CLI 38/38 — is what ended the oracle's job. Recovering any
 of it requires `git show`, and nothing in the tree points a reader at that commit.
@@ -122,24 +122,24 @@ working stream reconnect from a broken one (`crates/agentd/src/exec.rs:34-40`), 
 deterministic simulator has two clocks and a spawned child obeys the wrong one
 (`crates/agentd/tests/turmoil_transport.rs:54-60`).
 
-**Executable gates.** `mise.toml:292-301` defines `check`, the stated definition of done, as
+**Executable gates.** `.config/mise/tasks/check.toml:4-32` defines `check`, the stated definition of done, as
 exactly eight tasks: `lint`, `security`, `test`, `schema:check`, `stubs:check`, `model:check`,
 `live:check`, `build`. Four of those are drift gates that keep a hand-maintained value honest
-against an independent source: `schema:check` (`mise.toml:189`) asserts `docs/schema.json`
-still describes what the daemon serves, `stubs:check` (`mise.toml:235`) asserts
-`bindings/microvms-py/microvms.pyi` still describes the pyo3 surface, `model:check` (`mise.toml:257`)
+against an independent source: `schema:check` (`.config/mise/tasks/contracts.toml:51`) asserts `docs/schema.json`
+still describes what the daemon serves, `stubs:check` (`.config/mise/tasks/contracts.toml:188`) asserts
+`bindings/microvms-py/microvms.pyi` still describes the pyo3 surface, `model:check` (`.config/mise/tasks/contracts.toml:286`)
 asserts `microvms-core`'s hardcoded constants still match the pinned botocore service model,
-and `live:check` (`mise.toml:438`) asserts the live tier's own wiring, including `mise.toml`
+and `live:check` (`.config/mise/tasks/live.toml:4`) asserts the live tier's own wiring, including `.config/mise/tasks/live.toml`
 itself. A gate is stronger than a document because it fails rather than being unread.
 
 ### What that coverage does not reach
 
 Three subsystems or artifacts sit outside it, each verifiable from the repository.
 
-**Neither symspec gate runs in `check`.** `mise.toml:207` and `mise.toml:227` are the two
+**Neither symspec gate runs in `check`.** `.config/mise/tasks/trace.toml:3` and `.config/mise/tasks/trace.toml:15` are the two
 spec-verification tasks, and neither appears in `check`'s dependency list at
-`mise.toml:292-301`. Their own comments give the reason: `symspec` is a global npm install
-plus a downloaded embedding model, and `mise.toml:227` invokes the v5 CLI as
+`.config/mise/tasks/check.toml:4-32`. Their own comments give the reason: `symspec` is a global npm install
+plus a downloaded embedding model, and `.config/mise/tasks/trace.toml:28` invokes the v5 CLI as
 `node ~/workplace/symspec/packages/symspec/dist/cli.mjs` — an absolute path into one
 developer's home directory. The strongest externalization in the repository, 57 approved
 requirements, is therefore verified by a toolchain a second contributor does not have, and no
