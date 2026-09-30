@@ -1,0 +1,41 @@
+# `check`, the definition of done: every local gate, run at once. It creates no AWS
+# resources; mise.toml's header says what it leaves to `live`.
+
+[check]
+description = "The full local gate — the definition of done"
+depends = [
+  "lint",
+  "security",
+  "test",
+  "schema:check",
+  "schema:compat",
+  "manifest:check",
+  "core-api:check",
+  "parity:check",
+  "stubs:check",
+  "dts:check",
+  "model:check",
+  "publish:check",
+  "release:check",
+  "live:check",
+  "conformance:self-test",
+  "agents:check",
+  "changelog:check",
+  "build",
+  "background:check",
+  "trace:check",
+  "ratchet:check",
+  "guards:list",
+  "mutants:check",
+  "targets:check",
+  "ci:parity",
+]
+
+["targets:check"]
+description = "Every build `check` runs with an environment of its own names a cargo target of its own, outside `test`'s. No builds"
+# `check` runs its tasks at once, and `test`'s doc tests read `target/debug` after cargo has
+# released its lock, so a build there that sees another value of a variable a unit's build
+# script declares rebuilds the unit in place and fails them with E0463. The test's docstring has
+# the rule, what it reads, and what it can't see. CI runs its steps one at a time and without
+# mise, so the race and this test are local; CI's `guards` job fires the test's seeded faults.
+run = "{{vars.pytest}} pytest -q -p no:cacheprovider tools/test_check_targets.py"

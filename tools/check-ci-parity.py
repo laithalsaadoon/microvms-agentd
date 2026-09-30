@@ -33,8 +33,11 @@ It fails when:
   version, or can't be read. Each call is split like a shell word list: options before the
   tool are skipped (with their values), `--from <spec>` names the package, and `tool@X.Y.Z`
   or `tool==X.Y.Z` is the version.
-- a mise.toml tool, in `[tools]` or in a task's `tools`, is `latest`. mise.lock records the
-  exact version behind a fuzzy pin such as `node = "22"`.
+- a mise tool, in mise.toml's `[tools]` or in a task's `tools`, is `latest`. mise.lock records
+  the exact version behind a fuzzy pin such as `node = "22"`. The tasks are read through
+  tools/mise_config.py, the loader every gate that reads them shares, so a task in one of the
+  files mise.toml includes counts, and a config it refuses (an include that matches nothing,
+  a task two files define) is unreadable here.
 - a compared tool isn't found in ci.yml at all, so a pattern that stops matching fails by name
   instead of comparing nothing.
 - a `run:` step in a workflow `ci/local.toml` names (ci.yml must be one) has no entry there,
@@ -82,10 +85,11 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import NamedTuple
 
+import mise_config
 import yaml
 
 CI = ".github/workflows/ci.yml"
-MISE = "mise.toml"
+MISE = mise_config.MISE
 LOCK = "mise.lock"
 TOOLCHAIN = "rust-toolchain.toml"
 STUBS = "tools/generate-py-stubs.py"
@@ -231,6 +235,15 @@ def load_toml(path: Path, label: str) -> dict:
         return tomllib.loads(text)
     except tomllib.TOMLDecodeError as error:
         raise Unreadable(f"{label}: {path} doesn't parse as TOML: {error}") from None
+
+
+def load_mise(root: Path, path: Path) -> mise_config.Config:
+    """mise.toml at `path`, and the task files its includes name under `root`."""
+    text = read_text(path, MISE)
+    try:
+        return mise_config.parse(root, text)
+    except mise_config.Unreadable as error:
+        raise Unreadable("; ".join(error.problems)) from None
 
 
 def scalar(value: object) -> str:
@@ -490,21 +503,23 @@ def local_versions(
     return local
 
 
-def check_latest(mise: dict, local: dict[str, str | None], problems: list[str]) -> None:
+def check_latest(
+    mise: mise_config.Config, local: dict[str, str | None], problems: list[str]
+) -> None:
     """No `latest` anywhere, and a task's own pin of a compared tool is the `[tools]` one."""
-    places = [("[tools]", mise.get("tools", {}))]
-    for name, task in (mise.get("tasks") or {}).items():
-        if isinstance(task, dict) and isinstance(task.get("tools"), dict):
-            places.append((f"[tasks.{name!r}] tools", task["tools"]))
+    places = [(f"{MISE} [tools]", mise.data.get("tools", {}))]
+    for task in mise.tasks.values():
+        if isinstance(task.table.get("tools"), dict):
+            places.append((f"{task.file} {task.header} tools", task.table["tools"]))
     tools_by_key = {key: tool for tool, key in MISE_KEYS.items()}
-    for place, tools in places:
+    for index, (place, tools) in enumerate(places):
         for key, value in tools.items():
             if pin(value) == "latest":
-                problems.append(f"mise.toml {place} pins `{key}` to latest")
+                problems.append(f"{place} pins `{key}` to latest")
                 continue
             tool = tools_by_key.get(key)
             want = local.get(tool) if tool else None
-            if place == "[tools]" or want is None:
+            if index == 0 or want is None:
                 continue
             same = (
                 major(pin(value)) == major(want)
@@ -513,7 +528,7 @@ def check_latest(mise: dict, local: dict[str, str | None], problems: list[str]) 
             )
             if not same:
                 problems.append(
-                    f"{tool}: mise.toml {place} pins `{key}` = {pin(value)!r}, and [tools] "
+                    f"{tool}: {place} pins `{key}` = {pin(value)!r}, and [tools] "
                     f"pins {want}, the version CI is compared with"
                 )
 
@@ -967,9 +982,15 @@ def plan(
     return jobs
 
 
-def check_tasks(jobs: list[Job], mise: dict, problems: list[str]) -> list[str]:
+def check_tasks(
+    jobs: list[Job], mise: mise_config.Config, problems: list[str]
+) -> list[str]:
     """Each planned task has its `ci:<task>` mise task, and `ci:local` depends on them all."""
-    tasks = mise.get("tasks") or {}
+    tasks = mise.tables()
+
+    def where(name: str) -> str:
+        return mise.tasks[name].file if name in mise.tasks else MISE
+
     names = sorted({job.task for job in jobs})
     for name in names:
         task = tasks.get(f"ci:{name}")
@@ -977,18 +998,22 @@ def check_tasks(jobs: list[Job], mise: dict, problems: list[str]) -> list[str]:
         runs = runs if isinstance(runs, list) else [runs]
         if not any(f"tools/ci-local.py {name}" in str(run) for run in runs):
             problems.append(
-                f"mise.toml has no `ci:{name}` task running `./tools/ci-local.py {name}`"
+                f"no mise task `ci:{name}` runs `./tools/ci-local.py {name}` ({MISE} and"
+                " the files it includes)"
             )
     everything = tasks.get("ci:local")
     depends = everything.get("depends", []) if isinstance(everything, dict) else []
     for name in names:
         if f"ci:{name}" not in depends:
-            problems.append(f"mise.toml: `ci:local` doesn't depend on `ci:{name}`")
+            problems.append(
+                f"{where('ci:local')}: `ci:local` doesn't depend on `ci:{name}`"
+            )
     gate = tasks.get("check")
     for dep in gate.get("depends", []) if isinstance(gate, dict) else []:
         if dep == "ci:local" or dep in {f"ci:{name}" for name in names}:
             problems.append(
-                f"mise.toml: `check` depends on `{dep}`, which builds the tree once per CI job"
+                f"{where('check')}: `check` depends on `{dep}`, which builds the tree once"
+                " per CI job"
             )
     return names
 
@@ -999,7 +1024,7 @@ def check(
     """The problems found, and a one-line summary of what was compared."""
     try:
         ci = load_yaml(ci_path, "ci.yml")
-        mise = load_toml(mise_path, "mise.toml")
+        mise = load_mise(root, mise_path)
         lock = load_toml(root / LOCK, LOCK)
         toolchain = load_toml(root / TOOLCHAIN, TOOLCHAIN)
         registry = load_registry(root)
@@ -1008,14 +1033,14 @@ def check(
     except Unreadable as error:
         return [str(error)], ""
     problems: list[str] = []
-    keys = check_env(ci, mise, problems)
+    keys = check_env(ci, mise.data, problems)
     seen = read_ci(ci, problems)
     read_registry(registry, seen, problems)
-    versions = local_versions(mise, stubs, problems)
+    versions = local_versions(mise.data, stubs, problems)
     check_latest(mise, versions, problems)
     check_tools(seen, versions, problems)
     check_hashes(seen, lock, problems)
-    channel = check_rust(seen, mise, toolchain, problems)
+    channel = check_rust(seen, mise.data, toolchain, problems)
     jobs = plan(root, local, problems, {"ci.yml": ci_path})
     tasks = check_tasks(jobs, mise, problems)
     summary = (
@@ -1032,7 +1057,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", help="the repository (default: this script's)")
     parser.add_argument("--ci", help=f"the workflow to read (default: <root>/{CI})")
     parser.add_argument(
-        "--mise", help=f"the mise config to read (default: <root>/{MISE})"
+        "--mise",
+        help=f"the mise config to read, its includes under the root (default: <root>/{MISE})",
     )
     parser.add_argument(
         "--local", help=f"the ci:local plan to read (default: <root>/{LOCAL})"
