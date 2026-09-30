@@ -25,6 +25,10 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | ARCH-6 | waived | waived | waived | 1 | 6 | waived |
 | ARCH-7 | waived | waived | waived | 2 | 3 | waived |
 | ARCH-8 | waived | waived | waived | 1 | 1 | waived |
+| BIND-1 | waived | waived | waived | 1 | 2 | waived |
+| BIND-2 | waived | waived | waived | 3 | 7 | waived |
+| BIND-3 | waived | waived | waived | 1 | 1 | waived |
+| BIND-4 | waived | waived | waived | 1 | 1 | waived |
 | BIND-6 | 1 | 1 | 1 | 4 | 6 | 1 |
 | BIND-7 | 1 | 1 | 1 | 4 | 3 | 1 |
 | BIND-8 | 1 | 1 | 1 | 4 | 1 | 1 |
@@ -266,6 +270,50 @@ The microvms-core shall not contain logic beyond composition and re-exports.
 - **test:** `crates/microvms-cli/tests/dependency_direction.rs`
 - **impl:** `crates/microvms-core/src/lib.rs`
 - **live:** waived: composition makes no AWS call of its own
+
+## BIND-1
+
+The language bindings layer shall depend on microvms-core and, among the crates below it, only on microvms-protocol, with no dependency edge to the CLI crate.
+
+- **model:** waived: a property of the workspace's dependency graph, not of a state
+- **gherkin:** waived: no behavior to script: cargo metadata's resolved graph is the evidence, and dependency_direction.rs reads it
+- **fuzz:** waived: there is no input stream; the rule is over manifests
+- **test:** `crates/microvms-cli/tests/dependency_direction.rs`
+- **impl:** `bindings/microvms-js/src/lib.rs`, `bindings/microvms-py/src/lib.rs`
+- **live:** waived: a dependency edge makes no AWS call
+
+## BIND-2
+
+The language bindings layer shall not expose a parameter that bypasses a trap closure enforced in microvms-core.
+
+- **model:** waived: a property of each binding's parameter surface, not of a state
+- **gherkin:** waived: no Gherkin tier drives the bindings; their own suites call each surface and assert the refusal comes from core
+- **fuzz:** waived: the surface is a fixed set of signatures, not an input stream; the closures it must not reopen live in core, whose tests and harnesses exercise them
+- **test:** `bindings/microvms-py/tests/test_exec.py`, `bindings/microvms-py/tests/test_session.py`, `bindings/microvms-py/tests/test_smoke.py`
+- **impl:** `bindings/microvms-js/src/errors.rs`, `bindings/microvms-js/src/exec.rs`, `bindings/microvms-js/src/hooks.rs`, `bindings/microvms-js/src/sandbox.rs`, `bindings/microvms-py/src/exec.rs`, `bindings/microvms-py/src/hooks.rs`, `bindings/microvms-py/src/sandbox.rs`
+- **live:** waived: the live suite drives the CLI, and a binding makes no AWS call core doesn't make; the closures it must not bypass are core's, checked offline
+
+## BIND-3
+
+The Python binding shall deposit a thin idiomatic wrapper over microvms-core via PyO3.
+
+- **model:** waived: a property of the crate's dependencies and surface, not of a state
+- **gherkin:** waived: no behavior to script: the dependency set and the adapter-logic ratchet check it over manifests and source
+- **fuzz:** waived: there is no input stream; the rule is over manifests and source
+- **test:** `crates/microvms-cli/tests/dependency_direction.rs`
+- **impl:** `bindings/microvms-py/src/lib.rs`
+- **live:** waived: the wrapper makes no AWS call of its own; core's calls are the live tier's
+
+## BIND-4
+
+The JavaScript binding shall deposit a thin idiomatic wrapper over microvms-core via napi-rs.
+
+- **model:** waived: a property of the crate's dependencies and surface, not of a state
+- **gherkin:** waived: no behavior to script: the dependency set and the adapter-logic ratchet check it over manifests and source
+- **fuzz:** waived: there is no input stream; the rule is over manifests and source
+- **test:** `crates/microvms-cli/tests/dependency_direction.rs`
+- **impl:** `bindings/microvms-js/src/lib.rs`
+- **live:** waived: the wrapper makes no AWS call of its own; core's calls are the live tier's
 
 ## BIND-6
 
