@@ -8,6 +8,15 @@
 # `live` is never wired to a hook or to push. It creates real MicroVMs in the
 # caller's account, and a gate that spends money on every push is a gate people
 # disable. It is a deliberate command and a manual CI dispatch.
+#
+# CI runs these tasks too: each job of ci.yml and fuzz.yml installs mise and this file's tools
+# from mise.lock, then runs one `ci:<job>` task (below), so a check CI runs is a task a
+# contributor runs, under the same tools and `[env]`.
+
+# The oldest mise that reads this file the way CI's does: CI pins this version (the `version`
+# input of `.github/actions/mise/action.yml`), and the `ci:<job>` tasks call other tasks from
+# `run`, which older releases don't parse.
+min_version = "2026.8.1"
 
 [tools]
 # `rust = "stable"` makes mise provide the toolchain via rustup, which then honors
@@ -18,17 +27,16 @@
 # not know they were using. Removing the entry entirely is worse: cargo then
 # leaves mise's PATH and every task fails with "command not found".
 rust = "stable"
-# Every other tool is an exact version, and mise.lock records what each one resolved to (#315).
-# They were `latest`, which meant a contributor's ruff or semgrep was whatever that machine had
-# last installed while CI fetched a newer one, and a finding could appear on one side only.
-# `./tools/check-ci-parity.py` (`ci:parity`, in `check` and in CI's `security` job) fails
-# when ci.yml runs a different version of ruff, semgrep, Node's major, actionlint, or any of
-# the checksummed downloads below. Bumping one of those means this line and ci.yml together,
-# plus the sha256 beside a checksummed download.
+# Every other tool is an exact version, and mise.lock records what each one resolved to (#315),
+# with each platform's checksum. They were `latest`, which meant a contributor's ruff or semgrep
+# was whatever that machine had last installed while CI fetched a newer one, and a finding could
+# appear on one side only. CI installs from mise.lock with `--locked`, so a bump is this line
+# and `mise lock`, and both sides move together. `ci:parity` fails on a `latest` here or in a
+# task's own `tools`.
 #
-# betterleaks, syft, grype and osv-scanner take the version ci.yml already installs by
-# checksum, since that's the one CI has proven; the rest took what `latest` resolved to here
-# on 2026-09-27.
+# betterleaks, syft, grype and osv-scanner took the version CI then installed by checksum,
+# since that was the one CI had proven; the rest took what `latest` resolved to here on
+# 2026-09-27.
 uv = "0.12.13"
 ruff = "0.15.22"
 semgrep = "1.176.1"
@@ -40,23 +48,27 @@ osv-scanner = "2.5.0"
 terraform = "1.15.8"
 tflint = "0.63.1"
 lefthook = "2.1.10"
-# 22 rather than 24: it's the major CI's bindings job runs and the floor of microvms-js's
-# `engines` (`>=22.13.0`), so the suite contributors run is the one CI proves (D26). The parity
-# check compares majors; mise.lock holds the exact release.
+# 22 rather than 24: it's the floor of microvms-js's `engines` (`>=22.13.0`), so the suite
+# contributors and CI run is the oldest one a consumer may have (D26). mise.lock holds the exact
+# release.
 node = "22"
-"cargo:cargo-deny" = "0.20.2"
+# The release's static musl binary, by checksum, rather than a `cargo install` build: every CI job
+# installs all of `[tools]`, and building cargo-deny from source took minutes of each job whose
+# tools cache missed.
+"aqua:EmbarkStudios/cargo-deny" = "0.20.2"
 "aqua:rhysd/actionlint" = "1.7.12"
 # `ratchet:check`'s Rust collectors. A tree-sitter grammar update can change what a rule
-# matches, and the ratchet's sentinel fails on any change in what it finds. CI installs the same
-# release by checksum (ci.yml's `security` job, a required check).
+# matches, and the ratchet's sentinel fails on any change in what it finds.
 "aqua:ast-grep/ast-grep" = "0.43.0"
+# `vex:check`'s reader of the OpenVEX document.
+jq = "1.8.1"
 
 [settings]
 # The cargo backend builds its tools from source (`cargo install --locked`) rather than through
 # cargo-binstall. binstall fetches cargo-mutants' release binary, which needs glibc 2.39, and on
 # an older host (AL2023 has 2.34) that binary can't start, so `mutants` and `guards:fire` fail
-# before they test anything. cargo-deny is the other cargo tool: a first install builds it too,
-# once, in a few minutes. CI doesn't install through mise (D14).
+# before they test anything. The cargo tools are the tasks' own (`[vars]` below pins them), and
+# CI's tools cache holds their builds (`ci:tools`).
 cargo.binstall = false
 
 [env]
@@ -65,21 +77,20 @@ cargo.binstall = false
 # that image may not have. Linker choice lives in .cargo/config.toml.
 AGENTD_TARGET = "aarch64-unknown-linux-musl"
 
-# Every key of ci.yml's top-level `env`, with the same value, so a local run sees what CI's
-# does (`ci:parity` holds the two together). CI colors cargo's output, and a test that parses
-# cargo or clippy output without `--color never` read an empty set there and nowhere else:
-# PR #314's first CI run failed `AdapterLintTests` that way.
+# CI colors cargo's output, so every run here does too: a test that parses cargo or clippy
+# output without `--color never` read an empty set in CI and nowhere else, which is how PR
+# #314's first CI run failed `AdapterLintTests`. CI runs its tasks under this table, so the two
+# can't differ.
 CARGO_TERM_COLOR = "always"
 
 [vars]
-# The gates' unit suites run under pytest with pytest-xdist, which spreads a suite's tests over
-# every core: `test_check_guards_fire.py` took 46 s serial and 11 s this way, measured
-# 2026-09-30 at 7780e97 on a shared 16-vCPU devbox. The suites are `unittest` classes, which
-# pytest runs as they are, and CI still runs them with `python -m unittest`. Besides the two
-# runners, each suite gets the packages its ci.yml step installs and no others, so it can't pass
-# here on one CI lacks. Pinned exactly, for the reason `[tools]` gives. `-p no:cacheprovider` in
-# each call because pytest's cache is nothing the suites read, and `check` runs them at once.
-pytest = "uv run --with 'pytest==9.1.1' --with 'pytest-xdist==3.8.0'"
+# The tasks' own tools, which `mise install` leaves out and mise.lock doesn't record. Their
+# versions live here, in the file CI's tools cache is keyed on (with mise.lock), so a bump
+# moves the key and the cache CI restores is rebuilt with it (`ci:tools`).
+cargo_mutants = "27.1.0"
+cargo_bolero = "0.13.4"
+cargo_fuzz = "0.13.2"
+lychee = "0.24.2"
 
 [task_config]
 # The tasks live in `.config/mise/tasks/`, a file per area: `check.toml` holds `check`,

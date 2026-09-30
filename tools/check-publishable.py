@@ -92,6 +92,7 @@ SELECTOR_FILES = (
     ".github/workflows/fuzz.yml",
     ".github/workflows/live-conformance.yml",
     ".github/workflows/release.yml",
+    ".config/mise/tasks/ci.toml",
     ".config/mise/tasks/contracts.toml",
     ".config/mise/tasks/live.toml",
     ".config/mise/tasks/release.toml",
@@ -139,10 +140,11 @@ CLI_MATRIX_ROW = re.compile(r"\bzigbuild:")
 #: build the old way rather than passing something wrong.
 SELECTOR = re.compile(r"(?:-p|--package)[ =]+([A-Za-z0-9_-]+)")
 
-#: A selector every healthy tree has: CI's clippy and test steps name the CLI by package.
-#: Finding no selector at all would pass the check below vacuously, and finding some but not
-#: this one means the scan stopped reaching the workflow that matters most.
-SENTINEL_SELECTOR = (".github/workflows/ci.yml", "microvms-cli")
+#: A selector every healthy tree has: the clippy and test commands CI's macOS and Windows legs
+#: run (`ci:rust-client`) name the CLI by package. Finding no selector at all would pass the
+#: check below vacuously, and finding some but not this one means the scan stopped reaching the
+#: file that matters most.
+SENTINEL_SELECTOR = (".config/mise/tasks/ci.toml", "microvms-cli")
 
 
 def metadata() -> dict:
@@ -238,7 +240,7 @@ def stale_selectors(names: set[str]) -> list[str]:
     elif SENTINEL_SELECTOR not in seen:
         failures.append(
             f"SELECTOR found {len(seen)} selectors but not `-p {SENTINEL_SELECTOR[1]}` in"
-            f" {SENTINEL_SELECTOR[0]}, which CI's clippy and test steps always carry"
+            f" {SENTINEL_SELECTOR[0]}, which CI's clippy and test commands always carry"
         )
     return failures
 

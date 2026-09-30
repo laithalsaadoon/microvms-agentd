@@ -432,16 +432,6 @@ suite = "script"
 message = "FAIL: test_typedoc_is_located_with_the_npx_lock_held ("
 transform = { file = "tools/npx_cache.py", replace = "    lock = cache / \"microvms-agentd-npx.lock\"\n", with = "    if (cache / \"_npx\").is_dir():\n        yield cache\n        return\n    lock = cache / \"microvms-agentd-npx.lock\"\n" }
 
-# The `guards` job's Node (#271 review): its pin is held to mise.toml's major like the others.
-[[fault]]
-id = "ci-parity-guards-node-major"
-guard = "tools/check-ci-parity.py"
-run = ["./tools/check-ci-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
-message = "runs Node 24, and mise.toml pins 22 (majors compared)"
-transform = { file = ".github/workflows/ci.yml", replace = "the runner image ships.\n      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7\n        with:\n          node-version: '22'\n", with = "the runner image ships.\n      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7\n        with:\n          node-version: '24'\n" }
-
 # Not registered: the drift page's vitest cases (site/tests/drift-reference.test.ts), among them
 # "writes not collected ...", "names the commit a category started being counted at ...", and
 # #295's own: untraced charted on its own, its table starting where it was first counted, the

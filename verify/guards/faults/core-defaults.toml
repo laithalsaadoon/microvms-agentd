@@ -1,0 +1,13 @@
+# ── defaults and compositions the adapters take from core (#266) ─────────────
+# The CLI and both bindings used to restate these beside core's copy; each entry breaks core's,
+# which every surface now reads.
+
+[[fault]]
+id = "app-lifecycle-wait-stall-probe"
+guard = "control::image::tests::a_lifecycle_wait_is_the_callers_deadline_at_cores_poll_with_no_stall_probe"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::image::tests::a_lifecycle_wait_is_the_callers_deadline_at_cores_poll_with_no_stall_probe"]
+expect = "test-failed"
+suite = "rust"
+message = "stall_grace, poll_interval or timeout"
+note = "crates/microvms-app/src/control/image.rs::a_lifecycle_wait_is_the_callers_deadline_at_cores_poll_with_no_stall_probe"
+transform = { file = "crates/microvms-app/src/control/image.rs", replace = "            poll_interval: crate::sandbox::LIFECYCLE_POLL_INTERVAL,\n            stall_grace: Duration::MAX,\n", with = "            poll_interval: crate::sandbox::LIFECYCLE_POLL_INTERVAL,\n            stall_grace: DEFAULT_STALL_GRACE,\n" }

@@ -297,7 +297,7 @@ guard = "tools/check-agents-md.py"
 run = ["./tools/check-agents-md.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "the census sentinel `tools/check-agents-md.py` isn't among the paths .github/workflows/*.yml names"
+message = "the census sentinel `tools/check-mutants.py` isn't among the paths .github/workflows/*.yml names"
 transform = { file = "tools/check-agents-md.py", replace = "                if isinstance(run := step.get(\"run\"), Scalar):", with = "                if isinstance(run := step.get(\"runs\"), Scalar):" }
 
 # The move this guards against: a config the hook's glob names moves (deny.toml went under
@@ -335,8 +335,8 @@ guard = "tools/check-agents-md.py"
 run = ["./tools/check-agents-md.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "`agentd` is no directory in this tree"
-transform = { file = ".github/workflows/fuzz.yml", replace = "working-directory: crates/agentd\n", with = "working-directory: agentd\n" }
+message = "`microvms-js` is no directory in this tree"
+transform = { file = ".github/workflows/addons.yml", replace = "working-directory: bindings/microvms-js\n", with = "working-directory: microvms-js\n" }
 
 [[fault]]
 id = "agents-md-census-dependabot-stale"

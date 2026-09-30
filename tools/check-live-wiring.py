@@ -329,10 +329,17 @@ def harness(at: Path) -> None:
     # It imports the task loader, so the copy needs its sibling beside it.
     loader = Path(mise_config.__file__).resolve()
     (at / "tools" / loader.name).write_bytes(loader.read_bytes())
+    # The copy runs through uv (its shebang), so the harness pins this repo's uv. mise runs a
+    # task under its own config's tools only: with no uv there, it drops the inherited uv from
+    # PATH, and on a machine with no global uv (a CI runner) the command left is a shim that
+    # fails.
+    uv = (config().data.get("tools") or {}).get("uv")
+    tools = f"[tools]\nuv = {json.dumps(uv)}\n\n" if isinstance(uv, str) else ""
     # The body is written back as a JSON string, which TOML reads as the same basic string,
     # so a backslash or a quote in it can't change what the harness runs.
     (at / "mise.toml").write_text(
-        f"{stubs}[tasks.live]\nrun = {json.dumps(live_body())}\n", encoding="utf-8"
+        f"{tools}{stubs}[tasks.live]\nrun = {json.dumps(live_body())}\n",
+        encoding="utf-8",
     )
 
 

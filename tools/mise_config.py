@@ -4,8 +4,8 @@
 A module, not a script: every gate that reads the tasks imports it (`check-agents-md.py`,
 `check-ci-parity.py`, `check-live-wiring.py`, `check-publishable.py`, `ci-local.py` and
 `test_check_targets.py`), so a task reads the same to each of them wherever it's defined. It
-parses the TOML with `tomllib` rather than asking `mise tasks ls --json`, because CI's jobs run
-those gates without mise (D14).
+parses the TOML with `tomllib` rather than asking `mise tasks ls --json`, so a gate reads a
+fixture or a scratch tree the same way it reads this one, with no mise to trust either.
 
 mise.toml holds `[tools]`, `[settings]`, `[env]`, `[vars]` and `[task_config]`, and its
 `includes` name the task files, `.config/mise/tasks/<area>.toml`. An include is a path or a
