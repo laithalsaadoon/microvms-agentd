@@ -2114,6 +2114,332 @@ class FireLintBatches(unittest.TestCase):
         self.assertIn("the batch doesn't compile", why[0])
 
 
+# ── script batches ───────────────────────────────────────────────────────────
+
+# A script gate for the fixture repos: it reads each `*.txt` file outside tools/ and verify/ for
+# markers and prints a finding for each. `FINDING(text)` prints `<file>:<line>: text`, the
+# finding located in its file; `BARE(text)` prints the text alone; `NAMING(other|text)` prints
+# `<file> and <other>: text`, naming two files. It exits 1 on any finding. `ALONE(text)` is a
+# finding like FINDING's, except that two or more of them print and exit 0: an interaction two
+# faults have that neither has alone. Each run appends how many markers it saw to $GATE_LOG,
+# and under the fake strace it writes an `openat` line for each file it reads.
+FAKE_GATE = """\
+import os
+import pathlib
+import re
+import sys
+
+found, alone, marks = [], [], 0
+for path in sorted(pathlib.Path(".").rglob("*.txt")):
+    if path.parts[0] in (".git", "tools", "verify"):
+        continue
+    if os.environ.get("FAKE_TRACE"):
+        with open(os.environ["FAKE_TRACE"], "a") as log:
+            here = os.getcwd()
+            log.write(f'{os.getpid()} openat(AT_FDCWD<{here}>, "{path}", O_RDONLY) = 3<{here}/{path}>\\n')
+    for number, line in enumerate(path.read_text().splitlines(), 1):
+        for kind, text in re.findall(r"(FINDING|BARE|NAMING|ALONE)\\(([^)]*)\\)", line):
+            marks += 1
+            where = f"{path.as_posix()}:{number}"
+            if kind == "FINDING":
+                found.append(f"{where}: {text}")
+            elif kind == "BARE":
+                found.append(text)
+            elif kind == "NAMING":
+                other, said = text.split("|")
+                found.append(f"{path.as_posix()} and {other}: {said}")
+            else:
+                alone.append(f"{where}: {text}")
+if os.environ.get("GATE_LOG"):
+    with open(os.environ["GATE_LOG"], "a") as log:
+        log.write(f"{marks}\\n")
+print("gate: read the tree")
+for line in found + alone:
+    print(line)
+sys.exit(0 if len(alone) > 1 and not found else 1 if found or alone else 0)
+"""
+GATE = [sys.executable, "tools/gate.py"]
+
+
+def finding(fid: str, file: str, marker: str, message: str, anchor: str = "") -> str:
+    """An entry of the fixture gate that writes `marker` into `file` in place of `anchor`
+    (`<fid>=ok` by default)."""
+    anchor = anchor or f"{fid}=ok"
+    return entry(
+        fid=fid,
+        guard="tools/gate.py",
+        run=GATE,
+        expect="exit-nonzero",
+        suite="script",
+        fault=(
+            f"transform = {{ file = {toml_str(file)}, replace = {toml_str(anchor)}, "
+            f"with = {toml_str(marker)} }}"
+        ),
+        message=message,
+    )
+
+
+def gate_repo(test: unittest.TestCase, *entries: str, **files: str) -> Repo:
+    texts = {"a.txt": "a=ok\nb=ok\n", "c.txt": "c=ok\n", "d.txt": "d=ok\n", **files}
+    return Repo(test, {REGISTRY: "".join(entries), "tools/gate.py": FAKE_GATE, **texts})
+
+
+class FireScriptBatches(unittest.TestCase):
+    """The `exit-nonzero` entries on one script gate's command are seeded together and fire in
+    one run, each proven only by the one line carrying its message, when that line names a file
+    its own fault seeded and no other entry's. Whatever the batch can't attribute runs alone."""
+
+    def fire(
+        self, repo: Repo, *args: str
+    ) -> tuple[subprocess.CompletedProcess[str], list[int]]:
+        """The run, and the markers each seeded run saw, in order: a batch's run sees each of
+        its entries' markers, an entry's own run its own."""
+        log = repo.tmp.parent / "gate.log"
+        out = repo.run("fire", *args, GATE_LOG=str(log))
+        marks = [int(line) for line in log.read_text().splitlines()]
+        return out, [n for n in marks if n]
+
+    def test_entries_whose_lines_name_their_own_files_fire_in_one_run(self):
+        repo = gate_repo(
+            self,
+            finding("a", "a.txt", "FINDING(a is bad)", "a is bad"),
+            finding("c", "c.txt", "FINDING(c is bad)", "c is bad"),
+            finding("d", "d.txt", "FINDING(d is bad)", "d is bad"),
+        )
+        logs = repo.tmp.parent / "logs"
+        out, seeded = self.fire(repo, "--logs", str(logs))
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        for fid in "acd":
+            self.assertIn(f"fired: {fid} (", out.stdout)
+        self.assertEqual(seeded, [3], out.stdout)
+        self.assertIn(
+            f"guards: 3 of 3 script entries on `{' '.join(GATE)}` fired in one run (",
+            out.stdout,
+        )
+        text = (logs / "c.fault.log").read_text()
+        self.assertIn(
+            "the one line carrying its message names its own file: c.txt:1: c is bad",
+            text,
+        )
+
+    def test_a_message_on_two_lines_leaves_its_entry_to_run_alone(self):
+        # Two lines carry a's message, and the batch can't say that each is a's own.
+        repo = gate_repo(
+            self,
+            finding("a", "a.txt", "FINDING(a is bad) FINDING(a is bad)", "a is bad"),
+            finding("c", "c.txt", "FINDING(c is bad)", "c is bad"),
+        )
+        out, seeded = self.fire(repo)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(seeded, [3, 2], out.stdout)
+        self.assertIn(
+            "guards: a ran alone: 2 lines of the batch's output carry its message",
+            out.stdout,
+        )
+
+    def test_a_batch_whose_run_passes_leaves_every_entry_to_run_alone(self):
+        # Together the two faults print their lines and pass: those lines prove nothing.
+        repo = gate_repo(
+            self,
+            finding("a", "a.txt", "ALONE(a is bad)", "a is bad"),
+            finding("c", "c.txt", "ALONE(c is bad)", "c is bad"),
+        )
+        out, seeded = self.fire(repo)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(seeded, [2, 1, 1], out.stdout)
+        for fid in "ac":
+            self.assertIn(
+                f"guards: {fid} ran alone: the batch's run passed, so it proves nothing",
+                out.stdout,
+            )
+
+    def test_one_line_naming_two_entries_files_counts_for_neither(self):
+        # a's line names c.txt too, and c's fault writes nothing a gate reports: proven by a's
+        # line, c would fire on a fault it doesn't catch.
+        repo = gate_repo(
+            self,
+            finding("a", "a.txt", "NAMING(c.txt|shared)", "shared"),
+            finding("c", "c.txt", "c=quiet", "shared"),
+        )
+        out, seeded = self.fire(repo)
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertIn("fired: a (", out.stdout)
+        self.assertIn("DID NOT FIRE: c: ", out.stdout)
+        for fid in "ac":
+            self.assertIn(
+                f"guards: {fid} ran alone: the line carrying its message names a file "
+                "another entry in the batch seeded",
+                out.stdout,
+            )
+
+    def test_two_entries_with_one_message_in_two_files_each_run_alone(self):
+        repo = gate_repo(
+            self,
+            finding("a", "a.txt", "FINDING(shared)", "shared"),
+            finding("c", "c.txt", "FINDING(shared)", "shared"),
+        )
+        out, seeded = self.fire(repo)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(seeded, [2, 1, 1], out.stdout)
+        self.assertIn(
+            "guards: c ran alone: 2 lines of the batch's output carry its message",
+            out.stdout,
+        )
+
+    def test_a_line_naming_no_seeded_file_leaves_its_entry_to_run_alone(self):
+        repo = gate_repo(
+            self,
+            finding("a", "a.txt", "BARE(a is bad)", "a is bad"),
+            finding("c", "c.txt", "FINDING(c is bad)", "c is bad"),
+        )
+        out, seeded = self.fire(repo)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(seeded, [2, 1], out.stdout)
+        self.assertIn(
+            "guards: a ran alone: the line carrying its message names no file its fault "
+            "seeded",
+            out.stdout,
+        )
+
+    def test_entries_that_seed_one_file_go_to_different_batches(self):
+        repo = gate_repo(
+            self,
+            finding("a", "a.txt", "FINDING(a is bad)", "a is bad"),
+            finding("b", "a.txt", "FINDING(b is bad)", "b is bad"),
+            finding("c", "c.txt", "FINDING(c is bad)", "c is bad"),
+            finding("d", "d.txt", "FINDING(d is bad)", "d is bad"),
+        )
+        out, seeded = self.fire(repo)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        for fid in "abcd":
+            self.assertIn(f"fired: {fid} (", out.stdout)
+        # a, c and d share a run; b is a batch of one, which runs as its own entry.
+        self.assertEqual(seeded, [3, 1], out.stdout)
+
+    def test_a_fault_in_the_gates_own_directory_runs_alone(self):
+        broken = finding(
+            "e",
+            "tools/gate.py",
+            'print("gate: broken on purpose"); sys.exit(1)',
+            "broken on purpose",
+            anchor='print("gate: read the tree")',
+        )
+        repo = gate_repo(
+            self,
+            finding("a", "a.txt", "FINDING(a is bad)", "a is bad"),
+            broken,
+            finding("c", "c.txt", "FINDING(c is bad)", "c is bad"),
+        )
+        out, seeded = self.fire(repo)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        for fid in "ace":
+            self.assertIn(f"fired: {fid} (", out.stdout)
+        self.assertEqual(seeded, [2], out.stdout)
+        self.assertIn(
+            f"guards: 2 of 2 script entries on `{' '.join(GATE)}` fired in one run (",
+            out.stdout,
+        )
+
+    def test_only_a_gate_seeded_outside_its_own_code_batches(self):
+        module = fire_module()
+        load = module["load"]
+        repo = gate_repo(
+            self,
+            finding("a", "a.txt", "FINDING(a is bad)", "a is bad"),
+            # A test runner names the test that failed, not the file whose fault failed it,
+            # though the script it runs sits outside the files this one seeds.
+            entry(
+                fid="unit",
+                guard="test_gate.py",
+                run=["uv", "run", "python", "-m", "unittest", "tests/test_gate.py"],
+                expect="exit-nonzero",
+                suite="script",
+                fault='transform = { file = "a.txt", replace = "b=ok", with = "b=no" }',
+                message="FAIL: test_gate (",
+            ),
+            entry(
+                fid="pytest",
+                guard="test_gate",
+                run=["pytest", "-rA", "tests/test_gate.py"],
+                expect="exit-nonzero",
+                suite="script",
+                fault='transform = { file = "d.txt", replace = "d=ok", with = "d=no" }',
+                message="FAILED test_gate",
+            ),
+            entry(
+                fid="shell",
+                guard="c.txt",
+                run=["bash", "-c", "grep -q c=ok c.txt"],
+                expect="exit-nonzero",
+                suite="script",
+                fault='transform = { file = "c.txt", replace = "c=ok", with = "c=no" }',
+                message="c",
+            ),
+            entry(
+                fid="patched",
+                guard="tools/gate.py",
+                run=GATE,
+                expect="exit-nonzero",
+                suite="script",
+                fault='patch = "verify/guards/faults/d.patch"',
+                message="d is bad",
+            ),
+            **{
+                "verify/guards/faults/d.patch": (
+                    "--- a/d.txt\n+++ b/d.txt\n@@ -1 +1 @@\n-d=ok\n+FINDING(d is bad)\n"
+                )
+            },
+        )
+        faults, problems = load(repo.root)
+        self.assertEqual(problems, [])
+        self.assertEqual(
+            {f.id: module["script_batchable"](f) for f in faults},
+            {
+                "a": True,
+                "unit": False,
+                "pytest": False,
+                "shell": False,
+                "patched": False,
+            },
+        )
+
+    def test_script_batches_report_the_serial_verdicts_at_every_job_count(self):
+        repo = gate_repo(
+            self,
+            finding("a", "a.txt", "FINDING(a is bad)", "a is bad"),
+            finding("b", "a.txt", "BARE(b is bad)", "b is bad"),
+            finding("c", "c.txt", "FINDING(c is bad) FINDING(c is bad)", "c is bad"),
+            finding("d", "d.txt", "FINDING(d is bad)", "d is bad"),
+        )
+        runs = [self.fire(repo, "--jobs", str(jobs))[0] for jobs in (1, 2, 3)]
+        for out in runs:
+            self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(
+            [verdicts(out.stdout) for out in runs[1:]], [verdicts(runs[0].stdout)] * 2
+        )
+
+    def test_a_batch_records_what_its_run_read_for_each_entry_it_proves(self):
+        repo = gate_repo(
+            self,
+            finding("a", "a.txt", "FINDING(a is bad)", "a is bad"),
+            finding("c", "c.txt", "FINDING(c is bad)", "c is bad"),
+        )
+        where = repo.tmp.parent / "records"
+        out = repo.run("fire", "--record", str(where))
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertIn("guards: 2 of 2 script entries on", out.stdout)
+        kept = repo.run("fire", "--reuse", str(where))
+        self.assertEqual(sorted(reused(kept.stdout)), ["a", "c"], kept.stdout)
+        # The batch's run read a.txt for both entries, so a change to it fires both.
+        repo.write("a.txt", "a=ok\nb=ok\nmore=ok\n")
+        repo.commit()
+        again = repo.run("fire", "--reuse", str(where))
+        self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
+        self.assertEqual(sorted(firing(again.stdout)), ["a", "c"], again.stdout)
+        for fid in "ac":
+            self.assertIn("a.txt changed since", firing(again.stdout)[fid])
+
+
 # ── the restored pass by build ───────────────────────────────────────────────
 
 
