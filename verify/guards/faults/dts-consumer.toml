@@ -186,3 +186,13 @@ code = "E0080"
 suite = "rust"
 message = "a hook ceiling moved"
 transform = { file = "crates/microvms-domain/src/constants.rs", replace = "pub const MAX_MICROVM_HOOK_TIMEOUT_SEC: u32 = 60;\n", with = "pub const MAX_MICROVM_HOOK_TIMEOUT_SEC: u32 = 90;\n" }
+
+# A problem with the probes' shape doesn't stop them compiling.
+[[fault]]
+id = "dts-consumer-shape-ends-the-check"
+guard = "test_check_dts_consumer.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_dts_consumer.py", "-k", "ProbeShapeTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_tsc_still_checks_probes_whose_shape_is_refused ("
+transform = { file = "tools/check-dts-consumer.py", replace = "    found, problems = probes(directory)\n", with = "    found, problems = probes(directory)\n    if problems:\n        raise ConsumerError(\"\\n\".join(problems))\n" }
