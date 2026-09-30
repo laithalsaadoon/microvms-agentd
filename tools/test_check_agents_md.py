@@ -84,7 +84,7 @@ jobs:
     name: semgrep, secret history, licenses, workflow lint
     runs-on: ubuntu-latest
     steps:
-      - run: ./tools/check-agents-md.py
+      - run: python3 tools/check-mutants.py --detect
 
 # A blank line and a column-0 comment inside `jobs:` don't end the block.
   # The guards job runs as shards (D35).
@@ -215,6 +215,7 @@ HEALTHY = {
     "crates/agentd/fuzz/Cargo.toml": "",
     "docs/decisions.toml": DECISIONS,
     "tools/check-agents-md.py": GATE,
+    "tools/check-mutants.py": "X = 1\n",
     # `src/lib.rs` is the crate's own, resolved from the doc's directory; the second path is
     # the repo's, resolved from the root.
     "crate/AGENTS.md": (
@@ -907,10 +908,8 @@ class AgentsMdTests(unittest.TestCase):
     def test_a_stale_script_in_a_workflow_step_or_input_fails(self):
         cases = {
             "run": (
-                CI.replace(
-                    "./tools/check-agents-md.py", "./scripts/check-agents-md.py"
-                ),
-                "ci.yml:8: `scripts/check-agents-md.py`",
+                CI.replace("tools/check-mutants.py", "scripts/check-mutants.py"),
+                "ci.yml:8: `scripts/check-mutants.py`",
             ),
             "with": (
                 CI + "  upload:\n    runs-on: ubuntu-latest\n    steps:\n"
@@ -928,12 +927,12 @@ class AgentsMdTests(unittest.TestCase):
         self.healthy(
             **{
                 ".github/workflows/ci.yml": CI.replace(
-                    "./tools/check-agents-md.py", "true"
+                    "python3 tools/check-mutants.py --detect", "true"
                 )
             }
         )
         self.assert_fails_with(
-            "the census sentinel `tools/check-agents-md.py` isn't among the paths"
+            "the census sentinel `tools/check-mutants.py` isn't among the paths"
             " .github/workflows/*.yml names"
         )
         self.remove(".github/workflows/fuzz.yml")

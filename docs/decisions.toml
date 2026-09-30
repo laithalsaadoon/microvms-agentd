@@ -10,7 +10,7 @@
 [D14]
 decision = "CI doesn't install mise. Its jobs install each tool themselves, and `ci:parity` (tools/check-ci-parity.py) compares ci.yml's tool versions and env with mise.toml's instead of CI running the mise tasks."
 source = "Cited first by #316 (91c3272, 2026-09-28), whose pull request says \"D14 holds: CI doesn't install mise, and parity is checked by comparing files\". The decision predates that change, and its reason wasn't recorded in the repository."
-status = "Laith approved reversing it on 2026-09-30: CI may install mise through a SHA-pinned jdx/mise-action with a locked install from mise.lock. A later pull request makes that change and updates this entry; until it lands, CI works as the decision says."
+status = "Reversed by #423 (2026-09-30), on Laith's approval that day: every job of ci.yml and fuzz.yml installs mise through jdx/mise-action (v5.0.0, pinned by SHA, in `.github/actions/mise`) at mise.toml's `min_version`, installs mise.lock's tools with `--locked`, and runs its steps as one `mise run ci:<job>`. `ci:parity` no longer compares the files; it holds what running the tasks leaves: every task `check` depends on reached from a CI job, the Rust channel, and no floating tool."
 
 [D18]
 decision = "The tests that hold microvms-app to agentd-model's rows live in their own unpublished workspace crate, model-conformance. microvms-app is published, so it can't take a versioned dev-dependency on the unpublished agentd-model, and .cargo/deny.toml refuses a path dependency without a version (#296)."
@@ -19,6 +19,7 @@ source = "#343 (8234794, 2026-09-29)."
 [D26]
 decision = "mise pins Node 22 rather than 24: it's the major CI's bindings job runs and the floor of microvms-js's `engines`, so the suite contributors run is the one CI proves. `ci:parity` compares the majors."
 source = "#316 (91c3272, 2026-09-28)."
+status = "Since #423, CI installs mise.lock's Node like every other tool, so both sides run one release and `ci:parity` has no majors to compare. The pin to 22 stands."
 
 [D31]
 decision = "CI's `guards` job fires only the entries a pull request affects (`guards:fire -- --affected`), and every entry on each push to main. Laith picked option 2 of #323."

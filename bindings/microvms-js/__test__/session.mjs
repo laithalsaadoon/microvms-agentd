@@ -521,6 +521,17 @@ test('the refresh window is inside the token lifetime with room to spare', () =>
   assert.ok(maxTokenLifetimeSeconds - defaultRefreshAfterSeconds >= maxTokenLifetimeSeconds / 2);
 });
 
+test('the wait defaults are published', () => {
+  // Core's wait defaults, for a caller who leaves a timeout out (#266): an exec waits five minutes,
+  // the daemon's readiness two, a lifecycle transition five at polls well inside it.
+  const constants = JSON.parse(sessionConstants());
+  assert.equal(constants.defaultExecWaitSeconds, 300);
+  assert.equal(constants.defaultReadyTimeoutSeconds, 120);
+  assert.equal(constants.defaultLifecycleTimeoutSeconds, 300);
+  assert.ok(constants.lifecyclePollIntervalSeconds > 0);
+  assert.ok(constants.lifecyclePollIntervalSeconds < constants.defaultLifecycleTimeoutSeconds);
+});
+
 test('the default agent port is the one a direct session lands on', async () => {
   // One number, reachable two ways. A published constant disagreeing with the session's own default
   // would send a harness validating the contract to a different port than the client uses.
