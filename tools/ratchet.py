@@ -671,6 +671,38 @@ def collected_from(text: str, where: str) -> tuple[str, ...]:
     )
 
 
+def merge_base_with(root: Path, ref: str) -> str:
+    """The merge base of HEAD and `ref`, which is what rule 1 compares with. Not `ref` itself:
+    CI passes `--base origin/main`, and main can move past the commit a pull request's merge
+    was made from while the job runs; comparing with main's tip would count drift main fixed
+    in the meantime as drift the pull request adds."""
+    commit = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            f"{ref}^{{commit}}",
+        ],
+        capture_output=True,
+        text=True,
+        env=clean_env(),
+    )
+    if commit.returncode != 0:
+        raise SystemExit(f"--base {ref} doesn't name a commit")
+    out = subprocess.run(
+        ["git", "-C", str(root), "merge-base", "HEAD", commit.stdout.strip()],
+        capture_output=True,
+        text=True,
+        env=clean_env(),
+    )
+    if out.returncode != 0:
+        raise SystemExit(f"HEAD and --base {ref} have no merge base")
+    return out.stdout.strip()
+
+
 def default_base(root: Path) -> str:
     # Locally, rule 1 is only as good as `origin/main`: a clone whose origin is behind compares
     # with an older tree. That's acceptable because the run that decides a merge is CI's, which
@@ -1346,8 +1378,10 @@ def main(argv: list[str]) -> int:
     if args.command == "snapshot":
         return write_snapshot(ROOT / DRIFT, snapshot(head), args.check)
 
-    ref = args.base or default_base(ROOT)
-    base = read_base(ROOT, ref, args.base or ref[:12])
+    ref = merge_base_with(ROOT, args.base) if args.base else default_base(ROOT)
+    base = read_base(
+        ROOT, ref, f"the merge base with {args.base}" if args.base else ref[:12]
+    )
     failures = rules(head, base)
     rows = summary(head, base)
     base_note = (

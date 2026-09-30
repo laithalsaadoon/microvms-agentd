@@ -3339,6 +3339,27 @@ class BaseTests(unittest.TestCase):
         ):
             self.read_base(ws.root)
 
+    def test_an_explicit_base_is_read_at_its_merge_base_with_head(self):
+        # CI passes `--base origin/main`, and main can move past the commit a pull request's
+        # merge was made from while the job runs. Main here removes the adapter's subprocess
+        # after the branch forked; comparing the branch with main's tip would count that
+        # subprocess as drift the branch adds.
+        ws = self.repo()
+        fork = git(ws.root, "rev-parse", "HEAD").strip()
+        git(ws.root, "checkout", "-q", "-b", "pr")
+        branch = commit(ws.root, "the pull request's own change")
+        git(ws.root, "checkout", "-q", "main")
+        ws.write("adapter/src/lib.rs", "fn f() {}\n")
+        commit(ws.root, "main fixes the drift")
+        git(ws.root, "checkout", "-q", "pr")
+        self.assertEqual(RATCHET["merge_base_with"](ws.root, "main"), fork)
+        self.assertNotEqual(fork, branch)
+        base = self.read_base(ws.root, RATCHET["merge_base_with"](ws.root, "main"))
+        self.assertEqual(
+            keys(base.tree.drift, "subprocess"),
+            ['adapter/src/lib.rs: std::process::Command::new("aws")'],
+        )
+
     def test_an_unknown_base_ref_is_an_error_rather_than_a_bootstrap(self):
         root = git_repo(self)
         commit(root, "first")
