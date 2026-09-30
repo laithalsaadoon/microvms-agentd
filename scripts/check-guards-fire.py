@@ -13,7 +13,7 @@ quietly emptied, and every gate would stay green. `guards/faults.toml` records e
 fault this script can seed, and `guards/unregistered.txt` lists the notes that don't have one
 yet.
 
-Two subcommands:
+Three subcommands:
 
   `list`  (in `mise run check`; no builds) reads the registry and holds it to the tree:
           - every entry is well formed (the schema below);
@@ -53,6 +53,13 @@ Two subcommands:
           running (each runs in its own process group, so its rustc and test processes go
           too). SIGKILL can't be caught: a killed run leaves its worktrees (`git worktree
           prune` forgets them) and the extra targets beside them in the temp directory.
+          Each extra target starts, before any worker builds, as a copy of the first
+          target's dependency units, so the workers don't each build every dependency: a
+          dependency's artifact is the same in any tree. A local package's never is (it has
+          its tree's path compiled in), so none is copied, however it got there. Nothing is
+          copied back: a unit another worker built was compiled against that worker's builds
+          of its dependencies, and rustc refuses to mix it with the first target's
+          (`can't find crate`), so the first target stays one worker's builds.
 
           `--affected` selects the entries whose own files changed: the registry text of the
           entry changed or is new, or a file it names changed between the merge base of HEAD
@@ -107,6 +114,11 @@ Two subcommands:
           step. The last clean pass reinstalls the clean extension into `--venv`, which
           no target dir separates. A run stopped before it (a signal, a timeout) says so
           on stderr.
+
+  `build` (CI's `guards-cache` job, on a push to main) compiles what the selected entries'
+          cargo commands compile (each command before `--`, with `--no-run` for a test run)
+          into `--target-dir` and runs nothing, so the dependency cache the `guards` job
+          restores holds every build its commands need rather than one leg's first worker's.
 
 What counts as fired, by `expect`:
 
@@ -1026,7 +1038,10 @@ class Tree:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 if target.is_symlink() or target.exists():
                     target.unlink()
-                shutil.copy2(source, target, follow_symlinks=False)
+                # `copy`, not `copy2`: the copy's mtime is now. A kept old mtime can be older
+                # than an artifact a previous run built from other text at the same relative
+                # path, and cargo would take that artifact as fresh.
+                shutil.copy(source, target, follow_symlinks=False)
             elif target.exists() or target.is_symlink():
                 target.unlink()
         git(self.path, "add", "-A")
@@ -1593,6 +1608,203 @@ def affected(
     return reasons, commit, len(changed)
 
 
+# ── warm workers ─────────────────────────────────────────────────────────────
+
+# What a worker's target shares with another worktree's: the dev profile's unit directories.
+# The rest of a target is a workspace member's (the outputs cargo copies up beside `deps/`,
+# `incremental/`) or isn't something a fault's command reads (`doc/`, other profiles).
+UNIT_DIRS = ("deps", "build", ".fingerprint")
+# A unit's file or directory name: `<name>-<16 hex>`, plus an extension in `deps/`.
+UNIT_NAME = re.compile(r"^(.+)-[0-9a-f]{16}(?:\.[^/]*)?$")
+
+
+def local_packages(tree: Path) -> set[str] | None:
+    """Every name a local package's units can carry in a target: each workspace member's
+    package name and target names, and each path dependency's, dashes and underscores both.
+    None when `cargo metadata` can't say, and then no worker starts from a copy."""
+    try:
+        out = subprocess.run(
+            ["cargo", "metadata", "--no-deps", "--format-version", "1"],
+            cwd=tree,
+            capture_output=True,
+            text=True,
+            env=clean_env(),
+            timeout=300,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if out.returncode != 0:
+        return None
+    try:
+        packages = json.loads(out.stdout).get("packages")
+    except (json.JSONDecodeError, AttributeError):
+        return None
+    if not isinstance(packages, list) or not packages:
+        return None
+    names: set[str] = set()
+    for package in packages:
+        names.add(package["name"])
+        names.update(t["name"] for t in package.get("targets", []))
+        for dep in package.get("dependencies", []):
+            if dep.get("path"):
+                names.add(dep["name"])
+                if dep.get("rename"):
+                    names.add(dep["rename"])
+    return (
+        names
+        | {n.replace("-", "_") for n in names}
+        | {n.replace("_", "-") for n in names}
+    )
+
+
+def dependency_unit(name: str, local: set[str]) -> bool:
+    """Whether a unit directory's entry is a dependency's, so safe to share between trees.
+
+    A local package's unit is never shared: cargo keys it by its workspace-relative path and
+    trusts it while its sources are older, and it has the absolute path of the tree it was
+    built in compiled in (`env!("CARGO_MANIFEST_DIR")`, which guards read their sources
+    through). Copied into a tree whose files are older, it stays fresh and reads the other
+    tree. An entry whose name doesn't parse isn't shared either. `lib` may or may not be the
+    crate's own prefix (`liblibc-*.rlib` and `libc-*.d` are one crate), so both readings are
+    checked, and a match on either keeps the entry out.
+    """
+    match = UNIT_NAME.match(name)
+    if match is None:
+        return False
+    stem = match.group(1)
+    readings = {stem, stem[3:]} if stem.startswith("lib") else {stem}
+    return not readings & local
+
+
+def dependency_units(target: Path, local: set[str]) -> list[Path]:
+    """The dependency units in `target`'s dev profile, relative to `target`."""
+    out: list[Path] = []
+    for kind in UNIT_DIRS:
+        base = target / "debug" / kind
+        if base.is_dir():
+            out += [
+                Path("debug", kind, entry.name)
+                for entry in sorted(base.iterdir(), key=lambda e: e.name)
+                if dependency_unit(entry.name, local)
+            ]
+    return out
+
+
+def copy_units(source: Path, dest: Path, units: list[Path]) -> int:
+    """Copy each unit `dest` doesn't have from `source`, keeping mtimes (cargo compares
+    them); the count copied."""
+    copied = 0
+    for unit in units:
+        src, dst = source / unit, dest / unit
+        if dst.exists() or dst.is_symlink():
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if src.is_dir() and not src.is_symlink():
+            shutil.copytree(src, dst, symlinks=True)
+        else:
+            shutil.copy2(src, dst, follow_symlinks=False)
+        copied += 1
+    for name in (".rustc_info.json", "CACHEDIR.TAG"):
+        if (source / name).is_file() and not (dest / name).exists():
+            dest.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source / name, dest / name)
+    return copied
+
+
+def seed_targets(first: Path, others: list[Path], local: set[str] | None) -> str:
+    """Give each extra worker's empty target the first target's dependency units, before any
+    worker builds, so four workers don't each build every dependency. The line to print."""
+    if not others:
+        return ""
+    if local is None:
+        return (
+            "guards: cargo metadata didn't answer, so the other workers start from empty "
+            "targets"
+        )
+    started = time.monotonic()
+    units = dependency_units(first, local)
+    for target in others:
+        copy_units(first, target, units)
+    return (
+        f"guards: the other {len(others)} workers start from the first target's "
+        f"{len(units)} dependency units, without the workspace's own "
+        f"({time.monotonic() - started:.1f} s)"
+    )
+
+
+def fire_target(root: Path, env: dict[str, str], given: str | None) -> str:
+    """Where cargo builds: `--target-dir`, or `guards-fire` under the caller's target."""
+    if given:
+        return str(Path(given).resolve())
+    return str(
+        Path(env.get("CARGO_TARGET_DIR") or root / "target").resolve() / "guards-fire"
+    )
+
+
+def build_argv(argv: list[str]) -> list[str] | None:
+    """What a cargo command compiles, as a command that only compiles it: the argv before
+    `--`, with `--no-run` for `test` and `build` for `run`. None for any other program, and for
+    a doc test run, which cargo can't build without running (rustdoc compiles each doc test as
+    it runs it, against the library's normal build that other commands compile)."""
+    if not argv or Path(argv[0]).name != "cargo":
+        return None
+    head = argv[: argv.index("--")] if "--" in argv else list(argv)
+    at = next(
+        (i for i, a in enumerate(head[1:], 1) if not a.startswith(("-", "+"))), None
+    )
+    if at is None:
+        return None
+    if head[at] == "test" and "--doc" in head:
+        return None
+    if head[at] == "test" and "--no-run" not in head:
+        head.append("--no-run")
+    elif head[at] == "run":
+        head[at] = "build"
+    return head
+
+
+def cmd_build(root: Path, args: argparse.Namespace) -> int:
+    faults, problems = load(root)
+    if problems:
+        for problem in problems:
+            print(f"guards: {problem}", file=sys.stderr)
+        return 1
+    selected = [
+        f
+        for f in faults
+        if (not args.only or f.id in args.only)
+        and (not args.suite or f.suite in args.suite)
+    ]
+    builds: dict[tuple[str, ...], None] = {}
+    for fault in selected:
+        for argv in fault.run:
+            if (built := build_argv(argv)) is not None:
+                builds.setdefault(tuple(built))
+    if not builds:
+        print(
+            "guards: no selected entry runs cargo, so nothing to build", file=sys.stderr
+        )
+        return 1
+    env = clean_env()
+    env["CARGO_TARGET_DIR"] = fire_target(root, env, args.target_dir)
+    env.pop("VIRTUAL_ENV", None)
+    print(
+        f"guards: building what {len(selected)} entries' cargo commands compile, "
+        f"{len(builds)} builds, CARGO_TARGET_DIR={env['CARGO_TARGET_DIR']}"
+    )
+    total = time.monotonic()
+    for argv in builds:
+        started = time.monotonic()
+        print(f"$ {' '.join(argv)}")
+        code = subprocess.run(list(argv), cwd=root, env=env).returncode
+        if code != 0:
+            print(f"guards: `{' '.join(argv)}` exits {code}", file=sys.stderr)
+            return 1
+        print(f"guards: built in {time.monotonic() - started:.1f} s")
+    print(f"guards: {len(builds)} builds ({time.monotonic() - total:.1f} s)")
+    return 0
+
+
 def cmd_fire(root: Path, args: argparse.Namespace) -> int:
     faults, problems = load(root)
     if problems:
@@ -1681,12 +1893,7 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
             print("guards: this shard's slice is empty, so nothing to fire")
             return 0
     env = clean_env()
-    env["CARGO_TARGET_DIR"] = str(
-        Path(args.target_dir).resolve()
-        if args.target_dir
-        else Path(env.get("CARGO_TARGET_DIR") or root / "target").resolve()
-        / "guards-fire"
-    )
+    env["CARGO_TARGET_DIR"] = fire_target(root, env, args.target_dir)
     env.pop("VIRTUAL_ENV", None)
     logs = Path(args.logs).resolve() if args.logs else None
     if logs:
@@ -1726,6 +1933,11 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
                 )
             workers.append(Worker(number, tree, wenv, benv))
         first = workers[0].tree
+        first_target = Path(env["CARGO_TARGET_DIR"])
+        extra_targets = [Path(w.env["CARGO_TARGET_DIR"]) for w in workers[1:]]
+        # Nothing to copy from a first target no build has used (a cold cache).
+        warm = bool(extra_targets) and (first_target / "debug").is_dir()
+        local = local_packages(first.path) if warm else None
         changed = git(first.path, "diff", "--cached", "--name-only", "HEAD").stdout
         print(
             f"guards: tree {head} plus {len(changed.split())} uncommitted paths, "
@@ -1737,6 +1949,10 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
                 "in the directory above, the others in a target beside their worktree, "
                 "removed when the run ends"
             )
+        if warm:
+            # Before the first build of this run: see `dependency_unit` for why only a
+            # dependency's units are copied.
+            print(seed_targets(first_target, extra_targets, local))
 
         def run_clean(label: str):
             def do(worker: Worker, task: Task):
@@ -1867,6 +2083,14 @@ def main(argv: list[str] | None = None) -> int:
         help=f"the ref {UNREGISTERED} may only shrink from (default: the merge base with "
         "origin/main)",
     )
+    building = sub.add_parser(
+        "build", help="compile what the entries' cargo commands build, and run nothing"
+    )
+    building.add_argument("--only", action="append", default=[], metavar="ID")
+    building.add_argument("--suite", action="append", default=[], choices=SUITES)
+    building.add_argument(
+        "--target-dir", help="where cargo builds (default: as for `fire`)"
+    )
     fire = sub.add_parser("fire", help="seed each fault and require its guard to fail")
     fire.add_argument("--only", action="append", default=[], metavar="ID")
     fire.add_argument("--suite", action="append", default=[], choices=SUITES)
@@ -1910,6 +2134,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.command == "list":
         return cmd_list(root, args.base)
+    if args.command == "build":
+        return cmd_build(root, args)
     return cmd_fire(root, args)
 
 

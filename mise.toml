@@ -655,7 +655,8 @@ description = "Seed each registered fault in a scratch worktree and require its 
 # worth of disk.
 #
 # `-- --jobs N` runs faults in N scratch worktrees at once with the serial run's verdicts
-# and output; each extra worker builds in its own target, removed when the run ends.
+# and output; each extra worker builds in its own target, removed when the run ends, which
+# starts as a copy of target/guards-fire's dependency units (never the workspace's own crates).
 # `-- --affected` fires only the entries whose own files or registry text changed against
 # origin/main: a rule, not a trace. It's what CI's `guards` job runs on a pull request, and the
 # full fire runs on every push to main (#323). `-- --shard k/N` fires shard k (from 0) of N of
