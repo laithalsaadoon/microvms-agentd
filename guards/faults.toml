@@ -2129,12 +2129,17 @@ transform = { file = "model/src/exec_start.rs", replace = "Layering::Specified =
 
 # ── model_conformance.rs: the bootstrap and exec model replayed against agentd (#296) ──
 
+# The walk is replayed in slices, each a run of its shortest-first order, so the shortest path a
+# daemon fault fails on is slice 0's, and each fault below that seeds the daemon names slice 0.
+# The walk's floors, and the check that the slices replay it once, are
+# `the_slices_replay_every_walked_path_once`.
+
 # A step the per-state paths never take: every state a removing `Collect` reaches has a shorter
 # path, so only the walk's untaken-step paths drive it.
 [[fault]]
 id = "model-conformance-collect-keeps-acked"
-guard = "every_walked_path_of_the_model_replays_against_the_daemon"
-run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+guard = "slice_0_of_the_walk_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "slice_0_of_the_walk_replays_against_the_daemon"]
 expect = "test-failed"
 suite = "rust"
 message = "collect_expired removed 0 entries; the model collects 1"
@@ -2143,8 +2148,8 @@ transform = { file = "agentd/src/exec.rs", replace = "            Some(at) => no
 # The floor: a recorder that records nothing replays nothing and would pass.
 [[fault]]
 id = "model-conformance-empty-walk"
-guard = "every_walked_path_of_the_model_replays_against_the_daemon"
-run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+guard = "the_slices_replay_every_walked_path_once"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "the_slices_replay_every_walked_path_once"]
 expect = "test-failed"
 suite = "rust"
 message = "the walk recorded no path, so nothing was replayed"
@@ -2154,8 +2159,8 @@ transform = { file = "agentd/tests/model_conformance.rs", replace = "accessor().
 # names it.
 [[fault]]
 id = "model-conformance-untaken-steps"
-guard = "every_walked_path_of_the_model_replays_against_the_daemon"
-run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+guard = "the_slices_replay_every_walked_path_once"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "the_slices_replay_every_walked_path_once"]
 expect = "test-failed"
 suite = "rust"
 message = "the walk never takes [\"collect 200 removed\"]"
@@ -2166,8 +2171,8 @@ transform = { file = "agentd/tests/model_conformance.rs", replace = "    paths.e
 # replay reaches it on the shortest path that acks before the child exits.
 [[fault]]
 id = "model-conformance-ack-running"
-guard = "every_walked_path_of_the_model_replays_against_the_daemon"
-run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+guard = "slice_0_of_the_walk_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "slice_0_of_the_walk_replays_against_the_daemon"]
 expect = "test-failed"
 suite = "rust"
 message = "ExecAck(0) }): answered 200 OK; the model's response is 409 Conflict"
@@ -2177,8 +2182,8 @@ transform = { file = "agentd/src/exec.rs", replace = "    if slot.is_none() {\n"
 # catches it too.
 [[fault]]
 id = "model-conformance-collect-unacked-exited"
-guard = "every_walked_path_of_the_model_replays_against_the_daemon"
-run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+guard = "slice_0_of_the_walk_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "slice_0_of_the_walk_replays_against_the_daemon"]
 expect = "test-failed"
 suite = "rust"
 message = "collect_expired removed 1 entries; the model collects 0"
@@ -2189,8 +2194,8 @@ transform = { file = "agentd/src/exec.rs", replace = "            Some(at) => no
 # away (Running where the model has Acked) before the spawn count does.
 [[fault]]
 id = "model-conformance-restart-acked"
-guard = "every_walked_path_of_the_model_replays_against_the_daemon"
-run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+guard = "slice_0_of_the_walk_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "slice_0_of_the_walk_replays_against_the_daemon"]
 expect = "test-failed"
 suite = "rust"
 message = "the model's is Acked"
@@ -2202,11 +2207,11 @@ transform = { file = "agentd/src/exec.rs", replace = "    let already_present = 
 # (`exec::tests::a_retried_start_does_not_spawn_a_second_child` retries after the exit).
 [[fault]]
 id = "model-conformance-restart-running"
-guard = "every_walked_path_of_the_model_replays_against_the_daemon"
-run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+guard = "slice_0_of_the_walk_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "slice_0_of_the_walk_replays_against_the_daemon"]
 expect = "test-failed"
 suite = "rust"
-note = "agentd/tests/model_conformance.rs::every_walked_path_of_the_model_replays_against_the_daemon"
+note = "agentd/tests/model_conformance.rs::slice_0_of_the_walk_replays_against_the_daemon"
 message = "spawned 2 children; the model spawned 1"
 transform = { file = "agentd/src/exec.rs", replace = "    let already_present = state.with_execs(|execs| execs.contains_key(&req.exec_id));\n", with = "    let already_present = state.with_execs(|execs| execs.get(&req.exec_id).is_some_and(|entry| entry.acked_at.is_some() || entry.shared.terminal.try_lock().map_or(true, |terminal| terminal.is_some())));\n" }
 
@@ -2215,8 +2220,8 @@ transform = { file = "agentd/src/exec.rs", replace = "    let already_present = 
 # catches it too; this entry is what shows the replay reaches auth.
 [[fault]]
 id = "model-conformance-auth-before-bootstrap"
-guard = "every_walked_path_of_the_model_replays_against_the_daemon"
-run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+guard = "slice_0_of_the_walk_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "slice_0_of_the_walk_replays_against_the_daemon"]
 expect = "test-failed"
 suite = "rust"
 message = "answered 401 Unauthorized; the model's response is 503 Service Unavailable"
@@ -2227,12 +2232,66 @@ transform = { file = "agentd/src/auth.rs", replace = "            None => Some(S
 # this entry is what shows the replay reaches the hook.
 [[fault]]
 id = "model-conformance-hook-replaces-token"
-guard = "every_walked_path_of_the_model_replays_against_the_daemon"
-run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+guard = "slice_0_of_the_walk_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "slice_0_of_the_walk_replays_against_the_daemon"]
 expect = "test-failed"
 suite = "rust"
 message = "answered 200 OK; the model's response is 409 Conflict"
 transform = { file = "agentd/src/state.rs", replace = "                } else {\n                    Bootstrap::Conflict\n                }\n", with = "                } else {\n                    *slot = Some(presented.to_vec());\n                    Bootstrap::Installed\n                }\n" }
+
+# A slice start that skips the walk's first path, so no test replays it. Every slice test stays
+# green.
+[[fault]]
+id = "model-conformance-slice-gap"
+guard = "the_slices_replay_every_walked_path_once"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "the_slices_replay_every_walked_path_once"]
+expect = "test-failed"
+suite = "rust"
+message = "paths [0] are in no slice"
+transform = { file = "agentd/tests/model_conformance.rs", replace = "        if before * SLICES >= states * k {\n", with = "        if before * SLICES > states * k {\n" }
+
+# Each slice starts one path early, so a path at each cut is replayed twice.
+[[fault]]
+id = "model-conformance-slice-overlap"
+guard = "the_slices_replay_every_walked_path_once"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "the_slices_replay_every_walked_path_once"]
+expect = "test-failed"
+suite = "rust"
+note = "agentd/tests/model_conformance.rs::the_slices_replay_every_walked_path_once"
+message = "paths are in more than one slice"
+transform = { file = "agentd/tests/model_conformance.rs", replace = "    slice_start(paths, k)..slice_start(paths, k + 1)\n", with = "    slice_start(paths, k).saturating_sub(1)..slice_start(paths, k + 1)\n" }
+
+# A slice test that replays another's slice: the partition is whole, but the last slice's paths
+# run in no test and the one before's in two.
+[[fault]]
+id = "model-conformance-slice-unwired"
+guard = "the_slices_replay_every_walked_path_once"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "the_slices_replay_every_walked_path_once"]
+expect = "test-failed"
+suite = "rust"
+message = "slices [7] are replayed by no test"
+transform = { file = "agentd/tests/model_conformance.rs", replace = "    replay_slice(7).await;\n", with = "    replay_slice(6).await;\n" }
+
+# The wiring check on empty input: a source with no tests replays no slice, and says so.
+[[fault]]
+id = "model-conformance-slices-empty-source"
+guard = "the_slices_replay_every_walked_path_once"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "the_slices_replay_every_walked_path_once"]
+expect = "test-failed"
+suite = "rust"
+message = "no test in this file calls `replay_slice`"
+transform = { file = "agentd/tests/model_conformance.rs", replace = "syn::parse_str(include_str!(\"model_conformance.rs\"))", with = "syn::parse_str(\"\")" }
+
+# A slice's own floor: truncating division puts every path in the last slice, which the
+# partition check accepts, and a slice with nothing to replay would pass.
+[[fault]]
+id = "model-conformance-empty-slice"
+guard = "slice_0_of_the_walk_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "slice_0_of_the_walk_replays_against_the_daemon"]
+expect = "test-failed"
+suite = "rust"
+message = "slice 0 holds no path, so it replays nothing"
+transform = { file = "agentd/tests/model_conformance.rs", replace = "        if before * SLICES >= states * k {\n", with = "        if before >= k / SLICES * states {\n" }
 
 # The key floor: a model property that loses its key leaves the replay's claim with nothing
 # to back it, and trace:check can't see that while the key isn't in TRACED.
@@ -3162,6 +3221,170 @@ expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_root_guide_missing_a_kind_its_rules_use_fails_naming_it ("
 transform = { file = "scripts/check-agents-md.py", replace = "ROOT_KINDS = (\"task\", \"member\", \"path\", \"job\", \"symbol\")", with = "ROOT_KINDS = (\"task\", \"path\", \"job\", \"symbol\")" }
+
+# The path census: what lefthook.yml, the mise tasks, the workflows, dependabot.yml and the gate
+# scripts' constants name must exist, and each decision id the tree cites must be defined. Its
+# floor (every source reads as empty), a source's sentinel, and a stale path of each kind.
+[[fault]]
+id = "agents-md-census-floor"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "the census read no paths from lefthook.yml"
+transform = { file = "scripts/check-agents-md.py", replace = "            found, refused = readers[source]()", with = "            found, refused = [], []" }
+
+# The workflows still yield their filters and working directories, but no step's `run`.
+[[fault]]
+id = "agents-md-census-sentinel"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "the census sentinel `scripts/check-agents-md.py` isn't among the paths .github/workflows/*.yml names"
+transform = { file = "scripts/check-agents-md.py", replace = "                if isinstance(run := step.get(\"run\"), Scalar):", with = "                if isinstance(run := step.get(\"runs\"), Scalar):" }
+
+# The move this guards against: deny.toml goes under .cargo/ and the hook's glob keeps naming a
+# file that's gone, so the license hook would stop running on it.
+[[fault]]
+id = "agents-md-census-lefthook-glob-stale"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`.cargo/deny.toml` is no such path in this tree"
+transform = { file = "lefthook.yml", replace = "*/Cargo.toml,deny.toml}", with = "*/Cargo.toml,.cargo/deny.toml}" }
+
+[[fault]]
+id = "agents-md-census-mise-run-stale"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`tools/check-license-headers.py` is no such path in this tree"
+transform = { file = "mise.toml", replace = "\"./scripts/check-license-headers.py\",", with = "\"./tools/check-license-headers.py\"," }
+
+[[fault]]
+id = "agents-md-census-workflow-paths-stale"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`crates/agentd/src/fs.rs` is no such path in this tree"
+transform = { file = ".github/workflows/fuzz.yml", replace = "      - 'agentd/src/fs.rs'\n", with = "      - 'crates/agentd/src/fs.rs'\n" }
+
+[[fault]]
+id = "agents-md-census-working-directory-stale"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`crates/agentd` is no directory in this tree"
+transform = { file = ".github/workflows/fuzz.yml", replace = "working-directory: agentd\n", with = "working-directory: crates/agentd\n" }
+
+[[fault]]
+id = "agents-md-census-dependabot-stale"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`/bindings/microvms-js` (`bindings/microvms-js`) is no directory in this tree"
+transform = { file = ".github/dependabot.yml", replace = "directory: /microvms-js", with = "directory: /bindings/microvms-js" }
+
+[[fault]]
+id = "agents-md-census-constant-stale"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`verify/schema-breaks.toml` is no such path in this tree"
+transform = { file = "scripts/check-schema-compat.py", replace = "BREAKS = \"docs/schema-breaks.toml\"", with = "BREAKS = \"verify/schema-breaks.toml\"" }
+
+[[fault]]
+id = "agents-md-census-not-paths-stale"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "CENSUS_NOT_PATHS lists `lychee-report/`"
+transform = { file = "scripts/check-agents-md.py", replace = "    \"lychee/\": ", with = "    \"lychee-report/\": " }
+
+[[fault]]
+id = "agents-md-census-yaml-refused"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "a value that starts with `&`, which the census's YAML reader doesn't take"
+transform = { file = "lefthook.yml", replace = "pre-commit:\n  parallel: true\n", with = "pre-commit: &commit\n  parallel: true\n" }
+
+# A decision loses its table while the tree still cites it. The new name spells no id, since
+# this file is read for citations too.
+[[fault]]
+id = "agents-md-census-decision-undefined"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`D26` is a decision id docs/decisions.toml doesn't define"
+transform = { file = "docs/decisions.toml", replace = "[D26]\n", with = "[node-major]\n" }
+
+[[fault]]
+id = "agents-md-census-decisions-floor"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "docs/decisions.toml defines no decision"
+transform = { file = "scripts/check-agents-md.py", replace = "        defined.add(key)\n", with = "        pass\n" }
+
+[[fault]]
+id = "agents-md-census-citations-floor"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "found no decision id cited in the tree"
+transform = { file = "scripts/check-agents-md.py", replace = "r\"D[0-9]+\"", with = "r\"D[0-9]+x\"" }
+
+# The citation scan stops reading YAML, TOML and Python while Markdown and Rust still cite ids.
+[[fault]]
+id = "agents-md-census-decision-sentinel"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "the sentinel decision `D35` isn't cited anywhere"
+transform = { file = "scripts/check-agents-md.py", replace = "    \":(exclude)*.json\",\n", with = "    \":(exclude)*.json\",\n    \":(exclude)*.yml\",\n    \":(exclude)*.toml\",\n    \":(exclude)*.py\",\n" }
+
+# The unit suite: the matcher semantics the tree alone can't tell apart, since a looser reading
+# still finds a match for every glob in it.
+[[fault]]
+id = "agents-md-unit-lefthook-doublestar"
+guard = "test_check_agents_md.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_agents_md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_lefthook_glob_is_matched_the_way_lefthook_matches_it ("
+transform = { file = "scripts/check-agents-md.py", replace = "        if glob.startswith(\"**/\", at) and dialect == \"doublestar\":\n", with = "        if glob.startswith(\"**/\", at):\n" }
+
+[[fault]]
+id = "agents-md-unit-github-star"
+guard = "test_check_agents_md.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_agents_md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_stale_workflow_paths_filter_fails_under_githubs_syntax ("
+transform = { file = "scripts/check-agents-md.py", replace = "            out.append(\".*\" if dialect in (\"gobwas\", \"file\") else \"[^/]*\")\n", with = "            out.append(\".*\")\n" }
+
+[[fault]]
+id = "agents-md-unit-yaml-indentless-sequence"
+guard = "test_check_agents_md.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_agents_md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ERROR: test_mappings_sequences_and_compact_nesting ("
+transform = { file = "scripts/check-agents-md.py", replace = "        if key and head and head[0] == indent and _is_item(head[1]):\n", with = "        if False:\n" }
 
 [[fault]]
 id = "conformance-doctor-region-lines"

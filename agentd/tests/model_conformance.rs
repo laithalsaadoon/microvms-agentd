@@ -3,7 +3,7 @@
 //!
 //! `agentd-model` proves its properties over every interleaving of platform, client and in-VM
 //! attacker, but of the model: a handler that stopped making the model's transitions would
-//! leave `cargo test -p agentd-model` green. This test ties the two. Stateright walks
+//! leave `cargo test -p agentd-model` green. These tests tie the two. Stateright walks
 //! `Config::deployment_invariant_held()` breadth first, and `PathRecorder` keeps one path to
 //! each reachable state; [`walk`] adds a path for each step the daemon could tell apart that
 //! none of those takes. Each path is replayed from a fresh `AppState` through
@@ -12,6 +12,10 @@
 //! (200, 409, 401 or 503), which token is installed, each exec id's phase, how many children
 //! the id has spawned, and a polled result exactly while the child has exited and the model
 //! still holds its output.
+//!
+//! The walk is replayed in [`SLICES`] runs of its order, each its own test, so the harness
+//! runs them at once. `the_slices_replay_every_walked_path_once` holds them to the walk: each
+//! path is in one slice, each slice is one test's, and the steps they take cover [`COVERED`].
 //!
 //! The replay doesn't see the ack release output. `exec::poll` hides the result of any acked
 //! entry, whatever the entry still holds, and a second ack answers 409 either way, so an ack
@@ -36,6 +40,8 @@
 //!   which is when the daemon has the result to hand back.
 
 use std::collections::{BTreeSet, HashSet};
+use std::ops::Range;
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use agentd::exec::{self, Outcome, Phase, PollResponse};
@@ -49,9 +55,15 @@ use serde_json::{Value, json};
 use stateright::{Checker, Expectation, Model, PathRecorder};
 use tower::ServiceExt;
 
-/// Paths replayed at once. Each owns its daemon, so they share nothing but the host; the
-/// bound keeps the live `cat` children to a few dozen.
-const CONCURRENT_PATHS: usize = 16;
+/// The runs the walk is cut into, each replayed by its own test.
+const SLICES: usize = 8;
+
+/// Paths one slice replays at once. Each owns its daemon, so they share nothing but the host.
+/// The slices run at once too, so the bound is on their product, which keeps the live `cat`
+/// children to a few dozen. It's low because a path waiting on a child polls for it: sixteen
+/// a slice took more than twice as long as two a slice, on the 16-core devbox at load average
+/// 22 (2026-09-30).
+const CONCURRENT_PATHS: usize = 2;
 
 /// How long a child gets to show `exited` after its stdin closes or it's killed, and how long
 /// a spawned child gets to write its marker line.
@@ -677,26 +689,255 @@ async fn replay(path: &Path, scratch: &std::path::Path) -> Result<(), String> {
     }
 }
 
-/// Every path stateright walks through the bootstrap and exec model replays against the real
-/// routes with the model's responses, token, phases, spawn counts and output.
+/// The walk, taken once per test process: the slices replay shares of the same paths, and the
+/// partition check reads them too.
+struct Walk {
+    paths: Vec<Path>,
+    /// How many of `paths` the recorder kept; the rest are for untaken steps.
+    recorded: usize,
+    took: Duration,
+}
+
+static WALK: LazyLock<Walk> = LazyLock::new(|| {
+    let started = Instant::now();
+    let (paths, recorded) = walk();
+    Walk {
+        paths,
+        recorded,
+        took: started.elapsed(),
+    }
+});
+
+/// Where slice `k` of `paths` starts: the first path at which the paths before it hold at least
+/// `k`/[`SLICES`] of the walk's states. Slices are runs of the walk's order, so its shortest
+/// paths, where a fault fails soonest, are all slice 0's. They're cut by states rather than by
+/// paths because a later slice's paths are longer: a path's states count its steps and the
+/// fresh daemon it starts with.
+fn slice_start(paths: &[Path], k: usize) -> usize {
+    let states: usize = paths.iter().map(Vec::len).sum();
+    let mut before = 0;
+    for (index, path) in paths.iter().enumerate() {
+        if before * SLICES >= states * k {
+            return index;
+        }
+        before += path.len();
+    }
+    paths.len()
+}
+
+/// The paths slice `k` replays, by index into the walk: from its start to the next slice's.
+fn slice(paths: &[Path], k: usize) -> Range<usize> {
+    slice_start(paths, k)..slice_start(paths, k + 1)
+}
+
+/// The slice each test in `items` replays: the number it passes to [`replay_slice`], by the
+/// test's name.
+fn replayed_slices(items: &[syn::Item]) -> Vec<(String, usize)> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            syn::Item::Fn(function) if is_test(&function.attrs) => Some(function),
+            _ => None,
+        })
+        .flat_map(|function| {
+            function.block.stmts.iter().filter_map(|statement| {
+                let syn::Stmt::Expr(syn::Expr::Await(awaited), _) = statement else {
+                    return None;
+                };
+                let syn::Expr::Call(call) = &*awaited.base else {
+                    return None;
+                };
+                let syn::Expr::Path(callee) = &*call.func else {
+                    return None;
+                };
+                if !callee.path.is_ident("replay_slice") || call.args.len() != 1 {
+                    return None;
+                }
+                let Some(syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Int(k),
+                    ..
+                })) = call.args.first()
+                else {
+                    return None;
+                };
+                Some((function.sig.ident.to_string(), k.base10_parse().ok()?))
+            })
+        })
+        .collect()
+}
+
+/// Replays slice `k` of the walk against the real routes, holding the daemon to the model's
+/// responses, token, phases, spawn counts and output.
+async fn replay_slice(k: usize) {
+    let started = Instant::now();
+    let paths = &WALK.paths;
+    let range = slice(paths, k);
+    assert!(
+        !range.is_empty(),
+        "slice {k} holds no path, so it replays nothing"
+    );
+    let replayed = &paths[range.clone()];
+    let scratch = tempfile::tempdir().expect("a scratch directory");
+    let mut replays = futures_util::stream::iter(replayed)
+        .map(|path| replay(path, scratch.path()))
+        // In the walk's order, shortest first, so the failure reported is the slice's shortest.
+        .buffered(CONCURRENT_PATHS);
+    while let Some(outcome) = replays.next().await {
+        // The first divergence ends the run. The replays still in flight go with the stream,
+        // and the runtime's shutdown drops each waiter task with the stdin it holds, so every
+        // `cat` left sees EOF.
+        if let Err(failure) = outcome {
+            panic!("a replayed path diverged from the model: {failure}");
+        }
+    }
+    let steps: usize = replayed.iter().map(|path| path.len() - 1).sum();
+    eprintln!(
+        "slice {k}: replayed paths {range:?} of {} ({steps} steps) in {:?}",
+        paths.len(),
+        started.elapsed()
+    );
+}
+
+/// Slice 0 of the walk: its shortest paths, where a fault fails first.
 ///
 /// It's the daemon's side of AGENTD-1: every control request the model sends before bootstrap
 /// is one it answers `Unavailable`, and each is replayed to a daemon that has to answer 503.
+/// The model can send each from its initial state, and a one-step path sorts ahead of every
+/// longer one, so each is this slice's.
 ///
 /// **Falsification**: let `exec::start` spawn again for a retried id whose child is still
 /// running (`contains_key` to a check that's true only once the entry has exited or been
 /// acked) and the path that retries a running start fails on its spawn count, while
-/// `cargo test -p agentd-model` and every other agentd test stay green.
+/// `cargo test -p agentd-model` and every agentd test outside this file stay green.
 #[tokio::test]
-async fn every_walked_path_of_the_model_replays_against_the_daemon() {
-    let started = Instant::now();
-    let (paths, recorded) = walk();
+async fn slice_0_of_the_walk_replays_against_the_daemon() {
+    replay_slice(0).await;
+}
+
+/// Slice 1 of the walk; see [`replay_slice`].
+#[tokio::test]
+async fn slice_1_of_the_walk_replays_against_the_daemon() {
+    replay_slice(1).await;
+}
+
+/// Slice 2 of the walk; see [`replay_slice`].
+#[tokio::test]
+async fn slice_2_of_the_walk_replays_against_the_daemon() {
+    replay_slice(2).await;
+}
+
+/// Slice 3 of the walk; see [`replay_slice`].
+#[tokio::test]
+async fn slice_3_of_the_walk_replays_against_the_daemon() {
+    replay_slice(3).await;
+}
+
+/// Slice 4 of the walk; see [`replay_slice`].
+#[tokio::test]
+async fn slice_4_of_the_walk_replays_against_the_daemon() {
+    replay_slice(4).await;
+}
+
+/// Slice 5 of the walk; see [`replay_slice`].
+#[tokio::test]
+async fn slice_5_of_the_walk_replays_against_the_daemon() {
+    replay_slice(5).await;
+}
+
+/// Slice 6 of the walk; see [`replay_slice`].
+#[tokio::test]
+async fn slice_6_of_the_walk_replays_against_the_daemon() {
+    replay_slice(6).await;
+}
+
+/// Slice 7 of the walk; see [`replay_slice`].
+#[tokio::test]
+async fn slice_7_of_the_walk_replays_against_the_daemon() {
+    replay_slice(7).await;
+}
+
+/// Every walked path is in exactly one slice, every slice is replayed by exactly one test, and
+/// the steps the slices take cover [`COVERED`]: together the slices replay the whole walk, once.
+///
+/// The slice each test replays is read from this file's source, so a slice test deleted, or
+/// two passing the same number, fails here rather than leaving a slice's paths unreplayed.
+///
+/// **Falsification**: start each slice one path early (`slice_start(paths, k)` to
+/// `slice_start(paths, k).saturating_sub(1)` in [`slice`]) and this names the paths two slices
+/// replay, while every slice test stays green.
+#[test]
+fn the_slices_replay_every_walked_path_once() {
+    let Walk {
+        paths,
+        recorded,
+        took,
+    } = &*WALK;
     assert!(
         !paths.is_empty(),
         "the walk recorded no path, so nothing was replayed"
     );
-    let taken: BTreeSet<String> = paths
+
+    let mut holders = vec![Vec::new(); paths.len()];
+    for k in 0..SLICES {
+        for index in slice(paths, k) {
+            let Some(slices) = holders.get_mut(index) else {
+                panic!(
+                    "slice {k} reaches path {index}; the walk holds {}",
+                    paths.len()
+                );
+            };
+            slices.push(k);
+        }
+    }
+    let unplaced: Vec<usize> = (0..paths.len())
+        .filter(|&index| holders[index].is_empty())
+        .collect();
+    assert!(
+        unplaced.is_empty(),
+        "paths {unplaced:?} are in no slice, so no test replays them"
+    );
+    let doubled: Vec<(usize, &Vec<usize>)> = holders
         .iter()
+        .enumerate()
+        .filter(|(_, slices)| slices.len() > 1)
+        .collect();
+    assert!(
+        doubled.is_empty(),
+        "paths are in more than one slice, as (path, slices): {doubled:?}"
+    );
+
+    let source: syn::File =
+        syn::parse_str(include_str!("model_conformance.rs")).expect("this file parses");
+    let wired = replayed_slices(&source.items);
+    assert!(
+        !wired.is_empty(),
+        "no test in this file calls `replay_slice`, so no slice is replayed"
+    );
+    let mut tests = vec![Vec::new(); SLICES];
+    for (name, k) in wired {
+        let Some(replaying) = tests.get_mut(k) else {
+            panic!("{name} replays slice {k}; there are {SLICES}");
+        };
+        replaying.push(name);
+    }
+    let unwired: Vec<usize> = (0..SLICES).filter(|&k| tests[k].is_empty()).collect();
+    assert!(
+        unwired.is_empty(),
+        "slices {unwired:?} are replayed by no test; each needs a test that calls \
+         `replay_slice` with its number"
+    );
+    let shared: Vec<(usize, &Vec<String>)> = tests
+        .iter()
+        .enumerate()
+        .filter(|(_, names)| names.len() > 1)
+        .collect();
+    assert!(
+        shared.is_empty(),
+        "slices are replayed by more than one test: {shared:?}"
+    );
+
+    let taken: BTreeSet<String> = (0..SLICES)
+        .flat_map(|k| &paths[slice(paths, k)])
         .flat_map(|path| {
             path.windows(2).filter_map(|pair| match pair {
                 [(before, Some(action)), (after, _)] => Some(label(before, *action, after)),
@@ -712,29 +953,14 @@ async fn every_walked_path_of_the_model_replays_against_the_daemon() {
         missing.is_empty(),
         "the walk never takes {missing:?}; it takes {taken:?}"
     );
-    let walked = started.elapsed();
-
-    let scratch = tempfile::tempdir().expect("a scratch directory");
-    let mut replays = futures_util::stream::iter(&paths)
-        .map(|path| replay(path, scratch.path()))
-        // In the walk's order, shortest first, so the failure reported is the shortest.
-        .buffered(CONCURRENT_PATHS);
-    while let Some(outcome) = replays.next().await {
-        // The first divergence ends the run. The replays still in flight go with the stream,
-        // and the runtime's shutdown drops each waiter task with the stdin it holds, so every
-        // `cat` left sees EOF.
-        if let Err(failure) = outcome {
-            panic!("a replayed path diverged from the model: {failure}");
-        }
-    }
 
     let steps: usize = paths.iter().map(|path| path.len() - 1).sum();
+    let sizes: Vec<usize> = (0..SLICES).map(|k| slice(paths, k).len()).collect();
     eprintln!(
-        "replayed {} paths ({recorded} recorded, {} for untaken steps; {steps} steps) in {:?}, \
-         after a {walked:?} walk",
+        "walked {} paths ({recorded} recorded, {} for untaken steps; {steps} steps) in {took:?}, \
+         replayed in slices of {sizes:?} paths",
         paths.len(),
         paths.len() - recorded,
-        started.elapsed()
     );
 }
 

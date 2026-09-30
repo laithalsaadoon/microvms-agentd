@@ -37,7 +37,7 @@ pre-commit:
 
     - name: background example quality
       run: mise run background:check
-      glob: "examples/background-coding-agent/**/*.{py,tf,toml,yml}"
+      glob: "examples/background-coding-agent/**/*.{py,tf,toml,lock}"
 
     - name: requirement traceability
       run: mise run trace:check

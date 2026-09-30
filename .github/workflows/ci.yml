@@ -57,11 +57,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # No Rust toolchain: the example installs the published microvms wheel.
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.13" # mise.toml's uv; ci:parity compares them
           enable-cache: false
-      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_wrapper: false
       - name: Check example
@@ -105,7 +105,7 @@ jobs:
       # For the PEP 723 publish gate at the end of this job, and only on the platform
       # that runs it. See the `security` job for why no cache: there is no lockfile in
       # this repo for a cache key to watch, and this script's dependency set is empty.
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         if: matrix.os == 'ubuntu-latest'
         with:
           version: "0.12.13" # mise.toml's uv; ci:parity compares them
@@ -222,7 +222,7 @@ jobs:
           # betterleaks scans history, and the ratchet's rule 3 reads the base branch's copy of
           # ratchet/drift.json. A shallow clone has neither.
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.13" # mise.toml's uv; ci:parity compares them
           # No cache, deliberately. `enable-cache: auto` looks for a lockfile or a
@@ -461,7 +461,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.13" # mise.toml's uv; ci:parity compares them
           # See the `security` job: no lockfile to key a cache on, and a cache that
@@ -513,7 +513,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.13" # mise.toml's uv; ci:parity compares them
           # See the `security` job. Nothing here is locked either: `uvx maturin@1.14.1`
@@ -671,7 +671,7 @@ jobs:
           shared-key: guards-deps
           save-if: false
       # See the `security` job for why no cache.
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.13" # mise.toml's uv; ci:parity compares them
           enable-cache: false
@@ -782,7 +782,7 @@ jobs:
           shared-key: guards-deps
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # See the `security` job for why no cache.
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.13" # mise.toml's uv; ci:parity compares them
           enable-cache: false
@@ -845,7 +845,7 @@ jobs:
           shared-key: guards-deps
           save-if: false
       # See the `security` job for why no cache.
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         if: steps.diff.outputs.rust == 'true'
         with:
           version: "0.12.13" # mise.toml's uv; ci:parity compares them
