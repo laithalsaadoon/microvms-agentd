@@ -46,6 +46,7 @@ from lanes.lifecycle import (
     drive_build_logging,
     drive_health,
     drive_identity_per_vm,
+    drive_launch_by_name,
     drive_lifecycle,
 )
 from lanes.local import drive_doctor_region, drive_local_commands, drive_preflight
@@ -224,6 +225,16 @@ def run_suite(args: argparse.Namespace) -> int:
                 results,
                 "identity_per_vm",
                 drive_identity_per_vm,
+                cli,
+                launched,
+                results,
+            )
+            # A launch by the suite image's bare name (#253), on a bounded VM of its own, so a
+            # resolution that broke fails these checks and not another section's.
+            run_section(
+                results,
+                "launch_by_name",
+                drive_launch_by_name,
                 cli,
                 launched,
                 results,

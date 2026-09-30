@@ -64,7 +64,7 @@ contains.** It accrued 70 file-touches, 8% of all churn, and then left:
 the discovery instrument becomes git history". 28 files lived under `clients/python/`,
 12 of them under `tests/` and 10 of those test modules covering SSE reconnect, proxy auth,
 pricing, sizing, and cost.
-`mise.toml:166-169` records what that suite was worth: 83 client-library tests against a fake
+`.config/mise/tasks/test.toml:7-11` records what that suite was worth: 83 client-library tests against a fake
 daemon over a real loopback socket, and both suites passing against real AWS on the same
 commit — Python oracle 56/56, Rust CLI 38/38 — is what ended the oracle's job. Recovering any
 of it requires `git show`, and nothing in the tree points a reader at that commit.
@@ -113,31 +113,33 @@ model and one waiver. Its `systemName` field gives the per-subsystem coverage: `
 binding 1, sizing model 1. `verify/spec/agentd.symspec.json` adds 6, all `systemName: agentd`. The 13
 `TRAP-*` requirements are `docs/PLATFORM.md`'s findings in enforceable form.
 
-**Compounded lessons.** 12 files under `.erpaval/solutions/`, in four categories:
-`api-patterns/` 3, `architecture-patterns/` 2, `best-practices/` 4, `test-failures/` 3. They
-carry the failures that cost the most to rediscover — that `aws-config` with
-`default-features = false` cannot resolve credentials at all, that a byte-offset cursor is
-what separates a working stream reconnect from a broken one, that a deterministic simulator
-has two clocks and a spawned child obeys the wrong one.
+**Recorded lessons.** The failures that cost the most to rediscover are written down at the
+code that defends against them, and the
+[debugging guide's incident patterns](../insights/debugging-guide.md#known-incident-patterns)
+index them: that `aws-config` with `default-features = false` cannot resolve credentials at
+all (`crates/microvms-edges/Cargo.toml:34-40`), that a byte-offset cursor is what separates a
+working stream reconnect from a broken one (`crates/agentd/src/exec.rs:34-40`), and that a
+deterministic simulator has two clocks and a spawned child obeys the wrong one
+(`crates/agentd/tests/turmoil_transport.rs:54-60`).
 
-**Executable gates.** `mise.toml:292-301` defines `check`, the stated definition of done, as
+**Executable gates.** `.config/mise/tasks/check.toml:4-32` defines `check`, the stated definition of done, as
 exactly eight tasks: `lint`, `security`, `test`, `schema:check`, `stubs:check`, `model:check`,
 `live:check`, `build`. Four of those are drift gates that keep a hand-maintained value honest
-against an independent source: `schema:check` (`mise.toml:189`) asserts `docs/schema.json`
-still describes what the daemon serves, `stubs:check` (`mise.toml:235`) asserts
-`bindings/microvms-py/microvms.pyi` still describes the pyo3 surface, `model:check` (`mise.toml:257`)
+against an independent source: `schema:check` (`.config/mise/tasks/contracts.toml:51`) asserts `docs/schema.json`
+still describes what the daemon serves, `stubs:check` (`.config/mise/tasks/contracts.toml:188`) asserts
+`bindings/microvms-py/microvms.pyi` still describes the pyo3 surface, `model:check` (`.config/mise/tasks/contracts.toml:286`)
 asserts `microvms-core`'s hardcoded constants still match the pinned botocore service model,
-and `live:check` (`mise.toml:438`) asserts the live tier's own wiring, including `mise.toml`
+and `live:check` (`.config/mise/tasks/live.toml:4`) asserts the live tier's own wiring, including `.config/mise/tasks/live.toml`
 itself. A gate is stronger than a document because it fails rather than being unread.
 
 ### What that coverage does not reach
 
 Three subsystems or artifacts sit outside it, each verifiable from the repository.
 
-**Neither symspec gate runs in `check`.** `mise.toml:207` and `mise.toml:227` are the two
+**Neither symspec gate runs in `check`.** `.config/mise/tasks/trace.toml:3` and `.config/mise/tasks/trace.toml:15` are the two
 spec-verification tasks, and neither appears in `check`'s dependency list at
-`mise.toml:292-301`. Their own comments give the reason: `symspec` is a global npm install
-plus a downloaded embedding model, and `mise.toml:227` invokes the v5 CLI as
+`.config/mise/tasks/check.toml:4-32`. Their own comments give the reason: `symspec` is a global npm install
+plus a downloaded embedding model, and `.config/mise/tasks/trace.toml:28` invokes the v5 CLI as
 `node ~/workplace/symspec/packages/symspec/dist/cli.mjs` — an absolute path into one
 developer's home directory. The strongest externalization in the repository, 57 approved
 requirements, is therefore verified by a toolchain a second contributor does not have, and no
@@ -173,8 +175,9 @@ price of live AWS runs.
    is untrusted by design.
 5. `verify/spec/core.symspec.json` — the 51 requirements, the 13 `TRAP-*` entries first, since each
    is a `docs/PLATFORM.md` finding with a `verificationMethod` attached.
-6. `.erpaval/solutions/` — 12 lessons, ordered by whichever subsystem is about to be touched.
-   Consulting them before a fix costs minutes; rediscovering one costs a session.
+6. [`docs/insights/debugging-guide.md`](../insights/debugging-guide.md): the failure-mode index
+   and the incident patterns, read for whichever subsystem is about to be touched. Consulting
+   them before a fix costs minutes; rediscovering one costs a session.
 7. `mise.toml` — the command surface. `mise run check` is the local gate; `mise run live` is
    billable and manual.
 8. `crates/microvms-core/src/` — the largest crate at 39,097 lines (at `78304e3`) and 1,572 symbols.
@@ -199,8 +202,9 @@ the bullets name the count. Shares are computed with
 - `crates/microvms-cli/src/guards.rs`, since split into `crates/microvms-cli/src/guards/` — sole human author
   (85% of 13 commits). At 123 symbols and the
   highest churn in the CLI crate, this file needs a second reader more than any other; pair a
-  review of it with `.erpaval/solutions/test-failures/guards-that-passed-against-broken-code.md`,
-  which records four ways its guards passed against broken code.
+  review of it with the
+  [debugging guide's incident patterns](../insights/debugging-guide.md#known-incident-patterns),
+  which record the ways a guard in this repository passed against broken code.
 - `crates/microvms-cli/src/cli.rs` — sole human author (85% of 13 commits). The command surface
   definition is the CLI's contract with every consumer, so changes here belong behind the
   `crates/microvms-cli/tests/manifest.rs` and `thinness.rs` assertions rather than behind review

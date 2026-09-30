@@ -664,6 +664,7 @@ mod tests {
     use crate::control::fake::{self, Answer, FakeControlPlane, TestClock};
     use crate::region::Region;
     use crate::sandbox::Sandbox;
+    use crate::testing::aarch64_daemon;
 
     const ACCOUNT: &str = "123456789012";
     const BUCKET: &str = "artifact-bucket";
@@ -715,8 +716,13 @@ mod tests {
     }
 
     fn request() -> EnsureImageRequest {
-        let mut request =
-            EnsureImageRequest::new("task", b"daemon".to_vec(), dockerfile(), BUCKET, ROLE);
+        let mut request = EnsureImageRequest::new(
+            "task",
+            aarch64_daemon(b"daemon"),
+            dockerfile(),
+            BUCKET,
+            ROLE,
+        );
         request.s3_key_prefix = Some("harbor/images".to_string());
         request
     }
@@ -1171,9 +1177,10 @@ mod tests {
         );
         let mut sandbox = Sandbox::with_control_plane(plane).with_build_services(lookup.clone());
         let mut request = request();
-        // xorshift64: bytes with no repeats for deflate to find, from no dependency.
+        // xorshift64: bytes with no repeats for deflate to find, from no dependency, behind
+        // the aarch64 header the preflight asks for.
         let mut state = 0x9e37_79b9_7f4a_7c15_u64;
-        request.binary = (0..(2 << 20) / 8)
+        let payload: Vec<u8> = (0..(2 << 20) / 8)
             .flat_map(|_| {
                 state ^= state << 13;
                 state ^= state >> 7;
@@ -1181,6 +1188,7 @@ mod tests {
                 state.to_le_bytes()
             })
             .collect();
+        request.binary = aarch64_daemon(&payload);
 
         let timer = tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(1)).await;

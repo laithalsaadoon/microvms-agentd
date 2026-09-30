@@ -185,6 +185,10 @@ impl std::fmt::Display for Lifecycle {
 #[derive(Clone, Debug)]
 pub struct RunRequest {
     /// The image to launch, or `None` for the one [`Sandbox::build_image`] built.
+    ///
+    /// An image ARN, or a bare image name, which [`Sandbox::run`] resolves to its ARN with one
+    /// `ListMicrovmImages` read. A name no image carries is refused with `ERR_PRECONDITION`
+    /// before anything launches.
     pub image_identifier: Option<String>,
     /// `imageVersion`, or `None` for the image's own latest active version.
     ///
@@ -304,7 +308,7 @@ impl RunRequest {
         Self::default()
     }
 
-    /// Launches `identifier` rather than the built image.
+    /// Launches `identifier`, an image ARN or a bare image name, rather than the built image.
     #[must_use]
     pub fn with_image(mut self, identifier: impl Into<String>) -> Self {
         self.image_identifier = Some(identifier.into());
@@ -605,6 +609,8 @@ impl TokenMinter for ControlPlaneMinter {
 pub struct Sandbox {
     control: Arc<ControlPlane>,
     image: Option<Image>,
+    /// The image ARN [`Sandbox::run`] resolved and sent in `RunMicrovm`, set before the call.
+    launch_image_arn: Option<String>,
     microvm: Option<Microvm>,
     session: Option<Session>,
     /// A backend for the session [`Sandbox::run`] builds, or `None` for the real HTTP one.
@@ -738,6 +744,7 @@ impl Sandbox {
         Self {
             control: Arc::new(control),
             image: None,
+            launch_image_arn: None,
             microvm: None,
             session: None,
             session_backend: None,
@@ -812,6 +819,18 @@ impl Sandbox {
     /// The image, once built.
     pub fn image(&self) -> Option<&Image> {
         self.image.as_ref()
+    }
+
+    /// The image ARN [`Sandbox::run`] sent in `RunMicrovm`: the caller's identifier with a
+    /// bare name resolved, or the built image's.
+    ///
+    /// Recorded before the call rather than read back from [`Sandbox::microvm`], which holds
+    /// only what an accepted launch answered: a launch the service refused, or one a caller
+    /// interrupted, still names the image it asked for here. `None` until `run` has resolved
+    /// an image, and on an adopted sandbox. Not the image [`Sandbox::terminate`] deletes, which
+    /// is only ever one this sandbox built ([`Sandbox::image`]).
+    pub fn launch_image_arn(&self) -> Option<&str> {
+        self.launch_image_arn.as_deref()
     }
 
     /// The VM as the service last described it.
@@ -978,9 +997,9 @@ impl Sandbox {
     /// The ARN for `identifier`: an ARN passes through with zero calls, a bare name is
     /// resolved through the image listing by exact match.
     ///
-    /// A read-only delegation to [`ControlPlane::resolve_image_arn`], on this type so the
-    /// CLI's launch path reaches it through the one sandbox it already holds. It touches
-    /// none of the five state-machine variables — resolution is a question about the
+    /// A read-only delegation to [`ControlPlane::resolve_image_arn`], the resolution
+    /// [`Sandbox::run`] makes itself, for a caller that wants the ARN without launching. It
+    /// touches none of the five state-machine variables: resolution is a question about the
     /// account, not about this VM's lifecycle.
     pub async fn resolve_image_arn(&self, identifier: &str) -> Result<String, Error> {
         self.control.resolve_image_arn(identifier).await
@@ -1041,6 +1060,13 @@ impl Sandbox {
     /// image snapshot. That is safe because the platform forwards no external traffic until
     /// the run hook returns 200, so a per-VM secret delivered at launch wins the
     /// first-writer race through the endpoint.
+    ///
+    /// # A bare image name
+    ///
+    /// [`RunRequest::image_identifier`] may be a name: after the local refusals it is resolved
+    /// through [`ControlPlane::resolve_image_arn`], and [`Sandbox::launch_image_arn`] records
+    /// the ARN sent. A name that resolves to nothing fails with `ERR_PRECONDITION` and leaves
+    /// the sandbox as it was, so a later `run` on it can still launch.
     pub async fn run(&mut self, request: RunRequest) -> Result<&mut Session, Error> {
         self.refuse_detached("run")?;
         // STATE-3's local half. A sandbox that has already bootstrapped cannot bootstrap
@@ -1111,7 +1137,7 @@ impl Sandbox {
             launch_identity.as_ref(),
         )?;
 
-        let mut wire = RunMicrovmRequest::new(&identifier, payload);
+        let mut wire = RunMicrovmRequest::new(identifier, payload);
         wire.image_version = request.image_version.clone();
         wire.execution_role_arn = request.execution_role_arn.clone();
         wire.egress_network_connectors = request.egress_network_connectors.clone();
@@ -1128,6 +1154,18 @@ impl Sandbox {
         if request.shell {
             wire = wire.with_shell();
         }
+
+        // `imageIdentifier` takes an ARN, and the service answers a bare name with HTTP 400
+        // "Malformed ARN", so a name is resolved here, where every surface's launch passes
+        // (the CLI's `run --image`, both bindings' `Sandbox.run` and `AgentVm.launch`). The
+        // launch's local refusals go first: the listing a name costs is a call, and a launch
+        // `run_microvm` would refuse anyway costs none. An ARN passes through with no call.
+        self.control.launch_connectors(&wire)?;
+        wire.image_identifier = self
+            .control
+            .resolve_image_arn(&wire.image_identifier)
+            .await?;
+        self.launch_image_arn = Some(wire.image_identifier.clone());
 
         let launched = self.control.run_microvm(wire).await?;
 
@@ -1918,7 +1956,7 @@ mod tests {
         .expect("a wrappable Dockerfile");
         let request = crate::control::EnsureImageRequest::new(
             "task",
-            b"daemon".to_vec(),
+            crate::testing::aarch64_daemon(b"daemon"),
             dockerfile,
             "artifact-bucket",
             "arn:aws:iam::123456789012:role/build",
@@ -2015,6 +2053,153 @@ mod tests {
             .expect_err("no pool, no bearer token");
         assert_eq!(err.kind(), ErrorKind::Unexpected, "{err}");
         assert_eq!(recorder.call_count("RunMicrovm"), 0);
+    }
+
+    // ── a launch by bare image name (#253) ───────────────────────────────────
+
+    /// The ARN the fake's listing gives `wanted-image`.
+    const WANTED_ARN: &str = "arn:aws:lambda:us-east-1:123456789012:microvm-image:wanted-image";
+
+    /// A listing that holds `wanted-image` beside a name it's a prefix of.
+    fn answer_listing(recorder: &FakeControlPlane) {
+        recorder.answer(
+            "ListMicrovmImages",
+            Answer::ok(fake::list_images_response(
+                &["wanted-image-old", "wanted-image"],
+                None,
+            )),
+        );
+    }
+
+    /// **A launch by bare image name sends the listed ARN**, resolved before `RunMicrovm`, as
+    /// `run --image NAME` did. Every surface's launch is this `run`, and the SDKs used to send
+    /// the name verbatim, which the service answers with HTTP 400 "Malformed ARN".
+    ///
+    /// **Falsification**: drop the `resolve_image_arn` call from `Sandbox::run` and the calls
+    /// start at `RunMicrovm`, whose body carries `wanted-image`.
+    #[tokio::test]
+    async fn a_launch_by_bare_image_name_sends_the_listed_arn() {
+        let (mut sandbox, recorder, _) = planted();
+        answer_listing(&recorder);
+        answer_launch(&recorder);
+        sandbox
+            .run(RunRequest::new().with_image("wanted-image"))
+            .await
+            .expect("the launch reaches RUNNING");
+
+        let operations = recorder.operations();
+        assert_eq!(
+            operations.get(..2),
+            Some(&["ListMicrovmImages", "RunMicrovm"][..]),
+            "the name is resolved, once, before the launch: {operations:?}"
+        );
+        assert_eq!(recorder.call_count("ListMicrovmImages"), 1);
+        assert_eq!(
+            recorder.first_body("RunMicrovm")["imageIdentifier"],
+            WANTED_ARN,
+            "the launch carries the exact match's ARN, never the name"
+        );
+        sandbox.detach().expect("hand the scripted VM off quietly");
+    }
+
+    /// **An image ARN launches with no listing call**, and is the ARN the sandbox records.
+    #[tokio::test]
+    async fn a_launch_by_image_arn_makes_no_listing_call() {
+        let (mut sandbox, recorder, _) = planted();
+        answer_launch(&recorder);
+        sandbox
+            .run(RunRequest::new().with_image(WANTED_ARN))
+            .await
+            .expect("the launch reaches RUNNING");
+
+        assert_eq!(recorder.call_count("ListMicrovmImages"), 0);
+        assert_eq!(recorder.operations().first(), Some(&"RunMicrovm"));
+        assert_eq!(
+            recorder.first_body("RunMicrovm")["imageIdentifier"],
+            WANTED_ARN
+        );
+        assert_eq!(sandbox.launch_image_arn(), Some(WANTED_ARN));
+        sandbox.detach().expect("hand the scripted VM off quietly");
+    }
+
+    /// **The resolved ARN is recorded before `RunMicrovm`, so a launch the service refuses
+    /// still names the image it asked for.** The CLI's failure envelope reads it from here:
+    /// `microvm()` holds only what an accepted launch answered.
+    ///
+    /// **Falsification**: drop the `launch_image_arn` assignment from `Sandbox::run` and the
+    /// accessor reads `None` after the refusal.
+    #[tokio::test]
+    async fn a_refused_launch_by_name_still_records_the_resolved_arn() {
+        let (mut sandbox, recorder, _) = planted();
+        answer_listing(&recorder);
+        recorder.answer("RunMicrovm", Answer::failure(400, "scripted refusal"));
+        sandbox
+            .run(RunRequest::new().with_image("wanted-image"))
+            .await
+            .expect_err("the service refused the launch");
+
+        assert_eq!(
+            sandbox.launch_image_arn(),
+            Some(WANTED_ARN),
+            "the ARN the refused launch asked for"
+        );
+        assert!(sandbox.microvm().is_none(), "no launch was accepted");
+        assert_eq!(recorder.call_count("RunMicrovm"), 1);
+    }
+
+    /// **A name no image carries is `ERR_PRECONDITION` before any launch, and the sandbox is
+    /// left as it was**: nothing recorded (STATE-1 counts only an accepted launch), so the
+    /// same sandbox launches once the caller passes an image that exists.
+    #[tokio::test]
+    async fn an_unknown_image_name_is_refused_before_the_launch_and_the_sandbox_still_runs() {
+        let (mut sandbox, recorder, _) = planted();
+        recorder.answer(
+            "ListMicrovmImages",
+            Answer::ok(fake::list_images_response(&[], None)),
+        );
+        let error = sandbox
+            .run(RunRequest::new().with_image("no-such-image"))
+            .await
+            .expect_err("nothing to launch from");
+        assert_eq!(error.code(), "ERR_PRECONDITION");
+        assert!(error.to_string().contains("no-such-image"), "{error}");
+        assert_eq!(recorder.call_count("RunMicrovm"), 0);
+        assert_eq!(sandbox.launch_image_arn(), None);
+        assert!(!sandbox.image_exists(), "STATE-1: no launch was accepted");
+        assert!(sandbox.microvm().is_none());
+        assert_eq!(sandbox.bootstrap_count(), 0);
+
+        answer_launch(&recorder);
+        sandbox
+            .run(RunRequest::new().with_image(WANTED_ARN))
+            .await
+            .expect("a failed resolution doesn't use up the sandbox's one launch");
+        assert_eq!(sandbox.bootstrap_count(), 1);
+        sandbox.detach().expect("hand the scripted VM off quietly");
+    }
+
+    /// **A launch this client refuses costs no call, a bare name included**: the local
+    /// refusals come before the listing a name costs.
+    ///
+    /// **Falsification**: drop the `launch_connectors` call from `Sandbox::run` and the
+    /// out-of-range duration is refused by `run_microvm` only after the listing went out.
+    #[tokio::test]
+    async fn a_launch_refused_locally_makes_no_listing_call_for_a_name() {
+        let (mut sandbox, recorder, _) = planted();
+        answer_listing(&recorder);
+        let mut request = RunRequest::new().with_image("wanted-image");
+        request.max_duration_sec = 0;
+        let error = sandbox
+            .run(request)
+            .await
+            .expect_err("a zero maximum duration is refused locally");
+        assert_eq!(error.kind(), ErrorKind::InvalidArg, "{error}");
+        assert!(
+            recorder.calls().is_empty(),
+            "the refusal came after a call: {:?}",
+            recorder.operations()
+        );
+        assert_eq!(sandbox.launch_image_arn(), None);
     }
 
     /// **BIND-12: the launched session carries its request's posture**, the value
@@ -3705,7 +3890,7 @@ mod tests {
         sandbox
             .build_image(CreateImageRequest::new(
                 "agentd-conformance",
-                b"binary".to_vec(),
+                crate::testing::aarch64_daemon(b"binary"),
                 "s3://bucket/img.zip",
                 "arn:aws:iam::123456789012:role/build",
             ))
@@ -3795,7 +3980,7 @@ mod tests {
         sandbox
             .build_image(CreateImageRequest::new(
                 "img",
-                b"binary".to_vec(),
+                crate::testing::aarch64_daemon(b"binary"),
                 "s3://bucket/img.zip",
                 "arn:aws:iam::123456789012:role/build",
             ))

@@ -27,7 +27,7 @@ its `[actions]` table; the file also records each step `ci:local` skips and why,
 `check` does not create AWS resources. Initial dependency downloads, security
 rule loading, and advisory updates can require network access. Documentation,
 binding integration tests, and formal requirements have additional setup;
-consult their tasks in `mise.toml` and the CI workflows.
+consult their tasks in `.config/mise/tasks/` and the CI workflows.
 
 Useful checks while iterating:
 
@@ -123,24 +123,27 @@ with a reason, `LEFT_OUT`; the job fails until it's in one of them.
 In network simulation tests, coordinate child processes through stdin rather
 than wall-clock sleeps: child processes and the simulator use different clocks.
 
-`mise run ratchet:check` holds `verify/ratchet/drift.json` equal to the drift its
-collectors find, such as a subprocess in a shipping crate or a spec requirement no file
-in `verify/spec/traced/` lists. A new finding fails, and so does a fix the file still
-lists: run `mise run ratchet:update` and commit the file. Placement, a direct
-dependency outside its crate's set in `verify/arch/placement.toml`, is computed by
-`crates/microvms-cli/tests/dependency_direction.rs` instead, which holds each crate to
-its set plus its placement records in the file: a new dependency fails there, and so
-does a fixed one whose entry you haven't deleted. The check refuses an entry the
-base branch doesn't have, and a crate added to a set the base already has, so
-new drift moves to the layer whose job it is or goes under `decisions` with its
-reason. An untraced requirement can't be a decision: it gets an entry in its
-group's file (`verify/spec/traced/TRAP.toml` for a TRAP key), with a waiver for any
-layer it can't carry. Each group has its own file, so the changes that trace
-different groups don't edit one table; `tools/check-trace.py` loads them all
-and refuses a key in the wrong group's file or listed twice. Moving recorded
-drift to another file or crate isn't a fix: re-key its entry in the same
-change. A re-keyed entry keeps its issue and changes its path or its text, not
-both, so a move and a rename land in separate PRs.
+`mise run ratchet:check` collects the drift, such as a subprocess in a shipping crate
+or a spec requirement no file in `verify/spec/traced/` lists, from your working tree and
+from the tree of its merge base with origin/main (CI uses the pull request's base
+branch), with the same collectors, and fails on drift the base doesn't have. A fix
+removes drift by fixing the code and needs no other edit. Don't edit
+`verify/ratchet/drift.json`: it's a generated snapshot the docs site charts, and
+`mise run ratchet:snapshot` rewrites it in a change of its own. New drift moves to the
+layer whose job it is, or gets a decision with its reason in
+`verify/ratchet/decisions.toml`; a decision whose finding is gone fails too. Placement,
+a direct dependency outside its crate's set in `verify/arch/placement.toml`, is computed
+by `crates/microvms-cli/tests/dependency_direction.rs` instead, which holds each crate to
+its set, its `drift` table there and its placement decisions: a new dependency fails
+there, and so does a fixed one still in the drift table. The ratchet refuses drift the
+base doesn't have there too, and a crate added to a set the base already has. An
+untraced requirement can't be a decision: it gets an entry in its group's file
+(`verify/spec/traced/TRAP.toml` for a TRAP key), with a waiver for any layer it can't
+carry. Each group has its own file, so the changes that trace different groups don't
+edit one table; `tools/check-trace.py` loads them all and refuses a key in the wrong
+group's file or listed twice. Moving drift to another file or crate is a move, not new
+drift, when its key keeps its path or its text; a move and a rename at once read as new
+drift, so they land in separate PRs.
 
 `mise run parity:check` holds `verify/parity/capabilities.toml` to the four surfaces
 (core through `verify/parity/core-api.json`, the CLI through `docs/manifest.json`, and
@@ -164,7 +167,8 @@ and everything else takes the lookup it's given. An exception is an
 `#[expect(..., reason = "...")]` at the call site plus its line in
 `LINT_EXCEPTIONS` in `tools/test_ratchet.py`, which fails `ratchet:check` on
 any other `allow`, `warn` or `expect` of those lints in an adapter's source. A
-subprocess exception also needs its entry or decision in `verify/ratchet/drift.json`.
+subprocess exception is also drift the ratchet counts, or a decision in
+`verify/ratchet/decisions.toml`.
 An environment read has no drift category, so its `reason` and its line in
 that list are the whole record, and review is the check.
 
@@ -195,7 +199,7 @@ and every item below it is re-exported at its 0.10 path. The shared test
 doubles are `microvms_core::testing`, behind the `test-support` feature; a
 crate's `[dev-dependencies]` turns it on. The ratchet's port-impl collector reads
 the app and core as well as the adapters, so a port implementation there needs a
-decision in `verify/ratchet/drift.json`.
+decision in `verify/ratchet/decisions.toml`.
 
 ## Generated contracts and API changes
 

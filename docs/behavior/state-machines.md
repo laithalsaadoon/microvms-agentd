@@ -10,10 +10,10 @@ carries a state model with a machine-readable transition effect per requirement
 The models are ordinary `cargo test` targets in the `agentd-model` crate
 (`crates/model/Cargo.toml:2`), driven by `.checker().spawn_bfs().join().assert_properties()`
 (`crates/model/src/lib.rs:536-543`, `crates/model/src/client.rs:712-718`) and run by `cargo test --all`
-(`mise.toml:164`). The Z3 pass over the symspec is a separate task,
+(`.config/mise/tasks/test.toml:5`). The Z3 pass over the symspec is a separate task,
 `spec:core`, run with `--reachability-timeout-ms 5000` through `tools/check-spec.sh`, which refuses a symspec CLI
-older than 1.0 (`mise.toml:279-292`), with the daemon's own requirements gated by
-`./tools/check-spec.sh verify/spec/agentd.symspec.json` (`mise.toml:267-277`).
+older than 1.0 (`.config/mise/tasks/trace.toml:15-28`), with the daemon's own requirements gated by
+`./tools/check-spec.sh verify/spec/agentd.symspec.json` (`.config/mise/tasks/trace.toml:3-13`).
 
 Where a machine is mirrored across crates, the mirror is by convention rather than by a cargo
 dependency — `agentd-model` has no edge to `microvms-core` or to `agentd`
@@ -239,8 +239,7 @@ assertion rather than the resulting state:
   falling back to the `idlePolicy` that `GetMicrovm` reported, and with no window from either
   source, or with the suspend stamp missing, the check passes, because this sandbox cannot know
   how long the VM has been suspended and guessing would refuse a resume the service would honour
-  (`crates/microvms-app/src/sandbox.rs:1598-1608`; see
-  `.erpaval/solutions/architecture-patterns/an-absent-value-is-not-a-neutral-one.md`).
+  (`crates/microvms-app/src/sandbox.rs:1598-1608`).
 - `suspended_at` is cleared on a successful resume, so the next cycle's window is measured from
   the next suspend rather than accumulating every suspension into one total —
   `crates/microvms-app/src/sandbox.rs:1579-1582`.

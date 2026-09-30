@@ -1,25 +1,110 @@
-# ── ratchet:check: the rules over a category another check holds, and placement's base rule ─
+# ── ratchet:check: the merge-base rule, the base, the snapshot, and the category it doesn't collect ─
 
-# Placement is `HELD`: dependency_direction.rs computes it and holds the file's records to the
-# tree, so this script applies only rules 3 and 4 to it. Rules 1 and 2 over it would call every
-# record a fix, `update` would delete them all, and the sentinel would call its collector empty.
+# Rule 1 on the real tree: a subprocess added to a binding is drift the base doesn't have.
 [[fault]]
-id = "ratchet-held-rules-1-and-2"
+id = "ratchet-subset-new-drift"
 guard = "tools/ratchet.py"
 run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
-message = "fixed: [placement] microvms-cli -> const-hex."
-transform = { file = "tools/ratchet.py", replace = "compared = () if category in HELD else sorted(found.keys() | listed.keys())", with = "compared = sorted(found.keys() | listed.keys())" }
+message = "new drift: [subprocess] bindings/microvms-py/src/names.rs: std::process::Command::new(\"gh\"). Move the work"
+transform = { file = "bindings/microvms-py/src/names.rs", replace = "// SPDX-License-Identifier: Apache-2.0\n", with = "// SPDX-License-Identifier: Apache-2.0\nfn seeded() { std::process::Command::new(\"gh\"); }\n" }
+
+# Drift that leaves passes: a rule that held the two trees equal, refusing what the base has and
+# the tree doesn't, would fail the fix that edits nothing else.
+[[fault]]
+id = "ratchet-subset-removal-passes"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "RuleTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_rule_1_drift_that_leaves_passes ("
+transform = { file = "tools/ratchet.py", replace = "    return unexplained\n", with = "    return unexplained + vacated\n" }
+
+# A decision taken away (here, re-keyed so it no longer covers its finding) is drift the base
+# didn't have, since each tree is measured with its own decisions.
+[[fault]]
+id = "ratchet-decision-taken-away"
+guard = "verify/ratchet/decisions.toml"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "new drift: [subprocess] crates/microvms-cli/src/commands/doctor.rs: std::process::Command::new(\"terraform\")"
+transform = { file = "verify/ratchet/decisions.toml", replace = "key = \"crates/microvms-cli/src/commands/doctor.rs: std::process::Command::new(\\\"terraform\\\")\"\n", with = "key = \"crates/microvms-cli/src/commands/doctor.rs: std::process::Command::new(\\\"terraformed\\\")\"\n" }
+
+# Rule 2 and rule 4 on the real tree: a decision nothing matches, and drift in a category listed
+# as enforced.
+[[fault]]
+id = "ratchet-stale-decision"
+guard = "verify/ratchet/decisions.toml"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "stale decision: [subprocess] crates/agentd/src/exec.rs: Command::new(gone) decides a finding the tree doesn't have"
+transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"port-impl\", \"adapter-logic\"]\n", with = "enforced = [\"port-impl\", \"adapter-logic\"]\n\n[[decision]]\ncategory = \"subprocess\"\nkey = \"crates/agentd/src/exec.rs: Command::new(gone)\"\nreason = \"seeded\"\n" }
 
 [[fault]]
-id = "ratchet-held-update"
+id = "ratchet-enforced-with-drift"
+guard = "verify/ratchet/decisions.toml"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "subprocess is enforced by each crate's clippy.toml as a disallowed type (#285), so it can't carry drift"
+transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"port-impl\", \"adapter-logic\"]\n", with = "enforced = [\"port-impl\", \"adapter-logic\", \"subprocess\"]\n" }
+
+# The decisions reader's floor: one that read no decision would turn every decided finding into
+# drift on both trees and compare them equal.
+[[fault]]
+id = "ratchet-decisions-floor"
 guard = "test_ratchet.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "FileTests"]
 expect = "exit-nonzero"
 suite = "script"
-message = "FAIL: test_update_leaves_a_held_category_alone ("
-transform = { file = "tools/ratchet.py", replace = "            if item[\"category\"] in HELD:\n                kept.append(item)\n            elif budget[finding] > 0:\n", with = "            if budget[finding] > 0:\n" }
+message = "FAIL: test_the_checked_in_decisions_parse ("
+transform = { file = "tools/ratchet.py", replace = "    decisions = data.get(\"decision\", [])\n", with = "    decisions = data.get(\"decisions\", [])\n" }
+
+# A base that can't be read fails rather than reading as a base with nothing in it: on the real
+# gate, a ref that names no commit; in the unit test, a tree the collectors refuse.
+[[fault]]
+id = "ratchet-base-unknown-ref"
+guard = "tools/ratchet.py"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "--base no-such-ref doesn't name a commit"
+argv_fault = ["--base", "no-such-ref"]
+
+[[fault]]
+id = "ratchet-base-unmeasurable"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "BaseTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_base_the_collectors_refuse_fails ("
+transform = { file = "tools/ratchet.py", replace = "        except SystemExit as error:\n            raise SystemExit(\n                f\"{label}'s tree can't be measured", with = "        except SystemExit as error:\n            return Base(label, sets, None)\n            raise SystemExit(\n                f\"{label}'s tree can't be measured" }
+
+# The snapshot's check, which the job that rewrites drift.json runs. Seeded in the unit test, not
+# on the real file: the real snapshot is stale from any fix until that job rewrites it, and a
+# clean run of the check has to pass before a fault means anything.
+[[fault]]
+id = "ratchet-snapshot-stale"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "SnapshotTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_stale_snapshot_fails_its_check ("
+transform = { file = "tools/ratchet.py", replace = "    if current != text:\n", with = "    if False:\n" }
+
+# Placement is `HELD`: dependency_direction.rs computes it and holds its decisions to the tree, so
+# rule 2 leaves them alone here, and the sentinel doesn't call its collector empty.
+[[fault]]
+id = "ratchet-held-decisions"
+guard = "tools/ratchet.py"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "stale decision: [placement] microvms-cli -> notify"
+transform = { file = "tools/ratchet.py", replace = "    decided = Counter(\n        (d[\"category\"], d[\"key\"])\n        for d in head.decisions[\"decisions\"]\n        if d[\"category\"] not in HELD\n    )\n", with = "    decided = Counter((d[\"category\"], d[\"key\"]) for d in head.decisions[\"decisions\"])\n" }
 
 [[fault]]
 id = "ratchet-held-sentinel"
@@ -30,8 +115,8 @@ suite = "script"
 message = "sentinel: the placement collector found nothing"
 transform = { file = "tools/ratchet.py", replace = "        if category in HELD:\n            continue\n", with = "" }
 
-# What the ratchet still holds placement to: the base. On the real tree, a crate added to a set
-# the base has and an entry the base doesn't have both fail, with no collector reading a manifest.
+# What placement is held to here: the base's record. On the real tree, a crate added to a set the
+# base has and drift the base doesn't have both fail, with no collector reading a manifest.
 [[fault]]
 id = "ratchet-placement-set-grew"
 guard = "verify/arch/placement.toml"
@@ -42,10 +127,21 @@ message = "set grew: verify/arch/placement.toml adds reqwest to [microvms-py] no
 transform = { file = "verify/arch/placement.toml", replace = "normal = [\"microvms-core\", \"microvms-protocol\", \"serde_json\", \"pyo3\", \"tokio\"]", with = "normal = [\"microvms-core\", \"microvms-protocol\", \"serde_json\", \"pyo3\", \"tokio\", \"reqwest\"]" }
 
 [[fault]]
-id = "ratchet-placement-entry-not-in-base"
-guard = "verify/ratchet/drift.json"
+id = "ratchet-placement-drift-grew"
+guard = "verify/arch/placement.toml"
 run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
-message = "not in the base: [placement] microvms-cli -> reqwest is an entry here"
-transform = { file = "verify/ratchet/drift.json", replace = "    { \"category\": \"placement\", \"key\": \"microvms-cli -> tar\", \"issue\": 260 },\n", with = "    { \"category\": \"placement\", \"key\": \"microvms-cli -> tar\", \"issue\": 260 },\n    { \"category\": \"placement\", \"key\": \"microvms-cli -> reqwest\", \"issue\": 260 },\n" }
+message = "new drift: [placement] microvms-cli -> reqwest. A crate's drift in verify/arch/placement.toml can only shrink"
+transform = { file = "verify/arch/placement.toml", replace = "[microvms-cli.drift]\nnormal = [\"const-hex\", \"globset\", \"sha2\", \"tar\"]\n", with = "[microvms-cli.drift]\nnormal = [\"const-hex\", \"globset\", \"sha2\", \"tar\", \"reqwest\"]\n" }
+
+# port-impl is enforced (#270): with the CLI's copied minter gone, a port implemented in an
+# adapter again is drift an enforced category can't carry, and fails on the real tree.
+[[fault]]
+id = "ratchet-port-impl-cli-minter"
+guard = "verify/ratchet/decisions.toml"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "new drift: [port-impl] crates/microvms-cli/src/seam.rs: TokenMinter for CopiedMinter."
+transform = { file = "crates/microvms-cli/src/seam.rs", replace = "/// `aws s3 cp - <uri>`, with the artifact on the child's stdin.\n", with = "struct CopiedMinter;\n\nimpl microvms_core::session::TokenMinter for CopiedMinter {}\n\n/// `aws s3 cp - <uri>`, with the artifact on the child's stdin.\n" }

@@ -61,36 +61,27 @@ suite = "script"
 message = "FAIL: test_an_issue_the_check_cannot_read_is_an_error ("
 transform = { file = "tools/check-parity.py", replace = "    if problems:\n        print(\"parity: the table's exemptions can't be read:\")", with = "    if False:\n        print(\"parity: the table's exemptions can't be read:\")" }
 
-# The real tree: an empty table, a gap the file doesn't record, and a gap closed (here, turned
-# into a decision) while the file still lists it.
+# The real tree: an empty table, which leaves the category nothing to hold, and a gap the base
+# doesn't have.
 [[fault]]
 id = "ratchet-parity-gap-empty-table"
 guard = "tools/ratchet.py"
 run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
-# Any `fixed:` line: the first one in table order moves as #280 closes gaps, and a clean run
-# prints none.
-message = "fixed: [parity-gap] "
-transform = { file = "tools/ratchet.py", replace = "parity_table=ROOT / \"verify\" / \"parity\" / \"capabilities.toml\",", with = "parity_table=ROOT / \"verify\" / \"parity\" / \"fixtures\" / \"empty.toml\"," }
+# Both trees are read through the same scope, so both come up empty, and the category with no
+# drift reads as ready to promote.
+message = "promote parity-gap: move its rule into"
+transform = { file = "tools/ratchet.py", replace = "parity_table=root / \"verify\" / \"parity\" / \"capabilities.toml\",", with = "parity_table=root / \"verify\" / \"parity\" / \"fixtures\" / \"empty.toml\"," }
 
 [[fault]]
 id = "ratchet-parity-gap-new-drift"
-guard = "verify/ratchet/drift.json"
+guard = "tools/ratchet.py"
 run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
-message = "new drift: [parity-gap] ensure-image/cli. Give that surface the capability"
-transform = { file = "verify/ratchet/drift.json", replace = "    { \"category\": \"parity-gap\", \"key\": \"ensure-image/cli\", \"issue\": 258 },\n", with = "" }
-
-[[fault]]
-id = "ratchet-parity-gap-fixed"
-guard = "verify/ratchet/drift.json"
-run = ["./tools/ratchet.py", "--base", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
-message = "fixed: [parity-gap] ensure-image/cli"
-transform = { file = "verify/parity/capabilities.toml", replace = "reuse instead of calling core\", issue = \"#258\" }", with = "reuse instead of calling core\" }" }
+message = "new drift: [parity-gap] image-exists/cli. Give that surface the capability"
+transform = { file = "verify/parity/capabilities.toml", replace = "cli = { exempt = \"`ls --remote` lists images; no command asks about one\" }", with = "cli = { exempt = \"`ls --remote` lists images; no command asks about one\", issue = \"#269\" }" }
 
 [[fault]]
 id = "ratchet-parity-gap-advice"
@@ -125,7 +116,7 @@ transform = { file = "tools/ratchet-history.py", replace = "counts[category] if 
 # the category.
 [[fault]]
 id = "ratchet-untraced-traced-deletion"
-guard = "verify/ratchet/drift.json"
+guard = "tools/ratchet.py"
 run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
@@ -134,7 +125,7 @@ transform = { file = "verify/spec/traced/IMAGE.toml", replace = "[IMAGE-8]\nissu
 
 [[fault]]
 id = "ratchet-untraced-new-key"
-guard = "verify/ratchet/drift.json"
+guard = "tools/ratchet.py"
 run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
@@ -197,7 +188,7 @@ run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p",
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_the_repo_scope_reads_every_spec_check_trace_reads ("
-transform = { file = "tools/ratchet.py", replace = "specs=(\n        ROOT / \"verify\" / \"spec\" / \"core.symspec.json\",\n        ROOT / \"verify\" / \"spec\" / \"agentd.symspec.json\",\n    ),", with = "specs=(\n        ROOT / \"verify\" / \"spec\" / \"core.symspec.json\",\n    )," }
+transform = { file = "tools/ratchet.py", replace = "        specs=(\n            root / \"verify\" / \"spec\" / \"core.symspec.json\",\n            root / \"verify\" / \"spec\" / \"agentd.symspec.json\",\n        ),", with = "        specs=(\n            root / \"verify\" / \"spec\" / \"core.symspec.json\",\n        )," }
 
 [[fault]]
 id = "ratchet-untraced-advice"
@@ -209,8 +200,7 @@ message = "FAIL: test_rule_1_an_untraced_requirement_points_at_traced ("
 transform = { file = "tools/ratchet.py", replace = "NEW_DRIFT_FIX.get(category, LAYERING_FIX)", with = "LAYERING_FIX" }
 
 # #295 review round 1. A decision can't stand in for a trace: a new requirement with a decision
-# and no traced entry is refused, on the real tree and in the parse test, and rule 3's advice for
-# an untraced entry doesn't point at decisions.
+# and no traced entry is refused, on the real tree and in the parse test.
 [[fault]]
 id = "ratchet-untraced-decision"
 guard = "tools/ratchet.py"
@@ -220,7 +210,7 @@ suite = "script"
 message = "[untraced] TRAP-14 can't be a decision: a requirement that can't carry a layer waives that layer in its group's file"
 transform = [
   { file = "verify/spec/core.symspec.json", replace = "    \"5fc0dbf7-83f6-4d1d-96ea-902bfacee0b1\": {\n", with = "    \"seeded-trap-14\": { \"key\": \"TRAP-14\", \"sentence\": \"A seeded requirement.\" },\n    \"5fc0dbf7-83f6-4d1d-96ea-902bfacee0b1\": {\n" },
-  { file = "verify/ratchet/drift.json", replace = "  \"decisions\": [\n", with = "  \"decisions\": [\n    { \"category\": \"untraced\", \"key\": \"TRAP-14\", \"reason\": \"not worth a test\" },\n" },
+  { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"port-impl\", \"adapter-logic\"]\n", with = "enforced = [\"port-impl\", \"adapter-logic\"]\n\n[[decision]]\ncategory = \"untraced\"\nkey = \"TRAP-14\"\nreason = \"not worth a test\"\n" },
 ]
 
 [[fault]]
@@ -230,32 +220,11 @@ run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p",
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_an_untraced_decision_is_refused ("
-transform = { file = "tools/ratchet.py", replace = "            if name == \"decisions\" and category in NO_DECISIONS:\n", with = "            if False:\n" }
-
-[[fault]]
-id = "ratchet-untraced-not-in-base-advice"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "RuleTests"]
-expect = "exit-nonzero"
-suite = "script"
-message = "FAIL: test_rule_3_points_an_untraced_entry_at_traced ("
-transform = { file = "tools/ratchet.py", replace = "NOT_IN_BASE_FIX.get(category, LAYERING_NOT_IN_BASE_FIX)", with = "LAYERING_NOT_IN_BASE_FIX" }
+transform = { file = "tools/ratchet.py", replace = "        if category in NO_DECISIONS:\n", with = "        if False:\n" }
 
 # A traced entry that waives every layer passes trace:check with nothing checking it, so it stays
-# untraced. On the real tree: TRAP-1 waived six times and its entry gone, as `update` would leave
-# it. In the collector: the waiver check off, which the sentinel's GATE-4 catches.
-[[fault]]
-id = "ratchet-untraced-all-waived"
-guard = "verify/ratchet/drift.json"
-run = ["./tools/ratchet.py", "--base", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
-message = "new drift: [untraced] TRAP-1. Trace the requirement"
-transform = [
-  { file = "verify/spec/traced/TRAP.toml", replace = "# The TRAP group's traced requirements. The format and the rules are in tools/check-trace.py.\n", with = "# The TRAP group's traced requirements. The format and the rules are in tools/check-trace.py.\n\n[TRAP-1]\nissue = \"#301\"\nwaive.model = \"s\"\nwaive.gherkin = \"s\"\nwaive.fuzz = \"s\"\nwaive.test = \"s\"\nwaive.impl = \"s\"\nwaive.live = \"s\"\n" },
-  { file = "verify/ratchet/drift.json", replace = "    { \"category\": \"untraced\", \"key\": \"TRAP-1\", \"issue\": 301 },\n", with = "" },
-]
-
+# untraced: with the waiver check off, the sentinel's GATE-4 goes missing. The real tree can't show
+# it, since both trees read through the one collector.
 [[fault]]
 id = "ratchet-untraced-all-waived-sentinel"
 guard = "verify/ratchet/fixtures/sentinel/expected.json"

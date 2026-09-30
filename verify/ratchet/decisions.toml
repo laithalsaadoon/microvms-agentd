@@ -1,0 +1,66 @@
+# The drift ratchet's hand-written half (#281); `tools/ratchet.py`'s docstring has the rules.
+#
+# `enforced` lists the categories whose rule has moved into enforcing config, and each of them
+# can carry no drift. A decision is a permanent exception with its reason: it covers one finding
+# of its key, which then isn't drift. A change can add one, and review reads the reason. One whose
+# finding is gone fails `mise run ratchet:check` until it's deleted. An untraced requirement takes
+# no decision: it waives a layer in its group's file in `verify/spec/traced/` instead. A placement
+# decision allows a crate one edge outside its set in `verify/arch/placement.toml`, and
+# `crates/microvms-cli/tests/dependency_direction.rs` holds it to the tree.
+
+enforced = ["port-impl", "adapter-logic"]
+
+[[decision]]
+category = "port-impl"
+key = "crates/microvms-app/src/sandbox.rs: TokenMinter for ControlPlaneMinter"
+reason = "an adapter between two application ports that performs no I/O: it mints a session's proxy tokens through the control plane's own transport, and the app's sandbox and its tests build one without the edges"
+
+[[decision]]
+category = "placement"
+key = "microvms-cli -> notify"
+reason = "watching the local tree for `sync --watch` is a terminal affordance of the CLI's interactive loop; an event only wakes a re-hash, and the sync pass that decides what moves goes to core in #260"
+
+[[decision]]
+category = "subprocess"
+key = "crates/agentd/src/exec.rs: Command::new(program)"
+reason = "runs the caller's argv inside the VM; executing the user's commands is agentd's job"
+
+[[decision]]
+category = "subprocess"
+key = "crates/agentd/src/exec.rs: Command::new(shell)"
+reason = "runs the caller's script under its shell inside the VM; executing the user's commands is agentd's job"
+
+[[decision]]
+category = "subprocess"
+key = "crates/agentd/src/hook_handlers.rs: tokio::process::Command::new(path)"
+reason = "runs the image's lifecycle hook executables inside the VM; running hooks is agentd's job"
+
+[[decision]]
+category = "subprocess"
+key = "crates/microvms-cli/src/commands/doctor.rs: std::process::Command::new(\"terraform\")"
+reason = "reads the local Terraform stack's outputs; no Rust library reads Terraform state backends"
+
+[[decision]]
+category = "adapter-logic"
+key = "crates/microvms-cli/src/commands/lifecycle.rs: literal-default: Duration::from_secs(5)"
+reason = "`HEALTH_PROBE_DEADLINE`, the deadline on a best-effort health read the CLI makes only to copy the daemon's hook log into its local history, before a teardown and after a resume; core makes no such read, and the figure is short so a wedged endpoint can't hold a teardown for the transport's request timeout"
+
+[[decision]]
+category = "adapter-logic"
+key = "crates/microvms-cli/src/commands/lifecycle.rs: literal-default: Duration::from_secs(10)"
+reason = "`ATTACH_PROBE_DEADLINE`, the deadline on attaching a session only for that hook-log read after a resume; it bounds a CLI history nicety core doesn't do, so a resume whose VM is running never stalls over it"
+
+[[decision]]
+category = "adapter-logic"
+key = "crates/microvms-cli/src/commands/attached.rs: literal-default: Duration::from_secs(30)"
+reason = "`SYNC_DELETE_GRACE`, how long a sync pass waits past the in-guest `rm`'s own deadline; it's the figure the pass has always used, shorter than core's `DEFAULT_CLIENT_GRACE` because a pass under `sync --watch` holds the next one while it waits, and changing it is a behavior change of its own"
+
+[[decision]]
+category = "adapter-logic"
+key = "crates/microvms-cli/src/commands/attached.rs: literal-default: Duration::from_millis(250)"
+reason = "the quiet period `sync --watch` waits after a file event so one save's burst of events runs one sync pass; it paces the CLI's interactive watch loop, the terminal affordance the notify placement decision names, and the sync pass it wakes goes to core in #260"
+
+[[decision]]
+category = "adapter-logic"
+key = "crates/microvms-cli/src/commands/attached.rs: literal-default: Duration::from_millis(500)"
+reason = "`RESIZE_POLL_INTERVAL`, how often the interactive shell re-reads the local terminal's size to send a resize frame; the terminal is the CLI's, and no layer below it has one"

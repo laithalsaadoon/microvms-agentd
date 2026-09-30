@@ -45,6 +45,14 @@
 //! ([`protocol::tunnel::close`]) are drawn from RFC 6455's private range precisely so they
 //! can be told apart from that, and [`explain_close`] is where a caller turns one into a
 //! sentence.
+//!
+//! # A verified tunnel's end is proved inside the Noise session
+//!
+//! A close frame is plaintext, and anything on the path can send one or drop the connection.
+//! So a verified tunnel whose daemon offered the end of stream in the handshake ends
+//! [`TunnelEnd::Closed`] only when the daemon's end of stream arrived, or when this side ended
+//! first and sent its own; anything else is [`TunnelEnd::Truncated`] (BIND-23). The rule and its
+//! skew are in `protocol::identity` and `docs/PROTOCOL.md`.
 
 use std::sync::Arc;
 
@@ -76,15 +84,35 @@ pub const VERIFIED_CHUNK_BYTES: usize = 32 * 1024;
 const NOISE_MAX_MESSAGE_BYTES: usize = 65535;
 
 /// What ended a tunnel, and whether the caller should treat it as a failure.
+///
+/// Exhaustive on purpose: a caller that matched a new way to end under a wildcard arm would
+/// report a stream cut short however that arm reports, which is the failure #342 fixed.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TunnelEnd {
     /// The local client closed, or the guest reached EOF. The tunnel did its job.
+    ///
+    /// On a verified tunnel whose daemon offered the end of stream, the guest's EOF is read
+    /// from the daemon's end of stream, so every byte the guest sent arrived.
     Closed,
     /// The daemon refused or lost the guest connection, with its close code.
     ///
     /// Carries the code rather than a pre-rendered string so a caller can branch — a dead
     /// server is worth retrying against a different port, a relay failure is not.
     Refused { code: u16, reason: String },
+    /// A verified tunnel's daemon offered the end of stream, and the tunnel ended without it:
+    /// a close frame with no failure code, a transport error, or a hangup (BIND-23).
+    ///
+    /// A failure. Every byte that arrived authenticated, but the stream may have been cut short
+    /// on the path, or the guest may have stopped reading before all of the local bytes
+    /// reached it. `code` is the close frame's, and `None` when there was no frame.
+    Truncated { code: Option<u16> },
+    /// A verified tunnel ended the way [`TunnelEnd::Closed`] does, but its daemon predates the
+    /// end of stream (its handshake didn't offer one), so nothing proved the stream finished.
+    ///
+    /// Not a failure: an older daemon never sends an end of stream, and failing here would fail
+    /// every verified tunnel into an older image. A stream cut short would read the same,
+    /// though, so a caller should say so.
+    ClosedUnproven,
 }
 
 /// The `wss://` URL for a tunnel to `guest_port`.
@@ -209,8 +237,15 @@ pub async fn verify_identity(
     let guest_port = auth.port();
     match open(endpoint, guest_port, agent_token, auth, Some(identity)).await? {
         Opened::Refused(end) => Ok(end),
-        Opened::Ready(mut ready) => {
-            let _ = ready.socket.send(Message::Close(None)).await;
+        Opened::Ready(ready) => {
+            let Ready {
+                mut socket,
+                mut noise,
+            } = *ready;
+            let mut scratch = vec![0_u8; NOISE_MAX_MESSAGE_BYTES];
+            // This side's end of stream first, so the daemon closes its dial to its own port
+            // as a finished stream rather than resetting it.
+            end_first(&mut socket, &mut noise, &mut scratch).await;
             Ok(TunnelEnd::Closed)
         }
     }
@@ -228,7 +263,14 @@ enum Opened {
 
 struct Ready {
     socket: TunnelSocket,
-    noise: Option<snow::TransportState>,
+    noise: Option<Verified>,
+}
+
+/// A verified tunnel's session: the keyed transport, and whether the daemon offered the end of
+/// stream in its handshake reply.
+struct Verified {
+    transport: snow::TransportState,
+    daemon_proves_end: bool,
 }
 
 type TunnelSocket =
@@ -317,7 +359,7 @@ async fn open(
     let noise = match identity {
         None => None,
         Some(identity) => match initiate(&mut socket, identity, guest_port).await? {
-            Initiated::Transport(transport) => Some(transport),
+            Initiated::Transport(verified) => Some(verified),
             Initiated::Refused(end) => return Ok(Opened::Refused(end)),
         },
     };
@@ -357,10 +399,10 @@ where
             // Read from the local client, frame it, send it.
             read = local.read(&mut buffer) => match read {
                 Ok(0) => {
-                    // The local side finished sending. A close frame rather than a drop, so
-                    // the daemon shuts the guest's write half down and a request/response
-                    // protocol still gets its answer.
-                    let _ = socket.send(Message::Close(None)).await;
+                    // The local side finished sending, so this side ends the tunnel: its end
+                    // of stream, then a close frame. A WebSocket close is a whole close, so a
+                    // guest answer still in flight isn't relayed.
+                    end_first(&mut socket, &mut noise, &mut scratch).await;
                     return Ok(TunnelEnd::Closed);
                 }
                 Ok(count) => {
@@ -369,7 +411,7 @@ where
                         None => buffer[..count].to_vec(),
                     };
                     if socket.send(Message::Binary(frame.into())).await.is_err() {
-                        return Ok(TunnelEnd::Closed);
+                        return Ok(unproven_end(noise.as_ref(), None));
                     }
                 }
                 Err(err) => {
@@ -384,22 +426,31 @@ where
                 Some(Ok(Message::Binary(bytes))) => {
                     let plain: &[u8] = match noise.as_mut() {
                         None => &bytes,
-                        Some(transport) => {
-                            let count = transport.read_message(&bytes, &mut scratch).map_err(|err| {
+                        Some(verified) => {
+                            let count = verified.transport.read_message(&bytes, &mut scratch).map_err(|err| {
                                 // Failing rather than skipping, because a frame that does not
-                                // authenticate on a verified tunnel is a forged or corrupted
-                                // frame — writing it to the local client would hand the
-                                // application attacker-controlled bytes on the one path that
-                                // promised otherwise.
+                                // authenticate on a verified tunnel is a forged, replayed or
+                                // reordered frame (the nonce is its position), and writing it to
+                                // the local client would hand the application attacker-controlled
+                                // bytes on the one path that promised otherwise (BIND-24).
                                 Error::new(
                                     ErrorKind::Unexpected,
                                     format!("a tunnel frame did not authenticate: {err}"),
                                 )
                             })?;
+                            // The daemon's end of stream: the guest reached EOF and every byte
+                            // it sent came before this, in order, or this wouldn't decrypt.
+                            if protocol::identity::is_end_of_stream(&scratch[..count]) {
+                                let _ = local.flush().await;
+                                let _ = socket.send(Message::Close(None)).await;
+                                return Ok(TunnelEnd::Closed);
+                            }
                             &scratch[..count]
                         }
                     };
                     if local.write_all(plain).await.is_err() {
+                        // The local client went away, which ends the tunnel from this side.
+                        end_first(&mut socket, &mut noise, &mut scratch).await;
                         return Ok(TunnelEnd::Closed);
                     }
                 }
@@ -420,17 +471,50 @@ where
                 }
                 Some(Ok(Message::Close(frame))) => {
                     let _ = local.flush().await;
-                    return Ok(classify_close(frame.as_ref()));
+                    return Ok(match classify_close(frame.as_ref()) {
+                        // A failure code is a failure however it arrived, so it keeps its code
+                        // for the diagnosis. A clean-looking close is only as clean as the
+                        // tunnel can prove.
+                        TunnelEnd::Closed => {
+                            unproven_end(noise.as_ref(), frame.as_ref().map(|f| f.code.into()))
+                        }
+                        other => other,
+                    });
                 }
                 Some(Ok(_)) => continue,
-                // A transport error after a successful handshake. Reported as Closed rather
-                // than an Err because the bytes already delivered are still valid, and the
+                // A transport error or a hangup after a successful handshake. Not an Err,
+                // because the bytes already delivered are still valid; on a plain tunnel the
                 // caller's own read of `local` is where a truncation would surface.
-                Some(Err(_)) => return Ok(TunnelEnd::Closed),
-                None => return Ok(TunnelEnd::Closed),
+                Some(Err(_)) | None => return Ok(unproven_end(noise.as_ref(), None)),
             },
         }
     }
+}
+
+/// How a tunnel ends when the daemon's side ended with nothing that proves it: a close frame
+/// with no failure code, a transport error, or a hangup.
+///
+/// A plain tunnel has nothing to prove anything with, so that's [`TunnelEnd::Closed`], as it
+/// always was. A verified one is [`TunnelEnd::Truncated`] when the daemon offered the end of
+/// stream and [`TunnelEnd::ClosedUnproven`] when it predates one (BIND-23).
+fn unproven_end(noise: Option<&Verified>, code: Option<u16>) -> TunnelEnd {
+    match noise {
+        None => TunnelEnd::Closed,
+        Some(verified) if verified.daemon_proves_end => TunnelEnd::Truncated { code },
+        Some(_) => TunnelEnd::ClosedUnproven,
+    }
+}
+
+/// Ends the tunnel from this side: the end of stream on a verified tunnel, then a close frame.
+///
+/// Sent whatever the daemon offered: a daemon from before the end of stream decrypts it and
+/// relays nothing. Best effort, because the tunnel is ending either way; a daemon that never
+/// gets it resets its guest connection rather than closing it.
+async fn end_first(socket: &mut TunnelSocket, noise: &mut Option<Verified>, scratch: &mut [u8]) {
+    if let Ok(Some(end)) = seal(noise, &[], scratch) {
+        let _ = socket.send(Message::Binary(end.into())).await;
+    }
+    let _ = socket.send(Message::Close(None)).await;
 }
 
 /// Encrypts one chunk when the tunnel is verified, or reports `None` to send plaintext.
@@ -439,19 +523,22 @@ where
 /// encryption failure, which is unreachable for chunk sizes the `const` checks admit but is
 /// reported honestly rather than unwrapped.
 fn seal(
-    noise: &mut Option<snow::TransportState>,
+    noise: &mut Option<Verified>,
     plain: &[u8],
     scratch: &mut [u8],
 ) -> Result<Option<Vec<u8>>, Error> {
-    let Some(transport) = noise.as_mut() else {
+    let Some(verified) = noise.as_mut() else {
         return Ok(None);
     };
-    let count = transport.write_message(plain, scratch).map_err(|err| {
-        Error::new(
-            ErrorKind::Unexpected,
-            format!("encrypting a tunnel chunk failed: {err}"),
-        )
-    })?;
+    let count = verified
+        .transport
+        .write_message(plain, scratch)
+        .map_err(|err| {
+            Error::new(
+                ErrorKind::Unexpected,
+                format!("encrypting a tunnel chunk failed: {err}"),
+            )
+        })?;
     Ok(Some(scratch[..count].to_vec()))
 }
 
@@ -460,7 +547,7 @@ fn seal(
 /// A transport exists only once the daemon's reply verifies against the pinned VM key, so a
 /// far end holding any other key never gets a byte of the local connection (BIND-21).
 enum Initiated {
-    Transport(snow::TransportState),
+    Transport(Verified),
     Refused(TunnelEnd),
 }
 
@@ -473,12 +560,14 @@ async fn initiate(
     let mut initiator = crate::identity::initiator(identity)?;
     let mut scratch = vec![0_u8; NOISE_MAX_MESSAGE_BYTES];
 
-    let written = initiator.write_message(&[], &mut scratch).map_err(|err| {
-        Error::new(
-            ErrorKind::Unexpected,
-            format!("writing the identity handshake failed: {err}"),
-        )
-    })?;
+    let written = initiator
+        .write_message(&protocol::identity::HANDSHAKE_PAYLOAD, &mut scratch)
+        .map_err(|err| {
+            Error::new(
+                ErrorKind::Unexpected,
+                format!("writing the identity handshake failed: {err}"),
+            )
+        })?;
     if socket
         .send(Message::Binary(scratch[..written].to_vec().into()))
         .await
@@ -496,7 +585,7 @@ async fn initiate(
     loop {
         match socket.next().await {
             Some(Ok(Message::Binary(reply))) => {
-                initiator.read_message(&reply, &mut scratch).map_err(|_| {
+                let offer = initiator.read_message(&reply, &mut scratch).map_err(|_| {
                     // *Our* verification failed on the daemon's reply: the far end is not the
                     // VM the pin was minted for. This is the diagnosis the daemon cannot make
                     // — it does not know which key we pinned — and the one the caller most
@@ -512,13 +601,18 @@ async fn initiate(
                         ),
                     )
                 })?;
+                // An empty payload is a daemon from before the end of stream (#342).
+                let daemon_proves_end = protocol::identity::offers_end_of_stream(&scratch[..offer]);
                 let transport = initiator.into_transport_mode().map_err(|err| {
                     Error::new(
                         ErrorKind::Unexpected,
                         format!("entering transport mode failed: {err}"),
                     )
                 })?;
-                return Ok(Initiated::Transport(transport));
+                return Ok(Initiated::Transport(Verified {
+                    transport,
+                    daemon_proves_end,
+                }));
             }
             Some(Ok(Message::Close(frame))) => {
                 return Ok(Initiated::Refused(classify_close(frame.as_ref())));

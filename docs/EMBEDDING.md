@@ -108,8 +108,11 @@ reached for one, the release's `SHA256SUMS`, so it needs neither `gh` nor `curl`
 that cannot be verified raises `PreconditionError` rather than warning. Every binary it
 returns, including one you supplied, is checked for an aarch64 ELF header
 first, because a wrong-architecture daemon fails 45 minutes later as a run-hook
-timeout. A cache entry is served only while it still matches the digest
-recorded when it was verified.
+timeout. The build calls check the bytes they're handed the same way before any
+upload, so `build_artifact`, `build_image` and `ensure_image` raise
+`PreconditionError` for a daemon that didn't come from here and isn't aarch64. A
+cache entry is served only while it still matches the digest recorded when it
+was verified.
 
 On a machine that can't reach GitHub, download the release's assets once
 (`gh release download vX.Y.Z --dir <dir>/vX.Y.Z`) and set `$MICROVM_RELEASE_DIR`
@@ -249,7 +252,9 @@ applied at open. `PUT`/`GET /v1/fs/tar` move directory trees; extraction is
 confined by lexical resolution with symlink and bomb defenses and member/size
 caps (`crates/agentd/src/fs.rs:4-41`), and a write that would push the filesystem
 under the disk reserve is refused with 507 naming the real free space
-(`crates/agentd/src/fs.rs:66-91`).
+(`crates/agentd/src/fs.rs:66-91`). Every client reads a 507 as the wire kind
+`InsufficientStorage`, `ERR_PLATFORM` and not retryable: a retry needs space
+freed first.
 
 **Health.** `GET /v1/health` is unauthenticated and reports version, bootstrap
 state, disk pressure, and the identity-repair flags — the conditions that are

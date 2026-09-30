@@ -57,7 +57,8 @@ from local test results.
 - `crates/model/`, `verify/spec/`, `conformance/`: portable model tests, formal requirements,
   and live AWS checks.
 - `crates/model-conformance/`: unpublished, tests only; drives the app's policies and
-  `Sandbox` over the models' rows and paths.
+  `Sandbox` over the models' rows and paths, and the daemon's tunnel route against the
+  client's, the one place both halves meet.
 - `verify/arch/placement.toml`, `verify/ratchet/`: each crate's allowed dependencies and the
   drift count (see Architecture).
 
@@ -115,25 +116,28 @@ which #300 checks through the generated surfaces.
 If an adapter needs something private to a lower crate, make it public there or
 move the caller down. Never copy it.
 
-`verify/ratchet/drift.json` is the drift count: layering drift, parity gaps and
-untraced requirements, each with the issue that removes it. `mise run
-ratchet:check` fails on new drift and on a fix whose entry is still in the
-file; `mise run ratchet:update` removes fixed entries. A PR can't add an entry:
-fix the code, or record a permanent exception in `decisions` with its reason.
-An untraced requirement takes no decision: list it in its group's file under
-`verify/spec/traced/` (`verify/spec/traced/TRAP.toml` for a TRAP key) and waive there any
-layer it can't carry, with its reason. The edges
+Drift is layering drift, parity gaps and untraced requirements. `mise run
+ratchet:check` collects it from the working tree and from the merge base's tree,
+with the same collectors, and fails when the tree has drift the base doesn't: a
+PR can't add drift, and a fix removes it by fixing the code, with no list to
+edit. Nobody edits `verify/ratchet/drift.json`: it's a generated snapshot for
+the docs site's history chart, which `mise run ratchet:snapshot` rewrites in a
+change of its own. A permanent exception is a decision in
+`verify/ratchet/decisions.toml`, with its reason, and a decision whose finding is
+gone fails the check. An untraced requirement takes no decision: list it in its
+group's file under `verify/spec/traced/` (`verify/spec/traced/TRAP.toml` for a
+TRAP key) and waive there any layer it can't carry, with its reason. The edges
 between the workspace's crates, and each adapter's and layer's direct
 dependencies against its set in `verify/arch/placement.toml`, are computed in one
 place: `crates/microvms-cli/tests/dependency_direction.rs`. It holds each crate
-to exactly its set plus its placement entries and decisions in the drift file,
-so a new dependency and a fixed one fail there, and a fix deletes its entry by
-hand. The CLI's entries are #260's; the domain's, the app's and core's sets never
-carry drift. For placement the ratchet reads no manifest: it counts the entries
-and refuses one the base doesn't have, and a crate added to a set the base has.
+to exactly its set, its `drift` table there (the CLI's #260 crates) and its
+placement decisions, so a new dependency and a fixed one fail there; the
+domain's, the app's and core's sets never carry drift. For placement the ratchet
+reads no manifest: it reads each tree's drift tables, and refuses drift the base
+doesn't have and a crate added to a set the base has.
 The ratchet's port-impl collector reads the app and core as
-well as the adapters, so a port implemented anywhere but the edges is drift or
-a recorded decision. Forbidden calls are refused by each adapter's
+well as the adapters, and the category is enforced, so a port implemented
+anywhere but the edges fails `ratchet:check` unless a decision records why. Forbidden calls are refused by each adapter's
 `clippy.toml`, and `tools/test_ratchet.py` lists every site that turns those
 lints off. The CLI's `clippy.toml` also refuses core's transport calls and its
 production constructors outside `crates/microvms-cli/src/seam.rs`, and the bindings refuse the
@@ -151,12 +155,12 @@ capabilities, or `verify/parity/capabilities.toml` says why one doesn't.
   method of a class the table names, or a command, when no row names it, and on
   a row naming something a surface doesn't have. An exemption with an issue is
   a gap that issue closes, and the ratchet counts it as parity-gap drift, so
-  closing one deletes its exemption and its entry together. One without an issue
-  is a decision. The script's docstring has the rules; option-level parity
+  closing one deletes its exemption and nothing else. One without an issue is a
+  decision. The script's docstring has the rules; option-level parity
   (flags, keyword arguments) isn't checked yet.
 - Defaults live at or below core. The CLI and the bindings use the constant
   core re-exports from the layer that owns it, and don't add a duration, size
-  or retry literal of their own without a decision in `verify/ratchet/drift.json`.
+  or retry literal of their own without a decision in `verify/ratchet/decisions.toml`.
   The ratchet's `literal-default` rule (`verify/ratchet/rules/literal-default.yml`)
   fails `ratchet:check` on one in adapter source that has no decision there. A
   flag or keyword default isn't held yet: #300 checks those through the

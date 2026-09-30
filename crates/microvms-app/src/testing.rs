@@ -23,6 +23,24 @@ use crate::control::ControlPlane;
 use crate::control::transport::Transport;
 use crate::region::Region;
 
+/// Daemon bytes every check accepts: a little-endian ELF header naming aarch64
+/// (`EM_AARCH64`), then `payload`, so two tests that need different artifact hashes pass
+/// different payloads.
+pub fn aarch64_daemon(payload: &[u8]) -> Vec<u8> {
+    elf_daemon(microvms_domain::provision::REQUIRED_ELF_MACHINE, payload)
+}
+
+/// A little-endian ELF header naming `machine`, then `payload`: `0x3E` (x86_64) is the
+/// wrong-architecture daemon a build must refuse (#257).
+pub fn elf_daemon(machine: u16, payload: &[u8]) -> Vec<u8> {
+    let mut bytes = vec![0_u8; 20];
+    bytes[..4].copy_from_slice(b"\x7fELF");
+    bytes[5] = 1;
+    bytes[18..20].copy_from_slice(&machine.to_le_bytes());
+    bytes.extend_from_slice(payload);
+    bytes
+}
+
 /// A control plane over `transport` whose other ports are test doubles: `clock`, a
 /// [`SequenceEntropy`], and [`TestAdapters`].
 ///

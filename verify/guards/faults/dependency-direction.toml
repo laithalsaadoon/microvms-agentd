@@ -33,9 +33,9 @@ suite = "rust"
 message = "microvms-js's direct normal dependencies differ from its set"
 transform = { file = "bindings/microvms-js/Cargo.toml", replace = "[dependencies]\n", with = "[dependencies]\nglobset = \"0.4\"\n" }
 
-# The CLI carries placement entries, and this test holds it exactly to its set and them: it's the
-# one place the ratchet's placement category is computed. New drift in the CLI fails here, and
-# so does an entry whose edge is gone. reqwest is in the lock already, and without its default
+# The CLI carries placement drift, and this test holds it exactly to its set and that drift: it's
+# the one place the ratchet's placement category is computed. New drift in the CLI fails here,
+# and so does drift whose edge is gone. reqwest is in the lock already, and without its default
 # features it brings no crate the lock lacks.
 [[fault]]
 id = "deps-cli-new-drift"
@@ -47,24 +47,43 @@ message = "Outside the set: [\"reqwest\"]"
 transform = { file = "crates/microvms-cli/Cargo.toml", replace = "[dependencies]\n", with = "[dependencies]\nreqwest = { version = \"0.13\", default-features = false }\n" }
 
 [[fault]]
-id = "deps-cli-stale-entry"
+id = "deps-cli-stale-drift"
 guard = "each_adapter_depends_on_exactly_its_allowed_set"
 run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_adapter_depends_on_exactly_its_allowed_set"]
 expect = "test-failed"
 suite = "rust"
 message = "Listed but unused: [\"reqwest\"]"
-transform = { file = "verify/ratchet/drift.json", replace = "    { \"category\": \"placement\", \"key\": \"microvms-cli -> tar\", \"issue\": 260 },\n", with = "    { \"category\": \"placement\", \"key\": \"microvms-cli -> tar\", \"issue\": 260 },\n    { \"category\": \"placement\", \"key\": \"microvms-cli -> reqwest\", \"issue\": 260 },\n" }
+transform = { file = "verify/arch/placement.toml", replace = "[microvms-cli.drift]\nnormal = [\"const-hex\", \"globset\", \"sha2\", \"tar\"]\n", with = "[microvms-cli.drift]\nnormal = [\"const-hex\", \"globset\", \"sha2\", \"tar\", \"reqwest\"]\n" }
 
-# The records reader's floor: a reader that finds no placement record allows the CLI none of its
-# drift, so the CLI's exact set fails naming every recorded crate.
+# The records readers' floors: a reader that finds no drift, or no placement decision, allows the
+# CLI none of it, so the CLI's exact set fails naming each crate it read nothing for.
 [[fault]]
-id = "deps-records-floor"
+id = "deps-drift-floor"
 guard = "each_adapter_depends_on_exactly_its_allowed_set"
 run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_adapter_depends_on_exactly_its_allowed_set"]
 expect = "test-failed"
 suite = "rust"
-message = "Outside the set: [\"const-hex\", \"globset\", \"notify\", \"sha2\", \"tar\"]"
-transform = { file = "crates/microvms-cli/tests/dependency_direction.rs", replace = ".filter(|record| record[\"category\"] == \"placement\")", with = ".filter(|record| record[\"category\"] == \"placements\")" }
+message = "Outside the set: [\"const-hex\", \"globset\", \"sha2\", \"tar\"]"
+transform = { file = "crates/microvms-cli/tests/dependency_direction.rs", replace = "let Some(drift) = table.get(\"drift\") else", with = "let Some(drift) = table.get(\"drifts\") else" }
+
+[[fault]]
+id = "deps-decisions-floor"
+guard = "each_adapter_depends_on_exactly_its_allowed_set"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_adapter_depends_on_exactly_its_allowed_set"]
+expect = "test-failed"
+suite = "rust"
+message = "Outside the set: [\"notify\"]"
+transform = { file = "crates/microvms-cli/tests/dependency_direction.rs", replace = "decision[\"category\"].as_str() == Some(\"placement\")", with = "decision[\"category\"].as_str() == Some(\"placements\")" }
+
+# The bindings carry no drift: a drift table for one is the record edited around the exact set.
+[[fault]]
+id = "deps-binding-drift"
+guard = "each_adapter_depends_on_exactly_its_allowed_set"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_adapter_depends_on_exactly_its_allowed_set"]
+expect = "test-failed"
+suite = "rust"
+message = "microvms-py has placement drift in verify/arch/placement.toml"
+transform = { file = "verify/arch/placement.toml", replace = "[microvms-js]\n", with = "[microvms-py.drift]\nnormal = [\"globset\"]\n\n[microvms-js]\n" }
 
 [[fault]]
 id = "deps-record-without-set"
@@ -74,7 +93,7 @@ expect = "test-failed"
 suite = "rust"
 note = "crates/microvms-cli/tests/dependency_direction.rs::every_set_and_placement_record_belongs_to_a_crate_held_here"
 message = "which names microvms-edges, a crate with no set"
-transform = { file = "verify/ratchet/drift.json", replace = "    { \"category\": \"placement\", \"key\": \"microvms-cli -> tar\", \"issue\": 260 },\n", with = "    { \"category\": \"placement\", \"key\": \"microvms-cli -> tar\", \"issue\": 260 },\n    { \"category\": \"placement\", \"key\": \"microvms-edges -> reqwest\", \"issue\": 260 },\n" }
+transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"port-impl\", \"adapter-logic\"]\n", with = "enforced = [\"port-impl\", \"adapter-logic\"]\n\n[[decision]]\ncategory = \"placement\"\nkey = \"microvms-edges -> reqwest\"\nreason = \"seeded\"\n" }
 
 [[fault]]
 id = "deps-record-in-set"
@@ -82,8 +101,8 @@ guard = "every_set_and_placement_record_belongs_to_a_crate_held_here"
 run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "every_set_and_placement_record_belongs_to_a_crate_held_here"]
 expect = "test-failed"
 suite = "rust"
-message = "already lists clap, so the record allows nothing"
-transform = { file = "verify/ratchet/drift.json", replace = "      \"key\": \"microvms-cli -> notify\",\n", with = "      \"key\": \"microvms-cli -> clap\",\n" }
+message = "already lists, so the record allows nothing"
+transform = { file = "verify/ratchet/decisions.toml", replace = "key = \"microvms-cli -> notify\"\n", with = "key = \"microvms-cli -> clap\"\n" }
 
 [[fault]]
 id = "deps-record-twice"
@@ -91,8 +110,8 @@ guard = "every_set_and_placement_record_belongs_to_a_crate_held_here"
 run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "every_set_and_placement_record_belongs_to_a_crate_held_here"]
 expect = "test-failed"
 suite = "rust"
-message = "records the placement key \"microvms-cli -> tar\" twice"
-transform = { file = "verify/ratchet/drift.json", replace = "    { \"category\": \"placement\", \"key\": \"microvms-cli -> tar\", \"issue\": 260 },\n", with = "    { \"category\": \"placement\", \"key\": \"microvms-cli -> tar\", \"issue\": 260 },\n    { \"category\": \"placement\", \"key\": \"microvms-cli -> tar\", \"issue\": 260 },\n" }
+message = "the placement record \"microvms-cli -> tar\" is written twice, the second time as a decision"
+transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"port-impl\", \"adapter-logic\"]\n", with = "enforced = [\"port-impl\", \"adapter-logic\"]\n\n[[decision]]\ncategory = \"placement\"\nkey = \"microvms-cli -> tar\"\nreason = \"seeded\"\n" }
 
 [[fault]]
 id = "deps-record-shape"
@@ -101,7 +120,7 @@ run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", 
 expect = "test-failed"
 suite = "rust"
 message = "which isn't `<crate> -> <dependency>`"
-transform = { file = "verify/ratchet/drift.json", replace = "\"key\": \"microvms-cli -> tar\"", with = "\"key\": \"microvms-cli->tar\"" }
+transform = { file = "verify/ratchet/decisions.toml", replace = "key = \"microvms-cli -> notify\"\n", with = "key = \"microvms-cli->notify\"\n" }
 
 # A set for a crate no test here holds would be a set nothing checks.
 [[fault]]
@@ -119,8 +138,17 @@ guard = "every_set_and_placement_record_belongs_to_a_crate_held_here"
 run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "every_set_and_placement_record_belongs_to_a_crate_held_here"]
 expect = "test-failed"
 suite = "rust"
-message = "takes only normal and build lists, not [\"dev\"]"
+message = "and a drift table, not [\"dev\"]"
 transform = { file = "verify/arch/placement.toml", replace = "[microvms-py]\n", with = "[microvms-py]\ndev = [\"tempfile\"]\n" }
+
+[[fault]]
+id = "deps-drift-unknown-list"
+guard = "every_set_and_placement_record_belongs_to_a_crate_held_here"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "every_set_and_placement_record_belongs_to_a_crate_held_here"]
+expect = "test-failed"
+suite = "rust"
+message = "[microvms-cli.drift] in verify/arch/placement.toml takes only normal and build lists, not [\"dev\"]"
+transform = { file = "verify/arch/placement.toml", replace = "[microvms-cli.drift]\nnormal = [\"const-hex\", \"globset\", \"sha2\", \"tar\"]\n", with = "[microvms-cli.drift]\nnormal = [\"const-hex\", \"globset\", \"sha2\", \"tar\"]\ndev = [\"tempfile\"]\n" }
 
 [[fault]]
 id = "deps-domain-tokio"

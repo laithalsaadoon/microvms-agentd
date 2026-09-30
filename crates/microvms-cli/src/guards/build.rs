@@ -436,6 +436,104 @@ async fn a_locally_refused_dockerfile_costs_no_upload_and_no_call() {
     let _ = std::fs::remove_file(&dockerfile_path);
 }
 
+/// **BIND-20 (#257): a daemon that isn't an aarch64 ELF costs no upload and no call.** `build` and
+/// `run`'s build arm, each handed an explicit binary holding an x86_64 ELF header and then one
+/// that isn't an ELF at all, are refused as preconditions before the S3 PUT. The CLI checks
+/// only that the file exists, so before core refused the bytes they were uploaded and built,
+/// and the build failed as a run-hook timeout.
+///
+/// **Falsification**: drop the `require_aarch64` calls from `ControlPlane::preflight` and
+/// `build_artifact_with_context` and both paths upload the bytes.
+#[tokio::test]
+async fn a_daemon_that_is_not_an_aarch64_elf_costs_no_upload_and_no_call() {
+    let mut x86 = vec![0u8; 20];
+    x86[..4].copy_from_slice(b"\x7fELF");
+    x86[5] = 1;
+    x86[18..20].copy_from_slice(&0x3Eu16.to_le_bytes());
+    for (label, bytes, why) in [
+        ("x86-64", x86, "ELF machine 0x3e, not aarch64"),
+        (
+            "script",
+            b"#!/bin/sh\n".to_vec(),
+            "not an ELF binary at all",
+        ),
+    ] {
+        // One file for both paths, named the way `FakeBinary` names its own.
+        let binary = FakeBinary::new(&format!("wrong-arch-{label}"));
+        std::fs::write(&binary.0, &bytes).expect("writes");
+
+        let transport = Arc::new(ScriptedTransport::new());
+        let seam = ScriptedSeam {
+            transport: Arc::clone(&transport),
+            clock: Arc::new(YieldingClock::default()),
+        };
+        let command = Command::Build(BuildArgs {
+            binary: Some(binary.0.clone()),
+            state_dir: None,
+            base_image_version: None,
+            artifact_uri: None,
+            name: Some("wrong-arch".into()),
+            memory: MemoryMib::Mib2048,
+            dockerfile: None,
+            project: None,
+            repair_identity: false,
+            log_group: None,
+            log_stream: None,
+            reuse: false,
+            port: None,
+            region: region_flags(),
+            infra: InfraFlags::default(),
+        });
+        let (result, _) = dispatch_with(&seam, &command, full_infra()).await;
+        let error = result.expect_err(why);
+        assert_eq!(error.exit, Exit::Precondition, "{label}: {}", error.message);
+        assert!(error.message.contains(why), "{label}: {}", error.message);
+        assert_eq!(
+            transport.uploads(),
+            Vec::<String>::new(),
+            "build, {label}: no S3 PUT"
+        );
+        assert_eq!(
+            transport.calls(),
+            Vec::<String>::new(),
+            "build, {label}: zero calls"
+        );
+
+        let ledgers = TempDir::new(&format!("wrong-arch-{label}-ledger"));
+        let transport = Arc::new(ScriptedTransport::new());
+        let seam = ScriptedSeam {
+            transport: Arc::clone(&transport),
+            clock: Arc::new(YieldingClock::default()),
+        };
+        let mut args = run_args_for_image("unused", ledgers.0.clone());
+        args.image = None;
+        args.binary = Some(binary.0.clone());
+        let (result, _) = dispatch_with(&seam, &Command::Run(Box::new(args)), full_infra()).await;
+        let error = result.expect_err(why);
+        assert_eq!(
+            error.exit,
+            Exit::Precondition,
+            "run, {label}: {}",
+            error.message
+        );
+        assert!(
+            error.message.contains(why),
+            "run, {label}: {}",
+            error.message
+        );
+        assert_eq!(
+            transport.uploads(),
+            Vec::<String>::new(),
+            "run, {label}: no S3 PUT"
+        );
+        assert_eq!(
+            transport.calls(),
+            Vec::<String>::new(),
+            "run, {label}: zero calls"
+        );
+    }
+}
+
 /// **`build --base-image-version` reaches the `CreateMicrovmImage` body**, and its absence
 /// emits nothing.
 ///

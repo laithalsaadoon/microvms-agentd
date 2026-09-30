@@ -172,8 +172,10 @@ const FILE_MODE: u32 = 0o644;
 /// name hashes the inputs, not these bytes, for exactly that reason — see
 /// [`artifact_content_hash`].)
 ///
-/// Refuses a context entry that repeats a project file's name, since one archive cannot
-/// hold two entries of one name.
+/// Refuses a `binary` that isn't an aarch64 ELF, empty included (#257): every artifact
+/// carries the daemon as its `CMD`, and a build finds the wrong one only as a run-hook
+/// timeout. Refuses a context entry that repeats a project file's name, since one archive
+/// cannot hold two entries of one name.
 pub fn build_artifact_with_context(
     binary: &[u8],
     dockerfile: &str,
@@ -182,6 +184,7 @@ pub fn build_artifact_with_context(
 ) -> Result<Vec<u8>, Error> {
     use zip::write::{SimpleFileOptions, ZipWriter};
 
+    microvms_domain::provision::require_aarch64(binary)?;
     if let (Some(project), Some(context)) = (project, context)
         && let Some(entry) = context.entries().iter().find(|entry| {
             entry.name == project.ecosystem.manifest_name()
@@ -1200,6 +1203,7 @@ pub fn require_matching_from(base: &BaseImage, dockerfile: &str) -> Result<(), E
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::aarch64_daemon;
 
     const DEFAULT_AGENT_PORT_FOR_TESTS: u16 = crate::control::DEFAULT_AGENT_PORT;
 
@@ -1207,7 +1211,8 @@ mod tests {
     /// looks for them.
     #[test]
     fn the_artifact_holds_a_dockerfile_and_the_daemon() {
-        let bytes = build_artifact(b"\x7fELF fake daemon", "FROM scratch\n", None).expect("zips");
+        let bytes =
+            build_artifact(&aarch64_daemon(b"fake daemon"), "FROM scratch\n", None).expect("zips");
         let mut archive =
             zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("a readable zip");
 
@@ -1216,6 +1221,25 @@ mod tests {
             .collect();
         names.sort();
         assert_eq!(names, ["Dockerfile", "agentd"]);
+    }
+
+    /// **BIND-20 where the daemon enters an artifact (#257).** An x86_64 ELF, a script and no bytes
+    /// at all are each refused as a precondition naming what the bytes are, so the bindings'
+    /// two-step path (`build_artifact`, then the caller's own upload) never uploads one.
+    ///
+    /// **Falsification**: drop the `require_aarch64` call from `build_artifact_with_context`
+    /// and all three zip.
+    #[test]
+    fn an_artifact_refuses_a_daemon_that_is_not_an_aarch64_elf() {
+        for (binary, why) in [
+            (crate::testing::elf_daemon(0x3E, b"x86"), "ELF machine 0x3e"),
+            (b"#!/bin/sh\n".to_vec(), "not an ELF binary"),
+            (Vec::new(), "not an ELF binary"),
+        ] {
+            let error = build_artifact(&binary, "FROM scratch\n", None).expect_err(why);
+            assert_eq!(error.kind(), ErrorKind::Precondition, "{error}");
+            assert!(error.to_string().contains(why), "{error}");
+        }
     }
 
     /// The daemon entry carries mode 0755, and the Dockerfile entry does not have to.
@@ -1230,7 +1254,8 @@ mod tests {
     /// is a test that would have sent someone to debug the writer.
     #[test]
     fn the_daemon_entry_carries_the_execute_bit() {
-        let bytes = build_artifact(b"binary", "FROM scratch\n", None).expect("zips");
+        let bytes =
+            build_artifact(&aarch64_daemon(b"binary"), "FROM scratch\n", None).expect("zips");
         let mut archive =
             zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("a readable zip");
         let mode = archive
@@ -1258,7 +1283,7 @@ mod tests {
 
         // Deliberately includes a NUL and a high byte, which is what a real ELF has and
         // what a text-mode write would mangle.
-        let binary: Vec<u8> = (0u8..=255).cycle().take(4096).collect();
+        let binary = aarch64_daemon(&(0u8..=255).cycle().take(4096).collect::<Vec<u8>>());
         let bytes = build_artifact(&binary, "FROM scratch\n", None).expect("zips");
         let mut archive =
             zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("a readable zip");
@@ -1302,7 +1327,8 @@ mod tests {
             manifest: b"[project]\nname = \"demo\"\n".to_vec(),
             lockfile: b"version = 1\n".to_vec(),
         };
-        let bytes = build_artifact(b"binary", &dockerfile, Some(&project)).expect("zips");
+        let bytes =
+            build_artifact(&aarch64_daemon(b"binary"), &dockerfile, Some(&project)).expect("zips");
         assert!(
             !bytes
                 .windows(token.len())
@@ -1350,7 +1376,9 @@ mod tests {
                 manifest: b"manifest-bytes".to_vec(),
                 lockfile: b"lockfile-bytes".to_vec(),
             };
-            let bytes = build_artifact(b"binary", "FROM scratch\n", Some(&project)).expect("zips");
+            let bytes =
+                build_artifact(&aarch64_daemon(b"binary"), "FROM scratch\n", Some(&project))
+                    .expect("zips");
             let mut archive =
                 zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("a readable zip");
 
@@ -2408,7 +2436,13 @@ mod tests {
 
         let context = context_of(&[("app/run.sh", 0o755, b"#!/bin/sh\n"), ("data", 0o644, b"d")]);
         let build = || {
-            build_artifact_with_context(b"daemon", "FROM x\n", None, Some(&context)).expect("zips")
+            build_artifact_with_context(
+                &aarch64_daemon(b"daemon"),
+                "FROM x\n",
+                None,
+                Some(&context),
+            )
+            .expect("zips")
         };
         let first = build();
         assert_eq!(first, build(), "IMAGE-7: equal inputs, identical bytes");
@@ -2449,7 +2483,7 @@ mod tests {
         let token = "s3cr3t-agent-token-do-not-bake-me";
         let context = context_of(&[("app/main.py", 0o644, b"print('hi')\n")]);
         let bytes = build_artifact_with_context(
-            b"binary",
+            &aarch64_daemon(b"binary"),
             &wrap_dockerfile("FROM x\n", &WrapOptions::default()).expect("wraps"),
             None,
             Some(&context),

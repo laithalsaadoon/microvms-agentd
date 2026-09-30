@@ -41,7 +41,7 @@ constants at `crates/protocol/src/lib.rs:58` (`PROTOCOL_VERSION`) and `:66` (`VE
 Gate: a shape change is a **compile error in every crate that declares the dependency, by design** (`crates/microvms-core/Cargo.toml:29`
 states that a field renamed in `crates/protocol/` must break core's build), and the generated document is
 byte-compared by `crates/agentd/tests/schema_artifact.rs:39`, wired into the unconditional local gate as
-`mise.toml:184 [tasks."schema:check"]`.
+`.config/mise/tasks/contracts.toml:51 ["schema:check"]`.
 
 The crates that declare the dependency:
 `crates/agentd/Cargo.toml:15`, `crates/microvms-core/Cargo.toml:29`, `bindings/microvms-js/Cargo.toml:25`,
@@ -91,8 +91,8 @@ Defined at: `crates/microvms-domain/src/error.rs:43` (`Error`), `:127` (`ErrorKi
 Gate: `crates/microvms-domain/src/error.rs:433 every_kind_carries_its_python_err_code` — every kind must carry
 an `ERR_*` code — plus `:459 no_two_kinds_share_a_code` and, across the crate boundary,
 `crates/microvms-cli/src/exit.rs:486 the_exit_table_and_cores_error_kinds_are_the_same_thirteen_classes`.
-The Python side is gated by `mise.toml:219 [tasks."stubs:check"]` and the Node side by
-`mise.toml:245 [tasks."dts:check"]`, which diffs the committed `bindings/microvms-js/index.d.ts` against a
+The Python side is gated by `.config/mise/tasks/contracts.toml:188 ["stubs:check"]` and the Node side by
+`.config/mise/tasks/contracts.toml:248 ["dts:check"]`, which diffs the committed `bindings/microvms-js/index.d.ts` against a
 fresh napi build.
 
 The two types are two contracts serving two different consumers: `ErrorKind` answers which exit code
@@ -189,7 +189,7 @@ agent reading the `--json` envelope's `code`, and the conformance oracle reading
 Defined at: `crates/microvms-domain/src/constants.rs:57`-`:455` (the constants, from `MODEL_API_VERSION` to
 `DEAD_STATES`) and `:589` (`as_json`).
 
-Gate: `mise.toml:294 [tasks."model:check"]`, which runs `./tools/check-model-drift.py` (`:257`) and
+Gate: `.config/mise/tasks/contracts.toml:286 ["model:check"]`, which runs `./tools/check-model-drift.py` (`:257`) and
 compares every emitted key against the pinned botocore service model. It sits in `check` rather than
 `live` because the model is a file inside botocore — no network, no credentials. Inside the crate,
 `:693 as_json_carries_every_key_the_drift_gate_reads` and
@@ -238,7 +238,7 @@ Defined at: `crates/microvms-domain/src/sizing.rs:68` (`SIZE_CLASSES`, 5 rows / 
 (`SizeClass`).
 
 Gate: `tools/check-model-drift.py:279 PINNED_SIZE_CLASSES` is a deliberate literal twin compared
-against the emitted table, reached through `mise.toml:294 [tasks."model:check"]`. `mise.toml:310`
+against the emitted table, reached through `.config/mise/tasks/contracts.toml:286 ["model:check"]`. `.config/mise/tasks/contracts.toml:304`
 records why a twin is the only possible check here: the sizing table is measurement-backed, so the
 service model can say nothing about it and client-versus-client is the only comparison available.
 In-crate, `crates/microvms-domain/src/sizing.rs:273 the_documented_table_carries_the_measured_rows` pins the
@@ -290,7 +290,7 @@ rows.
 Defined at: `crates/microvms-domain/src/region.rs:45` (`Region`) and `:73` (`MICROVM_REGIONS: [Region; 5]`).
 
 Gate: `tools/check-model-drift.py:267 PINNED_REGIONS` is the literal twin, compared through
-`mise.toml:294 [tasks."model:check"]`; in-crate,
+`.config/mise/tasks/contracts.toml:286 ["model:check"]`; in-crate,
 `crates/microvms-domain/src/region.rs:176 the_five_supported_regions_are_the_measured_ones` and
 `crates/microvms-cli/src/cli.rs:1061 the_region_domain_is_exactly_the_five_measured_regions_and_excludes_eu_central_one`
 hold both ends. No service model states the set — this list is maintained by hand, and the two
@@ -343,8 +343,8 @@ Defined at: `crates/microvms-domain/src/cost.rs:1018` (`pinned_rates`), returnin
 Gate: an offline check and a live one, running at different times.
 `crates/microvms-domain/src/cost.rs:2227 every_rate_byte_matches_the_python_literal` compares each field
 against a literal in the offline tier, and `./tools/check-live-rates.py --twin-only` cross-checks
-the script's own pinned copy against the Rust source — offline and free, per `mise.toml:598`. The
-billable half, `mise.toml:571 [tasks."live:rates"]`, compares both against the live AWS Pricing API;
+the script's own pinned copy against the Rust source — offline and free, per `.config/mise/tasks/live.toml:137`. The
+billable half, `.config/mise/tasks/live.toml:120 ["live:rates"]`, compares both against the live AWS Pricing API;
 it sits in `live` rather than `check` because it needs network and credentials (`:402`).
 
 The figures were read from the Lambda pricing page on 2026-08-07 in us-east-1
@@ -369,7 +369,7 @@ The figures were read from the Lambda pricing page on 2026-08-07 in us-east-1
   `tools/check-live-rates.py:134` finds the function by the literal string
   `"pub fn pinned_rates()"`, and `:180` is the error raised when it cannot — an error that explicitly
   instructs the reader to repoint `TWIN_FN` rather than delete the check. The script's pinned figures
-  are a deliberate second copy (`mise.toml:598`), because a drift check that imported the values it
+  are a deliberate second copy (`.config/mise/tasks/live.toml:135`), because a drift check that imported the values it
   checks would compare a table against itself.
 - **Money is always a `Decimal`, and the pinned figures carry ten significant digits.**
   The literals at `crates/microvms-domain/src/cost.rs:1023`-`:1033` are `dec!()` values, not floats. Summing a

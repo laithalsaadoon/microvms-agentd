@@ -1,0 +1,40 @@
+# The formal requirements, and the traceability matrix that ties them to tests.
+
+[spec]
+description = "agentd.symspec.json: the daemon's six bootstrap and control-token requirements"
+# Covers `verify/spec/agentd.symspec.json` only (AGENTD-1..6); `spec:core` covers the core document.
+# Migrated from the v2 format to `docVersion: 3` on 2026-09-24, because symspec 1.x reads only
+# v3. `--strict` is not passed: in 1.x it is the full-verification gate (`data.verified`),
+# which fails on any requirement the decide tier could not compare, and neither document
+# passes it yet. The gate here is zero error-severity findings.
+#
+# Not in `check`'s dependency list: symspec is a global npm install plus a downloaded
+# embedding model, so a fresh clone should not fail on its absence.
+run = "./tools/check-spec.sh verify/spec/agentd.symspec.json"
+
+["spec:core"]
+description = "microvms-core's requirements: contradictions, coverage, and reachability"
+# The `symspec` on PATH, which must be 1.0 or later (the script refuses anything older by
+# name): `core.symspec.json` carries a state model, effects, and constraints, and the tier
+# that proves the constraints over *unbounded* runs is the reachability tier 0.x lacks. This
+# used to name a node path in one home directory, which broke when that checkout moved.
+#
+# `--reachability-timeout-ms 5000` rather than leaving it to inherit `--timeout-ms`, and the
+# flag's own help says why: Z3's cancellation is cooperative, so an unbounded reachability
+# query is an *uncancellable* one. This bound IS the cancellability mechanism.
+#
+# Out of `check`'s depends for the same reason `spec` is out. Verified 2026-09-24 with
+# symspec 1.2.1: 0 error findings (228 warn, 73 info) over 54 requirements.
+run = "./tools/check-spec.sh verify/spec/core.symspec.json --reachability-timeout-ms 5000"
+
+["trace:check"]
+description = "Every traced requirement appears in the model, a Gherkin tag, a fuzz harness and a test that name it, and the code; docs/TRACEABILITY.md is current"
+# Offline: ast-grep from `[tools]` reads the Rust and Node tests, stdlib `ast` the Python ones,
+# and nothing comes from PyPI. `./tools/check-trace.py --write` regenerates the matrix.
+#
+# The unit tests run first: they build throwaway trees and run the real parsers over them, so a
+# rule that stopped telling a test's doc from a comment fails there before it reads this tree.
+run = [
+  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider tools/test_check_trace.py",
+  "./tools/check-trace.py --check",
+]

@@ -385,10 +385,28 @@ pub fn classify(error: &Error) -> CliError {
     // remedy. A 401 and an unresolvable credential chain are both `ERR_CREDENTIALS`, and
     // "check your agent token" is unhelpful for the second while "run doctor" is unhelpful
     // for the first.
+    // The daemon's disk-pressure refusal, on any command that writes into the VM (`cp`,
+    // `sync`, `run <DIR>`, `agent-up`). `diskUnderPressure` is the name `health` reports the
+    // same condition under, so a caller keys on one name for the reading and the refusal
+    // (#256). The daemon's byte counts stay in the message.
+    if error.wire_kind() == Some(WireKind::InsufficientStorage) {
+        classified.message = format!(
+            "the VM's disk is under pressure: {error}. diskUnderPressure means a write would be \
+             refused right now."
+        );
+        classified
+            .data
+            .insert("diskUnderPressure".into(), serde_json::Value::Bool(true));
+    }
     let suggestions: &[&str] = match (exit, error.wire_kind()) {
         (Exit::Credentials, Some(WireKind::Unauthorized)) => {
             &["the agent token does not match the one the run hook installed at launch"]
         }
+        (Exit::Platform, Some(WireKind::InsufficientStorage)) => &[
+            "free space in the VM, then run the identical command again: `microvm exec --name \
+             <vm> -- rm -rf /workspace/<big-dir>`",
+            "`microvm health` reports diskAvailableBytes and diskUnderPressure",
+        ],
         (Exit::Credentials, _) => &[
             "`microvm doctor` reports which credential the SDK could not resolve",
             "an AccessDeniedException with a null message is the unsupported-region \
