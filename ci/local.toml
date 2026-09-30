@@ -211,6 +211,7 @@ reason = "into ci:local's tool directory, not the caller's ~/.cargo/bin"
 task = "fuzz"
 steps = [
   "install cargo-fuzz and cargo-bolero",
+  "build tar_extract",
   "build the harnesses",
   "fuzz the harnesses side by side",
 ]

@@ -165,10 +165,13 @@ jobs:
         run: |
           cargo install cargo-fuzz --locked
           cargo install cargo-bolero --version 0.13.4 --locked
-      # See the `cli-core` job. `cargo fuzz` runs from the directory that holds `fuzz/`.
+      # `cargo fuzz` runs from the directory that holds `fuzz/`, here and below.
+      - name: build tar_extract
+        working-directory: agentd
+        run: cargo +nightly fuzz build tar_extract
+      # See the `cli-core` job.
       - name: build the harnesses
         run: |
-          (cd agentd && cargo +nightly fuzz build tar_extract)
           cargo +nightly bolero test exec_start_fuzz::start_resolution -p agentd --runs 1
           cargo +nightly bolero test provision_fuzz::version -p microvms-edges --runs 1
           cargo +nightly bolero test control::posture_fuzz::posture_matches_the_launch -p microvms-app --runs 1
