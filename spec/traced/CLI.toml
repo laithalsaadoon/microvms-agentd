@@ -1,0 +1,10 @@
+# The CLI group's traced requirements. The format and the rules are in scripts/check-trace.py.
+
+[CLI-7]
+issue = "#216"
+
+[CLI-8]
+issue = "#216"
+
+[CLI-9]
+issue = "#216"

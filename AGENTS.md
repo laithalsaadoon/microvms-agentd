@@ -120,8 +120,9 @@ untraced requirements, each with the issue that removes it. `mise run
 ratchet:check` fails on new drift and on a fix whose entry is still in the
 file; `mise run ratchet:update` removes fixed entries. A PR can't add an entry:
 fix the code, or record a permanent exception in `decisions` with its reason.
-An untraced requirement takes no decision: list it in `TRACED` and waive there
-any layer it can't carry, with its reason. The edges
+An untraced requirement takes no decision: list it in its group's file under
+`spec/traced/` (`spec/traced/TRAP.toml` for a TRAP key) and waive there any
+layer it can't carry, with its reason. The edges
 between the workspace's crates are checked by
 `microvms-cli/tests/dependency_direction.rs`. Each adapter's allowed
 dependencies (`arch/placement.toml`) are checked by the ratchet, and

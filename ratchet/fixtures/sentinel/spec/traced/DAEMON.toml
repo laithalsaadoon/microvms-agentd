@@ -1,0 +1,5 @@
+# The sentinel's DAEMON group. DAEMON-1 waives one layer and is still traced.
+
+[DAEMON-1]
+issue = "#2"
+waive.live = "the fixture has no AWS call to check"

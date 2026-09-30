@@ -6,6 +6,38 @@ defined in `spec/core.symspec.json` and `spec/agentd.symspec.json`.
 
 | Requirement | model | gherkin | fuzz | test | impl | live |
 |---|---|---|---|---|---|---|
+| AGENTD-7 | 1 | 1 | 1 | 4 | 4 | 1 |
+| AGENTD-8 | 1 | 1 | 1 | 4 | 2 | 1 |
+| AGENTD-9 | 1 | 1 | 1 | 2 | 1 | 1 |
+| AGENTD-10 | 1 | 1 | 1 | 2 | 1 | 1 |
+| AGENTD-11 | 1 | 1 | 1 | 4 | 3 | 1 |
+| AGENTD-12 | 1 | 1 | 1 | 2 | 3 | 1 |
+| AGENTD-13 | 1 | 1 | 1 | 3 | 1 | 1 |
+| AGENTD-14 | 1 | 1 | 1 | 4 | 3 | 1 |
+| AGENTD-15 | 1 | 1 | 1 | 2 | 2 | 1 |
+| AGENTD-16 | 1 | 1 | 1 | 4 | 4 | 1 |
+| AGENTD-17 | waived | waived | waived | 2 | 1 | waived |
+| AGENTD-18 | waived | waived | waived | 1 | 1 | 1 |
+| ARCH-6 | waived | waived | waived | 1 | 6 | waived |
+| ARCH-7 | waived | waived | waived | 2 | 3 | waived |
+| ARCH-8 | waived | waived | waived | 1 | 1 | waived |
+| BIND-6 | 1 | 1 | 1 | 4 | 6 | 1 |
+| BIND-7 | 1 | 1 | 1 | 4 | 3 | 1 |
+| BIND-8 | 1 | 1 | 1 | 4 | 1 | 1 |
+| BIND-9 | 1 | 1 | 1 | 4 | 2 | 1 |
+| BIND-10 | 1 | 1 | 1 | 4 | 4 | 1 |
+| BIND-11 | 1 | 1 | 1 | 3 | 1 | 1 |
+| BIND-12 | 1 | 1 | 1 | 5 | 3 | 1 |
+| BIND-13 | 1 | 1 | 1 | 3 | 3 | waived |
+| BIND-14 | waived | 1 | 1 | 3 | 3 | waived |
+| BIND-15 | 1 | 1 | waived | 5 | 6 | 1 |
+| BIND-16 | 1 | 1 | waived | 4 | 5 | 1 |
+| BIND-17 | 1 | 1 | 1 | 2 | 4 | 1 |
+| BIND-18 | 1 | 1 | 1 | 4 | 3 | 1 |
+| BIND-19 | 1 | 1 | 1 | 2 | 1 | 1 |
+| BIND-20 | 1 | 1 | 1 | 2 | 3 | 1 |
+| BIND-21 | waived | waived | waived | 1 | 1 | 1 |
+| BIND-22 | waived | waived | 1 | 1 | 1 | waived |
 | CLI-7 | 1 | 1 | 1 | 3 | 8 | 1 |
 | CLI-8 | 1 | 1 | 1 | 2 | 3 | 1 |
 | CLI-9 | 1 | 1 | 1 | 2 | 3 | 1 |
@@ -21,38 +53,358 @@ defined in `spec/core.symspec.json` and `spec/agentd.symspec.json`.
 | IMAGE-10 | 1 | 1 | waived | 1 | 1 | 1 |
 | IMAGE-11 | 1 | 1 | waived | 1 | 1 | 1 |
 | IMAGE-12 | waived | waived | waived | 2 | 2 | waived |
-| AGENTD-7 | 1 | 1 | 1 | 4 | 4 | 1 |
-| AGENTD-8 | 1 | 1 | 1 | 4 | 2 | 1 |
-| AGENTD-9 | 1 | 1 | 1 | 2 | 1 | 1 |
-| AGENTD-10 | 1 | 1 | 1 | 2 | 1 | 1 |
-| AGENTD-11 | 1 | 1 | 1 | 4 | 3 | 1 |
-| AGENTD-12 | 1 | 1 | 1 | 2 | 3 | 1 |
-| AGENTD-13 | 1 | 1 | 1 | 3 | 1 | 1 |
-| AGENTD-14 | 1 | 1 | 1 | 4 | 3 | 1 |
-| AGENTD-15 | 1 | 1 | 1 | 2 | 2 | 1 |
-| AGENTD-16 | 1 | 1 | 1 | 4 | 4 | 1 |
-| AGENTD-17 | waived | waived | waived | 2 | 1 | waived |
-| AGENTD-18 | waived | waived | waived | 1 | 1 | 1 |
-| BIND-11 | 1 | 1 | 1 | 3 | 1 | 1 |
-| BIND-12 | 1 | 1 | 1 | 5 | 3 | 1 |
-| BIND-13 | 1 | 1 | 1 | 3 | 3 | waived |
-| BIND-17 | 1 | 1 | 1 | 2 | 4 | 1 |
-| BIND-18 | 1 | 1 | 1 | 4 | 3 | 1 |
-| BIND-19 | 1 | 1 | 1 | 2 | 1 | 1 |
-| BIND-20 | 1 | 1 | 1 | 2 | 3 | 1 |
-| BIND-21 | waived | waived | waived | 1 | 1 | 1 |
-| BIND-22 | waived | waived | 1 | 1 | 1 | waived |
-| BIND-6 | 1 | 1 | 1 | 4 | 6 | 1 |
-| BIND-7 | 1 | 1 | 1 | 4 | 3 | 1 |
-| BIND-8 | 1 | 1 | 1 | 4 | 1 | 1 |
-| BIND-9 | 1 | 1 | 1 | 4 | 2 | 1 |
-| BIND-10 | 1 | 1 | 1 | 4 | 4 | 1 |
-| BIND-14 | waived | 1 | 1 | 3 | 3 | waived |
-| BIND-15 | 1 | 1 | waived | 5 | 6 | 1 |
-| BIND-16 | 1 | 1 | waived | 4 | 5 | 1 |
-| ARCH-6 | waived | waived | waived | 1 | 6 | waived |
-| ARCH-7 | waived | waived | waived | 2 | 3 | waived |
-| ARCH-8 | waived | waived | waived | 1 | 1 | waived |
+
+## AGENTD-7
+
+When a start request names its user or its group with a JSON string, the agentd shall resolve the name against the guest's /etc/passwd or /etc/group before it spawns the child.
+
+- **model:** `model/src/exec_start.rs`
+- **gherkin:** `agentd/tests/features/exec_start.feature`
+- **fuzz:** `agentd/src/exec_start_fuzz.rs`
+- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
+- **impl:** `agentd/src/exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-js/src/session.rs`, `microvms-py/src/session.rs`
+- **live:** `conformance/lanes/exec.py`
+
+## AGENTD-8
+
+If a start request names a user or a group that the guest's /etc/passwd or /etc/group does not contain, then the agentd shall answer Bad Request with the unknown_user or unknown_group error naming the value and spawn no child.
+
+- **model:** `model/src/exec_start.rs`
+- **gherkin:** `agentd/tests/features/exec_start.feature`
+- **fuzz:** `agentd/src/exec_start_fuzz.rs`
+- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
+- **impl:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
+- **live:** `conformance/lanes/exec.py`
+
+## AGENTD-9
+
+When the user of a start request resolves to a passwd row, the agentd shall set HOME, USER and LOGNAME from the passwd row beneath the launch environment and the request environment.
+
+- **model:** `model/src/exec_start.rs`
+- **gherkin:** `agentd/tests/features/exec_start.feature`
+- **fuzz:** `agentd/src/exec_start_fuzz.rs`
+- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
+- **impl:** `agentd/src/exec_start.rs`
+- **live:** `conformance/lanes/exec.py`
+
+## AGENTD-10
+
+While a start request leaves inherit_image_env unset, the agentd shall build the child environment from the passwd identity, the launch environment and the request environment only.
+
+- **model:** `model/src/exec_start.rs`
+- **gherkin:** `agentd/tests/features/exec_start.feature`
+- **fuzz:** `agentd/src/exec_start_fuzz.rs`
+- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
+- **impl:** `agentd/src/exec_start.rs`
+- **live:** `conformance/lanes/exec.py`
+
+## AGENTD-11
+
+When a start request sets inherit_image_env, the agentd shall place the environment the agentd inherited at startup beneath the passwd identity, the launch environment and the request environment.
+
+- **model:** `model/src/exec_start.rs`
+- **gherkin:** `agentd/tests/features/exec_start.feature`
+- **fuzz:** `agentd/src/exec_start_fuzz.rs`
+- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
+- **impl:** `agentd/src/exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-js/src/session.rs`
+- **live:** `conformance/lanes/exec.py`
+
+## AGENTD-12
+
+The agentd shall exclude each AGENTD_ variable and the agent token from the image environment snapshot.
+
+- **model:** `model/src/exec_start.rs`
+- **gherkin:** `agentd/tests/features/exec_start.feature`
+- **fuzz:** `agentd/src/exec_start_fuzz.rs`
+- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
+- **impl:** `agentd/src/exec_start.rs`, `agentd/src/lib.rs`, `agentd/src/main.rs`
+- **live:** `conformance/lanes/exec.py`
+
+## AGENTD-13
+
+The agentd shall report on /v1/health whether an image environment snapshot exists and its key count, without its values.
+
+- **model:** `model/src/exec_start.rs`
+- **gherkin:** `agentd/tests/features/exec_start.feature`
+- **fuzz:** `agentd/src/exec_start_fuzz.rs`
+- **test:** `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`, `protocol/src/health.rs`
+- **impl:** `agentd/src/routes.rs`
+- **live:** `conformance/lanes/exec.py`
+
+## AGENTD-14
+
+When a start request names a shell, the agentd shall resolve the shell name on the child PATH, the image PATH, /bin and /usr/bin and run the command as the -c script of the resolved shell.
+
+- **model:** `model/src/exec_start.rs`
+- **gherkin:** `agentd/tests/features/exec_start.feature`
+- **fuzz:** `agentd/src/exec_start_fuzz.rs`
+- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
+- **impl:** `agentd/src/exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-py/src/session.rs`
+- **live:** `conformance/lanes/exec.py`
+
+## AGENTD-15
+
+If a start request names a shell that no searched directory holds as an executable file, then the agentd shall answer Bad Request with the unknown_shell error naming the shell and spawn no child.
+
+- **model:** `model/src/exec_start.rs`
+- **gherkin:** `agentd/tests/features/exec_start.feature`
+- **fuzz:** `agentd/src/exec_start_fuzz.rs`
+- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
+- **impl:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
+- **live:** `conformance/lanes/exec.py`
+
+## AGENTD-16
+
+When a start request carries its user and group as integers and its shell as a boolean, the agentd shall demote the child to exactly those ids and run a true shell as /bin/sh -c.
+
+- **model:** `model/src/exec_start.rs`
+- **gherkin:** `agentd/tests/features/exec_start.feature`
+- **fuzz:** `agentd/src/exec_start_fuzz.rs`
+- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
+- **impl:** `agentd/src/exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-js/src/session.rs`, `microvms-py/src/session.rs`
+- **live:** `conformance/lanes/exec.py`
+
+## AGENTD-17
+
+If the handshake of an identity-verified tunnel is not made with the host key the run hook pinned, then the agentd shall close the tunnel with close code 4403.
+
+- **model:** waived: #297 adds a stateright model of the tunnel handshake and its pins; until then the handshake and relay tests hold the key
+- **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
+- **fuzz:** waived: #297 adds a harness over the daemon's tunnel frame read
+- **test:** `agentd/src/tunnel_identity.rs`, `agentd/tests/tunnel_relay.rs`
+- **impl:** `agentd/src/tunnel_identity.rs`
+- **live:** waived: no live check presents another host key: that needs a second host identity for one VM, and the relay tests drive the daemon's real route with one
+
+## AGENTD-18
+
+While the handshake of an identity-verified tunnel has not completed, the agentd shall not dial the guest port or relay any byte between the caller and the guest.
+
+- **model:** waived: #297 adds a stateright model of the tunnel handshake and its pins; until then the handshake and relay tests hold the key
+- **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
+- **fuzz:** waived: #297 adds a harness over the daemon's tunnel frame read
+- **test:** `agentd/tests/tunnel_relay.rs`
+- **impl:** `agentd/src/tunnel.rs`
+- **live:** `conformance/lanes/tunnel.py`
+
+## ARCH-6
+
+The microvms-domain shall not perform network, filesystem, subprocess, environment, clock, or entropy access.
+
+- **model:** waived: a property of a crate's code and dependencies, not of a state
+- **gherkin:** waived: no behavior to script: clippy and the dependency set enforce it at build time
+- **fuzz:** waived: there is no input stream; the rule is over source and manifests
+- **test:** `microvms-cli/tests/dependency_direction.rs`
+- **impl:** `microvms-core/src/lib.rs`, `microvms-core/src/prelude.rs`, `microvms-domain/src/cost.rs`, `microvms-domain/src/identity.rs`, `microvms-domain/src/lib.rs`, `microvms-domain/src/names.rs`
+- **live:** waived: the domain makes no AWS call by construction
+
+## ARCH-7
+
+The microvms-app shall not depend directly on a crate or a tokio feature that performs network, AWS, filesystem, subprocess, or entropy I/O.
+
+- **model:** waived: a property of a crate's code and dependencies, not of a state
+- **gherkin:** waived: no behavior to script: clippy and the dependency set enforce it at build time
+- **fuzz:** waived: there is no input stream; the rule is over source and manifests
+- **test:** `microvms-app/src/sandbox.rs`, `microvms-cli/tests/dependency_direction.rs`
+- **impl:** `microvms-app/src/lib.rs`, `microvms-core/src/lib.rs`, `microvms-edges/src/lib.rs`
+- **live:** waived: the app's AWS calls all go through ports, so the live tier exercises the edges' implementations, not this rule
+
+## ARCH-8
+
+The microvms-core shall not contain logic beyond composition and re-exports.
+
+- **model:** waived: a property of a crate's code and dependencies, not of a state
+- **gherkin:** waived: no behavior to script: the dependency set and the ratchet check it over source and manifests
+- **fuzz:** waived: there is no input stream; the rule is over source and manifests
+- **test:** `microvms-cli/tests/dependency_direction.rs`
+- **impl:** `microvms-core/src/lib.rs`
+- **live:** waived: composition makes no AWS call of its own
+
+## BIND-6
+
+The microvms-core shall report a finished exec's POSIX exit code as 124 when a deadline ended the command, as 128 plus the signal number for any other signal death, and otherwise as the exit code.
+
+- **model:** `model/src/run.rs`
+- **gherkin:** `microvms-core/tests/features/run_to_completion.feature`
+- **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
+- **test:** `microvms-app/src/session/exec.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
+- **impl:** `microvms-app/src/session/complete.rs`, `microvms-app/src/session/exec.rs`, `microvms-js/src/exec.rs`, `microvms-js/src/session.rs`, `microvms-py/src/exec.rs`, `microvms-py/src/session.rs`
+- **live:** `conformance/lanes/sessions.py`
+
+## BIND-7
+
+The microvms-core shall annotate an exec result with one human-readable note for each of truncated output, an expired daemon deadline, writers left alive past the linger deadline, an expired client deadline, and a synthesized result.
+
+- **model:** `model/src/run.rs`
+- **gherkin:** `microvms-core/tests/features/run_to_completion.feature`
+- **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
+- **test:** `microvms-app/src/session/exec.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
+- **impl:** `microvms-app/src/session/exec.rs`, `microvms-js/src/exec.rs`, `microvms-py/src/exec.rs`
+- **live:** `conformance/lanes/sessions.py`
+
+## BIND-8
+
+If the output stream of a run-to-completion call ends without the terminal exit event, then the microvms-core shall fall back to waiting for and acknowledging the exec and return exactly one result.
+
+- **model:** `model/src/run.rs`
+- **gherkin:** `microvms-core/tests/features/run_to_completion.feature`
+- **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
+- **test:** `microvms-app/src/session/complete.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
+- **impl:** `microvms-app/src/session/complete.rs`
+- **live:** `conformance/lanes/sessions.py`
+
+## BIND-9
+
+If the client deadline of a run-to-completion call expires before the exec's result is acknowledged, then the microvms-core shall signal the exec's process group before acknowledging the exec within the client grace period.
+
+- **model:** `model/src/run.rs`
+- **gherkin:** `microvms-core/tests/features/run_to_completion.feature`
+- **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
+- **test:** `microvms-app/src/session/complete.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
+- **impl:** `microvms-app/src/session/complete.rs`, `microvms-app/src/session/exec.rs`
+- **live:** `conformance/lanes/sessions.py`
+
+## BIND-10
+
+If the acknowledgement that follows a client-deadline kill fails, then the microvms-core shall return a synthesized result whose POSIX exit code is 124 and whose notes name the failure.
+
+- **model:** `model/src/run.rs`
+- **gherkin:** `microvms-core/tests/features/run_to_completion.feature`
+- **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
+- **test:** `microvms-app/src/session/complete.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
+- **impl:** `microvms-app/src/session/complete.rs`, `microvms-app/src/session/exec.rs`, `microvms-js/src/exec.rs`, `microvms-py/src/exec.rs`
+- **live:** `conformance/lanes/sessions.py`
+
+## BIND-11
+
+The microvms-core shall derive a launch's egress posture from its launch options alone, as open when managed internet egress is requested, best-effort when the advisory deny is requested, and unsealed otherwise, and never as sealed.
+
+- **model:** `model/src/posture.rs`
+- **gherkin:** `microvms-core/tests/features/egress_posture.feature`
+- **fuzz:** `microvms-app/src/control/posture_fuzz.rs`
+- **test:** `microvms-app/src/control/connector.rs`, `microvms-js/__test__/egress_posture.mjs`, `microvms-py/tests/test_egress_posture.py`
+- **impl:** `microvms-app/src/control/connector.rs`
+- **live:** `conformance/lanes/posture.py`
+
+## BIND-12
+
+The language bindings layer shall expose on each session the egress posture the CLI envelope reports for the same launch options, and unsealed for a session whose launch options the session does not hold.
+
+- **model:** `model/src/posture.rs`
+- **gherkin:** `microvms-core/tests/features/egress_posture.feature`
+- **fuzz:** `microvms-app/src/control/posture_fuzz.rs`
+- **test:** `microvms-app/src/sandbox.rs`, `microvms-cli/src/guards.rs`, `microvms-core/tests/live_posture.rs`, `microvms-js/__test__/egress_posture.mjs`, `microvms-py/tests/test_egress_posture.py`
+- **impl:** `microvms-app/src/sandbox.rs`, `microvms-app/src/session/mod.rs`, `microvms-cli/src/commands/lifecycle.rs`
+- **live:** `conformance/lanes/posture.py`
+
+## BIND-13
+
+When a caller asks for the egress posture of a set of launch options, the microvms-core shall answer with the posture a launch with those options would report, or with the invalid-argument refusal the launch would raise, without any AWS call.
+
+- **model:** `model/src/posture.rs`
+- **gherkin:** `microvms-core/tests/features/egress_posture.feature`
+- **fuzz:** `microvms-app/src/control/posture_fuzz.rs`
+- **test:** `microvms-app/src/control/connector.rs`, `microvms-js/__test__/egress_posture.mjs`, `microvms-py/tests/test_egress_posture.py`
+- **impl:** `microvms-app/src/control/connector.rs`, `microvms-app/src/sandbox.rs`, `microvms-cli/src/commands/lifecycle.rs`
+- **live:** waived: a pure function that makes no AWS call; its refusals precede any call, so the service never sees them (zero calls asserted by the Gherkin scenarios and the fuzz harness)
+
+## BIND-14
+
+The sizing model shall select for a resource request the smallest size class whose baseline memory and baseline vCPU both cover the request, the default class when the request names neither, and an invalid-argument refusal naming the largest class when no class covers the request.
+
+- **model:** waived: a stateless selection over the five-row size table; the bolero harness checks minimality and coverage over arbitrary requests instead
+- **gherkin:** `microvms-core/tests/features/request_and_preflight.feature`
+- **fuzz:** `microvms-domain/src/sizing_fuzz.rs`
+- **test:** `microvms-domain/src/sizing.rs`, `microvms-js/__test__/request_and_preflight.mjs`, `microvms-py/tests/test_request_and_preflight.py`
+- **impl:** `microvms-domain/src/sizing.rs`, `microvms-js/src/cost.rs`, `microvms-py/src/cost.rs`
+- **live:** waived: a pure function of the request and the documented table; it makes no AWS call
+
+## BIND-15
+
+When a caller asks for a preflight, the microvms-core shall report whether the region resolves to a supported region, whether the credential chain resolves credentials, and whether the MicroVMs service answers a free read-only listing in that region, as one report whose ok is true only when every fatal check passed.
+
+- **model:** `model/src/preflight.rs`
+- **gherkin:** `microvms-core/tests/features/request_and_preflight.feature`
+- **fuzz:** waived: the outcome space (3 region x 2 credential x 3 service worlds) is enumerated exhaustively by the Stateright model; there is no input stream to fuzz
+- **test:** `microvms-app/src/preflight.rs`, `microvms-cli/src/guards.rs`, `microvms-core/tests/live_preflight.rs`, `microvms-js/__test__/request_and_preflight.mjs`, `microvms-py/tests/test_request_and_preflight.py`
+- **impl:** `microvms-app/src/control/image.rs`, `microvms-app/src/control/transport.rs`, `microvms-app/src/preflight.rs`, `microvms-domain/src/preflight.rs`, `microvms-js/src/preflight.rs`, `microvms-py/src/preflight.rs`
+- **live:** `conformance/lanes/local.py`
+
+## BIND-16
+
+The microvms-core shall not make a billable or mutating AWS call during a preflight, nor any AWS call after the region or the credentials failed to resolve.
+
+- **model:** `model/src/preflight.rs`
+- **gherkin:** `microvms-core/tests/features/request_and_preflight.feature`
+- **fuzz:** waived: the outcome space (3 region x 2 credential x 3 service worlds) is enumerated exhaustively by the Stateright model; there is no input stream to fuzz
+- **test:** `microvms-app/src/preflight.rs`, `microvms-core/tests/live_preflight.rs`, `microvms-js/__test__/request_and_preflight.mjs`, `microvms-py/tests/test_request_and_preflight.py`
+- **impl:** `microvms-app/src/control/image.rs`, `microvms-app/src/preflight.rs`, `microvms-domain/src/preflight.rs`, `microvms-js/src/preflight.rs`, `microvms-py/src/preflight.rs`
+- **live:** `conformance/lanes/local.py`
+
+## BIND-17
+
+When a caller requests the agentd daemon binary, the language bindings layer shall return the agentd binary that microvms-core resolves from a caller-supplied path, then the cache entry for the requested version, then the release asset for that version, with the version defaulting to the core version.
+
+- **model:** `model/src/provision.rs`
+- **gherkin:** `microvms-core/tests/features/provision.feature`
+- **fuzz:** `microvms-edges/src/provision_fuzz.rs`
+- **test:** `microvms-edges/src/provision.rs`, `microvms-js/__test__/provision.mjs`
+- **impl:** `microvms-edges/src/lib.rs`, `microvms-edges/src/provision.rs`, `microvms-js/src/provision.rs`, `microvms-py/src/provision.rs`
+- **live:** `conformance/lanes/quickstart.py`
+
+## BIND-18
+
+If a fetched agentd release asset fails its attestation or SHA256SUMS verification, or neither verification can run, then the microvms-core shall fail with ERR_PRECONDITION without returning or caching the bytes.
+
+- **model:** `model/src/provision.rs`
+- **gherkin:** `microvms-core/tests/features/provision.feature`
+- **fuzz:** `microvms-edges/src/provision_fuzz.rs`
+- **test:** `microvms-app/src/provision.rs`, `microvms-edges/src/provision.rs`, `microvms-edges/src/provision/release.rs`, `microvms-js/__test__/provision.mjs`
+- **impl:** `microvms-app/src/provision.rs`, `microvms-edges/src/provision.rs`, `microvms-edges/src/provision/release.rs`
+- **live:** `conformance/lanes/quickstart.py`
+
+## BIND-19
+
+If a cached agentd binary does not match the digest recorded when its release asset was verified, then the microvms-core shall discard the entry and fetch the release asset again.
+
+- **model:** `model/src/provision.rs`
+- **gherkin:** `microvms-core/tests/features/provision.feature`
+- **fuzz:** `microvms-edges/src/provision_fuzz.rs`
+- **test:** `microvms-edges/src/provision.rs`, `microvms-js/__test__/provision.mjs`
+- **impl:** `microvms-edges/src/provision.rs`
+- **live:** `conformance/lanes/quickstart.py`
+
+## BIND-20
+
+If a caller-supplied or fetched agentd binary is not an aarch64 ELF executable, then the microvms-core shall refuse it with ERR_PRECONDITION.
+
+- **model:** `model/src/provision.rs`
+- **gherkin:** `microvms-core/tests/features/provision.feature`
+- **fuzz:** `microvms-edges/src/provision_fuzz.rs`
+- **test:** `microvms-edges/src/provision.rs`, `microvms-js/__test__/provision.mjs`
+- **impl:** `microvms-edges/src/provision.rs`, `microvms-js/src/provision.rs`, `microvms-py/src/provision.rs`
+- **live:** `conformance/lanes/quickstart.py`
+
+## BIND-21
+
+If the far end of an identity-verified tunnel does not complete the handshake against the VM public key pinned in the name record, then the microvms-core shall fail the tunnel rather than relay the local connection through the tunnel.
+
+- **model:** waived: #297 adds a stateright model of the tunnel handshake and its pins; until then the handshake and relay tests hold the key
+- **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
+- **fuzz:** waived: #297 adds a harness over the client's tunnel frame read
+- **test:** `microvms-core/tests/tunnel_end_to_end.rs`
+- **impl:** `microvms-edges/src/session/tunnel.rs`
+- **live:** `conformance/lanes/tunnel.py`
+
+## BIND-22
+
+If a daemon event stream carries bytes that are not well-formed server-sent events, then the microvms-core shall drop the frame or end the stream with an error, without a panic and without holding more than 4 MiB of bytes that no frame terminator ends between reads.
+
+- **model:** waived: one stream read by one parser has no interleavings to explore; its input space is bytes
+- **gherkin:** waived: hostile bytes aren't a scenario a caller drives; the parser's tests feed it directly
+- **fuzz:** `microvms-app/src/session/sse_fuzz.rs`
+- **test:** `microvms-app/src/session/sse.rs`
+- **impl:** `microvms-app/src/session/sse.rs`
+- **live:** waived: a live daemon sends well-formed events, so a live run can't present hostile bytes
 
 ## CLI-7
 
@@ -218,358 +570,6 @@ The language bindings layer shall expose ensure_image as a thin wrapper that ret
 - **test:** `microvms-js/__test__/ensure.mjs`, `microvms-py/tests/test_ensure_image.py`
 - **impl:** `microvms-js/src/sandbox.rs`, `microvms-py/src/sandbox.rs`
 - **live:** waived: the conformance section drives core's ensure_image, which each binding forwards unchanged
-
-## AGENTD-7
-
-When a start request names its user or its group with a JSON string, the agentd shall resolve the name against the guest's /etc/passwd or /etc/group before it spawns the child.
-
-- **model:** `model/src/exec_start.rs`
-- **gherkin:** `agentd/tests/features/exec_start.feature`
-- **fuzz:** `agentd/src/exec_start_fuzz.rs`
-- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
-- **impl:** `agentd/src/exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-js/src/session.rs`, `microvms-py/src/session.rs`
-- **live:** `conformance/lanes/exec.py`
-
-## AGENTD-8
-
-If a start request names a user or a group that the guest's /etc/passwd or /etc/group does not contain, then the agentd shall answer Bad Request with the unknown_user or unknown_group error naming the value and spawn no child.
-
-- **model:** `model/src/exec_start.rs`
-- **gherkin:** `agentd/tests/features/exec_start.feature`
-- **fuzz:** `agentd/src/exec_start_fuzz.rs`
-- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
-- **impl:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
-- **live:** `conformance/lanes/exec.py`
-
-## AGENTD-9
-
-When the user of a start request resolves to a passwd row, the agentd shall set HOME, USER and LOGNAME from the passwd row beneath the launch environment and the request environment.
-
-- **model:** `model/src/exec_start.rs`
-- **gherkin:** `agentd/tests/features/exec_start.feature`
-- **fuzz:** `agentd/src/exec_start_fuzz.rs`
-- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
-- **impl:** `agentd/src/exec_start.rs`
-- **live:** `conformance/lanes/exec.py`
-
-## AGENTD-10
-
-While a start request leaves inherit_image_env unset, the agentd shall build the child environment from the passwd identity, the launch environment and the request environment only.
-
-- **model:** `model/src/exec_start.rs`
-- **gherkin:** `agentd/tests/features/exec_start.feature`
-- **fuzz:** `agentd/src/exec_start_fuzz.rs`
-- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
-- **impl:** `agentd/src/exec_start.rs`
-- **live:** `conformance/lanes/exec.py`
-
-## AGENTD-11
-
-When a start request sets inherit_image_env, the agentd shall place the environment the agentd inherited at startup beneath the passwd identity, the launch environment and the request environment.
-
-- **model:** `model/src/exec_start.rs`
-- **gherkin:** `agentd/tests/features/exec_start.feature`
-- **fuzz:** `agentd/src/exec_start_fuzz.rs`
-- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
-- **impl:** `agentd/src/exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-js/src/session.rs`
-- **live:** `conformance/lanes/exec.py`
-
-## AGENTD-12
-
-The agentd shall exclude each AGENTD_ variable and the agent token from the image environment snapshot.
-
-- **model:** `model/src/exec_start.rs`
-- **gherkin:** `agentd/tests/features/exec_start.feature`
-- **fuzz:** `agentd/src/exec_start_fuzz.rs`
-- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
-- **impl:** `agentd/src/exec_start.rs`, `agentd/src/lib.rs`, `agentd/src/main.rs`
-- **live:** `conformance/lanes/exec.py`
-
-## AGENTD-13
-
-The agentd shall report on /v1/health whether an image environment snapshot exists and its key count, without its values.
-
-- **model:** `model/src/exec_start.rs`
-- **gherkin:** `agentd/tests/features/exec_start.feature`
-- **fuzz:** `agentd/src/exec_start_fuzz.rs`
-- **test:** `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`, `protocol/src/health.rs`
-- **impl:** `agentd/src/routes.rs`
-- **live:** `conformance/lanes/exec.py`
-
-## AGENTD-14
-
-When a start request names a shell, the agentd shall resolve the shell name on the child PATH, the image PATH, /bin and /usr/bin and run the command as the -c script of the resolved shell.
-
-- **model:** `model/src/exec_start.rs`
-- **gherkin:** `agentd/tests/features/exec_start.feature`
-- **fuzz:** `agentd/src/exec_start_fuzz.rs`
-- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
-- **impl:** `agentd/src/exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-py/src/session.rs`
-- **live:** `conformance/lanes/exec.py`
-
-## AGENTD-15
-
-If a start request names a shell that no searched directory holds as an executable file, then the agentd shall answer Bad Request with the unknown_shell error naming the shell and spawn no child.
-
-- **model:** `model/src/exec_start.rs`
-- **gherkin:** `agentd/tests/features/exec_start.feature`
-- **fuzz:** `agentd/src/exec_start_fuzz.rs`
-- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
-- **impl:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
-- **live:** `conformance/lanes/exec.py`
-
-## AGENTD-16
-
-When a start request carries its user and group as integers and its shell as a boolean, the agentd shall demote the child to exactly those ids and run a true shell as /bin/sh -c.
-
-- **model:** `model/src/exec_start.rs`
-- **gherkin:** `agentd/tests/features/exec_start.feature`
-- **fuzz:** `agentd/src/exec_start_fuzz.rs`
-- **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
-- **impl:** `agentd/src/exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-js/src/session.rs`, `microvms-py/src/session.rs`
-- **live:** `conformance/lanes/exec.py`
-
-## AGENTD-17
-
-If the handshake of an identity-verified tunnel is not made with the host key the run hook pinned, then the agentd shall close the tunnel with close code 4403.
-
-- **model:** waived: #297 adds a stateright model of the tunnel handshake and its pins; until then the handshake and relay tests hold the key
-- **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
-- **fuzz:** waived: #297 adds a harness over the daemon's tunnel frame read
-- **test:** `agentd/src/tunnel_identity.rs`, `agentd/tests/tunnel_relay.rs`
-- **impl:** `agentd/src/tunnel_identity.rs`
-- **live:** waived: no live check presents another host key: that needs a second host identity for one VM, and the relay tests drive the daemon's real route with one
-
-## AGENTD-18
-
-While the handshake of an identity-verified tunnel has not completed, the agentd shall not dial the guest port or relay any byte between the caller and the guest.
-
-- **model:** waived: #297 adds a stateright model of the tunnel handshake and its pins; until then the handshake and relay tests hold the key
-- **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
-- **fuzz:** waived: #297 adds a harness over the daemon's tunnel frame read
-- **test:** `agentd/tests/tunnel_relay.rs`
-- **impl:** `agentd/src/tunnel.rs`
-- **live:** `conformance/lanes/tunnel.py`
-
-## BIND-11
-
-The microvms-core shall derive a launch's egress posture from its launch options alone, as open when managed internet egress is requested, best-effort when the advisory deny is requested, and unsealed otherwise, and never as sealed.
-
-- **model:** `model/src/posture.rs`
-- **gherkin:** `microvms-core/tests/features/egress_posture.feature`
-- **fuzz:** `microvms-app/src/control/posture_fuzz.rs`
-- **test:** `microvms-app/src/control/connector.rs`, `microvms-js/__test__/egress_posture.mjs`, `microvms-py/tests/test_egress_posture.py`
-- **impl:** `microvms-app/src/control/connector.rs`
-- **live:** `conformance/lanes/posture.py`
-
-## BIND-12
-
-The language bindings layer shall expose on each session the egress posture the CLI envelope reports for the same launch options, and unsealed for a session whose launch options the session does not hold.
-
-- **model:** `model/src/posture.rs`
-- **gherkin:** `microvms-core/tests/features/egress_posture.feature`
-- **fuzz:** `microvms-app/src/control/posture_fuzz.rs`
-- **test:** `microvms-app/src/sandbox.rs`, `microvms-cli/src/guards.rs`, `microvms-core/tests/live_posture.rs`, `microvms-js/__test__/egress_posture.mjs`, `microvms-py/tests/test_egress_posture.py`
-- **impl:** `microvms-app/src/sandbox.rs`, `microvms-app/src/session/mod.rs`, `microvms-cli/src/commands/lifecycle.rs`
-- **live:** `conformance/lanes/posture.py`
-
-## BIND-13
-
-When a caller asks for the egress posture of a set of launch options, the microvms-core shall answer with the posture a launch with those options would report, or with the invalid-argument refusal the launch would raise, without any AWS call.
-
-- **model:** `model/src/posture.rs`
-- **gherkin:** `microvms-core/tests/features/egress_posture.feature`
-- **fuzz:** `microvms-app/src/control/posture_fuzz.rs`
-- **test:** `microvms-app/src/control/connector.rs`, `microvms-js/__test__/egress_posture.mjs`, `microvms-py/tests/test_egress_posture.py`
-- **impl:** `microvms-app/src/control/connector.rs`, `microvms-app/src/sandbox.rs`, `microvms-cli/src/commands/lifecycle.rs`
-- **live:** waived: a pure function that makes no AWS call; its refusals precede any call, so the service never sees them (zero calls asserted by the Gherkin scenarios and the fuzz harness)
-
-## BIND-17
-
-When a caller requests the agentd daemon binary, the language bindings layer shall return the agentd binary that microvms-core resolves from a caller-supplied path, then the cache entry for the requested version, then the release asset for that version, with the version defaulting to the core version.
-
-- **model:** `model/src/provision.rs`
-- **gherkin:** `microvms-core/tests/features/provision.feature`
-- **fuzz:** `microvms-edges/src/provision_fuzz.rs`
-- **test:** `microvms-edges/src/provision.rs`, `microvms-js/__test__/provision.mjs`
-- **impl:** `microvms-edges/src/lib.rs`, `microvms-edges/src/provision.rs`, `microvms-js/src/provision.rs`, `microvms-py/src/provision.rs`
-- **live:** `conformance/lanes/quickstart.py`
-
-## BIND-18
-
-If a fetched agentd release asset fails its attestation or SHA256SUMS verification, or neither verification can run, then the microvms-core shall fail with ERR_PRECONDITION without returning or caching the bytes.
-
-- **model:** `model/src/provision.rs`
-- **gherkin:** `microvms-core/tests/features/provision.feature`
-- **fuzz:** `microvms-edges/src/provision_fuzz.rs`
-- **test:** `microvms-app/src/provision.rs`, `microvms-edges/src/provision.rs`, `microvms-edges/src/provision/release.rs`, `microvms-js/__test__/provision.mjs`
-- **impl:** `microvms-app/src/provision.rs`, `microvms-edges/src/provision.rs`, `microvms-edges/src/provision/release.rs`
-- **live:** `conformance/lanes/quickstart.py`
-
-## BIND-19
-
-If a cached agentd binary does not match the digest recorded when its release asset was verified, then the microvms-core shall discard the entry and fetch the release asset again.
-
-- **model:** `model/src/provision.rs`
-- **gherkin:** `microvms-core/tests/features/provision.feature`
-- **fuzz:** `microvms-edges/src/provision_fuzz.rs`
-- **test:** `microvms-edges/src/provision.rs`, `microvms-js/__test__/provision.mjs`
-- **impl:** `microvms-edges/src/provision.rs`
-- **live:** `conformance/lanes/quickstart.py`
-
-## BIND-20
-
-If a caller-supplied or fetched agentd binary is not an aarch64 ELF executable, then the microvms-core shall refuse it with ERR_PRECONDITION.
-
-- **model:** `model/src/provision.rs`
-- **gherkin:** `microvms-core/tests/features/provision.feature`
-- **fuzz:** `microvms-edges/src/provision_fuzz.rs`
-- **test:** `microvms-edges/src/provision.rs`, `microvms-js/__test__/provision.mjs`
-- **impl:** `microvms-edges/src/provision.rs`, `microvms-js/src/provision.rs`, `microvms-py/src/provision.rs`
-- **live:** `conformance/lanes/quickstart.py`
-
-## BIND-21
-
-If the far end of an identity-verified tunnel does not complete the handshake against the VM public key pinned in the name record, then the microvms-core shall fail the tunnel rather than relay the local connection through the tunnel.
-
-- **model:** waived: #297 adds a stateright model of the tunnel handshake and its pins; until then the handshake and relay tests hold the key
-- **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
-- **fuzz:** waived: #297 adds a harness over the client's tunnel frame read
-- **test:** `microvms-core/tests/tunnel_end_to_end.rs`
-- **impl:** `microvms-edges/src/session/tunnel.rs`
-- **live:** `conformance/lanes/tunnel.py`
-
-## BIND-22
-
-If a daemon event stream carries bytes that are not well-formed server-sent events, then the microvms-core shall drop the frame or end the stream with an error, without a panic and without holding more than 4 MiB of bytes that no frame terminator ends between reads.
-
-- **model:** waived: one stream read by one parser has no interleavings to explore; its input space is bytes
-- **gherkin:** waived: hostile bytes aren't a scenario a caller drives; the parser's tests feed it directly
-- **fuzz:** `microvms-app/src/session/sse_fuzz.rs`
-- **test:** `microvms-app/src/session/sse.rs`
-- **impl:** `microvms-app/src/session/sse.rs`
-- **live:** waived: a live daemon sends well-formed events, so a live run can't present hostile bytes
-
-## BIND-6
-
-The microvms-core shall report a finished exec's POSIX exit code as 124 when a deadline ended the command, as 128 plus the signal number for any other signal death, and otherwise as the exit code.
-
-- **model:** `model/src/run.rs`
-- **gherkin:** `microvms-core/tests/features/run_to_completion.feature`
-- **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
-- **test:** `microvms-app/src/session/exec.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
-- **impl:** `microvms-app/src/session/complete.rs`, `microvms-app/src/session/exec.rs`, `microvms-js/src/exec.rs`, `microvms-js/src/session.rs`, `microvms-py/src/exec.rs`, `microvms-py/src/session.rs`
-- **live:** `conformance/lanes/sessions.py`
-
-## BIND-7
-
-The microvms-core shall annotate an exec result with one human-readable note for each of truncated output, an expired daemon deadline, writers left alive past the linger deadline, an expired client deadline, and a synthesized result.
-
-- **model:** `model/src/run.rs`
-- **gherkin:** `microvms-core/tests/features/run_to_completion.feature`
-- **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
-- **test:** `microvms-app/src/session/exec.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
-- **impl:** `microvms-app/src/session/exec.rs`, `microvms-js/src/exec.rs`, `microvms-py/src/exec.rs`
-- **live:** `conformance/lanes/sessions.py`
-
-## BIND-8
-
-If the output stream of a run-to-completion call ends without the terminal exit event, then the microvms-core shall fall back to waiting for and acknowledging the exec and return exactly one result.
-
-- **model:** `model/src/run.rs`
-- **gherkin:** `microvms-core/tests/features/run_to_completion.feature`
-- **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
-- **test:** `microvms-app/src/session/complete.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
-- **impl:** `microvms-app/src/session/complete.rs`
-- **live:** `conformance/lanes/sessions.py`
-
-## BIND-9
-
-If the client deadline of a run-to-completion call expires before the exec's result is acknowledged, then the microvms-core shall signal the exec's process group before acknowledging the exec within the client grace period.
-
-- **model:** `model/src/run.rs`
-- **gherkin:** `microvms-core/tests/features/run_to_completion.feature`
-- **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
-- **test:** `microvms-app/src/session/complete.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
-- **impl:** `microvms-app/src/session/complete.rs`, `microvms-app/src/session/exec.rs`
-- **live:** `conformance/lanes/sessions.py`
-
-## BIND-10
-
-If the acknowledgement that follows a client-deadline kill fails, then the microvms-core shall return a synthesized result whose POSIX exit code is 124 and whose notes name the failure.
-
-- **model:** `model/src/run.rs`
-- **gherkin:** `microvms-core/tests/features/run_to_completion.feature`
-- **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
-- **test:** `microvms-app/src/session/complete.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
-- **impl:** `microvms-app/src/session/complete.rs`, `microvms-app/src/session/exec.rs`, `microvms-js/src/exec.rs`, `microvms-py/src/exec.rs`
-- **live:** `conformance/lanes/sessions.py`
-
-## BIND-14
-
-The sizing model shall select for a resource request the smallest size class whose baseline memory and baseline vCPU both cover the request, the default class when the request names neither, and an invalid-argument refusal naming the largest class when no class covers the request.
-
-- **model:** waived: a stateless selection over the five-row size table; the bolero harness checks minimality and coverage over arbitrary requests instead
-- **gherkin:** `microvms-core/tests/features/request_and_preflight.feature`
-- **fuzz:** `microvms-domain/src/sizing_fuzz.rs`
-- **test:** `microvms-domain/src/sizing.rs`, `microvms-js/__test__/request_and_preflight.mjs`, `microvms-py/tests/test_request_and_preflight.py`
-- **impl:** `microvms-domain/src/sizing.rs`, `microvms-js/src/cost.rs`, `microvms-py/src/cost.rs`
-- **live:** waived: a pure function of the request and the documented table; it makes no AWS call
-
-## BIND-15
-
-When a caller asks for a preflight, the microvms-core shall report whether the region resolves to a supported region, whether the credential chain resolves credentials, and whether the MicroVMs service answers a free read-only listing in that region, as one report whose ok is true only when every fatal check passed.
-
-- **model:** `model/src/preflight.rs`
-- **gherkin:** `microvms-core/tests/features/request_and_preflight.feature`
-- **fuzz:** waived: the outcome space (3 region x 2 credential x 3 service worlds) is enumerated exhaustively by the Stateright model; there is no input stream to fuzz
-- **test:** `microvms-app/src/preflight.rs`, `microvms-cli/src/guards.rs`, `microvms-core/tests/live_preflight.rs`, `microvms-js/__test__/request_and_preflight.mjs`, `microvms-py/tests/test_request_and_preflight.py`
-- **impl:** `microvms-app/src/control/image.rs`, `microvms-app/src/control/transport.rs`, `microvms-app/src/preflight.rs`, `microvms-domain/src/preflight.rs`, `microvms-js/src/preflight.rs`, `microvms-py/src/preflight.rs`
-- **live:** `conformance/lanes/local.py`
-
-## BIND-16
-
-The microvms-core shall not make a billable or mutating AWS call during a preflight, nor any AWS call after the region or the credentials failed to resolve.
-
-- **model:** `model/src/preflight.rs`
-- **gherkin:** `microvms-core/tests/features/request_and_preflight.feature`
-- **fuzz:** waived: the outcome space (3 region x 2 credential x 3 service worlds) is enumerated exhaustively by the Stateright model; there is no input stream to fuzz
-- **test:** `microvms-app/src/preflight.rs`, `microvms-core/tests/live_preflight.rs`, `microvms-js/__test__/request_and_preflight.mjs`, `microvms-py/tests/test_request_and_preflight.py`
-- **impl:** `microvms-app/src/control/image.rs`, `microvms-app/src/preflight.rs`, `microvms-domain/src/preflight.rs`, `microvms-js/src/preflight.rs`, `microvms-py/src/preflight.rs`
-- **live:** `conformance/lanes/local.py`
-
-## ARCH-6
-
-The microvms-domain shall not perform network, filesystem, subprocess, environment, clock, or entropy access.
-
-- **model:** waived: a property of a crate's code and dependencies, not of a state
-- **gherkin:** waived: no behavior to script: clippy and the dependency set enforce it at build time
-- **fuzz:** waived: there is no input stream; the rule is over source and manifests
-- **test:** `microvms-cli/tests/dependency_direction.rs`
-- **impl:** `microvms-core/src/lib.rs`, `microvms-core/src/prelude.rs`, `microvms-domain/src/cost.rs`, `microvms-domain/src/identity.rs`, `microvms-domain/src/lib.rs`, `microvms-domain/src/names.rs`
-- **live:** waived: the domain makes no AWS call by construction
-
-## ARCH-7
-
-The microvms-app shall not depend directly on a crate or a tokio feature that performs network, AWS, filesystem, subprocess, or entropy I/O.
-
-- **model:** waived: a property of a crate's code and dependencies, not of a state
-- **gherkin:** waived: no behavior to script: clippy and the dependency set enforce it at build time
-- **fuzz:** waived: there is no input stream; the rule is over source and manifests
-- **test:** `microvms-app/src/sandbox.rs`, `microvms-cli/tests/dependency_direction.rs`
-- **impl:** `microvms-app/src/lib.rs`, `microvms-core/src/lib.rs`, `microvms-edges/src/lib.rs`
-- **live:** waived: the app's AWS calls all go through ports, so the live tier exercises the edges' implementations, not this rule
-
-## ARCH-8
-
-The microvms-core shall not contain logic beyond composition and re-exports.
-
-- **model:** waived: a property of a crate's code and dependencies, not of a state
-- **gherkin:** waived: no behavior to script: the dependency set and the ratchet check it over source and manifests
-- **fuzz:** waived: there is no input stream; the rule is over source and manifests
-- **test:** `microvms-cli/tests/dependency_direction.rs`
-- **impl:** `microvms-core/src/lib.rs`
-- **live:** waived: composition makes no AWS call of its own
 
 ## Threats
 

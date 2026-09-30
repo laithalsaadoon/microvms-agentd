@@ -1,0 +1,15 @@
+# The sentinel's GATE group, in the format of the real files in spec/traced/, which the untraced
+# collector reads with check-trace.py's loader. GATE-4 waives every layer, so it's listed and
+# still untraced.
+
+[GATE-1]
+issue = "#1"
+
+[GATE-4]
+issue = "#3"
+waive.model = "nothing checks it"
+waive.gherkin = "nothing checks it"
+waive.fuzz = "nothing checks it"
+waive.test = "nothing checks it"
+waive.impl = "nothing checks it"
+waive.live = "nothing checks it"
