@@ -5109,6 +5109,13 @@ mod tests {
             "{}",
             within.render()
         );
+        assert_eq!(within.unpriced_phases(), ["image-build"]);
+        // An exact total under the ceiling says it's the estimate and claims no lower bound.
+        let exact_within = Budget::new(floor, OnBreach::Warn).check(&exact);
+        assert!(exact_within.unpriced_phases().is_empty());
+        let text = exact_within.render();
+        assert!(text.starts_with("budget: the estimated total $"), "{text}");
+        assert!(!text.contains("lower bound"), "{text}");
     }
 
     /// An empty report is an exact zero, not a lower bound: nothing on it is unpriced, so a
