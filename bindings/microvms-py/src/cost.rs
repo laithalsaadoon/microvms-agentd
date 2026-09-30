@@ -53,13 +53,13 @@
 //!   by value would not compile, which is the closest thing to "the core has no
 //!   constructor for a bill" that a binding can hold.
 //!
-//! # The JSON shape is the Python oracle's, not a re-invention
+//! # The JSON shape is core's
 //!
-//! [`CostReport::to_dict`] emits the `report_to_dict` shape the deleted Python client's
-//! `cli.py:688` produced — camelCase keys, `estimated: true` as a literal field,
-//! quantities and dollars as strings, and an unpriced line item with no `usd` key. It was
-//! a transcription rather than a design, because the two clients had to be diffable
-//! against each other; the shape stays because consumers now read it.
+//! [`CostReport::to_dict`] and [`LineItem::to_dict`] are core's `to_json` read back as a dict,
+//! the one shape the CLI's `cost --json` and TypeScript's `toJson` emit too (#255): camelCase
+//! keys, `estimated: true` as a literal field, quantities and dollars as strings, and an
+//! unpriced line item with no `usd` key. Written here by hand, it had drifted from the CLI's
+//! (no `size.headroomMib`).
 //!
 //! (cli.py line numbers resolve at `git show 'c4d396e^:clients/python/src/microvms_agentd/cli.py'` — the retired oracle.)
 
@@ -73,7 +73,7 @@ use microvms_core::cost::{
 };
 use microvms_core::prelude::*;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::PyDict;
 
 use crate::errors::PyCoreResult;
 
@@ -368,9 +368,10 @@ impl PyLineItem {
         &self.inner.note
     }
 
-    /// The `cli.py` `_line_to_dict` shape. An unpriced line has **no** `usd` key at all.
+    /// Core's JSON shape for a line item, as a dict. An unpriced line has **no** `usd` key at
+    /// all.
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        line_to_dict(py, &self.inner)
+        json_to_dict(py, &self.inner.to_json())
     }
 
     fn __str__(&self) -> String {
@@ -387,42 +388,15 @@ impl PyLineItem {
     }
 }
 
-/// `cli.py:725 _line_to_dict`, transcribed.
+/// A JSON object as the dict `json.loads` makes of it.
 ///
-/// The `usd` key is **absent** for an unpriced line rather than null. That is the one
-/// place this shape is load-bearing rather than conventional: a null is summed as zero by
-/// anything permissive, and the whole cost module exists to not enable that arithmetic.
-fn line_to_dict<'py>(py: Python<'py>, item: &CoreLineItem) -> PyResult<Bound<'py, PyDict>> {
-    let amount = PyDict::new(py);
-    amount.set_item("kind", item.amount.kind())?;
-    match (item.amount.estimate(), item.amount.unpriced_reason()) {
-        (Some(usd), _) => amount.set_item("usd", usd.amount().to_string())?,
-        (None, Some(reason)) => amount.set_item("reason", reason)?,
-        // Unreachable while `Amount` has two variants; written rather than `unreachable!()`
-        // because a panic across the FFI boundary is not an ordinary error and a third
-        // variant should degrade to a visibly incomplete dict, not abort the interpreter.
-        (None, None) => {}
-    }
-
-    let duration = match item.duration {
-        Some(duration) => {
-            let mapped = PyDict::new(py);
-            mapped.set_item("seconds", duration.duration().as_secs_f64())?;
-            mapped.set_item("provenance", duration.provenance().as_str())?;
-            Some(mapped)
-        }
-        None => None,
-    };
-
-    let dict = PyDict::new(py);
-    dict.set_item("phase", item.phase.as_str())?;
-    dict.set_item("line", item.line.map(BillingLine::as_str))?;
-    dict.set_item("quantity", item.quantity.to_string())?;
-    dict.set_item("unit", &item.unit)?;
-    dict.set_item("amount", amount)?;
-    dict.set_item("duration", duration)?;
-    dict.set_item("note", &item.note)?;
-    Ok(dict)
+/// Through `json` rather than built key by key, so the dict is core's shape exactly: an absent
+/// key stays absent, which is what keeps an unpriced line's `usd` out of a permissive sum.
+fn json_to_dict<'py>(py: Python<'py>, value: &serde_json::Value) -> PyResult<Bound<'py, PyDict>> {
+    Ok(py
+        .import("json")?
+        .call_method1("loads", (value.to_string(),))?
+        .cast_into::<PyDict>()?)
 }
 
 // ── Total (COST-4) ───────────────────────────────────────────────────────────
@@ -815,44 +789,10 @@ impl PyCostReport {
         self.inner.render()
     }
 
-    /// The `cli.py:688 report_to_dict` shape, key for key.
+    /// Core's JSON shape for a report, as a dict: the one `microvm cost --json` and
+    /// TypeScript's `toJson` emit (#255).
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        let size = PyDict::new(py);
-        size.set_item("baselineMib", self.inner.size().baseline_mib())?;
-        size.set_item("baselineVcpu", self.inner.size().baseline_vcpu())?;
-        size.set_item("peakMib", self.inner.size().peak_mib())?;
-        size.set_item("peakVcpu", self.inner.size().peak_vcpu())?;
-        size.set_item("describe", self.inner.size().to_string())?;
-
-        let rates = PyDict::new(py);
-        rates.set_item("region", self.inner.rates().region().to_string())?;
-        rates.set_item("retrieved", self.inner.rates().retrieved().to_string())?;
-        rates.set_item("sourceUrl", self.inner.rates().source_url())?;
-
-        let items = PyList::empty(py);
-        for item in self.inner.items() {
-            items.append(line_to_dict(py, item)?)?;
-        }
-
-        let total = self.inner.total();
-        let total_dict = PyDict::new(py);
-        total_dict.set_item("priced", total.floor().amount().to_string())?;
-        total_dict.set_item("isLowerBound", total.is_lower_bound())?;
-        total_dict.set_item("render", total.to_string())?;
-
-        let dict = PyDict::new(py);
-        dict.set_item("label", self.inner.label())?;
-        dict.set_item("size", size)?;
-        dict.set_item("rates", rates)?;
-        // Not "cost": these are estimates derived from published rates, and the field
-        // name is the only place the distinction survives a copy-paste.
-        dict.set_item("estimated", true)?;
-        dict.set_item("fullyMeasured", self.inner.fully_measured())?;
-        dict.set_item("complete", self.inner.is_complete())?;
-        dict.set_item("staleness", self.inner.staleness())?;
-        dict.set_item("items", items)?;
-        dict.set_item("total", total_dict)?;
-        Ok(dict)
+        json_to_dict(py, &self.inner.to_json())
     }
 
     fn __str__(&self) -> String {
@@ -960,6 +900,11 @@ impl PyResidencyComparison {
 /// takes it so a report is a pure function of its inputs and a test does not have to
 /// travel in time; a Python caller who needs that reaches for the core through Rust, and
 /// exposing a date here would be a knob whose only use is faking staleness.
+///
+/// Leave `launched` out and the core infers it: running time, or an image of non-zero size
+/// (a launch reads a snapshot, so claiming one adds a transfer line). Leave `label` out and
+/// the report is labelled `"run"`. Both defaults are the core's, the ones `microvm cost`
+/// applies.
 #[pyfunction]
 #[pyo3(signature = (
     size,
@@ -971,8 +916,8 @@ impl PyResidencyComparison {
     image_retained=None,
     suspend_resume_cycles=0,
     snapshot_gb=None,
-    launched=true,
-    label="run",
+    launched=None,
+    label=None,
     rates=None,
 ))]
 #[allow(
@@ -990,11 +935,11 @@ pub(crate) fn run_report(
     image_retained: Option<PyDuration>,
     suspend_resume_cycles: u32,
     snapshot_gb: Option<f64>,
-    launched: bool,
-    label: &str,
+    launched: Option<bool>,
+    label: Option<&str>,
     rates: Option<PyRateTable>,
 ) -> PyCoreResult<PyCostReport> {
-    let usage = RunUsage {
+    let mut usage = RunUsage {
         running: running.map(|duration| duration.inner),
         suspended: suspended.map(|duration| duration.inner),
         image_build: image_build.map(|duration| duration.inner),
@@ -1002,15 +947,16 @@ pub(crate) fn run_report(
         image_retained: image_retained.map(|duration| duration.inner),
         suspend_resume_cycles,
         snapshot_gb,
-        launched,
+        launched: false,
     };
+    usage.launched = launched.unwrap_or_else(|| usage.infer_launched());
     let table = rates.map_or_else(cost::pinned_rates, |rates| rates.inner);
     Ok(PyCostReport::wrap(cost::run_report(
         size.inner,
         &usage,
         &table,
         CalendarDate::today_utc(),
-        label,
+        label.unwrap_or(cost::DEFAULT_RUN_LABEL),
     )?))
 }
 
@@ -1020,6 +966,10 @@ pub(crate) fn run_report(
 /// [`run_report`]: not the arithmetic, which is shared, but what the durations admit about
 /// themselves — and it is why this signature has no `Duration` parameter at all, so an
 /// accidentally-measured one is not something a caller can write.
+///
+/// Leave `launched` out and the core infers it: running time, or an image of non-zero size, so
+/// a plan of suspended time alone reads no launch snapshot. Leave `label` out and the report
+/// is labelled `"estimate"`, what `microvm cost --estimate` labels the same plan (#255).
 #[pyfunction]
 #[pyo3(signature = (
     size,
@@ -1030,8 +980,8 @@ pub(crate) fn run_report(
     image_retained_seconds=None,
     suspend_resume_cycles=0,
     snapshot_gb=None,
-    launched=true,
-    label="plan",
+    launched=None,
+    label=None,
     rates=None,
 ))]
 #[allow(
@@ -1047,26 +997,27 @@ pub(crate) fn estimate_run(
     image_retained_seconds: Option<f64>,
     suspend_resume_cycles: u32,
     snapshot_gb: Option<f64>,
-    launched: bool,
-    label: &str,
+    launched: Option<bool>,
+    label: Option<&str>,
     rates: Option<PyRateTable>,
 ) -> PyCoreResult<PyCostReport> {
-    let plan = PlanUsage {
+    let mut plan = PlanUsage {
         running_seconds,
         suspended_seconds,
         image_gb,
         image_retained_seconds,
         suspend_resume_cycles,
         snapshot_gb,
-        launched,
+        launched: false,
     };
+    plan.launched = launched.unwrap_or_else(|| plan.infer_launched());
     let table = rates.map_or_else(cost::pinned_rates, |rates| rates.inner);
     Ok(PyCostReport::wrap(cost::estimate_run(
         size.inner,
         &plan,
         &table,
         CalendarDate::today_utc(),
-        label,
+        label.unwrap_or(cost::DEFAULT_ESTIMATE_LABEL),
     )?))
 }
 

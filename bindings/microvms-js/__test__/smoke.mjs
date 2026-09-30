@@ -212,6 +212,7 @@ test('a total over an unpriced line is a lower bound carrying its reasons', () =
 });
 
 test('the report JSON shape is the Python client’s', () => {
+  // Plus `size.headroomMib`: the shape is core's, the one `microvm cost --json` emits (#255).
   const parsed = JSON.parse(report().toJson());
   assert.equal(parsed.estimated, true);
   assert.deepEqual(Object.keys(parsed).sort(), [
@@ -229,6 +230,7 @@ test('the report JSON shape is the Python client’s', () => {
     'baselineMib',
     'baselineVcpu',
     'describe',
+    'headroomMib',
     'peakMib',
     'peakVcpu',
   ]);
