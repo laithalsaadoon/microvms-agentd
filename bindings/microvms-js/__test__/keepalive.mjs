@@ -11,11 +11,19 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { Session } from '../index.js';
 import { codeOf } from './support/sse.mjs';
 
-/** A health route answering from a `busy` script; the last answer repeats. */
-async function daemon(busy) {
+/**
+ * A health route answering from a `busy` script; the last answer repeats. Any `status` but 200
+ * answers every poll with it instead, the way a daemon that hasn't bootstrapped answers 503.
+ */
+async function daemon(busy, status = 200) {
   const seen = [];
   const server = createServer((req, res) => {
     seen.push([req.url, req.headers.authorization ?? null]);
+    if (status !== 200) {
+      res.writeHead(status, { 'content-length': '0' });
+      res.end();
+      return;
+    }
     const body = JSON.stringify({
       version: '0.1.0',
       bootstrapped: true,
@@ -108,4 +116,29 @@ test('an unreachable daemon is retried, then rejects as retryable', async () => 
     return true;
   });
   assert.equal(keepalive.running, false);
+});
+
+/** Every poll answers 503; the keepalive gives up once it has retried `tolerated` times. */
+async function pollsBeforeGivingUp(tolerated) {
+  const fake = await daemon([true], 503);
+  try {
+    const keepalive = await fake.session.keepAwake({ intervalSec: 1, toleratedErrors: tolerated });
+    await assert.rejects(keepalive.done(), (error) => {
+      assert.equal(codeOf(error), 'ERR_RETRYABLE');
+      return true;
+    });
+    return fake.seen.length;
+  } finally {
+    await fake.close();
+  }
+}
+
+test('one tolerated error is one retry before the keepalive rejects', async () => {
+  // **Falsification**: drop `toleratedErrors` on its way to the core's `KeepAwake` in
+  // `KeepAwakeOptions::policy`, and the core's default retries three times: four polls.
+  assert.equal(await pollsBeforeGivingUp(1), 2);
+});
+
+test('no tolerated errors rejects on the first failed poll', async () => {
+  assert.equal(await pollsBeforeGivingUp(0), 1);
 });

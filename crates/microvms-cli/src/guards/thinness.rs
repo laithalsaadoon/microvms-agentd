@@ -195,6 +195,7 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 while_busy: false,
                 for_sec: None,
                 idle_window: None,
+                tolerated_errors: microvms_core::session::keepalive::DEFAULT_TOLERATED_ERRORS,
                 attach: attach_flags(),
                 region: region_flags(),
             }),

@@ -845,7 +845,7 @@ fn prompt_options(args: &AgentPromptArgs) -> Result<PromptOptions, CliError> {
                     "--execution-timeout must be positive and finite",
                 ));
             }
-            let duration = microvms_core::cost::duration_of_secs_f64(seconds)?;
+            let duration = microvms_core::duration::of_secs_f64(seconds)?;
             if duration.is_zero() {
                 return Err(Error::invalid_arg(
                     "--execution-timeout is below timer precision",

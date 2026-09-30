@@ -24,6 +24,7 @@ status = "Since #423, CI installs mise.lock's Node like every other tool, so bot
 [D31]
 decision = "CI's `guards` job fires only the entries a pull request affects (`guards:fire -- --affected`), and every entry on each push to main. Laith picked option 2 of #323."
 source = "#334 (a081c25, 2026-09-29)."
+status = "Its rule for what a pull request affects changed on 2026-09-30: every push to main records what each entry's verdict read (`guards:fire -- --record`), and a pull request fires each entry whose recorded `fired` verdict it can't keep (`--reuse`), in place of `--affected`'s rule over the files each entry names. #333, which would have narrowed that rule, closed with the change."
 
 [D35]
 decision = "CI's `guards` job runs as a matrix of shards, each firing its share of the selection with 60 minutes, on pull requests and on main's push alike, and the required `seeded faults fire` check is their combined result."

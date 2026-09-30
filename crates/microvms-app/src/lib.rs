@@ -56,7 +56,7 @@ pub mod session;
 pub mod testing;
 
 // The rules and values the use cases compute with, at the paths the moved code names them by.
-pub use microvms_domain::{constants, cost, error, hooks, identity, region, sizing};
+pub use microvms_domain::{constants, cost, duration, error, hooks, identity, region, sizing};
 
 // Re-exported so the use cases and their callers name wire types through one crate.
 pub use protocol;

@@ -1,0 +1,27 @@
+# ── image administration through the bindings (#264) ──────────────────────────
+#
+# The binding parses a version status through core before the call. A binding that stopped
+# parsing (here, one that upper-cases first) lets a near miss through to the wire, and the
+# status test's refusal of it goes red.
+
+[[fault]]
+id = "py-version-status-unparsed"
+guard = "bindings/microvms-py/tests/test_control.py::test_a_version_status_is_the_models_spelling"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_control.py::test_a_version_status_is_the_models_spelling"],
+]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "bindings/microvms-py/src/control.rs", replace = "        let status: ops::VersionStatus = status.parse()?;\n", with = "        let status: ops::VersionStatus = status.to_ascii_uppercase().parse()?;\n" }
+
+[[fault]]
+id = "js-version-status-unparsed"
+guard = "a version status is the model spelling"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/control.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+transform = { file = "bindings/microvms-js/src/control.rs", replace = "        let status: ops::VersionStatus = status.parse().map_err(js_async)?;\n", with = "        let status: ops::VersionStatus = status.to_ascii_uppercase().parse().map_err(js_async)?;\n" }

@@ -678,9 +678,9 @@ impl PyExecHandle {
 
 /// A [`Duration`] from a caller's float seconds.
 ///
-/// The core's `duration_of_secs_f64` is what refuses a negative or non-finite figure —
-/// this is a call, not a check, which is the BIND-2 rule: the refusal and its message
-/// stay in one place.
+/// The core's `duration::of_secs_f64` is what refuses a negative or non-finite figure.
+/// This is a call, not a check, which is the BIND-2 rule: the refusal and its message
+/// stay in one place, and a wait's names no cost report (#338).
 pub(crate) fn seconds(value: f64) -> Result<Duration, microvms_core::Error> {
-    microvms_core::cost::duration_of_secs_f64(value)
+    microvms_core::duration::of_secs_f64(value)
 }
