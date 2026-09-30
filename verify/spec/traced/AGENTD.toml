@@ -1,5 +1,36 @@
 # The AGENTD group's traced requirements. The format and the rules are in tools/check-trace.py.
 
+[AGENTD-1]
+issue = "#305"
+waive.gherkin = "the token rules turn on two facts, whether a token is installed and whether the presented one equals it; the model checks every interleaving of them and the replay drives each against the daemon's routes, which a scenario would restate"
+waive.fuzz = "the verdict depends only on those two facts, which the model enumerates exhaustively, so there is no input space left for a fuzzer"
+waive.live = "the platform runs the hook before it forwards any traffic (AGENTD-2's live check), so a live run never reaches the daemon before bootstrap"
+
+[AGENTD-2]
+issue = "#305"
+waive.gherkin = "the token rules turn on two facts, whether a token is installed and whether the presented one equals it; the model checks every interleaving of them and the replay drives each against the daemon's routes, which a scenario would restate"
+waive.fuzz = "the verdict depends only on those two facts, which the model enumerates exhaustively, so there is no input space left for a fuzzer"
+
+[AGENTD-3]
+issue = "#305"
+waive.gherkin = "the token rules turn on two facts, whether a token is installed and whether the presented one equals it; the model checks every interleaving of them and the replay drives each against the daemon's routes, which a scenario would restate"
+waive.fuzz = "the verdict depends only on those two facts, which the model enumerates exhaustively, so there is no input space left for a fuzzer"
+
+[AGENTD-4]
+issue = "#305"
+waive.gherkin = "the token rules turn on two facts, whether a token is installed and whether the presented one equals it; the model checks every interleaving of them and the replay drives each against the daemon's routes, which a scenario would restate"
+waive.fuzz = "the verdict depends only on those two facts, which the model enumerates exhaustively, so there is no input space left for a fuzzer"
+
+[AGENTD-5]
+issue = "#305"
+waive.gherkin = "the token rules turn on two facts, whether a token is installed and whether the presented one equals it; the model checks every interleaving of them and the replay drives each against the daemon's routes, which a scenario would restate"
+waive.fuzz = "the verdict depends only on those two facts, which the model enumerates exhaustively, so there is no input space left for a fuzzer"
+
+[AGENTD-6]
+issue = "#305"
+waive.gherkin = "the token rules turn on two facts, whether a token is installed and whether the presented one equals it; the model checks every interleaving of them and the replay drives each against the daemon's routes, which a scenario would restate"
+waive.fuzz = "the verdict depends only on those two facts, which the model enumerates exhaustively, so there is no input space left for a fuzzer"
+
 [AGENTD-7]
 issue = "#224"
 
