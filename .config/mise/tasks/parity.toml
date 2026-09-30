@@ -11,6 +11,6 @@ description = "Every capability in verify/parity/capabilities.toml resolves on c
 # pins, so a cold cache downloads them once. The self-test runs first, for `model:check`'s
 # reason. CI's `rust` job runs both.
 run = [
-  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider tools/test_check_parity.py",
+  "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_check_parity.py",
   "./tools/check-parity.py",
 ]

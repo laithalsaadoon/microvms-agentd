@@ -25,16 +25,18 @@ binding and run its suite the way CI's `python and node bindings` job does
 (`pytest bindings/microvms-py/tests`, `node --test "bindings/microvms-js/__test__/*.mjs"`), or run
 `mise run ci:bindings`, which is that job.
 
-`mise run ci:local` runs each Linux job of ci.yml and fuzz.yml the way CI does: the job's
-own steps, in a clone of a snapshot of the worktree with the job's checkout depth and the
-workflow's env, each job with its own target directory. It catches what only CI used to, such
-as output parsed under `CARGO_TERM_COLOR=always` or a command that needs origin/main in a
-shallow checkout. `mise run ci:<job>` runs one job, and `-- --apply <patch>` runs it over the
-snapshot with a patch applied. It isn't in `check`, and each job's target takes tens of GB
-under `$TMPDIR` (`$CI_LOCAL_DIR` moves it). It tests the branch as it stands, while CI tests
-a pull request's merge with main, so rebase onto a fresh origin/main first. `ci/local.toml`
-says what each job skips and why. A new step in ci.yml needs an entry there, or, for a setup
-action, a reason in its `[actions]` table (`ci:parity` fails without one).
+CI's jobs run mise tasks: each job of ci.yml and fuzz.yml installs mise and mise.lock's tools
+through `.github/actions/mise`, then runs one `mise run ci:<job>`, whose task holds the job's
+steps, so `mise run ci:<job>` runs a job here in the worktree. A check CI should run is a task
+the job's `ci:` task calls, and `ci:parity` in `check` fails when a task `check` depends on
+isn't reached from one. `mise run ci:local` runs each Linux job in a clone of a snapshot of the
+worktree with the job's checkout depth, each job with its own target directory, which catches
+what a worktree run can't, such as a command that needs origin/main in a shallow checkout.
+`mise run ci:local -- <job>` runs one, and `-- --apply <patch>` runs over the snapshot with a
+patch applied. It isn't in `check`, and each job's target takes tens of GB under `$TMPDIR`
+(`$CI_LOCAL_DIR` moves it). It tests the branch as it stands, while CI tests a pull request's
+merge with main, so rebase onto a fresh origin/main first. `tools/ci-local.py` says which jobs
+stay CI-only and why.
 See CONTRIBUTING.md for targeted tests and setup; do not infer live verification
 from local test results.
 
@@ -116,13 +118,14 @@ which #300 checks through the generated surfaces.
 If an adapter needs something private to a lower crate, make it public there or
 move the caller down. Never copy it.
 
-Drift is layering drift, parity gaps and untraced requirements. `mise run
-ratchet:check` collects it from the working tree and from the merge base's tree,
-with the same collectors, and fails when the tree has drift the base doesn't: a
-PR can't add drift, and a fix removes it by fixing the code, with no list to
-edit. Nobody edits `verify/ratchet/drift.json`: it's a generated snapshot for
-the docs site's history chart, which `mise run ratchet:snapshot` rewrites in a
-change of its own. A permanent exception is a decision in
+Drift is layering drift, parity gaps, the case corpus's markers and skips, and
+untraced requirements. `mise run ratchet:check` collects it from the working
+tree and from the merge base's tree, with the same collectors, and fails when
+the tree has drift the base doesn't: a PR can't add drift, and a fix removes it
+by fixing the code, with no list to edit. Nobody edits
+`verify/ratchet/drift.json`: it's a generated snapshot for the docs site's
+history chart, which `mise run ratchet:snapshot` rewrites in a change of its
+own. A permanent exception is a decision in
 `verify/ratchet/decisions.toml`, with its reason, and a decision whose finding is
 gone fails the check. An untraced requirement takes no decision: list it in its
 group's file under `verify/spec/traced/` (`verify/spec/traced/TRAP.toml` for a

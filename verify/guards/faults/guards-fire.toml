@@ -17,6 +17,15 @@ transform = { file = "crates/agentd/src/fs.rs", replace = "    #[test]\n    fn n
 # the files and not the rest loses the sentinel id the unit suite looks for in the real registry.
 
 [[fault]]
+id = "guards-list-base-at-the-tip"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "UnregisteredOnlyShrinks"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_explicit_base_is_read_at_its_merge_base_with_head ("
+transform = { file = "tools/check-guards-fire.py", replace = "    ref = merge_base_with(root, base_ref) if base_ref else default_base(root)\n", with = "    ref = base_ref or default_base(root)\n" }
+
+[[fault]]
 id = "guards-registry-floor"
 guard = "tools/check-guards-fire.py list"
 run = ["./tools/check-guards-fire.py", "list", "--base", "HEAD"]
@@ -225,6 +234,27 @@ suite = "script"
 message = "FAIL: test_a_changed_script_selects_the_unit_suite_that_tests_it ("
 transform = { file = "tools/check-guards-fire.py", replace = "out |= {f\"{where}/{n}.py\" for n in (name, f\"check-{name}\")} & files", with = "out |= set()" }
 
+# The task the guards job's steps run (`ci:guards`), CI calling mise: a change to its table
+# selects every entry, as a change to the job's steps does, and a change elsewhere in its file
+# selects none.
+[[fault]]
+id = "guards-fire-affected-task"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_change_to_the_guards_task_selects_every_entry ("
+transform = { file = "tools/check-guards-fire.py", replace = "    task = CI_TASK_FILE in changed and task_inputs_changed(root, commit)\n", with = "    task = False\n" }
+
+[[fault]]
+id = "guards-fire-affected-task-whole-file"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_another_task_or_a_comment_in_the_task_file_selects_nothing ("
+transform = { file = "tools/check-guards-fire.py", replace = "        if inside and body and not body.startswith(\"#\"):\n", with = "        if body and not body.startswith(\"#\"):\n" }
+
 # Fix round 1: the `--affected` sources the falsifier found untested, and the restored pass on
 # more than one worker.
 [[fault]]
@@ -318,10 +348,11 @@ message = "FAIL: test_a_worker_that_takes_a_fault_runs_its_command_clean_again (
 transform = { file = "tools/check-guards-fire.py", replace = "            worker.touched.setdefault(command_key(fault))\n            worker.tree.reset()\n", with = "            worker.tree.reset()\n" }
 
 # The `guards` job's two legs (#323): a pull request fires the entries its diff affects and a
-# push to main fires every entry, each in shards under the same budget (#345). `GuardsJob` runs both steps as ci.yml writes them and
-# holds ci/local.toml's answers to them, `FireAffected` holds the rule that a change to the job's
-# own steps selects every entry, and test_check_ci_parity.py holds ci:local to a budget written
-# as an expression.
+# push to main fires every entry, each in shards under the same budget (#345). `GuardsJob` runs
+# both steps as ci.yml writes them, through the command of the `ci:guards` task they run, and
+# holds ci-local.py's answers to them, and `FireAffected` holds the rule that a change to the
+# job's own steps selects every entry. The two steps share the task's command, so a flag or a
+# suite dropped from it drops from both; the pull request's own entries seed its arguments.
 
 # The pull request's step loses its selection, so a pull request fires every entry again.
 # Warm workers: each extra worker's target starts as a copy of the first one's
@@ -688,16 +719,16 @@ transform = { file = "tools/check-guards-fire.py", replace = "    if fault.suite
 [[fault]]
 id = "guards-job-fire-not-incremental"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_the_fire_steps_build_incrementally ("
-transform = { file = ".github/workflows/ci.yml", replace = "          CARGO_INCREMENTAL: \"1\"\n        run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n", with = "        run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n" }
+transform = { file = ".config/mise/tasks/ci.toml", replace = "env = { CARGO_INCREMENTAL = \"1\" }\nrun = './tools/check-guards-fire.py fire", with = "run = './tools/check-guards-fire.py fire" }
 
 [[fault]]
 id = "guards-job-legs-save-cache"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_the_legs_restore_the_one_cache_a_push_to_main_saves ("
@@ -706,7 +737,7 @@ transform = { file = ".github/workflows/ci.yml", replace = "          # The `gua
 [[fault]]
 id = "guards-job-cache-saver-key"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_the_legs_restore_the_one_cache_a_push_to_main_saves ("
@@ -718,112 +749,109 @@ transform = { file = ".github/workflows/ci.yml", replace = "          shared-key
 [[fault]]
 id = "guards-job-push-drops-bindings"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
 message = "AssertionError: Lists differ: ['rust', 'script'] != ['rust', 'script', 'bindings']"
-transform = { file = ".github/workflows/ci.yml", replace = "--suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n", with = "--suite rust --suite script --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n" }
+transform = { file = ".config/mise/tasks/ci.toml", replace = "fire --suite rust --suite script --suite bindings --venv-per-worker", with = "fire --suite rust --suite script --venv-per-worker" }
 
 [[fault]]
 id = "guards-job-pr-drops-bindings"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_pull_request_fires_the_entries_it_affects_and_a_push_fires_every_entry ("
-transform = { file = ".github/workflows/ci.yml", replace = "--suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n", with = "--suite rust --suite script --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n" }
+transform = { file = ".github/workflows/ci.yml", replace = "        run: mise run ci:guards --target-dir target --affected --base \"$BASE\"\n", with = "        run: mise run guards:fire --suite rust --suite script --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n" }
 
 [[fault]]
 id = "guards-job-no-venv-per-worker"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
 message = " : the push step's environments"
-transform = [
-  { file = ".github/workflows/ci.yml", replace = "--suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n", with = "--suite rust --suite script --suite bindings --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n" },
-  { file = ".github/workflows/ci.yml", replace = "--suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n", with = "--suite rust --suite script --suite bindings --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n" },
-]
+transform = { file = ".config/mise/tasks/ci.toml", replace = "--suite bindings --venv-per-worker --timeout 900", with = "--suite bindings --timeout 900" }
 
 [[fault]]
 id = "guards-job-bindings-fires-again"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_the_guards_legs_are_the_one_place_faults_fire ("
-transform = { file = ".github/workflows/ci.yml", replace = "      - name: the npm loader resolves its platform packages\n        run: ./tools/check-npm-loader.py\n", with = "      - name: the npm loader resolves its platform packages\n        run: ./tools/check-npm-loader.py\n      - name: seeded binding faults fire\n        run: ./tools/check-guards-fire.py fire --suite bindings --venv .venv-bindings --target-dir target\n" }
+transform = { file = ".config/mise/tasks/ci.toml", replace = "  { task = \"npm:loader\" },\n]\n", with = "  { task = \"npm:loader\" },\n  { task = \"guards:fire\" },\n]\n" }
 
 [[fault]]
 id = "guards-job-fire-census-empty"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
 message = "AssertionError: [] is not true : no step in ci.yml fires a seeded fault"
-transform = { file = "tools/test_check_guards_fire.py", replace = "            if \"check-guards-fire.py fire\" in s.get(\"run\", \"\")\n        ]\n        self.assertTrue(firing, ", with = "            if \"check-guards-fire.py fires\" in s.get(\"run\", \"\")\n        ]\n        self.assertTrue(firing, " }
+transform = { file = "tools/test_check_guards_fire.py", replace = "            if any(\"check-guards-fire.py fire\" in c for c in commands_of(s))\n        ]\n        self.assertTrue(firing, ", with = "            if any(\"check-guards-fire.py fires\" in c for c in commands_of(s))\n        ]\n        self.assertTrue(firing, " }
 
 [[fault]]
 id = "guards-job-cache-builds-rust-only"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
 message = "AssertionError: Lists differ: ['rust'] != ['rust', 'bindings']"
-transform = { file = ".github/workflows/ci.yml", replace = "build --suite rust --suite bindings --target-dir target\n", with = "build --suite rust --target-dir target\n" }
+transform = { file = ".config/mise/tasks/ci.toml", replace = "run = \"./tools/check-guards-fire.py build --suite rust --suite bindings\"\n", with = "run = \"./tools/check-guards-fire.py build --suite rust\"\n" }
 
 [[fault]]
-id = "guards-job-cache-no-node"
+id = "guards-job-cache-own-node"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_the_legs_restore_the_one_cache_a_push_to_main_saves ("
-transform = { file = ".github/workflows/ci.yml", replace = "      # The `guards` legs' Node, for `napi build`.\n      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7\n        with:\n          node-version: '22'\n", with = "" }
+transform = { file = ".github/workflows/ci.yml", replace = "      - id: mise\n        uses: ./.github/actions/mise\n        with:\n          tools-cache: exact\n", with = "      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7\n        with:\n          node-version: '24'\n      - id: mise\n        uses: ./.github/actions/mise\n        with:\n          tools-cache: exact\n" }
 
 [[fault]]
 id = "guards-job-pr-affected"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_the_pull_request_step_is_the_push_step_plus_the_selection ("
-transform = { file = ".github/workflows/ci.yml", replace = " --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n", with = " --jobs 4 --shard \"$SHARD\"\n" }
+transform = { file = ".github/workflows/ci.yml", replace = "        run: mise run ci:guards --target-dir target --affected --base \"$BASE\"\n", with = "        run: mise run ci:guards --target-dir target\n" }
 
 # Either leg drops the script suite, which only this job fires.
 [[fault]]
 id = "guards-job-pr-suite"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_the_pull_request_step_is_the_push_step_plus_the_selection ("
-transform = { file = ".github/workflows/ci.yml", replace = "--suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --affected", with = "--suite rust --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --affected" }
+transform = { file = ".github/workflows/ci.yml", replace = "        run: mise run ci:guards --target-dir target --affected --base \"$BASE\"\n", with = "        run: mise run guards:fire --suite rust --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"${SHARD:-0/1}\" --affected --base \"$BASE\"\n" }
 
 [[fault]]
 id = "guards-job-push-suite"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
 message = "AssertionError: Lists differ: ['rust', 'bindings'] != ['rust', 'script', 'bindings']"
-transform = { file = ".github/workflows/ci.yml", replace = "--suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n", with = "--suite rust --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n" }
+transform = { file = ".config/mise/tasks/ci.toml", replace = "fire --suite rust --suite script --suite bindings", with = "fire --suite rust --suite bindings" }
 
 # Main's push stops being the full fire.
 [[fault]]
 id = "guards-job-push-affected"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
 message = "'--affected' unexpectedly found in"
-transform = { file = ".github/workflows/ci.yml", replace = "--target-dir target --jobs 4 --shard \"$SHARD\"\n", with = "--target-dir target --jobs 4 --shard \"$SHARD\" --affected\n" }
+transform = { file = ".github/workflows/ci.yml", replace = "        run: mise run ci:guards --target-dir target\n", with = "        run: mise run ci:guards --target-dir target --affected\n" }
 
 # Both fire steps run on a pull request.
 [[fault]]
 id = "guards-job-push-runs"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
 message = "pull_request: 2 fire steps run, not one"
@@ -834,7 +862,7 @@ transform = { file = ".github/workflows/ci.yml", replace = "      - name: every 
 [[fault]]
 id = "guards-job-push-budget"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
 message = "AssertionError: 30 != 60 : each shard's budget, on a pull request and on main's push"
@@ -844,7 +872,7 @@ transform = { file = ".github/workflows/ci.yml", replace = "    name: seeded fau
 [[fault]]
 id = "guards-job-fetch-depth"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_the_checkout_has_the_base_branch_the_merge_base_needs ("
@@ -854,77 +882,48 @@ transform = { file = ".github/workflows/ci.yml", replace = "          # `--affec
 [[fault]]
 id = "guards-job-missing"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
-message = "AssertionError: [] is not true : ci.yml's guards job has no step that runs"
+message = "AssertionError: [] is not true : ci.yml's guards job has no step whose task runs"
 transform = { file = ".github/workflows/ci.yml", replace = "  guards:\n    name: seeded faults fire (shard", with = "  guardz:\n    name: seeded faults fire (shard" }
 
 # The parser that returns nothing.
 [[fault]]
 id = "guards-job-parser-empty"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
-message = "AssertionError: [] is not true : ci.yml's guards job has no step that runs"
+message = "AssertionError: [] is not true : ci.yml's guards job has no step whose task runs"
 transform = { file = "tools/test_check_guards_fire.py", replace = "    return workflow_jobs().get(\"guards\") or {}\n", with = "    return {}\n" }
 
-# ci:local drops a budget written as an expression and runs the job with no timeout.
-[[fault]]
-id = "ci-parity-timeout-expression"
-guard = "test_check_ci_parity.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_ci_parity.py"]
-expect = "exit-nonzero"
-suite = "script"
-message = "AssertionError: None != 30"
-transform = { file = "tools/check-ci-parity.py", replace = "    if isinstance(timeout, str):\n", with = "    if False:\n" }
-
-# The empty input: a budget that resolves to nothing, or to a word, passes unreported.
-[[fault]]
-id = "ci-parity-timeout-not-a-number"
-guard = "test_check_ci_parity.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_ci_parity.py"]
-expect = "exit-nonzero"
-suite = "script"
-message = "timeout-minutes resolves to `soon`, not a positive number' not found in"
-transform = { file = "tools/check-ci-parity.py", replace = "            if not EXPRESSION.search(text):\n", with = "            if False:\n" }
-
-# ci:local takes `inf`, `nan` or `0` as a budget, and ci-local.py runs the job with no deadline.
-[[fault]]
-id = "ci-parity-timeout-not-positive"
-guard = "test_check_ci_parity.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_ci_parity.py"]
-expect = "exit-nonzero"
-suite = "script"
-message = "timeout-minutes resolves to `inf`, not a positive number' not found in"
-transform = { file = "tools/check-ci-parity.py", replace = "        if timeout is None or not (math.isfinite(timeout) and timeout > 0):\n", with = "        if timeout is None:\n" }
 
 # Both legs leave the worker count or the per-command timeout the budgets were measured with.
 [[fault]]
 id = "guards-job-jobs"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
 message = " : the push step's --jobs"
-transform = { file = ".github/workflows/ci.yml", replace = "run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n      - name: every seeded fault fires\n        if: github.event_name != 'pull_request'\n        env:\n          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}\n          CARGO_INCREMENTAL: \"1\"\n        run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n", with = "run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 1 --shard \"$SHARD\" --affected --base \"$BASE\"\n      - name: every seeded fault fires\n        if: github.event_name != 'pull_request'\n        env:\n          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}\n          CARGO_INCREMENTAL: \"1\"\n        run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 1 --shard \"$SHARD\"\n" }
+transform = { file = ".config/mise/tasks/ci.toml", replace = "--timeout 900 --jobs 4 --shard", with = "--timeout 900 --jobs 1 --shard" }
 
 [[fault]]
 id = "guards-job-timeout"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
 message = "AssertionError: None != '900' : the push step's --timeout"
-transform = { file = ".github/workflows/ci.yml", replace = "run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n      - name: every seeded fault fires\n        if: github.event_name != 'pull_request'\n        env:\n          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}\n          CARGO_INCREMENTAL: \"1\"\n        run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n", with = "run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --target-dir target --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n      - name: every seeded fault fires\n        if: github.event_name != 'pull_request'\n        env:\n          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}\n          CARGO_INCREMENTAL: \"1\"\n        run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --target-dir target --jobs 4 --shard \"$SHARD\"\n" }
+transform = { file = ".config/mise/tasks/ci.toml", replace = "--venv-per-worker --timeout 900 --jobs 4", with = "--venv-per-worker --jobs 4" }
 
 # The pull request's step stops diffing against its own base branch: a literal origin/main, or no
 # `BASE` at all, which the script reads as origin/main.
 [[fault]]
 id = "guards-job-pr-base-literal"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
 message = "guards: no merge base of HEAD and origin/main"
@@ -933,7 +932,7 @@ transform = { file = ".github/workflows/ci.yml", replace = "      - name: the se
 [[fault]]
 id = "guards-job-pr-base-unset"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
 message = "guards: no merge base of HEAD and origin/main"
@@ -944,20 +943,20 @@ transform = { file = ".github/workflows/ci.yml", replace = "      - name: the se
 [[fault]]
 id = "guards-job-local-event"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
 message = " : github.event_name == 'pull_request'"
-transform = { file = "ci/local.toml", replace = "\"github.event_name == 'pull_request'\" = \"true\"\n", with = "\"github.event_name == 'pull_request'\" = \"false\"\n" }
+transform = { file = "tools/ci-local.py", replace = "    \"github.event_name == 'pull_request'\": True,\n", with = "    \"github.event_name == 'pull_request'\": False,\n" }
 
 [[fault]]
 id = "guards-job-local-budget"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
 expect = "exit-nonzero"
 suite = "script"
 message = " : ci:local runs one shard of the selection, not all of it"
-transform = { file = "ci/local.toml", replace = "\"strategy.job-total\" = \"1\"\n", with = "\"strategy.job-total\" = \"3\"\n" }
+transform = { file = "tools/ci-local.py", replace = "    \"strategy.job-total\": \"1\",\n", with = "    \"strategy.job-total\": \"3\",\n" }
 
 # `fire --shard k/N` (#345): each CI leg fires one shard of the selection. `FireSharded` holds
 # the slices to a partition of whole commands in a documented order, cut after the selection,
@@ -1212,7 +1211,7 @@ transform = { file = "tools/test_check_guards_fire.py", replace = "        fault
 [[fault]]
 id = "guards-job-shard-total"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_matrix_runs_every_shard_and_lets_each_finish"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_matrix_runs_every_shard_and_lets_each_finish"]
 expect = "exit-nonzero"
 suite = "script"
 message = "pull_request: the fire step's SHARD isn't its leg of the matrix"
@@ -1222,26 +1221,26 @@ transform = { file = ".github/workflows/ci.yml", replace = "          BASE: orig
 [[fault]]
 id = "guards-job-shard-pr-flag"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_pull_request_fires_the_entries_it_affects_and_a_push_fires_every_entry"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_pull_request_fires_the_entries_it_affects_and_a_push_fires_every_entry"]
 expect = "exit-nonzero"
 suite = "script"
 message = "pull_request: an entry fires in two shards"
-transform = { file = ".github/workflows/ci.yml", replace = " --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n", with = " --jobs 4 --affected --base \"$BASE\"\n" }
+transform = { file = ".config/mise/tasks/ci.toml", replace = " --jobs 4 --shard \"${SHARD:-0/1}\"'\n", with = " --jobs 4'\n" }
 
 [[fault]]
 id = "guards-job-shard-push-flag"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_pull_request_fires_the_entries_it_affects_and_a_push_fires_every_entry"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_pull_request_fires_the_entries_it_affects_and_a_push_fires_every_entry"]
 expect = "exit-nonzero"
 suite = "script"
 message = "push: an entry fires in two shards"
-transform = { file = ".github/workflows/ci.yml", replace = " --jobs 4 --shard \"$SHARD\"\n", with = " --jobs 4\n" }
+transform = { file = ".github/workflows/ci.yml", replace = "        run: mise run ci:guards --target-dir target\n", with = "        run: mise run ci:guards --target-dir target --shard 0/1\n" }
 
 # One failed shard cancels the others.
 [[fault]]
 id = "guards-job-fail-fast"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_matrix_runs_every_shard_and_lets_each_finish"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_matrix_runs_every_shard_and_lets_each_finish"]
 expect = "exit-nonzero"
 suite = "script"
 message = "a failed shard cancels the others"
@@ -1252,7 +1251,7 @@ transform = { file = ".github/workflows/ci.yml", replace = "      fail-fast: fal
 [[fault]]
 id = "guards-job-aggregator-always"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_required_check_is_the_aggregator"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_required_check_is_the_aggregator"]
 expect = "exit-nonzero"
 suite = "script"
 message = "the aggregator doesn't run when a shard fails"
@@ -1261,7 +1260,7 @@ transform = { file = ".github/workflows/ci.yml", replace = "    needs: guards\n 
 [[fault]]
 id = "guards-job-aggregator-needs"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_required_check_is_the_aggregator"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_required_check_is_the_aggregator"]
 expect = "exit-nonzero"
 suite = "script"
 message = "the aggregator doesn't wait for the shards"
@@ -1271,7 +1270,7 @@ transform = { file = ".github/workflows/ci.yml", replace = "    name: seeded fau
 [[fault]]
 id = "guards-job-aggregator-result"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_aggregator_passes_only_when_every_shard_passed"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_aggregator_passes_only_when_every_shard_passed"]
 expect = "exit-nonzero"
 suite = "script"
 message = "with the shards cancelled"
@@ -1281,7 +1280,7 @@ transform = { file = ".github/workflows/ci.yml", replace = "        run: '[ \"$R
 [[fault]]
 id = "guards-job-aggregator-missing"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_required_check_is_the_aggregator"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_required_check_is_the_aggregator"]
 expect = "exit-nonzero"
 suite = "script"
 message = "0 jobs carry the required check's name"
@@ -1290,7 +1289,7 @@ transform = { file = ".github/workflows/ci.yml", replace = "  guards-result:\n  
 [[fault]]
 id = "guards-job-leg-name"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_required_check_is_the_aggregator"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_required_check_is_the_aggregator"]
 expect = "exit-nonzero"
 suite = "script"
 message = "2 jobs carry the required check's name"
@@ -1300,7 +1299,7 @@ transform = { file = ".github/workflows/ci.yml", replace = "    name: seeded fau
 [[fault]]
 id = "guards-job-aggregator-silent"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_aggregator_passes_only_when_every_shard_passed"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_aggregator_passes_only_when_every_shard_passed"]
 expect = "exit-nonzero"
 suite = "script"
 message = "the aggregator fails without saying why"
@@ -1310,7 +1309,7 @@ transform = { file = ".github/workflows/ci.yml", replace = "        run: '[ \"$R
 [[fault]]
 id = "guards-job-aggregator-step-if"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_aggregator_has_no_way_to_pass_over_a_red_shard"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_aggregator_has_no_way_to_pass_over_a_red_shard"]
 expect = "exit-nonzero"
 suite = "script"
 message = "an aggregator step sets a key that can hide a red shard"
@@ -1319,7 +1318,7 @@ transform = { file = ".github/workflows/ci.yml", replace = "      - name: every 
 [[fault]]
 id = "guards-job-aggregator-step-continue"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_aggregator_has_no_way_to_pass_over_a_red_shard"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_aggregator_has_no_way_to_pass_over_a_red_shard"]
 expect = "exit-nonzero"
 suite = "script"
 message = "an aggregator step sets a key that can hide a red shard"
@@ -1328,7 +1327,7 @@ transform = { file = ".github/workflows/ci.yml", replace = "      - name: every 
 [[fault]]
 id = "guards-job-aggregator-job-continue"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_aggregator_has_no_way_to_pass_over_a_red_shard"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_aggregator_has_no_way_to_pass_over_a_red_shard"]
 expect = "exit-nonzero"
 suite = "script"
 message = "the aggregator job sets a key that can hide a red shard"

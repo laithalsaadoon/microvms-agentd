@@ -35,6 +35,6 @@ description = "Every traced requirement appears in the model, a Gherkin tag, a f
 # The unit tests run first: they build throwaway trees and run the real parsers over them, so a
 # rule that stopped telling a test's doc from a comment fails there before it reads this tree.
 run = [
-  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider tools/test_check_trace.py",
+  "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_check_trace.py",
   "./tools/check-trace.py --check",
 ]
