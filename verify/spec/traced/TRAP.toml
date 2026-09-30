@@ -1,1 +1,86 @@
 # The TRAP group's traced requirements. The format and the rules are in tools/check-trace.py.
+
+[TRAP-1]
+issue = "#301"
+waive.model = "a fresh value per build attempt, drawn from the entropy port, not a state"
+waive.gherkin = "no scenario can show a token is unique: the tests draw two hundred and find no repeat, and recreating one name sends two distinct tokens"
+waive.fuzz = "the token has no caller input to fuzz: there's no override to feed"
+waive.live = "a replayed token wedges an image in CREATING for about fifteen hours (docs/PLATFORM.md), so a live run can't show the failure it closes; every live build sends a fresh one"
+
+[TRAP-2]
+issue = "#301"
+waive.model = "one wait's verdict over a sequence of describe answers, which the tests script"
+waive.gherkin = "the stall is a timed sequence of describe answers, which the tests script against a fake clock; a scenario would restate them"
+waive.fuzz = "the verdict turns on elapsed time and the builds' statuses, which the tests enumerate"
+waive.live = "a stall needs a replayed token's wedged image, about fifteen hours in CREATING (docs/PLATFORM.md)"
+
+[TRAP-3]
+issue = "#301"
+waive.model = "a bool mapped to the one enum value the model accepts, not a state"
+waive.gherkin = "no behavior to script: a typed flag and the request it writes, which the tests assert"
+waive.fuzz = "the input is one bool; there is no input space"
+
+[TRAP-4]
+issue = "#301"
+waive.model = "a derivation from a closed enum and a shape check on caller ARNs, not a state"
+waive.live = "every live launch sends connectors derived this way, but no named check reads them back; the offline tests assert the recorded requests"
+
+[TRAP-5]
+issue = "#301"
+waive.model = "a length check against one constant, not a state"
+waive.gherkin = "no behavior to script: the tests cover both sides of the 4096-byte boundary"
+waive.fuzz = "a length against one ceiling, which the boundary tests cover on both sides"
+waive.live = "refused before the first control-plane call, so the service never sees it"
+
+[TRAP-6]
+issue = "#301"
+waive.model = "a membership check over a closed set of five regions, not a state"
+waive.fuzz = "the region set is a closed enum of five names, and parsing is an exact match the tests enumerate"
+waive.live = "refused before the first control-plane call, so the service never sees it"
+
+[TRAP-7]
+issue = "#301"
+waive.model = "a header read and two headers sent on each request, not a state"
+waive.gherkin = "no behavior to script: the tests assert the headers on the recorded endpoint requests"
+waive.fuzz = "the headers carry a minted token and a port, with no caller input to fuzz"
+
+[TRAP-8]
+issue = "#301"
+waive.model = "the rule is what a refusal carries, the state and its reason, which the tests assert on scripted terminal states"
+waive.gherkin = "the tests drive every terminal state before RUNNING against a scripted control plane; a scenario per state would restate them"
+waive.fuzz = "the input is a closed set of terminal states, which the tests enumerate"
+waive.live = "a VM can't be made to reach a terminal state before RUNNING on demand against the live service"
+
+[TRAP-9]
+issue = "#301"
+waive.model = "an interval against a ceiling on the clock port, not a state"
+waive.gherkin = "the refresh is asserted against a fake clock in the tests; a scenario would restate them"
+waive.fuzz = "the interval is a constant against a sixty-minute ceiling, with no input space"
+waive.live = "the ceiling is sixty minutes, so a live check would hold a billable session past it to see one re-mint; the tests expire the token on a fake clock instead"
+
+[TRAP-10]
+issue = "#301"
+waive.model = "a membership check over the five documented baselines, not a state"
+waive.gherkin = "no behavior to script: the tests accept each of the five baselines and refuse the values beside them"
+waive.fuzz = "the baselines are a closed table the tests enumerate, with nothing between rows to search"
+waive.live = "refused before the first control-plane call, so the service never sees it"
+
+[TRAP-11]
+issue = "#301"
+waive.model = "a rule over which operations a lifecycle calls, not over its states"
+waive.gherkin = "no behavior to script: the full-lifecycle test counts every operation and connector a lifecycle sends"
+waive.fuzz = "there is no input stream; the rule is over the calls a lifecycle makes"
+waive.live = "a live run can't see an operation the client didn't call; the recorded lifecycle can, and counts none"
+
+[TRAP-12]
+issue = "#301"
+waive.model = "a comparison of constants with the pinned service model, not a state"
+waive.gherkin = "no behavior to script: the gate compares two JSON documents"
+waive.fuzz = "the inputs are the pinned model and the emitted constants, both fixed"
+waive.live = "the gate reads the pinned model offline and makes no AWS call"
+
+[TRAP-13]
+issue = "#301"
+waive.model = "a table lookup, not a state"
+waive.gherkin = "no behavior to script: the tests read each of the five rows"
+waive.fuzz = "the table has five rows, which the tests read exhaustively"
