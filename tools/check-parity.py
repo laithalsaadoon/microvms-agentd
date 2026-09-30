@@ -79,10 +79,11 @@ import subprocess
 import sys
 import tempfile
 import tomllib
-from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+import npx_cache
 
 ROOT = Path(__file__).resolve().parent.parent
 TABLE = ROOT / "verify" / "parity" / "capabilities.toml"
@@ -524,45 +525,10 @@ def npx() -> list[str]:
     return argv
 
 
-@contextlib.contextmanager
-def npx_lock() -> Iterator[None]:
-    # npx installs into <cache>/_npx/<hash of the packages>, and two callers installing one set
-    # at once extract over each other (TAR_ENTRY_ERROR, then no .bin/typedoc or a tree with
-    # files gone). The lock sits beside the cache because that's what callers share: every
-    # worktree, `fire` worker and `ci:local` clone uses the one `~/.npm`, while each agent on a
-    # shared host has its own TMPDIR. The lock goes with the file, so a killed holder drops it.
-    # Imported here so `--exemptions` still loads where fcntl doesn't exist.
-    #
-    # A waiter says so on stderr and then waits with no deadline, on purpose: a lock that gives
-    # up and installs anyway brings the race back on exactly the slow cold install it's for,
-    # and a waiter would only have made the same registry fetch. The caller's own timeout
-    # (`fire`'s per command, CI's per job) bounds a hung holder.
-    #
-    # The lock prevents new damage and doesn't repair old: a tree a lost race left half written
-    # stays that way, because npx sees the directory and skips the install. Delete that
-    # `_npx/<hash>` directory by hand. check-dts-consumer.py's `locate_tsc` installs its own set
-    # without this lock; each `guards` shard runs its one command once, so only two local runs
-    # on a cold cache can race it (a follow-up to #347).
-    import fcntl
-
-    printed = run(["npm", "config", "get", "cache"], "npm locating its cache").strip()
-    cache = Path(printed)
-    if not cache.is_absolute():
-        raise ParityError(
-            f"npm config get cache printed {printed!r}, not a directory to lock"
-        )
-    cache.mkdir(parents=True, exist_ok=True)
-    lock = cache / "microvms-agentd-npx.lock"
-    with lock.open("a") as handle:
-        try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            print(
-                f"parity: waiting for {lock}, held by another npx install",
-                file=sys.stderr,
-            )
-            fcntl.flock(handle, fcntl.LOCK_EX)
-        yield
+def npx_lock() -> contextlib.AbstractContextManager[Path]:
+    # `npx_cache.py` has the lock and its reasons (#347). check-dts-consumer.py's tsc install
+    # takes the same one.
+    return npx_cache.held("parity", ParityError)
 
 
 def run_typedoc(dts: Path, scratch: Path) -> dict[str, Any]:
