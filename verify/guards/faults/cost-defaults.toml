@@ -42,3 +42,17 @@ suite = "rust"
 message = "\"headroomMib\""
 note = "crates/microvms-domain/src/cost.rs::the_report_json_carries_the_pythons_key_set"
 transform = { file = "crates/microvms-domain/src/cost.rs", replace = "                \"headroomMib\": size.headroom_mib(),\n", with = "" }
+
+# `run`'s envelope carries its report in core's shape; CI's mutants job found `attach_cost`
+# replaced by `()` passing every test.
+
+[[fault]]
+id = "cli-run-drops-its-cost"
+guard = "guards::run::a_finished_run_reports_its_cost_in_cores_shape"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::run::a_finished_run_reports_its_cost_in_cores_shape"]
+expect = "test-failed"
+suite = "rust"
+message = "null"
+note = "crates/microvms-cli/src/guards/run.rs::a_finished_run_reports_its_cost_in_cores_shape"
+transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "    outcome.cost = Some(report.to_json());\n", with = "    let _ = report.to_json();\n" }
+

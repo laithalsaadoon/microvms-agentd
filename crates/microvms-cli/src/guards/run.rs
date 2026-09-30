@@ -673,3 +673,46 @@ async fn the_run_envelope_and_the_launched_session_report_the_same_posture() {
         sandbox.detach().expect("hand the scripted VM off quietly");
     }
 }
+
+/// **A finished run carries its cost report in the envelope, in core's JSON shape (#255).**
+///
+/// `data.cost` is `CostReport::to_json` of the run's report: labelled for the run, estimated,
+/// with the size class's headroom and the launch's line items. A run that dropped the report
+/// would still succeed, so this is the only thing that says the caller got its cost.
+///
+/// **Falsification**: `verify/guards/faults/cost-defaults.toml` entry `cli-run-drops-its-cost`
+/// builds the report and never sets `outcome.cost`, and `data.cost` is null.
+#[tokio::test]
+async fn a_finished_run_reports_its_cost_in_cores_shape() {
+    const HEALTH: &str = r#"{"version": "0.1.0", "bootstrapped": true, "disk": null,
+                             "identity_degraded": false, "identity_repaired": true}"#;
+    let image = "arn:aws:lambda:us-east-1:123456789012:microvm-image/img";
+    let dir = TempDir::new("run-cost");
+    let daemon = DaemonScript::new();
+    for _ in 0..4 {
+        daemon.reply(200, HEALTH);
+    }
+    let seam = SyncSeam {
+        transport: sync_launch_script(),
+        clock: Arc::new(YieldingClock::default()),
+        daemon,
+    };
+    let args = run_args_for_image(image, dir.0.clone());
+    let (result, _) = dispatch_with(&seam, &Command::Run(Box::new(args)), full_infra()).await;
+    let rendered = result.expect("the scripted run succeeds");
+    let cost = &rendered.data["cost"];
+    assert!(
+        cost["label"]
+            .as_str()
+            .is_some_and(|label| label.starts_with("run ")),
+        "{cost}"
+    );
+    assert_eq!(cost["estimated"], true, "{cost}");
+    assert!(cost["size"]["headroomMib"].is_number(), "{cost}");
+    assert!(
+        cost["items"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty()),
+        "{cost}"
+    );
+}
