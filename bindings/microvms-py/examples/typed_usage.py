@@ -44,6 +44,7 @@ from microvms import (
     EnsuredImage,
     EstimatedUsd,
     ExecHandle,
+    ExecProcess,
     ExecResult,
     Exit,
     Gap,
@@ -381,6 +382,26 @@ def collect_stream(handle: ExecHandle) -> tuple[bytes, int | None]:
         else:
             exit_code = event.exit_code
     return output, exit_code
+
+
+def collect_spawned(session: Session) -> tuple[bytes, bytes, int | None]:
+    """A spawned exec's two sides as bytes, and its exit from the daemon's record (#261).
+
+    Read one side after the other only because this is written for the checker: a real caller
+    reads both at once, since each holds one unread chunk. `assert_type` is the control for the
+    element type, which `bytes | None` would fail.
+    """
+    proc = session.spawn(["bash", "-lc", "make test"], gap_policy="event")
+    assert_type(proc, ExecProcess)
+    out = b""
+    for chunk in proc.stdout:
+        assert_type(chunk, bytes)
+        out += chunk
+    err = b"".join(proc.stderr)
+    lost = sum(gap.end - gap.start for gap in proc.gaps)
+    if lost:
+        err += b"[%d bytes lost]" % lost
+    return out, err, proc.wait(timeout=60).exit_code
 
 
 def main() -> None:
