@@ -3849,6 +3849,161 @@ suite = "script"
 message = "FAIL: test_each_cargo_command_builds_once_without_running ("
 transform = { file = "scripts/check-guards-fire.py", replace = "        head.append(\"--no-run\")\n", with = "        pass\n" }
 
+# Lint batches: an entry counts only by an error on the lines its own fault wrote, never by
+# another entry's or by a warning, and whatever a batch can't read (a compile error, output
+# that isn't JSON, a run that passed, lines two entries change, an error on no entry's lines)
+# runs alone. A batched entry's log reads like its own run's, and its verdict line is a
+# serial run's.
+
+[[fault]]
+id = "guards-fire-batch-any-lines"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireLintBatches"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_two_entries_with_one_message_are_each_proven_on_their_own_lines ("
+transform = { file = "scripts/check-guards-fire.py", replace = "            if owner == position:\n                proven.setdefault(position, at)\n            elif owner is None:\n                tainted.setdefault(position, at)\n", with = "            proven.setdefault(position, at)\n" }
+
+[[fault]]
+id = "guards-fire-batch-another-entrys-lines"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireLintBatches"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_two_entries_with_one_message_are_each_proven_on_their_own_lines ("
+transform = { file = "scripts/check-guards-fire.py", replace = "            if owner == position:\n", with = "            if owner is not None:\n" }
+
+[[fault]]
+id = "guards-fire-batch-unattributed-error"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireLintBatches"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_error_off_the_entrys_own_lines_leaves_it_to_run_alone ("
+transform = { file = "scripts/check-guards-fire.py", replace = "            elif owner is None:\n                tainted.setdefault(position, at)\n", with = "" }
+
+[[fault]]
+id = "guards-fire-batch-warning-proves"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireLintBatches"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_warning_on_the_entrys_own_lines_proves_nothing ("
+transform = { file = "scripts/check-guards-fire.py", replace = "        if level != \"error\":\n            continue\n", with = "" }
+
+[[fault]]
+id = "guards-fire-batch-compile-error"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireLintBatches"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_batch_that_does_not_compile_runs_every_entry_alone ("
+transform = { file = "scripts/check-guards-fire.py", replace = "        if level.startswith(\"error\") and (lint is None or CODE.match(str(lint))):\n", with = "        if False:\n" }
+
+[[fault]]
+id = "guards-fire-batch-overlap"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireLintBatches"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_entries_that_change_the_same_lines_run_apart ("
+transform = { file = "scripts/check-guards-fire.py", replace = "        if clash is not None:\n", with = "        if False:\n" }
+
+[[fault]]
+id = "guards-fire-batch-not-json"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireLintBatches"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_attribution_reads_nothing_it_cannot_parse_and_nothing_from_a_run_that_passed ("
+transform = { file = "scripts/check-guards-fire.py", replace = "            return {}, dict.fromkeys(\n                positions, f\"a line of the batch's output isn't JSON: {line[:80]}\"\n            )\n", with = "            continue\n" }
+
+[[fault]]
+id = "guards-fire-batch-run-passed"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireLintBatches"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_attribution_reads_nothing_it_cannot_parse_and_nothing_from_a_run_that_passed ("
+transform = { file = "scripts/check-guards-fire.py", replace = "    if code == 0:\n        return {}, dict.fromkeys(positions, \"the batch's run passed\")\n", with = "" }
+
+[[fault]]
+id = "guards-fire-batch-log-raw"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireLintBatches"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_one_run_proves_each_entry_by_the_error_on_its_own_lines ("
+transform = { file = "scripts/check-guards-fire.py", replace = "                        + rendered_log(output),\n", with = "                        + output,\n" }
+
+[[fault]]
+id = "guards-fire-batch-verdict-line"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "test_lint_batches_report_the_serial_verdicts_at_every_job_count"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_lint_batches_report_the_serial_verdicts_at_every_job_count ("
+transform = { file = "scripts/check-guards-fire.py", replace = "                (members[p], (f\"fired: {faults[p].id} ({elapsed:.1f} s)\", False))\n", with = "                (members[p], (f\"fired: {faults[p].id} (in a batch, {elapsed:.1f} s)\", False))\n" }
+
+# The restored pass by build: a build is ready only when no fault in it is queued or running
+# anywhere, a worker that takes a fault in a build owes that build, a build comes back while
+# other builds' faults still run, a reset removes the ignored files a run left, and a result no
+# worker is left to put fails the run instead of hanging it.
+
+[[fault]]
+id = "guards-fire-restore-while-queued"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireRestoredByBuild"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_build_is_ready_only_when_none_of_its_faults_is_queued_or_running ("
+transform = { file = "scripts/check-guards-fire.py", replace = "            queued = any(task.build == build for queue in self.queues for task in queue)\n", with = "            queued = False\n" }
+
+[[fault]]
+id = "guards-fire-restore-while-running"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireRestoredByBuild"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_build_is_ready_only_when_none_of_its_faults_is_queued_or_running ("
+transform = { file = "scripts/check-guards-fire.py", replace = "            if not queued and not self.running.get(build):\n", with = "            if not queued:\n" }
+
+[[fault]]
+id = "guards-fire-restore-taken-fault-owed"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireRestoredByBuild"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_build_is_ready_only_when_none_of_its_faults_is_queued_or_running ("
+transform = { file = "scripts/check-guards-fire.py", replace = "                if self.restores is not None:\n                    self.restores[number].setdefault(task.build)\n", with = "                pass\n" }
+
+[[fault]]
+id = "guards-fire-restore-barrier"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireRestoredByBuild"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_build_is_restored_after_its_last_fault_and_before_the_others_end ("
+transform = { file = "scripts/check-guards-fire.py", replace = "            queued = any(task.build == build for queue in self.queues for task in queue)\n            if not queued and not self.running.get(build):\n", with = "            queued = any(task.build is not None for queue in self.queues for task in queue)\n            if not queued and not any(self.running.values()):\n" }
+
+[[fault]]
+id = "guards-fire-reset-keeps-ignored"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireRestoredByBuild"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_ignored_file_a_fault_writes_is_gone_before_the_next_run ("
+transform = { file = "scripts/check-guards-fire.py", replace = "        git(self.path, \"clean\", \"-fdqx\")\n", with = "        git(self.path, \"clean\", \"-fdq\")\n" }
+
+[[fault]]
+id = "guards-fire-board-waits-forever"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "FireRestoredByBuild"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_result_no_worker_is_left_to_put_fails_the_run ("
+transform = { file = "scripts/check-guards-fire.py", replace = "                if self.left == 0:\n", with = "                if False:\n" }
+
 # The fire steps build incrementally, and the legs restore the one dependency cache a push to
 # main saves.
 
