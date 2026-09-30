@@ -44,7 +44,7 @@ use std::sync::Arc;
 use futures_util_shim::BoxFuture;
 use microvms_core::control::ControlPlane;
 use microvms_core::prelude::*;
-use microvms_core::sandbox::Sandbox;
+use microvms_core::sandbox::{ControlPlaneMinter, Sandbox};
 use microvms_core::session::{Session, SessionBuilder};
 use microvms_core::{Error, ErrorKind, Region};
 
@@ -230,17 +230,15 @@ impl CoreSeam for AwsSeam {
         attach: Attach,
     ) -> BoxFuture<'_, Result<Session, Error>> {
         Box::pin(async move {
-            // The minter goes through the same `ControlPlane` the launch path uses, so an
-            // attached session mints proxy tokens exactly as a launched one does (TRAP-9).
+            // Core's minter over the same `ControlPlane` the launch path uses, so an attached
+            // session mints proxy tokens exactly as a launched one does (TRAP-9), port scopes
+            // included.
             let mut plane = production_plane(region).await?;
             if let Some(port) = attach.port {
                 plane = plane.with_port(port)?;
             }
             let port = plane.port();
-            let minter = Arc::new(PlaneMinter {
-                control: Arc::new(plane),
-                microvm_id: attach.microvm_id,
-            });
+            let minter = Arc::new(ControlPlaneMinter::new(Arc::new(plane), attach.microvm_id));
             production_session(attach.endpoint, attach.agent_token)
                 .with_minter(minter)
                 .with_port(port)
@@ -251,48 +249,6 @@ impl CoreSeam for AwsSeam {
     fn put_artifact(&self, uri: &str, bytes: Vec<u8>) -> BoxFuture<'_, Result<(), Error>> {
         let uri = uri.to_string();
         Box::pin(async move { put_via_aws_cli(&uri, bytes).await })
-    }
-}
-
-/// Mints proxy tokens for one MicroVM through the control plane.
-///
-/// The same bridge `sandbox.rs:333` builds for a launched VM. Duplicated rather than
-/// exported from core, because core's is private to `sandbox.rs` and asking another lane to
-/// widen it for the attach path is a change to a file this task must not touch — recorded
-/// as the smaller of the two costs.
-struct PlaneMinter {
-    control: Arc<ControlPlane>,
-    microvm_id: String,
-}
-
-impl microvms_core::session::TokenMinter for PlaneMinter {
-    fn mint(&self) -> BoxFuture<'_, Result<microvms_core::session::ProxyToken, Error>> {
-        Box::pin(async move {
-            let minted = self.control.mint_auth_token(&self.microvm_id).await?;
-            Ok(minted.into())
-        })
-    }
-
-    /// The same override `sandbox.rs`'s minter carries, and duplicated for the same reason the
-    /// struct is: core's is private to that module. Without it, an attached session's
-    /// `connect_headers(port)` would answer a header pair behind a token the control plane
-    /// scoped to the agent port alone, which the proxy refuses with 403 `Access to port
-    /// denied` — the defect measured 2026-08-15.
-    fn mint_for_ports(
-        &self,
-        ports: &[u16],
-    ) -> BoxFuture<'_, Result<microvms_core::session::ProxyToken, Error>> {
-        let specs: Vec<microvms_core::control::ops::PortSpecification> = ports
-            .iter()
-            .map(|port| microvms_core::control::ops::PortSpecification::port(*port))
-            .collect();
-        Box::pin(async move {
-            let minted = self
-                .control
-                .mint_auth_token_for(&self.microvm_id, &specs)
-                .await?;
-            Ok(minted.into())
-        })
     }
 }
 
