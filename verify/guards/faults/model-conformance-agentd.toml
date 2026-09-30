@@ -188,14 +188,15 @@ transform = { file = "crates/agentd/tests/model_conformance.rs", replace = "depl
 
 # A test's doc claims a key for the trace that no model property backs. check-trace.py credits
 # the test layer from that doc, so the key check has to read the same doc, not a list beside it.
+# The key is a binding rule, which no property of the daemon's model will ever name.
 [[fault]]
 id = "model-conformance-doc-claims-unbacked-key"
 guard = "the_keys_the_replay_backs_name_safety_properties_of_the_model"
 run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_model"]
 expect = "test-failed"
 suite = "rust"
-message = "no safety property of the model is named for [\"AGENTD-5\"]"
-transform = { file = "crates/agentd/tests/model_conformance.rs", replace = "/// It's the daemon's side of AGENTD-1:", with = "/// It's the daemon's side of AGENTD-1 and AGENTD-5:" }
+message = "no safety property of the model is named for [\"BIND-1\"]"
+transform = { file = "crates/agentd/tests/model_conformance.rs", replace = "/// It's the daemon's side of AGENTD-1:", with = "/// It's the daemon's side of AGENTD-1 and BIND-1:" }
 
 # The key check on empty input: a source with no tests claims no key, and says so.
 [[fault]]

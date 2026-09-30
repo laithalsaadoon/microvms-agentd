@@ -12,33 +12,47 @@ from harness.results import Results
 
 
 def drive_daemon_lane(daemon: Daemon, results: Results) -> None:
-    """The six checks that test the daemon rather than the client under test.
+    """The checks that test the daemon rather than the client under test.
 
-    Same six names the oracle used, asserting on the status integer the daemon chose.
-    Routing them through a client library would test that library twice and the daemon
-    no better; asserting on the integer is what they always meant.
+    The six names the oracle used, the three that prove a token rule now led by its key,
+    and one for the installed token's own acceptance (AGENTD-6), all asserting on the
+    status integer the daemon chose. Routing them through a client library would test
+    that library twice and the daemon no better; asserting on the integer is what they
+    always meant.
     """
     print("\n-- bootstrap and authorization (daemon lane) --")
     results.eq(
-        "post-bootstrap hijack refused with 409",
+        "AGENTD-3 post-bootstrap hijack refused with 409",
         post_run_hook(daemon, "attacker-token"),
         409,
     )
     results.eq(
-        "identical bootstrap replay accepted",
+        "AGENTD-4 identical bootstrap replay accepted",
         post_run_hook(daemon, daemon.agent_token),
         200,
     )
+    # The route answers an unknown exec with 404 once a request is let in, so 404 rather
+    # than 401 is the installed token being accepted.
+    results.eq(
+        "AGENTD-6 the installed token is accepted: an unknown exec is 404, not 401",
+        daemon.status("GET", "/v1/exec/nope", token=daemon.agent_token),
+        404,
+    )
 
-    for name, token in (
-        ("wrong token refused with 401", "wrong-token"),
-        # The daemon must *answer* a token it cannot decode rather than drop the
-        # connection, which is why this asserts a status at all: a `TransportError`
-        # out of `Daemon.status` is the failure, and `results.eq` reports it as the
-        # exception it is rather than as a wrong status.
-        ("non-ASCII token header answered, not a dropped connection", "tökén"),
-    ):
-        results.eq(name, daemon.status("GET", "/v1/exec/nope", token=token), 401)
+    results.eq(
+        "AGENTD-5 wrong token refused with 401",
+        daemon.status("GET", "/v1/exec/nope", token="wrong-token"),
+        401,
+    )
+    # The daemon must *answer* a token it cannot decode rather than drop the
+    # connection, which is why this asserts a status at all: a `TransportError`
+    # out of `Daemon.status` is the failure, and `results.eq` reports it as the
+    # exception it is rather than as a wrong status.
+    results.eq(
+        "non-ASCII token header answered, not a dropped connection",
+        daemon.status("GET", "/v1/exec/nope", token="tökén"),
+        401,
+    )
 
     for name, method, path, body in (
         ("malformed body is 400, not 404", "POST", "/v1/exec/start", {"bogus": True}),

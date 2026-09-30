@@ -124,10 +124,13 @@ In network simulation tests, coordinate child processes through stdin rather
 than wall-clock sleeps: child processes and the simulator use different clocks.
 
 `mise run ratchet:check` holds `verify/ratchet/drift.json` equal to the drift its
-collectors find, such as an adapter dependency outside `verify/arch/placement.toml`, a
-subprocess in a shipping crate, or a spec requirement no file in `verify/spec/traced/`
-lists. A new finding fails, and so does a fix the file still lists: run
-`mise run ratchet:update` and commit the file. The check refuses an entry the
+collectors find, such as a subprocess in a shipping crate or a spec requirement no file
+in `verify/spec/traced/` lists. A new finding fails, and so does a fix the file still
+lists: run `mise run ratchet:update` and commit the file. Placement, a direct
+dependency outside its crate's set in `verify/arch/placement.toml`, is computed by
+`crates/microvms-cli/tests/dependency_direction.rs` instead, which holds each crate to
+its set plus its placement records in the file: a new dependency fails there, and so
+does a fixed one whose entry you haven't deleted. The check refuses an entry the
 base branch doesn't have, and a crate added to a set the base already has, so
 new drift moves to the layer whose job it is or goes under `decisions` with its
 reason. An untraced requirement can't be a decision: it gets an entry in its

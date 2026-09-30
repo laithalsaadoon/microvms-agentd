@@ -73,8 +73,11 @@ pub async fn require_token(
         None if !state.is_bootstrapped() => Some(StatusCode::SERVICE_UNAVAILABLE),
         None => Some(StatusCode::UNAUTHORIZED),
         Some(token) => match state.token_matches(&token) {
+            // AGENTD-1: closed before bootstrap, whatever the request presents.
             None => Some(StatusCode::SERVICE_UNAVAILABLE),
+            // AGENTD-6: the installed token opens every control route.
             Some(true) => None,
+            // AGENTD-5: any other token is refused.
             Some(false) => Some(StatusCode::UNAUTHORIZED),
         },
     };
