@@ -151,7 +151,7 @@ export declare class BuildHookTimeout {
   /** A build-family timeout, or a refusal naming both ceilings. */
   constructor(seconds: number)
   /** The service ceiling for this family: 3600. */
-  get maxSecs(): number
+  get maxSecs(): 3600
   get seconds(): number
   toString(): string
 }
@@ -686,7 +686,7 @@ export declare class RunHookTimeout {
   /** A run-family timeout, or a refusal naming **both** ceilings. */
   constructor(seconds: number)
   /** The service ceiling for this family: 60. */
-  get maxSecs(): number
+  get maxSecs(): 60
   get seconds(): number
   toString(): string
 }
