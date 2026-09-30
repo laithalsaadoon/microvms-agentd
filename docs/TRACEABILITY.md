@@ -6,6 +6,12 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 
 | Requirement | model | gherkin | fuzz | test | impl | live |
 |---|---|---|---|---|---|---|
+| AGENTD-1 | 1 | waived | waived | 2 | 1 | waived |
+| AGENTD-2 | 1 | waived | waived | 2 | 1 | 1 |
+| AGENTD-3 | 1 | waived | waived | 1 | 1 | 1 |
+| AGENTD-4 | 1 | waived | waived | 1 | 1 | 1 |
+| AGENTD-5 | 1 | waived | waived | 1 | 1 | 1 |
+| AGENTD-6 | 1 | waived | waived | 1 | 1 | 1 |
 | AGENTD-7 | 1 | 1 | 1 | 4 | 4 | 1 |
 | AGENTD-8 | 1 | 1 | 1 | 4 | 2 | 1 |
 | AGENTD-9 | 1 | 1 | 1 | 2 | 1 | 1 |
@@ -61,6 +67,72 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | IMAGE-10 | 1 | 1 | waived | 1 | 1 | 1 |
 | IMAGE-11 | 1 | 1 | waived | 1 | 1 | 1 |
 | IMAGE-12 | waived | waived | waived | 2 | 2 | waived |
+
+## AGENTD-1
+
+While the agent token is not installed, the agentd shall reject the control request.
+
+- **model:** `crates/model/src/lib.rs`
+- **gherkin:** waived: the token rules turn on two facts, whether a token is installed and whether the presented one equals it; the model checks every interleaving of them and the replay drives each against the daemon's routes, which a scenario would restate
+- **fuzz:** waived: the verdict depends only on those two facts, which the model enumerates exhaustively, so there is no input space left for a fuzzer
+- **test:** `crates/agentd/tests/model_conformance.rs`, `crates/agentd/tests/turmoil_transport.rs`
+- **impl:** `crates/agentd/src/auth.rs`
+- **live:** waived: the platform runs the hook before it forwards any traffic (AGENTD-2's live check), so a live run never reaches the daemon before bootstrap
+
+## AGENTD-2
+
+When a bootstrap request presents a token and the agent token is not installed, the agentd shall install the agent token.
+
+- **model:** `crates/model/src/lib.rs`
+- **gherkin:** waived: the token rules turn on two facts, whether a token is installed and whether the presented one equals it; the model checks every interleaving of them and the replay drives each against the daemon's routes, which a scenario would restate
+- **fuzz:** waived: the verdict depends only on those two facts, which the model enumerates exhaustively, so there is no input space left for a fuzzer
+- **test:** `crates/agentd/src/state.rs`, `crates/agentd/tests/turmoil_transport.rs`
+- **impl:** `crates/agentd/src/state.rs`
+- **live:** `conformance/lanes/lifecycle.py`
+
+## AGENTD-3
+
+When a bootstrap request presents a token that differs from the installed agent token, the agentd shall reject the bootstrap request.
+
+- **model:** `crates/model/src/lib.rs`
+- **gherkin:** waived: the token rules turn on two facts, whether a token is installed and whether the presented one equals it; the model checks every interleaving of them and the replay drives each against the daemon's routes, which a scenario would restate
+- **fuzz:** waived: the verdict depends only on those two facts, which the model enumerates exhaustively, so there is no input space left for a fuzzer
+- **test:** `crates/agentd/src/state.rs`
+- **impl:** `crates/agentd/src/state.rs`
+- **live:** `conformance/lanes/bootstrap.py`
+
+## AGENTD-4
+
+When a bootstrap request presents a token equal to the installed agent token, the agentd shall accept the bootstrap request.
+
+- **model:** `crates/model/src/lib.rs`
+- **gherkin:** waived: the token rules turn on two facts, whether a token is installed and whether the presented one equals it; the model checks every interleaving of them and the replay drives each against the daemon's routes, which a scenario would restate
+- **fuzz:** waived: the verdict depends only on those two facts, which the model enumerates exhaustively, so there is no input space left for a fuzzer
+- **test:** `crates/agentd/src/state.rs`
+- **impl:** `crates/agentd/src/state.rs`
+- **live:** `conformance/lanes/bootstrap.py`
+
+## AGENTD-5
+
+When a control request presents a token that differs from the installed agent token, the agentd shall reject the control request.
+
+- **model:** `crates/model/src/lib.rs`
+- **gherkin:** waived: the token rules turn on two facts, whether a token is installed and whether the presented one equals it; the model checks every interleaving of them and the replay drives each against the daemon's routes, which a scenario would restate
+- **fuzz:** waived: the verdict depends only on those two facts, which the model enumerates exhaustively, so there is no input space left for a fuzzer
+- **test:** `crates/agentd/tests/turmoil_transport.rs`
+- **impl:** `crates/agentd/src/auth.rs`
+- **live:** `conformance/lanes/bootstrap.py`
+
+## AGENTD-6
+
+When a control request presents a token equal to the installed agent token, the agentd shall accept the control request.
+
+- **model:** `crates/model/src/lib.rs`
+- **gherkin:** waived: the token rules turn on two facts, whether a token is installed and whether the presented one equals it; the model checks every interleaving of them and the replay drives each against the daemon's routes, which a scenario would restate
+- **fuzz:** waived: the verdict depends only on those two facts, which the model enumerates exhaustively, so there is no input space left for a fuzzer
+- **test:** `crates/agentd/tests/turmoil_transport.rs`
+- **impl:** `crates/agentd/src/auth.rs`
+- **live:** `conformance/lanes/bootstrap.py`
 
 ## AGENTD-7
 
@@ -674,7 +746,7 @@ trace it.
 
 | Threat | Requirement | Guard | Status |
 |---|---|---|---|
-| An in-VM process races the platform to the bootstrap hook | AGENTD-1 (not traced), AGENTD-3 (not traced) | `crates/agentd/tests/model_conformance.rs::slice_0_of_the_walk_replays_against_the_daemon`, `crates/agentd/src/state.rs::identical_replay_succeeds_and_a_different_token_conflicts` | guarded; a process that starts before the daemon still wins, which is the unenforced invariant below |
+| An in-VM process races the platform to the bootstrap hook | AGENTD-1, AGENTD-3 | `crates/agentd/tests/model_conformance.rs::slice_0_of_the_walk_replays_against_the_daemon`, `crates/agentd/src/state.rs::identical_replay_succeeds_and_a_different_token_conflicts` | guarded; a process that starts before the daemon still wins, which is the unenforced invariant below |
 | A caller holding the agent token but not the host key opens a verified tunnel | AGENTD-17 | `crates/agentd/src/tunnel_identity.rs::only_the_pinned_host_key_completes_a_handshake`, `crates/agentd/tests/tunnel_relay.rs::a_valid_token_with_the_wrong_host_key_is_refused` | guarded; its seeded fault waits for #297's handshake model, since under KK no one-sided change turns the pin off |
 | A verified tunnel's handshake fails, or the VM has no key, and the guest service is reached anyway | AGENTD-18 | `crates/agentd/tests/tunnel_relay.rs::a_refused_caller_never_causes_a_guest_connection`, `crates/agentd/tests/tunnel_relay.rs::identity_against_a_seedless_vm_is_refused_not_downgraded` | guarded |
 | A guest answers a verified tunnel's handshake with a key other than the pinned VM key | BIND-21 | `crates/microvms-core/tests/tunnel_end_to_end.rs::a_wrong_pin_fails_closed_with_a_diagnosis`, `crates/microvms-core/tests/tunnel_end_to_end.rs::a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel` | guarded |

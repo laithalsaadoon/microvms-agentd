@@ -17,7 +17,7 @@ class Daemon:
     """Raw HTTP to one MicroVM's daemon, through the platform's endpoint proxy.
 
     Not a client library and deliberately so: every method here returns the status
-    integer the daemon chose, and the six checks that use it assert on that integer.
+    integer the daemon chose, and the daemon lane's checks assert on that integer.
     The deleted Python suite asserted on the exception *its* status table mapped the
     integer to, which is one more layer that could be the thing that passes. Status
     codes are what those checks always meant.

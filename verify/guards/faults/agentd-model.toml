@@ -44,3 +44,42 @@ expect = "test-failed"
 suite = "rust"
 note = "crates/model/src/exec_start.rs::specified"
 transform = { file = "crates/model/src/exec_start.rs", replace = "Layering::Specified => [image, identity, world.launch, request.env()],", with = "Layering::Specified => [image, world.launch, identity, request.env()]," }
+
+# The daemon model's token properties (#305), one per key the trace credits to it: each fault
+# changes one response of the model, and only that key's property reports a counterexample
+# (stateright names the first one it finds).
+[[fault]]
+id = "model-agentd-2-first-bootstrap-refused"
+guard = "tests::correct_deployment_satisfies_every_property"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "tests::correct_deployment_satisfies_every_property"]
+expect = "test-failed"
+suite = "rust"
+message = "\"AGENTD-2 the first bootstrap installs its token\" counterexample"
+transform = { file = "crates/model/src/lib.rs", replace = "                        next.boot = Boot::Ready { token, by: from };\n                        Response::Ok\n", with = "                        next.boot = Boot::Ready { token, by: from };\n                        Response::Conflict\n" }
+
+[[fault]]
+id = "model-agentd-4-replay-refused"
+guard = "tests::correct_deployment_satisfies_every_property"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "tests::correct_deployment_satisfies_every_property"]
+expect = "test-failed"
+suite = "rust"
+message = "\"AGENTD-4 a bootstrap presenting the installed token is accepted\" counterexample"
+transform = { file = "crates/model/src/lib.rs", replace = "                    } if installed == token => Response::Ok,\n", with = "                    } if installed == token => Response::Conflict,\n" }
+
+[[fault]]
+id = "model-agentd-5-wrong-token-unavailable"
+guard = "tests::correct_deployment_satisfies_every_property"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "tests::correct_deployment_satisfies_every_property"]
+expect = "test-failed"
+suite = "rust"
+message = "\"AGENTD-5 a control request presenting another token is refused\" counterexample"
+transform = { file = "crates/model/src/lib.rs", replace = "                Some(installed) if installed != token => Response::Unauthorized,\n", with = "                Some(installed) if installed != token => Response::Unavailable,\n" }
+
+[[fault]]
+id = "model-agentd-6-poll-refused"
+guard = "tests::correct_deployment_satisfies_every_property"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "tests::correct_deployment_satisfies_every_property"]
+expect = "test-failed"
+suite = "rust"
+message = "\"AGENTD-6 a control request presenting the installed token is accepted\" counterexample"
+transform = { file = "crates/model/src/lib.rs", replace = "                        ControlOp::ExecPoll(_) => Response::Ok,\n", with = "                        ControlOp::ExecPoll(_) => Response::Unauthorized,\n" }

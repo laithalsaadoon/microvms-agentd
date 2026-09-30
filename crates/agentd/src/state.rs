@@ -122,14 +122,14 @@ pub(crate) fn epoch_secs() -> u64 {
 /// What happened when a caller tried to install a token.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Bootstrap {
-    /// The token was installed. This caller was first.
+    /// The token was installed. This caller was first (AGENTD-2).
     Installed,
     /// A token identical to the installed one was presented again. The platform
     /// may retry its own hook, and telling it the VM is broken would fail a
-    /// launch that is actually fine, so this is success.
+    /// launch that is actually fine, so this is success (AGENTD-4).
     AlreadyIdentical,
     /// A token different from the installed one was presented. Refused with 409;
-    /// the installed token is unchanged.
+    /// the installed token is unchanged (AGENTD-3).
     Conflict,
 }
 
@@ -474,6 +474,7 @@ mod tests {
             .collect()
     }
 
+    /// **AGENTD-2.** The first bootstrap installs the token it presents.
     #[test]
     fn first_bootstrap_installs() {
         let state = state();
@@ -485,8 +486,9 @@ mod tests {
         assert!(state.is_bootstrapped());
     }
 
-    /// A second bootstrap with a different token is refused and leaves the first in place
-    /// (AGENTD-3), which is what keeps a losing racer from replacing the winner's token.
+    /// A replay of the installed token is accepted (AGENTD-4), and a second bootstrap with a
+    /// different token is refused and leaves the first in place (AGENTD-3), which is what keeps
+    /// a losing racer from replacing the winner's token.
     #[test]
     fn identical_replay_succeeds_and_a_different_token_conflicts() {
         let state = state();
