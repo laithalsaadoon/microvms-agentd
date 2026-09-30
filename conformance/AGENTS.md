@@ -4,6 +4,18 @@ The live suite: `run_rs.py` drives the real `microvm` CLI against AWS and record
 check as PASS or FAIL. `infra/` is the Terraform stack it runs in. Everything here except the
 self-test is billable.
 
+`run_rs.py` is the entry point and holds only the command line. The suite is the three
+packages beside it, which import as top-level packages because Python puts a script's own
+directory first on its module search path, whatever the working directory:
+
+- `harness/`: what every section drives the CLI and the daemon through, `Results` among it
+  (`harness/results.py`). It imports nothing from the lanes.
+- `lanes/`: the checks, one module per area. A section is a `drive_*` function in its area's
+  module, and `lanes/suite.py` runs the sections in the order they need, with the reasons
+  beside them. A new check goes in its section; a new section also gets its line there.
+- `selftest/`: the offline half. `selftest/suite.py` runs every twin; a lane's twins, where it
+  has them, are in the `selftest/` module of the same name.
+
 - Offline first: `./conformance/run_rs.py --self-test` exercises the suite's own helpers and
   their negative twins, and `mise run live:check` checks the live tier's wiring in `mise.toml`.
   Both are free, and `mise run check` runs both (the first as `conformance:self-test`).
