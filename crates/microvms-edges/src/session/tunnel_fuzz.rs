@@ -175,30 +175,52 @@ impl Reply {
     }
 }
 
+/// One reply, checked against the pin's rule.
+fn check_reply(case: &Reply) {
+    let (initiator, first) = hello();
+    let (wire, expected) = case.wire(&first);
+    let mut scratch = vec![0_u8; 65535];
+    match (read_reply(initiator, &wire, &mut scratch, 8080), expected) {
+        (Ok(verified), Some(offer)) => {
+            assert_eq!(verified.daemon_proves_end, offer, "{case:?}");
+        }
+        (Err(error), None) => {
+            assert!(
+                error.to_string().contains("pinned key"),
+                "{case:?}: {error}"
+            );
+        }
+        (read, expected) => panic!(
+            "{case:?} read as {:?}, and the pin's rule says {expected:?}",
+            read.map(|verified| verified.daemon_proves_end)
+        ),
+    }
+}
+
 /// **BIND-21.** Hostile bytes as the daemon's handshake reply open a session exactly when the
 /// pinned VM made them for this handshake, with the offer the payload carries.
+///
+/// Every run checks one reply of each kind before the drawn ones. Under `cargo test` bolero
+/// draws for a fixed time, and a handshake's crypto keeps that to a few dozen inputs, so a
+/// rule only a draw reaches can go unchecked in a run (#297's seeded faults did).
 #[test]
 fn a_reply_opens_only_from_the_pinned_vm() {
-    bolero::check!().with_type::<Reply>().for_each(|case| {
-        let (initiator, first) = hello();
-        let (wire, expected) = case.wire(&first);
-        let mut scratch = vec![0_u8; 65535];
-        match (read_reply(initiator, &wire, &mut scratch, 8080), expected) {
-            (Ok(verified), Some(offer)) => {
-                assert_eq!(verified.daemon_proves_end, offer, "{case:?}");
-            }
-            (Err(error), None) => {
-                assert!(
-                    error.to_string().contains("pinned key"),
-                    "{case:?}: {error}"
-                );
-            }
-            (read, expected) => panic!(
-                "{case:?} read as {:?}, and the pin's rule says {expected:?}",
-                read.map(|verified| verified.daemon_proves_end)
-            ),
-        }
-    });
+    for case in [
+        Reply::Pinned { offer: false },
+        Reply::Pinned { offer: true },
+        Reply::Payload(vec![0x02]),
+        Reply::Replayed { offer: true },
+        Reply::OtherVm { offer: true },
+        Reply::Flipped {
+            offer: true,
+            at: 0,
+            bit: 0,
+        },
+        Reply::Bytes(vec![0; 48]),
+    ] {
+        check_reply(&case);
+    }
+    bolero::check!().with_type::<Reply>().for_each(check_reply);
 }
 
 /// One thing the path does.
@@ -245,103 +267,129 @@ fn session() -> (Verified, snow::TransportState) {
     (verified, daemon.into_transport_mode().expect("transport"))
 }
 
+/// The paths every run checks before the drawn ones, for the reason
+/// [`a_reply_opens_only_from_the_pinned_vm`] gives: a faithful path whose first chunk is one
+/// byte, and a path that flips, drops, replays or swaps.
+fn anchor_paths() -> Vec<Path> {
+    let chunks = vec![vec![0], vec![1, 2], vec![3, 4, 5]];
+    let path = |steps: Vec<Step>, faithful| Path {
+        chunks: chunks.clone(),
+        steps,
+        faithful,
+    };
+    vec![
+        path(Vec::new(), true),
+        path(vec![Step::Flip { at: 0, bit: 0 }], false),
+        path(vec![Step::Drop], false),
+        path(vec![Step::Deliver, Step::Replay(0)], false),
+        path(vec![Step::Swap], false),
+        path(vec![Step::Junk(vec![0; 32])], false),
+    ]
+}
+
 /// **BIND-23 and BIND-24.** Over a path that drops, replays, swaps, flips and forges, each frame
 /// the client opens is the guest's next chunk, whole and in order, and the daemon's end of
 /// stream opens only after every chunk; a path that did nothing reaches it.
 #[test]
 fn frames_open_in_order_and_the_daemons_end_only_after_every_chunk() {
-    bolero::check!().with_type::<Path>().for_each(|path| {
-        let chunks: Vec<Vec<u8>> = path
-            .chunks
-            .iter()
-            .filter(|chunk| !chunk.is_empty())
-            .take(MAX_CHUNKS)
-            .map(|chunk| chunk[..chunk.len().min(1 + usize::from(chunk[0] % 8))].to_vec())
-            .collect();
-        let (mut client, mut daemon) = session();
-        let mut scratch = vec![0_u8; 65535];
-        // Every frame of the session, the end of stream last: what the path saw.
-        let frames: Vec<Vec<u8>> = chunks
-            .iter()
-            .map(Vec::as_slice)
-            .chain([&[][..]])
-            .map(|plain| {
-                let written = daemon.write_message(plain, &mut scratch).expect("seals");
-                scratch[..written].to_vec()
-            })
-            .collect();
-        let mut queue: std::collections::VecDeque<Vec<u8>> = frames.iter().cloned().collect();
-        let mut opened = 0;
-        let mut attacked = false;
+    for path in anchor_paths() {
+        check_path(&path);
+    }
+    bolero::check!().with_type::<Path>().for_each(check_path);
+}
 
-        let given: &[Step] = if path.faithful { &[] } else { &path.steps };
-        let steps = given.iter().map(Some).chain(std::iter::repeat(None));
-        for step in steps {
-            let frame = match step {
-                None | Some(Step::Deliver) => queue.pop_front(),
-                Some(Step::Drop) => {
-                    attacked |= queue.pop_front().is_some();
-                    continue;
-                }
-                Some(Step::Replay(index)) => {
+/// One path, checked against the frames' rules.
+fn check_path(path: &Path) {
+    let chunks: Vec<Vec<u8>> = path
+        .chunks
+        .iter()
+        .filter(|chunk| !chunk.is_empty())
+        .take(MAX_CHUNKS)
+        .map(|chunk| chunk[..chunk.len().min(1 + usize::from(chunk[0] % 8))].to_vec())
+        .collect();
+    let (mut client, mut daemon) = session();
+    let mut scratch = vec![0_u8; 65535];
+    // Every frame of the session, the end of stream last: what the path saw.
+    let frames: Vec<Vec<u8>> = chunks
+        .iter()
+        .map(Vec::as_slice)
+        .chain([&[][..]])
+        .map(|plain| {
+            let written = daemon.write_message(plain, &mut scratch).expect("seals");
+            scratch[..written].to_vec()
+        })
+        .collect();
+    let mut queue: std::collections::VecDeque<Vec<u8>> = frames.iter().cloned().collect();
+    let mut opened = 0;
+    let mut attacked = false;
+
+    let given: &[Step] = if path.faithful { &[] } else { &path.steps };
+    let steps = given.iter().map(Some).chain(std::iter::repeat(None));
+    for step in steps {
+        let frame = match step {
+            None | Some(Step::Deliver) => queue.pop_front(),
+            Some(Step::Drop) => {
+                attacked |= queue.pop_front().is_some();
+                continue;
+            }
+            Some(Step::Replay(index)) => {
+                attacked = true;
+                Some(frames[usize::from(*index) % frames.len()].clone())
+            }
+            Some(Step::Swap) => {
+                if queue.len() >= 2 {
+                    queue.swap(0, 1);
                     attacked = true;
-                    Some(frames[usize::from(*index) % frames.len()].clone())
                 }
-                Some(Step::Swap) => {
-                    if queue.len() >= 2 {
-                        queue.swap(0, 1);
-                        attacked = true;
-                    }
-                    continue;
-                }
-                Some(Step::Flip { at, bit }) => queue.pop_front().map(|mut frame| {
-                    let at = usize::from(*at) % frame.len();
-                    frame[at] ^= 1 << (bit % 8);
-                    attacked = true;
-                    frame
-                }),
-                Some(Step::Junk(bytes)) => {
-                    attacked = true;
-                    Some(bytes[..bytes.len().min(MAX_JUNK_BYTES)].to_vec())
-                }
-            };
-            let Some(frame) = frame else {
+                continue;
+            }
+            Some(Step::Flip { at, bit }) => queue.pop_front().map(|mut frame| {
+                let at = usize::from(*at) % frame.len();
+                frame[at] ^= 1 << (bit % 8);
+                attacked = true;
+                frame
+            }),
+            Some(Step::Junk(bytes)) => {
+                attacked = true;
+                Some(bytes[..bytes.len().min(MAX_JUNK_BYTES)].to_vec())
+            }
+        };
+        let Some(frame) = frame else {
+            assert!(
+                attacked,
+                "a path that did nothing ran out before the end: {path:?}"
+            );
+            return;
+        };
+        match open_frame(&mut client, &frame, &mut scratch) {
+            Ok(Frame::Chunk(count)) => {
                 assert!(
-                    attacked,
-                    "a path that did nothing ran out before the end: {path:?}"
+                    chunks.get(opened).map(Vec::as_slice) == Some(&scratch[..count]),
+                    "frame {opened} opened as {:?}, not the guest's next chunk: {path:?}",
+                    &scratch[..count]
+                );
+                opened += 1;
+            }
+            Ok(Frame::End) => {
+                assert_eq!(
+                    opened,
+                    chunks.len(),
+                    "the daemon's end opened before every chunk: {path:?}"
                 );
                 return;
-            };
-            match open_frame(&mut client, &frame, &mut scratch) {
-                Ok(Frame::Chunk(count)) => {
-                    assert!(
-                        chunks.get(opened).map(Vec::as_slice) == Some(&scratch[..count]),
-                        "frame {opened} opened as {:?}, not the guest's next chunk: {path:?}",
-                        &scratch[..count]
-                    );
-                    opened += 1;
-                }
-                Ok(Frame::End) => {
-                    assert_eq!(
-                        opened,
-                        chunks.len(),
-                        "the daemon's end opened before every chunk: {path:?}"
-                    );
-                    return;
-                }
-                // The relay fails here, so nothing after it reaches the local connection.
-                Err(error) => {
-                    assert!(
-                        attacked,
-                        "an untouched frame failed to open: {error}: {path:?}"
-                    );
-                    assert!(
-                        error.to_string().contains("did not authenticate"),
-                        "{error}"
-                    );
-                    return;
-                }
+            }
+            // The relay fails here, so nothing after it reaches the local connection.
+            Err(error) => {
+                assert!(
+                    attacked,
+                    "an untouched frame failed to open: {error}: {path:?}"
+                );
+                assert!(
+                    error.to_string().contains("did not authenticate"),
+                    "{error}"
+                );
+                return;
             }
         }
-    });
+    }
 }
