@@ -1362,6 +1362,11 @@ export interface CompletionRequest {
   timeoutSec?: number
   /** The idempotency key. Omitted, one is minted. */
   execId?: string
+  /**
+   * Signal the whole process group once the command's own child exits. See
+   * `ExecOptions.reapGroupOnExit`.
+   */
+  reapGroupOnExit?: boolean
   /** Start the child's environment from the image's `ENV`. See `ExecOptions.inheritImageEnv`. */
   inheritImageEnv?: boolean
   /**
