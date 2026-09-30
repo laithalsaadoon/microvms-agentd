@@ -18,6 +18,7 @@ use microvms_core::Region;
 
 use crate::cli::DoctorArgs;
 use crate::commands::{Ctx, Rendered, response_type};
+use crate::config::Source;
 use crate::exit::{CliError, Exit};
 use crate::render::{Check, check_json, healthy, render_doctor};
 
@@ -38,18 +39,29 @@ pub async fn doctor<O: std::io::Write, E: std::io::Write>(
     // The config file first: it is the one check that is entirely local, and a malformed
     // file fails `run` before anything else would, so it should be the first line a reader
     // sees. Fatal on a broken file, advisory-pass on an absent one — a project without a
-    // microvm.toml is configured by flags, which is not a finding.
-    checks.push(check_config(&args.config));
+    // microvm.toml is configured by flags, which is not a finding. Loaded once, through the
+    // loader `run` uses, because the region below reads it too.
+    let loaded = crate::config::load(
+        args.config.config.as_deref(),
+        args.config.no_config,
+        std::path::Path::new("."),
+    );
+    checks.push(check_config(&args.config, &loaded));
 
     // The region first among the AWS-adjacent ones, because it is the value a connector ARN is
     // interpolated into and a wrong one produces a null-message denial that reads as IAM.
-    // Resolved once, flags first, so every line below reports on the region this line names
-    // (#250). Each check used to resolve it again from the environment alone. A `microvm.toml`
-    // `region` isn't folded in here, where `run` puts it above the environment, so `doctor`
-    // reports on the environment's region in a project that pins one. That's a separate gap
-    // from the flags #250 is about, left for its own change.
-    let region = args.region.resolve(ctx.env);
-    checks.push(check_region(&region));
+    // Resolved once, so every line below reports on the region this line names (#250), and
+    // through `run`'s own chain, flags, then the file's `region`, then the environment, so
+    // that region is the one `run` launches in (#336). Each check used to resolve it again
+    // from the environment alone, and then this line did, from the flags and the environment.
+    // A file that doesn't load pins nothing here: the config line above is the fatal one.
+    let (config_path, config_region) = match &loaded {
+        Ok(Some((path, config))) => (Some(path.as_path()), config.region.as_deref()),
+        Ok(None) | Err(_) => (None, None),
+    };
+    let merged = crate::config::merge_region(&args.region, config_region, ctx.env);
+    let region = merged.flags.resolve(ctx.env);
+    checks.push(check_region(&region, &merged, config_path));
     // Then whether credentials resolve at all. Through the seam, so this command is covered by
     // the behavioral guard like every other AWS-touching one — and it is genuinely the
     // cheapest question that proves the chain resolves rather than that a file exists.
@@ -98,11 +110,17 @@ pub async fn doctor<O: std::io::Write, E: std::io::Write>(
 /// file exists and cannot be used — that is exactly the state in which `run` fails with
 /// `ERR_CONFIG` — and advisory-pass when no file is present, because flags-only is a
 /// configuration, not a gap.
-fn check_config(flags: &crate::cli::ConfigFlags) -> Check {
+fn check_config(
+    flags: &crate::cli::ConfigFlags,
+    loaded: &Result<
+        Option<(std::path::PathBuf, crate::config::ProjectConfig)>,
+        crate::config::ConfigError,
+    >,
+) -> Check {
     if flags.no_config {
         return Check::pass("config", "--no-config: any microvm.toml is ignored");
     }
-    match crate::config::load(flags.config.as_deref(), false, std::path::Path::new(".")) {
+    match loaded {
         Ok(Some((path, config))) => {
             let pinned = [
                 ("image", config.image.is_some()),
@@ -153,8 +171,28 @@ fn check_config(flags: &crate::cli::ConfigFlags) -> Check {
 /// and AWS adds regions faster than a constant is re-read. The bindings' `preflight` keeps the
 /// unresolved case fatal, because a harness cannot launch without a region. The remedy names
 /// the five, so the reader can tell "typo" from "genuinely new".
-fn check_region(region: &Result<Region, microvms_core::Error>) -> Check {
-    microvms_core::preflight::region_check(region).advisory()
+///
+/// The line also says which layer chose the region, in the words a reader would change it
+/// with: the flag, the config file's path, the environment, or the built-in default. `run`
+/// reports the same answer as `resolvedConfig.region.source`.
+fn check_region(
+    region: &Result<Region, microvms_core::Error>,
+    merged: &crate::config::MergedRegion,
+    config_path: Option<&std::path::Path>,
+) -> Check {
+    let mut check = microvms_core::preflight::region_check(region).advisory();
+    let chosen_by = match merged.reported.source {
+        Source::Flag if merged.flags.unlisted_region.is_some() => "--unlisted-region".to_string(),
+        Source::Flag => "--region".to_string(),
+        Source::Config => config_path.map_or_else(
+            || crate::config::DEFAULT_FILE.to_string(),
+            |path| path.display().to_string(),
+        ),
+        Source::Env => "$AWS_REGION or $AWS_DEFAULT_REGION".to_string(),
+        Source::Default => "the built-in default".to_string(),
+    };
+    check.detail.push_str(&format!("; set by {chosen_by}"));
+    check
 }
 
 /// Whether the credential chain resolves credentials for the resolved region: core's preflight
@@ -516,7 +554,13 @@ pub fn elf_machine(path: &std::path::Path) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::seam::resolve_region;
+    use crate::cli::{RegionArg, RegionFlags};
+
+    /// The region line for these flags and this environment, in a project with no config file.
+    fn region_line(flags: RegionFlags, env: &dyn Fn(&str) -> Option<String>) -> Check {
+        let merged = crate::config::merge_region(&flags, None, env);
+        check_region(&merged.flags.resolve(env), &merged, None)
+    }
 
     /// Writes a file and removes it on drop.
     struct TempFile(std::path::PathBuf, #[allow(dead_code)] tempfile::TempPath);
@@ -635,14 +679,22 @@ mod tests {
     #[test]
     fn an_unlisted_region_is_advisory_and_the_remedy_names_the_five() {
         let env = |_: &str| None;
-        let check = check_region(&resolve_region(None, Some("eu-central-1"), &env));
+        let unlisted = RegionFlags {
+            region: None,
+            unlisted_region: Some("eu-central-1".to_string()),
+        };
+        let check = region_line(unlisted, &env);
         assert!(!check.ok);
         assert!(!check.fatal, "{check:?}");
         assert!(check.remedy.contains("us-east-1"), "{check:?}");
         assert!(check.remedy.contains("ap-northeast-1"), "{check:?}");
 
         // And a listed one passes.
-        let listed = check_region(&resolve_region(Some(Region::UsWest2), None, &env));
+        let listed = RegionFlags {
+            region: Some(RegionArg::UsWest2),
+            unlisted_region: None,
+        };
+        let listed = region_line(listed, &env);
         assert!(listed.ok, "{listed:?}");
     }
 
@@ -653,7 +705,7 @@ mod tests {
     #[test]
     fn an_unparseable_region_from_the_environment_is_reported_rather_than_raised() {
         let env = |name: &str| (name == "AWS_REGION").then(|| "not-a-region".to_string());
-        let check = check_region(&resolve_region(None, None, &env));
+        let check = region_line(RegionFlags::default(), &env);
         assert!(!check.ok);
         assert!(!check.fatal);
         assert!(check.detail.contains("not-a-region"), "{check:?}");

@@ -337,47 +337,16 @@ pub fn merge_config(
     report("shell", json!(shell.value), shell.source);
     merged.shell = shell.value;
 
-    // The region: a config value joins the flag chain *above* the environment, because the
-    // file is project state and the environment is machine state. The closed set only —
-    // the loader already refused an unlisted name with the flag's own remedy (and doctor
-    // validates through the same loader, so the two commands cannot disagree), which is
-    // why this is an expect rather than a second refusal.
-    let region_config = config.region.as_deref().map(|name| {
-        crate::cli::RegionArg::from_name(name).expect("config::load validated the region domain")
-    });
-    let region = crate::config::pick(
-        args.region.region.is_some() || args.region.unlisted_region.is_some(),
-        args.region.region,
-        region_config.map(Some),
+    // The region: the file joins the flag chain above the environment, and the report walks
+    // the chain the run itself will. One function for `run` and `doctor`, so the two can't
+    // disagree about which region a project uses (#336).
+    let region = crate::config::merge_region(&args.region, config.region.as_deref(), env);
+    merged.region = region.flags;
+    report(
+        "region",
+        json!(region.reported.value),
+        region.reported.source,
     );
-    if args.region.unlisted_region.is_none() {
-        merged.region.region = region.value;
-    }
-    // The report continues down the chain the run itself will walk: past the file sit
-    // `$AWS_REGION`/`$AWS_DEFAULT_REGION`, then the built-in. A report that said
-    // `default: null` while the launch went where the environment pointed would be the
-    // report lying about the one knob whose chain does not end at the file.
-    let (region_value, region_source) = match (
-        merged
-            .region
-            .region
-            .map(|r| r.region().as_str().to_string())
-            .or_else(|| merged.region.unlisted_region.clone()),
-        region.source,
-    ) {
-        (Some(value), source) => (Some(value), source),
-        (None, _) => match env("AWS_REGION").or_else(|| env("AWS_DEFAULT_REGION")) {
-            // Reported as the environment's word, unvalidated: `resolve` refuses an
-            // unlisted name later with the remedy attached, and this report must not
-            // pre-empt that refusal by pretending the value was something else.
-            Some(name) => (Some(name), crate::config::Source::Env),
-            None => (
-                Some(microvms_core::Region::UsEast1.as_str().to_string()),
-                crate::config::Source::Default,
-            ),
-        },
-    };
-    report("region", json!(region_value), region_source);
 
     // The launch env, merged per key with the flag pair winning its own key.
     let env_source = match (args.launch_env.is_empty(), &config.env) {
