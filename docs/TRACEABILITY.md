@@ -38,11 +38,11 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | BIND-2 | waived | waived | waived | 3 | 7 | waived |
 | BIND-3 | waived | waived | waived | 1 | 1 | waived |
 | BIND-4 | waived | waived | waived | 1 | 1 | waived |
-| BIND-6 | 1 | 1 | 1 | 4 | 6 | 1 |
-| BIND-7 | 1 | 1 | 1 | 4 | 3 | 1 |
-| BIND-8 | 1 | 1 | 1 | 4 | 1 | 1 |
+| BIND-6 | 1 | 1 | 1 | 4 | 7 | 1 |
+| BIND-7 | 1 | 1 | 1 | 4 | 4 | 1 |
+| BIND-8 | 1 | 1 | 1 | 4 | 2 | 1 |
 | BIND-9 | 1 | 1 | 1 | 4 | 2 | 1 |
-| BIND-10 | 1 | 1 | 1 | 4 | 4 | 1 |
+| BIND-10 | 1 | 1 | 1 | 5 | 6 | 1 |
 | BIND-11 | 1 | 1 | 1 | 3 | 1 | 1 |
 | BIND-12 | 1 | 1 | 1 | 5 | 3 | 1 |
 | BIND-13 | 1 | 1 | 1 | 3 | 3 | waived |
@@ -439,7 +439,7 @@ The microvms-core shall report a finished exec's POSIX exit code as 124 when a d
 - **gherkin:** `crates/microvms-core/tests/features/run_to_completion.feature`
 - **fuzz:** `crates/microvms-core/tests/run_to_completion_fuzz.rs`
 - **test:** `bindings/microvms-js/__test__/run_to_completion.mjs`, `bindings/microvms-py/tests/test_run_to_completion.py`, `crates/microvms-app/src/session/exec.rs`, `crates/microvms-core/tests/live_run_to_completion.rs`
-- **impl:** `bindings/microvms-js/src/exec.rs`, `bindings/microvms-js/src/session.rs`, `bindings/microvms-py/src/exec.rs`, `bindings/microvms-py/src/session.rs`, `crates/microvms-app/src/session/complete.rs`, `crates/microvms-app/src/session/exec.rs`
+- **impl:** `bindings/microvms-js/src/exec.rs`, `bindings/microvms-js/src/session.rs`, `bindings/microvms-py/src/exec.rs`, `bindings/microvms-py/src/session.rs`, `crates/microvms-app/src/session/complete.rs`, `crates/microvms-app/src/session/exec.rs`, `crates/microvms-cli/src/commands/attached.rs`
 - **live:** `conformance/lanes/sessions.py`
 
 ## BIND-7
@@ -450,7 +450,7 @@ The microvms-core shall annotate an exec result with one human-readable note for
 - **gherkin:** `crates/microvms-core/tests/features/run_to_completion.feature`
 - **fuzz:** `crates/microvms-core/tests/run_to_completion_fuzz.rs`
 - **test:** `bindings/microvms-js/__test__/run_to_completion.mjs`, `bindings/microvms-py/tests/test_run_to_completion.py`, `crates/microvms-app/src/session/exec.rs`, `crates/microvms-core/tests/live_run_to_completion.rs`
-- **impl:** `bindings/microvms-js/src/exec.rs`, `bindings/microvms-py/src/exec.rs`, `crates/microvms-app/src/session/exec.rs`
+- **impl:** `bindings/microvms-js/src/exec.rs`, `bindings/microvms-py/src/exec.rs`, `crates/microvms-app/src/session/exec.rs`, `crates/microvms-cli/src/commands/attached.rs`
 - **live:** `conformance/lanes/sessions.py`
 
 ## BIND-8
@@ -461,7 +461,7 @@ If the output stream of a run-to-completion call ends without the terminal exit 
 - **gherkin:** `crates/microvms-core/tests/features/run_to_completion.feature`
 - **fuzz:** `crates/microvms-core/tests/run_to_completion_fuzz.rs`
 - **test:** `bindings/microvms-js/__test__/run_to_completion.mjs`, `bindings/microvms-py/tests/test_run_to_completion.py`, `crates/microvms-app/src/session/complete.rs`, `crates/microvms-core/tests/live_run_to_completion.rs`
-- **impl:** `crates/microvms-app/src/session/complete.rs`
+- **impl:** `crates/microvms-app/src/session/complete.rs`, `crates/microvms-cli/src/cli.rs`
 - **live:** `conformance/lanes/sessions.py`
 
 ## BIND-9
@@ -482,8 +482,8 @@ If the acknowledgement that follows a client-deadline kill fails, then the micro
 - **model:** `crates/model/src/run.rs`
 - **gherkin:** `crates/microvms-core/tests/features/run_to_completion.feature`
 - **fuzz:** `crates/microvms-core/tests/run_to_completion_fuzz.rs`
-- **test:** `bindings/microvms-js/__test__/run_to_completion.mjs`, `bindings/microvms-py/tests/test_run_to_completion.py`, `crates/microvms-app/src/session/complete.rs`, `crates/microvms-core/tests/live_run_to_completion.rs`
-- **impl:** `bindings/microvms-js/src/exec.rs`, `bindings/microvms-py/src/exec.rs`, `crates/microvms-app/src/session/complete.rs`, `crates/microvms-app/src/session/exec.rs`
+- **test:** `bindings/microvms-js/__test__/run_to_completion.mjs`, `bindings/microvms-py/tests/test_run_to_completion.py`, `crates/microvms-app/src/session/complete.rs`, `crates/microvms-cli/src/guards/exec.rs`, `crates/microvms-core/tests/live_run_to_completion.rs`
+- **impl:** `bindings/microvms-js/src/exec.rs`, `bindings/microvms-py/src/exec.rs`, `crates/microvms-app/src/session/complete.rs`, `crates/microvms-app/src/session/exec.rs`, `crates/microvms-cli/src/cli.rs`, `crates/microvms-cli/src/commands/attached.rs`
 - **live:** `conformance/lanes/sessions.py`
 
 ## BIND-11

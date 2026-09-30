@@ -237,7 +237,25 @@ pub async fn exec<O: std::io::Write, E: std::io::Write>(
             shell: args.shell.clone(),
             inherit_image_env: args.inherit_image_env,
             reap: args.reap,
-        });
+        })
+        // The daemon's own deadline, only when the caller asked for one. `--timeout` is this
+        // process's wait, and it never becomes the daemon's budget (`start_request` says why).
+        .with_timeout_sec(args.timeout_sec.map(|budget| budget.as_secs_f64()));
+    // Planned before anything starts, so a `timeout_sec` no deadline can be built from is
+    // refused with no exec behind it, as the bindings' `run_to_completion` refuses it.
+    let completion = if args.complete {
+        Some(microvms_core::session::CompletionPlan::new(
+            &request,
+            microvms_core::session::CompletionOptions {
+                client_grace: args
+                    .client_grace
+                    .unwrap_or(microvms_core::session::DEFAULT_CLIENT_GRACE),
+                ..microvms_core::session::CompletionOptions::default()
+            },
+        )?)
+    } else {
+        None
+    };
     let exec_id = request.exec_id.clone();
     ctx.out.progress(&format!("exec {exec_id}: {command}"));
 
@@ -298,7 +316,20 @@ pub async fn exec<O: std::io::Write, E: std::io::Write>(
         });
         return Ok(render_exec(&exec_id, &started));
     }
-    let result = match handle.wait_and_ack(timeout).await {
+    let waited = match &completion {
+        // Core's composition: wait and ack under the client deadline, then on it a kill, an ack
+        // within the grace, and a synthesized 124 when that fails too. `--kill-on-timeout`
+        // conflicts with `--complete`, so the arm below that kills is never this one's.
+        Some(plan) => {
+            ctx.out.progress(&format!(
+                "waiting for exactly one result, up to {}s",
+                plan.deadline().as_secs()
+            ));
+            plan.drive(&handle, None).await
+        }
+        None => handle.wait_and_ack(timeout).await,
+    };
+    let result = match waited {
         Ok(result) => result,
         // The deadline ended the wait and the caller asked for that to be a stop. One kill,
         // best-effort: its own failure is folded into the report rather than replacing the
@@ -643,6 +674,13 @@ pub(crate) fn render_exec_as(
                 .is_some_and(|outcome| outcome.timed_out)
         ),
     );
+    // Core's shell-semantics reading of the same result (BIND-6, BIND-7, BIND-10), so a script
+    // wanting `$?`'s answer (124 for a deadline, 128 + n for a signal) doesn't rebuild it from
+    // `outcome`: the code, one note per condition that changes how the output reads, and
+    // whether the result was synthesized after the client deadline.
+    data.insert("posixExitCode".into(), json!(result.posix_exit_code()));
+    data.insert("notes".into(), json!(result.notes()));
+    data.insert("synthesized".into(), json!(result.synthesized()));
 
     let code = result.exit_code();
     let dense = format!(
@@ -656,15 +694,15 @@ pub(crate) fn render_exec_as(
             lines.push(part.trim_end_matches('\n').to_string());
         }
     }
-    if result
-        .outcome
-        .as_ref()
-        .is_some_and(|outcome| outcome.timed_out)
-    {
-        lines.push("execution deadline expired".into());
-    }
+    // One line per note: an expired daemon deadline, truncation, writers left alive, and the
+    // client deadline's kill or synthesis.
+    lines.extend(result.notes());
     lines.push(match (result.done(), code) {
         (_, Some(code)) => format!("exit code: {code}"),
+        // Nothing came back after the client deadline's kill, so there is no record to read.
+        (false, None) if result.synthesized() => {
+            format!("exec {exec_id} has no result: exit code 124, synthesized")
+        }
         // Still running, which for a poll is the normal answer and not a failure.
         (false, None) => format!("exec {exec_id} is {}", phase_name(result.phase)),
         // Finished with no exit code: a signal death. Reporting it as one — 0, or 128+n — is how a
@@ -674,11 +712,10 @@ pub(crate) fn render_exec_as(
 
     let (kind, _) = response_type(command);
     let rendered = Rendered::ok(kind, data, lines.join("\n"), dense);
-    if result
-        .outcome
-        .as_ref()
-        .is_some_and(|outcome| outcome.timed_out)
-    {
+    // A deadline ended the command: the daemon's, or under `--complete` the client's kill or a
+    // synthesized result. Core's condition, the one its `posixExitCode` of 124 reports, so a
+    // command that exits 124 by itself is still `ERR_EXEC_FAILED`.
+    if result.deadline_ended() {
         return rendered.reporting(Exit::Timeout);
     }
     // Keyed on a *present* non-zero code, so a running exec's absent one is not a failure. A
