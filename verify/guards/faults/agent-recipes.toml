@@ -1,0 +1,12 @@
+# ── the agent recipes in core (`crates/microvms-app/src/agents/`) ──────────────
+# `prompt_sync` is core's since #266, and both bindings call it; the entry breaks core's.
+
+[[fault]]
+id = "app-prompt-sync-unbounded"
+guard = "agents::tests::a_synchronous_prompt_bounds_the_daemon_by_the_wait_it_makes"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "agents::tests::a_synchronous_prompt_bounds_the_daemon_by_the_wait_it_makes"]
+expect = "test-failed"
+suite = "rust"
+message = "timeout_sec for None"
+note = "crates/microvms-app/src/agents/mod.rs::a_synchronous_prompt_bounds_the_daemon_by_the_wait_it_makes"
+transform = { file = "crates/microvms-app/src/agents/mod.rs", replace = "    let bounded = PromptOptions {\n        timeout: Some(timeout),\n        ..options.clone()\n    };\n", with = "    let bounded = options.clone();\n" }
