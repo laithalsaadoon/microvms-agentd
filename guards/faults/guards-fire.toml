@@ -996,6 +996,7 @@ message = "FAIL: test_a_command_stays_in_one_shard ("
 transform = [
   { file = "scripts/check-guards-fire.py", replace = "    weights = command_weights(selected, entry_cost)\n", with = "    weights = {fault.id: entry_cost(fault) for fault in selected}\n" },
   { file = "scripts/check-guards-fire.py", replace = "    return [fault for fault in selected if command_key(fault) in keep]\n", with = "    return [fault for fault in selected if fault.id in keep]\n" },
+  { file = "scripts/check-guards-fire.py", replace = "    weights = {key: w + command_overhead(first[key]) for key, w in weights.items()}\n", with = "" },
 ]
 
 # The shards are split by entry count, not cost, or a cost loses one of its tiers.
@@ -1027,6 +1028,24 @@ message = "FAIL: test_a_shard_weighs_an_entry_by_what_it_builds ("
 transform = { file = "scripts/check-guards-fire.py", replace = "    return 14 if fault.suite == \"rust\" else 17\n", with = "    return 14\n" }
 
 # A shard's entries come out in the order the split visits commands, not registry order.
+[[fault]]
+id = "guards-fire-shard-lint-weight"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "test_a_shard_weighs_an_entry_by_what_it_builds"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_shard_weighs_an_entry_by_what_it_builds ("
+transform = { file = "scripts/check-guards-fire.py", replace = "    if fault.expect == \"lint-error\":\n        # A lint entry fires in its command's batch (`plan_batch`), one clippy run for all of\n        # them: run 36673442938 fired 60 of them in about 15 s of batches.\n        return 2\n", with = "" }
+
+[[fault]]
+id = "guards-fire-shard-no-overhead"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "test_a_shard_weighs_an_entry_by_what_it_builds"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_shard_weighs_an_entry_by_what_it_builds ("
+transform = { file = "scripts/check-guards-fire.py", replace = "    weights = {key: w + command_overhead(first[key]) for key, w in weights.items()}\n", with = "" }
+
 [[fault]]
 id = "guards-fire-shard-order"
 guard = "test_check_guards_fire.py"
@@ -1226,7 +1245,7 @@ run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "disc
 expect = "exit-nonzero"
 suite = "script"
 message = "a failed shard cancels the others"
-transform = { file = ".github/workflows/ci.yml", replace = "      fail-fast: false\n      matrix:\n        shard: [0, 1, 2]\n", with = "      fail-fast: true\n      matrix:\n        shard: [0, 1, 2]\n" }
+transform = { file = ".github/workflows/ci.yml", replace = "      fail-fast: false\n      matrix:\n        shard: [0, 1, 2, 3, 4, 5]\n", with = "      fail-fast: true\n      matrix:\n        shard: [0, 1, 2, 3, 4, 5]\n" }
 
 # The aggregator is skipped when a shard fails, which the ruleset reads as passing; or it
 # stops waiting for the shards.

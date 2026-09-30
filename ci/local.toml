@@ -29,7 +29,7 @@
 # `HEAD^` side) isn't modeled, so `ci:guards` runs the pull request's `--affected` selection,
 # never main's full fire. It runs it as shard 0 of 1, the whole selection in one run under the
 # job's 60 minutes, where CI splits it across the matrix; `mise run guards:fire -- --jobs 4
-# --venv-per-worker` is the full fire here, and `-- --venv-per-worker --affected --shard k/3`
+# --venv-per-worker` is the full fire here, and `-- --venv-per-worker --affected --shard k/6`
 # one CI leg's share.
 
 workflows = ["ci.yml", "fuzz.yml"]
