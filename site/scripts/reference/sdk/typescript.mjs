@@ -218,6 +218,40 @@ const withoutPageLists = (body) =>
     .filter((chunk) => !/^## (?:Classes|Interfaces)\n/.test(chunk))
     .join("")
 
+/** TypeDoc's name for a member keyed by a well-known symbol: `[asyncIterator]`. */
+const SYMBOL_KEYED = /^\[(\w+)\]$/
+
+/**
+ * A member keyed by a well-known symbol, written as the declarations write it:
+ * `[Symbol.asyncIterator](): T;`.
+ *
+ * typedoc-plugin-markdown 4.13.1 writes such a member's signature block as `[asyncIterator](): T;`
+ * and then unescapes the block, which reduces everything that reads as a Markdown link,
+ * `[text](target)`, to its text. So `ExecStream`'s page said `asyncIterator: T;`, a property
+ * named `asyncIterator`, where `index.d.ts` declares the method `for await` calls (#337). The
+ * heading and the block are rewritten to `Symbol.<key>` here. A symbol-keyed member whose block
+ * isn't in that reduced form fails the generation, so a plugin release that renders it another
+ * way is read rather than rewritten blind.
+ *
+ * @param {string} body the class's page
+ * @param {import("typedoc").DeclarationReflection} reflection the class
+ */
+const withSymbolKeys = (body, reflection) => {
+  let fixed = body
+  for (const member of reflection.children ?? []) {
+    const key = SYMBOL_KEYED.exec(member.name)?.[1]
+    if (key === undefined) continue
+    const reduced = `### \\[${key}\\]()\n\n\`\`\`ts\n${key}: `
+    if (fixed.split(reduced).length !== 2) {
+      throw new Error(
+        `typedoc-plugin-markdown wrote ${reflection.name}'s ${member.name} in a form this layout doesn't rewrite`
+      )
+    }
+    fixed = fixed.replace(reduced, `### \\[Symbol.${key}\\]()\n\n\`\`\`ts\n[Symbol.${key}](): `)
+  }
+  return fixed
+}
+
 /**
  * The heading slug Starlight derives for a heading the plugin writes: github-slugger over the
  * heading text, which for `agentConstants()` is `agentconstants`.
@@ -319,7 +353,7 @@ const layout = async (repoRoot, project, out) => {
         summaryText(reflection),
         `The ${reflection.name} ${label} in ${packageName}.`
       ),
-      body: [body(file), provenance(LANGUAGE, renderer)].join("\n\n"),
+      body: [withSymbolKeys(body(file), reflection), provenance(LANGUAGE, renderer)].join("\n\n"),
       sidebarLabel: reflection.name,
       sidebarOrder: at,
       source: LANGUAGE.source
