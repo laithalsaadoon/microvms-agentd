@@ -1024,6 +1024,24 @@ class UnregisteredOnlyShrinks(unittest.TestCase):
         out = repo.run("list", "--base", "HEAD")
         self.assertEqual(out.returncode, 0, out.stderr)
 
+    def test_an_explicit_base_is_read_at_its_merge_base_with_head(self):
+        # CI passes `--base origin/main`, and main can move while the job runs. Main here drops
+        # the listed note after the branch forked; the branch still lists it, which is right
+        # for the commit it forked from, so it isn't a key the branch added.
+        repo = self.repo()
+        git(repo.root, "checkout", "-q", "-b", "pr")
+        repo.write("README", "the pull request's own change\n")
+        repo.commit("pr")
+        git(repo.root, "checkout", "-q", "main")
+        repo.write("src/lib.rs", "pub fn gone() {}\n")
+        repo.write("verify/guards/unregistered.txt", "")
+        repo.commit("main drops the note")
+        git(repo.root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        git(repo.root, "checkout", "-q", "pr")
+        out = repo.run("list", "--base", "origin/main")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("the merge base with origin/main", out.stdout)
+
     def test_a_renamed_test_keeps_its_place(self):
         repo = self.repo()
         repo.write("src/lib.rs", RUST_NOTE.replace("fn the_guard()", "fn renamed()"))

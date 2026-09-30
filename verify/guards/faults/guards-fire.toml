@@ -17,6 +17,15 @@ transform = { file = "crates/agentd/src/fs.rs", replace = "    #[test]\n    fn n
 # the files and not the rest loses the sentinel id the unit suite looks for in the real registry.
 
 [[fault]]
+id = "guards-list-base-at-the-tip"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "UnregisteredOnlyShrinks"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_explicit_base_is_read_at_its_merge_base_with_head ("
+transform = { file = "tools/check-guards-fire.py", replace = "    ref = merge_base_with(root, base_ref) if base_ref else default_base(root)\n", with = "    ref = base_ref or default_base(root)\n" }
+
+[[fault]]
 id = "guards-registry-floor"
 guard = "tools/check-guards-fire.py list"
 run = ["./tools/check-guards-fire.py", "list", "--base", "HEAD"]

@@ -986,6 +986,22 @@ def default_base(root: Path) -> str:
     return out.stdout.strip()
 
 
+def merge_base_with(root: Path, ref: str) -> str:
+    """The merge base of HEAD and `ref`: what a pull request is compared with. Not `ref`
+    itself: CI passes `--base origin/main`, and main can move past the commit the pull
+    request's merge was made from while the job runs, which would count main's own later
+    changes against the pull request."""
+    commit = git(
+        root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False
+    )
+    if commit.returncode != 0:
+        raise SystemExit(f"guards: --base {ref} doesn't name a commit")
+    base = git(root, "merge-base", "HEAD", commit.stdout.strip(), check=False)
+    if base.returncode != 0:
+        raise SystemExit(f"guards: HEAD and --base {ref} have no merge base")
+    return base.stdout.strip()
+
+
 def base_unregistered(root: Path, ref: str) -> dict[str, str] | None:
     """The list at `ref`, or None when `ref` predates it (the bootstrap)."""
     commit = git(
@@ -1081,8 +1097,8 @@ def cmd_list(root: Path, base_ref: str | None) -> int:
                 "register its fault in its owner's file there. New notes can't join the "
                 "unregistered list"
             )
-    ref = base_ref or default_base(root)
-    label = base_ref or ref[:12]
+    ref = merge_base_with(root, base_ref) if base_ref else default_base(root)
+    label = f"the merge base with {base_ref}" if base_ref else ref[:12]
     base = base_unregistered(root, ref)
     if base is not None:
         for key in grown(listed, base, found.notes):
