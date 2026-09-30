@@ -303,7 +303,7 @@ export const driftPage = (history) => {
     route: routeOf(id),
     title: "Architecture drift",
     description:
-      "The entries in verify/ratchet/drift.json at each commit that changed the file: layering and parity drift, and the requirements no layer traces yet.",
+      "The drift verify/ratchet/drift.json records at each commit that changed the file: layering and parity drift, and the requirements no layer traces yet.",
     // After the four contract pages and the wire schema; the sidebar lists it by hand beside them.
     sidebarOrder: 5,
     sidebarLabel: "Architecture drift",
@@ -313,7 +313,7 @@ export const driftPage = (history) => {
         title: "What the count is",
         body: [
           inlineText(
-            `Each entry in ${code(DRIFT_SOURCE)} names the issue that removes it, and what it records depends on its category. Layering drift is work a driving adapter (the CLI or a binding) does that belongs in a lower layer; a parity gap is a capability one surface has and another lacks; an untraced requirement is one no test, model or live check is held to yet.`
+            `Each entry in ${code(DRIFT_SOURCE)} is one piece of drift, and what it records depends on its category. Layering drift is work a driving adapter (the CLI or a binding) does that belongs in a lower layer; a parity gap is a capability one surface has and another lacks; an untraced requirement is one no test, model or live check is held to yet.`
           ),
           table(
             ["Category", "Kind", "An entry is"],
@@ -324,7 +324,7 @@ export const driftPage = (history) => {
             ])
           ),
           inlineText(
-            `A decision is a permanent exception with its reason, and it isn't counted. ${code("mise run ratchet:check")} fails when the file and the tree disagree in either direction, and it refuses an entry the base branch doesn't have, so the count can only go down.`
+            `A decision in ${code("verify/ratchet/decisions.toml")} is a permanent exception with its reason, and it isn't counted. ${code("mise run ratchet:check")} collects the drift from a change's tree and from its merge base's, and fails on drift the base doesn't have, so the count can only go down.`
           ),
           ...(notCollected.length === 0
             ? []
@@ -341,7 +341,7 @@ export const driftPage = (history) => {
       {
         title: "Provenance",
         body: inlineText(
-          `This page is generated from the git history of ${code(DRIFT_SOURCE)}: ${code(HISTORY_SCRIPT)} reads the file at each first-parent commit that changed it, and ${code("site/scripts/gen-reference.mjs")} writes the page on every ${code("pnpm run sync")}. A working tree whose copy differs from HEAD's adds a last point marked "working tree". To change a number, fix what the entry names (move the code, give the surface the capability, or trace the requirement in its group's file in ${code("verify/spec/traced/")}) and run ${code("mise run ratchet:update")}.`
+          `This page is generated from the git history of ${code(DRIFT_SOURCE)}: ${code(HISTORY_SCRIPT)} reads the file at each first-parent commit that changed it, and ${code("site/scripts/gen-reference.mjs")} writes the page on every ${code("pnpm run sync")}. Until the merge-base rule the file was the hand-kept count, so each merge that moved it is a point; since then it's a snapshot that ${code("mise run ratchet:snapshot")} rewrites in a change of its own, so each rewrite is one. A working tree whose copy differs from HEAD's adds a last point marked "working tree". To change a number, fix what the entry names (move the code, give the surface the capability, or trace the requirement in its group's file in ${code("verify/spec/traced/")}); the next snapshot counts it.`
         )
       }
     ])

@@ -387,8 +387,13 @@ impl Ensure {
     fn request(&self, size: Option<u32>, force: bool) -> EnsureImageRequest {
         let task = std::fs::read_to_string(self.dir.0.join("Dockerfile")).expect("a Dockerfile");
         let dockerfile = wrap_dockerfile(&task, &WrapOptions::default()).expect("wraps");
-        let mut request =
-            EnsureImageRequest::new("task", b"\x7fELF daemon".to_vec(), dockerfile, BUCKET, ROLE);
+        let mut request = EnsureImageRequest::new(
+            "task",
+            microvms_app::testing::aarch64_daemon(b"daemon"),
+            dockerfile,
+            BUCKET,
+            ROLE,
+        );
         request.context = Some(BuildContext::from_dir(&self.dir.0).expect("a readable context"));
         request.s3_key_prefix = Some("harbor".to_string());
         request.force = force;

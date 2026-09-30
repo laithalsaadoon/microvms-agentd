@@ -36,10 +36,10 @@
 //! # Every always-property has a sometimes-property beside it
 //!
 //! A safety property over a state space that never reaches the interesting state passes
-//! while measuring nothing — the failure mode `.erpaval/solutions/test-failures/` records
-//! and the one the daemon model's coverage checks already guard against. So each claim here
-//! is paired: `no resume wire call after terminate` is only worth reading next to
-//! `a resume is attempted after a terminate`, which proves the checker got there.
+//! while measuring nothing, which is the failure the daemon model's coverage checks already
+//! guard against. So each claim here is paired: `no resume wire call after terminate` is
+//! only worth reading next to `a resume is attempted after a terminate`, which proves the
+//! checker got there.
 //!
 //! # The window is a boolean, not a clock
 //!

@@ -3,14 +3,15 @@
 # are out of scope: they never ship.
 #
 # Every adapter name is a parsing, rendering, or host-bridge crate, or the one edge onto core.
-# `crates/microvms-cli/tests/dependency_direction.rs` holds each crate here to exactly its set plus
-# its placement records in `verify/ratchet/drift.json`: an entry is drift with the issue that
-# removes it, and a decision is a permanent exception with its reason. A direct dependency outside
-# both fails there, and so does a listed crate the crate no longer uses. A set can shrink, but
-# `mise run ratchet:check` refuses a crate added to a set the base branch already has, and an entry
-# the base doesn't have, since either would clear a finding without a reason: move the work to the
-# layer whose job it is, or record a decision with its reason. A new table is fine for a crate the
-# base has no set for, once the test holds that crate: it refuses a table for any other.
+# `crates/microvms-cli/tests/dependency_direction.rs` holds each crate here to exactly its set,
+# its `drift` table and its placement decisions in `verify/ratchet/decisions.toml`: a direct
+# dependency outside all three fails there, and so does a listed crate the crate no longer uses.
+# A crate's drift is work it does that belongs below it, with the issue that moves it; the test
+# is its one computation, and `mise run ratchet:check` holds it to the base branch, so it can only
+# shrink. A set can shrink too, but the check refuses a crate added to a set the base branch
+# already has, since that would clear a finding without a reason: move the work to the layer whose
+# job it is, or record a decision with its reason. A new table is fine for a crate the base has no
+# set for, once the test holds that crate: it refuses a table for any other.
 #
 # A layer's set is every crate it may use, and it never carries drift or a decision. The test
 # asserts the domain's and the app's declared features too.
@@ -26,6 +27,10 @@
 
 [microvms-cli]
 normal = ["microvms-core", "clap", "ratatui", "serde", "serde_json", "tokio", "toml", "unicode-width"]
+
+# Directory sync's hashing, globbing and archive crates, which #260 moves into core.
+[microvms-cli.drift]
+normal = ["const-hex", "globset", "sha2", "tar"]
 
 [microvms-py]
 normal = ["microvms-core", "microvms-protocol", "serde_json", "pyo3", "tokio"]

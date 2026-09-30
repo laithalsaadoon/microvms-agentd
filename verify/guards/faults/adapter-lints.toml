@@ -176,12 +176,12 @@ transform = { file = "bindings/microvms-js/src/control.rs", replace = ".unwrap_o
 
 [[fault]]
 id = "ratchet-adapter-logic-decision"
-guard = "verify/ratchet/drift.json"
+guard = "verify/ratchet/decisions.toml"
 run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
 message = "new drift: [adapter-logic] crates/microvms-cli/src/commands/attached.rs: literal-default: Duration::from_millis(250)"
-transform = { file = "verify/ratchet/drift.json", replace = "    {\n      \"category\": \"adapter-logic\",\n      \"key\": \"crates/microvms-cli/src/commands/attached.rs: literal-default: Duration::from_millis(250)\",\n      \"reason\": \"the quiet period `sync --watch` waits after a file event so one save's burst of events runs one sync pass; it paces the CLI's interactive watch loop, the terminal affordance the notify placement decision names, and the sync pass it wakes goes to core in #260\"\n    },\n", with = "" }
+transform = { file = "verify/ratchet/decisions.toml", replace = "key = \"crates/microvms-cli/src/commands/attached.rs: literal-default: Duration::from_millis(250)\"\n", with = "key = \"crates/microvms-cli/src/commands/attached.rs: literal-default: Duration::from_millis(251)\"\n" }
 
 [[fault]]
 id = "model-drift-operations"

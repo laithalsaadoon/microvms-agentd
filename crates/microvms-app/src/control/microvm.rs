@@ -1962,7 +1962,7 @@ mod tests {
         // Everything this client can do, in the order a real run does it.
         let request = super::super::CreateImageRequest::new(
             "img",
-            b"binary".to_vec(),
+            crate::testing::aarch64_daemon(b"binary"),
             "s3://bucket/img.zip",
             "arn:aws:iam::123456789012:role/build",
         );

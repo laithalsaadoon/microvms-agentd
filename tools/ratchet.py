@@ -4,71 +4,89 @@
 # dependencies = []
 # ///
 # SPDX-License-Identifier: Apache-2.0
-"""Hold the repo's drift to a checked-in count that can only go down (#281).
+"""Hold the repo's drift to its merge base's: a change can't add drift (#281).
 
-`verify/ratchet/drift.json` records every place a driving adapter does work that belongs below it,
-every capability a surface lacks until an issue closes it (#271), and every requirement no
-layer traces yet (#295). This script collects the same findings from the tree, compares, and fails on either side of a
-mismatch. A pass/fail rule has no memory of how much drift it accepted, so it can't tell whether
-the drift is shrinking, and it can steer a violation sideways instead of down: the CLI's
-thinness guard pushed an upload into an `aws s3 cp` subprocess it couldn't see.
+Drift is every place a driving adapter does work that belongs below it, every capability a
+surface lacks until an issue closes it (#271), and every requirement no layer traces yet (#295).
+This script collects it from the working tree and from the tree of the commit it compares with,
+with the same collectors, and fails when the working tree has drift that commit doesn't: the
+head's drift is a subset of the base's. The base is the merge base of HEAD and origin/main
+unless `--base` names one; CI passes the pull request's base branch, or the commit before on a
+push to main.
 
-# The file
+A pass/fail rule has no memory of how much drift it accepted, so it can't tell whether the drift
+is shrinking, and it can steer a violation sideways instead of down: the CLI's thinness guard
+pushed an upload into an `aws s3 cp` subprocess it couldn't see. Comparing with the base makes
+the count a ratchet with no list to keep: a fix removes drift by fixing the code and edits
+nothing else, and a change that adds drift fails whatever else it edits.
 
-    {
-      "version": 1,
-      "enforced": [],
-      "entries":   [{"category": "placement", "key": "microvms-cli -> tar", "issue": 260}],
-      "decisions": [{"category": "subprocess", "key": "...", "reason": "..."}]
-    }
+# What's written by hand
 
-- An entry is drift with the issue that removes it. The entries are the count.
-- A decision is a permanent exception with its reason. It covers its key and isn't counted.
-- `enforced` lists the categories whose rule has moved into enforcing config (`PROMOTE`). It
-  only quiets rule 4. The ratchet keeps collecting an enforced category and rules 1 and 2 still
-  apply, so a finding there fails unless a decision covers it. An enforced category can't carry
-  entries, so listing one never waives drift: the tree has to be clean of it first.
-- Keys never carry a line number, so moving code inside a file doesn't churn the file. Two
-  identical findings in one file share a key, so the key is listed once per occurrence.
-- `update` writes the layout the checked-in file uses, one line per entry, so its diff shows
-  only the entries it removed.
+- `verify/ratchet/decisions.toml`: the permanent exceptions, each a finding with its reason,
+  and `enforced`, the categories whose rule has moved into enforcing config (`PROMOTE`).
+
+      enforced = ["adapter-logic"]
+
+      [[decision]]
+      category = "subprocess"
+      key = "crates/agentd/src/exec.rs: Command::new(program)"
+      reason = "runs the caller's argv inside the VM; executing the user's commands is agentd's job"
+
+  A decision covers one finding of its key and takes it out of the drift. A change can add
+  one, which a reviewer sees with its reason, in any category but untraced. Two identical
+  findings in one file share a key, so the key is decided once per occurrence.
+- `verify/arch/placement.toml`: each adapter's and layer's allowed set, and in a crate's
+  `drift` table its placement drift: the CLI's directory sync crates, which #260 moves below
+  it. Placement is `HELD` (below), so its drift is that record rather than a finding.
+
+Keys never carry a line number, so moving code inside a file changes nothing.
+
+# The snapshot
+
+`verify/ratchet/drift.json` is generated: the drift by category, and the decisions' count, at
+the commit that last rewrote it, which the docs site charts (`tools/ratchet-history.py`).
+`snapshot` writes it and `snapshot --check` fails while it's stale. The check never reads it, so
+a change that fixes drift leaves it alone and two such changes can't conflict in it; a change of
+its own rewrites it for the chart.
 
 # The rules
 
-1. A finding with no entry or decision: new drift.
-2. An entry or decision with no finding: a fix the file doesn't record yet. `update` removes it.
-
-   Rules 1 and 2 hold a category this script collects. A category in `HELD` is collected by
-   the check it names, which holds the file's records to the tree the same way, so here it
-   takes only rules 3 and 4, and `update` leaves its records alone.
-3. An entry absent from the base branch's copy of the file, or a crate added to an allowed set
-   the base's `verify/arch/placement.toml` already has. This is what makes the count a ratchet: a PR
-   can delete entries but not add them, and it can't widen a set to make a finding disappear.
-   It can add a decision (in any category but untraced), which a reviewer sees in the diff
-   with its reason, and it can add a set for a crate the base has none for. When the base has no drift file at all, the rule is
-   skipped: that's the one PR that creates it. It's skipped the same way for a category the
-   base's `tools/ratchet.py` doesn't collect (its `COLLECTED`), since the base's file couldn't
-   record that category's findings: the PR that starts collecting one lists them as entries.
-   From the next PR on, the base collects it and the rule holds it like the rest.
+1. Drift the base doesn't have: new drift.
 
    A move isn't an addition. A subprocess, port-impl or adapter-logic key is `<path>: <text>`,
    so moving the code to another file (or another crate) or renaming what the text names
-   re-keys it. A new key passes when it takes the place of a base entry of the same category
-   and issue that the file no longer lists, and the two share their path or their text. Each
-   base entry takes one replacement. Moving and renaming in one change shares neither, so it
-   takes two PRs. An entry whose key is unchanged may name a different issue. A parity-gap
-   key names a table row, not a place in the code, so it never pairs: renaming a row that
-   carries a gap is a new key.
-4. A collected category with no entries that isn't `enforced`: its rule is ready to enforce.
+   re-keys it. A new key passes when it takes the place of one of the same category that the
+   base has and the working tree doesn't, and the two share their path or their text. Each
+   base key takes one replacement. Moving and renaming in one change shares neither, so it
+   takes two changes. A placement, parity-gap or untraced key names an edge, a table row or a
+   requirement, not a place in the code, so it never pairs: renaming a row that carries a gap
+   is new drift.
+2. A decision no finding matches: it's stale, so it goes. A `HELD` category's decisions are
+   its check's to hold.
+3. A crate added to an allowed set the base's `verify/arch/placement.toml` already has. A set
+   can shrink, and a table for a crate the base has none for is fine, but widening one would
+   clear a finding without a reason.
+4. A collected category with no drift that isn't `enforced`: its rule is ready to enforce. An
+   enforced category with drift fails too, so listing one never waives drift.
+
+A base whose tree has no `verify/ratchet/decisions.toml` predates rule 1, so rule 1 is skipped
+and the summary says so: that's the change that moved the decisions out of `drift.json`. Rule 3
+still reads its sets. A base that can't be read fails: a ref that names no commit, or a tree
+the collectors refuse.
+
+Both trees are measured by this script's collectors, not the base's, so a change to a collector
+moves both sides at once: a rule that reaches further finds drift the base already had, and one
+that reaches less shrinks both. The sentinel below, each collector's unit tests, and review of
+the collector's own diff are what hold the collectors.
 
 # The collectors
 
-- placement (`HELD`): `crates/microvms-cli/tests/dependency_direction.rs`, not this script.
-  It computes each direct normal and build dependency of every crate with a set in
-  `verify/arch/placement.toml` from `cargo metadata`, and holds it to exactly that set and the
-  crate's placement entries and decisions here, so a new dependency and a fixed one both fail
-  there. This script reads no manifest for it: it counts the entries and holds them and the sets
-  to the base (rule 3).
+- placement (`HELD`): not collected here. `crates/microvms-cli/tests/dependency_direction.rs`
+  computes each direct normal and build dependency of every crate with a set in
+  `verify/arch/placement.toml` from `cargo metadata`, and holds it to exactly that set, the
+  crate's `drift` and its placement decisions, so a new dependency and a fixed one both fail
+  there. This script reads the drift from each tree's `placement.toml`, and rule 1 holds it
+  like the rest.
 - subprocess: every `Command::new` in the `src/` of every shipping crate, including one inside
   a macro invocation such as `tokio::select!` or `vec![...]`. The shipping crates are the
   workspace's members minus the ones `Scope.non_shipping` names, so a crate added to the
@@ -96,9 +114,9 @@ thinness guard pushed an upload into an `aws s3 cp` subprocess it couldn't see.
   its group is the prefix, and the file that would list it is `verify/spec/traced/TRAP.toml`.
   `trace:check` holds a listed key to its layers, so a traced key missing one fails there, not
   here. A requirement that can't carry a layer waives it in its group's file with its reason
-  rather than staying an entry, and the category takes no decisions, since a decision would take
+  rather than staying drift, and the category takes no decisions, since a decision would take
   a requirement out of the count with no layer checking it. A listed key that waives every layer
-  is still an entry: no layer checks it either. A requirement with no key is an error, since no
+  is still drift: no layer checks it either. A requirement with no key is an error, since no
   group file can list it.
 
 The Rust collectors are ast-grep rules under `verify/ratchet/`, and test code is out of all of them: an
@@ -126,22 +144,25 @@ sentinel has nothing to prove for it: its check's own tests do that.
 Usage, from anywhere:
 
     ./tools/ratchet.py [check]            # the gate
-    ./tools/ratchet.py update             # delete fixed entries; never adds one
-    ./tools/ratchet.py --base origin/main # compare with this ref (default: the merge base)
+    ./tools/ratchet.py --base origin/main # compare with this commit (default: the merge base)
     ./tools/ratchet.py --json             # the summary as JSON
+    ./tools/ratchet.py snapshot           # rewrite verify/ratchet/drift.json
+    ./tools/ratchet.py snapshot --check   # fail while it's stale, writing nothing
 
 With `$GITHUB_STEP_SUMMARY` set, the summary is also appended there as Markdown.
 """
 
 import argparse
 import ast
+import io
 import json
 import os
 import re
 import runpy
 import subprocess
 import sys
-import textwrap
+import tarfile
+import tempfile
 import tomllib
 from collections import Counter
 from pathlib import Path, PurePosixPath
@@ -149,6 +170,7 @@ from typing import NamedTuple
 
 ROOT = Path(__file__).resolve().parent.parent
 DRIFT = "verify/ratchet/drift.json"
+DECISIONS = "verify/ratchet/decisions.toml"
 SCRIPT = "tools/ratchet.py"
 PLACEMENT = "verify/arch/placement.toml"
 SGCONFIG = ROOT / "verify" / "ratchet" / "sgconfig.yml"
@@ -187,23 +209,28 @@ class Scope(NamedTuple):
     trace: Path = CHECK_TRACE
 
 
-REPO = Scope(
-    root=ROOT,
-    adapters=("microvms-cli", "microvms-py", "microvms-js"),
-    # `crates/model/` is a proof harness, and `crates/model-conformance/` holds only tests that drive the app
-    # over the model's rows. Only tests depend on either, and neither is ever published.
-    non_shipping=frozenset({"agentd-model", "model-conformance"}),
-    # `microvms-edges` is the one crate the collector doesn't read below the adapters: it's
-    # where port implementations belong.
-    composed=("microvms-app",),
-    composition_root="microvms-core",
-    parity_table=ROOT / "verify" / "parity" / "capabilities.toml",
-    specs=(
-        ROOT / "verify" / "spec" / "core.symspec.json",
-        ROOT / "verify" / "spec" / "agentd.symspec.json",
-    ),
-    traced=ROOT / "verify" / "spec" / "traced",
-)
+def repo_scope(root: Path) -> Scope:
+    """The repository's scope over the tree at `root`: this checkout's, or a base's copy."""
+    return Scope(
+        root=root,
+        adapters=("microvms-cli", "microvms-py", "microvms-js"),
+        # `crates/model/` is a proof harness, and `crates/model-conformance/` holds only tests that drive the app
+        # over the model's rows. Only tests depend on either, and neither is ever published.
+        non_shipping=frozenset({"agentd-model", "model-conformance"}),
+        # `microvms-edges` is the one crate the collector doesn't read below the adapters: it's
+        # where port implementations belong.
+        composed=("microvms-app",),
+        composition_root="microvms-core",
+        parity_table=root / "verify" / "parity" / "capabilities.toml",
+        specs=(
+            root / "verify" / "spec" / "core.symspec.json",
+            root / "verify" / "spec" / "agentd.symspec.json",
+        ),
+        traced=root / "verify" / "spec" / "traced",
+    )
+
+
+REPO = repo_scope(ROOT)
 
 SENTINEL_ROOT = ROOT / "verify" / "ratchet" / "fixtures" / "sentinel"
 SENTINEL = Scope(
@@ -219,6 +246,8 @@ SENTINEL = Scope(
     traced=SENTINEL_ROOT / "spec" / "traced",
 )
 
+#: Every category the ratchet counts. `tools/ratchet-history.py` reads this tuple from each
+#: commit's copy of this script, with `ast`, to tell a category nobody counted yet from a zero.
 COLLECTED = (
     "placement",
     "subprocess",
@@ -229,8 +258,8 @@ COLLECTED = (
 )
 
 #: Collected categories whose findings another check computes, by the check. That check holds
-#: the file's records for the category to the tree (rules 1 and 2), so this script has no
-#: collector for it: it counts the entries and applies rules 3 and 4. Placement is
+#: the category's record to the tree, so this script has no collector for it: it reads the
+#: record from each tree and compares the two like any drift. Placement is
 #: `dependency_direction.rs`'s, which computes the edges from `cargo metadata` for every crate
 #: with a set, so the edges are computed in one place.
 HELD = {"placement": "crates/microvms-cli/tests/dependency_direction.rs"}
@@ -246,14 +275,15 @@ CATEGORIES = (*COLLECTED, *NOT_COLLECTED)
 
 #: Where each category's rule goes once the category is empty (rule 4).
 PROMOTE = {
-    # dependency_direction.rs already holds every set exactly, the CLI's drift entries
-    # included, so once #260 clears them the promotion is only listing the category.
+    # dependency_direction.rs already holds every set exactly, the CLI's drift included, so once
+    # #260 clears that drift the promotion is only listing the category.
     "placement": "crates/microvms-cli/tests/dependency_direction.rs, which holds every set exactly (#260)",
     "subprocess": "each crate's clippy.toml as a disallowed type (#285)",
     # These two stay in the ratchet's own ast-grep rules: once enforced, the collector is the
-    # hard gate, since a finding without a decision fails rule 1. Not semgrep: #281 measured
-    # that its `impl $T for $U` matches every impl, and it can't skip inline test modules.
-    "port-impl": "verify/ratchet/rules/port-impl.yml as a hard gate, once #270 clears its entry",
+    # hard gate, since a finding without a decision is drift, and an enforced category can't
+    # carry any. Not semgrep: #281 measured that its `impl $T for $U` matches every impl, and it
+    # can't skip inline test modules.
+    "port-impl": "verify/ratchet/rules/port-impl.yml as a hard gate, once #270 clears its drift",
     "adapter-logic": (
         "verify/ratchet/rules/operation-literal.yml and literal-default.yml as a hard gate (#273)"
     ),
@@ -269,8 +299,12 @@ PROMOTE = {
 
 
 #: What rule 1 tells the reader to do with new drift. A parity gap or an untraced requirement
-#: isn't work in the wrong layer.
+#: isn't work in the wrong layer, and placement drift is a record another check holds.
 NEW_DRIFT_FIX = {
+    "placement": (
+        "A crate's drift in verify/arch/placement.toml can only shrink: move the work to the "
+        f"layer whose job it is, or add a decision for the edge with its reason in {DECISIONS}."
+    ),
     "parity-gap": (
         "Give that surface the capability, or, if the gap is permanent, drop the exemption's "
         "issue in verify/parity/capabilities.toml so it reads as a decision."
@@ -283,20 +317,10 @@ NEW_DRIFT_FIX = {
 }
 LAYERING_FIX = (
     "Move the work to the layer whose job it is (I/O belongs in microvms-edges, behind a port "
-    "in microvms-app), or add a decision with its reason."
+    f"in microvms-app), or add a decision with its reason in {DECISIONS}."
 )
-#: What rule 3 tells the reader to do with an entry the base doesn't have. Layering drift can
-#: take a decision; a parity gap and an untraced requirement leave the way rule 1 says.
-NOT_IN_BASE_FIX = {
-    "parity-gap": (
-        "give that surface the capability, or, if the gap is permanent, drop the exemption's "
-        "issue in verify/parity/capabilities.toml."
-    ),
-    "untraced": "trace the requirement in its group's file, verify/spec/traced/<GROUP>.toml, instead.",
-}
-LAYERING_NOT_IN_BASE_FIX = "fix the code, or add a decision with its reason."
 
-#: Categories `decisions` can't name, with what to do instead.
+#: Categories a decision can't name, with what to do instead.
 NO_DECISIONS = {
     "untraced": (
         "a requirement that can't carry a layer waives that layer in its group's file, "
@@ -309,127 +333,171 @@ def describe(category: str, key: str) -> str:
     return f"[{category}] {key}"
 
 
-# ── the file ────────────────────────────────────────────────────────────────
+# ── the files ───────────────────────────────────────────────────────────────
 
 
-def parse(data: object, where: str) -> dict:
-    """Validate a drift file's contents. Anything off is a hard failure naming `where`."""
+def parse_decisions(data: object, where: str) -> dict:
+    """Validate a decisions file's contents. Anything off is a hard failure naming `where`.
+
+    The result has `enforced`, a list of categories, and `decisions`, a list of tables with
+    exactly `category`, `key` and `reason`.
+    """
 
     def fail(message: str):
         raise SystemExit(f"{where}: {message}")
 
-    if not isinstance(data, dict) or set(data) != {
-        "version",
-        "enforced",
-        "entries",
-        "decisions",
-    }:
-        fail("expected exactly the keys version, enforced, entries, decisions")
-    if data["version"] != 1:
-        fail(f"unknown version {data['version']!r}")
-
+    # `decision` may be absent: TOML has no empty array of tables. `enforced` may not, so a
+    # file that lost its first line doesn't read as nothing enforced.
+    if (
+        not isinstance(data, dict)
+        or "enforced" not in data
+        or not set(data) <= {"enforced", "decision"}
+    ):
+        fail("expected `enforced` and the [[decision]] tables, and nothing else")
     enforced = data["enforced"]
-    if not isinstance(enforced, list) or len(set(enforced)) != len(enforced):
+    if (
+        not isinstance(enforced, list)
+        or not all(isinstance(category, str) for category in enforced)
+        or len(set(enforced)) != len(enforced)
+    ):
         fail("enforced must be a list of distinct category names")
     for category in enforced:
         if category not in COLLECTED:
             fail(f"enforced names {category!r}, which isn't a collected category")
 
-    def records(name: str, extra: str) -> list[dict]:
-        items = data[name]
-        if not isinstance(items, list):
-            fail(f"{name} must be a list")
-        for item in items:
-            if not isinstance(item, dict) or set(item) != {"category", "key", extra}:
-                fail(f"each of {name} has exactly category, key, {extra}: {item!r}")
-            category, key = item["category"], item["key"]
-            if category not in CATEGORIES:
-                fail(f"unknown category {category!r}")
-            if category in NOT_COLLECTED:
-                fail(
-                    f"{category} is not collected yet ({NOT_COLLECTED[category]}), so the file "
-                    "can't record it"
-                )
-            # Decisions stay: an enforcing rule has exceptions too (agentd's subprocesses).
-            if category in enforced and name == "entries":
-                fail(
-                    f"{category} is enforced by {PROMOTE[category]}, so the file can't carry "
-                    "entries for it"
-                )
-            if not isinstance(key, str) or not key.strip():
-                fail(f"a key must be a non-empty string: {item!r}")
-            if name == "decisions" and category in NO_DECISIONS:
-                fail(
-                    f"{describe(category, key)} can't be a decision: "
-                    f"{NO_DECISIONS[category]}"
-                )
-        return items
-
-    entries = records("entries", "issue")
-    for entry in entries:
-        issue = entry["issue"]
-        if isinstance(issue, bool) or not isinstance(issue, int) or issue <= 0:
-            fail(f"an entry names the issue that removes it, as a number: {entry!r}")
-    decisions = records("decisions", "reason")
-    for decision in decisions:
-        if not isinstance(decision["reason"], str) or not decision["reason"].strip():
-            fail(f"a decision states its reason: {decision!r}")
-
-    both = {(e["category"], e["key"]) for e in entries} & {
-        (d["category"], d["key"]) for d in decisions
-    }
-    for category, key in sorted(both):
-        fail(f"{describe(category, key)} is both an entry and a decision")
-    return data
+    decisions = data.get("decision", [])
+    if not isinstance(decisions, list):
+        fail("each decision is a [[decision]] table")
+    for item in decisions:
+        if not isinstance(item, dict) or set(item) != {"category", "key", "reason"}:
+            fail(f"each decision has exactly category, key and reason: {item!r}")
+        category, key, reason = item["category"], item["key"], item["reason"]
+        if category not in CATEGORIES:
+            fail(f"unknown category {category!r}")
+        if category in NOT_COLLECTED:
+            fail(
+                f"{category} is not collected yet ({NOT_COLLECTED[category]}), so nothing can "
+                "be decided in it"
+            )
+        if not isinstance(key, str) or not key.strip():
+            fail(f"a key must be a non-empty string: {item!r}")
+        if not isinstance(reason, str) or not reason.strip():
+            fail(f"a decision states its reason: {item!r}")
+        if category in NO_DECISIONS:
+            fail(
+                f"{describe(category, key)} can't be a decision: {NO_DECISIONS[category]}"
+            )
+    return {"enforced": list(enforced), "decisions": list(decisions)}
 
 
-def counted(items: list[dict]) -> Counter:
-    return Counter((item["category"], item["key"]) for item in items)
+def placement_from(text: str, where: str) -> dict[str, dict]:
+    """A `verify/arch/placement.toml`'s tables: each crate's allowed set and its drift.
+
+    Each crate maps to `normal` and `build`, the sets, and `drift`, the same two kinds for its
+    placement drift. What else the file must hold is `dependency_direction.rs`'s to check.
+    """
+    try:
+        tables = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        raise SystemExit(f"{where}: {error}") from None
+
+    def names(table: dict, kind: str, name: str) -> set[str]:
+        value = table.get(kind, [])
+        if not isinstance(value, list) or not all(isinstance(n, str) for n in value):
+            raise SystemExit(f"{where}: [{name}] {kind} is a list of crate names")
+        return set(value)
+
+    sets = {}
+    for crate, table in tables.items():
+        if not isinstance(table, dict) or not set(table) <= {
+            "normal",
+            "build",
+            "drift",
+        }:
+            raise SystemExit(
+                f"{where}: [{crate}] takes only normal and build lists and a drift table"
+            )
+        drift = table.get("drift", {})
+        if not isinstance(drift, dict) or not set(drift) <= {"normal", "build"}:
+            raise SystemExit(
+                f"{where}: [{crate}.drift] takes only normal and build lists"
+            )
+        sets[crate] = {
+            **{kind: names(table, kind, crate) for kind in ("normal", "build")},
+            "drift": {
+                kind: names(drift, kind, f"{crate}.drift")
+                for kind in ("normal", "build")
+            },
+        }
+    return sets
 
 
-def read_file(path: Path) -> dict:
-    if not path.exists():
-        raise SystemExit(f"{path} is missing")
-    return parse(
-        json.loads(path.read_text(encoding="utf-8")), str(path.relative_to(ROOT))
+def edge(crate: str, dependency: str, kind: str) -> str:
+    """A placement key. A build dependency's name carries ` (build)`, so a record for a normal
+    edge never stands for a build edge or the other way round."""
+    return f"{crate} -> {dependency}{' (build)' if kind == 'build' else ''}"
+
+
+def placement_drift(sets: dict) -> Counter:
+    """The placement drift `placement.toml` records, one finding per edge."""
+    return Counter(
+        ("placement", edge(crate, dependency, kind))
+        for crate, table in sets.items()
+        for kind in ("normal", "build")
+        for dependency in table["drift"][kind]
     )
 
 
-def dump(data: dict) -> str:
-    """The file's text, in the layout it's checked in with: one line per entry.
+class Tree(NamedTuple):
+    """One commit's drift, and what rules 2 to 4 read beside it."""
 
-    `update` writes this, so removing an entry is a one-line diff rather than a reflow of the
-    whole file. Decisions spread over lines because their reasons are prose.
-    """
+    #: What the collectors found, before any decision.
+    findings: Counter
+    #: `decisions.toml`, parsed.
+    decisions: dict
+    #: `placement.toml`'s sets and drift.
+    sets: dict
+    #: The findings no decision covers, and the placement drift: what rule 1 compares.
+    drift: Counter
 
-    def one_line(item: dict) -> str:
-        return (
-            "{ "
-            + ", ".join(f"{json.dumps(k)}: {json.dumps(item[k])}" for k in item)
-            + " }"
-        )
 
-    def block(name: str, items: list[dict], render) -> str:
-        if not items:
-            return f'  "{name}": []'
-        body = ",\n".join(render(item) for item in items)
-        return f'  "{name}": [\n{body}\n  ]'
+def read_text(path: Path, name: str) -> str:
+    # Read, not stat then read: CodeQL flags the gap between the two.
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise SystemExit(f"{name} is missing") from None
 
-    entries = [{k: e[k] for k in ("category", "key", "issue")} for e in data["entries"]]
-    decisions = [
-        {k: d[k] for k in ("category", "key", "reason")} for d in data["decisions"]
-    ]
-    parts = [
-        f'  "version": {json.dumps(data["version"])}',
-        f'  "enforced": {json.dumps(data["enforced"])}',
-        block("entries", entries, lambda e: "    " + one_line(e)),
-        block(
-            "decisions",
-            decisions,
-            lambda d: textwrap.indent(json.dumps(d, indent=2), "    "),
-        ),
-    ]
-    return "{\n" + ",\n".join(parts) + "\n}\n"
+
+def read_tree(scope: Scope, where: str = "") -> Tree:
+    """The drift of the tree at `scope.root`. `where` prefixes a file's name in an error."""
+    sets = placement_from(
+        read_text(scope.root / PLACEMENT, f"{where}{PLACEMENT}"), f"{where}{PLACEMENT}"
+    )
+    text = read_text(scope.root / DECISIONS, f"{where}{DECISIONS}")
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        raise SystemExit(f"{where}{DECISIONS}: {error}") from None
+    decisions = parse_decisions(data, f"{where}{DECISIONS}")
+    findings = collect(scope, require_ports=True)
+    covered = Counter(
+        (d["category"], d["key"])
+        for d in decisions["decisions"]
+        if d["category"] not in HELD
+    )
+    return Tree(findings, decisions, sets, findings - covered + placement_drift(sets))
+
+
+class Base(NamedTuple):
+    """The commit a change is compared with."""
+
+    #: How the summary and the failures name it: `--base` as given, or the merge base's sha.
+    label: str
+    #: Its `placement.toml`'s sets, for rule 3, or None when it has none.
+    sets: dict | None
+    #: Its drift, or None when its tree predates `decisions.toml` and rule 1 is skipped.
+    tree: Tree | None
 
 
 # The pointers a git hook exports, as in check-guards-fire.py. Every git call here names its
@@ -453,9 +521,9 @@ def clean_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if k not in GIT_ENV_LEAKS}
 
 
-def show(root: Path, ref: str, path: str) -> str | None:
-    """`path`'s text at `ref`, or None when `ref` has no such file. An unknown ref is an error."""
-    commit = subprocess.run(
+def commit_of(root: Path, ref: str) -> str:
+    """The commit `ref` names. An unknown ref is an error, not a base with nothing in it."""
+    out = subprocess.run(
         [
             "git",
             "-C",
@@ -469,9 +537,57 @@ def show(root: Path, ref: str, path: str) -> str | None:
         text=True,
         env=clean_env(),
     )
-    if commit.returncode != 0:
+    if out.returncode != 0:
         raise SystemExit(f"--base {ref} doesn't name a commit in {root}")
-    spec = f"{commit.stdout.strip()}:{path}"
+    return out.stdout.strip()
+
+
+def read_base(root: Path, ref: str, label: str) -> Base:
+    """The base's tree, exported from git and measured with this script's collectors.
+
+    Not its own copy of this script: both trees are measured one way, so a change to a
+    collector moves both sides and never reads as drift added or fixed. Anything that stops the
+    measurement is an error, since a base with no drift would pass every change.
+    """
+    commit = commit_of(root, ref)
+    archive = subprocess.run(
+        ["git", "-C", str(root), "archive", "--format=tar", commit],
+        capture_output=True,
+        env=clean_env(),
+    )
+    if archive.returncode != 0:
+        raise SystemExit(
+            f"can't export {label}'s tree to compare with:\n"
+            + archive.stderr.decode(errors="replace")
+        )
+    with tempfile.TemporaryDirectory(prefix="ratchet-base-") as directory:
+        tree = Path(directory)
+        with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
+            tar.extractall(tree, filter="data")
+        where = f"{label}:"
+        # Read, not stat then read: CodeQL flags the gap between the two.
+        try:
+            text = (tree / PLACEMENT).read_text(encoding="utf-8")
+        except FileNotFoundError:
+            sets = None
+        else:
+            sets = placement_from(text, f"{where}{PLACEMENT}")
+        try:
+            (tree / DECISIONS).read_bytes()
+        except FileNotFoundError:
+            return Base(label, sets, None)
+        try:
+            return Base(label, sets, read_tree(repo_scope(tree), where))
+        except SystemExit as error:
+            raise SystemExit(
+                f"{label}'s tree can't be measured, so there's nothing to compare with: "
+                f"{error}"
+            ) from None
+
+
+def show(root: Path, ref: str, path: str) -> str | None:
+    """`path`'s text at `ref`, or None when `ref` has no such file. An unknown ref is an error."""
+    spec = f"{commit_of(root, ref)}:{path}"
     if (
         subprocess.run(
             ["git", "-C", str(root), "cat-file", "-e", spec],
@@ -490,29 +606,18 @@ def show(root: Path, ref: str, path: str) -> str | None:
     ).stdout
 
 
-def read_base(root: Path, ref: str) -> dict | None:
-    """The drift file at `ref`, or None when `ref` predates it."""
-    text = show(root, ref, DRIFT)
-    return None if text is None else parse(json.loads(text), f"{ref}:{DRIFT}")
-
-
-def read_base_sets(root: Path, ref: str) -> dict | None:
-    """The allowed sets at `ref`, or None when `ref` predates them."""
-    text = show(root, ref, PLACEMENT)
-    return None if text is None else sets_from(text, f"{ref}:{PLACEMENT}")
-
-
 def read_base_collected(root: Path, ref: str) -> tuple[str, ...]:
     """The categories `ref`'s own ratchet collects, from the `COLLECTED` in its script.
 
-    Read with `ast`, not run: the base's script is code from another commit. A script with no
-    literal `COLLECTED` is an error rather than an empty tuple, which would skip rule 3 for
-    every category.
+    The history reads it for each commit, to tell a category that commit didn't count from a
+    zero. Read with `ast`, not run: the script is code from another commit. A script with no
+    literal `COLLECTED` is an error rather than an empty tuple, which would read as nothing
+    counted.
     """
     text = show(root, ref, SCRIPT)
     if text is None:
         raise SystemExit(
-            f"{ref} has no {SCRIPT}, so rule 3 can't tell which categories it collected"
+            f"{ref} has no {SCRIPT}, so there's no telling which categories it collected"
         )
     return collected_from(text, f"{ref}:{SCRIPT}")
 
@@ -542,9 +647,9 @@ def collected_from(text: str, where: str) -> tuple[str, ...]:
 
 
 def default_base(root: Path) -> str:
-    # Locally, rule 3 is only as good as `origin/main`: a fork whose origin predates the file
-    # gets the bootstrap note and no rule 3. That's acceptable because the run that decides a
-    # merge is CI's, which passes `--base` explicitly.
+    # Locally, rule 1 is only as good as `origin/main`: a clone whose origin is behind compares
+    # with an older tree. That's acceptable because the run that decides a merge is CI's, which
+    # passes `--base` explicitly.
     out = subprocess.run(
         ["git", "-C", str(root), "merge-base", "HEAD", "origin/main"],
         capture_output=True,
@@ -553,7 +658,7 @@ def default_base(root: Path) -> str:
     )
     if out.returncode != 0:
         raise SystemExit(
-            "no merge base of HEAD and origin/main, so rule 3 has nothing to compare with. "
+            "no merge base of HEAD and origin/main, so rule 1 has nothing to compare with. "
             "Fetch origin, or pass --base <ref>."
         )
     return out.stdout.strip()
@@ -563,44 +668,38 @@ def default_base(root: Path) -> str:
 
 
 def location_and_text(category: str, key: str) -> tuple[str | None, str | None]:
-    """A Rust key's `<path>` and `<text>` halves. Placement and parity-gap keys name crates and
-    table rows, not places."""
-    if category in ("placement", "parity-gap") or ": " not in key:
+    """A Rust key's `<path>` and `<text>` halves. Placement, parity-gap and untraced keys name
+    edges, table rows and requirements, not places."""
+    if category in ("placement", "parity-gap", "untraced") or ": " not in key:
         return None, None
     path, text = key.split(": ", 1)
     return path, text
 
 
-def additions(file: dict, base: dict) -> list[dict]:
-    """The file's entries that the base doesn't have and that no move accounts for (rule 3)."""
-    here = Counter((e["category"], e["key"], e["issue"]) for e in file["entries"])
-    there = Counter((e["category"], e["key"], e["issue"]) for e in base["entries"])
-    added = sorted((here - there).elements())
-    vacated = sorted((there - here).elements())
+def additions(head: Counter, base: Counter) -> list[tuple[str, str]]:
+    """The head's drift the base doesn't have and no move accounts for (rule 1)."""
+    added = sorted((head - base).elements())
+    vacated = sorted((base - head).elements())
 
-    def replaces(new: tuple, old: tuple) -> bool:
+    def replaces(new: tuple[str, str], old: tuple[str, str]) -> bool:
         if new[0] != old[0]:
             return False
-        if new[1] == old[1]:
-            return True
-        if new[2] != old[2]:
-            return False
-        new_path, new_text = location_and_text(new[0], new[1])
-        old_path, old_text = location_and_text(old[0], old[1])
+        new_path, new_text = location_and_text(*new)
+        old_path, old_text = location_and_text(*old)
         return new_path is not None and (new_path == old_path or new_text == old_text)
 
     unexplained = []
     for new in added:
         old = next((old for old in vacated if replaces(new, old)), None)
         if old is None:
-            unexplained.append({"category": new[0], "key": new[1], "issue": new[2]})
+            unexplained.append(new)
         else:
             vacated.remove(old)
     return unexplained
 
 
 def grown_sets(sets: dict, base_sets: dict | None, base_label: str) -> list[str]:
-    """A crate added to an allowed set the base already has (rule 3's other half)."""
+    """A crate added to an allowed set the base already has (rule 3)."""
     if base_sets is None:
         return []
     failures = []
@@ -613,134 +712,83 @@ def grown_sets(sets: dict, base_sets: dict | None, base_label: str) -> list[str]
                     f"set grew: {PLACEMENT} adds {dependency} to [{crate}] {kind}, which "
                     f"{base_label}'s copy doesn't allow. A set can only shrink: move the "
                     "work to the layer whose job it is, or add a decision for "
-                    f"`{crate} -> {dependency}` with its reason."
+                    f"`{edge(crate, dependency, kind)}` with its reason."
                 )
     return failures
 
 
-def compare(
-    current: Counter,
-    file: dict,
-    base: dict | None,
-    base_label: str,
-    base_collected: tuple[str, ...] | None = None,
-) -> list[str]:
-    """Every failure of the four rules over the drift file, in category order.
-
-    `base_collected` is what the base's ratchet collects (`read_base_collected`); rule 3 is
-    skipped for the others. None means the base collects what this script does.
-    """
+def rules(head: Tree, base: Base) -> list[str]:
+    """Every failure of the four rules, in category order, then rule 3's."""
     failures: list[str] = []
-    entries = counted(file["entries"])
-    recorded = entries + counted(file["decisions"])
-    added = (
-        []
-        if base is None
-        else [
-            entry
-            for entry in additions(file, base)
-            if base_collected is None or entry["category"] in base_collected
-        ]
+    enforced = head.decisions["enforced"]
+    decided = Counter(
+        (d["category"], d["key"])
+        for d in head.decisions["decisions"]
+        if d["category"] not in HELD
     )
+    stale = decided - head.findings
+    added = [] if base.tree is None else additions(head.drift, base.tree.drift)
 
     for category in COLLECTED:
-        found = {k: n for (c, k), n in current.items() if c == category}
-        listed = {k: n for (c, k), n in recorded.items() if c == category}
-        # A held category's records meet the tree in the check `HELD` names. Nothing here reads
-        # the tree for it, so rule 2 would call every record a fix.
-        compared = () if category in HELD else sorted(found.keys() | listed.keys())
-        for key in compared:
-            if found.get(key, 0) > listed.get(key, 0):
+        for c, key in added:
+            if c == category:
                 failures.append(
                     f"new drift: {describe(category, key)}. "
                     + NEW_DRIFT_FIX.get(category, LAYERING_FIX)
                 )
-            elif listed.get(key, 0) > found.get(key, 0):
+        for c, key in sorted(stale.elements()):
+            if c == category:
                 failures.append(
-                    f"fixed: {describe(category, key)}. Run `mise run ratchet:update` "
-                    "and commit the file."
+                    f"stale decision: {describe(category, key)} decides a finding the tree "
+                    f"doesn't have. Delete it from {DECISIONS}."
                 )
-        for entry in added:
-            if entry["category"] == category:
-                failures.append(
-                    f"not in the base: {describe(category, entry['key'])} is an entry here "
-                    f"but not in {base_label}'s {DRIFT}, and it doesn't replace one there "
-                    "that shares its path or its text. Entries can only be removed: "
-                    + NOT_IN_BASE_FIX.get(category, LAYERING_NOT_IN_BASE_FIX)
-                )
-        if category not in file["enforced"] and not any(
-            c == category for c, _ in entries
-        ):
+        drifting = sorted(k for c, k in head.drift.elements() if c == category)
+        if category in enforced and drifting:
+            failures.append(
+                f"{category} is enforced by {PROMOTE[category]}, so it can't carry drift: "
+                f"{'; '.join(drifting)}. Fix it, or take {category} out of enforced in "
+                f"{DECISIONS}."
+            )
+        elif category not in enforced and not drifting:
             failures.append(
                 f"promote {category}: move its rule into {PROMOTE[category]}, then list it "
-                f"under enforced in {DRIFT}."
+                f"under enforced in {DECISIONS}."
             )
-    return failures
+    return failures + grown_sets(head.sets, base.sets, base.label)
 
 
-def updated(file: dict, current: Counter) -> tuple[dict, list[str]]:
-    """The file with every entry and decision the tree no longer has removed. Adds nothing.
+# ── the summary and the snapshot ───────────────────────────────────────────
 
-    A `HELD` category's records stay: no collector here finds them, and the check that does
-    names the record a fix leaves behind.
+
+def summary(head: Tree, base: Base) -> dict:
+    """Per category: its status, the drift here and at the base, and its decisions.
+
+    With no base drift (rule 1 skipped), the base's count is None, so its change reads "new".
     """
-    budget = Counter(current)
-    removed: list[str] = []
-
-    def keep(items: list[dict]) -> list[dict]:
-        kept = []
-        for item in items:
-            finding = (item["category"], item["key"])
-            if item["category"] in HELD:
-                kept.append(item)
-            elif budget[finding] > 0:
-                budget[finding] -= 1
-                kept.append(item)
-            else:
-                removed.append(describe(*finding))
-        return kept
-
-    data = {
-        **file,
-        "entries": keep(file["entries"]),
-        "decisions": keep(file["decisions"]),
-    }
-    return data, removed
-
-
-# ── the summary ─────────────────────────────────────────────────────────────
-
-
-def summary(
-    file: dict, base: dict | None, base_collected: tuple[str, ...] | None = None
-) -> dict:
-    """Per category: its status, the drift count, the base's count, and its decisions.
-
-    A category the base doesn't collect has no base count, so its change reads "new".
-    """
-    entries = Counter(item["category"] for item in file["entries"])
-    decisions = Counter(item["category"] for item in file["decisions"])
-    base_entries = (
-        None if base is None else Counter(e["category"] for e in base["entries"])
+    drift = Counter(category for category, _ in head.drift.elements())
+    base_drift = (
+        None
+        if base.tree is None
+        else Counter(category for category, _ in base.tree.drift.elements())
     )
+    decisions = Counter(d["category"] for d in head.decisions["decisions"])
     rows = {}
     for category in CATEGORIES:
         if category in NOT_COLLECTED:
             rows[category] = {
                 "status": "not collected",
-                "entries": None,
+                "drift": None,
                 "base": None,
                 "decisions": None,
                 "note": NOT_COLLECTED[category],
             }
             continue
         rows[category] = {
-            "status": "enforced" if category in file["enforced"] else "collected",
-            "entries": entries[category],
-            "base": None
-            if base_entries is None
-            or (base_collected is not None and category not in base_collected)
-            else base_entries[category],
+            "status": "enforced"
+            if category in head.decisions["enforced"]
+            else "collected",
+            "drift": drift[category],
+            "base": None if base_drift is None else base_drift[category],
             "decisions": decisions[category],
         }
     return rows
@@ -749,7 +797,7 @@ def summary(
 def change(row: dict) -> str:
     if row["base"] is None:
         return "new"
-    delta = row["entries"] - row["base"]
+    delta = row["drift"] - row["base"]
     return f"{delta:+d}" if delta else "0"
 
 
@@ -759,9 +807,9 @@ def render_text(rows: dict) -> str:
         if row["status"] == "not collected":
             lines.append(f"{category:<14} not collected ({row['note']})")
         else:
-            line = f"{category:<14} {row['entries']:>5} {change(row):>6} {row['decisions']:>9}"
+            line = f"{category:<14} {row['drift']:>5} {change(row):>6} {row['decisions']:>9}"
             if row["status"] == "enforced":
-                line += f"  enforced, still collected (rule: {PROMOTE[category]})"
+                line += f"  enforced (rule: {PROMOTE[category]})"
             lines.append(line)
     return "\n".join(lines)
 
@@ -781,11 +829,26 @@ def render_markdown(rows: dict, failures: list[str], base_note: str) -> str:
         else:
             name = f"{category} (enforced)" if row["status"] == "enforced" else category
             lines.append(
-                f"| {name} | {row['entries']} | {change(row)} | {row['decisions']} |"
+                f"| {name} | {row['drift']} | {change(row)} | {row['decisions']} |"
             )
     if failures:
         lines += ["", "### Failures", "", *(f"- {f}" for f in failures)]
     return "\n".join(lines) + "\n"
+
+
+def snapshot(head: Tree) -> str:
+    """`drift.json`'s text for a tree: its drift by category, one key a line, and how many
+    decisions each category has. `tools/ratchet-history.py` charts it."""
+    decisions = Counter(d["category"] for d in head.decisions["decisions"])
+    data = {
+        "version": 2,
+        "drift": {
+            category: sorted(k for c, k in head.drift.elements() if c == category)
+            for category in COLLECTED
+        },
+        "decisions": {category: decisions[category] for category in COLLECTED},
+    }
+    return json.dumps(data, indent=2) + "\n"
 
 
 # ── the collectors ──────────────────────────────────────────────────────────
@@ -809,18 +872,6 @@ def cargo_metadata(scope: Scope) -> dict:
     if out.returncode != 0:
         raise SystemExit(f"cargo metadata failed in {scope.root}:\n{out.stderr}")
     return json.loads(out.stdout)
-
-
-def sets_from(text: str, where: str) -> dict[str, dict[str, set[str]]]:
-    """The allowed sets in a `verify/arch/placement.toml`'s text, for rule 3's set half."""
-    sets = tomllib.loads(text)
-    for crate, table in sets.items():
-        if not isinstance(table, dict) or not set(table) <= {"normal", "build"}:
-            raise SystemExit(f"{where}: [{crate}] takes only normal and build lists")
-    return {
-        crate: {kind: set(table.get(kind, [])) for kind in ("normal", "build")}
-        for crate, table in sets.items()
-    }
 
 
 class Crates(NamedTuple):
@@ -1075,8 +1126,7 @@ def untraced(scope: Scope) -> Counter:
     `ratchet-history.py` loads this one (the script imports nothing from outside the standard
     library). It's the loader trace:check reads them with, so the two gates can't disagree about
     what a file lists, and a file it refuses fails here too. A spec or a directory that gives up
-    nothing is an error, not an empty category: every entry would read as fixed, and `update`
-    would delete them all.
+    nothing is an error, not an empty category: every key would read as traced.
     """
     if scope.traced is None:
         return Counter()
@@ -1165,58 +1215,71 @@ def sentinel(scope: Scope) -> list[str]:
 # ── entry point ─────────────────────────────────────────────────────────────
 
 
+def write_snapshot(path: Path, text: str, check: bool) -> int:
+    """Write the snapshot to `path`, or with `check`, fail while `path` holds anything else."""
+    if not check:
+        path.write_text(text, encoding="utf-8")
+        print(f"ratchet: wrote {DRIFT}")
+        return 0
+    try:
+        current = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        current = None
+    if current != text:
+        print(
+            f"stale: {DRIFT} isn't the tree's drift. `mise run ratchet:snapshot` rewrites it, "
+            "in a change of its own.",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"ratchet: {DRIFT} is the tree's drift")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument(
-        "command", nargs="?", choices=("check", "update"), default="check"
+        "command", nargs="?", choices=("check", "snapshot"), default="check"
     )
     parser.add_argument(
-        "--base", help="the ref rule 3 compares with (default: the merge base)"
+        "--base",
+        help="the commit to compare with (default: the merge base with origin/main)",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help=f"with snapshot: fail while {DRIFT} is stale, and write nothing",
     )
     parser.add_argument("--json", action="store_true", help="print the summary as JSON")
     args = parser.parse_args(argv)
+    if args.check and args.command != "snapshot":
+        parser.error("--check goes with snapshot")
 
     failures = sentinel(SENTINEL)
     if failures:
         print("\n".join(failures), file=sys.stderr)
         return 1
+    head = read_tree(REPO)
 
-    path = ROOT / DRIFT
-    file = read_file(path)
-    current = collect(REPO, require_ports=True)
+    if args.command == "snapshot":
+        return write_snapshot(ROOT / DRIFT, snapshot(head), args.check)
+
     ref = args.base or default_base(ROOT)
-    base_label = args.base or ref[:12]
-    base = read_base(ROOT, ref)
-    base_collected = None if base is None else read_base_collected(ROOT, ref)
-    sets = sets_from((ROOT / PLACEMENT).read_text(encoding="utf-8"), PLACEMENT)
-    grown = grown_sets(sets, read_base_sets(ROOT, ref), base_label)
-
-    if args.command == "update":
-        data, removed = updated(file, current)
-        path.write_text(dump(data), encoding="utf-8")
-        for item in removed:
-            print(f"removed {item}")
-        file = parse(data, DRIFT)
-
-    failures = compare(current, file, base, base_label, base_collected) + grown
-    rows = summary(file, base, base_collected)
-    newly = [
-        c for c in COLLECTED if base_collected is not None and c not in base_collected
-    ]
+    base = read_base(ROOT, ref, args.base or ref[:12])
+    failures = rules(head, base)
+    rows = summary(head, base)
     base_note = (
-        f"{base_label}, which has no {DRIFT}: this is the bootstrap, so rule 3 is skipped"
-        if base is None
-        else f"{base_label}, whose ratchet doesn't collect {', '.join(newly)} yet, so rule 3 "
-        f"is skipped for {', '.join(newly)}"
-        if newly
-        else f"{base_label}"
+        base.label
+        if base.tree is not None
+        else f"{base.label}, which has no {DECISIONS}: it predates rule 1, so rule 1 is "
+        "skipped"
     )
     if args.json:
         print(
             json.dumps(
                 {
-                    "base": base_label,
-                    "bootstrap": base is None,
+                    "base": base.label,
+                    "bootstrap": base.tree is None,
                     "categories": rows,
                     "failures": failures,
                 },

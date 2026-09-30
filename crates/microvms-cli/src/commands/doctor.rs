@@ -439,7 +439,7 @@ fn check_terraform(infra_dir: std::path::PathBuf) -> Check {
         )
         .advisory();
     }
-    // Recorded as a decision in `verify/ratchet/drift.json`, with the same reason.
+    // Recorded as a decision in `verify/ratchet/decisions.toml`, with the same reason.
     #[expect(
         clippy::disallowed_types,
         reason = "reads the local Terraform stack's outputs; no Rust library reads Terraform state backends"

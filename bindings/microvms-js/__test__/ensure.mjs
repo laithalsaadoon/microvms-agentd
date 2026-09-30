@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { Region, Sandbox, wrapDockerfile } from '../index.js';
+import { elfHeader } from './support/elf.mjs';
 import { codeOf } from './support/sse.mjs';
 
 process.env.AWS_ACCESS_KEY_ID = 'AKIDEXAMPLE';
@@ -21,7 +22,8 @@ delete process.env.AWS_PROFILE;
 
 const options = (overrides = {}) => ({
   namePrefix: 'task',
-  binary: new Uint8Array([0x7f, 0x45, 0x4c, 0x46]),
+  // An aarch64 ELF header, so each case below is refused for its own cause.
+  binary: elfHeader(0xb7),
   dockerfile: wrapDockerfile('FROM python:3.12-slim\n'),
   s3Bucket: 'agentd-conformance-bucket',
   buildRoleArn: 'arn:aws:iam::123456789012:role/build',

@@ -3819,10 +3819,9 @@ mod tests {
 
     /// The break-even is the number a pool scheduler needs, and this is what makes it
     /// meaningful rather than merely reproducible: just under it, a cycle loses money;
-    /// just over, it saves. Asserting the *verdict* the figure predicts, per
-    /// `.erpaval/solutions/test-failures/proptest-and-dst-tiers-need-verdict-assertions.md`
-    /// — a test that only pinned 1371.29 would pass against a formula that computed a
-    /// number with no relation to the crossover.
+    /// just over, it saves. The test asserts the *verdict* the figure predicts, because a
+    /// test that only pinned 1371.29 would pass against a formula that computed a number
+    /// with no relation to the crossover.
     #[test]
     fn churn_below_break_even_costs_more_than_leaving_the_vm_running() {
         let break_even = month_comparison()
