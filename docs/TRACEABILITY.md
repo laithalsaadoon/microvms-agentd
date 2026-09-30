@@ -79,7 +79,7 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | IMAGE-11 | 1 | 1 | waived | 1 | 1 | 1 |
 | IMAGE-12 | waived | waived | waived | 2 | 2 | waived |
 | TRAP-1 | waived | waived | waived | 9 | 19 | waived |
-| TRAP-2 | waived | waived | waived | 1 | 6 | waived |
+| TRAP-2 | waived | waived | waived | 1 | 5 | waived |
 | TRAP-3 | waived | waived | waived | 1 | 6 | 1 |
 | TRAP-4 | waived | 1 | 1 | 2 | 4 | waived |
 | TRAP-5 | waived | waived | waived | 2 | 6 | waived |
@@ -903,7 +903,7 @@ If an image build remains in CREATING past the stall grace period with every bui
 - **gherkin:** waived: the stall is a timed sequence of describe answers, which the tests script against a fake clock; a scenario would restate them
 - **fuzz:** waived: the verdict turns on elapsed time and the builds' statuses, which the tests enumerate
 - **test:** `crates/microvms-app/src/control/image.rs`
-- **impl:** `crates/microvms-app/src/clock.rs`, `crates/microvms-app/src/control/image.rs`, `crates/microvms-app/src/control/mod.rs`, `crates/microvms-app/src/control/ops.rs`, `crates/microvms-cli/src/commands/lifecycle.rs`, `crates/microvms-domain/src/constants.rs`
+- **impl:** `crates/microvms-app/src/clock.rs`, `crates/microvms-app/src/control/image.rs`, `crates/microvms-app/src/control/mod.rs`, `crates/microvms-app/src/control/ops.rs`, `crates/microvms-domain/src/constants.rs`
 - **live:** waived: a stall needs a replayed token's wedged image, about fifteen hours in CREATING (docs/PLATFORM.md)
 
 ## TRAP-3
