@@ -181,7 +181,7 @@ ts = "Session.runSync"
 [[capability]]
 id = "run-to-completion"
 core = "microvms_core::session::Session::run_to_completion"
-cli = { exempt = "exec has the parts but not the composition", issue = "#259" }
+cli = "exec --complete"
 py = "Session.run_to_completion"
 ts = "Session.runToCompletion"
 
@@ -432,36 +432,39 @@ ts = "ControlPlane.terminate"
 id = "list-images"
 core = "microvms_core::control::ControlPlane::list_images"
 cli = "ls --remote"
-py = { exempt = "not bound", issue = "#264" }
-ts = { exempt = "not bound", issue = "#264" }
+py = "ControlPlane.list_images"
+ts = "ControlPlane.listImages"
 
 [[capability]]
 id = "delete-image"
 core = "microvms_core::control::ControlPlane::delete_image"
 cli = "terminate --delete-image"
-py = { exempt = "only through terminate(delete_image=True)", issue = "#264" }
-ts = { exempt = "only through terminate({ deleteImage })", issue = "#264" }
+py = "ControlPlane.delete_image"
+ts = "ControlPlane.deleteImage"
 
 [[capability]]
 id = "image-versions"
 core = "microvms_core::control::ControlPlane::list_image_versions"
 cli = { exempt = "no command", issue = "#264" }
-py = { exempt = "not bound", issue = "#264" }
-ts = { exempt = "not bound", issue = "#264" }
+py = "ControlPlane.list_image_versions"
+ts = "ControlPlane.listImageVersions"
 
 [[capability]]
 id = "set-image-version-status"
 core = "microvms_core::control::ControlPlane::set_image_version_status"
 cli = { exempt = "no command", issue = "#264" }
-py = { exempt = "not bound", issue = "#264" }
-ts = { exempt = "not bound", issue = "#264" }
+py = "ControlPlane.set_image_version_status"
+ts = "ControlPlane.setImageVersionStatus"
 
 [[capability]]
 id = "image-builds"
-core = "microvms_core::control::ControlPlane::list_image_builds"
+core = [
+  "microvms_core::control::ControlPlane::list_image_builds",
+  "microvms_core::control::ControlPlane::get_image_build",
+]
 cli = { exempt = "no command", issue = "#264" }
-py = { exempt = "not bound", issue = "#264" }
-ts = { exempt = "not bound", issue = "#264" }
+py = ["ControlPlane.list_image_builds", "ControlPlane.get_image_build"]
+ts = ["ControlPlane.listImageBuilds", "ControlPlane.getImageBuild"]
 
 [[capability]]
 id = "build-log-group"
@@ -578,6 +581,13 @@ core = "microvms_core::agents::AgentVm::build"
 cli = "agent-up"
 py = ["AgentVm.build_artifact", "AgentVm.build_image"]
 ts = ["AgentVm.buildArtifact", "AgentVm.buildImage"]
+
+[[capability]]
+id = "agent-ensure-image"
+core = ["microvms_core::agents::AgentVm::ensure_image", "microvms_core::agents::ensure_request_for"]
+cli = "agent-up"
+py = "AgentVm.ensure_image"
+ts = "AgentVm.ensureImage"
 
 [[capability]]
 id = "agent-vm-access-and-prompt"

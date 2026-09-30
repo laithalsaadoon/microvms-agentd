@@ -61,12 +61,18 @@ export declare class AgentVm {
   dockerfile(): Promise<string>
   /**
    * The image name for these specs and this daemon binary: `agent-vm-<agents>-<hash12>`.
-   * Content-addressed, so an unchanged binary and spec set name the image a previous run
-   * built; `findImage` looks it up.
+   * Content-addressed, so an unchanged binary, spec set and size name the image a previous
+   * run built; `findImage` looks it up, and `ensureImage` builds or reuses it.
    */
   imageName(options: AgentImageOptions, size?: SizeClass | undefined | null): Promise<string>
   /** The ARN of an existing image named per `imageName`, or `null` when there is none. */
   findImage(options: AgentImageOptions, size?: SizeClass | undefined | null): Promise<string | null>
+  /**
+   * Builds or reuses this VM's image, named per `imageName`: resolved at once when ready,
+   * waited on while building, deleted and rebuilt when failed, and uploaded to
+   * `s3://<s3Bucket>/<s3KeyPrefix>/<name>/artifact.zip` only when a build is needed.
+   */
+  ensureImage(options: AgentEnsureOptions, size?: SizeClass | undefined | null): Promise<EnsuredImage>
   /** The artifact bytes to upload to `s3://<bucket>/<imageName>.zip` before `buildImage`. */
   buildArtifact(options: AgentImageOptions, size?: SizeClass | undefined | null): Promise<Buffer>
   /**
@@ -157,7 +163,8 @@ export declare class BuildHookTimeout {
 }
 
 /**
- * MicroVM lifecycle by ID: get, list, suspend, resume, terminate, and wait.
+ * MicroVM lifecycle by ID (get, list, suspend, resume, terminate, and wait) and image
+ * administration (list, delete, versions and their status, builds).
  *
  * Holds no lifecycle state, so it checks nothing a `Sandbox` would (STATE-5, STATE-7,
  * STATE-12). Use it when a process has only an identifier.
@@ -185,6 +192,37 @@ export declare class ControlPlane {
    * past `timeout` rejects with a timeout.
    */
   waitForState(microvmId: string, wanted: Array<string>, options?: WaitForStateOptions | undefined | null): Promise<Microvm>
+  /** `ListMicrovmImages`, every page: every image in the account and region. */
+  listImages(): Promise<Array<ImageSummary>>
+  /**
+   * Deletes the image, its extra versions first, retrying while it refuses (an image still
+   * `CREATING`, or one a terminating VM holds).
+   *
+   * Resolves `true` once the service took the deletion and `false` when every attempt
+   * failed or `identifier` is not one the service accepts. It doesn't reject, as a
+   * teardown's delete shouldn't.
+   */
+  deleteImage(identifier: string, options?: DeleteImageOptions | undefined | null): Promise<boolean>
+  /**
+   * `ListMicrovmImageVersions`, every page: each version, its status, and its build
+   * configuration.
+   */
+  listImageVersions(identifier: string): Promise<Array<ImageVersion>>
+  /**
+   * `UpdateMicrovmImageVersion`: `status` is `"ACTIVE"` or `"INACTIVE"`.
+   *
+   * `INACTIVE` is the non-destructive retire: `RunMicrovm` refuses the version, running VMs
+   * keep running, and the version's readback stays. Resolves with the readback, and rejects
+   * when it doesn't carry the status asked for, so a 200 that didn't take isn't a rollback.
+   */
+  setImageVersionStatus(identifier: string, version: string, status: string): Promise<ImageVersion>
+  /**
+   * `ListMicrovmImageBuilds` for one version, every page: one build per Graviton
+   * generation. Each `buildId` is what `getImageBuild` takes.
+   */
+  listImageBuilds(identifier: string, version: string): Promise<Array<ImageBuild>>
+  /** `GetMicrovmImageBuild`: one build, with the snapshot sizes the listing doesn't carry. */
+  getImageBuild(identifier: string, version: string, buildId: string): Promise<ImageBuild>
   /** The region this plane addresses. */
   get region(): string
 }
@@ -1143,6 +1181,21 @@ export declare class Unpriced {
 /** The layer's fixed values as JSON, for a caller that wants to reason about the guest. */
 export declare function agentConstants(): string
 
+/**
+ * What `ensureImage` builds or reuses from: the daemon binary, the build role, and where
+ * the artifact goes.
+ */
+export interface AgentEnsureOptions {
+  /** The daemon binary's bytes, zipped into the artifact. */
+  binary: Uint8Array
+  /** The build role, which must read the bucket and grant logs on `/aws/lambda-microvms/*`. */
+  buildRoleArn: string
+  /** The bucket the artifact is uploaded to, in the VM's region. */
+  s3Bucket: string
+  /** A key prefix inside the bucket, or absent for the bucket root. */
+  s3KeyPrefix?: string
+}
+
 /** What an agent image is derived from: the daemon binary and the build role. */
 export interface AgentImageOptions {
   /** The daemon binary's bytes, zipped into the artifact. */
@@ -1330,6 +1383,11 @@ export interface CompletionRequest {
   timeoutSec?: number
   /** The idempotency key. Omitted, one is minted. */
   execId?: string
+  /**
+   * Signal the whole process group once the command's own child exits. See
+   * `ExecOptions.reapGroupOnExit`.
+   */
+  reapGroupOnExit?: boolean
   /** Start the child's environment from the image's `ENV`. See `ExecOptions.inheritImageEnv`. */
   inheritImageEnv?: boolean
   /**
@@ -1359,6 +1417,14 @@ export declare function costConstants(): string
 
 /** The managed base every `docs/PLATFORM.md` measurement from 2026-08-06 onward used. */
 export declare function defaultBaseImage(): BaseImageInput
+
+/** How `deleteImage` retries while the image refuses. */
+export interface DeleteImageOptions {
+  /** Attempts before giving up. Default: the core's teardown figure. */
+  attempts?: number
+  /** Seconds between attempts. Default: the core's teardown figure. */
+  backoff?: number
+}
 
 /** `Detached` as a plain object, token included, for a private store. */
 export interface DetachedObject {
@@ -1715,6 +1781,92 @@ export interface Image {
    * create call, so a caller reads it here or never.
    */
   logStream?: string
+}
+
+/**
+ * One build of an image version: one per Graviton generation, so a version's builds differ
+ * in `chipsetGeneration`. `getImageBuild` adds the snapshot sizes the listing lacks.
+ */
+export interface ImageBuild {
+  imageArn: string
+  imageVersion: string
+  /** What `getImageBuild` takes, and nothing else in the API mints one. */
+  buildId: string
+  /** `buildState`, as the service spells it. */
+  buildState: string
+  architecture: string
+  chipset: string
+  chipsetGeneration: string
+  /** Unix seconds. */
+  createdAt: number
+  /**
+   * Why the build is in this state, when the service said: where a failed build's reason
+   * lives.
+   */
+  stateReason?: string
+  /**
+   * `snapshotBuild.memorySnapshotSizeInBytes`, from `getImageBuild` only, and only when the
+   * service reported it.
+   */
+  memorySnapshotSizeInBytes?: number
+  /** `snapshotBuild.codeInstallSizeInBytes`, from `getImageBuild` only. */
+  codeInstallSizeInBytes?: number
+  /** `snapshotBuild.diskSnapshotSizeInBytes`, from `getImageBuild` only. */
+  diskSnapshotSizeInBytes?: number
+}
+
+/** One `ListMicrovmImages` item: an image's ARN, name and state. */
+export interface ImageSummary {
+  imageArn: string
+  name: string
+  /** As the service spells it, such as `"CREATING"` or `"CREATED"`. */
+  state: string
+}
+
+/**
+ * One image version as `ListMicrovmImageVersions` or `UpdateMicrovmImageVersion` reads it
+ * back: its build state, whether `RunMicrovm` launches it, and what it was built with.
+ */
+export interface ImageVersion {
+  imageArn: string
+  imageVersion: string
+  /** The version's build state, as the service spells it. */
+  state: string
+  /**
+   * `"ACTIVE"` (`RunMicrovm` launches it) or `"INACTIVE"` (it refuses; running VMs keep
+   * running).
+   */
+  status: string
+  /** Whether `RunMicrovm` launches this version. */
+  isActive: boolean
+  /**
+   * Why the version is in this state, when the service said. A failed build's reason is on
+   * its build (`listImageBuilds`), and this one is usually absent.
+   */
+  stateReason?: string
+  /** Unix seconds. */
+  createdAt: number
+  /** Unix seconds, when the service reported it. */
+  updatedAt?: number
+  baseImageArn: string
+  /**
+   * The base version the build used, as the service spells it (`"1.0"` where the managed
+   * base lists `"1"`). A record of the build, not a value to pass back as a pin.
+   */
+  baseImageVersion?: string
+  buildRoleArn: string
+  /** `codeArtifact.uri`: the artifact the version was built from. */
+  codeArtifactUri: string
+  description?: string
+  /**
+   * `resources[0].minimumMemoryInMiB`, the list's one member: the size class the version
+   * was built for, and the only place a built image reports it.
+   */
+  minimumMemoryMib?: number
+  egressNetworkConnectors?: Array<string>
+  additionalOsCapabilities?: Array<string>
+  environmentVariables?: Record<string, string>
+  tags?: Record<string, string>
 }
 
 /**

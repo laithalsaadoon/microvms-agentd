@@ -1105,8 +1105,38 @@ pub struct ExecArgs {
     pub command: Option<String>,
 
     /// How long to wait for the command, in seconds.
+    ///
+    /// A client-side deadline: past it this process stops waiting and the command keeps
+    /// running in the guest. --timeout-sec is the daemon's deadline for the command itself.
     #[arg(long, default_value = "300", value_parser = parse_seconds)]
     pub timeout: std::time::Duration,
+
+    /// The daemon's deadline for the command, in seconds: `timeout_sec` on the start request.
+    ///
+    /// Past it the daemon sends the process group SIGTERM, then SIGKILL, and the result reads
+    /// `timedOut: true`, `posixExitCode: 124` and `ERR_TIMEOUT`. Omitted, the daemon sets
+    /// none and the command runs until it exits or the VM ends. The daemon refuses zero.
+    #[arg(long, value_name = "SECONDS", value_parser = parse_seconds, conflicts_with = "poll")]
+    pub timeout_sec: Option<std::time::Duration>,
+
+    /// Wait for exactly one result, the way the SDKs' `run_to_completion` does (BIND-8 to
+    /// BIND-10).
+    ///
+    /// The client deadline is --timeout-sec plus --client-grace, or the VM's maximum lifetime
+    /// without --timeout-sec, so it replaces --timeout. Past it the process group is killed
+    /// and the result collected within the grace. When even that fails the result is
+    /// synthesized: `posixExitCode` 124, `synthesized: true`, a note naming both failures, and
+    /// `ERR_TIMEOUT`, as for any deadline that ended the command.
+    #[arg(long, conflicts_with_all = ["poll", "detach", "stream", "timeout", "kill_on_timeout"])]
+    pub complete: bool,
+
+    /// With --complete, the seconds past --timeout-sec before the kill, and then for its result.
+    ///
+    /// Omitted, core's client grace (`DEFAULT_CLIENT_GRACE`, 60 seconds): the daemon escalates
+    /// a timed-out group from SIGTERM to SIGKILL after ten seconds, and the rest covers a slow
+    /// proxy.
+    #[arg(long, value_name = "SECONDS", value_parser = parse_seconds, requires = "complete")]
+    pub client_grace: Option<std::time::Duration>,
 
     /// Working directory.
     ///
@@ -1918,7 +1948,7 @@ pub struct CostArgs {
     pub cycles: u32,
 
     /// The hold to compare running against suspended over, in seconds.
-    #[arg(long, default_value = "3600", value_parser = parse_seconds)]
+    #[arg(long, default_value = "3600", value_parser = parse_report_seconds)]
     pub hold_sec: std::time::Duration,
 
     /// A budget in USD the report's total is checked against (#77).
@@ -2231,14 +2261,24 @@ fn parse_env_pair(pair: &str) -> Result<(String, String), String> {
 /// A parser rather than a conversion in the handler, because the refusal has to come before the
 /// work: `exec` converted after the command had started in the VM, `run` after the launch, and
 /// `suspend` and `resume` after the call was sent, so `inf` panicked with a VM running and `NaN`
-/// quietly meant zero (#268). The conversion is core's `duration_of_secs_f64`, the one both
+/// quietly meant zero (#268). The conversion is core's `duration::of_secs_f64`, the one both
 /// bindings call for their waits, so all three surfaces refuse the same values with the same
 /// message.
 fn parse_seconds(raw: &str) -> Result<std::time::Duration, String> {
-    let seconds: f64 = raw
-        .parse()
-        .map_err(|_| format!("{raw:?} is not a number of seconds"))?;
-    microvms_core::cost::duration_of_secs_f64(seconds).map_err(|error| error.to_string())
+    microvms_core::duration::of_secs_f64(number_of_seconds(raw)?).map_err(|error| error.to_string())
+}
+
+/// [`parse_seconds`] for a span a cost report prices, through core's
+/// `cost::duration_of_secs_f64`, which the bindings' residency comparison calls too. Its refusal
+/// adds why a negative span matters there; a wait's has no report to put a credit on (#338).
+fn parse_report_seconds(raw: &str) -> Result<std::time::Duration, String> {
+    microvms_core::cost::duration_of_secs_f64(number_of_seconds(raw)?)
+        .map_err(|error| error.to_string())
+}
+
+fn number_of_seconds(raw: &str) -> Result<f64, String> {
+    raw.parse()
+        .map_err(|_| format!("{raw:?} is not a number of seconds"))
 }
 
 #[cfg(test)]
@@ -3266,6 +3306,8 @@ mod tests {
     fn parsed_seconds(command: &Command, flag: &str) -> Option<std::time::Duration> {
         match (command, flag) {
             (Command::Exec(args), "--timeout") => Some(args.timeout),
+            (Command::Exec(args), "--timeout-sec") => args.timeout_sec,
+            (Command::Exec(args), "--client-grace") => args.client_grace,
             (Command::Run(args), "--timeout") => Some(args.timeout),
             (Command::Sync(args), "--timeout") => Some(args.timeout),
             (Command::Suspend(args), "--timeout") => Some(args.timeout),
@@ -3286,17 +3328,24 @@ mod tests {
     /// refusals from passing on an argv that fails for some other reason (a missing positional,
     /// a renamed flag).
     ///
+    /// A refused figure's message is core's: a wait's names no report, and `cost --hold-sec`'s,
+    /// the one span a report prices, says why a negative one matters there (#338).
+    ///
     /// **Falsification**: `verify/guards/faults/seconds-flags.toml` entries `cli-seconds-parse-table` (the
-    /// refusal becomes a silent zero, and every refused row but `abc` parses) and
-    /// `cli-seconds-parse-truncates` (a fraction loses its sub-second part, and `0.5` reads 0s).
+    /// refusal becomes a silent zero, and every refused row but `abc` parses),
+    /// `cli-seconds-parse-truncates` (a fraction loses its sub-second part, and `0.5` reads 0s)
+    /// and `cli-seconds-wait-names-a-credit` (the waits parse through the cost conversion, and
+    /// `exec --timeout=-5` names a credit).
     #[test]
     fn every_seconds_flag_refuses_what_is_not_a_duration() {
         use std::time::Duration;
         let attached = ["--endpoint", "https://mvm-1.example", "--agent-token", "t"];
         let with_id =
             |rest: &[&'static str]| [&attached[..], &["--microvm-id", "mvm-1"], rest].concat();
-        let flags: [(&str, Vec<&str>, &str); 11] = [
+        let flags: [(&str, Vec<&str>, &str); 13] = [
             ("exec", with_id(&["true"]), "--timeout"),
+            ("exec", with_id(&["true"]), "--timeout-sec"),
+            ("exec", with_id(&["--complete", "true"]), "--client-grace"),
             ("run", vec!["--no-config"], "--timeout"),
             ("sync", with_id(&["."]), "--timeout"),
             ("suspend", vec!["mvm-1"], "--timeout"),
@@ -3354,6 +3403,12 @@ mod tests {
                                 "{label} refused as {:?}: {rendering}",
                                 error.kind()
                             ));
+                        }
+                        // Only the hold a report prices says why a negative span matters to a
+                        // report; a wait's refusal claims none (#338).
+                        let priced = *flag == "--hold-sec";
+                        if value != "abc" && rendering.contains("credit on the report") != priced {
+                            misses.push(format!("{label} refused with {rendering}"));
                         }
                     }
                 }

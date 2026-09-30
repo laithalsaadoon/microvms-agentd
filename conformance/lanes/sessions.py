@@ -16,7 +16,7 @@ import tempfile
 import time
 from typing import Any
 
-from harness.cli import Cli
+from harness.cli import Cli, attach_args
 from harness.constants import BASELINE_MEMORY_MIB, REPO, SERVICE
 from harness.envelope import Envelope, KindError
 from harness.redact import command_for_log
@@ -123,6 +123,27 @@ def drive_run_to_completion(cli: Cli, launched: Envelope, results: Results) -> N
         "BIND-10 a client grace shorter than the output linger synthesizes 124",
         passed,
         detail,
+    )
+
+    # The CLI form (#259): the same composition through `exec --complete`, with the daemon's
+    # deadline from --timeout-sec. The daemon ends `sleep 30` at two seconds, so the envelope
+    # is a result (`ok`) whose posixExitCode is 124 with a note naming timeout_sec, and the
+    # exit is ERR_TIMEOUT (10), as for any deadline that ended the command.
+    attach = attach_args(cli, launched)
+    argv = cli.argv("exec", "sleep 30", "--complete", "--timeout-sec", "2", *attach)
+    cli.log.append(command_for_log(argv))
+    proc = subprocess.run(argv, capture_output=True, text=True, check=False)
+    envelope = Cli.parse_stdout(proc.stdout, argv)
+    notes = envelope.data.get("notes") or []
+    results.check(
+        "exec --complete --timeout-sec 2 reports posixExitCode 124 with a note and ERR_TIMEOUT",
+        envelope.status == "ok"
+        and envelope.data.get("posixExitCode") == 124
+        and any("timeout_sec" in note for note in notes)
+        and envelope.data.get("synthesized") is False
+        and proc.returncode == 10,
+        f"status={envelope.status} posixExitCode={envelope.data.get('posixExitCode')} "
+        f"notes={notes} synthesized={envelope.data.get('synthesized')} $?={proc.returncode}",
     )
 
 

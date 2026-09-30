@@ -1,0 +1,25 @@
+# ── the spawned binary's envelopes and exit codes (tests/exit_codes.rs) ──────
+# `exec --stream`'s failure path at the process boundary: one document on stdout, and offline on
+# every host (#338). The first entry writes a stray line to stdout before the attach; the second
+# hands the child the credentials an instance role would have, with HTTPS sent to a proxy nothing
+# listens on, so the mint goes past the credential lookup without reaching AWS.
+
+[[fault]]
+id = "cli-exit-stream-stray-print"
+guard = "a_streamed_exec_that_fails_before_any_event_writes_one_document_on_stdout"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "exit_codes", "--", "--exact", "a_streamed_exec_that_fails_before_any_event_writes_one_document_on_stdout"]
+expect = "test-failed"
+suite = "rust"
+message = "stdout was not exactly one JSON document"
+note = "crates/microvms-cli/tests/exit_codes.rs::a_streamed_exec_that_fails_before_any_event_writes_one_document_on_stdout"
+transform = { file = "crates/microvms-cli/src/commands/attached.rs", replace = "    args: &ExecArgs,\n) -> Result<Rendered, CliError> {\n    let (session, microvm_id) = attach(ctx, &args.region, &args.attach).await?;\n", with = "    args: &ExecArgs,\n) -> Result<Rendered, CliError> {\n    println!(\"attaching\");\n    let (session, microvm_id) = attach(ctx, &args.region, &args.attach).await?;\n" }
+
+[[fault]]
+id = "cli-exit-stream-mints-offline"
+guard = "a_streamed_exec_that_fails_before_any_event_writes_one_document_on_stdout"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "exit_codes", "--", "--exact", "a_streamed_exec_that_fails_before_any_event_writes_one_document_on_stdout"]
+expect = "test-failed"
+suite = "rust"
+message = "the attach went past the credential lookup"
+note = "crates/microvms-cli/tests/exit_codes.rs::a_streamed_exec_that_fails_before_any_event_writes_one_document_on_stdout"
+transform = { file = "crates/microvms-cli/tests/support/mod.rs", replace = "    command.env(\"AWS_EC2_METADATA_DISABLED\", \"true\");\n", with = "    command.env(\"AWS_EC2_METADATA_DISABLED\", \"true\");\n    command.env(\"AWS_ACCESS_KEY_ID\", \"AKIDEXAMPLE\");\n    command.env(\"AWS_SECRET_ACCESS_KEY\", \"secret\");\n    command.env(\"HTTPS_PROXY\", \"http://127.0.0.1:9\");\n" }
