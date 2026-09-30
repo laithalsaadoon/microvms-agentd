@@ -830,6 +830,12 @@ async fn names_delete_removes_a_held_name_and_refuses_an_unknown_one() {
     let error = result.expect_err("nobody holds that name");
     assert_eq!(error.exit, Exit::Precondition, "{}", error.message);
     assert!(error.message.contains("\"nobody\""), "{}", error.message);
+    let looked_in = dir.0.join("names").display().to_string();
+    assert!(
+        error.message.contains(&looked_in),
+        "the refusal names the registry it read, {looked_in}: {}",
+        error.message
+    );
     assert!(
         registry.lookup("alpha").is_some(),
         "a refused call deleted nothing"
