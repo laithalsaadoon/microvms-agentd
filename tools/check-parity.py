@@ -52,6 +52,36 @@ The check fails when:
 - `index.d.ts` carries `@hidden`, `@ignore` or `@private`: TypeDoc leaves such a declaration
   out of what it reports, so the check refuses to read around it.
 
+Defaults (#300). A default a surface states is a copy of core's unless it names core's
+constant, and a copy can drift. Core publishes its defaults as `data.clientDefaults` in the
+manifest (`microvms_core::defaults::client_defaults()`, which `manifest:check` keeps current),
+and `[[default]]` rows map each surface default to one of them or exempt it with a reason:
+
+    [[default]]
+    id = "exec-wait"
+    core = "execWaitSeconds"          # a key of clientDefaults; a dot path reaches a group
+    cli = ["exec --timeout", "run --timeout"]
+    py = ["ExecHandle.wait(timeout)", "Session.run_sync(timeout)"]
+
+A CLI default is `<command> --<flag>`; a Python one is `function(param)`, `Class.method(param)`,
+or `Class(param)` for a constructor's. The check fails when:
+
+- a held default belongs to no row. On the CLI a default is held when it reads as a non-zero
+  number (the manifest prints every default as a string); in the stub when it's a non-zero
+  number, `True`, `False` or `...`, the stub's spelling of a default named for a constant. A
+  zero, `None` or a string isn't held: a zero or `None` is "nothing unless asked", and string
+  defaults (a label, a bind address) aren't this check's.
+- a row names a default the surface doesn't state, or one another row names.
+- a row's `core` key isn't in `clientDefaults`, or a stated default differs from core's value
+  (numbers by value, a boolean only with a boolean). A `...` is checked by its row alone: the
+  binding's source names the constant, which is why the stub can't print it, and the
+  adapter-logic ratchet refuses a `DEFAULT_*` retyped as a number there.
+- a row has both `core` and `exempt`, neither, an empty reason, or a `ts` cell: `index.d.ts`
+  states defaults only in prose, so there's none to read.
+- the manifest has no `clientDefaults`, a surface states no held default at all (the floor), or
+  a row marked `sentinel = true` names a default the surface doesn't state or doesn't compare.
+  The table must mark one.
+
 A cell is a name, a list of names, or `{ exempt = "<reason>", issue = "#N" }`. A CLI name is
 `<command>`, `<command> --<flag> ...`, or `@<group>` for a `[flag_groups]` entry, flags every
 attached command shares.
@@ -109,7 +139,8 @@ LABELS = {"core": "core", "cli": "CLI", "py": "Python", "ts": "TypeScript"}
 SENTINELS = ("launch", "health", "kill", "run-report")
 CAPABILITY_KEYS = {"id", "sentinel", *SURFACES}
 TYPE_KEYS = {"name", "exempt_members"}
-TABLE_KEYS = {"capability", "type", "flag_groups", "exempt_names"}
+TABLE_KEYS = {"capability", "type", "flag_groups", "exempt_names", "default"}
+DEFAULT_KEYS = {"id", "sentinel", "core", "exempt", "cli", "py", "ts"}
 ISSUE = re.compile(r"#[1-9][0-9]*")
 
 # TypeDoc's ReflectionKind values for what the reader keeps.
@@ -139,10 +170,21 @@ class Surface:
     classes: dict[str, ClassInfo] = field(default_factory=dict)
     # CLI only: each command's flags
     flags: dict[str, set[str]] = field(default_factory=dict)
+    # the defaults the surface states, by `[[default]]` name, as the surface spells them
+    defaults: dict[str, str] = field(default_factory=dict)
+    # CLI only: the manifest's `clientDefaults`, core's values, or None when it has none
+    client_defaults: dict[str, Any] | None = None
 
 
 def dunder(name: str) -> bool:
     return name.startswith("__") and name.endswith("__")
+
+
+def record_defaults(owner: str, function: dict[str, Any], surface: Surface) -> None:
+    """A function's stated defaults as `owner(param)`. `None` means the stub has no default."""
+    for parameter in function.get("parameters") or []:
+        if parameter.get("default") is not None:
+            surface.defaults[f"{owner}({parameter['name']})"] = parameter["default"]
 
 
 def py_surface(dump: dict[str, Any]) -> Surface:
@@ -154,9 +196,15 @@ def py_surface(dump: dict[str, Any]) -> Surface:
         if dunder(name):
             continue
         surface.names.add(name)
+        if item["kind"] == "function":
+            record_defaults(name, item, surface)
         if item["kind"] == "class":
             info = ClassInfo()
             for member in item.get("members") or []:
+                if member["kind"] == "function" and member["name"] == "__new__":
+                    record_defaults(name, member, surface)
+                elif member["kind"] == "function" and not dunder(member["name"]):
+                    record_defaults(f"{name}.{member['name']}", member, surface)
                 if dunder(member["name"]) or member["kind"] not in (
                     "function",
                     "attribute",
@@ -226,13 +274,22 @@ def hidden_declarations(text: str) -> list[str]:
 def cli_surface(manifest: dict[str, Any]) -> Surface:
     """`microvm manifest`'s envelope. Positionals are arguments, not flags."""
     surface = Surface()
-    for command in (manifest.get("data") or {}).get("commands") or []:
+    data = manifest.get("data") or {}
+    for command in data.get("commands") or []:
         surface.names.add(command["name"])
-        surface.flags[command["name"]] = {
-            parameter["name"]
+        flags = [
+            parameter
             for parameter in command.get("parameters") or []
             if not parameter.get("positional")
-        }
+        ]
+        surface.flags[command["name"]] = {parameter["name"] for parameter in flags}
+        for parameter in flags:
+            if parameter.get("default") is not None:
+                surface.defaults[f"{command['name']} --{parameter['name']}"] = str(
+                    parameter["default"]
+                )
+    client = data.get("clientDefaults")
+    surface.client_defaults = client if isinstance(client, dict) else None
     return surface
 
 
@@ -400,6 +457,137 @@ def check(
     cli = surfaces["cli"]
     for command in sorted(cli.names - mapped["cli"] - exempt.get("cli", set())):
         problems.append(f"cli: {command} belongs to no row")
+    return problems + default_problems(table.get("default") or [], surfaces, empty)
+
+
+def as_number(text: str) -> float | None:
+    """A default's text as a number, or `None` when it doesn't read as one."""
+    try:
+        value = float(text)
+    except ValueError:
+        return None
+    return (
+        value if value == value and value not in (float("inf"), float("-inf")) else None
+    )
+
+
+def held(key: str, text: str) -> bool:
+    """Whether a stated default needs a `[[default]]` row; see the module docs."""
+    if key == "py" and text in ("True", "False", "..."):
+        return True
+    number = as_number(text)
+    return number is not None and number != 0
+
+
+def core_value(client: dict[str, Any], path: str) -> tuple[bool, Any]:
+    """`clientDefaults` at a dot path, and whether the path resolved."""
+    value: Any = client
+    for part in path.split("."):
+        if not isinstance(value, dict) or part not in value:
+            return False, None
+        value = value[part]
+    return True, value
+
+
+def differs(text: str, value: Any) -> bool:
+    """Whether a surface's default text states something other than core's value."""
+    if isinstance(value, bool):
+        return text.lower() != str(value).lower()
+    if isinstance(value, int | float):
+        number = as_number(text)
+        return number is None or number != value
+    return True
+
+
+def default_problems(
+    rows: list[dict[str, Any]], surfaces: dict[str, Surface], empty: set[str]
+) -> list[str]:
+    """The `[[default]]` rules; see the module docs."""
+    problems = []
+    client = surfaces["cli"].client_defaults
+    if client is None and "cli" not in empty:
+        problems.append("cli: the manifest carries no clientDefaults to compare with")
+    claimed: dict[tuple[str, str], str] = {}
+    seen: set[str] = set()
+    sentinels = 0
+    for row in rows:
+        row_id = row.get("id", "<no id>")
+        where = f"default {row_id}"
+        if row_id in seen:
+            problems.append(f"{where}: the id is used by more than one row")
+        seen.add(row_id)
+        problems += [
+            f"{where}: unknown key {key}" for key in sorted(set(row) - DEFAULT_KEYS)
+        ]
+        if "ts" in row:
+            problems.append(
+                f"{where}: ts: index.d.ts states defaults only in prose, so there's none to map"
+            )
+        key_path = row.get("core")
+        reason = row.get("exempt")
+        if (key_path is None) == (reason is None):
+            problems.append(f"{where}: a row has a core key or an exemption, not both")
+        elif reason is not None and not (isinstance(reason, str) and reason.strip()):
+            problems.append(f"{where}: the exemption has an empty reason")
+        resolved, value = (False, None)
+        if isinstance(key_path, str) and client is not None:
+            resolved, value = core_value(client, key_path)
+            if not resolved:
+                problems.append(f"{where}: clientDefaults has no {key_path}")
+        sentinel = row.get("sentinel") is True
+        sentinels += sentinel
+        compared = 0
+        for key in ("cli", "py"):
+            names = names_of(row[key]) if key in row else []
+            if names is None:
+                problems.append(
+                    f"{where}: {key}: a cell is a default's name or a list of them"
+                )
+                continue
+            for name in names:
+                if (key, name) in claimed:
+                    problems.append(
+                        f"{where}: {key}: {name} is also in default {claimed[(key, name)]}"
+                    )
+                claimed[(key, name)] = row_id
+                if key in empty:
+                    continue
+                text = surfaces[key].defaults.get(name)
+                if text is None:
+                    problems.append(f"{where}: {key}: {name} states no default")
+                    continue
+                if not resolved or text == "...":
+                    continue
+                compared += 1
+                if differs(text, value):
+                    problems.append(
+                        f"{where}: {key}: {name} defaults to {text}, but clientDefaults."
+                        f"{key_path} is {json.dumps(value)}"
+                    )
+        if sentinel and (key_path is None or not compared):
+            problems.append(
+                f"sentinel default {row_id}: no stated default was compared with core's"
+            )
+    if not sentinels:
+        problems.append("the table marks no sentinel [[default]] row")
+    for key in ("cli", "py"):
+        if key in empty:
+            continue
+        stated = {
+            name: text
+            for name, text in surfaces[key].defaults.items()
+            if held(key, text)
+        }
+        if not stated:
+            problems.append(
+                f"{key}: the surface states no default the rows hold, so nothing was read"
+            )
+        for name in sorted(
+            set(stated) - {name for surface, name in claimed if surface == key}
+        ):
+            problems.append(
+                f"{key}: {name} = {stated[name]} belongs to no [[default]] row"
+            )
     return problems
 
 
@@ -673,7 +861,8 @@ def main() -> int:
             print(f"  {problem}")
     elif not refused:
         print(
-            "parity: every row resolves on its surfaces, and every name rule (a) holds has a row"
+            "parity: every row resolves on its surfaces, every name rule (a) holds has a row, "
+            "and every default a surface states is core's or exempt"
         )
     return 1 if refused or problems else 0
 
