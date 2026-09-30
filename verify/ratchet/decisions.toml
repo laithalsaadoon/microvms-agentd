@@ -8,7 +8,7 @@
 # decision allows a crate one edge outside its set in `verify/arch/placement.toml`, and
 # `crates/microvms-cli/tests/dependency_direction.rs` holds it to the tree.
 
-enforced = ["port-impl", "adapter-logic"]
+enforced = ["port-impl", "adapter-logic", "placement"]
 
 [[decision]]
 category = "port-impl"
@@ -18,7 +18,7 @@ reason = "an adapter between two application ports that performs no I/O: it mint
 [[decision]]
 category = "placement"
 key = "microvms-cli -> notify"
-reason = "watching the local tree for `sync --watch` is a terminal affordance of the CLI's interactive loop; an event only wakes a re-hash, and the sync pass that decides what moves goes to core in #260"
+reason = "watching the local tree for `sync --watch` is a terminal affordance of the CLI's interactive loop; an event only wakes a re-hash, and the sync pass that decides what moves is core's"
 
 [[decision]]
 category = "subprocess"
@@ -49,11 +49,6 @@ reason = "`HEALTH_PROBE_DEADLINE`, the deadline on a best-effort health read the
 category = "adapter-logic"
 key = "crates/microvms-cli/src/commands/lifecycle.rs: literal-default: Duration::from_secs(10)"
 reason = "`ATTACH_PROBE_DEADLINE`, the deadline on attaching a session only for that hook-log read after a resume; it bounds a CLI history nicety core doesn't do, so a resume whose VM is running never stalls over it"
-
-[[decision]]
-category = "adapter-logic"
-key = "crates/microvms-cli/src/commands/attached.rs: literal-default: Duration::from_secs(30)"
-reason = "`SYNC_DELETE_GRACE`, how long a sync pass waits past the in-guest `rm`'s own deadline; it's the figure the pass has always used, shorter than core's `DEFAULT_CLIENT_GRACE` because a pass under `sync --watch` holds the next one while it waits, and changing it is a behavior change of its own"
 
 [[decision]]
 category = "adapter-logic"

@@ -112,7 +112,9 @@ fn parse_and_dispatch(
 /// A daemon for a sync whose guest manifest orders one deletion, so a dispatched sync reaches
 /// the `rm` exec whose budget is the flag, and that exec exits and acks.
 fn seconds_sync_daemon(tree: &std::path::Path) -> Arc<DaemonScript> {
-    let mut remote = crate::sync::manifest(tree).expect("the tree manifests");
+    let mut remote =
+        microvms_core::workspace::LocalTree::manifest(&microvms_core::workspace::DiskTree, tree)
+            .expect("the tree manifests");
     remote.files.insert("removed.txt".into(), "1".repeat(64));
     let remote = String::from_utf8(serde_json::to_vec(&remote).expect("serializes")).expect("utf8");
     let script = DaemonScript::new();

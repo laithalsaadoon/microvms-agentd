@@ -64,6 +64,7 @@
 //!
 //! (cli.py line numbers resolve at `git show 'c4d396e^:clients/python/src/microvms_agentd/cli.py'` — the retired oracle.)
 
+use microvms_core::workspace::LocalTree as _;
 use std::time::Duration;
 
 use microvms_core::control::{ControlPlane, CreateImageRequest, ProjectFiles, WaitOpts};
@@ -450,10 +451,9 @@ fn config_error(error: crate::config::ConfigError) -> crate::exit::CliError {
         .suggest("--no-config ignores the file for this invocation")
 }
 
-/// A [`crate::sync::SyncError`] as the `ERR_SYNC` row.
-pub(crate) fn sync_error(error: crate::sync::SyncError) -> crate::exit::CliError {
-    crate::exit::CliError::new(Exit::Sync, error.to_string())
-        .suggest("the failure is on this machine's filesystem; the platform was not involved")
+/// A local tree's failure as the `ERR_SYNC` row, through the one mapping `classify` holds.
+pub(crate) fn sync_error(error: microvms_core::workspace::WorkspaceError) -> crate::exit::CliError {
+    microvms_core::Error::from(error).into()
 }
 
 /// Everything `run <DIR>`'s sync needs past the launch: where the tree came from, its
@@ -494,7 +494,7 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
         Some(path) if path.is_dir() => Some(path.clone()),
         _ => None,
     };
-    let mut packed: Option<crate::sync::Packed> = None;
+    let mut packed: Option<microvms_core::workspace::Packed> = None;
     if let Some(dir) = &sync_dir {
         args.binary = None; // the positional was a directory, not a binary to build from
         if args.image.is_none() {
@@ -508,7 +508,9 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
             )
             .suggest("pass --image <arn-or-name>, or pin `image` in microvm.toml"));
         }
-        let work = crate::sync::pack(dir).map_err(sync_error)?;
+        let work = microvms_core::workspace::DiskTree
+            .pack(dir)
+            .map_err(sync_error)?;
         ctx.out.progress(&format!(
             "packed {} ({} member(s), {} byte(s))",
             dir.display(),
@@ -830,12 +832,16 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
     // so nothing was ever going to come back and nothing was transferred).
     if let Some(plan) = &sync_plan {
         let mut report = Map::new();
-        report.insert("workdir".into(), json!(crate::sync::REMOTE_WORKDIR));
+        report.insert(
+            "workdir".into(),
+            json!(microvms_core::workspace::REMOTE_WORKDIR),
+        );
         report.insert("uploadedBytes".into(), json!(plan.archive.len()));
         report.insert("uploadedMembers".into(), json!(plan.members));
         let artifacts = match &downloaded {
             Some(archive) => {
-                let artifacts = crate::sync::extract_artifacts(archive, &plan.globs, &plan.dir)
+                let artifacts = microvms_core::workspace::DiskTree
+                    .extract(archive, &plan.globs, &plan.dir)
                     .map_err(sync_error)?;
                 ctx.out.progress(&format!(
                     "brought back {} artifact(s) into {}",
@@ -1114,12 +1120,12 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
         ctx.out.progress(&format!(
             "uploading {} member(s) to {}",
             plan.members,
-            crate::sync::REMOTE_WORKDIR
+            microvms_core::workspace::REMOTE_WORKDIR
         ));
         sandbox
             .session()
             .expect("run() built one")
-            .upload_tar(crate::sync::REMOTE_WORKDIR, &plan.archive)
+            .upload_tar(microvms_core::workspace::REMOTE_WORKDIR, &plan.archive)
             .await?;
     }
 
@@ -1138,7 +1144,7 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
             // The synced tree is the working directory: `run . --exec "make test"` means
             // "run make test in my project", and an exec that started in the image's own
             // WORKDIR would make every command spell the path itself.
-            cwd: sync.map(|_| crate::sync::REMOTE_WORKDIR.to_string()),
+            cwd: sync.map(|_| microvms_core::workspace::REMOTE_WORKDIR.to_string()),
             ..StartSpec::command(&command)
         });
         let result = sandbox
@@ -1185,7 +1191,7 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
         match sandbox
             .session()
             .expect("run() built one")
-            .download_tar(crate::sync::REMOTE_WORKDIR)
+            .download_tar(microvms_core::workspace::REMOTE_WORKDIR)
             .await
         {
             Ok(bytes) => *downloaded = Some(bytes),

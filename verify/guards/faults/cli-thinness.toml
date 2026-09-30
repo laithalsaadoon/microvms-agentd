@@ -171,15 +171,3 @@ expect = "test-failed"
 suite = "rust"
 note = "crates/microvms-cli/tests/thinness.rs::only_a_file_level_cfg_test_skips_a_file"
 transform = { file = "crates/microvms-cli/tests/thinness.rs", replace = "    use proc_macro2::{Delimiter, TokenTree};\n    let mut trees = lex(text).into_iter();\n", with = "    if text.lines().any(|line| line.trim() == \"#![cfg(test)]\") {\n        return true;\n    }\n    use proc_macro2::{Delimiter, TokenTree};\n    let mut trees = lex(text).into_iter();\n" }
-
-# `default-features = false`, so the lock gains an edge and no package (the default features
-# add six crates and rewrite the lock). Retire this entry with the test, when #260's change
-# clears the CLI's placement drift.
-[[fault]]
-id = "thinness-dependency"
-guard = "no_direct_dependency_is_a_second_path_to_aws"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "thinness", "--", "--exact", "no_direct_dependency_is_a_second_path_to_aws"]
-expect = "test-failed"
-suite = "rust"
-note = "crates/microvms-cli/tests/thinness.rs::no_direct_dependency_is_a_second_path_to_aws"
-transform = { file = "crates/microvms-cli/Cargo.toml", replace = "[dependencies]\n", with = "[dependencies]\nreqwest = { version = \"0.13\", default-features = false }\n" }

@@ -285,6 +285,13 @@ pub mod session {
     }
 }
 
+pub mod workspace {
+    //! Directory transfer: the manifest, the diff and the sync pass, over the real filesystem's
+    //! walk, hash, pack and guarded extraction (#260).
+    pub use microvms_app::workspace::*;
+    pub use microvms_edges::workspace::*;
+}
+
 #[cfg(feature = "test-support")]
 pub mod testing {
     //! The shared test doubles, for a dependent's tests: `microvms_app::testing`.

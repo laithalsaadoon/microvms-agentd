@@ -120,6 +120,12 @@ snow = { version = "0.10", default-features = false, features = [
     "use-getrandom",
 ] }
 
+# Directory transfer (`workspace`, #260): the walk's archive and the extraction's glob
+# selection. The manifest's content hashes use the `sha2` and `const-hex` above. `tar` is the
+# version agentd carries, so the lock gains no second copy.
+globset = "0.4"
+tar = "0.4.46"
+
 [dev-dependencies]
 # The app's shared test doubles, for the forwarder's and tunnel's tests.
 microvms-app = { version = "0.10.0", path = "../microvms-app", features = ["test-support"] }

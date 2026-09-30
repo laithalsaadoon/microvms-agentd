@@ -57,13 +57,13 @@ transform = { file = "crates/microvms-cli/src/commands/local.rs", replace = "dur
 
 [[fault]]
 id = "cli-sync-client-wait"
-guard = "commands::attached::tests::a_sync_waits_its_budget_plus_the_delete_grace"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "commands::attached::tests::a_sync_waits_its_budget_plus_the_delete_grace"]
+guard = "workspace::tests::a_sync_waits_its_budget_plus_the_delete_grace"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "workspace::tests::a_sync_waits_its_budget_plus_the_delete_grace"]
 expect = "test-failed"
 suite = "rust"
 message = "left: 30s"
-note = "crates/microvms-cli/src/commands/attached.rs::a_sync_waits_its_budget_plus_the_delete_grace"
-transform = { file = "crates/microvms-cli/src/commands/attached.rs", replace = "    budget + SYNC_DELETE_GRACE\n", with = "    budget - SYNC_DELETE_GRACE\n" }
+note = "crates/microvms-app/src/workspace.rs::a_sync_waits_its_budget_plus_the_delete_grace"
+transform = { file = "crates/microvms-app/src/workspace.rs", replace = "    budget.saturating_add(SYNC_DELETE_GRACE)\n", with = "    budget.saturating_sub(SYNC_DELETE_GRACE)\n" }
 
 # An accepted figure has to arrive as typed: a fraction must not lose its sub-second part in
 # the parser, and `sync`'s budget is the one seconds flag that reaches the wire.
@@ -86,7 +86,7 @@ expect = "test-failed"
 suite = "rust"
 message = "sync --timeout=60: the rm's timeout_sec was null"
 note = "crates/microvms-cli/src/guards/seconds.rs::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
-transform = { file = "crates/microvms-cli/src/commands/attached.rs", replace = ".with_timeout_sec(Some(delete_timeout.as_secs_f64())),", with = ".with_timeout_sec(None)," }
+transform = { file = "crates/microvms-app/src/workspace.rs", replace = ".with_timeout_sec(Some(delete_timeout.as_secs_f64()));", with = ".with_timeout_sec(None);" }
 
 [[fault]]
 id = "cli-sync-rm-deadline-truncated"
@@ -96,7 +96,7 @@ expect = "test-failed"
 suite = "rust"
 message = "sync --timeout=0.5: the rm's timeout_sec was 0.0"
 note = "crates/microvms-cli/src/guards/seconds.rs::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
-transform = { file = "crates/microvms-cli/src/commands/attached.rs", replace = ".with_timeout_sec(Some(delete_timeout.as_secs_f64())),", with = ".with_timeout_sec(Some(delete_timeout.as_secs() as f64))," }
+transform = { file = "crates/microvms-app/src/workspace.rs", replace = ".with_timeout_sec(Some(delete_timeout.as_secs_f64()));", with = ".with_timeout_sec(Some(delete_timeout.as_secs() as f64));" }
 
 # A figure every surface accepts, up to what a `Duration` holds, can be past what the clock can
 # add to now. Core's deadlines saturate; the unchecked add panicked after the exec had started.

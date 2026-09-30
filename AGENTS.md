@@ -108,8 +108,7 @@ first:
   wire call, file format or subprocess here belongs in a lower layer.
 
 That's the rule, not a description of today's tree. The CLI still owns file
-formats and file I/O, the run ledger and the sync manifest among them, and #260
-moves directory sync into core. The ratchet's adapter-logic rules
+formats and file I/O, the run ledger among them. The ratchet's adapter-logic rules
 (`verify/ratchet/rules/`) refuse an operation name written as a literal and a retyped
 default in the CLI's and both bindings' code; they don't read file formats, or
 attribute defaults such as clap's `default_value_t` and PyO3's `signature`,
@@ -133,8 +132,8 @@ TRAP key) and waive there any layer it can't carry, with its reason. The edges
 between the workspace's crates, and each adapter's and layer's direct
 dependencies against its set in `verify/arch/placement.toml`, are computed in one
 place: `crates/microvms-cli/tests/dependency_direction.rs`. It holds each crate
-to exactly its set, its `drift` table there (the CLI's #260 crates) and its
-placement decisions, so a new dependency and a fixed one fail there; the
+to exactly its set, any `drift` table there and its placement decisions, so a
+new dependency and a fixed one fail there; the
 domain's, the app's and core's sets never carry drift. For placement the ratchet
 reads no manifest: it reads each tree's drift tables, and refuses drift the base
 doesn't have and a crate added to a set the base has.

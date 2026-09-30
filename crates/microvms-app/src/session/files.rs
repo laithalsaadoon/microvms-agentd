@@ -146,12 +146,11 @@ pub(crate) async fn upload_tar(
 
 /// The raw tar bytes of a remote tree, for a caller doing its own unpacking.
 ///
-/// Bytes rather than an extraction, deliberately. The Python's `download_dir` extracts
-/// with tarfile's `data` filter, which is the same contract the daemon enforces on
-/// upload — the archive describes the VM's filesystem, and the VM is where untrusted
-/// work runs, so trusting it on the way out would be the wrong direction of trust.
-/// Rust has no equivalent filter in the standard library, and this crate declines to add
-/// `tar` for it: an extraction that looked safe and was not is worse than none.
+/// Bytes rather than an extraction: the archive describes the VM's filesystem, and the VM is
+/// where untrusted work runs, so trusting it on the way out would be the wrong direction of
+/// trust. `Session::download_dir` (`crate::workspace`) is the extraction, and it writes only
+/// the regular files a caller's globs select, never under `.git` and never outside the
+/// destination.
 pub(crate) async fn download_tar(transport: &Transport, remote: &str) -> Result<Vec<u8>, Error> {
     let response = transport
         .send(HttpRequest::new("GET", tar_path(remote)))

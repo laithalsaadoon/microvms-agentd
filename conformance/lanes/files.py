@@ -34,17 +34,14 @@ def drive_file_transfer(
     its own.
 
     `--tar` is asymmetric, and the asymmetry is the design rather than a rough edge. The
-    **local** side is an archive file, because neither `microvms-core` nor the CLI carries a
-    tar library — `session/files.rs:112` declines to add one, since Rust's standard library
-    has no equivalent of tarfile's `data` filter and "an extraction that looked safe and was
-    not is worse than none". The **`vm:`** side is a *directory*, because the daemon does
-    carry the crate and both routes are about trees: `GET /v1/fs/tar` packs a directory and
-    `PUT /v1/fs/tar` extracts into one, through the confined extractor that stays the only
-    extractor in the system.
+    **local** side is an archive file, moved as bytes: `cp` packs and unpacks nothing, so the
+    hostile archives below reach the daemon's confined extractor unexamined, and that
+    extractor is what they test. The **`vm:`** side is a *directory*, because both routes are
+    about trees: `GET /v1/fs/tar` packs a directory and `PUT /v1/fs/tar` extracts into one.
 
-    So nothing outside the daemon ever packs or unpacks, which is also why this section no
-    longer shells out to `tar` in the guest: al2023-minimal has no `tar` binary, and a step
-    that needed one would be testing the base image's tooling rather than this client.
+    This section doesn't shell out to `tar` in the guest either: al2023-minimal has no `tar`
+    binary, and a step that needed one would be testing the base image's tooling rather than
+    this client.
     """
     print("\n-- file transfer --")
     attach = attach_args(cli, launched)
