@@ -41,6 +41,7 @@ from lanes.exec import (
     drive_token_rotation,
 )
 from lanes.files import drive_config_and_sync, drive_file_transfer
+from lanes.image_versions import drive_image_versions
 from lanes.keepalive import drive_idle_keepalive, drive_keepalive_helper
 from lanes.lifecycle import (
     drive_build_logging,
@@ -258,6 +259,16 @@ def run_suite(args: argparse.Namespace) -> int:
                 cli,
                 launched,
                 aws,
+                results,
+            )
+            # The suite image's versions and builds through the CLI (#264), and a retire
+            # round trip that restores the version before the sections after it launch.
+            run_section(
+                results,
+                "image_versions",
+                drive_image_versions,
+                cli,
+                str(launched.data["imageIdentifier"]),
                 results,
             )
             # Adoption (#196) on its own bounded VM, from the suite's image.
