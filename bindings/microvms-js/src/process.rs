@@ -24,10 +24,11 @@
 //!
 //! The daemon publishes stdout and stderr into **one** SSE stream with a `stream`
 //! discriminator per output frame, sharing **one** offset space. That is not an
-//! inconvenience to be undone; it is what makes the byte cursor work — a single cursor
-//! cannot be split into two without inventing an ordering between them that the wire never
-//! stated. So the demultiplexing happens here, at the last possible moment: one core drive,
-//! one cursor, two channels chosen by the discriminator, two `ReadableStream`s over those.
+//! inconvenience to be undone; it is what makes the byte cursor work. So core's
+//! `ExecHandle::split` runs one drive with one cursor and routes each frame to one of two
+//! channels by the discriminator, and this handle is two `ReadableStream`s over those. The
+//! routing, the gap attribution and the gap policy are core's (`microvms-app`'s
+//! `session/split.rs`), so the Python process shape reads the same channels.
 //!
 //! Interleaving order is therefore preserved *within* each stream and is not recoverable
 //! *between* them, which is exactly the guarantee `SandboxProcess` makes and exactly what
@@ -37,7 +38,7 @@
 //!
 //! # Reconnect-at-cursor survives, and this is the property no other sandbox backend has
 //!
-//! The drive is `microvms_core`'s `for_each_event_async` with `StreamOptions` untouched, so a
+//! The split's drive is `microvms_core`'s `for_each_event_async`, so a
 //! stream cut by a MicroVM suspend/resume reconnects at the byte cursor and the two
 //! `ReadableStream`s see a contiguous join rather than an end. That distinction is invisible
 //! in a byte stream: a cut and a clean exit are the same absence of further bytes. Closing
@@ -87,8 +88,9 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use microvms_core::session::{ExecEvent, ExecHandle as CoreHandle, StreamOptions};
+use microvms_core::session::{ExecHandle as CoreHandle, GapLog, SplitItem, StreamOptions};
 use napi::bindgen_prelude::{Env, FromNapiValue, JsValue, ObjectRef, ReadableStream, Uint8Array};
+use napi::tokio_stream::StreamExt as _;
 use napi_derive::napi;
 
 use crate::errors::{AsyncError, js_async};
@@ -116,6 +118,15 @@ pub enum GapPolicy {
     /// For a caller that wants the surviving bytes more than the completeness guarantee. The
     /// consumer is then responsible for reading `gaps`, and nothing forces it to.
     Event,
+}
+
+impl From<GapPolicy> for microvms_core::session::GapPolicy {
+    fn from(policy: GapPolicy) -> Self {
+        match policy {
+            GapPolicy::Error => microvms_core::session::GapPolicy::Error,
+            GapPolicy::Event => microvms_core::session::GapPolicy::Event,
+        }
+    }
 }
 
 /// One byte range the daemon could not replay.
@@ -158,28 +169,11 @@ pub struct ProcessExit {
     pub timed_out: bool,
 }
 
-/// One recorded gap, before it becomes an [`OutputGap`].
-///
-/// A named struct rather than a `(Option<String>, u64, u64)`, because the tuple's first field is
-/// the one a reader would guess wrong: it is the stream a *later* frame named, not one the gap
-/// frame carried.
-struct RecordedGap {
-    /// The stream the following output frame belonged to, or `None` when nothing followed.
-    attributed_to: Option<String>,
-    from: u64,
-    to: u64,
-}
-
-/// Which of the two channels an output frame belongs to.
-fn is_stderr(stream: protocol::exec::StreamKind) -> bool {
-    matches!(stream, protocol::exec::StreamKind::Stderr)
-}
-
 /// One demultiplexed channel: the receiver a `ReadableStream` will drain, or the stream once
 /// it has been built.
 enum Channel {
     /// Not yet read from JS.
-    Pending(tokio::sync::mpsc::Receiver<napi::Result<Uint8Array>>),
+    Pending(tokio::sync::mpsc::Receiver<SplitItem>),
     /// Built. The `ReadableStream` object lives in JS; this holds the reference that keeps
     /// the *same* object coming back out of the getter.
     Built(ObjectRef<false>),
@@ -198,7 +192,7 @@ pub struct ExecProcess {
     handle: Arc<CoreHandle>,
     stdout: Mutex<Channel>,
     stderr: Mutex<Channel>,
-    gaps: Arc<Mutex<Vec<RecordedGap>>>,
+    gaps: GapLog,
 }
 
 impl ExecProcess {
@@ -213,162 +207,17 @@ impl ExecProcess {
         options: StreamOptions,
         policy: GapPolicy,
     ) -> Self {
-        // Capacity 1 on each, for the reason `exec.rs` gives: the daemon's SSE body is the
-        // backpressure signal, and buffering here would defeat the byte cursor the core
-        // reconnects at. Per-channel rather than shared, because a consumer that reads stdout
-        // and ignores stderr must not deadlock — with one shared channel a full stderr would
-        // stall stdout, and "the process hangs when you don't read stderr" is the classic
-        // subprocess bug this shape exists to avoid. The cost is that a *wholly* unread
-        // channel still stalls the drive at one buffered chunk, which is the same bound a
-        // single pipe has.
-        let (out_tx, out_rx) = tokio::sync::mpsc::channel(1);
-        let (err_tx, err_rx) = tokio::sync::mpsc::channel(1);
-        let gaps = Arc::new(Mutex::new(Vec::new()));
-
-        let drive_handle = Arc::clone(&handle);
-        let drive_gaps = Arc::clone(&gaps);
-        // Gaps seen but not yet attributed to a stream. Behind an `Arc<Mutex<..>>` rather than
-        // a plain local, because core's callback future is a plain type parameter that cannot
-        // name a borrow of the closure's captures — so state that spans events has to be
-        // shared by handle. Per-`ExecProcess`, never a static: a global would attribute one
-        // exec's gap to another's stream.
-        let unattributed: Arc<Mutex<Vec<(u64, u64)>>> = Arc::new(Mutex::new(Vec::new()));
-        let drive_unattributed = Arc::clone(&unattributed);
+        let split = Arc::clone(&handle).split(options, policy.into());
         // `napi::bindgen_prelude::spawn` and **not** `napi::tokio::spawn`: this is called from
         // an `async fn` today, but `exec.rs`'s note records that the latter needs an ambient
         // runtime and aborts the process without one. Same submission path as every other
         // drive in this crate.
-        napi::bindgen_prelude::spawn(async move {
-            let end = drive_handle
-                .for_each_event_async(options, |event| {
-                    // Cloned per event rather than borrowed, for the reason above. One atomic
-                    // increment each.
-                    let out_tx = out_tx.clone();
-                    let err_tx = err_tx.clone();
-                    let gaps = Arc::clone(&drive_gaps);
-                    let unattributed = Arc::clone(&drive_unattributed);
-                    let error_on_gap = matches!(policy, GapPolicy::Error);
-                    async move {
-                        match event {
-                            ExecEvent::Output { stream, data, .. } => {
-                                // A gap seen earlier is attributed to *this* frame's stream,
-                                // which is the closest thing the wire supports: the bytes that
-                                // resumed after the hole came out of one side, and that side is
-                                // the one whose log now has a hole in it.
-                                let held: Vec<(u64, u64)> = unattributed
-                                    .lock()
-                                    .unwrap_or_else(PoisonError::into_inner)
-                                    .drain(..)
-                                    .collect();
-                                if !held.is_empty() {
-                                    let name = stream.as_str().to_string();
-                                    let mut recorded =
-                                        gaps.lock().unwrap_or_else(PoisonError::into_inner);
-                                    for (from, to) in held {
-                                        recorded.push(RecordedGap {
-                                            attributed_to: Some(name.clone()),
-                                            from,
-                                            to,
-                                        });
-                                    }
-                                }
-                                let target = if is_stderr(stream) { &err_tx } else { &out_tx };
-                                // `.await`ed rather than `try_send`: capacity 1 means the
-                                // channel is full whenever the JS reader is behind, which is
-                                // the normal case, and dropping there would lose output the
-                                // cursor believes was delivered.
-                                match target.send(Ok(Uint8Array::new(data))).await {
-                                    Ok(()) => std::ops::ControlFlow::Continue(()),
-                                    // The reader was cancelled or GC'd. Ending the drive is what
-                                    // stops a task reading a body nobody reads — and, because
-                                    // the other channel shares this drive, it is also why a
-                                    // consumer must not cancel one stream and keep reading the
-                                    // other.
-                                    Err(_) => std::ops::ControlFlow::Break(()),
-                                }
-                            }
-                            ExecEvent::Gap { from, to } => {
-                                if error_on_gap {
-                                    // **Both** streams, because the wire cannot say which side
-                                    // lost the bytes: the offset space is shared, so erroring
-                                    // only one would leave the other looking complete when it
-                                    // may be the truncated one. The message carries the range,
-                                    // so a caller can resume at `to`. The error is typed like
-                                    // `ExecHandle.stream`'s under `errorOnGap` (`ERR_PLATFORM`,
-                                    // `OutputGap`), so a caller can tell lost output from a
-                                    // transport failure it could retry.
-                                    let message = format!(
-                                        "output bytes [{from}, {to}) are unrecoverable: the \
-                                         daemon evicted them before this client read them. \
-                                         Resume from offset {to}, or pass gapPolicy: 'event' \
-                                         to keep the surviving bytes instead."
-                                    );
-                                    reject_both(
-                                        &out_tx,
-                                        &err_tx,
-                                        microvms_core::Error::wire(
-                                            microvms_core::WireKind::OutputGap,
-                                            message,
-                                        ),
-                                    )
-                                    .await;
-                                    // Break, so nothing more is pushed into streams that have
-                                    // already errored.
-                                    std::ops::ControlFlow::Break(())
-                                } else {
-                                    // Held rather than recorded now: the stream it belongs to is
-                                    // named by the *next* output frame.
-                                    unattributed
-                                        .lock()
-                                        .unwrap_or_else(PoisonError::into_inner)
-                                        .push((from, to));
-                                    std::ops::ControlFlow::Continue(())
-                                }
-                            }
-                            // Nothing is sent for the terminal event: closing the channels is
-                            // what ends the streams, and dropping the senders when this task
-                            // returns is what closes them. `wait()` is where the exit code
-                            // comes from, because the daemon's record is the only thing that can
-                            // distinguish an exit from a cut.
-                            ExecEvent::Exit(_) => std::ops::ControlFlow::Continue(()),
-                        }
-                    }
-                })
-                .await;
-
-            // A gap the stream ended on has no following frame to attribute it to, so it is
-            // recorded with `stream: null` rather than guessed at.
-            let leftover: Vec<(u64, u64)> = unattributed
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .drain(..)
-                .collect();
-            if !leftover.is_empty() {
-                let mut recorded = drive_gaps.lock().unwrap_or_else(PoisonError::into_inner);
-                for (from, to) in leftover {
-                    recorded.push(RecordedGap {
-                        attributed_to: None,
-                        from,
-                        to,
-                    });
-                }
-            }
-
-            // A drive error reaches the consumer as a stream error, so an exhausted reconnect
-            // budget rejects the read rather than ending it — the same rule `exec.rs` states,
-            // and for the same reason: a silent end reads as complete output. It keeps its code
-            // chain, because the code is how a caller tells a budget it can retry
-            // (`ERR_RETRYABLE`) from a refusal it can't (`ERR_CREDENTIALS`, `Unauthorized`).
-            if let Err(error) = end {
-                reject_both(&out_tx, &err_tx, error).await;
-            }
-        });
-
+        napi::bindgen_prelude::spawn(split.drive);
         Self {
             handle,
-            stdout: Mutex::new(Channel::Pending(out_rx)),
-            stderr: Mutex::new(Channel::Pending(err_rx)),
-            gaps,
+            stdout: Mutex::new(Channel::Pending(split.stdout)),
+            stderr: Mutex::new(Channel::Pending(split.stderr)),
+            gaps: split.gaps,
         }
     }
 
@@ -383,7 +232,7 @@ impl ExecProcess {
             Channel::Pending(receiver) => {
                 let stream: ReadableStream<'env, Uint8Array> = ReadableStream::new(
                     env,
-                    napi::tokio_stream::wrappers::ReceiverStream::new(receiver),
+                    napi::tokio_stream::wrappers::ReceiverStream::new(receiver).map(chunk),
                 )?;
                 // Referenced so the *same* object comes back next time. Through `Object`
                 // because `create_ref` lives there and a `ReadableStream` *is* a JS object —
@@ -419,26 +268,13 @@ impl ExecProcess {
     }
 }
 
-/// Errors both of a process's streams with one core error, code chain included.
+/// One channel item as a `ReadableStream` chunk, or its rejection with the code chain.
 ///
-/// Both streams need the error, and `microvms_core::Error` isn't `Clone`, so it's mapped once
-/// through `js_async` (the conversion that attaches `err.cause`) and the mapped error is copied.
-/// napi's `Error::try_clone` copies a Rust-built error's status, reason and whole `cause` chain.
-async fn reject_both(
-    out_tx: &tokio::sync::mpsc::Sender<napi::Result<Uint8Array>>,
-    err_tx: &tokio::sync::mpsc::Sender<napi::Result<Uint8Array>>,
-    error: microvms_core::Error,
-) {
-    let rejection: napi::Error = js_async(error).into();
-    // For an error with no JS reference, which is every error `js_async` builds, napi 3.13's
-    // `try_clone` always returns `Ok`, so this arm isn't reached. If a later napi could fail
-    // here, the failure itself still rejects stderr, which beats a stream that looks complete.
-    let copy = rejection.try_clone().unwrap_or_else(|failed| failed);
-    // Both sends at once, not one after the other. Each channel holds one chunk, so while a
-    // stdout chunk sits unread a stdout-first send parks, and a caller reading stderr to the end
-    // before stdout would wait forever for a rejection that's never sent. Send failures mean the
-    // reader is gone, and there's nobody left to tell.
-    let _ = tokio::join!(out_tx.send(Err(rejection)), err_tx.send(Err(copy)));
+/// Through `js_async`, the conversion that attaches `err.cause`, so a caller reads the code
+/// (`ERR_PLATFORM` for a gap, a drive error's own) the way it does on every other rejection.
+fn chunk(item: SplitItem) -> napi::Result<Uint8Array> {
+    item.map(Uint8Array::new)
+        .map_err(|error| js_async(error).into())
 }
 
 impl Drop for ExecProcess {
@@ -515,11 +351,10 @@ impl ExecProcess {
     #[napi(getter)]
     pub fn gaps(&self) -> Vec<OutputGap> {
         self.gaps
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .iter()
+            .snapshot()
+            .into_iter()
             .map(|gap| OutputGap {
-                stream: gap.attributed_to.clone(),
+                stream: gap.stream.map(|stream| stream.as_str().to_string()),
                 from: gap.from as i64,
                 to: gap.to as i64,
             })

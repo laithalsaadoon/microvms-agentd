@@ -286,9 +286,9 @@ ts = "Session.connectSubprotocols"
 
 [[capability]]
 id = "split-streams"
-core = { exempt = "the demux and gap policy live in js/process.rs", issue = "#261" }
+core = "microvms_core::session::ExecHandle::split"
 cli = { exempt = "`exec --stream` carries both streams as events" }
-py = { exempt = "no spawn", issue = "#261" }
+py = ["Session.spawn", "ExecProcess", "ExecProcess.kill", "ExecProcess.wait"]
 ts = ["Session.spawn", "ExecProcess", "ExecProcess.kill", "ExecProcess.wait"]
 
 [[capability]]
@@ -823,7 +823,6 @@ exempt_members.ts = { create = "the async factory idiom (js/sandbox.rs); Python 
 
 [[type]]
 name = "Session"
-exempt_members.ts = { spawn = { exempt = "Python has no split-stream spawn", issue = "#261" } }
 
 [[type]]
 name = "AgentVm"
