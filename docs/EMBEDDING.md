@@ -348,6 +348,40 @@ measured in us-east-1 on 2026-09-24). The named shell replaces the idiom:
 argv form reports. It needs a daemon that knows named shells (`docs/PROTOCOL.md`,
 "shell"); the argv form works with every daemon.
 
+## Separate stdout and stderr
+
+`Session.spawn` returns an exec as a process: `stdout` and `stderr` as two byte
+streams, a `wait()` that reads the daemon's exec record, and a `kill()` that
+can run twice. Both bindings read core's split, `ExecHandle::split`
+(`crates/microvms-app/src/session/split.rs`): one stream drive with one byte
+cursor, so a cut reconnects without ending either side, and each output frame
+routed to its own side.
+
+```python
+from concurrent.futures import ThreadPoolExecutor
+
+proc = session.spawn(["bash", "-lc", "make test"], cwd="/work")
+with ThreadPoolExecutor(2) as pool:
+    out, err = pool.map(b"".join, [proc.stdout, proc.stderr])
+result = proc.wait()
+```
+
+```js
+const proc = await session.spawn(['bash', '-lc', 'make test'], { exec: { cwd: '/work' } });
+const [out, err] = await Promise.all([
+  new Response(proc.stdout).text(),
+  new Response(proc.stderr).text(),
+]);
+const { exitCode } = await proc.wait();
+```
+
+A gap, a byte range the daemon evicted before this client read it, raises from
+both sides by default (`ERR_PLATFORM`, wire kind `OutputGap`) and names the
+range, since the shared offset space can't say which side lost it.
+`gap_policy="event"` (`gapPolicy: 'event'`) records the range on `proc.gaps`,
+under the stream of the output that followed it, and keeps both sides open.
+Each side holds one unread chunk, like a pipe, so read both at once.
+
 ## The proxy-token reality
 
 The daemon's endpoint sits behind the platform's proxy, and the proxy wants two

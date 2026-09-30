@@ -1,0 +1,34 @@
+# ── core's split of one exec's output into stdout and stderr (#261) ──────────
+#
+# Each fault puts back one way a demultiplexer gets the split wrong. The bindings' process tests
+# see the same breaks through each binding (`bindings.toml`'s `js-spawn-*`).
+
+[[fault]]
+id = "split-gap-attribution"
+guard = "session::split::tests::under_event_a_gap_takes_the_stream_of_the_frame_after_it"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::split::tests::under_event_a_gap_takes_the_stream_of_the_frame_after_it"]
+expect = "test-failed"
+suite = "rust"
+message = "the gap names the side whose log has the hole"
+note = "crates/microvms-app/src/session/split.rs::under_event_a_gap_takes_the_stream_of_the_frame_after_it"
+transform = { file = "crates/microvms-app/src/session/split.rs", replace = "                            stream: Some(stream),\n", with = "                            stream: Some(StreamKind::Stdout),\n" }
+
+[[fault]]
+id = "split-gap-error-one-side"
+guard = "session::split::tests::under_error_a_gap_ends_both_sides_naming_the_range"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::split::tests::under_error_a_gap_ends_both_sides_naming_the_range"]
+expect = "test-failed"
+suite = "rust"
+message = "stderr ended cleanly with a hole in it"
+note = "crates/microvms-app/src/session/split.rs::under_error_a_gap_ends_both_sides_naming_the_range"
+transform = { file = "crates/microvms-app/src/session/split.rs", replace = "                            reject_both(&out_tx, &err_tx, gap_error(from, to)).await;\n", with = "                            let _ = out_tx.send(Err(gap_error(from, to))).await;\n" }
+
+[[fault]]
+id = "split-stderr-first-reader"
+guard = "session::split::tests::a_stderr_reader_gets_the_drive_error_while_a_stdout_chunk_sits_unread"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::split::tests::a_stderr_reader_gets_the_drive_error_while_a_stdout_chunk_sits_unread"]
+expect = "test-failed"
+suite = "rust"
+message = "stderr never settled while stdout held a chunk"
+note = "crates/microvms-app/src/session/split.rs::a_stderr_reader_gets_the_drive_error_while_a_stdout_chunk_sits_unread"
+transform = { file = "crates/microvms-app/src/session/split.rs", replace = "    let _ = tokio::join!(out_tx.send(Err(error)), err_tx.send(Err(copy)));\n", with = "    let _ = out_tx.send(Err(error)).await;\n    let _ = err_tx.send(Err(copy)).await;\n" }
