@@ -44,7 +44,7 @@ use std::time::Duration;
 use microvms_core::prelude::*;
 use microvms_core::{Region, protocol::exec::StartRequest};
 use microvms_core::sandbox::{RunRequest, Sandbox, TeardownOpts};
-use microvms_core::session::{DEFAULT_READY_TIMEOUT, mint_exec_id};
+use microvms_core::session::mint_exec_id;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -54,8 +54,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let work = async {
         let mut request = RunRequest::new().with_image(&image);
         request.execution_role_arn = Some(role);
+        // Returns once the VM is RUNNING and its daemon answers.
         let session = sandbox.run(request).await?;
-        session.wait_until_ready(DEFAULT_READY_TIMEOUT).await?;
         let command = vec!["printf 'hello from a sandbox\\n'".into()];
         let hello = StartRequest::new(mint_exec_id(), command)
             .with_shell(true)

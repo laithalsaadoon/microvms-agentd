@@ -93,7 +93,7 @@ pub mod prelude;
 pub use microvms_domain::{constants, cost, duration, error, hooks, region, sizing};
 
 // Whole modules that live in one crate below.
-pub use microvms_app::sandbox;
+pub use microvms_app::{defaults, sandbox};
 pub use microvms_edges::{env, provision};
 
 // Re-exported so consumers name wire types through this crate rather than

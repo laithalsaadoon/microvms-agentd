@@ -45,7 +45,8 @@ use crate::process::{ExecProcess, GapPolicy};
 use crate::region::Region;
 
 /// How long to wait for a daemon to report bootstrapped: the core's default.
-const DEFAULT_READY_TIMEOUT: f64 = microvms_core::session::DEFAULT_READY_TIMEOUT.as_secs_f64();
+const DEFAULT_BOOTSTRAP_TIMEOUT: f64 =
+    microvms_core::session::DEFAULT_BOOTSTRAP_TIMEOUT.as_secs_f64();
 
 /// The default one-shot `runSync` deadline: the core's exec wait, since `runSync` waits the
 /// same way.
@@ -658,7 +659,7 @@ impl Session {
     /// is the mistake the retryable split exists to prevent.
     #[napi]
     pub async fn wait_until_ready(&self, timeout: Option<f64>) -> Result<Health, AsyncError> {
-        let timeout = seconds_async(timeout.unwrap_or(DEFAULT_READY_TIMEOUT))?;
+        let timeout = seconds_async(timeout.unwrap_or(DEFAULT_BOOTSTRAP_TIMEOUT))?;
         let live = self.live().await;
         let session = live.session().map_err(js_async)?;
         Ok(Health::wrap(
@@ -1048,7 +1049,11 @@ pub fn session_constants() -> String {
             r#""wsSubprotocol":"{}","wsAuthSubprotocolPrefix":"{}","#,
             r#""wsPortSubprotocolPrefix":"{}","#,
             // The waits' defaults, core's (#266), for a caller who leaves a timeout out.
+            // `defaultReadyTimeoutSeconds` is the wait for the daemon to answer, core's
+            // `DEFAULT_BOOTSTRAP_TIMEOUT`, and `defaultRunningTimeoutSeconds` the wait for
+            // RUNNING before it (#254).
             r#""defaultExecWaitSeconds":{},"defaultReadyTimeoutSeconds":{},"#,
+            r#""defaultRunningTimeoutSeconds":{},"#,
             r#""defaultLifecycleTimeoutSeconds":{},"lifecyclePollIntervalSeconds":{},"#,
             r#""phases":[{}],"streamKinds":[{}]}}"#,
         ),
@@ -1061,7 +1066,8 @@ pub fn session_constants() -> String {
         microvms_core::session::WS_AUTH_SUBPROTOCOL_PREFIX,
         microvms_core::session::WS_PORT_SUBPROTOCOL_PREFIX,
         microvms_core::session::DEFAULT_EXEC_WAIT.as_secs_f64(),
-        microvms_core::session::DEFAULT_READY_TIMEOUT.as_secs_f64(),
+        microvms_core::session::DEFAULT_BOOTSTRAP_TIMEOUT.as_secs_f64(),
+        microvms_core::sandbox::DEFAULT_RUNNING_TIMEOUT.as_secs_f64(),
         microvms_core::sandbox::DEFAULT_LIFECYCLE_TIMEOUT.as_secs_f64(),
         microvms_core::sandbox::LIFECYCLE_POLL_INTERVAL.as_secs_f64(),
         phases,

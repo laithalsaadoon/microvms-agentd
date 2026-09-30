@@ -21,7 +21,8 @@
 //! completion too:
 //!
 //! - `LaunchAccepted` is `run` with `wait` off, and `HookSucceeded` is `wait_until_running` with
-//!   `GetMicrovm` answering RUNNING. A hook report the model ignores (the VM was terminated
+//!   `GetMicrovm` answering RUNNING and the daemon answering health, the proxied request that
+//!   mints the launch's proxy token. A hook report the model ignores (the VM was terminated
 //!   first) is a `wait_until_running` the sandbox refuses.
 //! - `ExecRequested` asks the session's proxy auth for its headers, which mints on a cold cache.
 //! - `SuspendRequested` is `suspend`. When `SuspendComplete` is the next step, `GetMicrovm`
@@ -142,8 +143,8 @@ const COVERED: [&str; 14] = [
 /// takes. A change to the model or the planner that moves these counts is a change to what the
 /// replay drives, so it edits this table in the same diff.
 const SKIPPED: [(&str, usize); 2] = [
-    ("a closed window opens again", 14),
-    ("a completion arrives after another step", 146),
+    ("a closed window opens again", 11),
+    ("a completion arrives after another step", 122),
 ];
 
 /// One sandbox call, and the model's state after the steps it stands for.
@@ -333,7 +334,9 @@ impl Replay {
         let transport = Arc::clone(&plane) as Arc<dyn Transport>;
         let control = control_plane(transport, Region::UsEast1, clock.clone());
         Self {
-            sandbox: Sandbox::with_control_plane(control),
+            // A daemon that answers health, which the wait after RUNNING polls.
+            sandbox: Sandbox::with_control_plane(control)
+                .with_session_backend(microvms_app::testing::HealthyDaemon::new()),
             plane,
             clock,
             requests: 0,
@@ -386,6 +389,8 @@ impl Replay {
                     .wait_until_running(READY)
                     .await
                     .map_err(|error| format!("wait_until_running failed: {error}"))?;
+                // The wait for the daemon, on the cold cache.
+                self.requests += 1;
             }
             Call::HookRefused => refusal(
                 self.sandbox.wait_until_running(READY).await.map(|_| ()),

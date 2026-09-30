@@ -129,12 +129,62 @@ def _tunnel_fetch_to_eof(
                 proc.kill()
 
 
+def _forward_fetch(
+    cli: Cli,
+    vm_name: str,
+    state_dir: Path,
+    local_port: int,
+    guest_port: int,
+) -> tuple[str | None, Envelope | None]:
+    """One HTTP GET through `microvm port-forward`, and the command's envelope.
+
+    `--max-connections 1` makes the fetch the one connection, after which the process exits on
+    its own and prints the envelope.
+    """
+    argv = cli.argv(
+        "port-forward",
+        f"{local_port}:{guest_port}",
+        "--name",
+        vm_name,
+        "--state-dir",
+        str(state_dir),
+        "--region",
+        cli.region,
+        "--max-connections",
+        "1",
+    )
+    cli.log.append(command_for_log(argv))
+    with subprocess.Popen(
+        argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    ) as proc:
+        try:
+            body: str | None = None
+            # The listener needs a moment to bind; the retry is the wait.
+            for _ in range(20):
+                time.sleep(0.5)
+                try:
+                    answer = httpx.get(
+                        f"http://127.0.0.1:{local_port}/v1/schema", timeout=30.0
+                    )
+                    if answer.status_code == 200:
+                        body = answer.text
+                    break
+                except httpx.TransportError:
+                    continue
+            stdout, _ = proc.communicate(timeout=30)
+            return body, cli.parse_stdout(stdout, argv) if stdout.strip() else None
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+
+
 def drive_tunnel_identity(
     cli: Cli, launched: Envelope, state_dir: Path, results: Results
 ) -> None:
-    """Tunnel identity (issue #70 layer 3): prove the VM, fail closed. Nine checks,
-    two of them `attach --verify-identity` (issue #66) over the same pin, and one the
-    verified tunnel's end of stream crossing the real proxy (#342).
+    """Tunnel identity (issue #70 layer 3): prove the VM, fail closed. Ten checks,
+    two of them `attach --verify-identity` (issue #66) over the same pin, one the
+    verified tunnel's end of stream crossing the real proxy (#342), and one a
+    `port-forward` through core's forward loop (#263), which had no live check.
 
     Its own VM, launched `--identity` from the image the suite already built: the seed is
     delivered only at launch, so the suite's VM — launched without one — cannot carry it.
@@ -233,6 +283,22 @@ def drive_tunnel_identity(
             f"served={ended_data.get('connectionsServed')!r} "
             f"truncated={ended_data.get('connectionsTruncated')!r} "
             f"unproven={ended_data.get('connectionsUnproven')!r}",
+        )
+
+        # `port-forward` through core's forward loop (#263): the same daemon port and
+        # `GET /v1/schema`, over the HTTPS path with the minted proxy headers instead of a
+        # WebSocket.
+        forwarded, forward = _forward_fetch(cli, vm_name, state_dir, 18447, AGENT_PORT)
+        forward_data = forward.data if forward else {}
+        results.check(
+            "port-forward served a request through the real proxy",
+            forwarded is not None
+            and '"protocol_version"' in forwarded
+            and forward_data.get("connectionsServed") == 1
+            and forward_data.get("connectionsRefused") == 0,
+            f"body: {forwarded[:80] if forwarded else forwarded!r} "
+            f"served={forward_data.get('connectionsServed')!r} "
+            f"refused={forward_data.get('connectionsRefused')!r}",
         )
 
         # `attach --verify-identity` (issue #66) runs the tunnel's handshake with no relay

@@ -9,6 +9,7 @@ the scratch worktree included. The census cases run the real ast-grep, so run th
 """
 
 import dataclasses
+import fnmatch
 import json
 import os
 import re
@@ -2113,6 +2114,332 @@ class FireLintBatches(unittest.TestCase):
         self.assertIn("the batch doesn't compile", why[0])
 
 
+# ── script batches ───────────────────────────────────────────────────────────
+
+# A script gate for the fixture repos: it reads each `*.txt` file outside tools/ and verify/ for
+# markers and prints a finding for each. `FINDING(text)` prints `<file>:<line>: text`, the
+# finding located in its file; `BARE(text)` prints the text alone; `NAMING(other|text)` prints
+# `<file> and <other>: text`, naming two files. It exits 1 on any finding. `ALONE(text)` is a
+# finding like FINDING's, except that two or more of them print and exit 0: an interaction two
+# faults have that neither has alone. Each run appends how many markers it saw to $GATE_LOG,
+# and under the fake strace it writes an `openat` line for each file it reads.
+FAKE_GATE = """\
+import os
+import pathlib
+import re
+import sys
+
+found, alone, marks = [], [], 0
+for path in sorted(pathlib.Path(".").rglob("*.txt")):
+    if path.parts[0] in (".git", "tools", "verify"):
+        continue
+    if os.environ.get("FAKE_TRACE"):
+        with open(os.environ["FAKE_TRACE"], "a") as log:
+            here = os.getcwd()
+            log.write(f'{os.getpid()} openat(AT_FDCWD<{here}>, "{path}", O_RDONLY) = 3<{here}/{path}>\\n')
+    for number, line in enumerate(path.read_text().splitlines(), 1):
+        for kind, text in re.findall(r"(FINDING|BARE|NAMING|ALONE)\\(([^)]*)\\)", line):
+            marks += 1
+            where = f"{path.as_posix()}:{number}"
+            if kind == "FINDING":
+                found.append(f"{where}: {text}")
+            elif kind == "BARE":
+                found.append(text)
+            elif kind == "NAMING":
+                other, said = text.split("|")
+                found.append(f"{path.as_posix()} and {other}: {said}")
+            else:
+                alone.append(f"{where}: {text}")
+if os.environ.get("GATE_LOG"):
+    with open(os.environ["GATE_LOG"], "a") as log:
+        log.write(f"{marks}\\n")
+print("gate: read the tree")
+for line in found + alone:
+    print(line)
+sys.exit(0 if len(alone) > 1 and not found else 1 if found or alone else 0)
+"""
+GATE = [sys.executable, "tools/gate.py"]
+
+
+def finding(fid: str, file: str, marker: str, message: str, anchor: str = "") -> str:
+    """An entry of the fixture gate that writes `marker` into `file` in place of `anchor`
+    (`<fid>=ok` by default)."""
+    anchor = anchor or f"{fid}=ok"
+    return entry(
+        fid=fid,
+        guard="tools/gate.py",
+        run=GATE,
+        expect="exit-nonzero",
+        suite="script",
+        fault=(
+            f"transform = {{ file = {toml_str(file)}, replace = {toml_str(anchor)}, "
+            f"with = {toml_str(marker)} }}"
+        ),
+        message=message,
+    )
+
+
+def gate_repo(test: unittest.TestCase, *entries: str, **files: str) -> Repo:
+    texts = {"a.txt": "a=ok\nb=ok\n", "c.txt": "c=ok\n", "d.txt": "d=ok\n", **files}
+    return Repo(test, {REGISTRY: "".join(entries), "tools/gate.py": FAKE_GATE, **texts})
+
+
+class FireScriptBatches(unittest.TestCase):
+    """The `exit-nonzero` entries on one script gate's command are seeded together and fire in
+    one run, each proven only by the one line carrying its message, when that line names a file
+    its own fault seeded and no other entry's. Whatever the batch can't attribute runs alone."""
+
+    def fire(
+        self, repo: Repo, *args: str
+    ) -> tuple[subprocess.CompletedProcess[str], list[int]]:
+        """The run, and the markers each seeded run saw, in order: a batch's run sees each of
+        its entries' markers, an entry's own run its own."""
+        log = repo.tmp.parent / "gate.log"
+        out = repo.run("fire", *args, GATE_LOG=str(log))
+        marks = [int(line) for line in log.read_text().splitlines()]
+        return out, [n for n in marks if n]
+
+    def test_entries_whose_lines_name_their_own_files_fire_in_one_run(self):
+        repo = gate_repo(
+            self,
+            finding("a", "a.txt", "FINDING(a is bad)", "a is bad"),
+            finding("c", "c.txt", "FINDING(c is bad)", "c is bad"),
+            finding("d", "d.txt", "FINDING(d is bad)", "d is bad"),
+        )
+        logs = repo.tmp.parent / "logs"
+        out, seeded = self.fire(repo, "--logs", str(logs))
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        for fid in "acd":
+            self.assertIn(f"fired: {fid} (", out.stdout)
+        self.assertEqual(seeded, [3], out.stdout)
+        self.assertIn(
+            f"guards: 3 of 3 script entries on `{' '.join(GATE)}` fired in one run (",
+            out.stdout,
+        )
+        text = (logs / "c.fault.log").read_text()
+        self.assertIn(
+            "the one line carrying its message names its own file: c.txt:1: c is bad",
+            text,
+        )
+
+    def test_a_message_on_two_lines_leaves_its_entry_to_run_alone(self):
+        # Two lines carry a's message, and the batch can't say that each is a's own.
+        repo = gate_repo(
+            self,
+            finding("a", "a.txt", "FINDING(a is bad) FINDING(a is bad)", "a is bad"),
+            finding("c", "c.txt", "FINDING(c is bad)", "c is bad"),
+        )
+        out, seeded = self.fire(repo)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(seeded, [3, 2], out.stdout)
+        self.assertIn(
+            "guards: a ran alone: 2 lines of the batch's output carry its message",
+            out.stdout,
+        )
+
+    def test_a_batch_whose_run_passes_leaves_every_entry_to_run_alone(self):
+        # Together the two faults print their lines and pass: those lines prove nothing.
+        repo = gate_repo(
+            self,
+            finding("a", "a.txt", "ALONE(a is bad)", "a is bad"),
+            finding("c", "c.txt", "ALONE(c is bad)", "c is bad"),
+        )
+        out, seeded = self.fire(repo)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(seeded, [2, 1, 1], out.stdout)
+        for fid in "ac":
+            self.assertIn(
+                f"guards: {fid} ran alone: the batch's run passed, so it proves nothing",
+                out.stdout,
+            )
+
+    def test_one_line_naming_two_entries_files_counts_for_neither(self):
+        # a's line names c.txt too, and c's fault writes nothing a gate reports: proven by a's
+        # line, c would fire on a fault it doesn't catch.
+        repo = gate_repo(
+            self,
+            finding("a", "a.txt", "NAMING(c.txt|shared)", "shared"),
+            finding("c", "c.txt", "c=quiet", "shared"),
+        )
+        out, seeded = self.fire(repo)
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertIn("fired: a (", out.stdout)
+        self.assertIn("DID NOT FIRE: c: ", out.stdout)
+        for fid in "ac":
+            self.assertIn(
+                f"guards: {fid} ran alone: the line carrying its message names a file "
+                "another entry in the batch seeded",
+                out.stdout,
+            )
+
+    def test_two_entries_with_one_message_in_two_files_each_run_alone(self):
+        repo = gate_repo(
+            self,
+            finding("a", "a.txt", "FINDING(shared)", "shared"),
+            finding("c", "c.txt", "FINDING(shared)", "shared"),
+        )
+        out, seeded = self.fire(repo)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(seeded, [2, 1, 1], out.stdout)
+        self.assertIn(
+            "guards: c ran alone: 2 lines of the batch's output carry its message",
+            out.stdout,
+        )
+
+    def test_a_line_naming_no_seeded_file_leaves_its_entry_to_run_alone(self):
+        repo = gate_repo(
+            self,
+            finding("a", "a.txt", "BARE(a is bad)", "a is bad"),
+            finding("c", "c.txt", "FINDING(c is bad)", "c is bad"),
+        )
+        out, seeded = self.fire(repo)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(seeded, [2, 1], out.stdout)
+        self.assertIn(
+            "guards: a ran alone: the line carrying its message names no file its fault "
+            "seeded",
+            out.stdout,
+        )
+
+    def test_entries_that_seed_one_file_go_to_different_batches(self):
+        repo = gate_repo(
+            self,
+            finding("a", "a.txt", "FINDING(a is bad)", "a is bad"),
+            finding("b", "a.txt", "FINDING(b is bad)", "b is bad"),
+            finding("c", "c.txt", "FINDING(c is bad)", "c is bad"),
+            finding("d", "d.txt", "FINDING(d is bad)", "d is bad"),
+        )
+        out, seeded = self.fire(repo)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        for fid in "abcd":
+            self.assertIn(f"fired: {fid} (", out.stdout)
+        # a, c and d share a run; b is a batch of one, which runs as its own entry.
+        self.assertEqual(seeded, [3, 1], out.stdout)
+
+    def test_a_fault_in_the_gates_own_directory_runs_alone(self):
+        broken = finding(
+            "e",
+            "tools/gate.py",
+            'print("gate: broken on purpose"); sys.exit(1)',
+            "broken on purpose",
+            anchor='print("gate: read the tree")',
+        )
+        repo = gate_repo(
+            self,
+            finding("a", "a.txt", "FINDING(a is bad)", "a is bad"),
+            broken,
+            finding("c", "c.txt", "FINDING(c is bad)", "c is bad"),
+        )
+        out, seeded = self.fire(repo)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        for fid in "ace":
+            self.assertIn(f"fired: {fid} (", out.stdout)
+        self.assertEqual(seeded, [2], out.stdout)
+        self.assertIn(
+            f"guards: 2 of 2 script entries on `{' '.join(GATE)}` fired in one run (",
+            out.stdout,
+        )
+
+    def test_only_a_gate_seeded_outside_its_own_code_batches(self):
+        module = fire_module()
+        load = module["load"]
+        repo = gate_repo(
+            self,
+            finding("a", "a.txt", "FINDING(a is bad)", "a is bad"),
+            # A test runner names the test that failed, not the file whose fault failed it,
+            # though the script it runs sits outside the files this one seeds.
+            entry(
+                fid="unit",
+                guard="test_gate.py",
+                run=["uv", "run", "python", "-m", "unittest", "tests/test_gate.py"],
+                expect="exit-nonzero",
+                suite="script",
+                fault='transform = { file = "a.txt", replace = "b=ok", with = "b=no" }',
+                message="FAIL: test_gate (",
+            ),
+            entry(
+                fid="pytest",
+                guard="test_gate",
+                run=["pytest", "-rA", "tests/test_gate.py"],
+                expect="exit-nonzero",
+                suite="script",
+                fault='transform = { file = "d.txt", replace = "d=ok", with = "d=no" }',
+                message="FAILED test_gate",
+            ),
+            entry(
+                fid="shell",
+                guard="c.txt",
+                run=["bash", "-c", "grep -q c=ok c.txt"],
+                expect="exit-nonzero",
+                suite="script",
+                fault='transform = { file = "c.txt", replace = "c=ok", with = "c=no" }',
+                message="c",
+            ),
+            entry(
+                fid="patched",
+                guard="tools/gate.py",
+                run=GATE,
+                expect="exit-nonzero",
+                suite="script",
+                fault='patch = "verify/guards/faults/d.patch"',
+                message="d is bad",
+            ),
+            **{
+                "verify/guards/faults/d.patch": (
+                    "--- a/d.txt\n+++ b/d.txt\n@@ -1 +1 @@\n-d=ok\n+FINDING(d is bad)\n"
+                )
+            },
+        )
+        faults, problems = load(repo.root)
+        self.assertEqual(problems, [])
+        self.assertEqual(
+            {f.id: module["script_batchable"](f) for f in faults},
+            {
+                "a": True,
+                "unit": False,
+                "pytest": False,
+                "shell": False,
+                "patched": False,
+            },
+        )
+
+    def test_script_batches_report_the_serial_verdicts_at_every_job_count(self):
+        repo = gate_repo(
+            self,
+            finding("a", "a.txt", "FINDING(a is bad)", "a is bad"),
+            finding("b", "a.txt", "BARE(b is bad)", "b is bad"),
+            finding("c", "c.txt", "FINDING(c is bad) FINDING(c is bad)", "c is bad"),
+            finding("d", "d.txt", "FINDING(d is bad)", "d is bad"),
+        )
+        runs = [self.fire(repo, "--jobs", str(jobs))[0] for jobs in (1, 2, 3)]
+        for out in runs:
+            self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(
+            [verdicts(out.stdout) for out in runs[1:]], [verdicts(runs[0].stdout)] * 2
+        )
+
+    def test_a_batch_records_what_its_run_read_for_each_entry_it_proves(self):
+        repo = gate_repo(
+            self,
+            finding("a", "a.txt", "FINDING(a is bad)", "a is bad"),
+            finding("c", "c.txt", "FINDING(c is bad)", "c is bad"),
+        )
+        where = repo.tmp.parent / "records"
+        out = repo.run("fire", "--record", str(where))
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertIn("guards: 2 of 2 script entries on", out.stdout)
+        kept = repo.run("fire", "--reuse", str(where))
+        self.assertEqual(sorted(reused(kept.stdout)), ["a", "c"], kept.stdout)
+        # The batch's run read a.txt for both entries, so a change to it fires both.
+        repo.write("a.txt", "a=ok\nb=ok\nmore=ok\n")
+        repo.commit()
+        again = repo.run("fire", "--reuse", str(where))
+        self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
+        self.assertEqual(sorted(firing(again.stdout)), ["a", "c"], again.stdout)
+        for fid in "ac":
+            self.assertIn("a.txt changed since", firing(again.stdout)[fid])
+
+
 # ── the restored pass by build ───────────────────────────────────────────────
 
 
@@ -2389,7 +2716,7 @@ HASH = "0123456789abcdef"
 
 
 def fire_module() -> dict:
-    return runpy.run_path(str(SCRIPT), run_name="guards_fire")
+    return runpy.run_path(str(SCRIPT), run_name="tools.check-guards-fire")
 
 
 def fake_target(root: Path, names: list[str]) -> Path:
@@ -3077,6 +3404,49 @@ class VerdictCache(unittest.TestCase):
             ["shard-0-of-2.json", "shard-1-of-2.json"],
         )
         self.fires(self.reuse(repo, where), {})
+
+    def test_a_command_one_leg_recorded_keeps_its_verdict_on_another(self):
+        # A new entry on b's command makes it as heavy as a's, and the split moves c from leg 1
+        # to leg 0 and p from leg 0 to leg 1. Each leg reads both legs' records and keeps the
+        # verdicts of the commands the other leg recorded; one that had only its own leg's
+        # record would fire them.
+        repo = cache_repo(self)
+        where = self.record(repo, "--shard", "0/2")
+        self.record(repo, "--shard", "1/2")
+        script = fire_module()
+
+        def legs() -> dict[str, int]:
+            faults, _ = script["load"](repo.root)
+            return {f.id: k for k in (0, 1) for f in script["shard"](faults, k, 2)}
+
+        before = legs()
+        text = (repo.root / REGISTRY).read_text()
+        repo.write(
+            REGISTRY,
+            text
+            + entry(
+                fid="b2",
+                guard="gb",
+                run=["cargo", "test", "--", "--exact", "gb"],
+                fault='transform = { file = "state-b.txt", replace = "gb=ok", with = "gb=ok gb=fail" }',
+            ),
+        )
+        repo.commit()
+        after = legs()
+        self.assertEqual((before["c"], after["c"]), (1, 0), "the premise: c moves")
+        self.assertEqual((before["p"], after["p"]), (0, 1), "the premise: p moves")
+        kept = {
+            k: reused(self.reuse(repo, where, "--shard", f"{k}/2").stdout)
+            for k in (0, 1)
+        }
+        self.assertIn("c", kept[0], "leg 0 fires c, which leg 1 recorded")
+        self.assertIn("p", kept[1], "leg 1 fires p, which leg 0 recorded")
+        self.assertEqual(sorted(kept[0] + kept[1]), sorted(set(CACHE)))
+        own = repo.tmp.parent / "own"
+        own.mkdir()
+        shutil.copy(where / "shard-0-of-2.json", own)
+        out = self.reuse(repo, own, "--shard", "0/2")
+        self.assertEqual(firing(out.stdout).get("c"), "no record has its command")
 
     def test_a_shard_keeps_its_slice_whatever_record_it_reads(self):
         # The slice is cut before --reuse, so a leg that restored another record, or none,
@@ -3790,7 +4160,7 @@ class FireSharded(unittest.TestCase):
         )
         state = " ".join(f"{n}{i}=ok" for n, _, _, _, size in spec for i in range(size))
         repo = Repo(self, {REGISTRY: registry, "state.txt": state + "\n"})
-        script = runpy.run_path(str(SCRIPT))
+        script = runpy.run_path(str(SCRIPT), run_name="tools.check-guards-fire")
         faults, problems = script["load"](repo.root)
         self.assertEqual(problems, [])
         self.assertEqual(
@@ -3802,7 +4172,7 @@ class FireSharded(unittest.TestCase):
     def test_the_registrys_own_shards_partition_it(self):
         # The split CI makes, on the registry it makes it of: every suite's entries in CI's
         # six shards.
-        script = runpy.run_path(str(SCRIPT))
+        script = runpy.run_path(str(SCRIPT), run_name="tools.check-guards-fire")
         faults, problems = script["load"](HERE.parent)
         self.assertEqual(problems, [])
         selected = [f for f in faults if f.suite in ("rust", "script", "bindings")]
@@ -3831,7 +4201,8 @@ EXPRESSIONS: dict[str, str] = {}
 # Where the fire steps keep the record, which the cache steps save and restore.
 VERDICTS = "$RUNNER_TEMP/guards-verdicts"
 VERDICTS_PATH = "${{ runner.temp }}/guards-verdicts"
-VERDICTS_KEY = "guards-verdicts-${{ matrix.shard }}-of-${{ strategy.job-total }}-"
+# The one cache entry a push's records are saved under together.
+RECORDS_KEY = "guards-records-"
 EXPRESSION = re.compile(r"\$\{\{\s*(.+?)\s*\}\}")
 MISE_RUN = re.compile(r"(?<![\w./-])mise\s+run\s+(\S+)([^\n]*)")
 # The action each job installs mise and its tools through.
@@ -4028,35 +4399,174 @@ class GuardsJob(unittest.TestCase):
             )
             return ids
 
+        # Each leg on a runner of its own: its temp directory, and the cache ci.yml's steps save
+        # into and restore from, by their own keys, paths and prefixes.
+        cache: dict[str, Path] = {}
+        artifacts: dict[str, Path] = {}
         (push,) = self.fire_steps("push")
-        main = repo.tmp.parent / "main-temp"
-        fired = each_leg("push", push, lambda shard: main)
-        self.assertEqual(set(fired), {*ORDER, "sc", "bi"}, "push: the shards together")
-        records = main / "guards-verdicts"
+        fired = []
+        for shard in legs:
+            temp = repo.tmp.parent / f"main-temp-{shard}"
+            out = self.run_step(repo, push, shard, len(legs), temp)
+            self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+            fired += fired_ids(out.stdout)
+            self.assertEqual(
+                sorted(p.name for p in (temp / "guards-verdicts").glob("*.json")),
+                [f"shard-{shard}-of-{len(legs)}.json"],
+                "push: each leg writes its own record",
+            )
+            for step in self.cache_steps("actions/upload-artifact", "push"):
+                given = step["with"]
+                name = self.render(given["name"], shard, len(legs), temp)
+                artifacts[name] = Path(
+                    self.render(given["path"], shard, len(legs), temp)
+                )
         self.assertEqual(
-            sorted(p.name for p in records.glob("*.json")),
-            sorted(f"shard-{k}-of-{len(legs)}.json" for k in legs),
-            "push: each leg writes its own record",
+            len(fired), len(set(fired)), f"push: an entry fires twice: {fired}"
         )
+        self.assertEqual(set(fired), {*ORDER, "sc", "bi"}, "push: the shards together")
+        # The job that saves the push's records once its legs are done, on a runner of its own.
+        joined = repo.tmp.parent / "records-temp"
+        for step in self.records_job().get("steps") or []:
+            given = step.get("with") or {}
+            if str(step.get("uses", "")).startswith("actions/download-artifact@"):
+                into = Path(self.render(given["path"], 0, len(legs), joined))
+                for name, source in artifacts.items():
+                    if fnmatch.fnmatchcase(name, given["pattern"]):
+                        # `merge-multiple` puts every artifact's files in `path` itself.
+                        where = into if given.get("merge-multiple") else into / name
+                        where.mkdir(parents=True, exist_ok=True)
+                        for record in source.iterdir():
+                            shutil.copy(record, where)
+            elif str(step.get("uses", "")).startswith("actions/cache/save@"):
+                saved = Path(self.render(given["path"], 0, len(legs), joined))
+                # The action saves nothing, with a warning, when the path isn't there.
+                if saved.exists():
+                    cache[self.render(given["key"], 0, len(legs), joined)] = saved
         # HEAD plays the pull request's merge commit: one rust, one script and one bindings
-        # entry's files change, and each leg restores its own leg's record from main.
+        # entry's files change, and a new entry on `crate`'s command makes it heavier, which
+        # moves most commands to another leg, as a pull request that adds a fault does (#416).
+        script_module = fire_module()
+        before = self.slices(script_module, repo, len(legs))
         for path in ("state-a.txt", "state-s.txt", "state-js.txt"):
             repo.write(path, (repo.root / path).read_text() + "extra=ok\n")
+        repo.write(
+            REGISTRY,
+            (repo.root / REGISTRY).read_text()
+            + entry(
+                fid="crate2",
+                guard="tests::the_d_guard",
+                run=[
+                    "cargo",
+                    "test",
+                    "-p",
+                    "fixture",
+                    "--",
+                    "--exact",
+                    "tests::the_d_guard",
+                ],
+                fault='transform = { file = "state-d.txt", replace = "tests::the_d_guard=ok", with = "tests::the_d_guard=ok tests::the_d_guard=fail" }',
+            ),
+        )
         repo.commit()
+        after = self.slices(script_module, repo, len(legs))
+        # The premise: an entry nothing changed for, whose command another leg recorded.
+        self.assertNotEqual(
+            before["lint"], after["lint"], "lint's command stayed on its leg"
+        )
 
         def restored(shard: int) -> Path:
             temp = repo.tmp.parent / f"pr-temp-{shard}"
-            (temp / "guards-verdicts").mkdir(parents=True, exist_ok=True)
-            shutil.copy(
-                records / f"shard-{shard}-of-{len(legs)}.json", temp / "guards-verdicts"
-            )
+            for step in self.cache_steps("actions/cache/restore", "pull_request"):
+                given = step["with"]
+                key = self.render(given["key"], shard, len(legs), temp)
+                # One prefix a line, as the action reads them.
+                prefixes = [
+                    line.strip()
+                    for line in self.render(
+                        given.get("restore-keys") or "", shard, len(legs), temp
+                    ).splitlines()
+                    if line.strip()
+                ]
+                hit = key if key in cache else None
+                hit = hit or next(
+                    (
+                        k
+                        for k in sorted(cache)
+                        if any(k.startswith(p) for p in prefixes)
+                    ),
+                    None,
+                )
+                if hit is not None:
+                    # The saved tree as it was, subdirectories and all.
+                    into = Path(self.render(given["path"], shard, len(legs), temp))
+                    shutil.copytree(cache[hit], into, dirs_exist_ok=True)
             return temp
 
         (pr,) = self.fire_steps("pull_request")
         fired = each_leg("pull_request", pr, restored)
+        # Only what the change can move fires: the three entries whose files changed and the
+        # new one, on whichever leg their commands landed and whichever leg recorded them.
         self.assertEqual(
-            set(fired), {"a", "sc", "bi"}, "pull_request: the shards together"
+            set(fired), {"a", "sc", "bi", "crate2"}, "pull_request: the shards together"
         )
+
+    def slices(self, script: dict, repo: Repo, total: int) -> dict[str, int]:
+        """Each entry's leg under the script's split of the fixture's registry."""
+        faults, problems = script["load"](repo.root)
+        self.assertEqual(problems, [])
+        return {
+            fault.id: k
+            for k in range(total)
+            for fault in script["shard"](faults, k, total)
+        }
+
+    def render(self, text: object, shard: int, total: int, temp: Path) -> str:
+        """A cache step's `with` value as the runner of leg `shard` renders it."""
+        answers = {
+            **EXPRESSIONS,
+            "matrix.shard": str(shard),
+            "strategy.job-total": str(total),
+            "runner.temp": str(temp),
+            "github.sha": "the-push",
+            "github.event.pull_request.base.sha": "the-base",
+        }
+
+        def value(match: re.Match) -> str:
+            self.assertIn(
+                match.group(1), answers, f"unmodeled `${{{{ {match.group(1)} }}}}`"
+            )
+            return answers[match.group(1)]
+
+        return EXPRESSION.sub(value, str(text))
+
+    def records_job(self) -> dict:
+        """The job that saves main's records for the pull requests."""
+        found = [
+            job
+            for job in workflow_jobs().values()
+            if any(
+                str(s.get("uses", "")).startswith("actions/download-artifact@")
+                and "guards-verdicts" in str((s.get("with") or {}).get("pattern"))
+                for s in job.get("steps") or []
+            )
+        ]
+        self.assertEqual(len(found), 1, "one job saves the legs' records together")
+        return found[0]
+
+    def cache_steps(self, action: str, event: str) -> list[dict]:
+        """The guards job's `action` steps that run on `event`."""
+        chosen = []
+        for step in guards_job().get("steps") or []:
+            if not str(step.get("uses", "")).startswith(action + "@"):
+                continue
+            condition = step.get("if")
+            if condition is None or (condition == ON_PULL_REQUEST) == (
+                event == "pull_request"
+            ):
+                chosen.append(step)
+        self.assertTrue(chosen, f"the guards job has no {action} step on {event}")
+        return chosen
 
     def test_the_pull_request_step_is_the_push_step_reusing_what_it_records(self):
         # So the two legs can't drift apart in a flag (a lost suite, or bindings entries with
@@ -4083,32 +4593,54 @@ class GuardsJob(unittest.TestCase):
         self.assertEqual(push_argv[-2:], ["--record", VERDICTS])
         self.assertEqual(pr_argv, [*push_argv[:-2], "--reuse", VERDICTS])
 
-    def test_each_leg_reads_the_record_its_leg_saves_on_main(self):
-        # The pull request's leg restores under the key main's same leg saves, by its prefix,
-        # into the directory both fire steps name, after strace is there; main never restores
-        # one, a pull request never saves one, and nothing else in the workflow caches it.
+    def test_a_pull_request_reads_every_legs_record_from_one_push(self):
+        # Each push leg uploads its record, and one job, once every leg is done (`always()`, so
+        # a failed leg costs only its own), saves them together under the push's commit; a pull
+        # request's leg restores that entry into the directory the fire reads, after strace and
+        # before the fire. A leg's slice moves when the registry's weights do, so a leg that
+        # read only its own leg's record found most of its commands in none (#416), and legs
+        # that read the six records separately mixed two pushes' splits (#450's first run).
+        # Main never restores, a pull request never uploads or saves, and nothing else caches
+        # the records.
         steps = guards_job().get("steps") or []
-
-        def only(action: str) -> dict:
-            found = [
-                s for s in steps if str(s.get("uses", "")).startswith(action + "@")
-            ]
-            self.assertEqual(
-                len(found), 1, f"the guards job has {len(found)} {action} steps"
-            )
-            return found[0]
-
-        restore, save = only("actions/cache/restore"), only("actions/cache/save")
+        (restore,) = self.cache_steps("actions/cache/restore", "pull_request")
+        (upload,) = self.cache_steps("actions/upload-artifact", "push")
         self.assertEqual(restore.get("if"), ON_PULL_REQUEST)
-        self.assertEqual(save.get("if"), ON_PUSH)
-        for step in (restore, save):
-            self.assertEqual((step.get("with") or {}).get("path"), VERDICTS_PATH)
-        self.assertEqual(save["with"].get("key"), VERDICTS_KEY + "${{ github.sha }}")
+        self.assertEqual(upload.get("if"), ON_PUSH)
+        self.assertEqual(restore["with"].get("path"), VERDICTS_PATH)
         self.assertEqual(
             restore["with"].get("key"),
-            VERDICTS_KEY + "${{ github.event.pull_request.base.sha }}",
+            RECORDS_KEY + "${{ github.event.pull_request.base.sha }}",
         )
-        self.assertEqual(restore["with"].get("restore-keys"), VERDICTS_KEY)
+        self.assertEqual(restore["with"].get("restore-keys"), RECORDS_KEY)
+        self.assertEqual(upload["with"].get("path"), VERDICTS_PATH)
+        self.assertEqual(
+            upload["with"].get("name"), "guards-verdicts-${{ matrix.shard }}"
+        )
+        self.assertEqual(upload["with"].get("if-no-files-found"), "error")
+        job = self.records_job()
+        needs = job.get("needs")
+        self.assertIn(
+            "guards", [needs] if isinstance(needs, str) else list(needs or [])
+        )
+        self.assertEqual(job.get("if"), "always() && github.event_name == 'push'")
+        (download, save) = job.get("steps") or []
+        self.assertTrue(
+            str(download.get("uses")).startswith("actions/download-artifact@")
+        )
+        self.assertEqual(
+            download.get("with"),
+            {
+                "pattern": "guards-verdicts-*",
+                "merge-multiple": True,
+                "path": VERDICTS_PATH,
+            },
+        )
+        self.assertTrue(str(save.get("uses")).startswith("actions/cache/save@"))
+        self.assertEqual(
+            save.get("with"),
+            {"path": VERDICTS_PATH, "key": RECORDS_KEY + "${{ github.sha }}"},
+        )
         (strace,) = [
             s for s in steps if "apt-get install -y strace" in s.get("run", "")
         ]
@@ -4118,15 +4650,36 @@ class GuardsJob(unittest.TestCase):
         at = steps.index
         self.assertLess(at(strace), at(restore))
         self.assertLess(at(restore), at(pr))
-        self.assertLess(at(push), at(save))
+        self.assertLess(at(push), at(upload))
         caches = [
-            (name, s.get("uses"))
+            (name, s.get("uses", "").split("@")[0])
             for name, job in workflow_jobs().items()
             for s in job.get("steps") or []
-            if str(s.get("uses", "")).startswith("actions/cache")
-            and "guards-verdicts" in json.dumps(s.get("with") or {})
+            if str(s.get("uses", "")).startswith(
+                (
+                    "actions/cache",
+                    "actions/upload-artifact",
+                    "actions/download-artifact",
+                )
+            )
+            and "guards-" in json.dumps(s.get("with") or {})
+            and (
+                "guards-verdicts" in json.dumps(s.get("with") or {})
+                or "guards-records" in json.dumps(s.get("with") or {})
+            )
         ]
-        self.assertEqual([name for name, _ in caches], ["guards", "guards"], caches)
+        self.assertEqual(
+            sorted(caches),
+            sorted(
+                [
+                    ("guards", "actions/cache/restore"),
+                    ("guards", "actions/upload-artifact"),
+                    ("guards-records", "actions/download-artifact"),
+                    ("guards-records", "actions/cache/save"),
+                ]
+            ),
+            caches,
+        )
 
     def test_ci_local_answers_the_guards_job_as_a_pull_request(self):
         # ci:local runs one leg, the pull request's, as one run of its whole selection. Its
@@ -4290,9 +4843,9 @@ class GuardsJob(unittest.TestCase):
                             "guards-cache",
                         ):
                             self.assertNotEqual(given.get("tools-cache"), "exact", name)
-                        # The guards legs' record of each verdict is main's too, and
-                        # test_each_leg_reads_the_record_its_leg_saves_on_main holds its key.
-                        record = str(given.get("key", "")).startswith(VERDICTS_KEY)
+                        # Main's records of each verdict are main's too, and
+                        # test_a_pull_request_reads_every_legs_record_from_one_push holds their key.
+                        record = str(given.get("key", "")).startswith(RECORDS_KEY)
                         if (
                             str(step.get("uses", "")).startswith("actions/cache/save@")
                             and not record

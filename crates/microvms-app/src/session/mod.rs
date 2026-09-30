@@ -64,8 +64,17 @@ use crate::error::{Error, ErrorKind, WireKind};
 /// How long one non-streaming request may take.
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// How long to wait for a daemon to report bootstrapped.
-pub const DEFAULT_READY_TIMEOUT: Duration = Duration::from_secs(120);
+/// How long to wait for a daemon to report bootstrapped, once its VM is RUNNING: the wait
+/// [`crate::sandbox::Sandbox::run`] makes after the RUNNING one, and
+/// [`Session::wait_until_ready`]'s default in the bindings.
+pub const DEFAULT_BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The old name of [`DEFAULT_BOOTSTRAP_TIMEOUT`], kept for one release.
+#[deprecated(
+    note = "renamed DEFAULT_BOOTSTRAP_TIMEOUT: `sandbox::DEFAULT_READY_TIMEOUT` shared this name \
+            for a different wait, the one for RUNNING"
+)]
+pub const DEFAULT_READY_TIMEOUT: Duration = DEFAULT_BOOTSTRAP_TIMEOUT;
 
 /// How often to re-poll health while waiting for bootstrap.
 const READY_POLL_INTERVAL: Duration = Duration::from_secs(2);
@@ -900,6 +909,64 @@ pub(crate) mod testing {
             "identity_repaired": true,
         })
     }
+
+    /// A daemon that answers every `GET /v1/health` bootstrapped and refuses anything else,
+    /// counting the polls.
+    ///
+    /// The backend a test gives a `Sandbox` it launches through a scripted control plane: a
+    /// launch waits for the daemon to answer (#254), and the test adapters' own backend reaches
+    /// nothing. Anything but health fails as a transport error naming the request, so a test
+    /// that needs a real exchange scripts a [`Recorder`] instead.
+    #[derive(Default)]
+    pub struct HealthyDaemon {
+        polls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl HealthyDaemon {
+        pub fn new() -> Arc<Self> {
+            Arc::new(Self::default())
+        }
+
+        /// How many health polls it answered.
+        pub fn polls(&self) -> usize {
+            self.polls.load(std::sync::atomic::Ordering::SeqCst)
+        }
+
+        fn refuse(request: &HttpRequest) -> Error {
+            Error::wire(
+                WireKind::Transport,
+                format!(
+                    "{} {} reached a test daemon that answers only health",
+                    request.method, request.path
+                ),
+            )
+        }
+    }
+
+    impl HttpBackend for HealthyDaemon {
+        fn send(&self, request: HttpRequest) -> BoxFuture<'_, Result<HttpResponse, Error>> {
+            let answer = if request.method == "GET" && request.path == "/v1/health" {
+                self.polls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(HttpResponse {
+                    status: 200,
+                    headers: HashMap::new(),
+                    body: health_body(true).to_string().into_bytes(),
+                })
+            } else {
+                Err(Self::refuse(&request))
+            };
+            Box::pin(async move { answer })
+        }
+
+        fn open_stream(
+            &self,
+            request: HttpRequest,
+            _idle_timeout: Duration,
+        ) -> BoxFuture<'_, Result<OpenStream, Error>> {
+            let refused = Self::refuse(&request);
+            Box::pin(async move { Err(refused) })
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1218,7 +1285,7 @@ mod tests {
         let (session, _, _) = session_with(Arc::clone(&recorder));
 
         let health = session
-            .wait_until_ready(DEFAULT_READY_TIMEOUT)
+            .wait_until_ready(DEFAULT_BOOTSTRAP_TIMEOUT)
             .await
             .expect("the daemon comes up");
         assert!(health.bootstrapped);
@@ -1233,7 +1300,7 @@ mod tests {
         let (session, _, _) = session_with(Arc::clone(&recorder));
 
         let err = session
-            .wait_until_ready(DEFAULT_READY_TIMEOUT)
+            .wait_until_ready(DEFAULT_BOOTSTRAP_TIMEOUT)
             .await
             .expect_err("a 401 is fatal");
         assert_eq!(err.kind(), ErrorKind::Credentials);

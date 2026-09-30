@@ -1,0 +1,86 @@
+# ── mutmut: the ratchet over the gate scripts' changed functions ───────────────
+# Each entry breaks one rule of tools/check-mutmut.py and runs its unit suite, whose throwaway
+# repos hand the gate a fake mutmut's verdicts (and, for the hashes, the real mutmut's).
+
+# The ratchet itself: a changed function whose survivors grow reads as a pass.
+[[fault]]
+id = "mutmut-growth-passes"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_function_whose_survivors_grow_fails_and_shows_each ("
+transform = { file = "tools/check-mutmut.py", replace = "            if len(head.counted) > before:\n", with = "            if False:\n" }
+
+# The floor: results that name no mutant read as a count of none.
+[[fault]]
+id = "mutmut-empty-results-pass"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_results_that_name_no_mutant_fail ("
+transform = { file = "tools/check-mutmut.py", replace = "    if not verdicts or not all(\n", with = "    if verdicts and not all(\n" }
+
+# A mutant the run never finished reads as one of the statuses mutmut gives a verdict.
+[[fault]]
+id = "mutmut-no-verdict-counts"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_mutant_the_run_left_without_a_verdict_fails ("
+transform = { file = "tools/check-mutmut.py", replace = "        if code in UNREAD:\n", with = "        if False:\n" }
+
+# The sentinel: hashes that aren't mutmut's make the changed functions read here not the ones
+# mutmut mutates. The case that holds them to mutmut's own function sees it.
+[[fault]]
+id = "mutmut-hashes-not-mutmuts"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_function_hashes_are_mutmuts ("
+transform = { file = "tools/check-mutmut.py", replace = "DUMP = {\"annotate_fields\": False}\n", with = "DUMP = {\"annotate_fields\": True}\n" }
+
+# A pragma with no reason passes.
+[[fault]]
+id = "mutmut-pragma-reason-unchecked"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_each_changed_scripts_bare_pragma_fails_before_mutmut_runs ("
+transform = { file = "tools/check-mutmut.py", replace = "        and not REASONED.search(token.string)\n", with = "        and False\n" }
+
+# A pathspec that matches nothing: every change reads as no script changed, and CI's first step
+# answers `false`.
+[[fault]]
+id = "mutmut-scripts-pathspec-empty"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_jobs_steps_ask_the_script_and_run_it_as_these_cases_do ("
+transform = { file = "tools/check-mutmut.py", replace = "SCRIPTS = \":(glob)tools/*.py\"\n", with = "SCRIPTS = \":(glob)tools/*.pyx\"\n" }
+
+# A suite that stops loading its script under mutmut's name stops the script's measurement, and
+# that reads as a script nothing measures.
+[[fault]]
+id = "mutmut-dropped-suite-passes"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_suite_that_stops_naming_its_script_fails ("
+transform = { file = "tools/check-mutmut.py", replace = "        elif script.base_suites:\n", with = "        elif False:\n" }
+
+# An exit code mutmut doesn't name reads as a caught mutant instead of a count that can't be read.
+[[fault]]
+id = "mutmut-unnamed-code-caught"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_exit_code_mutmut_doesnt_name_fails ("
+transform = { file = "tools/check-mutmut.py", replace = "        if code not in STATUS and -code not in SIGNALS:\n", with = "        if False:\n" }

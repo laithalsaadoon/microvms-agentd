@@ -46,6 +46,7 @@ pub mod adapters;
 pub mod agents;
 pub mod clock;
 pub mod control;
+pub mod defaults;
 pub mod entropy;
 pub mod names;
 pub mod preflight;

@@ -16,7 +16,7 @@ pub use crate::clock::testing::{TestClock, YieldingClock};
 pub use crate::control::fake::*;
 pub use crate::entropy::testing::SequenceEntropy;
 pub use crate::session::proxy::testing::CountingMinter;
-pub use crate::session::testing::{Recorder, Reply, health_body, session_with};
+pub use crate::session::testing::{HealthyDaemon, Recorder, Reply, health_body, session_with};
 
 use crate::clock::Clock;
 use crate::control::ControlPlane;

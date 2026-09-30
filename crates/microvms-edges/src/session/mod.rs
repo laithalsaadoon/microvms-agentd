@@ -3,11 +3,13 @@
 //!
 //! [`forward`] is the port forwarder's listener and its 403-vs-502 diagnostic. [`tunnel`] is
 //! the WebSocket client that carries raw TCP to the daemon's relay, and [`shell`] is the
-//! interactive shell over the same kind of socket. Each builds on the session's
+//! interactive shell over the same kind of socket. [`serve`] is the accept loop the CLI and
+//! the SDKs run both of the first two in. Each builds on the session's
 //! `ProxyAuth` in `microvms-app`, which mints the tokens they present.
 
 pub mod forward;
 pub mod http;
+pub mod serve;
 pub mod shell;
 pub mod tunnel;
 #[cfg(test)]

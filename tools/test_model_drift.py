@@ -8,7 +8,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-DRIFT = runpy.run_path(str(Path(__file__).with_name("check-model-drift.py")))
+DRIFT = runpy.run_path(
+    str(Path(__file__).with_name("check-model-drift.py")),
+    run_name="tools.check-model-drift",
+)
 
 
 class ModelLoaderTests(unittest.TestCase):

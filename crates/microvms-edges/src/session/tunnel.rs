@@ -182,7 +182,7 @@ pub async fn relay_connection<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    relay_connection_inner(local, endpoint, guest_port, agent_token, auth, None).await
+    relay_connection_inner(local, endpoint, guest_port, agent_token, Some(auth), None).await
 }
 
 /// [`relay_connection`], first proving the far end is the VM `identity` was minted for.
@@ -209,7 +209,7 @@ where
         endpoint,
         guest_port,
         agent_token,
-        auth,
+        Some(auth),
         Some(identity),
     )
     .await
@@ -235,7 +235,15 @@ pub async fn verify_identity(
     identity: &microvms_app::identity::TunnelIdentity,
 ) -> Result<TunnelEnd, Error> {
     let guest_port = auth.port();
-    match open(endpoint, guest_port, agent_token, auth, Some(identity)).await? {
+    match open(
+        endpoint,
+        guest_port,
+        agent_token,
+        Some(auth),
+        Some(identity),
+    )
+    .await?
+    {
         Opened::Refused(end) => Ok(end),
         Opened::Ready(ready) => {
             let Ready {
@@ -285,7 +293,7 @@ async fn open(
     endpoint: &str,
     guest_port: u16,
     agent_token: &str,
-    auth: &Arc<ProxyAuth>,
+    auth: Option<&Arc<ProxyAuth>>,
     identity: Option<&microvms_app::identity::TunnelIdentity>,
 ) -> Result<Opened, Error> {
     // **The token is scoped to the DAEMON's port, not to `guest_port`, and that inversion is
@@ -300,7 +308,13 @@ async fn open(
     // cost a live debugging session on 2026-08-29.
     //
     // `guest_port` still travels, in the query string, where the daemon reads it.
-    let offered = auth.subprotocols(auth.port()).await?;
+    //
+    // A direct session has no proxy to cross, so it offers nothing: the daemon answers a
+    // handshake that offered no subprotocol with none, and its own bearer check is the gate.
+    let offered = match auth {
+        Some(auth) => Some(auth.subprotocols(auth.port()).await?),
+        None => None,
+    };
     let url = tunnel_url_with_identity(endpoint, guest_port, identity.is_some());
 
     let mut request = url.as_str().into_client_request().map_err(|err| {
@@ -313,15 +327,17 @@ async fn open(
         let headers = request.headers_mut();
         // The three platform values, offered as one comma-separated list. The proxy consumes
         // all of them and forwards none (measured), so the daemon sees an ordinary handshake.
-        headers.insert(
-            "sec-websocket-protocol",
-            offered.join(", ").parse().map_err(|err| {
-                Error::new(
-                    ErrorKind::Unexpected,
-                    format!("the minted subprotocols are not a legal header value: {err}"),
-                )
-            })?,
-        );
+        if let Some(offered) = offered {
+            headers.insert(
+                "sec-websocket-protocol",
+                offered.join(", ").parse().map_err(|err| {
+                    Error::new(
+                        ErrorKind::Unexpected,
+                        format!("the minted subprotocols are not a legal header value: {err}"),
+                    )
+                })?,
+            );
+        }
         // The daemon's own bearer check runs on the upgrade request, so the agent token has
         // to be here too — the proxy credential authorizes reaching the port, and this
         // authorizes the daemon's control route behind it. Two credentials, two purposes.
@@ -366,12 +382,17 @@ async fn open(
     Ok(Opened::Ready(Box::new(Ready { socket, noise })))
 }
 
-async fn relay_connection_inner<S>(
+/// [`relay_connection`] and [`relay_connection_verified`] over an optional proxy credential.
+///
+/// `None` is a direct session's: the daemon is reached without the endpoint proxy, so there
+/// is no port-scoped token to present, and the daemon's bearer check is the gate. The serving
+/// loop (`super::serve`) takes whichever the session has.
+pub(crate) async fn relay_connection_inner<S>(
     mut local: S,
     endpoint: &str,
     guest_port: u16,
     agent_token: &str,
-    auth: &Arc<ProxyAuth>,
+    auth: Option<&Arc<ProxyAuth>>,
     identity: Option<&microvms_app::identity::TunnelIdentity>,
 ) -> Result<TunnelEnd, Error>
 where

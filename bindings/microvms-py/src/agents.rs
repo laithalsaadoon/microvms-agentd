@@ -688,14 +688,9 @@ impl PyAgentVm {
         if let Some(ceiling) = max_duration_sec {
             request.max_duration_sec = ceiling;
         }
+        // The core's launch waits for RUNNING and then for the daemon to answer (#254).
         self.detached(py, move |sandbox| {
-            runtime::block_on_detached(async {
-                let session = sandbox.run(request).await?;
-                session
-                    .wait_until_ready(microvms_core::session::DEFAULT_READY_TIMEOUT)
-                    .await?;
-                Ok::<(), Error>(())
-            })
+            runtime::block_on_detached(sandbox.run(request)).map(|_| ())
         })?;
         Ok(PySession::in_sandbox(Arc::clone(&self.sandbox)))
     }

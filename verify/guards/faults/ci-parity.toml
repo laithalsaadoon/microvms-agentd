@@ -95,7 +95,7 @@ run = ["./tools/check-ci-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "rust: .github/workflows/ci.yml job `security` installs 'beta', and rust-toolchain.toml says stable"
-transform = { file = ".github/workflows/ci.yml", replace = "          toolchain: stable\n          components: clippy\n", with = "          toolchain: beta\n          components: clippy\n" }
+transform = { file = ".github/workflows/ci.yml", replace = "          toolchain: stable\n          components: clippy\n      - uses: ./.github/actions/mise\n      - run: mise run ci:security\n", with = "          toolchain: beta\n          components: clippy\n      - uses: ./.github/actions/mise\n      - run: mise run ci:security\n" }
 
 [[fault]]
 id = "ci-parity-rust-mise"
