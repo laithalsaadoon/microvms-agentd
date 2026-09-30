@@ -220,7 +220,7 @@ def drive_health(cli: Cli, launched: Envelope, results: Results) -> None:
     health = cli.call("health", *attach)
 
     results.check(
-        "health reachable through the endpoint",
+        "TRAP-7 health reachable through the endpoint",
         bool(health.data.get("version")),
         f"daemon version {health.data.get('version')!r}",
     )
@@ -235,7 +235,7 @@ def drive_health(cli: Cli, launched: Envelope, results: Results) -> None:
         False,
     )
     results.eq(
-        "identity repair actually ran", health.data.get("identityRepaired"), True
+        "TRAP-3 identity repair actually ran", health.data.get("identityRepaired"), True
     )
 
     # The daemon's own record of the run hook, with a timestamp the wall clock brackets:
