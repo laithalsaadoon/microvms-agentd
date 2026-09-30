@@ -69,7 +69,7 @@ A guest whose `AGENTD_PORT` disagrees with the create call's port fails the buil
 
 ## 7. The daemon that never became ready
 
-`Ready hook invocation timed out after PT5M` after a long build, saying nothing about architecture, is a host-architecture daemon binary. MicroVMs are ARM64-only, so an x86-64 `CMD` cannot exec and surfaces only as the hook never answering. `microvm doctor --binary <path>` reads the ELF header and answers before the build starts; a script or wrapper is caught as not an ELF binary. The same reason appears when an `ENTRYPOINT` swallows the `CMD`, when a start wrapper exits before handing off to the daemon, and when a prefetch or install at app start runs past the five-minute observed ceiling.
+`Ready hook invocation timed out after PT5M` after a long build, saying nothing about architecture, can be a host-architecture daemon binary. MicroVMs are ARM64-only, so an x86-64 `CMD` cannot exec and surfaces only as the hook never answering. Every build path the client drives now reads the daemon's ELF header before the upload and refuses anything but aarch64 with `ERR_PRECONDITION`, a script or wrapper included as not an ELF binary, so this cause is left to an artifact you built and uploaded yourself (`--artifact-uri`). `microvm doctor --binary <path>` answers the same question for a file without a build. The same reason appears when an `ENTRYPOINT` swallows the `CMD`, when a start wrapper exits before handing off to the daemon, and when a prefetch or install at app start runs past the five-minute observed ceiling.
 
 ## 8. The VM that died before `RUNNING`
 

@@ -7,8 +7,8 @@
 //!
 //! # The token is a credential
 //!
-//! [`BearerToken`]'s `Debug` prints its length and nothing else, per
-//! `.erpaval/solutions/best-practices/credential-structs-never-derive-debug.md`. It
+//! [`BearerToken`]'s `Debug` is written by hand and prints its length and nothing else,
+//! because a derived one would put the token in every log line that formats it. It
 //! reaches the guest as a file over the authenticated channel and never as an argv
 //! element or an env var on the wire.
 
