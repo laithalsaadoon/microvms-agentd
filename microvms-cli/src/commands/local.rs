@@ -43,8 +43,8 @@ fn ledger_header(root: &std::path::Path) -> String {
 /// Lists what this CLI created and could not confirm it deleted — and, with `--remote`, what
 /// the account still has.
 ///
-/// The plain form is one directory read and touches no seam door; `tests` in `guards.rs`
-/// hold `ls` in `LOCAL_ONLY` on that basis. `--remote` is the one flag that changes it, and
+/// The plain form is one directory read and touches no seam door; `guards/thinness.rs`
+/// holds `ls` in `LOCAL_ONLY` on that basis. `--remote` is the one flag that changes it, and
 /// it goes through [`crate::seam::CoreSeam::control_plane`] — the single AWS service this
 /// binary talks to — for two listings, `ListMicrovms` and `ListMicrovmImages`, read to their
 /// last page. Nothing is written unless `--prune` asks, and then only the files of entries

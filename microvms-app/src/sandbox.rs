@@ -2004,7 +2004,7 @@ mod tests {
 
     /// **BIND-12: the launched session carries its request's posture**, the value
     /// `egress_posture_for` answers for the same options and the CLI envelope reports
-    /// (`guards.rs` holds that half). Each of the four launchable shapes.
+    /// (the CLI's `guards/run.rs` holds that half). Each of the four launchable shapes.
     ///
     /// **Falsification** — 2026-09-24. Build the session without `with_egress_posture` and
     /// the `open` and `best-effort` rows read `unsealed`; restored.

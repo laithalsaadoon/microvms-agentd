@@ -8,7 +8,7 @@
 //! The launches go through `ControlPlane::with_transport` and a scripted transport that
 //! answers a launch to RUNNING, so a scenario can assert what a launched session reports
 //! without an AWS account. The bindings expose exactly these core values
-//! (`microvms-cli/tests/thinness.rs` keeps them thin), and `microvms-cli/src/guards.rs` holds
+//! (`microvms-cli/tests/thinness.rs` keeps them thin), and `microvms-cli/src/guards/run.rs` holds
 //! the parity guard against the CLI envelope.
 
 use std::sync::Arc;

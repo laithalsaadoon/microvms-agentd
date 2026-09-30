@@ -43,8 +43,9 @@ Three subcommands:
           - a SHIPPED path matches no file, so a crate that moves or is renamed fails here
             rather than dropping out of the set. The floor is the same rule: a file listing
             that came back empty matches nothing.
-          - a Rust file NOT_SHIPPED matches isn't declared `#[cfg(test)] mod <name>;` by its
-            parent module, so the exclusion can't hide code that ships.
+          - a Rust file NOT_SHIPPED matches is neither declared `#[cfg(test)] mod <name>;` by
+            its parent module nor opened with a `#![cfg(test)]` of its own, so the exclusion
+            can't hide code that ships.
           - towncrier.toml names no fragment directory or no type.
 
   `draft` prints the next release's section as `release:prepare` would write it, and writes
@@ -89,10 +90,11 @@ SHIPPED = (
     "microvms-js/index.d.ts",
 )
 # Rust files under SHIPPED that only a test build compiles: the fuzz harnesses and the CLI's
-# guards. `check` holds each to a `#[cfg(test)] mod <name>;` in its parent module.
+# guards, each file under `microvms-cli/src/guards/`. `check` holds each to a
+# `#[cfg(test)] mod <name>;` in its parent module, or to a `#![cfg(test)]` of its own.
 NOT_SHIPPED = (
     re.compile(r"^[^/]+/src/(?:.+/)?[a-z0-9_]+_fuzz\.rs$"),
-    re.compile(r"^microvms-cli/src/guards\.rs$"),
+    re.compile(r"^microvms-cli/src/guards/(?:.+/)?[a-z0-9_]+\.rs$"),
 )
 # The files in changelog.d/ that aren't fragments, besides the template towncrier.toml names.
 NOT_FRAGMENTS = {".gitkeep"}
@@ -258,19 +260,44 @@ def shipped_set_problems(root: Path) -> list[str]:
         inside = any(path.startswith(p) for p in SHIPPED if p.endswith("/"))
         if inside and any(rule.match(path) for rule in NOT_SHIPPED):
             if not declared_for_tests(root, Path(path)):
+                name, _ = module_of(Path(path))
                 problems.append(
-                    f"NOT_SHIPPED covers {path}, and no `#[cfg(test)] mod {Path(path).stem};`"
-                    " in its parent module declares it, so it may be compiled into what ships"
+                    f"NOT_SHIPPED covers {path}, and no `#[cfg(test)] mod {name};` in its"
+                    " parent module declares it, nor does it open with `#![cfg(test)]`, so it"
+                    " may be compiled into what ships"
                 )
     return problems
 
 
+def module_of(path: Path) -> tuple[str, Path]:
+    """The module name a Rust file compiles as, and the directory its parent module is in.
+
+    `a/b.rs` is module `b`, declared from `a/`; `a/b/mod.rs` is module `b` too, declared from
+    `a/` as well.
+    """
+    if path.name == "mod.rs":
+        return path.parent.name, path.parent.parent
+    return path.stem, path.parent
+
+
 def declared_for_tests(root: Path, path: Path) -> bool:
-    """Whether the module file `path` is declared `#[cfg(test)] mod <stem>;` by its parent."""
-    folder = path.parent
-    parents = [folder / name for name in ("lib.rs", "main.rs", "mod.rs")]
+    """Whether the module file `path` compiles only for tests.
+
+    It does when it opens with a `#![cfg(test)]` of its own, among the comments and inner
+    attributes before its first item (each of the CLI's guard files does), or when its parent
+    module declares it `#[cfg(test)] mod <name>;` (each fuzz harness is). A multi-line inner
+    attribute ends the opening, so an attribute after one isn't read: that fails closed.
+    """
+    for line in (root / path).read_text(encoding="utf-8").splitlines():
+        text = line.strip()
+        if text == "#![cfg(test)]":
+            return True
+        if text and not text.startswith(("//", "#![")):
+            break
+    name, folder = module_of(path)
+    parents = [folder / file for file in ("lib.rs", "main.rs", "mod.rs")]
     parents.append(folder.parent / f"{folder.name}.rs")
-    declaration = re.compile(rf"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+{path.stem}\s*;")
+    declaration = re.compile(rf"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+{name}\s*;")
     for parent in parents:
         file = root / parent
         if not file.is_file():

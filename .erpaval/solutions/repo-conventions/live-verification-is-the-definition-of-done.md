@@ -1,6 +1,6 @@
 ---
 tags: [microvms-agentd, live-conformance, verification, fixtures]
-modules: [conformance/run_rs.py, AGENTS.md, microvms-cli/src/guards.rs]
+modules: [conformance/run_rs.py, AGENTS.md, microvms-cli/src/guards/]
 ---
 
 # Live verification is the task-level definition of done (Laith, 2026-08-28)

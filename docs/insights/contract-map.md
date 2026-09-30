@@ -150,7 +150,7 @@ alongside the spelled codes at `microvms-domain/src/error.rs:434-452`.
 **Consumer(s):**
 
 - `microvms-cli/src/cli.rs:35` — the `--region` value, parsed into the enum at the CLI edge.
-- `microvms-cli/src/commands/doctor.rs:17`, `microvms-cli/src/guards.rs:33`, `microvms-cli/src/seam.rs:31`
+- `microvms-cli/src/commands/doctor.rs:17`, `microvms-cli/src/guards/support.rs:21`, `microvms-cli/src/seam.rs:31`
 - `microvms-py/src/region.rs:11`, `microvms-py/src/sandbox.rs:309`
 - `microvms-js/src/region.rs:8`, `microvms-js/src/sandbox.rs:60`, `microvms-js/src/lib.rs:46`
 - `microvms-core/src/lib.rs:104` (re-export), `microvms-domain/src/cost.rs:857`,
@@ -216,7 +216,7 @@ same commit.
 
 - `microvms-py/src/session.rs:8`, `microvms-py/src/exec.rs:482`, `microvms-py/src/runtime.rs:12`, `microvms-py/src/sandbox.rs:632`
 - `microvms-js/src/session.rs:7`, `microvms-js/src/exec.rs:326`, `microvms-js/src/process.rs:190`, `microvms-js/src/sandbox.rs:28`
-- `microvms-cli/src/seam.rs:18`, `microvms-cli/src/guards.rs:32`, `microvms-cli/src/commands/attached.rs:39`, `microvms-cli/tests/thinness.rs:247`
+- `microvms-cli/src/seam.rs:18`, `microvms-cli/src/guards/support.rs:19`, `microvms-cli/src/commands/attached.rs:39`, `microvms-cli/tests/thinness.rs:247`
 - `microvms-app/src/sandbox.rs:822` (`session()`), `:1028` and `:1531` — `run` and `resume`
   hand back `&mut Session`; plus `microvms-app/src/control/ops.rs` and
   `microvms-app/src/session/{http,proxy}.rs`
@@ -273,7 +273,7 @@ the scope and the header are assigned from one value.
 - `microvms-cli/src/exit.rs:336-365` — keys the remedy suggestion on it where two conditions
   share an exit code.
 - `microvms-cli/src/exit.rs:534-560` — pins which ones collapse onto `ERR_PROTOCOL`.
-- `microvms-cli/src/guards.rs:2486`
+- `microvms-cli/src/guards/exec.rs:526`
 - `microvms-py/src/errors.rs:161-164` — sets `.wire_kind` on the raised exception.
 - `microvms-js/src/errors.rs:70-80`, `:152-158` — the cause's cause, and `wire_kinds()`.
 - `microvms-core/src/lib.rs:79` (re-export), plus `control/{microvm,transport}.rs` and
@@ -341,7 +341,7 @@ declare one whenever the daemon does.
 
 **Consumer(s):**
 
-- `microvms-cli/src/commands/lifecycle.rs:6`, `microvms-cli/src/guards.rs:31`, `microvms-cli/src/ledger.rs:94`, `microvms-cli/src/seam.rs:9`, `microvms-cli/tests/thinness.rs:245`
+- `microvms-cli/src/commands/lifecycle.rs:6`, `microvms-cli/src/guards/support.rs:18`, `microvms-cli/src/ledger.rs:94`, `microvms-cli/src/seam.rs:9`, `microvms-cli/tests/thinness.rs:245`
 - `microvms-py/src/sandbox.rs:6`, `microvms-py/src/session.rs:27`, `microvms-py/src/runtime.rs:12`
 - `microvms-js/src/sandbox.rs:6`, `microvms-js/src/session.rs:7`, `microvms-js/src/region.rs:11`
 
@@ -766,7 +766,7 @@ pinned client sends. Mitigation: `#[serde(default)]` on every field but `exec_id
 
 - `agentd/src/exec.rs:87-90` (re-export)
 - `microvms-app/src/session/exec.rs:79-87` — `impl From<protocol::exec::PollResponse> for ExecResult`
-- `microvms-cli/src/guards.rs:1957` — the expected envelope shape is written out rather than
+- `microvms-cli/src/guards/support.rs:874` — the expected envelope shape is written out rather than
   serialized from `PollResponse`, "which is the whole point".
 - `microvms-cli/src/commands/attached.rs:1105`, `:1093` — constructs `Outcome` values for its render tests.
 - `microvms-core/tests/turmoil_client.rs:952`

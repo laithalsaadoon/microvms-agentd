@@ -2,7 +2,7 @@
 //! The rules of the shared case corpus (`parity/cases/`, #272), for every Rust runner.
 //!
 //! Core's runner (`tests/parity_cases.rs`) and the CLI's two tiers (`microvms-cli/tests/
-//! parity_cases.rs` and the `parity` section of `microvms-cli/src/guards.rs`) include this file
+//! parity_cases.rs` and `microvms-cli/src/guards/parity.rs`) include this file
 //! by path, so the three read the corpus by one set of rules. The Python and TypeScript runners
 //! restate the same rules; `parity/cases/README.md` is the contract all of them follow.
 //!
@@ -27,9 +27,9 @@ pub const SURFACES: [&str; 4] = ["core", "cli", "py", "ts"];
 pub const SENTINEL: &str = "wrap-dockerfile/sentinel";
 
 /// The CLI's two tiers and the areas each one answers: a spawned `microvm`
-/// (`microvms-cli/tests/parity_cases.rs`) and the scripted fakes (the `parity` section of
-/// `microvms-cli/src/guards.rs`). Each tier owns one list and leaves the other's cases alone.
-/// The split is stated once, here, so a tier can't hand an area to the other without the
+/// (`microvms-cli/tests/parity_cases.rs`) and the scripted fakes
+/// (`microvms-cli/src/guards/parity.rs`). Each tier owns one list and leaves the other's cases
+/// alone. The split is stated once, here, so a tier can't hand an area to the other without the
 /// other one planning it and failing on a case it has no handler for.
 pub const CLI_PROCESS_AREAS: [&str; 2] = ["cost", "egress"];
 pub const CLI_FAKE_AREAS: [&str; 2] = ["image-name", "error"];

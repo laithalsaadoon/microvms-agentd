@@ -2,7 +2,7 @@
 //! **CLI-3 and CLI-4 at the process boundary**: the exit code a shell reads, and the single
 //! document on stdout.
 //!
-//! The classification half of the exit catalogue is tested in-crate (`src/guards.rs`), where a
+//! The classification half of the exit catalogue is tested in `src/guards/exit_codes.rs`, where a
 //! failure can be *induced* at the seam. What only a spawned child can answer is whether the
 //! process really exits with those numbers, because `ExitCode` hides its value in-process — and
 //! whether stdout carries exactly one JSON document with progress interleaved on stderr, which is
@@ -17,7 +17,7 @@ use support::{TempDir, run};
 ///
 /// The rows an invocation cannot reach without an account — `ERR_RETRYABLE`, `ERR_CREDENTIALS`
 /// against a 401, `ERR_BUILD_WEDGED`, `ERR_LAUNCH_DIED`, `ERR_WINDOW_CLOSED`, `ERR_PROTOCOL`,
-/// `ERR_TIMEOUT` — are covered by `src/guards.rs`'s table, which induces each at the seam. Split
+/// `ERR_TIMEOUT` — are induced at the seam by the table in `src/guards/exit_codes.rs`. Split
 /// that way because the two halves answer different questions: that one asks whether the
 /// classification is right, and this one asks whether the number survives into `$?`.
 ///
@@ -271,7 +271,7 @@ fn a_success_with_progress_enabled_writes_one_json_document_on_stdout() {
 ///
 /// # Why the success path is not driven from here
 ///
-/// It needs a daemon to stream from. `src/guards.rs` drives it against a scripted backend — where
+/// It needs a daemon to stream from. `src/guards/exec.rs` drives it against a scripted one — where
 /// the events, their order, and the compact final envelope are all asserted — and the live tier
 /// drives it against a real one. What this file adds is the claim only a spawned child can make:
 /// that the shape survives into real file descriptors with progress interleaved on the other one.
@@ -398,7 +398,7 @@ fn every_attached_command_documents_the_identifier_triple_in_its_help() {
 ///
 /// The *warning* half of this rule — that `--quiet` cannot buy silence about a leak or a stale rate
 /// table — is asserted in-process at `src/envelope.rs`'s `quiet_silences_progress_but_never_a_leak_warning`
-/// and end-to-end by `src/guards.rs`'s interrupt test, which reads the real leak warning off stderr.
+/// and end-to-end by `src/guards/interrupt.rs`, which reads the real leak warning off stderr.
 /// It is not asserted here for the reason the test above records: the commands that emit a leak
 /// warning all reach `ControlPlane::new` first, and that currently panics (packet §7).
 #[test]
@@ -621,7 +621,7 @@ fn the_dense_cost_path_is_cuttable_and_marks_unpriced_lines() {
 /// silent zero (exit 0).
 ///
 /// `cost` is the driver because it's fully local: no credentials, no network, so the answer
-/// doesn't depend on the host. `src/guards.rs` holds the same refusal for every seconds flag
+/// doesn't depend on the host. `src/guards/seconds.rs` holds that refusal for every seconds flag
 /// in-process; this one asks whether it survives into `$?`. `inf` goes first so a panicking
 /// parser stops on the exit code before any envelope is read.
 ///

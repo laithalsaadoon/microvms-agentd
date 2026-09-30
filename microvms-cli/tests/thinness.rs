@@ -37,8 +37,8 @@
 //! 1. **Comments** never reach the token stream.
 //! 2. **String literals** are single tokens the walk doesn't enter, because a message that
 //!    explains a macro isn't a call to one.
-//! 3. **Test regions** are skipped: `src/guards.rs` is test-only, and so is each file's
-//!    `mod tests`.
+//! 3. **Test regions** are skipped: every file under `src/guards/` is test-only, and so is
+//!    each file's `mod tests`.
 //!
 //! (cli.py line numbers resolve at `git show 'c4d396e^:clients/python/src/microvms_agentd/cli.py'`, the retired oracle.)
 
@@ -133,8 +133,8 @@ fn no_direct_dependency_is_a_second_path_to_aws() {
 /// The files the scan covers, each cut at its test region.
 ///
 /// A file whose own inner attributes include `#![cfg(test)]` is skipped entirely: it does not
-/// ship, and `src/guards.rs` is exactly that. It scripts a fake control plane and captures what a
-/// command writes, none of which is code a user runs.
+/// ship, and each file under `src/guards/` is exactly that. They script a fake control plane and
+/// capture what a command writes, none of which is code a user runs.
 ///
 /// The skip is deliberately keyed on the **inner** attribute (`#![cfg(test)]`, whole file) rather
 /// than the outer one (`#[cfg(test)]`, next item), because those are different claims and only the

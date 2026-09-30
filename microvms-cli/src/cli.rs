@@ -3189,7 +3189,7 @@ mod tests {
     ///
     /// This used to be a clap `requires`, which refused at parse time information the CLI
     /// already held. The refusal still exists — `ERR_INVALID_ARG` from the handler when no
-    /// record names an image — and the guard for it is in `guards.rs`, where a state
+    /// record names an image — and the guard for it is in `guards/history.rs`, where a state
     /// directory can be staged. Parse-time is too early to know.
     #[test]
     fn deleting_an_image_parses_without_the_identifier_the_ledger_can_supply() {

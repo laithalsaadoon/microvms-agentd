@@ -4,7 +4,7 @@
 //!
 //! This tier takes the areas a process can answer with no AWS call and no fake: `cost --json`
 //! and the launch refusals `run` makes before any call. The areas that need a scripted control
-//! plane or daemon are the `parity` section of `src/guards.rs`, which reads the same corpus by
+//! plane or daemon are `src/guards/parity.rs`, which reads the same corpus by
 //! the same rules (`microvms-core/tests/parity_corpus/mod.rs`).
 
 #[allow(dead_code)]
@@ -40,7 +40,7 @@ fn the_cli_process_answers_the_shared_case_corpus() {
 /// The envelope's answer: its `data` on success, or the refusal's facets. `retryable` is the
 /// exit code's row, which is where the CLI says it (the table's `retryable` row). Each code is
 /// one row of `EXIT_TABLE` (`src/exit.rs`), and the process exits with the envelope's code, so
-/// `ERR_RETRYABLE` here is the same test as `Exit::Retryable` in `src/guards.rs`.
+/// `ERR_RETRYABLE` here is the same test as `Exit::Retryable` in `src/guards/parity.rs`.
 fn answer_of(args: &[&str]) -> (Value, Value) {
     let outcome = run(args, &[]);
     let envelope = outcome.envelope();

@@ -178,7 +178,7 @@ fn the_cli_exports_no_library_target_at_all() {
         "microvms-cli grew a library target ({library:?}). ARCH-5's witness is that it has none: a \
          binding cannot need a type from a crate that exports nothing, and the absence is what \
          makes that a property rather than a promise. Test-only code that needs to be reachable \
-         belongs in `src/guards.rs` under cfg(test)."
+         belongs in `src/guards/` under cfg(test)."
     );
 
     // And exactly one binary, named `microvm`, so the crate is what it claims to be.
