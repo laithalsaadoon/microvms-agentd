@@ -91,7 +91,7 @@ files that a basename search calls orphans, each cleared against its real invoca
 | `bindings/microvms-py/tests/test_stubs.py` | `pytest bindings/microvms-py/tests -q` at `.github/workflows/ci.yml:308`; pytest auto-discovers `test_*.py`, so no file names it |
 | `bindings/microvms-js/__test__/support/decimal.mjs` | `bindings/microvms-js/__test__/cost.mjs:40` |
 | `bindings/microvms-js/__test__/support/sse.mjs` | `bindings/microvms-js/__test__/cost.mjs:41`, `bindings/microvms-js/__test__/errors.mjs:40`, `bindings/microvms-js/__test__/exec.mjs:44`, `bindings/microvms-js/__test__/process.mjs:31`, `bindings/microvms-js/__test__/session.mjs:33` |
-| `conformance/infra/main.tf` | `terraform -chdir=conformance/infra` at `mise.toml:54`, `mise.toml:95`, `mise.toml:482`, `mise.toml:726` |
+| `conformance/infra/main.tf` | `terraform -chdir=conformance/infra` at `.config/mise/tasks/lint.toml:13`, `.config/mise/tasks/lint.toml:54`, `.config/mise/tasks/live.toml:21`, `.config/mise/tasks/live.toml:263` |
 
 Two modules are compiled only under `cfg(test)` and are live test code, not dead source:
 `crates/microvms-cli/src/guards/` (inner `#![cfg(test)]` at `crates/microvms-cli/src/guards/mod.rs:25` and in
@@ -135,7 +135,7 @@ The two differ in whether the whole construct earns its place:
 
 **Non-Rust surfaces, both clean.** `uvx ruff check --select F401,F811,F841` over all 17
 tracked `.py` files plus `bindings/microvms-py/microvms.pyi` reports no findings; F401 is in the
-repo's own selected set (`ruff.toml`) and `mise.toml:93` runs `ruff check .` across the whole
+repo's own selected set (`ruff.toml`) and `.config/mise/tasks/lint.toml:52` runs `ruff check .` across the whole
 repo. The eight `bindings/microvms-js/__test__/*.mjs` files have no linter, so their
 `import … from '…'` bindings were checked directly for non-comment uses: zero unused.
 

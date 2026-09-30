@@ -78,8 +78,8 @@ guard = "tools/check-publishable.py"
 run = ["./tools/check-publishable.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "mise.toml runs cargo with a `-p` selector but isn't in SELECTOR_FILES"
-transform = { file = "tools/check-publishable.py", replace = "    \".github/workflows/release.yml\",\n    \"mise.toml\",\n)", with = "    \".github/workflows/release.yml\",\n)" }
+message = ".config/mise/tasks/contracts.toml runs cargo with a `-p` selector but isn't in SELECTOR_FILES"
+transform = { file = "tools/check-publishable.py", replace = "    \".config/mise/tasks/contracts.toml\",\n", with = "" }
 
 [[fault]]
 id = "publishable-reach-floor"
@@ -88,7 +88,7 @@ run = ["./tools/check-publishable.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "SELECTOR_SURFACES doesn't reach"
-transform = { file = "tools/check-publishable.py", replace = "SELECTOR_SURFACES = (\".github/workflows/*.yml\", \"mise.toml\")", with = "SELECTOR_SURFACES = ()" }
+transform = { file = "tools/check-publishable.py", replace = "SELECTOR_SURFACES = (\".github/workflows/*.yml\",)", with = "SELECTOR_SURFACES = ()" }
 
 # targets:check: a build `check` runs with an environment of its own names a target of its own.
 # The stub generator back in the shared target, the rustdoc walk back in cargo's target, a
@@ -100,7 +100,7 @@ run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p",
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_build_with_its_own_environment_names_its_own_target ("
-transform = { file = "mise.toml", replace = "outputs = { auto = true }\nenv = { CARGO_TARGET_DIR = \"{{config_root}}/target/stubs\" }\nrun = \"./tools/generate-py-stubs.py --check\"\n", with = "outputs = { auto = true }\nrun = \"./tools/generate-py-stubs.py --check\"\n" }
+transform = { file = ".config/mise/tasks/contracts.toml", replace = "outputs = { auto = true }\nenv = { CARGO_TARGET_DIR = \"{{config_root}}/target/stubs\" }\nrun = \"./tools/generate-py-stubs.py --check\"\n", with = "outputs = { auto = true }\nrun = \"./tools/generate-py-stubs.py --check\"\n" }
 
 [[fault]]
 id = "check-targets-rustdoc-shared"
@@ -118,7 +118,7 @@ run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p",
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_check_runs_a_build ("
-transform = { file = "mise.toml", replace = "[tasks.check]\n", with = "[tasks.check-renamed]\n" }
+transform = { file = ".config/mise/tasks/check.toml", replace = "[check]\n", with = "[check-renamed]\n" }
 
 [[fault]]
 id = "check-targets-sentinel"
