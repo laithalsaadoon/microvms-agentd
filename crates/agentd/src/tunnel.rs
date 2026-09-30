@@ -152,9 +152,9 @@ pub async fn open(
 /// causes a connection to a guest service, and no byte crosses the relay unauthenticated
 /// (AGENTD-18). That ordering is deliberate: the cheapest refusal
 /// is one that touches nothing, and a guest server that logged a connection from a rejected
-/// caller would be misleading evidence. The WebSocket close frame that ends the tunnel isn't a
-/// relayed byte: it's sent outside the Noise session, which is the plaintext-close gap in
-/// `docs/TRUST.md`'s threat table.
+/// caller would be misleading evidence. The WebSocket close frame that ends the tunnel is sent
+/// outside the Noise session, so it decides nothing: the end of stream inside the session is
+/// what says a stream finished (`protocol::identity`, AGENTD-19 and AGENTD-20).
 async fn verified_relay(socket: WebSocket, port: u16, material: crate::tunnel_identity::Shared) {
     let Some(material) = material else {
         // The caller asked for proof and this VM has no key. Refused rather than downgraded:
@@ -291,7 +291,9 @@ async fn dial(port: u16) -> Result<TcpStream, Refusal> {
 enum Inbound {
     /// Bytes for the guest.
     Bytes(Vec<u8>),
-    /// The caller finished sending, or the transport ended.
+    /// The caller's end of stream: it sent everything, and the channel authenticated that.
+    Ended,
+    /// A close frame, or the end of the transport, with nothing proving the caller finished.
     Closed,
     /// The transport failed; no close frame can be delivered.
     Failed(String),
@@ -299,14 +301,23 @@ enum Inbound {
 
 /// A caller-facing byte channel: either a bare WebSocket or one inside a Noise session.
 ///
-/// A trait rather than two copies of the pump loop, because the loop is where the half-close
-/// and backpressure semantics live and those must not diverge between a verified tunnel and a
+/// A trait rather than two copies of the pump loop, because the loop is where the end and
+/// backpressure semantics live and those must not diverge between a verified tunnel and a
 /// plain one — a bug fixed in one copy and not the other is the failure mode this avoids.
 trait Channel {
     /// The next bytes from the caller.
     fn recv(&mut self) -> impl std::future::Future<Output = Inbound> + Send;
     /// Sends bytes to the caller. `false` means the transport is gone.
     fn send(&mut self, bytes: &[u8]) -> impl std::future::Future<Output = bool> + Send;
+    /// Sends the end of stream, after the last relayed byte. `false` means the transport is
+    /// gone.
+    ///
+    /// The plain channel sends nothing: none of its frames are authenticated, so an end it sent
+    /// would prove nothing a close frame doesn't.
+    fn send_end(&mut self) -> impl std::future::Future<Output = bool> + Send;
+    /// Whether the caller offered the end of stream, so an end without it is a stream that may
+    /// have been cut short rather than one the caller finished.
+    fn caller_proves_end(&self) -> bool;
     /// Sends a close frame carrying `code` and `reason`, then drops the channel.
     fn close(&mut self, code: u16, reason: &str) -> impl std::future::Future<Output = ()> + Send;
     /// The largest payload one send may carry.
@@ -328,9 +339,8 @@ impl Channel for Plain {
             // gain — but nothing here produces text.
             Some(Ok(Message::Binary(bytes))) => Inbound::Bytes(bytes.to_vec()),
             Some(Ok(Message::Text(text))) => Inbound::Bytes(text.as_bytes().to_vec()),
-            // A caller's half-close means "I have sent everything". The pump shuts the guest's
-            // write half rather than dropping the connection, which is what lets a
-            // request/response protocol get its response.
+            // A WebSocket close is a whole close, not a half-close: the pump ends the tunnel,
+            // and the guest reads EOF with whatever it had sent in flight left unrelayed.
             Some(Ok(Message::Close(_))) | None => Inbound::Closed,
             // Ping, pong, and continuation frames are axum's to handle; nothing to relay.
             Some(Ok(_)) => Inbound::Bytes(Vec::new()),
@@ -343,6 +353,14 @@ impl Channel for Plain {
             .send(Message::Binary(bytes.to_vec().into()))
             .await
             .is_ok()
+    }
+
+    async fn send_end(&mut self) -> bool {
+        true
+    }
+
+    fn caller_proves_end(&self) -> bool {
+        false
     }
 
     async fn close(&mut self, code: u16, reason: &str) {
@@ -363,6 +381,9 @@ impl Channel for Plain {
 /// Generic over the channel so a verified tunnel and a plain one share one loop. One task per
 /// direction would need a shared sink; a select loop keeps the channel owned here, which is
 /// what lets the close frame below be the last thing written.
+///
+/// Either side's end is the end of the whole tunnel: the first EOF closes both directions, and
+/// bytes the other side still had in flight aren't relayed.
 async fn pump<C: Channel>(mut channel: C, stream: TcpStream, port: u16) {
     let (mut guest_read, mut guest_write) = stream.into_split();
     let mut buffer = vec![0_u8; channel.chunk_bytes()];
@@ -375,9 +396,10 @@ async fn pump<C: Channel>(mut channel: C, stream: TcpStream, port: u16) {
                         continue;
                     }
                     if guest_write.write_all(&bytes).await.is_err() {
-                        break Ended::GuestClosed;
+                        break Ended::GuestRefused;
                     }
                 }
+                Inbound::Ended => break Ended::CallerFinished,
                 Inbound::Closed => break Ended::CallerClosed,
                 Inbound::Failed(error) => {
                     tracing::info!(port, %error, "tunnel transport error");
@@ -385,7 +407,7 @@ async fn pump<C: Channel>(mut channel: C, stream: TcpStream, port: u16) {
                 }
             },
             read = guest_read.read(&mut buffer) => match read {
-                Ok(0) => break Ended::GuestClosed,
+                Ok(0) => break Ended::GuestEof,
                 Ok(count) => {
                     if !channel.send(&buffer[..count]).await {
                         break Ended::TransportFailed;
@@ -399,10 +421,26 @@ async fn pump<C: Channel>(mut channel: C, stream: TcpStream, port: u16) {
         }
     };
 
+    // A caller that offered the end of stream and ended without it may have been cut short on
+    // the path, by a forged close frame or a dropped connection (AGENTD-20). Closing the guest
+    // connection would hand the guest an EOF, which reads as "the caller sent everything"; a
+    // reset says the stream broke, so a guest reading an upload to its end doesn't keep a
+    // truncated one.
+    let cut_short = channel.caller_proves_end()
+        && matches!(outcome, Ended::CallerClosed | Ended::TransportFailed);
     match outcome {
-        // A clean end on either side is code 1000: the tunnel did its job, and a caller
-        // that treated a finished connection as an error would retry a completed request.
-        Ended::CallerClosed | Ended::GuestClosed => {
+        // The guest finished, and every byte it sent was relayed before its EOF was read, so
+        // the end of stream goes out before the close (AGENTD-19). Code 1000 either way: the
+        // tunnel did its job, and a caller that treated a finished connection as an error
+        // would retry a completed request.
+        Ended::GuestEof => {
+            if channel.send_end().await {
+                channel.close(close::NORMAL, "").await;
+            }
+        }
+        // No end of stream on any of these. After a refused write the caller's bytes didn't all
+        // reach the guest, so a verified caller reads the end as truncated, which it is.
+        Ended::CallerFinished | Ended::CallerClosed | Ended::GuestRefused => {
             channel.close(close::NORMAL, "").await;
         }
         Ended::RelayFailed => {
@@ -413,14 +451,36 @@ async fn pump<C: Channel>(mut channel: C, stream: TcpStream, port: u16) {
         // Nothing to send: the transport is what failed.
         Ended::TransportFailed => {}
     }
+    if cut_short {
+        reset(guest_read, guest_write, port);
+    }
     tracing::info!(port, "tunnel closed");
+}
+
+/// Resets the guest connection instead of closing it: the guest reads a reset, not an EOF.
+///
+/// A zero linger is what makes the kernel send RST on close. It's set only here: on any other
+/// end the halves drop normally, and the guest reads EOF after the last byte relayed to it.
+fn reset(read: tokio::net::tcp::OwnedReadHalf, write: tokio::net::tcp::OwnedWriteHalf, port: u16) {
+    // Both halves come from one `into_split`, so they always reunite.
+    let Ok(stream) = read.reunite(write) else {
+        return;
+    };
+    if let Err(error) = stream.set_zero_linger() {
+        tracing::warn!(port, %error, "could not reset the guest connection; it closes instead");
+    }
+    tracing::info!(
+        port,
+        "tunnel ended without the caller's end of stream; guest reset"
+    );
 }
 
 /// The Noise KK handshake over WebSocket frames, and the encrypted channel it yields.
 ///
 /// Two messages, one each way, which is what `KK` costs: the initiator's first message and
-/// the responder's reply. Both carry empty payloads — there is nothing to say beyond proving
-/// possession of a key, and the guest port already travelled in the query string.
+/// the responder's reply. Each payload is the sender's offer of the end of stream
+/// (`protocol::identity::HANDSHAKE_PAYLOAD`), and nothing else: the guest port already
+/// travelled in the query string.
 mod handshake {
     use axum::extract::ws::{Message, WebSocket};
 
@@ -482,16 +542,23 @@ mod handshake {
         // The refusal that matters: under KK both static keys are mixed into the handshake
         // hash, so a caller pinning the wrong VM or holding the wrong host key fails *here*,
         // in a decryption that cannot be skipped by a verifier that forgot a check.
-        if let Err(error) = responder.read_message(&first, &mut scratch) {
-            return Err(Failed::new(socket, error.to_string()));
-        }
-
-        let written = match responder.write_message(&[], &mut scratch) {
-            Ok(written) => written,
+        let offer = match responder.read_message(&first, &mut scratch) {
+            Ok(read) => read,
             Err(error) => {
                 return Err(Failed::new(socket, error.to_string()));
             }
         };
+        // An empty payload is a caller from before the end of stream: it never sends one, so
+        // its close is taken as its end, as it always was.
+        let caller_proves_end = protocol::identity::offers_end_of_stream(&scratch[..offer]);
+
+        let written =
+            match responder.write_message(&protocol::identity::HANDSHAKE_PAYLOAD, &mut scratch) {
+                Ok(written) => written,
+                Err(error) => {
+                    return Err(Failed::new(socket, error.to_string()));
+                }
+            };
         if socket
             .send(Message::Binary(scratch[..written].to_vec().into()))
             .await
@@ -505,6 +572,7 @@ mod handshake {
                 socket,
                 transport,
                 scratch,
+                caller_proves_end,
             }),
             Err(error) => Err(Failed::new(socket, error.to_string())),
         }
@@ -530,6 +598,8 @@ mod handshake {
         /// One reusable buffer, sized to the Noise ceiling. Reused rather than allocated per
         /// frame because this is the hot path of every byte the tunnel carries.
         scratch: Vec<u8>,
+        /// Whether the caller's handshake offered the end of stream.
+        caller_proves_end: bool,
     }
 
     impl Channel for Noise {
@@ -549,6 +619,11 @@ mod handshake {
                 Some(Err(error)) => return Inbound::Failed(error.to_string()),
             };
             match self.transport.read_message(&frame, &mut self.scratch) {
+                // Whatever the caller offered: the message authenticated, so the caller did
+                // send it. The offer only decides what a close without one means.
+                Ok(count) if protocol::identity::is_end_of_stream(&self.scratch[..count]) => {
+                    Inbound::Ended
+                }
                 Ok(count) => Inbound::Bytes(self.scratch[..count].to_vec()),
                 // A frame that does not authenticate is not a protocol nicety to work around:
                 // it is a forged or corrupted frame, and continuing would relay attacker bytes
@@ -569,10 +644,21 @@ mod handshake {
                 .is_ok()
         }
 
+        /// An empty plaintext, the one message a relayed chunk never is. An older caller
+        /// decrypts it and relays nothing, so it's sent whatever the caller offered.
+        async fn send_end(&mut self) -> bool {
+            self.send(&[]).await
+        }
+
+        fn caller_proves_end(&self) -> bool {
+            self.caller_proves_end
+        }
+
         async fn close(&mut self, code: u16, reason: &str) {
             // The close frame itself is plaintext, which is deliberate and worth stating: it
             // carries a code and a diagnostic sentence, never guest bytes, and a caller whose
-            // handshake failed has no key to read an encrypted reason with.
+            // handshake failed has no key to read an encrypted reason with. After the
+            // handshake it's never the verdict: the end of stream, sent before it, is.
             let frame = axum::extract::ws::CloseFrame {
                 code,
                 reason: reason.to_string().into(),
@@ -588,10 +674,14 @@ mod handshake {
 
 /// Why a relay loop ended.
 enum Ended {
-    /// The caller sent a close frame or the stream ended.
+    /// The caller's end of stream arrived.
+    CallerFinished,
+    /// The caller sent a close frame or the stream ended, without an end of stream.
     CallerClosed,
-    /// The guest side reached EOF or refused a write.
-    GuestClosed,
+    /// The guest side reached EOF.
+    GuestEof,
+    /// The guest side refused a write.
+    GuestRefused,
     /// A read on an established guest connection failed.
     RelayFailed,
     /// The WebSocket itself failed; no close frame can be delivered.
