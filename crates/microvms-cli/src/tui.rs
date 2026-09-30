@@ -233,7 +233,8 @@ mod tests {
         .with_footer("2 runs, 1 leaked")
     }
 
-    /// Every cell's text reaches the frame, and a long identifier is not truncated.
+    /// **CLI-1.** Every cell's text reaches the frame ratatui draws, and a long identifier is not
+    /// truncated.
     ///
     /// The truncation case is the one that matters: for a leaked resource the identifier *is* the
     /// remedy, and a table that clipped it would produce output the operator cannot act on.
