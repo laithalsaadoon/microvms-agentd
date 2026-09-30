@@ -1,0 +1,19 @@
+# ── the release's Sigstore check (#284) ──────────────────────────────────────
+
+[[fault]]
+id = "release-signer-identity"
+guard = "provision::release::tests::another_signer_identity_is_refused"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "provision::release::tests::another_signer_identity_is_refused"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/provision/release.rs", replace = "sigstore_verify::VerificationPolicy::new(&signer.identity, &signer.issuer)", with = "sigstore_verify::VerificationPolicy::with_issuer(&signer.issuer)" }
+
+# #275: the download's byte limit, apart from the network so it has an offline test. Checking
+# only what's already read lets one chunk carry the body past the limit.
+[[fault]]
+id = "release-body-streamed-limit"
+guard = "provision::release::tests::a_body_over_its_limit_is_refused"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "provision::release::tests::a_body_over_its_limit_is_refused"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/provision/release.rs", replace = "if self.bytes.len() + chunk.len() > self.limit {", with = "if self.bytes.len() > self.limit {" }

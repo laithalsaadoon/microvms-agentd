@@ -19,8 +19,8 @@ The Python client (`clients/python/`) was the discovery instrument: it found and
 closed fifteen client-side API traps, measured the platform's pricing and
 lifecycle semantics, and encoded cost-reporting honesty rules. All of that is now
 settled and pinned — in `docs/PLATFORM.md` (every claim dated and measured), in
-`scripts/check-model-drift` (33 constraints bound to the botocore service model),
-and in `spec/core.symspec.json` (the formal spec for what you are building, with
+`tools/check-model-drift` (33 constraints bound to the botocore service model),
+and in `verify/spec/core.symspec.json` (the formal spec for what you are building, with
 a state model and reachability-proved lifecycle properties). Your job is a
 translation of settled semantics into a stronger type system, not a
 re-discovery. When the Python code and the docs disagree, the docs win; when the
@@ -86,7 +86,7 @@ Traps with measured semantics to preserve (details in PLATFORM.md):
 ## Correctness stack, tier by tier
 
 - **symspec v5**: the spec is already authored and verified at
-  `spec/core.symspec.json` — 51 requirements (ARCH-5, TRAP-13, COST-10,
+  `verify/spec/core.symspec.json` — 51 requirements (ARCH-5, TRAP-13, COST-10,
   STATE-12, BIND-5, CLI-6), a state model (`vm_state` enum over the six service
   states; `token_installed`, `image_exists`, `was_terminated` booleans;
   `bootstrap_count` finite int 0..3), an initial predicate, and 7 effects + 3
@@ -104,7 +104,7 @@ Traps with measured semantics to preserve (details in PLATFORM.md):
   `node ~/workplace/symspec/packages/symspec/dist/cli.mjs` (1.0.0-alpha.0) —
   NOT the 0.1.0 `symspec` on PATH, which lacks the state model and
   reachability tier entirely. Wire
-  `check spec/core.symspec.json --reachability-timeout-ms 5000` into the mise
+  `check verify/spec/core.symspec.json --reachability-timeout-ms 5000` into the mise
   spec task. If you change the spec, re-run the planted-defect proofs (add a
   contradiction, watch it report, delete it). Two tool quirks the authoring
   session hit: GTWR lint errors silently exclude a requirement from the formal
@@ -122,9 +122,9 @@ Traps with measured semantics to preserve (details in PLATFORM.md):
   is proven against real AWS. Add a `conformance/run_rs.py` variant (or a flag)
   that drives the Rust CLI through the same 56 checks. Live runs are authorized
   via the EC2 instance profile; keep the Terraform stack applied; run
-  `scripts/verify-clean` after every live session and treat its prefix list as
+  `tools/verify-clean` after every live session and treat its prefix list as
   a correctness condition if you add new resource names.
-- **drift**: `scripts/check-model-drift` must learn to read the Rust constants
+- **drift**: `tools/check-model-drift` must learn to read the Rust constants
   too (or a small `--emit-json` on the CLI that exposes them for checking).
   `mise run check` is the definition of done; `mise run live` is the billable
   tier and needs no hook.
@@ -168,5 +168,5 @@ port its shape from the Python one.
 - Every doc claim you add to PLATFORM.md carries date, region, API version.
 - Commit checkpoints with the story in the message, hooks green, no --no-verify.
 
-Start by reading `spec/core.symspec.json`, `docs/PLATFORM.md`, and
+Start by reading `verify/spec/core.symspec.json`, `docs/PLATFORM.md`, and
 `.erpaval/specs/001-control-plane-client/spec.md`, then plan the waves.

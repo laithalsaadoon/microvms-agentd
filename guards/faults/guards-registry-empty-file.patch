@@ -1,6 +1,0 @@
-diff --git a/guards/faults/guards-registry-empty.toml b/guards/faults/guards-registry-empty.toml
-new file mode 100644
---- /dev/null
-+++ b/guards/faults/guards-registry-empty.toml
-@@ -0,0 +1 @@
-+# ── an owner whose file holds no entry yet ──

@@ -52,19 +52,19 @@ Use `-p microvms-protocol` for the protocol package; its Rust import is
 `protocol`. The shipping daemon target is `aarch64-unknown-linux-musl`.
 `.cargo/config.toml` selects `rust-lld`; no external cross compiler is needed.
 
-Python builds with maturin and tests under `microvms-py/tests/`. Node builds
-with `npm run build` and tests with `npm test` in `microvms-js/`.
+Python builds with maturin and tests under `bindings/microvms-py/tests/`. Node builds
+with `npm run build` and tests with `npm test` in `bindings/microvms-js/`.
 
 For a new invariant guard, register the fault that proves it catches its
-failure in its owner's file in `guards/faults/` (a gate's, a crate's, or one
+failure in its owner's file in `verify/guards/faults/` (a gate's, a crate's, or one
 issue's guards; a new owner starts a file), and show
 `mise run guards:fire -- --only <id>` printing `fired` for it. The registry is
 split by owner so that pull requests adding guards for different owners don't
 edit one file; an id is still unique across every file. `check` runs
 `guards:list`, which fails when an entry's anchor or patch no longer matches the
 tree, when a test gains a `**Falsification**` note with no entry
-(`guards/unregistered.txt` lists the older ones and only shrinks), and when the
-single file the registry used to be, guards/faults.toml, comes back: nothing
+(`verify/guards/unregistered.txt` lists the older ones and only shrinks), and when the
+single file the registry used to be, verify/guards/faults.toml, comes back: nothing
 reads it. CI's `guards` job seeds the Rust, script and binding
 faults a pull request affects and, on every push to main, all of them; each of its
 workers builds the bindings into its own Python environment (`--venv-per-worker`). A guard no fault can be seeded for, such
@@ -93,13 +93,13 @@ CI's `mutants` job runs cargo-mutants over the Rust a pull request changes, and
 `mise run mutants` runs it over your branch against origin/main. It isn't in
 `check`, because each mutant is a build. A mutant is one small change to the
 code, such as a return value replaced or a `>` turned into `>=`. Only the
-mutated package's own tests run against it, so a test in `microvms-core/tests`
+mutated package's own tests run against it, so a test in `crates/microvms-core/tests`
 doesn't catch a mutant in the app. A change with no Rust in it passes at once.
 
 Reading `missed.txt`: each shard uploads its `mutants.out` as an artifact, and
 the job's log prints the same list. Each line names a mutant by file, line,
 column and change, such as
-`agentd/src/fs.rs:632:5: replace fuzz_extract -> Result<u64, String> with Ok(0)`,
+`crates/agentd/src/fs.rs:632:5: replace fuzz_extract -> Result<u64, String> with Ok(0)`,
 and `mutants.out/diff/` and `mutants.out/log/` hold its diff and its test
 output. A missed mutant means the tests ran that code and nothing checked what
 it did. Write the assertion that fails with the mutant in, and rerun. When no
@@ -116,31 +116,31 @@ exclusion: a new test double behind `cfg(any(test, feature = "test-support"))`
 code only a non-Unix build compiles, such as a `cfg(not(unix))` twin, which the
 Linux job always reports missed. A name regex would also drop the tested Unix
 twin's mutants, since the two share a name. Each skip is listed in `SKIPS` in
-`scripts/test_check_mutants.py`, and a crate with one needs the `mutants` crate
+`tools/test_check_mutants.py`, and a crate with one needs the `mutants` crate
 as a dev-dependency. A new workspace crate goes in the wrapper's `PACKAGES` or,
 with a reason, `LEFT_OUT`; the job fails until it's in one of them.
 
 In network simulation tests, coordinate child processes through stdin rather
 than wall-clock sleeps: child processes and the simulator use different clocks.
 
-`mise run ratchet:check` holds `ratchet/drift.json` equal to the drift its
-collectors find, such as an adapter dependency outside `arch/placement.toml`, a
-subprocess in a shipping crate, or a spec requirement no file in `spec/traced/`
+`mise run ratchet:check` holds `verify/ratchet/drift.json` equal to the drift its
+collectors find, such as an adapter dependency outside `verify/arch/placement.toml`, a
+subprocess in a shipping crate, or a spec requirement no file in `verify/spec/traced/`
 lists. A new finding fails, and so does a fix the file still lists: run
 `mise run ratchet:update` and commit the file. The check refuses an entry the
 base branch doesn't have, and a crate added to a set the base already has, so
 new drift moves to the layer whose job it is or goes under `decisions` with its
 reason. An untraced requirement can't be a decision: it gets an entry in its
-group's file (`spec/traced/TRAP.toml` for a TRAP key), with a waiver for any
+group's file (`verify/spec/traced/TRAP.toml` for a TRAP key), with a waiver for any
 layer it can't carry. Each group has its own file, so the changes that trace
-different groups don't edit one table; `scripts/check-trace.py` loads them all
+different groups don't edit one table; `tools/check-trace.py` loads them all
 and refuses a key in the wrong group's file or listed twice. Moving recorded
 drift to another file or crate isn't a fix: re-key its entry in the same
 change. A re-keyed entry keeps its issue and changes its path or its text, not
 both, so a move and a rename land in separate PRs.
 
-`mise run parity:check` holds `parity/capabilities.toml` to the four surfaces
-(core through `parity/core-api.json`, the CLI through `docs/manifest.json`, and
+`mise run parity:check` holds `verify/parity/capabilities.toml` to the four surfaces
+(core through `verify/parity/core-api.json`, the CLI through `docs/manifest.json`, and
 the two bindings through their stub and declarations). A public function, a
 method of a class the table names, or a command that no row names fails, and so
 does a row naming something a surface doesn't have. A new class and its methods
@@ -159,9 +159,9 @@ name), and its crate root denies both lints. The adapter hands
 `microvms_core::env::process` to core's resolvers once, where it composes them,
 and everything else takes the lookup it's given. An exception is an
 `#[expect(..., reason = "...")]` at the call site plus its line in
-`LINT_EXCEPTIONS` in `scripts/test_ratchet.py`, which fails `ratchet:check` on
+`LINT_EXCEPTIONS` in `tools/test_ratchet.py`, which fails `ratchet:check` on
 any other `allow`, `warn` or `expect` of those lints in an adapter's source. A
-subprocess exception also needs its entry or decision in `ratchet/drift.json`.
+subprocess exception also needs its entry or decision in `verify/ratchet/drift.json`.
 An environment read has no drift category, so its `reason` and its line in
 that list are the whole record, and review is the check.
 
@@ -175,8 +175,8 @@ features as well as its name. The I/O
 methods its types had in 0.10 (`CalendarDate::today_utc`, `NameRecord::new`,
 `LaunchIdentity::generate`, `TunnelIdentity::initiator`) are extension traits in
 `microvms_core::prelude`, so in-repo callers import `microvms_core::prelude::*`.
-`microvms-core/tests/public_paths.rs` names every public path core had at
-v0.10.0; regenerate it with `scripts/generate-public-paths.py` only when a
+`crates/microvms-core/tests/public_paths.rs` names every public path core had at
+v0.10.0; regenerate it with `tools/generate-public-paths.py` only when a
 release changes the API on purpose.
 
 `microvms-app` holds the use cases and reaches the outside only through the
@@ -192,7 +192,7 @@ and every item below it is re-exported at its 0.10 path. The shared test
 doubles are `microvms_core::testing`, behind the `test-support` feature; a
 crate's `[dev-dependencies]` turns it on. The ratchet's port-impl collector reads
 the app and core as well as the adapters, so a port implementation there needs a
-decision in `ratchet/drift.json`.
+decision in `verify/ratchet/drift.json`.
 
 ## Generated contracts and API changes
 
@@ -202,7 +202,7 @@ Regenerate affected contracts and include their diffs:
 mise run schema        # docs/schema.json
 mise run manifest      # docs/manifest.json
 mise run stubs         # Python declarations
-mise run core-api      # parity/core-api.json, core's public paths
+mise run core-api      # verify/parity/core-api.json, core's public paths
 mise run model:check   # implemented constraints versus the installed boto3 model
 ```
 
@@ -223,7 +223,7 @@ manages images and VMs; [Lambda core](https://docs.aws.amazon.com/lambda/latest/
 manages VPC connectors. Document the package's supported workflows and limits.
 
 To check implemented constraints against the latest SDK without creating AWS
-resources, run `uv run --upgrade --script scripts/check-model-drift.py`.
+resources, run `uv run --upgrade --script tools/check-model-drift.py`.
 
 The `spec` and `spec:core` tasks are separate from `check`. They require
 compatible symspec tooling; `spec:core` currently names a local checkout and
@@ -296,7 +296,7 @@ an edit there as one.
 changes shipped code and adds no fragment. Shipped code is the source directory of each
 published crate, the daemon and both bindings, plus `microvms.pyi` and `index.d.ts`; the fuzz
 harnesses and the CLI's guards in those directories compile only into tests and don't count.
-`scripts/changelog.py` holds the set and says why each part is in it. A change there that no
+`tools/changelog.py` holds the set and says why each part is in it. A change there that no
 user can observe, such as a unit test beside the code or a lint attribute, takes
 `changelog.d/<issue>.internal.md` instead: a line saying why, which no release renders and the
 release build removes with the rest. A change to scripts, CI, guards, docs or manifests needs no
@@ -322,7 +322,7 @@ publishing new crates, then add each trusted publisher on crates.io (this reposi
 the new one. Publishing after the bump is the same failure the other way round:
 the release's version already exists, and `cargo publish --workspace` has no
 `--skip-existing`.
-`./scripts/check-publishable.py --dry-run` warns about a published crate the
+`./tools/check-publishable.py --dry-run` warns about a published crate the
 registry doesn't have, and fails with `--tag`, which is how the release guard
 runs it.
 
@@ -340,7 +340,7 @@ Node versions, regenerates the Python stub, and runs
 CHANGELOG.md as that version, below `## Unreleased`, removes them, and stages
 both. It refuses a malformed fragment and a build with nothing to render, which
 is what a second run finds. Read the section it wrote, commit it with the bump,
-and check the tag with `./scripts/check-publishable.py --tag=vX.Y.Z`. Once that
+and check the tag with `./tools/check-publishable.py --tag=vX.Y.Z`. Once that
 pull request merges, tag main's tip with `mise run release:tag vX.Y.Z`. Use the
 release task rather than manually pushing an old tag. Registry versions are
 immutable.

@@ -39,7 +39,7 @@ PACKAGE_REGISTRY = "https://pypi.org"
 #: reach check above is what earns the flip.
 CONNECTORLESS_POSTURE = "unsealed"
 #: The advisory deny's black hole, as `--deny-egress` sets it
-#: (`microvms-app/src/sandbox.rs`, `DENY_EGRESS_PROXY_URL`). Loopback port 1, privileged,
+#: (`crates/microvms-app/src/sandbox.rs`, `DENY_EGRESS_PROXY_URL`). Loopback port 1, privileged,
 #: nothing serving it.
 DENY_EGRESS_PROXY_URL = "http://127.0.0.1:1"
 #: The one API family the conformance execution role may grant (`conformance/infra/main.tf`,

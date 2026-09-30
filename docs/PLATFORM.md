@@ -179,7 +179,7 @@ charges; suspended VMs incur snapshot storage and transitions incur reads and
 writes. Data transfer is separate. Server-side build compute billing remains
 unverified and is reported as unpriced, not zero. The old $0.08/GiB-month
 storage estimate was rounded low; the API rate gives $0.081111103 at 730 hours.
-Use `microvm cost` and `scripts/check-live-rates.py` rather than copying rates
+Use `microvm cost` and `tools/check-live-rates.py` rather than copying rates
 from this record.
 
 ## Seeing an OOM: the process case works, the VM case is still unmeasured
@@ -666,7 +666,7 @@ either behavior.
 
 ## A client-token retry after a suspend returns the same VM, and it resumes
 
-Measured 2026-09-24, us-east-1, API 2025-09-09, live (`microvms-core/tests/
+Measured 2026-09-24, us-east-1, API 2025-09-09, live (`crates/microvms-core/tests/
 live_lifecycle.rs`, run by `drive_lifecycle_by_id`). A `RunMicrovm` retried with the
 same `clientToken` and identical parameters after the VM had been suspended answered with
 the original VM, and the client's retry reached RUNNING on it. A client that reads
@@ -699,7 +699,7 @@ package with a native arm64 executable) took 13.0 s; every later run took 0.1 s.
 under 10 s, so the delay varies from launch to launch. Consistent with AWS's statement that a
 MicroVM's disk is paged in on demand after launch (grade: measured; the mechanism is
 inferred). Budget the first exec of any large executable accordingly: the agent version
-probe allows 60 s (`microvms-app/src/agents/mod.rs`, `VERSION_PROBE_TIMEOUT`).
+probe allows 60 s (`crates/microvms-app/src/agents/mod.rs`, `VERSION_PROBE_TIMEOUT`).
 
 ## The daemon's own environment holds the image `ENV` plus four platform variables
 

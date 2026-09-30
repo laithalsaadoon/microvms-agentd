@@ -82,7 +82,7 @@ another definition is held like an edited one:
 
 A new route, an optional request field, a response field with a default and a
 definition renamed with its shape kept are all compatible. A change that has to
-break the rules bumps `PROTOCOL_VERSION` in `protocol/src/lib.rs` and lists each
+break the rules bumps `PROTOCOL_VERSION` in `crates/protocol/src/lib.rs` and lists each
 break in `docs/schema-breaks.toml`, as the line the check prints and with the
 reason. While the version differs from the previous tag's, the check passes only
 when that list and the breaks it finds are the same, so a later change that
@@ -146,7 +146,7 @@ follow them.
 `/run` installs the token and returns 200. A later `/run` carrying the same token
 returns 200, because the platform may retry its own hook and must not be told the
 VM is broken. A later `/run` carrying a different token returns 409 and changes
-nothing. The model in `model/` checks this over every interleaving, including a
+nothing. The model in `crates/model/` checks this over every interleaving, including a
 racing in-VM caller.
 
 **Control routes answer 503 before bootstrap.** They do not answer 404, and
@@ -358,8 +358,8 @@ and never its values; `null` means no snapshot, which is also what a daemon that
 predates the flag reports. Such a daemon ignores `inherit_image_env`, as serde
 ignores any unknown key, so a caller that depends on it checks the count first.
 
-The model in `model/src/exec_start.rs` checks these rules over every request
-shape (AGENTD-7 through AGENTD-16 in `spec/agentd.symspec.json`), including that
+The model in `crates/model/src/exec_start.rs` checks these rules over every request
+shape (AGENTD-7 through AGENTD-16 in `verify/spec/agentd.symspec.json`), including that
 no refused request ever has a child and that neither the token nor `AGENTD_*`
 configuration reaches one.
 
@@ -529,7 +529,7 @@ the socket level from a request sent by a process inside the VM (measured; see
 `PLATFORM.md`). Filtering by source address therefore cannot separate the
 platform from an in-VM process, so it provides no protection here.
 
-The remaining defenses, all checked in `model/`, are the following:
+The remaining defenses, all checked in `crates/model/`, are the following:
 
 1. Bootstrap is one-shot, so a losing racer never replaces the winner's token.
 2. A post-bootstrap hijack attempt is refused at the hook with 409 and at the
@@ -539,7 +539,7 @@ The remaining defenses, all checked in `model/`, are the following:
 One risk remains. The design assumes the daemon is the container `CMD` and that
 the harness issues its first exec only after readiness. The daemon does not
 enforce this invariant. A base image that starts its own background process
-before bootstrap breaks it. `model/` includes that configuration and reports the
+before bootstrap breaks it. `crates/model/` includes that configuration and reports the
 counterexample path, so the consequence of breaking the invariant is a checked
 result rather than a prediction. Enforcing the invariant is the responsibility
 of whoever builds the image, not of this daemon.

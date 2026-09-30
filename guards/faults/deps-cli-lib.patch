@@ -1,6 +1,0 @@
-diff --git a/microvms-cli/src/lib.rs b/microvms-cli/src/lib.rs
-new file mode 100644
---- /dev/null
-+++ b/microvms-cli/src/lib.rs
-@@ -0,0 +1 @@
-+// SPDX-License-Identifier: Apache-2.0

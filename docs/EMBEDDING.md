@@ -40,7 +40,7 @@ image = sandbox.build_image(
 The Node binding is the same pair: `wrapDockerfile(task, { workdir })` and
 `baseImageFromDockerfile(dockerfile)`, passed as `buildImage({ dockerfile,
 baseImage, … })`. Both are pure functions in
-`microvms-app/src/control/artifact.rs` and make no AWS call.
+`crates/microvms-app/src/control/artifact.rs` and make no AWS call.
 
 `wrap_dockerfile` keeps the task text verbatim and appends the stanza the
 default `microvm build` bakes, rendered by the same function, so the two cannot
@@ -88,7 +88,7 @@ microvm build --dockerfile Dockerfile --name my-task-image
 With no binary, `build` provisions the daemon itself: the release asset for
 the CLI's own version, verified and cached under the state directory. The
 `agentd_bytes` above come from the same chain through the bindings
-(`microvms-edges/src/provision.rs`). `provision_agentd_report()` returns the
+(`crates/microvms-edges/src/provision.rs`). `provision_agentd_report()` returns the
 bytes together with `.source`, `.verification`, `.path`, and `.sha256`, and
 Node has the same pair:
 
@@ -128,7 +128,7 @@ and enforcing it belongs to whoever builds the image — the daemon cannot.
 One thing never goes in the image: a secret. The image becomes a shared
 snapshot, so every VM launched from it sees the same bytes; per-VM credentials
 travel through `runHookPayload` at launch instead (the module docs of
-`microvms-app/src/control/artifact.rs`).
+`crates/microvms-app/src/control/artifact.rs`).
 
 ### From build inputs to an image ARN: `ensure_image`
 
@@ -203,21 +203,21 @@ token. What follows is the shape of the client, not the contract itself.
 
 **Bootstrap.** The platform delivers your `runHookPayload` string to the
 daemon's `/run` hook; agentd parses it as JSON and installs `agent_token`
-(`agentd/src/routes.rs:166-216`). The install is one-shot: a replay of the
+(`crates/agentd/src/routes.rs:166-216`). The install is one-shot: a replay of the
 identical token answers 200 (the platform may retry its own hook), a different
 token answers 409 and changes nothing. Until it lands, every control route
 answers 503 — not 404, not a dropped connection — so a client can distinguish
-"not yet bootstrapped" from "broken" (`agentd/src/auth.rs:62-80`). The payload
-is capped at 4096 bytes (`microvms-domain/src/constants.rs:83`).
+"not yet bootstrapped" from "broken" (`crates/agentd/src/auth.rs:62-80`). The payload
+is capped at 4096 bytes (`crates/microvms-domain/src/constants.rs:83`).
 
 **Auth.** Every `/v1/` route except `/v1/health` and `/v1/schema` takes
 `Authorization: Bearer <agent_token>` — the same token the payload delivered.
-Comparison is constant-time over bytes (`agentd/src/auth.rs:28`).
+Comparison is constant-time over bytes (`crates/agentd/src/auth.rs:28`).
 
 **Exec.** The client mints the `exec_id` and sends it in `POST /v1/exec/start`.
 That is what makes a retry safe: a start carrying a known id returns success
 without spawning a second child, decided under the registry lock
-(`agentd/src/exec.rs:364-367`), so a harness whose process died between sending
+(`crates/agentd/src/exec.rs:364-367`), so a harness whose process died between sending
 the start and reading the answer sends the identical start again and gets the
 original exec. `GET /v1/exec/{id}` polls, read-only, repeatable. `POST
 /v1/exec/{id}/ack` releases the buffered output and starts the collection
@@ -225,7 +225,7 @@ clock; a second ack is 409, because the first released it and a 200 with an
 empty body would read as "the command produced no output". Output lives until
 the ack, so nothing a slow reader has not seen is destroyed. `POST
 /v1/exec/{id}/kill` signals the process group, SIGTERM then SIGKILL after a
-grace period (`agentd/src/exec.rs:900-931`). `POST /v1/exec/{id}/stdin` writes
+grace period (`crates/agentd/src/exec.rs:900-931`). `POST /v1/exec/{id}/stdin` writes
 to a child that was started with `stdin: true` and carries the explicit EOF
 signal; an exec that never asked for stdin answers 409.
 
@@ -233,16 +233,16 @@ signal; an exec that never asked for stdin answers 409.
 a byte cursor. A reconnecting client passes the offset it read to and receives
 exactly what it has not seen; a reattach past the retained window gets an
 explicit `gap` event naming the missing byte range rather than silently
-skipping (`agentd/src/exec.rs:436-524`). The stream ends with a typed `exit`
+skipping (`crates/agentd/src/exec.rs:436-524`). The stream ends with a typed `exit`
 event, which is what distinguishes a finished command from a cut connection —
 the reason this is SSE and not a chunked byte stream.
 
 **Files.** `PUT`/`GET /v1/fs/file` move one file, streamed, with a mode
 applied at open. `PUT`/`GET /v1/fs/tar` move directory trees; extraction is
 confined by lexical resolution with symlink and bomb defenses and member/size
-caps (`agentd/src/fs.rs:4-41`), and a write that would push the filesystem
+caps (`crates/agentd/src/fs.rs:4-41`), and a write that would push the filesystem
 under the disk reserve is refused with 507 naming the real free space
-(`agentd/src/fs.rs:66-91`).
+(`crates/agentd/src/fs.rs:66-91`).
 
 **Health.** `GET /v1/health` is unauthenticated and reports version, bootstrap
 state, disk pressure, and the identity-repair flags — the conditions that are
@@ -256,9 +256,9 @@ the stream is cut, kill the process group when the harness's own deadline
 passes, and turn what came back into a shell exit code. The bindings provide
 it as one call, `Session.run_to_completion` in Python and
 `Session.runToCompletion` in Node, over `Session::run_to_completion` in
-`microvms-core` (`microvms-app/src/session/complete.rs`). The behavior is
-specified as BIND-6 through BIND-10 in `spec/core.symspec.json` and checked by
-the Stateright model in `model/src/run.rs`.
+`microvms-core` (`crates/microvms-app/src/session/complete.rs`). The behavior is
+specified as BIND-6 through BIND-10 in `verify/spec/core.symspec.json` and checked by
+the Stateright model in `crates/model/src/run.rs`.
 
 ```python
 def exec(self, command: str, timeout_sec: int | None = None) -> tuple[str, str, int]:
@@ -337,18 +337,18 @@ The daemon's endpoint sits behind the platform's proxy, and the proxy wants two
 headers on every request: `X-aws-proxy-auth` carrying a minted JWE, and
 `X-aws-proxy-port` naming which allowed port this request targets — omitting
 the second is rejected in a way that reads like a bad token
-(`microvms-app/src/session/proxy.rs:5-13`). The token comes from
+(`crates/microvms-app/src/session/proxy.rs:5-13`). The token comes from
 `CreateMicrovmAuthToken`, and the response's `authToken` is a **map of header
 name to value**, not a string; read it as a string and every request fails.
 
 The service caps a token at sixty minutes
-(`microvms-app/src/session/proxy.rs:63`). That is not a choice, and it is
+(`crates/microvms-app/src/session/proxy.rs:63`). That is not a choice, and it is
 shorter than a long agent run, so a client that mints once at construction
 expires mid-run with a rejection indistinguishable from a dead daemon. The
 pattern that works is minting inside the request path with a refresh interval
 well under the ceiling — this repo's clients refresh at half of it, thirty
 minutes, so a request in flight across the rollover still holds a token with
-about thirty minutes of life (`microvms-app/src/session/proxy.rs:29-37`). A
+about thirty minutes of life (`crates/microvms-app/src/session/proxy.rs:29-37`). A
 mint failure is retryable; treat it that way, because a control-plane throttle
 at minute thirty must not kill a healthy run.
 
@@ -688,17 +688,17 @@ so the rows are the generic needs.
 
 | Need | Who had it | agentd |
 | --- | --- | --- |
-| Start/poll/ack exec that outlives an auth-token ceiling | evaluation harnesses | caller-minted `exec_id`, idempotent start, read-only poll, explicit ack, TTL only after ack (`agentd/src/exec.rs`) |
-| Idempotent start under retry | evaluation harnesses | a known id returns success without spawning a second child (`agentd/src/exec.rs:364-367`) |
+| Start/poll/ack exec that outlives an auth-token ceiling | evaluation harnesses | caller-minted `exec_id`, idempotent start, read-only poll, explicit ack, TTL only after ack (`crates/agentd/src/exec.rs`) |
+| Idempotent start under retry | evaluation harnesses | a known id returns success without spawning a second child (`crates/agentd/src/exec.rs:364-367`) |
 | Per-exec env, cwd, user/group, timeout | evaluation harnesses | in the wire protocol and applied by the daemon; the child's environment starts empty, so the token never leaks into it |
-| A user by name, with its `HOME` | evaluation harnesses | `user`/`group` take a name the daemon resolves against the guest's `/etc/passwd` and `/etc/group`, and a user with a row gets `HOME`, `USER`, `LOGNAME` beneath the caller's env; an unknown name is `400 unknown_user` before anything spawns (`agentd/src/exec_start.rs`) |
+| A user by name, with its `HOME` | evaluation harnesses | `user`/`group` take a name the daemon resolves against the guest's `/etc/passwd` and `/etc/group`, and a user with a row gets `HOME`, `USER`, `LOGNAME` beneath the caller's env; an unknown name is `400 unknown_user` before anything spawns (`crates/agentd/src/exec_start.rs`) |
 | The image's `ENV` (a venv `PATH`, a `JAVA_HOME`) in the child | evaluation harnesses | opt-in `inherit_image_env`: the daemon's startup snapshot of its own environment, minus `AGENTD_*`, as the lowest layer; `Health.image_env_keys` says whether the daemon honours it |
 | Bash semantics without guessing the image | evaluation harnesses | `shell: "bash"`, resolved in the guest; a missing shell is `400 unknown_shell` rather than exit 127 |
-| File and directory-tree transfer with tar fidelity | evaluation harnesses | streamed file routes plus confined tar extraction (`agentd/src/fs.rs`) |
-| Per-instance credential bootstrap, no secret in the shared image | both | one-shot `runHookPayload` bootstrap with replay semantics (`agentd/src/routes.rs:166-216`) |
-| Lifecycle hooks answered so the platform can manage the VM | session servers | ready/validate/run/suspend/resume/terminate all served (`agentd/src/routes.rs:112-118`) |
+| File and directory-tree transfer with tar fidelity | evaluation harnesses | streamed file routes plus confined tar extraction (`crates/agentd/src/fs.rs`) |
+| Per-instance credential bootstrap, no secret in the shared image | both | one-shot `runHookPayload` bootstrap with replay semantics (`crates/agentd/src/routes.rs:166-216`) |
+| Lifecycle hooks answered so the platform can manage the VM | session servers | ready/validate/run/suspend/resume/terminate all served (`crates/agentd/src/routes.rs:112-118`) |
 | A liveness probe cheaper than an exec | session servers | unauthenticated `GET /v1/health` |
-| Live output streaming with resume | neither had it | SSE with byte-cursor resume and explicit gap events (`agentd/src/exec.rs:436-524`) |
+| Live output streaming with resume | neither had it | SSE with byte-cursor resume and explicit gap events (`crates/agentd/src/exec.rs:436-524`) |
 
 ### A harness exec in one call
 
@@ -740,23 +740,23 @@ library's rather than each harness's to rediscover.
 ## Configuration knobs
 
 Every `AGENTD_*` variable is read at startup by `Config::from_env`
-(`agentd/src/config.rs:116-152`); an unset or unparseable value keeps the
+(`crates/agentd/src/config.rs:116-152`); an unset or unparseable value keeps the
 default rather than refusing to boot, because a daemon that will not start
 strands the VM with no way in. Set them as `ENV` lines in your Dockerfile —
 the stanza already sets `AGENTD_PORT` and `AGENTD_LOG`.
 
 | Variable | Default | What it bounds |
 | --- | --- | --- |
-| `AGENTD_PORT` | `9000` | the port the control API and hooks listen on (`agentd/src/config.rs:15`) |
-| `AGENTD_LOG` | `info` | the tracing filter, standard `EnvFilter` syntax (`agentd/src/main.rs:91`) |
-| `AGENTD_MAX_BODY_BYTES` | 512 MiB | largest request body accepted on the wire (`agentd/src/config.rs:17-19`) |
-| `AGENTD_MAX_OUTPUT_BYTES` | 8 MiB | per-stream cap on captured exec output; exceeding it truncates and marks the result (`agentd/src/config.rs:25-27`) |
-| `AGENTD_OUTPUT_LINGER_SECS` | `5` | how long to keep reading pipes after the child exits, for grandchildren holding them (`agentd/src/config.rs:28-31`) |
-| `AGENTD_EXEC_TTL_SECS` | `900` | how long an acked exec entry is retained before collection (`agentd/src/config.rs:32-33`) |
-| `AGENTD_STREAM_BUFFER_BYTES` | 1 MiB | bytes of recent output kept for stream replay; a reattach past it gets a gap event (`agentd/src/config.rs:41-45`) |
-| `AGENTD_STREAM_CHANNEL_CAPACITY` | `256` | slots in an exec's live fan-out channel; a lagging subscriber re-reads the ring instead of losing output (`agentd/src/config.rs:46-49`) |
-| `AGENTD_SSE_KEEPALIVE_SECS` | `15` | interval between SSE keep-alive comments, so a silent exec does not look like a dead connection (`agentd/src/config.rs:50-53`) |
-| `AGENTD_MAX_STDIN_WRITE_BYTES` | 1 MiB | largest single decoded stdin write (`agentd/src/config.rs:54-57`) |
-| `AGENTD_DISK_RESERVE_BYTES` | 256 MiB | free bytes a write target must keep; a write that would cross it is refused with 507. Zero disables the guard (`agentd/src/config.rs:63-69`) |
-| `AGENTD_REPAIR_IDENTITY` | `true` | whether to replace image-derived identity at the first successful run hook, because N VMs restored from one snapshot share machine-id, hostname, and boot_id. `0`/`false`/`no`/`off` opt out (`agentd/src/config.rs:70-78`) |
-| `AGENTD_HOOK_HANDLER_TIMEOUT_SECS` | `20` | how long one handler may run before its process group is killed; clamped to 1–55 so it stays under the image's hook timeout (`agentd/src/config.rs:84-88`) |
+| `AGENTD_PORT` | `9000` | the port the control API and hooks listen on (`crates/agentd/src/config.rs:15`) |
+| `AGENTD_LOG` | `info` | the tracing filter, standard `EnvFilter` syntax (`crates/agentd/src/main.rs:91`) |
+| `AGENTD_MAX_BODY_BYTES` | 512 MiB | largest request body accepted on the wire (`crates/agentd/src/config.rs:17-19`) |
+| `AGENTD_MAX_OUTPUT_BYTES` | 8 MiB | per-stream cap on captured exec output; exceeding it truncates and marks the result (`crates/agentd/src/config.rs:25-27`) |
+| `AGENTD_OUTPUT_LINGER_SECS` | `5` | how long to keep reading pipes after the child exits, for grandchildren holding them (`crates/agentd/src/config.rs:28-31`) |
+| `AGENTD_EXEC_TTL_SECS` | `900` | how long an acked exec entry is retained before collection (`crates/agentd/src/config.rs:32-33`) |
+| `AGENTD_STREAM_BUFFER_BYTES` | 1 MiB | bytes of recent output kept for stream replay; a reattach past it gets a gap event (`crates/agentd/src/config.rs:41-45`) |
+| `AGENTD_STREAM_CHANNEL_CAPACITY` | `256` | slots in an exec's live fan-out channel; a lagging subscriber re-reads the ring instead of losing output (`crates/agentd/src/config.rs:46-49`) |
+| `AGENTD_SSE_KEEPALIVE_SECS` | `15` | interval between SSE keep-alive comments, so a silent exec does not look like a dead connection (`crates/agentd/src/config.rs:50-53`) |
+| `AGENTD_MAX_STDIN_WRITE_BYTES` | 1 MiB | largest single decoded stdin write (`crates/agentd/src/config.rs:54-57`) |
+| `AGENTD_DISK_RESERVE_BYTES` | 256 MiB | free bytes a write target must keep; a write that would cross it is refused with 507. Zero disables the guard (`crates/agentd/src/config.rs:63-69`) |
+| `AGENTD_REPAIR_IDENTITY` | `true` | whether to replace image-derived identity at the first successful run hook, because N VMs restored from one snapshot share machine-id, hostname, and boot_id. `0`/`false`/`no`/`off` opt out (`crates/agentd/src/config.rs:70-78`) |
+| `AGENTD_HOOK_HANDLER_TIMEOUT_SECS` | `20` | how long one handler may run before its process group is killed; clamped to 1–55 so it stays under the image's hook timeout (`crates/agentd/src/config.rs:84-88`) |

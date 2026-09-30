@@ -180,7 +180,7 @@ def drive_closed_output(cli: Cli, launched: Envelope, results: Results) -> None:
                 plane.terminate_microvm(microvmIdentifier=vm)
 
 
-#: The `@live` scenario in `microvms-cli/tests/features/closed_output.feature` this suite runs.
+#: The `@live` scenario in `crates/microvms-cli/tests/features/closed_output.feature` this suite runs.
 BDD_LIVE_SCENARIO = "a streamed exec stops when its stdout reader closes"
 
 

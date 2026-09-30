@@ -16,7 +16,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
-# The wheel and venv the typed-consumer gate builds. `microvms-py/microvms.pyi` is the one
+# The wheel and venv the typed-consumer gate builds. `bindings/microvms-py/microvms.pyi` is the one
 # generated Python artifact that IS committed — it is the thing the drift gate compares
 # against — but the wheel built to prove it reaches a checker through PEP 561 is scratch,
 # and a 200 MB debug wheel is not something to offer a reviewer.
@@ -25,18 +25,18 @@ dist-wheel/
 .venv-bindings/
 # The napi-rs build outputs. `napi build --platform` writes the compiled addon plus a
 # generated loader and type declarations beside `package.json`, all three derived from
-# `microvms-js/src/`. The addon and the loader stay out: committing them would commit one
+# `bindings/microvms-js/src/`. The addon and the loader stay out: committing them would commit one
 # platform's binary into a repo other platforms clone. `index.d.ts` is committed, the way
-# `microvms-py/microvms.pyi` is: it is the same on every platform, the docs site's TypeScript
+# `bindings/microvms-py/microvms.pyi` is: it is the same on every platform, the docs site's TypeScript
 # reference is generated from it, and `mise run dts:check` fails when it drifts from the source.
-microvms-js/*.node
-microvms-js/index.js
-microvms-js/node_modules/
+bindings/microvms-js/*.node
+bindings/microvms-js/index.js
+bindings/microvms-js/node_modules/
 # One package directory per entry in `package.json`'s `napi.targets`, written by
 # `napi create-npm-dirs` and filled by `napi artifacts`. Derived in full — name, `os`,
 # `cpu`, `libc`, and the inherited license and repository all come from the root
 # manifest — so the target list is the source and these are its output.
-microvms-js/npm/
+bindings/microvms-js/npm/
 sbom/
 docs/.repomix/
 docs/.packets/

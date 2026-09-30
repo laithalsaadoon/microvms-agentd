@@ -67,9 +67,9 @@ for the service this project drives.
 | Interface | Install | First example |
 |---|---|---|
 | CLI | `cargo binstall microvms-cli --no-confirm` | [Run an agent below](#run-a-coding-agent-in-a-sandbox) |
-| Python 3.9+ | `pip install microvms` | [Python quickstart](microvms-py/README.md) |
-| Node 22.13+ | `npm install @theagenticguy/microvms` | [JavaScript / TypeScript quickstart](microvms-js/README.md) |
-| Rust | `cargo add microvms-core` | [Rust quickstart](microvms-core/README.md) |
+| Python 3.9+ | `pip install microvms` | [Python quickstart](bindings/microvms-py/README.md) |
+| Node 22.13+ | `npm install @theagenticguy/microvms` | [JavaScript / TypeScript quickstart](bindings/microvms-js/README.md) |
+| Rust | `cargo add microvms-core` | [Rust quickstart](crates/microvms-core/README.md) |
 
 The CLI command requires [cargo-binstall](https://github.com/cargo-bins/cargo-binstall).
 Without it, download a CLI binary for your OS from
@@ -214,7 +214,7 @@ Both print `hello from a sandbox` and request VM termination. Check the cleanup
 report for failures or undeleted resources. For complete setup, agent prompts
 via `AgentVm`, file transfer, and streaming, see the
 [SDK guide](https://laithalsaadoon.github.io/microvms-agentd/learn/tutorial/from-code/).
-Rust has a [complete Cargo example](microvms-core/README.md).
+Rust has a [complete Cargo example](crates/microvms-core/README.md).
 
 ## Sandbox boundaries and cleanup
 

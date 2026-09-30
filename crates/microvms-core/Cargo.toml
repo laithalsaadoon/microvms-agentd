@@ -1,0 +1,136 @@
+[package]
+name = "microvms-core"
+version = "0.10.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = true
+description = "The MicroVMs control-plane and in-VM client: every trap closure, the cost engine, the sizing model"
+readme = "README.md"
+keywords = ["microvms", "lambda", "aws", "sandbox", "microvm"]
+categories = ["api-bindings", "virtualization"]
+
+# The composition root (ARCH-8): the crates below, and nothing else. `verify/arch/placement.toml`
+# records this set, and `crates/microvms-cli/tests/dependency_direction.rs` fails on a crate added
+# here. A dependency that does work belongs in the crate that does it: a rule in
+# `microvms-domain`, a use case in `microvms-app`, an I/O implementation in `microvms-edges`.
+[dependencies]
+# The wire contract, shared with the daemon rather than mirrored (ARCH-2), and re-exported so
+# a consumer names wire types through this crate.
+protocol = { package = "microvms-protocol", version = "0.10.0", path = "../protocol" }
+# The rules and values, which do no I/O (ARCH-6).
+microvms-domain = { version = "0.10.0", path = "../microvms-domain" }
+# The use cases, written against ports (ARCH-7).
+microvms-app = { version = "0.10.0", path = "../microvms-app" }
+# The production port implementations, which `prelude` wires into the use cases.
+microvms-edges = { version = "0.10.0", path = "../microvms-edges" }
+
+[features]
+# The shared test doubles in `microvms_core::testing`, for a dependent's `[dev-dependencies]`
+# only. Resolver 3 keeps a dev-only feature out of a normal build, so nothing shipped carries
+# them.
+test-support = ["microvms-app/test-support"]
+
+[dev-dependencies]
+# The shared test doubles, named as `microvms_app::testing` in this crate's own tests. Not a
+# dependency on this crate with `test-support`: `cargo publish` resolves a versioned
+# self-dependency against the registry, where the feature doesn't exist yet, and
+# `tools/check-publishable.py` refuses one.
+microvms-app = { version = "0.10.0", path = "../microvms-app", features = ["test-support"] }
+# What the integration tests build their fixtures from: the daemon's wire payloads, the tunnel's
+# WebSocket and Noise handshake, a context's zip and hash, and the scratch directories' names.
+# Test-only, so outside the placement set, which covers what ships.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+futures-util = "0.3"
+base64 = "0.23"
+const-hex = "1.19"
+sha2 = "0.11"
+getrandom = "0.4"
+zip = { version = "8.6", default-features = false, features = ["deflate"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = [
+    "connect",
+    "handshake",
+    "rustls-tls-webpki-roots",
+] }
+snow = { version = "0.10", default-features = false, features = [
+    "default-resolver",
+    "use-curve25519",
+    "use-chacha20poly1305",
+    "use-blake2",
+    "use-sha2",
+    "use-getrandom",
+] }
+# Deterministic network simulation for the reconnect-at-cursor tests, mirroring
+# the daemon's dev-dependencies so both sides of the protocol are exercised under
+# the same simulated clock.
+turmoil = "0.7.2"
+hyper = { version = "1.11", features = ["client", "server", "http1"] }
+hyper-util = { version = "0.1", features = [
+    "client",
+    "client-legacy",
+    "server",
+    "tokio",
+] }
+# The behavior specs for the IMAGE requirements (#220, #221), run-to-completion (BIND-6..10,
+# #222), and daemon provisioning (BIND-17..20, #219): Gherkin scenarios in `tests/features/`,
+# each run by its own `harness = false` target, tagged with the requirement each one verifies.
+# The same pin and features as the CLI's.
+cucumber = { version = "0.23", features = ["output-junit"] }
+# The fuzz harnesses over Dockerfile text, build contexts, run-to-completion's scripted faults
+# (`tests/run_to_completion_fuzz.rs`), and the provisioning parsers (`src/provision_fuzz.rs`).
+# `bolero::check!` runs as an ordinary `#[test]` on stable and as a coverage-guided target
+# under `cargo bolero test`.
+bolero = "0.13"
+# The same tokio with a runtime, for the Gherkin runners' `main` and the README's
+# `#[tokio::main]` doctest: the library itself does not choose a runtime, so `rt` and
+# `rt-multi-thread` are test-only features here.
+tokio = { version = "1.53", features = [
+    "rt",
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "time",
+    "sync",
+    "io-util",
+] }
+# Temp state directories for the provisioning tests: random names, cleanup on drop.
+tempfile = "3"
+# The capability table the case corpus names rows of (`tests/parity_cases.rs`). The CLI's
+# pin, which reads `microvm.toml` with it.
+toml = "1"
+
+# An independent oracle for the `.dockerignore` matcher in `tests/context_fuzz.rs`: the
+# fuzzed matcher is hand-written, and the oracle translates the same patterns to regexes the
+# way moby's patternmatcher does. Already in the tree through the workspace.
+regex = "1.13"
+
+[[test]]
+name = "bdd_wrap"
+harness = false
+
+[[test]]
+name = "bdd_provision"
+harness = false
+
+[[test]]
+name = "bdd_run_to_completion"
+harness = false
+
+# The behavior spec for BIND-11..13 (#227), against the core the bindings wrap.
+[[test]]
+name = "bdd_posture"
+harness = false
+
+# The behavior spec for BIND-14..16 (#223): size-class selection and preflight.
+[[test]]
+name = "bdd_preflight"
+harness = false
+
+[[test]]
+name = "bdd_ensure"
+harness = false
+
+[lints.rust]
+# No hand-written `unsafe` in this crate; a future one is a build error, not a scan finding.
+unsafe_code = "forbid"

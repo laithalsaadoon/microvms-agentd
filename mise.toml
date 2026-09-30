@@ -21,7 +21,7 @@ rust = "stable"
 # Every other tool is an exact version, and mise.lock records what each one resolved to (#315).
 # They were `latest`, which meant a contributor's ruff or semgrep was whatever that machine had
 # last installed while CI fetched a newer one, and a finding could appear on one side only.
-# `./scripts/check-ci-parity.py` (`ci:parity`, in `check` and in CI's `security` job) fails
+# `./tools/check-ci-parity.py` (`ci:parity`, in `check` and in CI's `security` job) fails
 # when ci.yml runs a different version of ruff, semgrep, Node's major, actionlint, or any of
 # the checksummed downloads below. Bumping one of those means this line and ci.yml together,
 # plus the sha256 beside a checksummed download.
@@ -104,7 +104,7 @@ description = "Format check + clippy + ruff, no writes"
 # whole life not linting most of the repo.
 #
 # ruff discovers files by **extension** when it walks a directory, and every gate in
-# `scripts/` *used to be* an extensionless PEP 723 script. So `ruff check scripts` reported
+# `tools/` *used to be* an extensionless PEP 723 script. So `ruff check scripts` reported
 # "No Python files found under the given path(s)" as a *warning* and exited 0: measured, the
 # two ruff lines here were reading `conformance/run_rs.py` and nothing else, for as long as
 # they had existed. That is a gate passing over an empty set, which is the failure mode
@@ -113,25 +113,25 @@ description = "Format check + clippy + ruff, no writes"
 #
 # Two fixes were tried, and the second is why this comment is shorter than it was. Naming each
 # script here worked for exactly the files someone remembered. `ruff.toml`'s
-# `extend-include = ["scripts/*"]` was structural but taught only ruff — the same blindness
+# `extend-include = ["tools/*"]` was structural but taught only ruff — the same blindness
 # then turned up in `check-license-headers.py`, which at the time enumerated only
 # `git ls-files "*.rs" "*.py"` (it covers six extensions now)
 # and so had never seen the scripts either (issue #32). The gates are now named
-# `scripts/*.py`, which every extension-based enumerator in this repo already understands, and
+# `tools/*.py`, which every extension-based enumerator in this repo already understands, and
 # `extend-include` is gone. They keep their shebangs and their executable bit, so
-# `./scripts/check-model-drift.py` is still a direct invocation.
+# `./tools/check-model-drift.py` is still a direct invocation.
 #
-# `./scripts/check-lint-coverage.py` is the guard over that, and it is a separate gate on
+# `./tools/check-lint-coverage.py` is the guard over that, and it is a separate gate on
 # purpose: `ruff check .` would still print "All checks passed!" over nothing. It compares
 # ruff's own `--show-files` answer against every tracked file that is Python by extension
 # **or by shebang**, and names any shortfall. That shebang half is what enforces the rename
-# rather than merely recommending it: a new extensionless script under `scripts/` is reported
+# rather than merely recommending it: a new extensionless script under `tools/` is reported
 # by name as unlinted, measured. Offline, free, milliseconds. Proven able to fail by pointing
 # it at an empty directory, which is the original defect reproduced deliberately.
 run = [
   "cargo fmt --all -- --check",
   "cargo clippy --all-targets -- -D warnings",
-  "./scripts/check-lint-coverage.py",
+  "./tools/check-lint-coverage.py",
   "ruff check .",
   "ruff format --check .",
   "terraform -chdir=conformance/infra fmt -check",
@@ -154,11 +154,11 @@ run = [
   # --severity WARNING drops the INFO tier: its findings here are std::env::args
   # in a CLI and TempDir in tests — idioms, not defects — and a gate that cries
   # wolf gets --no-verify'd. WARNING and ERROR still fail the run.
-  "semgrep scan --config p/rust --config p/secrets --severity WARNING --severity ERROR --error --quiet --metrics=off protocol/src agentd/src model/src microvms-domain/src microvms-app/src microvms-edges/src microvms-core/src microvms-cli/src microvms-py/src microvms-js/src",
+  "semgrep scan --config p/rust --config p/secrets --severity WARNING --severity ERROR --error --quiet --metrics=off crates/protocol/src crates/agentd/src crates/model/src crates/microvms-domain/src crates/microvms-app/src crates/microvms-edges/src crates/microvms-core/src crates/microvms-cli/src bindings/microvms-py/src bindings/microvms-js/src",
   "betterleaks git .",
   # The header check's own floor, in throwaway repos: an empty `git ls-files` must fail.
-  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider scripts/test_license_headers.py",
-  "./scripts/check-license-headers.py",
+  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider tools/test_license_headers.py",
+  "./tools/check-license-headers.py",
   "cargo deny check",
   "actionlint",
 ]
@@ -170,7 +170,7 @@ description = "CycloneDX + SPDX SBOMs into sbom/ (gitignored; CI publishes them 
 # someone else's dependency tree), target/ and node_modules/ are build output.
 run = """
 mkdir -p sbom
-syft . --exclude './conformance/infra/.terraform/**' --exclude './target/**' --exclude './microvms-js/node_modules/**' \
+syft . --exclude './conformance/infra/.terraform/**' --exclude './target/**' --exclude './bindings/microvms-js/node_modules/**' \
   --exclude './site/node_modules/**' --exclude './site/dist/**' \
   -o cyclonedx-json=sbom/microvms-agentd.cdx.json \
   -o spdx-json=sbom/microvms-agentd.spdx.json -q
@@ -195,7 +195,7 @@ depends = ["sbom"]
 # describe nothing this repository installs or ships.
 run = [
   "grype sbom:sbom/microvms-agentd.cdx.json --fail-on high -q --vex .vex/microvms-agentd.openvex.json",
-  "TRIVY_VEX=.vex/microvms-agentd.openvex.json trivy fs --scanners vuln,misconfig,secret --skip-dirs conformance/infra/.terraform --skip-dirs target --skip-dirs site/node_modules --skip-dirs site/dist --skip-dirs microvms-js/node_modules --exit-code 1 --severity HIGH,CRITICAL --ignorefile .config/trivyignore.yaml -q .",
+  "TRIVY_VEX=.vex/microvms-agentd.openvex.json trivy fs --scanners vuln,misconfig,secret --skip-dirs conformance/infra/.terraform --skip-dirs target --skip-dirs site/node_modules --skip-dirs site/dist --skip-dirs bindings/microvms-js/node_modules --exit-code 1 --severity HIGH,CRITICAL --ignorefile .config/trivyignore.yaml -q .",
   # `--config` is required, not decorative: osv-scanner applies a config file only to the
   # lockfiles in its own directory, so without it the root file governs Cargo.lock and
   # nothing governs site/pnpm-lock.yaml (measured 2026-09-05: the extract-zip ignore was
@@ -212,13 +212,13 @@ run = "cargo test --all"
 # live-green — both suites passed against real AWS on the same commit (Python oracle
 # 56/56, Rust CLI 38/38), which is what made the oracle's job finished rather than
 # merely duplicated. The Python left in the tree is tooling and binding tests, not a client:
-# `conformance/run_rs.py` drives the Rust CLI, the six `scripts/` gates read botocore's model,
-# the Pricing API, the account, and the pyo3 surface, and `microvms-py/tests` covers the
+# `conformance/run_rs.py` drives the Rust CLI, the six `tools/` gates read botocore's model,
+# the Pricing API, the account, and the pyo3 surface, and `bindings/microvms-py/tests` covers the
 # bindings (run in CI against a built wheel, not here — it needs `maturin develop`).
 #
 # Every one of them is linted by `fmt` and `lint`, which is newly true rather than restated:
 # eighteen files are what `ruff.toml` reaches now, against the one file the two ruff lines
-# used to see. `./scripts/check-lint-coverage.py` prints the count on every run, which is what
+# used to see. `./tools/check-lint-coverage.py` prints the count on every run, which is what
 # keeps this number from drifting the way the live-suite counts above did.
 
 [tasks."toolchain:id"]
@@ -270,16 +270,18 @@ description = "Fail if the committed schema no longer matches what is served"
 # serves.
 #
 # `toolchain:id` says how mise skips it and why the list is complete. The generator is
-# `agentd/src/bin/schema.rs` over the daemon's and the protocol's serde types, so the Rust
+# `crates/agentd/src/bin/schema.rs` over the daemon's and the protocol's serde types, so the Rust
 # entries hold it, and the one file it reads at run time is the committed schema.
 sources = [
   "Cargo.toml",
   "Cargo.lock",
   "rust-toolchain.toml",
   ".cargo/config.toml",
-  "*/Cargo.toml",
-  "*/build.rs",
-  "*/src/**/*",
+  "crates/*/Cargo.toml",
+  "crates/*/src/**/*",
+  "bindings/*/Cargo.toml",
+  "bindings/*/build.rs",
+  "bindings/*/src/**/*",
   "target/toolchain-id",
   "docs/schema.json",
 ]
@@ -298,8 +300,8 @@ description = "docs/schema.json against the previous release tag's copy: no rout
 # The unit tests run first, for `trace:check`'s reason: they run the real script over the
 # v0.8.0, v0.9.0 and v0.10.0 schemas and over copies with one break seeded in each.
 run = [
-  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider scripts/test_check_schema_compat.py",
-  "./scripts/check-schema-compat.py",
+  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider tools/test_check_schema_compat.py",
+  "./tools/check-schema-compat.py",
 ]
 
 [tasks.manifest]
@@ -327,9 +329,11 @@ sources = [
   "Cargo.lock",
   "rust-toolchain.toml",
   ".cargo/config.toml",
-  "*/Cargo.toml",
-  "*/build.rs",
-  "*/src/**/*",
+  "crates/*/Cargo.toml",
+  "crates/*/src/**/*",
+  "bindings/*/Cargo.toml",
+  "bindings/*/build.rs",
+  "bindings/*/src/**/*",
   "target/toolchain-id",
   "docs/manifest.json",
 ]
@@ -344,21 +348,21 @@ diff -u docs/manifest.json "$tmp"
 """
 
 [tasks.core-api]
-description = "Regenerate parity/core-api.json, every public path of microvms-core"
+description = "Regenerate verify/parity/core-api.json, every public path of microvms-core"
 # The core surface `parity:check` reads (#271). Core re-exports most of its API from the crates
 # below it, so this builds the rustdoc JSON of each and stitches them; the script's docstring
 # has why it's a committed snapshot and how it builds on stable.
-run = "./scripts/generate-core-api.py"
+run = "./tools/generate-core-api.py"
 
 [tasks."core-api:check"]
-description = "Fail if parity/core-api.json no longer matches core's public surface"
+description = "Fail if verify/parity/core-api.json no longer matches core's public surface"
 # `schema:check`'s argument, pointed at the snapshot `parity:check` reads for core: a stale one
 # holds the table to a surface nobody ships. The stitcher's unit tests run first; they build a
 # two-crate fixture workspace with the real toolchain, so a rustdoc that changed under the pin
 # fails there, naming its format_version, before the gate reads core through it. It documents
 # the five crates alone, no dependency docs: measured 2026-09-28, about 5 s warm. CI's `rust`
 # job runs both. The JSON builds into `target/rustdoc-json`, not the shared target, and
-# `scripts/rustdoc_walk.py`'s `build` says why.
+# `tools/rustdoc_walk.py`'s `build` says why.
 #
 # `toolchain:id` says how mise skips it and why the list is complete. Its sources are the five
 # crates (in the Rust entries), the toolchain, whose rustdoc writes the JSON and builds the
@@ -369,24 +373,26 @@ sources = [
   "Cargo.lock",
   "rust-toolchain.toml",
   ".cargo/config.toml",
-  "*/Cargo.toml",
-  "*/build.rs",
-  "*/src/**/*",
+  "crates/*/Cargo.toml",
+  "crates/*/src/**/*",
+  "bindings/*/Cargo.toml",
+  "bindings/*/build.rs",
+  "bindings/*/src/**/*",
   "target/toolchain-id",
-  "parity/core-api.json",
-  "scripts/generate-core-api.py",
-  "scripts/rustdoc_walk.py",
-  "scripts/test_rustdoc_walk.py",
+  "verify/parity/core-api.json",
+  "tools/generate-core-api.py",
+  "tools/rustdoc_walk.py",
+  "tools/test_rustdoc_walk.py",
 ]
 depends = ["toolchain:id"]
 outputs = { auto = true }
 run = [
-  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider scripts/test_rustdoc_walk.py",
-  "./scripts/generate-core-api.py --check",
+  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider tools/test_rustdoc_walk.py",
+  "./tools/generate-core-api.py --check",
 ]
 
 [tasks."parity:check"]
-description = "Every capability in parity/capabilities.toml resolves on core, the CLI, Python and TypeScript, and every function, method and command it holds has a row"
+description = "Every capability in verify/parity/capabilities.toml resolves on core, the CLI, Python and TypeScript, and every function, method and command it holds has a row"
 # The table says, for each capability, what each surface calls it or why it lacks it (#271); the
 # script's docstring has the rules. It reads the committed surfaces (core-api.json, manifest.json,
 # microvms.pyi, index.d.ts), so the gates that hold those to the code (`core-api:check`,
@@ -395,15 +401,15 @@ description = "Every capability in parity/capabilities.toml resolves on core, th
 # pins, so a cold cache downloads them once. The self-test runs first, for `model:check`'s
 # reason. CI's `rust` job runs both.
 run = [
-  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider scripts/test_check_parity.py",
-  "./scripts/check-parity.py",
+  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider tools/test_check_parity.py",
+  "./tools/check-parity.py",
 ]
 
 [tasks.stubs]
-description = "Regenerate microvms-py/microvms.pyi from the pyo3 surface"
+description = "Regenerate bindings/microvms-py/microvms.pyi from the pyo3 surface"
 # `stubs:check`'s target, for its reason, so the two share one build.
 env = { CARGO_TARGET_DIR = "{{config_root}}/target/stubs" }
-run = "./scripts/generate-py-stubs.py"
+run = "./tools/generate-py-stubs.py"
 
 [tasks."stubs:check"]
 description = "Fail if the committed Python stub no longer matches the pyo3 surface"
@@ -441,26 +447,28 @@ sources = [
   "Cargo.lock",
   "rust-toolchain.toml",
   ".cargo/config.toml",
-  "*/Cargo.toml",
-  "*/build.rs",
-  "*/src/**/*",
+  "crates/*/Cargo.toml",
+  "crates/*/src/**/*",
+  "bindings/*/Cargo.toml",
+  "bindings/*/build.rs",
+  "bindings/*/src/**/*",
   "target/toolchain-id",
-  "microvms-py/microvms.pyi",
-  "microvms-py/pyproject.toml",
-  "scripts/generate-py-stubs.py",
+  "bindings/microvms-py/microvms.pyi",
+  "bindings/microvms-py/pyproject.toml",
+  "tools/generate-py-stubs.py",
 ]
 depends = ["toolchain:id"]
 outputs = { auto = true }
 env = { CARGO_TARGET_DIR = "{{config_root}}/target/stubs" }
-run = "./scripts/generate-py-stubs.py --check"
+run = "./tools/generate-py-stubs.py --check"
 
 [tasks.dts]
-description = "Regenerate microvms-js/index.d.ts from the napi-rs surface"
+description = "Regenerate bindings/microvms-js/index.d.ts from the napi-rs surface"
 # `napi build` is the only thing that writes this file: napi-derive records each `#[napi]` item's
 # TypeScript shape at compile time and the CLI stitches them together, with the SPDX header from
-# `microvms-js/package.json`'s `napi.dtsHeader`. It also writes `index.js` and the platform `.node`
+# `bindings/microvms-js/package.json`'s `napi.dtsHeader`. It also writes `index.js` and the platform `.node`
 # addon beside it, both gitignored, so this is the same command `ci.yml`'s bindings job runs.
-run = "npx -y -p @napi-rs/cli@3 napi build --manifest-path Cargo.toml --package microvms-js --platform --output-dir . --cwd microvms-js"
+run = "npx -y -p @napi-rs/cli@3 napi build --manifest-path Cargo.toml --package microvms-js --platform --output-dir . --cwd bindings/microvms-js"
 
 [tasks."dts:check"]
 description = "Fail if the committed TypeScript declarations no longer match the napi-rs surface"
@@ -487,18 +495,18 @@ run = [
 set -euo pipefail
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
-npx -y -p @napi-rs/cli@3 napi build --manifest-path Cargo.toml --package microvms-js --platform --output-dir "$out" --cwd microvms-js >/dev/null
-if ! diff -u microvms-js/index.d.ts "$out/index.d.ts"; then
-  echo "microvms-js/index.d.ts is stale: run \`mise run dts\` and commit the result" >&2
+npx -y -p @napi-rs/cli@3 napi build --manifest-path Cargo.toml --package microvms-js --platform --output-dir "$out" --cwd bindings/microvms-js >/dev/null
+if ! diff -u bindings/microvms-js/index.d.ts "$out/index.d.ts"; then
+  echo "bindings/microvms-js/index.d.ts is stale: run \`mise run dts\` and commit the result" >&2
   exit 1
 fi
 ''',
-  "./scripts/check-dts-consumer.py",
+  "./tools/check-dts-consumer.py",
 ]
 
 [tasks.spec]
 description = "agentd.symspec.json: the daemon's six bootstrap and control-token requirements"
-# Covers `spec/agentd.symspec.json` only (AGENTD-1..6); `spec:core` covers the core document.
+# Covers `verify/spec/agentd.symspec.json` only (AGENTD-1..6); `spec:core` covers the core document.
 # Migrated from the v2 format to `docVersion: 3` on 2026-09-24, because symspec 1.x reads only
 # v3. `--strict` is not passed: in 1.x it is the full-verification gate (`data.verified`),
 # which fails on any requirement the decide tier could not compare, and neither document
@@ -506,7 +514,7 @@ description = "agentd.symspec.json: the daemon's six bootstrap and control-token
 #
 # Not in `check`'s dependency list: symspec is a global npm install plus a downloaded
 # embedding model, so a fresh clone should not fail on its absence.
-run = "./scripts/check-spec.sh spec/agentd.symspec.json"
+run = "./tools/check-spec.sh verify/spec/agentd.symspec.json"
 
 [tasks."spec:core"]
 description = "microvms-core's requirements: contradictions, coverage, and reachability"
@@ -521,7 +529,7 @@ description = "microvms-core's requirements: contradictions, coverage, and reach
 #
 # Out of `check`'s depends for the same reason `spec` is out. Verified 2026-09-24 with
 # symspec 1.2.1: 0 error findings (228 warn, 73 info) over 54 requirements.
-run = "./scripts/check-spec.sh spec/core.symspec.json --reachability-timeout-ms 5000"
+run = "./tools/check-spec.sh verify/spec/core.symspec.json --reachability-timeout-ms 5000"
 
 [tasks."model:check"]
 description = "Fail if a hardcoded API constraint no longer matches botocore's service model"
@@ -552,8 +560,8 @@ description = "Fail if a hardcoded API constraint no longer matches botocore's s
 # for the built binary, which is nothing beside the rest of `check`. `--rust-binary` exists
 # for anyone who wants that trade knowingly.
 run = [
-  "./scripts/check-model-drift.py",
-  "{{vars.pytest}} --with 'boto3>=1.40' --with 'pyyaml==6.0.3' pytest -n auto -q -p no:cacheprovider scripts/test_model_drift.py",
+  "./tools/check-model-drift.py",
+  "{{vars.pytest}} --with 'boto3>=1.40' --with 'pyyaml==6.0.3' pytest -n auto -q -p no:cacheprovider tools/test_model_drift.py",
 ]
 
 [tasks.build]
@@ -584,7 +592,7 @@ description = "The publish set is the intended one and every manifest can upload
 # It also asserts the publish set by equality, so a crate that quietly becomes publishable
 # fails here. `agentd` and `agentd-model` are `publish = false` on purpose and a diff that
 # flips either one has to say so.
-run = "./scripts/check-publishable.py"
+run = "./tools/check-publishable.py"
 
 [tasks."release:tag"]
 description = "Create and push a release tag, refusing a reused or stale one. THE way to release"
@@ -597,14 +605,14 @@ description = "Create and push a release tag, refusing a reused or stale one. TH
 #
 # So the control is here, before the tag exists: no reuse local or remote, a clean tree, HEAD at
 # main's tip, and `publish:check` against the tag.
-run = "./scripts/release-tag.sh"
+run = "./tools/release-tag.sh"
 
 # ── the changelog: fragments in changelog.d/, written into CHANGELOG.md at release ──
 #
 # CHANGELOG.md's `## Unreleased` was one list that every product PR appended to, so any two in
 # flight conflicted there. Each entry is a fragment now, a file of its own, and towncrier
 # (towncrier.toml) builds the release's section from them. All three tasks run
-# `./scripts/changelog.py`, whose PEP 723 header pins towncrier, so they and CI's step run one
+# `./tools/changelog.py`, whose PEP 723 header pins towncrier, so they and CI's step run one
 # version; the script's docstring has the rules.
 
 [tasks."changelog:check"]
@@ -615,20 +623,20 @@ description = "Every changelog.d/ fragment is well named and builds, and a branc
 # author. The unit tests run first, for `trace:check`'s reason: they build throwaway repos and
 # run the real script over them.
 run = [
-  "uv run python -m unittest discover -s scripts -p 'test_changelog.py'",
-  "./scripts/changelog.py check",
+  "uv run python -m unittest discover -s tools -p 'test_changelog.py'",
+  "./tools/changelog.py check",
 ]
 
 [tasks."changelog:draft"]
 description = "Print the next release's CHANGELOG.md section from changelog.d/, writing nothing"
-run = "./scripts/changelog.py draft"
+run = "./tools/changelog.py draft"
 
 [tasks."release:prepare"]
 description = "Write changelog.d/ into CHANGELOG.md as release X.Y.Z and remove the fragments (towncrier build), staged for the release PR"
 # Before `release:tag`, in the release PR that bumps the versions: the section it writes is the
 # one the tag publishes. It refuses a malformed fragment, a version that isn't semver, and a
 # build with nothing to render, which is what a second run finds.
-run = "./scripts/changelog.py build"
+run = "./tools/changelog.py build"
 
 [tasks."npm:check"]
 description = "The npm package's loader and glibc floor. Needs a built addon"
@@ -640,8 +648,8 @@ description = "The npm package's loader and glibc floor. Needs a built addon"
 # what a developer has locally; the release job adds the flag because that is the only place
 # all four exist. `ci.yml`'s bindings job runs this same pair.
 run = [
-  "./scripts/check-npm-loader.py",
-  "./scripts/check-addon-glibc.py microvms-js",
+  "./tools/check-npm-loader.py",
+  "./tools/check-addon-glibc.py bindings/microvms-js",
 ]
 
 [tasks."publish:dry-run"]
@@ -660,7 +668,7 @@ description = "Package and verify every publishable crate as if the others were 
 # staged is still dirty — because packaging uncommitted work verifies something that is not in
 # the repository. That is invisible in CI, where the checkout is clean by construction, and it
 # is the first thing this hits when run from a working branch.
-run = "./scripts/check-publishable.py --dry-run"
+run = "./tools/check-publishable.py --dry-run"
 
 [tasks."live:check"]
 description = "Fail if the live tier's own wiring is wrong. Offline and free"
@@ -675,7 +683,7 @@ description = "Fail if the live tier's own wiring is wrong. Offline and free"
 # `live:` prefixed but deliberately NOT in `live`'s own dependency list: a guard over the
 # tier's wiring belongs in the gate that runs every time, not in the tier it describes,
 # which runs when someone decides to spend money.
-run = "./scripts/check-live-wiring.py"
+run = "./tools/check-live-wiring.py"
 
 [tasks."conformance:self-test"]
 description = "The live suite's own helpers and their negative twins, against a stub CLI. Offline"
@@ -695,8 +703,8 @@ description = "Every task, fault id, path, file, CI job and code name AGENTS.md,
 # The unit tests run first, for `trace:check`'s reason: they build throwaway repos and run the
 # real script over them, so an extractor that stopped matching fails there first.
 run = [
-  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider scripts/test_check_agents_md.py",
-  "./scripts/check-agents-md.py",
+  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider tools/test_check_agents_md.py",
+  "./tools/check-agents-md.py",
 ]
 
 [tasks."targets:check"]
@@ -706,7 +714,7 @@ description = "Every build `check` runs with an environment of its own names a c
 # script declares rebuilds the unit in place and fails them with E0463. The test's docstring has
 # the rule, what it reads, and what it can't see. CI runs its steps one at a time and without
 # mise, so the race and this test are local; CI's `guards` job fires the test's seeded faults.
-run = "{{vars.pytest}} pytest -q -p no:cacheprovider scripts/test_check_targets.py"
+run = "{{vars.pytest}} pytest -q -p no:cacheprovider tools/test_check_targets.py"
 
 [tasks.check]
 description = "The full local gate — the definition of done"
@@ -750,15 +758,15 @@ description = "ci.yml's env and tool versions match mise.toml's, and ci/local.to
 # The unit tests run first, over fixture ci.yml and mise.toml pairs, so a rule that stopped
 # matching fails there before it reads this tree. The runner's tests clone throwaway repos.
 run = [
-  "{{vars.pytest}} --with 'pyyaml==6.0.3' pytest -n auto -q -p no:cacheprovider scripts/test_check_ci_parity.py scripts/test_ci_local.py",
-  "./scripts/check-ci-parity.py",
+  "{{vars.pytest}} --with 'pyyaml==6.0.3' pytest -n auto -q -p no:cacheprovider tools/test_check_ci_parity.py tools/test_ci_local.py",
+  "./tools/check-ci-parity.py",
 ]
 
 # ── ci:local: CI's Linux jobs, here (#315) ──────────────────────────────────
 #
 # Each `ci:<job>` task runs that CI job's own `run:` steps, in order, in a clone of a snapshot
 # of this worktree shaped like the job's checkout, with the workflow's env. `ci/local.toml` says
-# which jobs each task runs and why any step runs differently; `./scripts/ci-local.py`'s
+# which jobs each task runs and why any step runs differently; `./tools/ci-local.py`'s
 # docstring has the rest. `mise run ci:local` runs them all in parallel, each with its own
 # target directory, then prints every result and what stays CI-only. `mise run -c ci:local`
 # lets the rest finish when one fails.
@@ -770,31 +778,31 @@ run = [
 
 [tasks."ci:rust"]
 description = "CI's `rust` job (the ubuntu leg), in a shallow clone of a worktree snapshot"
-run = "./scripts/ci-local.py rust"
+run = "./tools/ci-local.py rust"
 
 [tasks."ci:security"]
 description = "CI's `security` job, in a full clone of a worktree snapshot with origin/main"
-run = "./scripts/ci-local.py security"
+run = "./tools/ci-local.py security"
 
 [tasks."ci:drift"]
 description = "CI's `drift` job, in a shallow clone of a worktree snapshot"
-run = "./scripts/ci-local.py drift"
+run = "./tools/ci-local.py drift"
 
 [tasks."ci:bindings"]
 description = "CI's `bindings` job, in a shallow clone of a worktree snapshot"
-run = "./scripts/ci-local.py bindings"
+run = "./tools/ci-local.py bindings"
 
 [tasks."ci:guards"]
 description = "CI's `guards` job on a pull request (the seeded faults it affects), in a full clone of a worktree snapshot with origin/main"
-run = "./scripts/ci-local.py guards"
+run = "./tools/ci-local.py guards"
 
 [tasks."ci:build"]
 description = "CI's `build` job (the static aarch64 binary), in a shallow clone of a worktree snapshot"
-run = "./scripts/ci-local.py build"
+run = "./tools/ci-local.py build"
 
 [tasks."ci:fuzz"]
 description = "fuzz.yml's jobs one after another, with its time bounds. Needs a nightly toolchain"
-run = "./scripts/ci-local.py fuzz"
+run = "./tools/ci-local.py fuzz"
 
 [tasks."ci:local"]
 description = "Every ci:<job> task in parallel, then their results and what stays CI-only"
@@ -807,13 +815,13 @@ depends = [
   "ci:build",
   "ci:fuzz",
 ]
-run = "./scripts/ci-local.py summary"
+run = "./tools/ci-local.py summary"
 
 [tasks."guards:list"]
-description = "Every seeded fault in guards/faults/*.toml still applies, and every Falsification note has an entry or is listed. No builds"
+description = "Every seeded fault in verify/guards/faults/*.toml still applies, and every Falsification note has an entry or is listed. No builds"
 # The cheap half of #274, and the half that runs on every push: it reads the registry, checks
 # each transform anchor and patch against the tree, and holds the Falsification notes in the
-# tests to guards/faults/*.toml or guards/unregistered.txt, which only shrinks from the merge
+# tests to verify/guards/faults/*.toml or verify/guards/unregistered.txt, which only shrinks from the merge
 # base with origin/main (CI passes the PR's base, as for the ratchet). The script's docstring
 # has the rules. ast-grep from `[tools]` reads the Rust and JS tests, stdlib `ast` the Python
 # ones, and the base is a local ref, so it's offline.
@@ -821,8 +829,8 @@ description = "Every seeded fault in guards/faults/*.toml still applies, and eve
 # The unit tests run first, for `trace:check`'s reason: they build throwaway repos with a fake
 # runner and drive every verdict through the real script, `fire` included.
 run = [
-  "{{vars.pytest}} --with 'pyyaml==6.0.3' pytest -n auto -q -p no:cacheprovider scripts/test_check_guards_fire.py",
-  "./scripts/check-guards-fire.py list",
+  "{{vars.pytest}} --with 'pyyaml==6.0.3' pytest -n auto -q -p no:cacheprovider tools/test_check_guards_fire.py",
+  "./tools/check-guards-fire.py list",
 ]
 
 [tasks."guards:fire"]
@@ -846,14 +854,14 @@ description = "Seed each registered fault in a scratch worktree and require its 
 #
 # cargo-mutants is here for the `fuzz_extract` exclusion's entry, at the `mutants` task's pin.
 tools = { "cargo:cargo-mutants" = "27.1.0" }
-run = "./scripts/check-guards-fire.py fire"
+run = "./tools/check-guards-fire.py fire"
 
 [tasks."mutants:check"]
 description = "The mutants wrapper's unit tests, and the skip sites and exclusions it hands cargo-mutants. No builds"
 # The cheap half of `mutants`, in `check` and in CI's `security` job. A fake cargo stands in for
 # cargo-mutants, and the CI job's own steps run from ci.yml over a throwaway repo, so a broken
 # wrapper or step fails here rather than as a green shard that mutated nothing.
-run = "{{vars.pytest}} --with 'pyyaml==6.0.3' pytest -n auto -q -p no:cacheprovider scripts/test_check_mutants.py"
+run = "{{vars.pytest}} --with 'pyyaml==6.0.3' pytest -n auto -q -p no:cacheprovider tools/test_check_mutants.py"
 
 [tasks.mutants]
 description = "Mutation-test the Rust this branch changes against origin/main; fails on a mutant its tests miss"
@@ -868,11 +876,11 @@ description = "Mutation-test the Rust this branch changes against origin/main; f
 # builds it from source (`[settings]` above says why), about three minutes the first time. CI
 # installs the same version's release binary by checksum.
 tools = { "cargo:cargo-mutants" = "27.1.0" }
-run = "./scripts/check-mutants.py"
+run = "./tools/check-mutants.py"
 
 [tasks."ratchet:check"]
-description = "Fail on new drift (layering, parity gaps, untraced requirements), and on a fix ratchet/drift.json doesn't record yet"
-# `ratchet/drift.json` is the count of places a driving adapter does work that belongs below it,
+description = "Fail on new drift (layering, parity gaps, untraced requirements), and on a fix verify/ratchet/drift.json doesn't record yet"
+# `verify/ratchet/drift.json` is the count of places a driving adapter does work that belongs below it,
 # of parity gaps (#271) and of untraced requirements (#295), each with the issue that removes it. A pass/fail rule can't say whether that count is
 # shrinking, and `tests/thinness.rs` showed it can move drift sideways: it pushed an upload into
 # an `aws s3 cp` subprocess it couldn't see. The script's docstring has the four rules.
@@ -884,26 +892,26 @@ description = "Fail on new drift (layering, parity gaps, untraced requirements),
 # The unit tests run first because they build throwaway workspaces and run both tools over them;
 # if a tool changed under the pin, the tests say so before the gate reads the tree through it.
 run = [
-  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider scripts/test_ratchet.py",
-  "./scripts/ratchet.py",
+  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider tools/test_ratchet.py",
+  "./tools/ratchet.py",
 ]
 
 [tasks."ratchet:update"]
-description = "Delete the entries ratchet/drift.json holds for drift that's gone. Never adds one"
+description = "Delete the entries verify/ratchet/drift.json holds for drift that's gone. Never adds one"
 # Adding an entry is a hand edit on purpose, and the check refuses one the base branch doesn't
 # have: new drift is fixed or recorded as a decision with its reason, never waved through.
-run = "./scripts/ratchet.py update"
+run = "./tools/ratchet.py update"
 
 [tasks."trace:check"]
 description = "Every traced requirement appears in the model, a Gherkin tag, a fuzz harness and a test that name it, and the code; docs/TRACEABILITY.md is current"
 # Offline: ast-grep from `[tools]` reads the Rust and Node tests, stdlib `ast` the Python ones,
-# and nothing comes from PyPI. `./scripts/check-trace.py --write` regenerates the matrix.
+# and nothing comes from PyPI. `./tools/check-trace.py --write` regenerates the matrix.
 #
 # The unit tests run first: they build throwaway trees and run the real parsers over them, so a
 # rule that stopped telling a test's doc from a comment fails there before it reads this tree.
 run = [
-  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider scripts/test_check_trace.py",
-  "./scripts/check-trace.py --check",
+  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider tools/test_check_trace.py",
+  "./tools/check-trace.py --check",
 ]
 
 [tasks."background:check"]
@@ -992,7 +1000,7 @@ description = "Fetch and verify a published daemon release with no gh and no tok
 # it's tagged, so before a tag pass an earlier one: `MICROVM_RELEASE_VERSION=0.10.0 mise run
 # live:release`. It isn't in `live`'s sequence because the conformance quickstart already
 # provisions the daemon the same way with `gh` logged out. The check before a release is
-# published is `microvms-edges/tests/release_bundle.rs`, which `release.yml` runs over the
+# published is `crates/microvms-edges/tests/release_bundle.rs`, which `release.yml` runs over the
 # bundle it just produced.
 run = 'env -u GITHUB_TOKEN -u GH_TOKEN GH_CONFIG_DIR="$(mktemp -d)" cargo test -p microvms-core --test live_release -- --ignored --nocapture'
 
@@ -1041,9 +1049,9 @@ description = "Fail if the pinned rate table no longer matches the AWS Pricing A
 # client's `pricing` module and that client is now git history. The pinned figures are
 # inlined there as literals — a deliberate second copy of `microvms-core`'s
 # `pinned_rates()`, since a drift check that imported the values it checks would compare
-# a table against itself. `scripts/check-live-rates.py --twin-only` runs that cross-check
+# a table against itself. `tools/check-live-rates.py --twin-only` runs that cross-check
 # alone, offline and free, and it also runs first on this path.
-run = "./scripts/check-live-rates.py"
+run = "./tools/check-live-rates.py"
 
 [tasks."live:verify-clean"]
 description = "Ask the account what leaked, rather than trusting teardown"
@@ -1055,7 +1063,7 @@ description = "Ask the account what leaked, rather than trusting teardown"
 # body for why the sequencing had to move out of `depends` entirely. This task stays a
 # plain one so `mise run live:verify-clean` remains the bare "what is in my account right
 # now" question, which is what someone reaches for after an interrupted run.
-run = "./scripts/verify-clean.py"
+run = "./tools/verify-clean.py"
 
 [tasks.live]
 description = "Every live suite, then an independent leak check. BILLABLE."
@@ -1129,7 +1137,7 @@ depends = ["build", "build:cli", "live:infra"]
 # it is per-clone and never committed: a marker claiming someone else's run is worse than
 # no marker.
 #
-# The path comes from `scripts/live-marker-path` rather than the literal `.git/…`, because
+# The path comes from `tools/live-marker-path` rather than the literal `.git/…`, because
 # in a **worktree** `.git` is a *file* and the redirect fails with "Not a directory" —
 # measured 2026-08-15, where a 228-second billable run ended `[live] ERROR task failed` on
 # this line with all 76 checks green and the account clean. `mise run marker:check` is the
@@ -1161,7 +1169,7 @@ mise run live:conformance-rs
 mise run live:rates
 verify_clean
 
-git rev-parse HEAD > "$(./scripts/check-live-wiring.py --marker-path)"
+git rev-parse HEAD > "$(./tools/check-live-wiring.py --marker-path)"
 echo 'recorded this commit as live-verified'
 """
 

@@ -1,0 +1,480 @@
+# ── wiring the table in (#271): the snapshot's format refusal, the ratchet's parity-gap ─
+
+# The stitcher's format_version refusal through the gate CI runs, beside its unit-tier entry
+# `rustdoc-walk-format-version`: a rustdoc whose format the walk wasn't written for is refused
+# by name before any path is read.
+[[fault]]
+id = "core-api-format-version"
+guard = "tools/generate-core-api.py"
+run = ["./tools/generate-core-api.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "and this walk was written for [59]"
+transform = { file = "tools/rustdoc_walk.py", replace = "ACCEPTED_FORMAT_VERSIONS = frozenset({60, 61})", with = "ACCEPTED_FORMAT_VERSIONS = frozenset({59})" }
+
+# `--exemptions`, the table-only mode the ratchet reads: an issue it can't read would print as
+# null and drop out of the count as a decision.
+[[fault]]
+id = "parity-exemptions-malformed-issue"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "ExemptionRecordTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_exemptions_mode_refuses_an_issue_it_cannot_read ("
+transform = { file = "tools/check-parity.py", replace = "    if problems:\n        print(\"parity: the table's exemptions can't be read:\")", with = "    if False:\n        print(\"parity: the table's exemptions can't be read:\")" }
+
+# The parity-gap collector. Its sentinel first: a collector that reads nothing, and one that reads
+# the decisions instead of the gaps, both fail against verify/ratchet/fixtures/sentinel/parity/.
+[[fault]]
+id = "ratchet-parity-gap-sentinel"
+guard = "verify/ratchet/fixtures/sentinel/expected.json"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "sentinel: the parity-gap collector found nothing"
+transform = { file = "tools/ratchet.py", replace = "records = json.loads(out.stdout)[\"exemptions\"]", with = "records = []" }
+
+[[fault]]
+id = "ratchet-parity-gap-sentinel-decisions"
+guard = "verify/ratchet/fixtures/sentinel/expected.json"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "sentinel: unexpected [parity-gap] ledger/core"
+transform = { file = "tools/ratchet.py", replace = "if record[\"issue\"] is not None", with = "if record[\"issue\"] is None" }
+
+[[fault]]
+id = "ratchet-parity-gap-unit"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "ParityGapTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_tracked_exemption_is_a_gap_and_a_decision_is_not ("
+transform = { file = "tools/ratchet.py", replace = "if record[\"issue\"] is not None", with = "if record[\"issue\"] is None" }
+
+[[fault]]
+id = "ratchet-parity-gap-unreadable-issue"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "ParityGapTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_issue_the_check_cannot_read_is_an_error ("
+transform = { file = "tools/check-parity.py", replace = "    if problems:\n        print(\"parity: the table's exemptions can't be read:\")", with = "    if False:\n        print(\"parity: the table's exemptions can't be read:\")" }
+
+# The real tree: an empty table, a gap the file doesn't record, and a gap closed (here, turned
+# into a decision) while the file still lists it.
+[[fault]]
+id = "ratchet-parity-gap-empty-table"
+guard = "tools/ratchet.py"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+# Any `fixed:` line: the first one in table order moves as #280 closes gaps, and a clean run
+# prints none.
+message = "fixed: [parity-gap] "
+transform = { file = "tools/ratchet.py", replace = "parity_table=ROOT / \"verify\" / \"parity\" / \"capabilities.toml\",", with = "parity_table=ROOT / \"verify\" / \"parity\" / \"fixtures\" / \"empty.toml\"," }
+
+[[fault]]
+id = "ratchet-parity-gap-new-drift"
+guard = "verify/ratchet/drift.json"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "new drift: [parity-gap] ensure-image/cli. Give that surface the capability"
+transform = { file = "verify/ratchet/drift.json", replace = "    { \"category\": \"parity-gap\", \"key\": \"ensure-image/cli\", \"issue\": 258 },\n", with = "" }
+
+[[fault]]
+id = "ratchet-parity-gap-fixed"
+guard = "verify/ratchet/drift.json"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "fixed: [parity-gap] ensure-image/cli"
+transform = { file = "verify/parity/capabilities.toml", replace = "reuse instead of calling core\", issue = \"#258\" }", with = "reuse instead of calling core\" }" }
+
+[[fault]]
+id = "ratchet-parity-gap-advice"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "RuleTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_rule_1_a_new_parity_gap_points_at_the_table ("
+transform = { file = "tools/ratchet.py", replace = "NEW_DRIFT_FIX.get(category, LAYERING_FIX)", with = "LAYERING_FIX" }
+
+# The drift page's history: a category a commit's ratchet didn't collect is null there, not 0.
+[[fault]]
+id = "ratchet-history-not-collected"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "HistoryTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_category_a_commit_did_not_collect_is_null_there ("
+transform = { file = "tools/ratchet-history.py", replace = "counts[category] if category in collected else None", with = "counts[category]" }
+
+[[fault]]
+id = "ratchet-history-untraced-null"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "HistoryTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_untraced_is_null_before_the_commit_that_collects_it ("
+transform = { file = "tools/ratchet-history.py", replace = "counts[category] if category in collected else None", with = "counts[category]" }
+
+# The untraced collector (#295). The real tree first: a traced key dropped from its group's file in
+# verify/spec/traced/ and a new requirement with no entry are both new drift, with rule 1's advice for
+# the category.
+[[fault]]
+id = "ratchet-untraced-traced-deletion"
+guard = "verify/ratchet/drift.json"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "new drift: [untraced] IMAGE-8. Trace the requirement: list its key in its group's file"
+transform = { file = "verify/spec/traced/IMAGE.toml", replace = "[IMAGE-8]\nissue = \"#221\"\n\n", with = "" }
+
+[[fault]]
+id = "ratchet-untraced-new-key"
+guard = "verify/ratchet/drift.json"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "new drift: [untraced] TRAP-14. Trace the requirement: list its key in its group's file"
+transform = { file = "verify/spec/core.symspec.json", replace = "    \"5fc0dbf7-83f6-4d1d-96ea-902bfacee0b1\": {\n", with = "    \"seeded-trap-14\": { \"key\": \"TRAP-14\", \"sentence\": \"A seeded requirement.\" },\n    \"5fc0dbf7-83f6-4d1d-96ea-902bfacee0b1\": {\n" }
+
+# A spec the collector can't read is an error, not every entry fixed.
+[[fault]]
+id = "ratchet-untraced-no-requirements"
+guard = "tools/ratchet.py"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "core.symspec.json has no requirements object"
+transform = { file = "verify/spec/core.symspec.json", replace = "  \"requirements\": {", with = "  \"requirement\": {" }
+
+# Its sentinel: a collector that finds nothing fails against verify/ratchet/fixtures/sentinel/spec/.
+[[fault]]
+id = "ratchet-untraced-sentinel"
+guard = "verify/ratchet/fixtures/sentinel/expected.json"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "sentinel: the untraced collector found nothing"
+transform = { file = "tools/ratchet.py", replace = "return Counter((\"untraced\", key) for key in keys - checked)", with = "return Counter()" }
+
+# Its unit tests: the fixture's exact keys, the empty-input refusals, the repo scope reading
+# every spec check-trace.py reads, and rule 1's advice.
+[[fault]]
+id = "ratchet-untraced-unit"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "UntracedTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_fixture_spec_yields_exactly_its_untraced_keys ("
+transform = { file = "tools/ratchet.py", replace = "for key in keys - checked)", with = "for key in keys)" }
+
+[[fault]]
+id = "ratchet-untraced-empty-spec"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "UntracedTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_one_empty_spec_is_refused_too ("
+transform = { file = "tools/ratchet.py", replace = "        if not found:\n", with = "        if False:\n" }
+
+[[fault]]
+id = "ratchet-untraced-empty-traced"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "UntracedTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_empty_traced_is_refused ("
+transform = { file = "tools/ratchet.py", replace = "    if not traced:\n", with = "    if False:\n" }
+
+[[fault]]
+id = "ratchet-untraced-repo-specs"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "UntracedTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_repo_scope_reads_every_spec_check_trace_reads ("
+transform = { file = "tools/ratchet.py", replace = "specs=(\n        ROOT / \"verify\" / \"spec\" / \"core.symspec.json\",\n        ROOT / \"verify\" / \"spec\" / \"agentd.symspec.json\",\n    ),", with = "specs=(\n        ROOT / \"verify\" / \"spec\" / \"core.symspec.json\",\n    )," }
+
+[[fault]]
+id = "ratchet-untraced-advice"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "RuleTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_rule_1_an_untraced_requirement_points_at_traced ("
+transform = { file = "tools/ratchet.py", replace = "NEW_DRIFT_FIX.get(category, LAYERING_FIX)", with = "LAYERING_FIX" }
+
+# #295 review round 1. A decision can't stand in for a trace: a new requirement with a decision
+# and no traced entry is refused, on the real tree and in the parse test, and rule 3's advice for
+# an untraced entry doesn't point at decisions.
+[[fault]]
+id = "ratchet-untraced-decision"
+guard = "tools/ratchet.py"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "[untraced] TRAP-14 can't be a decision: a requirement that can't carry a layer waives that layer in its group's file"
+transform = [
+  { file = "verify/spec/core.symspec.json", replace = "    \"5fc0dbf7-83f6-4d1d-96ea-902bfacee0b1\": {\n", with = "    \"seeded-trap-14\": { \"key\": \"TRAP-14\", \"sentence\": \"A seeded requirement.\" },\n    \"5fc0dbf7-83f6-4d1d-96ea-902bfacee0b1\": {\n" },
+  { file = "verify/ratchet/drift.json", replace = "  \"decisions\": [\n", with = "  \"decisions\": [\n    { \"category\": \"untraced\", \"key\": \"TRAP-14\", \"reason\": \"not worth a test\" },\n" },
+]
+
+[[fault]]
+id = "ratchet-untraced-decision-unit"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "FileTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_untraced_decision_is_refused ("
+transform = { file = "tools/ratchet.py", replace = "            if name == \"decisions\" and category in NO_DECISIONS:\n", with = "            if False:\n" }
+
+[[fault]]
+id = "ratchet-untraced-not-in-base-advice"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "RuleTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_rule_3_points_an_untraced_entry_at_traced ("
+transform = { file = "tools/ratchet.py", replace = "NOT_IN_BASE_FIX.get(category, LAYERING_NOT_IN_BASE_FIX)", with = "LAYERING_NOT_IN_BASE_FIX" }
+
+# A traced entry that waives every layer passes trace:check with nothing checking it, so it stays
+# untraced. On the real tree: TRAP-1 waived six times and its entry gone, as `update` would leave
+# it. In the collector: the waiver check off, which the sentinel's GATE-4 catches.
+[[fault]]
+id = "ratchet-untraced-all-waived"
+guard = "verify/ratchet/drift.json"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "new drift: [untraced] TRAP-1. Trace the requirement"
+transform = [
+  { file = "verify/spec/traced/TRAP.toml", replace = "# The TRAP group's traced requirements. The format and the rules are in tools/check-trace.py.\n", with = "# The TRAP group's traced requirements. The format and the rules are in tools/check-trace.py.\n\n[TRAP-1]\nissue = \"#301\"\nwaive.model = \"s\"\nwaive.gherkin = \"s\"\nwaive.fuzz = \"s\"\nwaive.test = \"s\"\nwaive.impl = \"s\"\nwaive.live = \"s\"\n" },
+  { file = "verify/ratchet/drift.json", replace = "    { \"category\": \"untraced\", \"key\": \"TRAP-1\", \"issue\": 301 },\n", with = "" },
+]
+
+[[fault]]
+id = "ratchet-untraced-all-waived-sentinel"
+guard = "verify/ratchet/fixtures/sentinel/expected.json"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "sentinel: [untraced] GATE-4 was not reported"
+transform = { file = "tools/ratchet.py", replace = "for key, entry in traced.items() if not set(layers) <= set(entry.waive)", with = "for key, entry in traced.items()" }
+
+# LAYERS is read with the loader: an empty one (a parser that returns nothing) is refused on the real
+# tree, and a script without one is refused in the unit test.
+[[fault]]
+id = "ratchet-untraced-empty-layers"
+guard = "tools/ratchet.py"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "check-trace.py has no LAYERS tuple"
+transform = { file = "tools/check-trace.py", replace = "LAYERS = (\"model\", \"gherkin\", \"fuzz\", \"test\", \"impl\", \"live\")\n", with = "LAYERS = ()\n" }
+
+[[fault]]
+id = "ratchet-untraced-no-layers-unit"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "UntracedTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_script_without_layers_is_refused ("
+transform = { file = "tools/ratchet.py", replace = "    if not isinstance(layers, tuple) or not layers:\n        raise SystemExit(f\"{scope.trace} has no LAYERS tuple\")\n", with = "    layers = layers or ()\n" }
+
+# A requirement with no key: check-trace.py skips it, so the collector refuses it, on the real
+# tree and in the unit test.
+[[fault]]
+id = "ratchet-untraced-keyless"
+guard = "tools/ratchet.py"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "agentd.symspec.json: requirement seeded-keyless has no key, so no traced file can list it"
+transform = { file = "verify/spec/agentd.symspec.json", replace = "  \"requirements\": {\n", with = "  \"requirements\": {\n    \"seeded-keyless\": { \"key\": \"\", \"sentence\": \"The daemon shall do a seeded, keyless thing.\" },\n" }
+
+[[fault]]
+id = "ratchet-untraced-keyless-unit"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "UntracedTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_requirement_without_a_key_is_refused ("
+transform = { file = "tools/ratchet.py", replace = "            if not isinstance(key, str) or not key.strip():\n                raise SystemExit(\n", with = "            if False:\n                raise SystemExit(\n" }
+
+# Rule (a) over a `[[type]]`'s methods (#271 review): a method both bindings add needs a row, or
+# the pairing alone passes it and nothing asks about core or the CLI. On the real surfaces, a
+# row that stops naming `AgentVm.image_name`; in the self-test, the old skip put back.
+[[fault]]
+id = "parity-type-method-unmapped"
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "py: AgentVm.image_name belongs to no row"
+transform = { file = "verify/parity/capabilities.toml", replace = "py = \"AgentVm.image_name\"\n", with = "py = { exempt = \"seeded\" }\n" }
+
+[[fault]]
+id = "parity-test-type-method"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "RuleTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_new_method_on_both_sides_of_a_type_needs_a_row ("
+transform = { file = "tools/check-parity.py", replace = "    if key != \"ts\" or cls not in types:\n        return methods\n", with = "    if cls in types:\n        return set()\n    if key != \"ts\":\n        return methods\n" }
+
+# The TypeScript side of a `[[type]]` holds a method only when its Python twin is a method: napi
+# writes each getter as a method, and holding those would ask for a row per accessor.
+[[fault]]
+id = "parity-test-type-accessor"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "RuleTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_type_accessor_is_held_by_the_pairing_alone ("
+transform = { file = "tools/check-parity.py", replace = "    return {name for name in methods if normalize(name) in python_methods}\n", with = "    return methods\n" }
+
+# The TypeScript reader (#271 review): a function inside a namespace, the shape napi-rs writes
+# for `#[napi(namespace = ...)]`, and a declaration TypeDoc drops for its JSDoc tag. Each one
+# is seeded into the real declarations, TS-only, with no row.
+[[fault]]
+id = "parity-ts-namespace-function"
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ts: snapshots.snapshotVm belongs to no row"
+transform = { file = "bindings/microvms-js/index.d.ts", replace = "/** The layer's fixed values as JSON, for a caller that wants to reason about the guest. */\n", with = "export declare namespace snapshots {\n  export function snapshotVm(): void\n}\n/** The layer's fixed values as JSON, for a caller that wants to reason about the guest. */\n" }
+
+[[fault]]
+id = "parity-ts-hidden-tag"
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "has JSDoc tags TypeDoc drops a declaration for"
+transform = { file = "bindings/microvms-js/index.d.ts", replace = "/** The layer's fixed values as JSON, for a caller that wants to reason about the guest. */\n", with = "/** Snapshots the VM. @hidden */\nexport declare function snapshotVm(): void\n/** The layer's fixed values as JSON, for a caller that wants to reason about the guest. */\n" }
+
+[[fault]]
+id = "parity-test-ts-namespace"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "RuleTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_unmapped_function_in_a_typescript_namespace_fails ("
+transform = { file = "tools/check-parity.py", replace = "            read_ts_children(item.get(\"children\") or [], f\"{name}.\", surface)\n", with = "            pass\n" }
+
+[[fault]]
+id = "parity-test-ts-hidden-tag"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "ReaderTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_declaration_typedoc_would_drop_is_refused ("
+transform = { file = "tools/check-parity.py", replace = "    if hidden:\n        raise ParityError(", with = "    if False:\n        raise ParityError(" }
+
+# Concurrent callers installing TypeDoc into one cold npx cache extract over each other (#347).
+# The locate runs under a lock beside npm's cache; without it the fake npx finds the lock free.
+[[fault]]
+id = "parity-npx-lock-dropped"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_typedoc_is_located_with_the_npx_lock_held ("
+transform = { file = "tools/check-parity.py", replace = "    with npx_lock():\n        where = run(", with = "    with contextlib.nullcontext():\n        where = run(" }
+
+# A blank answer from npm would lock a file nobody else opens.
+[[fault]]
+id = "parity-npx-lock-blank-cache"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_npm_that_names_no_cache_is_refused ("
+transform = { file = "tools/check-parity.py", replace = "    if not cache.is_absolute():\n", with = "    if False:\n" }
+
+# A shared lock lets a second caller into the install, so the race comes back with the lock taken.
+[[fault]]
+id = "parity-npx-lock-shared"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_typedoc_is_located_with_the_npx_lock_held ("
+transform = { file = "tools/check-parity.py", replace = "fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)", with = "fcntl.flock(handle, fcntl.LOCK_SH | fcntl.LOCK_NB)" }
+
+# The same for the wait: a second caller waiting shared still gets in beside a third.
+[[fault]]
+id = "parity-npx-lock-shared-wait"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_second_caller_waits_for_the_lock ("
+transform = { file = "tools/check-parity.py", replace = "            fcntl.flock(handle, fcntl.LOCK_EX)\n", with = "            fcntl.flock(handle, fcntl.LOCK_SH)\n" }
+
+# A lock that doesn't wait raises for a second caller, so every overlap fails instead of the rare
+# race.
+[[fault]]
+id = "parity-npx-lock-nonblocking"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_second_caller_waits_for_the_lock ("
+transform = { file = "tools/check-parity.py", replace = "            fcntl.flock(handle, fcntl.LOCK_EX)\n", with = "            raise\n" }
+
+# A lock that polls for a second and then installs anyway passes a short hold (#347 review): the
+# cold install it's for takes longer, so the race comes back. The recorded calls catch it.
+[[fault]]
+id = "parity-npx-lock-gives-up"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_second_caller_waits_for_the_lock ("
+transform = { file = "tools/check-parity.py", replace = "            fcntl.flock(handle, fcntl.LOCK_EX)\n", with = "            for _ in range(50):\n                try:\n                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)\n                    break\n                except BlockingIOError:\n                    __import__(\"time\").sleep(0.02)\n" }
+
+# A waiter that prints nothing leaves a host-wide stall behind a slow install with no trace in the
+# log (#347 review).
+[[fault]]
+id = "parity-npx-lock-silent-wait"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_second_caller_waits_for_the_lock ("
+transform = { file = "tools/check-parity.py", replace = "            print(\n                f\"parity: waiting for {lock}, held by another npx install\",\n                file=sys.stderr,\n            )\n", with = "            pass\n" }
+
+# The race needs only this package set's directory to be cold, not the whole cache, so a lock
+# skipped once `_npx` exists lets it back in (#347 review).
+[[fault]]
+id = "parity-npx-lock-skipped-when-warm"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "NpxLockTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_typedoc_is_located_with_the_npx_lock_held ("
+transform = { file = "tools/check-parity.py", replace = "    lock = cache / \"microvms-agentd-npx.lock\"\n", with = "    if (cache / \"_npx\").is_dir():\n        yield\n        return\n    lock = cache / \"microvms-agentd-npx.lock\"\n" }
+
+# The `guards` job's Node (#271 review): its pin is held to mise.toml's major like the others.
+[[fault]]
+id = "ci-parity-guards-node-major"
+guard = "tools/check-ci-parity.py"
+run = ["./tools/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "runs Node 24, and mise.toml pins 22 (majors compared)"
+transform = { file = ".github/workflows/ci.yml", replace = "the runner image ships.\n      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7\n        with:\n          node-version: '22'\n", with = "the runner image ships.\n      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7\n        with:\n          node-version: '24'\n" }
+
+# Not registered: the drift page's vitest cases (site/tests/drift-reference.test.ts), among them
+# "writes not collected ...", "names the commit a category started being counted at ...", and
+# #295's own: untraced charted on its own, its table starting where it was first counted, the
+# per-category copy, and the refusal of a category the page doesn't describe. The registry's
+# suites are rust, script and bindings, no site test has an entry, and a scratch worktree has no
+# site/node_modules, so a vitest entry needs a site suite first. #271 and #295 broke each case by
+# hand; `docs:check` runs them.

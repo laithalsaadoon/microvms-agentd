@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
- * The Python SDK reference: `microvms-py/microvms.pyi`, parsed by Griffe, rendered to pages.
+ * The Python SDK reference: `bindings/microvms-py/microvms.pyi`, parsed by Griffe, rendered to pages.
  *
  * `griffe_dump.py` does the parsing and prints the surface as JSON; this file only lays it out.
  * The split is deliberate. Griffe owns the hard part, reading a stub with `ast` and rendering
@@ -9,7 +9,7 @@
  *
  * The pages:
  *
- * - `reference/python/`: install and quickstart from `microvms-py/README.md`, then one index row
+ * - `reference/python/`: install and quickstart from `bindings/microvms-py/README.md`, then one index row
  *   per class, function, constant, and exception.
  * - `reference/python/classes/<name>/`: one per class, every member with its full signature.
  * - `reference/python/module/`: the module-level functions, constants, and exceptions.

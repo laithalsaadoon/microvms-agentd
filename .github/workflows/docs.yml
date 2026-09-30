@@ -23,7 +23,7 @@ concurrency:
 # No path filter, deliberately. The site is not built only from `site/` and `docs/`:
 # every generated page carries `path:line` citations that the build resolves against
 # git at a pinned commit, and it FAILS when a cited path no longer exists. So a change
-# to `agentd/src/` can break this build, which is the point — a citation that silently
+# to `crates/agentd/src/` can break this build, which is the point — a citation that silently
 # stops resolving is a docs site lying with a link. A path filter would also make this
 # a required check that skips, which blocks a PR rather than passing it.
 #
@@ -77,8 +77,8 @@ jobs:
       # Griffe exactly and whose committed `.lock` beside it is what `--locked` enforces. The same
       # hash as every other `setup-uv` in this repo, so one Dependabot bump moves them together.
       # No cache: the script's whole environment is one pure-Python wheel. uv also runs
-      # `scripts/ratchet-history.py` for the Architecture drift page, which reads the history of
-      # `ratchet/drift.json` out of the full clone above and has no dependencies at all.
+      # `tools/ratchet-history.py` for the Architecture drift page, which reads the history of
+      # `verify/ratchet/drift.json` out of the full clone above and has no dependencies at all.
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: false

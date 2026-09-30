@@ -24,7 +24,7 @@ from harness.results import Results
 
 
 def run_to_completion_live(cli: Cli, launched: Envelope, name: str) -> tuple[bool, str]:
-    """One ignored test of `microvms-core/tests/live_run_to_completion.rs` on the kept VM.
+    """One ignored test of `crates/microvms-core/tests/live_run_to_completion.rs` on the kept VM.
 
     The attach coordinates travel in `MICROVM_LIVE_ATTACH`, so the test attaches through core's
     `Session::attach` (a fresh control plane and proxy-token minter) rather than launching.

@@ -1,0 +1,130 @@
+# ── script gates ─────────────────────────────────────────────────────────────
+
+[[fault]]
+id = "lint-coverage-empty-root"
+guard = "tools/check-lint-coverage.py"
+run = ["./tools/check-lint-coverage.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "lint coverage: FAILED"
+argv_fault = ["--root", "{empty_dir}"]
+
+[[fault]]
+id = "license-headers-missing"
+guard = "tools/check-license-headers.py"
+run = ["./tools/check-license-headers.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "1 files are missing"
+transform = { file = "crates/agentd/src/fs.rs", replace = "// SPDX-License-Identifier: Apache-2.0\n", with = "" }
+
+[[fault]]
+id = "license-headers-floor"
+guard = "tools/check-license-headers.py"
+run = ["./tools/check-license-headers.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "returned no tracked source files"
+transform = { file = "tools/check-license-headers.py", replace = "for line in out.stdout.splitlines() if line]", with = "for line in out.stdout.splitlines() if line and False]" }
+
+[[fault]]
+id = "license-headers-sentinel"
+guard = "tools/check-license-headers.py"
+run = ["./tools/check-license-headers.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "crates/microvms-core/src/lib.rs, which this repo always tracks"
+transform = { file = "tools/check-license-headers.py", replace = "[\"git\", \"ls-files\", *(f\"*{ext}\" for ext in COMMENT)]", with = "[\"git\", \"ls-files\", *(f\"*{ext}\" for ext in COMMENT if ext != \".rs\")]" }
+
+[[fault]]
+id = "license-headers-extension-floor"
+guard = "tools/check-license-headers.py"
+run = ["./tools/check-license-headers.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "but none ending in .mjs, .sh"
+transform = { file = "tools/check-license-headers.py", replace = "[\"git\", \"ls-files\", *(f\"*{ext}\" for ext in COMMENT)]", with = "[\"git\", \"ls-files\", *(f\"*{ext}\" for ext in COMMENT if ext not in (\".mjs\", \".sh\"))]" }
+
+[[fault]]
+id = "license-unit-git-env"
+guard = "test_license_headers.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_license_headers.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_inherited_git_dir_leaves_that_repo_alone ("
+transform = { file = "tools/test_license_headers.py", replace = "if k not in GIT_ENV_LEAKS}", with = "if k not in ()}" }
+
+[[fault]]
+id = "publishable-selector-floor"
+guard = "tools/check-publishable.py"
+run = ["./tools/check-publishable.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "found no `-p` selector"
+transform = { file = "tools/check-publishable.py", replace = "SELECTOR = re.compile(r\"(?:-p|--package)[ =]+([A-Za-z0-9_-]+)\")", with = "SELECTOR = re.compile(r\"(?:-P|--pakage)[ =]+([A-Za-z0-9_-]+)\")" }
+
+[[fault]]
+id = "publishable-selector-sentinel"
+guard = "tools/check-publishable.py"
+run = ["./tools/check-publishable.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "but not `-p microvms-cli` in .github/workflows/ci.yml"
+transform = { file = "tools/check-publishable.py", replace = "SELECTOR = re.compile(r\"(?:-p|--package)[ =]+([A-Za-z0-9_-]+)\")", with = "SELECTOR = re.compile(r\"(?:-p|--package)[ =]+([A-Za-z0-9_]+)\")" }
+
+[[fault]]
+id = "publishable-listing"
+guard = "tools/check-publishable.py"
+run = ["./tools/check-publishable.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "mise.toml runs cargo with a `-p` selector but isn't in SELECTOR_FILES"
+transform = { file = "tools/check-publishable.py", replace = "    \".github/workflows/release.yml\",\n    \"mise.toml\",\n)", with = "    \".github/workflows/release.yml\",\n)" }
+
+[[fault]]
+id = "publishable-reach-floor"
+guard = "tools/check-publishable.py"
+run = ["./tools/check-publishable.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "SELECTOR_SURFACES doesn't reach"
+transform = { file = "tools/check-publishable.py", replace = "SELECTOR_SURFACES = (\".github/workflows/*.yml\", \"mise.toml\")", with = "SELECTOR_SURFACES = ()" }
+
+# targets:check: a build `check` runs with an environment of its own names a target of its own.
+# The stub generator back in the shared target, the rustdoc walk back in cargo's target, a
+# `check` the scan can't find (the floor), and a scan that stopped seeing tools (the sentinel).
+[[fault]]
+id = "check-targets-stubs-shared"
+guard = "test_check_targets.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_targets.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_build_with_its_own_environment_names_its_own_target ("
+transform = { file = "mise.toml", replace = "outputs = { auto = true }\nenv = { CARGO_TARGET_DIR = \"{{config_root}}/target/stubs\" }\nrun = \"./tools/generate-py-stubs.py --check\"\n", with = "outputs = { auto = true }\nrun = \"./tools/generate-py-stubs.py --check\"\n" }
+
+[[fault]]
+id = "check-targets-rustdoc-shared"
+guard = "test_check_targets.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_targets.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_rustdoc_walk_builds_outside_cargos_target ("
+transform = { file = "tools/rustdoc_walk.py", replace = "Path(json.loads(metadata.stdout)[\"target_directory\"]) / \"rustdoc-json\"", with = "Path(json.loads(metadata.stdout)[\"target_directory\"])" }
+
+[[fault]]
+id = "check-targets-floor"
+guard = "test_check_targets.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_targets.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_check_runs_a_build ("
+transform = { file = "mise.toml", replace = "[tasks.check]\n", with = "[tasks.check-renamed]\n" }
+
+[[fault]]
+id = "check-targets-sentinel"
+guard = "test_check_targets.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_targets.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_scan_sees_each_kind_of_build ("
+transform = { file = "tools/test_check_targets.py", replace = "                if re.search(tool, line):\n", with = "                if False:\n" }

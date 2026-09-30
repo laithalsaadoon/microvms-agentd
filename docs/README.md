@@ -9,9 +9,9 @@ terminate the VM. First-time AWS setup and image builds take longer.
 |---|---|
 | Install the CLI and configure AWS | [First run](https://laithalsaadoon.github.io/microvms-agentd/learn/tutorial/first-run/) |
 | Run Claude Code or Codex on a project | [Coding agents in sandboxes](https://laithalsaadoon.github.io/microvms-agentd/learn/operations/run-coding-agents-on-bedrock/) |
-| Add sandboxes to a Python application | [Python package quickstart](../microvms-py/README.md) |
-| Add sandboxes to a Node application | [JavaScript / TypeScript quickstart](../microvms-js/README.md) |
-| Use the Rust client | [Rust quickstart](../microvms-core/README.md) |
+| Add sandboxes to a Python application | [Python package quickstart](../bindings/microvms-py/README.md) |
+| Add sandboxes to a Node application | [JavaScript / TypeScript quickstart](../bindings/microvms-js/README.md) |
+| Use the Rust client | [Rust quickstart](../crates/microvms-core/README.md) |
 | Upload a project and retrieve artifacts | [Project guide](https://laithalsaadoon.github.io/microvms-agentd/learn/tutorial/run-a-project/) |
 | Look up a CLI flag or response | [CLI reference](https://laithalsaadoon.github.io/microvms-agentd/reference/) or `microvm manifest` |
 

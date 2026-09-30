@@ -15,8 +15,8 @@ import { defineMdastPlugin, type MdastPluginDefinition } from "satteri"
  * ## Wrap, never replace
  *
  * The citation stays visible exactly as authored: `ctx.wrapNode` puts a `link` around the
- * `inlineCode` node, so `` `agentd/src/routes.rs:412` `` renders as
- * `<a href="…"><code>agentd/src/routes.rs:412</code></a>`. Rewriting the text would take the
+ * `inlineCode` node, so `` `crates/agentd/src/routes.rs:412` `` renders as
+ * `<a href="…"><code>crates/agentd/src/routes.rs:412</code></a>`. Rewriting the text would take the
  * grep-able path away from the reader who wants to run `rg` on it, which is most of them.
  *
  * ## Where the transform lands, and where it deliberately does not
@@ -121,9 +121,9 @@ const EXT =
 /**
  * Four shapes matter, and every part is optional so one anchored pattern covers all four:
  *
- *   agentd/src/routes.rs:412            a full citation, which also becomes the antecedent
- *   agentd/src/routes.rs:412-430        a range
- *   agentd/src/routes.rs                a bare path: not a citation, but it names the antecedent
+ *   crates/agentd/src/routes.rs:412            a full citation, which also becomes the antecedent
+ *   crates/agentd/src/routes.rs:412-430        a range
+ *   crates/agentd/src/routes.rs                a bare path: not a citation, but it names the antecedent
  *   :551                                a shorthand, resolved against the antecedent
  *
  * A trailing label inside the same span — `` `routes.rs:371 surface_docs()` `` — is kept, because
@@ -200,7 +200,7 @@ type VisitorContext = Parameters<InlineCodeVisitor>[1]
  *   file its later cells abbreviate. Carrying an antecedent in from the row above points a correct
  *   citation at the wrong file and invents a range error out of it.
  * - **A bare backticked path SETS the antecedent and asserts no line.** That is how a table row
- *   whose first cell is `` `agentd/src/exec.rs` `` licenses `` `:30` `` in a later cell.
+ *   whose first cell is `` `crates/agentd/src/exec.rs` `` licenses `` `:30` `` in a later cell.
  * - **A shorthand with no antecedent is an error.** No reader can resolve it either.
  *
  * The reset points arrive in document order because Sätteri dispatches in a pre-order walk: the

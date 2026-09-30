@@ -30,10 +30,10 @@ An image build boots the image in a snapshot VM, calls the build-time hooks
 (`/ready`, `/validate`) against the daemon, and captures the memory and disk
 snapshot only after they answer — in-repo sources pin the ordering:
 
-- `agentd/src/state.rs` (the hook log): "build-time hooks (validate, ready)
+- `crates/agentd/src/state.rs` (the hook log): "build-time hooks (validate, ready)
   fire in the snapshot VM **before the snapshot is taken**, so their records
   ride the memory image into every VM launched from it."
-- `agentd/src/routes.rs` (`ready_hook`): "the snapshot is taken after this
+- `crates/agentd/src/routes.rs` (`ready_hook`): "the snapshot is taken after this
   fires."
 - `docs/PLATFORM.md` (failed-build shapes): a build whose ready hook timed
   out has `codeInstallSizeInBytes` and **no snapshots** — the snapshot does

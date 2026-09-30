@@ -17,7 +17,7 @@ updates:
   # The fuzz crate is excluded from the workspace (sanitizer builds, nightly),
   # so it carries its own lockfile that the root cargo entry never sees.
   - package-ecosystem: cargo
-    directory: /agentd/fuzz
+    directory: /crates/agentd/fuzz
     schedule:
       interval: weekly
     open-pull-requests-limit: 2
@@ -33,6 +33,6 @@ updates:
       actions:
         patterns: ["*"]
   - package-ecosystem: npm
-    directory: /microvms-js
+    directory: /bindings/microvms-js
     schedule:
       interval: weekly

@@ -1,0 +1,11 @@
+# ── generated artifacts ──────────────────────────────────────────────────────
+
+# `mise run manifest:check`'s script, spelled out: CI runs this without mise.
+[[fault]]
+id = "manifest-help-string"
+guard = "manifest:check"
+run = ["bash", "-c", "set -eu; tmp=$(mktemp); trap 'rm -f \"$tmp\"' EXIT; cargo run -q -p microvms-cli -- manifest > \"$tmp\"; diff -u docs/manifest.json \"$tmp\""]
+expect = "exit-nonzero"
+suite = "rust"
+message = "+        \"help\": \"Emit the typed JSON envelope on stdout instead of plain output\""
+transform = { file = "crates/microvms-cli/src/cli.rs", replace = "    /// Emit the typed JSON envelope on stdout instead of human output.\n", with = "    /// Emit the typed JSON envelope on stdout instead of plain output.\n" }

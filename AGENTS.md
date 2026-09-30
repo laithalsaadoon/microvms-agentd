@@ -22,7 +22,7 @@ installation or advisory/rule updates. It does not run the documentation,
 formal requirements, or live AWS tiers, and it doesn't build or test the Python
 and Node bindings. When a change reaches behavior a binding exposes, build each
 binding and run its suite the way CI's `python and node bindings` job does
-(`pytest microvms-py/tests`, `node --test "microvms-js/__test__/*.mjs"`), or run
+(`pytest bindings/microvms-py/tests`, `node --test "bindings/microvms-js/__test__/*.mjs"`), or run
 `mise run ci:bindings`, which is that job.
 
 `mise run ci:local` runs each Linux job of ci.yml and fuzz.yml the way CI does: the job's
@@ -40,25 +40,25 @@ from local test results.
 
 ## Code map
 
-- `protocol/`: shared types; package name `microvms-protocol`, import `protocol`.
-- `agentd/`: lifecycle hooks, authenticated execution, files, tunnels.
-- `microvms-domain/`: rules and values with no I/O: sizing, cost, regions,
+- `crates/protocol/`: shared types; package name `microvms-protocol`, import `protocol`.
+- `crates/agentd/`: lifecycle hooks, authenticated execution, files, tunnels.
+- `crates/microvms-domain/`: rules and values with no I/O: sizing, cost, regions,
   names, service constraints, error kinds.
-- `microvms-app/`: use cases over ports: the control-plane client, sandboxes,
+- `crates/microvms-app/`: use cases over ports: the control-plane client, sandboxes,
   sessions, image builds, agent recipes, and the daemon release's verification
   policy.
-- `microvms-edges/`: the production port implementations: SigV4 transport,
+- `crates/microvms-edges/`: the production port implementations: SigV4 transport,
   sockets, the name registry on disk, the release fetch and Sigstore check,
   clock and entropy.
-- `microvms-core/`: the composition root the CLI and bindings depend on; wires
+- `crates/microvms-core/`: the composition root the CLI and bindings depend on; wires
   the edges into the app and re-exports every layer.
-- `microvms-cli/`: `microvm` commands and JSON envelopes.
-- `microvms-py/`, `microvms-js/`: thin PyO3 and napi-rs bindings.
-- `model/`, `spec/`, `conformance/`: portable model tests, formal requirements,
+- `crates/microvms-cli/`: `microvm` commands and JSON envelopes.
+- `bindings/microvms-py/`, `bindings/microvms-js/`: thin PyO3 and napi-rs bindings.
+- `crates/model/`, `verify/spec/`, `conformance/`: portable model tests, formal requirements,
   and live AWS checks.
-- `model-conformance/`: unpublished, tests only; drives the app's policies and
+- `crates/model-conformance/`: unpublished, tests only; drives the app's policies and
   `Sandbox` over the models' rows and paths.
-- `arch/placement.toml`, `ratchet/`: each crate's allowed dependencies and the
+- `verify/arch/placement.toml`, `verify/ratchet/`: each crate's allowed dependencies and the
   drift count (see Architecture).
 
 `microvms-domain`, `microvms-app`, `microvms-edges`, `microvms-cli`, both bindings,
@@ -82,7 +82,7 @@ first:
 - `microvms-domain`: rules and values. It performs no network, filesystem,
   subprocess, environment, clock or entropy access (ARCH-6): its `clippy.toml`
   refuses those std calls and its dependencies' clock and entropy calls under a
-  crate-root `forbid`, and its dependency set in `arch/placement.toml` and each
+  crate-root `forbid`, and its dependency set in `verify/arch/placement.toml` and each
   dependency's features are asserted exactly. A rule that needs one of those
   inputs takes it as a parameter, the way `Region::from_env` takes a lookup.
 - `microvms-app`: use cases (the control-plane client, `Sandbox`, `Session`,
@@ -107,7 +107,7 @@ first:
 That's the rule, not a description of today's tree. The CLI still owns file
 formats and file I/O, the run ledger and the sync manifest among them, and #260
 moves directory sync into core. The ratchet's adapter-logic rules
-(`ratchet/rules/`) refuse an operation name written as a literal and a retyped
+(`verify/ratchet/rules/`) refuse an operation name written as a literal and a retyped
 default in the CLI's and both bindings' code; they don't read file formats, or
 attribute defaults such as clap's `default_value_t` and PyO3's `signature`,
 which #300 checks through the generated surfaces.
@@ -115,33 +115,33 @@ which #300 checks through the generated surfaces.
 If an adapter needs something private to a lower crate, make it public there or
 move the caller down. Never copy it.
 
-`ratchet/drift.json` is the drift count: layering drift, parity gaps and
+`verify/ratchet/drift.json` is the drift count: layering drift, parity gaps and
 untraced requirements, each with the issue that removes it. `mise run
 ratchet:check` fails on new drift and on a fix whose entry is still in the
 file; `mise run ratchet:update` removes fixed entries. A PR can't add an entry:
 fix the code, or record a permanent exception in `decisions` with its reason.
 An untraced requirement takes no decision: list it in its group's file under
-`spec/traced/` (`spec/traced/TRAP.toml` for a TRAP key) and waive there any
+`verify/spec/traced/` (`verify/spec/traced/TRAP.toml` for a TRAP key) and waive there any
 layer it can't carry, with its reason. The edges
 between the workspace's crates are checked by
-`microvms-cli/tests/dependency_direction.rs`. Each adapter's allowed
-dependencies (`arch/placement.toml`) are checked by the ratchet, and
+`crates/microvms-cli/tests/dependency_direction.rs`. Each adapter's allowed
+dependencies (`verify/arch/placement.toml`) are checked by the ratchet, and
 `dependency_direction.rs` asserts them exactly for each adapter the ratchet
 holds no placement drift for (the CLI joins when #260 clears its entries). The
 domain's, the app's and core's sets are there too, asserted exactly, and they
 never carry drift. The ratchet's port-impl collector reads the app and core as
 well as the adapters, so a port implemented anywhere but the edges is drift or
 a recorded decision. Forbidden calls are refused by each adapter's
-`clippy.toml`, and `scripts/test_ratchet.py` lists every site that turns those
+`clippy.toml`, and `tools/test_ratchet.py` lists every site that turns those
 lints off. The CLI's `clippy.toml` also refuses core's transport calls and its
-production constructors outside `microvms-cli/src/seam.rs`, and the bindings refuse the
+production constructors outside `crates/microvms-cli/src/seam.rs`, and the bindings refuse the
 transport calls. `protocol::exec::StartRequest` is `#[non_exhaustive]`, so every
 start request is built from `StartRequest::new`, which holds the wire's defaults.
 The Python binding's `run` signatures still restate four of them as keyword
 defaults, which #300 checks.
 
 Core is the one implementation. The CLI, Python and TypeScript expose the same
-capabilities, or `parity/capabilities.toml` says why one doesn't.
+capabilities, or `verify/parity/capabilities.toml` says why one doesn't.
 
 - A capability lands in core first. The change that adds a public name to any
   surface adds its row to the table, with the other surfaces implemented, or
@@ -154,8 +154,8 @@ capabilities, or `parity/capabilities.toml` says why one doesn't.
   (flags, keyword arguments) isn't checked yet.
 - Defaults live at or below core. The CLI and the bindings use the constant
   core re-exports from the layer that owns it, and don't add a duration, size
-  or retry literal of their own without a decision in `ratchet/drift.json`.
-  The ratchet's `literal-default` rule (`ratchet/rules/literal-default.yml`)
+  or retry literal of their own without a decision in `verify/ratchet/drift.json`.
+  The ratchet's `literal-default` rule (`verify/ratchet/rules/literal-default.yml`)
   fails `ratchet:check` on one in adapter source that has no decision there. A
   flag or keyword default isn't held yet: #300 checks those through the
   generated surfaces.
@@ -164,7 +164,7 @@ capabilities, or `parity/capabilities.toml` says why one doesn't.
 
 - Use `microvm manifest` for the current command contract. Regenerate
   `docs/manifest.json`, `docs/schema.json`, and Python stubs when affected, and
-  `parity/core-api.json` (`mise run core-api`) when core's public surface
+  `verify/parity/core-api.json` (`mise run core-api`) when core's public surface
   changes.
 - Edit `site/authored/` and top-level `docs/*.md`; generated content under
   `site/src/content/docs/` is overwritten. Generated source analyses contain
@@ -210,14 +210,14 @@ A check that passes on broken code gives a false answer. Each rule here names th
 check that holds it, or says that review does.
 
 - Every new guard, gate or scanner ships with a seeded fault that makes it
-  fail, in its owner's file in `guards/faults/` (a new owner starts a file).
+  fail, in its owner's file in `verify/guards/faults/` (a new owner starts a file).
   A scanner's floor (an empty input) and its sentinel get a fault each. Review
   holds that a new check has its entries; CI holds that every entry fires.
   The `guards` job seeds the Rust, script and binding faults (each worker with
   its own Python environment, `--venv-per-worker`), as `mise run guards:fire`
   does locally, and it fails when a fault doesn't fire. `guards:list` in `check` fails on an entry
   that no longer applies to the tree, and on a new Falsification note that has
-  no entry and no line in `guards/unregistered.txt`.
+  no entry and no line in `verify/guards/unregistered.txt`.
 - Tests assert the verdict, not only that something ran or stayed contained.
   CI's `mutants` job fails on a mutant of the changed Rust that no test
   catches, which is what a test that only checks "it returned" leaves behind.

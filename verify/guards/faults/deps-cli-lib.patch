@@ -1,0 +1,6 @@
+diff --git a/crates/microvms-cli/src/lib.rs b/crates/microvms-cli/src/lib.rs
+new file mode 100644
+--- /dev/null
++++ b/crates/microvms-cli/src/lib.rs
+@@ -0,0 +1 @@
++// SPDX-License-Identifier: Apache-2.0

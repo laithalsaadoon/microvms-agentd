@@ -61,19 +61,19 @@ providers' hand-rolled daemons did, with proofs behind each behavior:
 
 - Idempotent detached exec: caller-minted exec id, retry-safe start,
   read-only poll, explicit ack, TTL only after ack, so unread output is never
-  destroyed (`agentd/src/exec.rs`). This is precisely the start/poll/ack
+  destroyed (`crates/agentd/src/exec.rs`). This is precisely the start/poll/ack
   model Harbor's provider built, plus SSE streaming with byte-cursor resume
   and explicit gap events, which Harbor's daemon lacks.
 - Per-exec `env`, `cwd`, `user`/`group`, `timeout_sec`, `stdin`, and shell
   vs argv mode are all in the wire protocol and applied by the daemon
-  (`protocol/src/exec.rs:116`, `agentd/src/exec.rs:999-1019`), and exposed
+  (`crates/protocol/src/exec.rs:116`, `crates/agentd/src/exec.rs:999-1019`), and exposed
   by the Rust, Python, and Node clients.
 - Kill with SIGTERM-grace-SIGKILL to the process group; per-command timeout
   enforced daemon-side when requested.
 - File transfer: streamed single-file read/write with mode-at-open, tar
   upload/download with a confined extraction path (lexical resolution,
   symlink and bomb defenses, member/size caps), disk-pressure refusal with
-  the real numbers (`agentd/src/fs.rs`).
+  the real numbers (`crates/agentd/src/fs.rs`).
 - Per-VM secret bootstrap through `runHookPayload` with one-shot semantics
   and traffic ordering guaranteed by the platform; the token never enters a
   child's environment.
@@ -98,10 +98,10 @@ deletes, over the cost of building it here.
 applies `env` per request, the bindings expose it, and `microvm exec` now
 takes it too: a repeatable `--env KEY=VALUE`, `--user`/`--group` as a name or
 a numeric id, `--shell`, and `--inherit-image-env`
-(`microvms-cli/src/cli.rs:1132-1171`), all copied into the start request
-(`microvms-cli/src/commands/attached.rs:224-240`). The empty `env` in
+(`crates/microvms-cli/src/cli.rs:1132-1171`), all copied into the start request
+(`crates/microvms-cli/src/commands/attached.rs:224-240`). The empty `env` in
 `StartSpec::command` is now only the default a caller overrides
-(`microvms-cli/src/commands/lifecycle.rs:1924-1937`). Every harness passes
+(`crates/microvms-cli/src/commands/lifecycle.rs:1924-1937`). Every harness passes
 env per exec (Harbor merges layers of it on every call), and the PATH
 failure the coding-agents example documents was this gap biting a real
 workload.

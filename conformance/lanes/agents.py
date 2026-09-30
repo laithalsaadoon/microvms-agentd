@@ -261,7 +261,7 @@ def drive_agent_vm(
     explicit `terminate <name> --delete-image` in this function's own `finally`, so
     however the checks above end the VM, its image, and the service-created log group go.
     The image is deleted rather than kept for the next run's `imageReused: true`,
-    because a snapshot nobody owns bills for a week (`scripts/verify-clean.py` knows the
+    because a snapshot nobody owns bills for a week (`tools/verify-clean.py` knows the
     `agent-vm-` prefix, so a leak of one is visible, and that is the backstop rather than
     the plan); the reuse verdict is asserted as a boolean, which is the property that
     holds either way.

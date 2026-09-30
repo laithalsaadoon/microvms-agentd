@@ -44,10 +44,10 @@ not present an authentication credential to the run hook.
    returns 200. An identical replay returns 200; a different token returns
    409 without modifying state. Replays must remain idempotent because a
    failed run hook can cause AWS to terminate the VM. Implemented in
-   `agentd/src/state.rs` and `agentd/src/routes.rs`.
+   `crates/agentd/src/state.rs` and `crates/agentd/src/routes.rs`.
 2. **Constant-time comparison on bytes.** Bootstrap and request guards compare
    equal-length byte strings with `subtle::ct_eq`, avoiding Unicode decoding
-   errors. Token length remains observable. Implemented in `agentd/src/auth.rs`.
+   errors. Token length remains observable. Implemented in `crates/agentd/src/auth.rs`.
 3. **Authorization before request-body processing.** Protected routes reject
    unauthorized requests before parsing or buffering their body. A bounded
    drain (64 KiB by default) reduces connection resets; excess data closes the
@@ -58,8 +58,8 @@ not present an authentication credential to the run hook.
    inherited. Caller-supplied environment values are intentionally available
    to child processes. User changes use `Command::uid`/`gid`; avoid Rust
    `pre_exec` closures in a multithreaded process because inherited locks can
-   deadlock after fork. Implemented in `agentd/src/exec.rs` and
-   `agentd/src/exec_start.rs`.
+   deadlock after fork. Implemented in `crates/agentd/src/exec.rs` and
+   `crates/agentd/src/exec_start.rs`.
 
    **The one opt-in exception is `inherit_image_env`.** A start request that
    sets it starts the child from the environment the daemon inherited as the
@@ -78,7 +78,7 @@ not present an authentication credential to the run hook.
    and `/v1/schema` remain unauthenticated; health exposes bootstrap state so
    callers can check readiness.
 
-`model/` explores bootstrap interleavings and tests both compliant and broken
+`crates/model/` explores bootstrap interleavings and tests both compliant and broken
 deployments. Unit and conformance tests exercise the implementation. The
 model does not cover identity repair, filesystem confinement, or all Linux
 process behavior.
@@ -86,7 +86,7 @@ process behavior.
 ## Threats and the tests that guard them
 
 Each row names a threat, the requirement key that states the defense (in
-`spec/agentd.symspec.json` or `spec/core.symspec.json`), and a test that fails
+`verify/spec/agentd.symspec.json` or `verify/spec/core.symspec.json`), and a test that fails
 when the defense is removed. `mise run trace:check` reads this table: it fails
 on a key neither spec defines, on a guard that isn't a running test at that path
 or doesn't name one of its row's keys, and on a known gap that names no issue,
@@ -95,19 +95,19 @@ and it renders the table in [Traceability](TRACEABILITY.md). A guard is written
 
 | Threat | Requirement | Guard | Status |
 |---|---|---|---|
-| An in-VM process races the platform to the bootstrap hook | `AGENTD-1`, `AGENTD-3` | `agentd/tests/model_conformance.rs::slice_0_of_the_walk_replays_against_the_daemon`, `agentd/src/state.rs::identical_replay_succeeds_and_a_different_token_conflicts` | guarded; a process that starts before the daemon still wins, which is the unenforced invariant below |
-| A caller holding the agent token but not the host key opens a verified tunnel | `AGENTD-17` | `agentd/src/tunnel_identity.rs::only_the_pinned_host_key_completes_a_handshake`, `agentd/tests/tunnel_relay.rs::a_valid_token_with_the_wrong_host_key_is_refused` | guarded; its seeded fault waits for #297's handshake model, since under KK no one-sided change turns the pin off |
-| A verified tunnel's handshake fails, or the VM has no key, and the guest service is reached anyway | `AGENTD-18` | `agentd/tests/tunnel_relay.rs::a_refused_caller_never_causes_a_guest_connection`, `agentd/tests/tunnel_relay.rs::identity_against_a_seedless_vm_is_refused_not_downgraded` | guarded |
-| A guest answers a verified tunnel's handshake with a key other than the pinned VM key | `BIND-21` | `microvms-core/tests/tunnel_end_to_end.rs::a_wrong_pin_fails_closed_with_a_diagnosis`, `microvms-core/tests/tunnel_end_to_end.rs::a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel` | guarded |
+| An in-VM process races the platform to the bootstrap hook | `AGENTD-1`, `AGENTD-3` | `crates/agentd/tests/model_conformance.rs::slice_0_of_the_walk_replays_against_the_daemon`, `crates/agentd/src/state.rs::identical_replay_succeeds_and_a_different_token_conflicts` | guarded; a process that starts before the daemon still wins, which is the unenforced invariant below |
+| A caller holding the agent token but not the host key opens a verified tunnel | `AGENTD-17` | `crates/agentd/src/tunnel_identity.rs::only_the_pinned_host_key_completes_a_handshake`, `crates/agentd/tests/tunnel_relay.rs::a_valid_token_with_the_wrong_host_key_is_refused` | guarded; its seeded fault waits for #297's handshake model, since under KK no one-sided change turns the pin off |
+| A verified tunnel's handshake fails, or the VM has no key, and the guest service is reached anyway | `AGENTD-18` | `crates/agentd/tests/tunnel_relay.rs::a_refused_caller_never_causes_a_guest_connection`, `crates/agentd/tests/tunnel_relay.rs::identity_against_a_seedless_vm_is_refused_not_downgraded` | guarded |
+| A guest answers a verified tunnel's handshake with a key other than the pinned VM key | `BIND-21` | `crates/microvms-core/tests/tunnel_end_to_end.rs::a_wrong_pin_fails_closed_with_a_diagnosis`, `crates/microvms-core/tests/tunnel_end_to_end.rs::a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel` | guarded |
 | A guest replays or forges tunnel frames after the handshake | none | none | known gap, #297: both frame reads refuse a frame that doesn't authenticate, but no key states it and no test or harness sends one |
-| A guest streams hostile server-sent events to the client | `BIND-22` | `microvms-app/src/session/sse.rs::an_unterminated_stream_is_refused_at_the_pending_ceiling`, `microvms-app/src/session/sse.rs::an_unrecognized_or_unparseable_frame_is_dropped_rather_than_raised`, `microvms-app/src/session/sse_fuzz.rs::hostile_stream_bytes_stay_bounded_and_every_event_round_trips` | guarded |
-| A replaced or tampered daemon release asset | `BIND-18` | `microvms-edges/src/provision/release.rs::another_signer_identity_is_refused`, `microvms-edges/src/provision/release.rs::one_flipped_byte_in_the_asset_is_refused` | guarded |
+| A guest streams hostile server-sent events to the client | `BIND-22` | `crates/microvms-app/src/session/sse.rs::an_unterminated_stream_is_refused_at_the_pending_ceiling`, `crates/microvms-app/src/session/sse.rs::an_unrecognized_or_unparseable_frame_is_dropped_rather_than_raised`, `crates/microvms-app/src/session/sse_fuzz.rs::hostile_stream_bytes_stay_bounded_and_every_event_round_trips` | guarded |
+| A replaced or tampered daemon release asset | `BIND-18` | `crates/microvms-edges/src/provision/release.rs::another_signer_identity_is_refused`, `crates/microvms-edges/src/provision/release.rs::one_flipped_byte_in_the_asset_is_refused` | guarded |
 | An on-path party ends a verified tunnel early, with a plaintext close frame or by dropping the connection | none | none | known gap, #342: the close frame is plaintext, and the client reads a transport error or a hangup after the handshake as a clean end too, so a stream cut short looks complete |
 
 **The plaintext close.** A verified tunnel ends with a WebSocket close frame
-sent in the clear (`Noise::close` in `agentd/src/tunnel.rs`), and after the
+sent in the clear (`Noise::close` in `crates/agentd/src/tunnel.rs`), and after the
 handshake the client reads a close frame, a transport error and a hangup alike
-as a clean end (`microvms-edges/src/session/tunnel.rs`). Anything on the path
+as a clean end (`crates/microvms-edges/src/session/tunnel.rs`). Anything on the path
 can send that frame or drop the connection, so a port-forward cut short looks
 complete to both ends. Until the tunnel sends an authenticated end of stream (#342)
 before the WebSocket close, check a transfer's length or digest where it matters.
@@ -137,7 +137,7 @@ image). The run hook is the first per-VM moment, and nothing has read the
 identifiers by then: the platform forwards no traffic until the hook answers,
 and workloads start only after readiness.
 
-`agentd/src/identity.rs` uses a fresh 128-bit seed to:
+`crates/agentd/src/identity.rs` uses a fresh 128-bit seed to:
 
 - Rewrite `/etc/machine-id` and set the hostname.
 - Remove `/var/lib/systemd/random-seed` rather than sharing its snapshot value.
@@ -188,7 +188,7 @@ image-owned code with the daemon's privileges:
 WebSocket and terminates in the daemon. The host supplies the VM seed and
 host public key through one-shot bootstrap; both sides pin the other's public
 key. Subsequent tunnel data is encrypted with ChaCha20-Poly1305, beyond the
-proxy's TLS termination. See `protocol/src/identity.rs`.
+proxy's TLS termination. See `crates/protocol/src/identity.rs`.
 
 The local name record stores the host secret and VM public pin; it does not
 retain the VM secret. A stolen record can authorize the same tunnels its

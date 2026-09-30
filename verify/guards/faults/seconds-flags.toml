@@ -1,0 +1,250 @@
+# ── seconds flags that aren't durations (#268) ────────────────────────────────
+# The CLI's seconds flags parse through core's `duration_of_secs_f64` (`cli::parse_seconds`),
+# so a bad value is refused before any call, and each adapter's clippy.toml bans the panicking
+# float conversions. The first two seed the parser: today's panicking expression restored, then
+# a silent zero with no panic.
+
+[[fault]]
+id = "cli-seconds-flag-panics"
+guard = "guards::seconds::a_seconds_flag_that_is_not_a_duration_is_refused_before_any_call"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::seconds::a_seconds_flag_that_is_not_a_duration_is_refused_before_any_call"]
+expect = "test-failed"
+suite = "rust"
+message = "cannot convert float seconds to Duration"
+note = "crates/microvms-cli/src/guards/seconds.rs::a_seconds_flag_that_is_not_a_duration_is_refused_before_any_call"
+transform = { file = "crates/microvms-cli/src/cli.rs", replace = "microvms_core::cost::duration_of_secs_f64(seconds).map_err(|error| error.to_string())", with = "Ok(std::time::Duration::from_secs_f64(seconds.max(0.0)))" }
+
+[[fault]]
+id = "cli-seconds-flag-clamps"
+guard = "guards::seconds::a_seconds_flag_that_is_not_a_duration_is_refused_before_any_call"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::seconds::a_seconds_flag_that_is_not_a_duration_is_refused_before_any_call"]
+expect = "test-failed"
+suite = "rust"
+message = "exec --timeout=NaN: answered"
+note = "crates/microvms-cli/src/guards/seconds.rs::a_seconds_flag_that_is_not_a_duration_is_refused_before_any_call"
+transform = { file = "crates/microvms-cli/src/cli.rs", replace = "microvms_core::cost::duration_of_secs_f64(seconds).map_err(|error| error.to_string())", with = "Ok(std::time::Duration::try_from_secs_f64(seconds.max(0.0)).unwrap_or_default())" }
+
+[[fault]]
+id = "cli-seconds-parse-table"
+guard = "cli::tests::every_seconds_flag_refuses_what_is_not_a_duration"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "cli::tests::every_seconds_flag_refuses_what_is_not_a_duration"]
+expect = "test-failed"
+suite = "rust"
+message = "exec --timeout=inf parsed"
+note = "crates/microvms-cli/src/cli.rs::every_seconds_flag_refuses_what_is_not_a_duration"
+transform = { file = "crates/microvms-cli/src/cli.rs", replace = "microvms_core::cost::duration_of_secs_f64(seconds).map_err(|error| error.to_string())", with = "Ok(std::time::Duration::try_from_secs_f64(seconds.max(0.0)).unwrap_or_default())" }
+
+[[fault]]
+id = "cli-seconds-exit-code"
+guard = "a_seconds_flag_that_is_not_a_duration_exits_with_the_argument_error"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "exit_codes", "--", "--exact", "a_seconds_flag_that_is_not_a_duration_exits_with_the_argument_error"]
+expect = "test-failed"
+suite = "rust"
+message = "left: 101"
+note = "crates/microvms-cli/tests/exit_codes.rs::a_seconds_flag_that_is_not_a_duration_exits_with_the_argument_error"
+transform = { file = "crates/microvms-cli/src/cli.rs", replace = "microvms_core::cost::duration_of_secs_f64(seconds).map_err(|error| error.to_string())", with = "Ok(std::time::Duration::from_secs_f64(seconds.max(0.0)))" }
+
+[[fault]]
+id = "cli-ls-interval-too-large"
+guard = "commands::local::tests::a_spin_interval_or_an_empty_watch_is_refused"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "commands::local::tests::a_spin_interval_or_an_empty_watch_is_refused"]
+expect = "test-failed"
+suite = "rust"
+message = "1e300"
+note = "crates/microvms-cli/src/commands/local.rs::a_spin_interval_or_an_empty_watch_is_refused"
+transform = { file = "crates/microvms-cli/src/commands/local.rs", replace = "duration_of_secs_f64(args.interval_sec)", with = "duration_of_secs_f64(if args.interval_sec.is_finite() { args.interval_sec.min(60.0) } else { args.interval_sec })" }
+
+[[fault]]
+id = "cli-sync-client-wait"
+guard = "commands::attached::tests::a_sync_waits_its_budget_plus_the_delete_grace"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "commands::attached::tests::a_sync_waits_its_budget_plus_the_delete_grace"]
+expect = "test-failed"
+suite = "rust"
+message = "left: 30s"
+note = "crates/microvms-cli/src/commands/attached.rs::a_sync_waits_its_budget_plus_the_delete_grace"
+transform = { file = "crates/microvms-cli/src/commands/attached.rs", replace = "    budget + SYNC_DELETE_GRACE\n", with = "    budget - SYNC_DELETE_GRACE\n" }
+
+# An accepted figure has to arrive as typed: a fraction must not lose its sub-second part in
+# the parser, and `sync`'s budget is the one seconds flag that reaches the wire.
+
+[[fault]]
+id = "cli-seconds-parse-truncates"
+guard = "cli::tests::every_seconds_flag_refuses_what_is_not_a_duration"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "cli::tests::every_seconds_flag_refuses_what_is_not_a_duration"]
+expect = "test-failed"
+suite = "rust"
+message = "exec --timeout=0.5 parsed to Some(0ns)"
+note = "crates/microvms-cli/src/cli.rs::every_seconds_flag_refuses_what_is_not_a_duration"
+transform = { file = "crates/microvms-cli/src/cli.rs", replace = "microvms_core::cost::duration_of_secs_f64(seconds).map_err(|error| error.to_string())", with = "microvms_core::cost::duration_of_secs_f64(seconds).map(|whole| std::time::Duration::from_secs(whole.as_secs())).map_err(|error| error.to_string())" }
+
+[[fault]]
+id = "cli-sync-rm-deadline-dropped"
+guard = "guards::seconds::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::seconds::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"]
+expect = "test-failed"
+suite = "rust"
+message = "sync --timeout=60: the rm's timeout_sec was null"
+note = "crates/microvms-cli/src/guards/seconds.rs::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
+transform = { file = "crates/microvms-cli/src/commands/attached.rs", replace = ".with_timeout_sec(Some(delete_timeout.as_secs_f64())),", with = ".with_timeout_sec(None)," }
+
+[[fault]]
+id = "cli-sync-rm-deadline-truncated"
+guard = "guards::seconds::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::seconds::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"]
+expect = "test-failed"
+suite = "rust"
+message = "sync --timeout=0.5: the rm's timeout_sec was 0.0"
+note = "crates/microvms-cli/src/guards/seconds.rs::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
+transform = { file = "crates/microvms-cli/src/commands/attached.rs", replace = ".with_timeout_sec(Some(delete_timeout.as_secs_f64())),", with = ".with_timeout_sec(Some(delete_timeout.as_secs() as f64))," }
+
+# A figure every surface accepts, up to what a `Duration` holds, can be past what the clock can
+# add to now. Core's deadlines saturate; the unchecked add panicked after the exec had started.
+
+[[fault]]
+id = "app-wait-deadline-overflows"
+guard = "session::exec::tests::a_wait_longer_than_the_clock_can_hold_still_waits"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::exec::tests::a_wait_longer_than_the_clock_can_hold_still_waits"]
+expect = "test-failed"
+suite = "rust"
+message = "overflow when adding duration to instant"
+note = "crates/microvms-app/src/session/exec.rs::a_wait_longer_than_the_clock_can_hold_still_waits"
+transform = { file = "crates/microvms-app/src/session/mod.rs", replace = "    now.checked_add(after).unwrap_or_else(|| now + FAR_FUTURE)\n", with = "    now + after\n" }
+
+# Each of the other three deadline sites, put back to the unchecked add on its own, so a later
+# edit at one call site can't pass because the helper is still right.
+
+[[fault]]
+id = "app-ready-deadline-overflows"
+guard = "session::tests::a_ready_wait_longer_than_the_clock_can_hold_still_polls"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::tests::a_ready_wait_longer_than_the_clock_can_hold_still_polls"]
+expect = "test-failed"
+suite = "rust"
+message = "overflow when adding duration to instant"
+note = "crates/microvms-app/src/session/mod.rs::a_ready_wait_longer_than_the_clock_can_hold_still_polls"
+transform = { file = "crates/microvms-app/src/session/mod.rs", replace = "        let deadline = deadline_after(timeout);\n", with = "        let deadline = tokio::time::Instant::now() + timeout;\n" }
+
+[[fault]]
+id = "app-completion-deadline-overflows"
+guard = "session::complete::tests::a_client_deadline_longer_than_the_clock_can_hold_still_waits"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::complete::tests::a_client_deadline_longer_than_the_clock_can_hold_still_waits"]
+expect = "test-failed"
+suite = "rust"
+message = "overflow when adding duration to instant"
+note = "crates/microvms-app/src/session/complete.rs::a_client_deadline_longer_than_the_clock_can_hold_still_waits"
+transform = { file = "crates/microvms-app/src/session/complete.rs", replace = "        let deadline = super::deadline_after(self.deadline);\n", with = "        let deadline = tokio::time::Instant::now() + self.deadline;\n" }
+
+[[fault]]
+id = "app-completion-grace-overflows"
+guard = "session::complete::tests::a_client_grace_longer_than_the_clock_can_hold_still_acks"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::complete::tests::a_client_grace_longer_than_the_clock_can_hold_still_acks"]
+expect = "test-failed"
+suite = "rust"
+message = "overflow when adding duration to instant"
+note = "crates/microvms-app/src/session/complete.rs::a_client_grace_longer_than_the_clock_can_hold_still_acks"
+transform = { file = "crates/microvms-app/src/session/complete.rs", replace = "        let grace = super::deadline_after(self.options.client_grace);\n", with = "        let grace = tokio::time::Instant::now() + self.options.client_grace;\n" }
+
+[[fault]]
+id = "cli-huge-timeout-panics"
+guard = "guards::seconds::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::seconds::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"]
+expect = "test-failed"
+suite = "rust"
+message = "exec --timeout=1e19: panicked (overflow when adding duration to instant)"
+note = "crates/microvms-cli/src/guards/seconds.rs::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
+transform = { file = "crates/microvms-app/src/session/mod.rs", replace = "    now.checked_add(after).unwrap_or_else(|| now + FAR_FUTURE)\n", with = "    now + after\n" }
+
+# `run` waits on its exec after the launch, so the same panic there left the VM billing.
+
+[[fault]]
+id = "cli-huge-run-timeout-panics"
+guard = "guards::seconds::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::seconds::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"]
+expect = "test-failed"
+suite = "rust"
+message = "run --exec true --timeout=1e19: panicked (overflow when adding duration to instant)"
+transform = { file = "crates/microvms-app/src/session/mod.rs", replace = "    now.checked_add(after).unwrap_or_else(|| now + FAR_FUTURE)\n", with = "    now + after\n" }
+
+[[fault]]
+id = "cli-huge-run-timeout-tears-down"
+guard = "guards::seconds::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::seconds::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"]
+expect = "test-failed"
+suite = "rust"
+message = "run --exec true --timeout=1e19: no teardown after"
+transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "    let teardown = tear_down(ctx, &mut sandbox, &mut ledger, args.keep).await;\n", with = "    let teardown = tear_down(ctx, &mut sandbox, &mut ledger, true).await;\n" }
+
+# The refusal prints the figure as typed, so `1e300` doesn't read as 301 digits.
+
+[[fault]]
+id = "domain-duration-refusal-as-typed"
+guard = "cost::tests::a_refused_figure_is_named_as_typed_with_the_range_it_missed"
+run = ["cargo", "test", "-p", "microvms-domain", "--lib", "--", "--exact", "cost::tests::a_refused_figure_is_named_as_typed_with_the_range_it_missed"]
+expect = "test-failed"
+suite = "rust"
+message = "0000000000 seconds is not a duration"
+note = "crates/microvms-domain/src/cost.rs::a_refused_figure_is_named_as_typed_with_the_range_it_missed"
+transform = { file = "crates/microvms-domain/src/cost.rs", replace = "\"{seconds:?} seconds is not a duration", with = "\"{seconds} seconds is not a duration" }
+
+[[fault]]
+id = "cli-ls-interval-message-as-typed"
+guard = "commands::local::tests::a_spin_interval_or_an_empty_watch_is_refused"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "commands::local::tests::a_spin_interval_or_an_empty_watch_is_refused"]
+expect = "test-failed"
+suite = "rust"
+message = "at least 0.1: 0\n"
+note = "crates/microvms-cli/src/commands/local.rs::a_spin_interval_or_an_empty_watch_is_refused"
+transform = { file = "crates/microvms-cli/src/commands/local.rs", replace = "at least 0.1: {:?}\",", with = "at least 0.1: {}\"," }
+
+[[fault]]
+id = "clippy-cli-duration-from-secs-f64"
+guard = "microvms-cli clippy.toml: std::time::Duration::from_secs_f64"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `std::time::Duration::from_secs_f64`"
+transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = std::time::Duration::from_secs_f64(1.0);\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-duration-from-secs-f32"
+guard = "microvms-cli clippy.toml: std::time::Duration::from_secs_f32"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `std::time::Duration::from_secs_f32`"
+transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = std::time::Duration::from_secs_f32(1.0);\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-py-duration-from-secs-f64"
+guard = "microvms-py clippy.toml: std::time::Duration::from_secs_f64"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `std::time::Duration::from_secs_f64`"
+transform = { file = "bindings/microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = std::time::Duration::from_secs_f64(1.0);\n" }
+
+[[fault]]
+id = "clippy-py-duration-from-secs-f32"
+guard = "microvms-py clippy.toml: std::time::Duration::from_secs_f32"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `std::time::Duration::from_secs_f32`"
+transform = { file = "bindings/microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = std::time::Duration::from_secs_f32(1.0);\n" }
+
+[[fault]]
+id = "clippy-js-duration-from-secs-f64"
+guard = "microvms-js clippy.toml: std::time::Duration::from_secs_f64"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `std::time::Duration::from_secs_f64`"
+transform = { file = "bindings/microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = std::time::Duration::from_secs_f64(1.0);\n" }
+
+[[fault]]
+id = "clippy-js-duration-from-secs-f32"
+guard = "microvms-js clippy.toml: std::time::Duration::from_secs_f32"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `std::time::Duration::from_secs_f32`"
+transform = { file = "bindings/microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = std::time::Duration::from_secs_f32(1.0);\n" }

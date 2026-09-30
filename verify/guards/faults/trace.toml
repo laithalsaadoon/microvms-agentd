@@ -1,0 +1,247 @@
+# ── trace:check (#276, #277) ─────────────────────────────────────────────────
+
+[[fault]]
+id = "trace-cli9-gherkin"
+guard = "tools/check-trace.py --check"
+run = ["./tools/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: CLI-9 has no gherkin layer"
+transform = { file = "crates/microvms-cli/tests/features/closed_output.feature", replace = "@CLI-9 @live", with = "@live" }
+
+[[fault]]
+id = "trace-rust-cfg-any"
+guard = "tools/check-trace.py --check"
+run = ["./tools/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: ARCH-8 has no test layer"
+patch = "verify/guards/faults/trace-rust-cfg-any.patch"
+
+# The impl layer leaves the CLI's in-crate guards out: they're test code under `src/`. Read as
+# production code, each guard file would join the impl row of every key it mentions.
+[[fault]]
+id = "trace-cli-guards-not-impl"
+guard = "tools/check-trace.py --check"
+run = ["./tools/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: docs/TRACEABILITY.md is stale"
+transform = { file = "tools/check-trace.py", replace = "            or path.is_relative_to(root / CLI_GUARDS)\n", with = "            or False\n" }
+
+[[fault]]
+id = "trace-node-regex-in-body"
+guard = "tools/check-trace.py --check"
+run = ["./tools/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: docs/TRACEABILITY.md is stale"
+patch = "verify/guards/faults/trace-node-regex-in-body.patch"
+
+[[fault]]
+id = "trace-python-parametrize"
+guard = "tools/check-trace.py --check"
+run = ["./tools/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: docs/TRACEABILITY.md is stale"
+patch = "verify/guards/faults/trace-python-parametrize.patch"
+
+# #276's H10: with the literal key off every title and docstring, a Node `test.todo` and a
+# Python test under `@pytest.mark.skip` still spell IMAGE-5. Neither runs, so neither counts.
+[[fault]]
+id = "trace-never-runs"
+guard = "tools/check-trace.py --check"
+run = ["./tools/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: IMAGE-5 has no test layer"
+patch = "verify/guards/faults/trace-never-runs.patch"
+
+[[fault]]
+id = "trace-fuzz-file-test-doc"
+guard = "tools/check-trace.py --check"
+run = ["./tools/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: docs/TRACEABILITY.md is stale"
+transform = { file = "crates/microvms-cli/src/closed_output_fuzz.rs", replace = "/// CLI-7, CLI-8, CLI-9: the CLI's", with = "// CLI-7, CLI-8, CLI-9: the CLI's" }
+
+[[fault]]
+id = "trace-binding-floor"
+guard = "tools/check-trace.py --check"
+run = ["./tools/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "BINDING_TESTS entry ('bindings/microvms-js/__tests__', '*.mjs') yields no file"
+transform = { file = "tools/check-trace.py", replace = "    (\"bindings/microvms-js/__test__\", \"*.mjs\"),\n", with = "    (\"bindings/microvms-js/__tests__\", \"*.mjs\"),\n" }
+
+[[fault]]
+id = "trace-layer-floor"
+guard = "tools/check-trace.py --check"
+run = ["./tools/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "the live collector found no requirement key"
+transform = { file = "tools/check-trace.py", replace = "results\\.(?:check|eq|absent)\\(", with = "results\\.(?:never)\\(" }
+
+# The live layer reads every module of the suite under conformance/, not only its entry point.
+# The floor: an enumeration that yields nothing. The sentinel: a key whose only live check is
+# in a lane module stops counting when that check loses its key.
+[[fault]]
+id = "trace-live-suite-floor"
+guard = "tools/check-trace.py --check"
+run = ["./tools/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "the live collector found no requirement key"
+transform = { file = "tools/check-trace.py", replace = "LIVE_SUITE.relative_to(ROOT)).rglob(\"*.py\"))", with = "LIVE_SUITE.relative_to(ROOT)).rglob(\"*.pyx\"))" }
+
+[[fault]]
+id = "trace-live-lane-key"
+guard = "tools/check-trace.py --check"
+run = ["./tools/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: AGENTD-10 has no live layer"
+transform = { file = "conformance/lanes/exec.py", replace = "\"AGENTD-10 without --inherit-image-env", with = "\"without --inherit-image-env" }
+
+[[fault]]
+id = "trace-sentinel"
+guard = "tools/check-trace.py --check"
+run = ["./tools/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "the sentinel CLI-7 is not in verify/spec/traced/CLI.toml"
+transform = { file = "verify/spec/traced/CLI.toml", replace = "[CLI-7]\nissue = \"#216\"\n\n", with = "" }
+
+# The traced files in verify/spec/traced/, one per requirement group, and the one loader trace:check and
+# the ratchet read them with. Each refusal names its file, seeded on the real files: a key in
+# another group's file, a key twice in one file (TOML refuses it) and in two files, an entry of
+# another shape, a file named for no group, and the floor, a directory with no group file.
+[[fault]]
+id = "trace-traced-wrong-group"
+guard = "tools/check-trace.py --check"
+run = ["./tools/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: verify/spec/traced/BIND.toml: STATE-1 isn't in the BIND group"
+transform = { file = "verify/spec/traced/BIND.toml", replace = "[BIND-6]\n", with = "[STATE-1]\nissue = \"#302\"\n\n[BIND-6]\n" }
+
+[[fault]]
+id = "trace-traced-twice-in-one-file"
+guard = "tools/check-trace.py --check"
+run = ["./tools/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: verify/spec/traced/CLI.toml doesn't parse: Cannot declare ('CLI-8',) twice"
+transform = { file = "verify/spec/traced/CLI.toml", replace = "[CLI-8]\nissue = \"#216\"\n", with = "[CLI-8]\nissue = \"#216\"\n\n[CLI-8]\nissue = \"#216\"\n" }
+
+[[fault]]
+id = "trace-traced-twice-in-two-files"
+guard = "tools/check-trace.py --check"
+run = ["./tools/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: CLI-7 is listed in more than one file: verify/spec/traced/CLI.toml, verify/spec/traced/IMAGE.toml"
+transform = { file = "verify/spec/traced/IMAGE.toml", replace = "[IMAGE-1]\n", with = "[CLI-7]\nissue = \"#216\"\n\n[IMAGE-1]\n" }
+
+[[fault]]
+id = "trace-traced-malformed"
+guard = "tools/check-trace.py --check"
+run = ["./tools/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: verify/spec/traced/CLI.toml: CLI-9 is malformed"
+transform = { file = "verify/spec/traced/CLI.toml", replace = "[CLI-9]\nissue = \"#216\"\n", with = "[CLI-9]\nissues = \"#216\"\n" }
+
+[[fault]]
+id = "trace-traced-unknown-group"
+guard = "tools/check-trace.py --check"
+run = ["./tools/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: verify/spec/traced/COSTS.toml isn't named for a requirement group the specs define"
+patch = "verify/guards/faults/trace-traced-unknown-group.patch"
+
+[[fault]]
+id = "trace-traced-floor"
+guard = "tools/check-trace.py --check"
+run = ["./tools/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: verify/spec/trace holds no group file, so no requirement is traced"
+transform = { file = "tools/check-trace.py", replace = "TRACED_DIR = ROOT / \"verify\" / \"spec\" / \"traced\"\n", with = "TRACED_DIR = ROOT / \"verify\" / \"spec\" / \"trace\"\n" }
+
+[[fault]]
+id = "trace-keyless-shrinks"
+guard = "tools/check-trace.py --check"
+run = ["./tools/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "drop it from KEYLESS"
+transform = { file = "crates/microvms-edges/tests/release_bundle.rs", replace = "#[test]\nfn the_release_bundle_verifies_under_the_embedded_trusted_root() {", with = "/// CLI-7\n#[test]\nfn the_release_bundle_verifies_under_the_embedded_trusted_root() {" }
+
+# The unit suite's own breaks, one per rule branch #276 added (its report's B rows).
+[[fault]]
+id = "trace-unit-js-member-callee"
+guard = "test_check_trace.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_trace.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_node_assertion_that_calls_a_test_method_does_not_count ("
+transform = { file = "tools/check-trace.py", replace = "_JS_CALLEE = r\"^(?:test|it|describe|suite)(?:\\.only)?$\"", with = "_JS_CALLEE = r\"^(?:[A-Za-z_$][\\w$]*\\.)*(?:test|it|describe|suite)(?:\\.only)?$\"" }
+
+[[fault]]
+id = "trace-unit-js-skip-todo"
+guard = "test_check_trace.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_trace.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_node_test_that_never_runs_does_not_count ("
+transform = { file = "tools/check-trace.py", replace = "                {\"not\": _JS_OFF},\n                {\"not\": {\"inside\": {**_JS_OFF, \"stopBy\": \"end\"}}},\n", with = "" }
+
+[[fault]]
+id = "trace-unit-rust-cfg-off"
+guard = "test_check_trace.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_trace.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_rust_test_that_never_runs_does_not_count ("
+transform = { file = "tools/check-trace.py", replace = "_OFF = [_in_run({\"regex\": r\"^#\\[\\s*cfg\\s*\\(\", \"not\": {\"regex\": _PLATFORM_CFG}})]", with = "_OFF = []" }
+
+[[fault]]
+id = "trace-unit-rust-ignored"
+guard = "test_check_trace.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_trace.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_rust_test_that_never_runs_does_not_count ("
+transform = { file = "tools/check-trace.py", replace = "_TEST_FN = {\"all\": [_runs(*_OFF, *_IGNORED)", with = "_TEST_FN = {\"all\": [_runs(*_OFF)" }
+
+[[fault]]
+id = "trace-unit-python-decorators"
+guard = "test_check_trace.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_trace.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_python_literal_in_a_decorator_does_not_count ("
+transform = { file = "tools/check-trace.py", replace = "            if isinstance(decorator, ast.Call) and _marker(decorator, \"req\"):\n                for argument in decorator.args:\n                    if isinstance(argument, ast.Constant) and isinstance(\n                        argument.value, str\n                    ):\n                        keys |= set(patterns.key.findall(argument.value))\n", with = "            keys |= set(patterns.key.findall(ast.unparse(decorator)))\n" }
+
+[[fault]]
+id = "trace-unit-harness-as-test"
+guard = "test_check_trace.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_trace.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_harness_does_not_also_count_for_the_test_layer ("
+transform = { file = "tools/check-trace.py", replace = "_TEST_FN = {\"all\": [_runs(*_OFF, *_IGNORED), {\"not\": _CALLS_BOLERO}]}", with = "_TEST_FN = {\"all\": [_runs(*_OFF, *_IGNORED)]}" }
+
+[[fault]]
+id = "trace-unit-bolero-spelling"
+guard = "test_check_trace.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_trace.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_spelling_of_the_bolero_call_is_a_harness ("
+transform = { file = "tools/check-trace.py", replace = "r\"^(?:(?:::\\s*)?bolero\\s*::\\s*)?check$\"", with = "r\"^bolero\\s*::\\s*check$\"" }

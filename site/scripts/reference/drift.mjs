@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
- * The "Architecture drift" page: the count `ratchet/drift.json` holds, at each commit that changed it.
+ * The "Architecture drift" page: the count `verify/ratchet/drift.json` holds, at each commit that changed it.
  *
- * `scripts/ratchet-history.py` reads the series out of git and prints it as JSON; this file lays it
+ * `tools/ratchet-history.py` reads the series out of git and prints it as JSON; this file lays it
  * out as tables and Mermaid `xychart-beta` lines, which `beautiful-mermaid` renders at build time
  * like every other diagram here. The split mirrors the Python SDK's: the history script owns the part
  * that needs git and the file's schema, and the layout stays in the tier's own Markdown helpers.
@@ -20,8 +20,8 @@ import { routeOf, TIER } from "./pages.mjs"
 /** @typedef {import("./pages.mjs").ReferencePage} ReferencePage */
 
 /** The file the page counts, and the script that reads its history. */
-export const DRIFT_SOURCE = "ratchet/drift.json"
-export const HISTORY_SCRIPT = "scripts/ratchet-history.py"
+export const DRIFT_SOURCE = "verify/ratchet/drift.json"
+export const HISTORY_SCRIPT = "tools/ratchet-history.py"
 const THIS_FILE = "site/scripts/reference/drift.mjs"
 
 /**
@@ -34,7 +34,7 @@ const THIS_FILE = "site/scripts/reference/drift.mjs"
 export const CATEGORIES = {
   placement: {
     kind: "layering",
-    meaning: `a dependency a crate has outside its allowed set in ${code("arch/placement.toml")}`
+    meaning: `a dependency a crate has outside its allowed set in ${code("verify/arch/placement.toml")}`
   },
   subprocess: {
     kind: "layering",
@@ -51,11 +51,11 @@ export const CATEGORIES = {
   },
   "parity-gap": {
     kind: "parity",
-    meaning: `a capability one surface lacks until an issue closes it: an exemption in ${code("parity/capabilities.toml")} that names the issue`
+    meaning: `a capability one surface lacks until an issue closes it: an exemption in ${code("verify/parity/capabilities.toml")} that names the issue`
   },
   untraced: {
     kind: "traceability",
-    meaning: `a requirement in ${code("spec/")} that no group file in ${code("spec/traced/")} lists, so ${code("trace:check")} holds no layer to it`
+    meaning: `a requirement in ${code("verify/spec/")} that no group file in ${code("verify/spec/traced/")} lists, so ${code("trace:check")} holds no layer to it`
   }
 }
 
@@ -303,7 +303,7 @@ export const driftPage = (history) => {
     route: routeOf(id),
     title: "Architecture drift",
     description:
-      "The entries in ratchet/drift.json at each commit that changed the file: layering and parity drift, and the requirements no layer traces yet.",
+      "The entries in verify/ratchet/drift.json at each commit that changed the file: layering and parity drift, and the requirements no layer traces yet.",
     // After the four contract pages and the wire schema; the sidebar lists it by hand beside them.
     sidebarOrder: 5,
     sidebarLabel: "Architecture drift",
@@ -341,7 +341,7 @@ export const driftPage = (history) => {
       {
         title: "Provenance",
         body: inlineText(
-          `This page is generated from the git history of ${code(DRIFT_SOURCE)}: ${code(HISTORY_SCRIPT)} reads the file at each first-parent commit that changed it, and ${code("site/scripts/gen-reference.mjs")} writes the page on every ${code("pnpm run sync")}. A working tree whose copy differs from HEAD's adds a last point marked "working tree". To change a number, fix what the entry names (move the code, give the surface the capability, or trace the requirement in its group's file in ${code("spec/traced/")}) and run ${code("mise run ratchet:update")}.`
+          `This page is generated from the git history of ${code(DRIFT_SOURCE)}: ${code(HISTORY_SCRIPT)} reads the file at each first-parent commit that changed it, and ${code("site/scripts/gen-reference.mjs")} writes the page on every ${code("pnpm run sync")}. A working tree whose copy differs from HEAD's adds a last point marked "working tree". To change a number, fix what the entry names (move the code, give the surface the capability, or trace the requirement in its group's file in ${code("verify/spec/traced/")}) and run ${code("mise run ratchet:update")}.`
         )
       }
     ])

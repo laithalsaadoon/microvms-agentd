@@ -1,6 +1,6 @@
 # Plan: microvms-core — port the client stack to Rust
 
-Derived from `spec/core.symspec.json` (51 requirements: ARCH-5, TRAP-13, COST-10,
+Derived from `verify/spec/core.symspec.json` (51 requirements: ARCH-5, TRAP-13, COST-10,
 STATE-12, BIND-5, CLI-6), `.erpaval/specs/001-control-plane-client/spec.md` (the
 S1/S2/S3 ladder and falsification discipline), and `.erpaval/microvms-core-kickoff.md`
 (the architecture, decided). Session: `.erpaval/sessions/session-fa0814/`.
@@ -8,13 +8,13 @@ S1/S2/S3 ladder and falsification discipline), and `.erpaval/microvms-core-kicko
 ## Layout (decided by the kickoff; not reopened)
 
 ```
-protocol/        NEW  wire types extracted from agentd (serde+schemars only)
-microvms-core/   NEW  control-plane client, in-VM client, traps, cost, sizing
-microvms-py/     NEW  PyO3 bindings (build-only, no publish)
-microvms-js/     NEW  napi-rs bindings (build-only, no publish)
-microvms-cli/    NEW  the `microvm` binary
-agentd/          EXISTS  depends on protocol after extraction; schema.json byte-identical
-model/           EXISTS  gains client-side lifecycle model (or sibling module)
+crates/protocol/        NEW  wire types extracted from agentd (serde+schemars only)
+crates/microvms-core/   NEW  control-plane client, in-VM client, traps, cost, sizing
+bindings/microvms-py/     NEW  PyO3 bindings (build-only, no publish)
+bindings/microvms-js/     NEW  napi-rs bindings (build-only, no publish)
+crates/microvms-cli/    NEW  the `microvm` binary
+crates/agentd/          EXISTS  depends on protocol after extraction; schema.json byte-identical
+crates/model/           EXISTS  gains client-side lifecycle model (or sibling module)
 ```
 
 Workspace `members` grows to seven. One dependency direction:
@@ -85,13 +85,13 @@ TRAP-10/TRAP-13, S1).
 
 **Lifecycle is a typestate-informed state machine matching the symspec state
 model** (vm_state 6-enum, token_installed, image_exists, was_terminated,
-bootstrap_count 0..3; STATE-1..12). Client-side stateright model extends model/
+bootstrap_count 0..3; STATE-1..12). Client-side stateright model extends crates/model/
 with resume-after-terminate rejected without a wire call and suspend/resume
 session-invariant preservation. STATE-12: resume checks the elapsed suspended
 window locally and rejects naming the window.
 
 **In-VM client reuses the daemon's turmoil discipline.** SimListener pattern from
-agentd/tests/turmoil_transport.rs:121; byte-offset cursor reconnect per the prior
+crates/agentd/tests/turmoil_transport.rs:121; byte-offset cursor reconnect per the prior
 lesson (solutions/architecture-patterns/byte-offset-cursor...); two-clocks rule
 respected (never pace a child with sleep under turmoil).
 
@@ -108,7 +108,7 @@ coercions, so BIND-2/BIND-5 hold by construction. Build-only; nothing published.
 **Verification wiring.**
 - `mise` gains `spec:core` task running the v5 CLI
   (`node ~/workplace/symspec/packages/symspec/dist/cli.mjs check
-  spec/core.symspec.json --reachability-timeout-ms 5000`); stays out of `check`'s
+  verify/spec/core.symspec.json --reachability-timeout-ms 5000`); stays out of `check`'s
   depends (fresh-clone argument stands — global node path).
 - `check-model-drift` gains a Rust source: `microvm constants --emit-json`
   (offline), compared against the same model plus a python-vs-rust cross-check
@@ -123,7 +123,7 @@ coercions, so BIND-2/BIND-5 hold by construction. Build-only; nothing published.
   client under test, and adding a raw-request affordance to the CLI would
   violate CLI-2/CLI-5. run_rs.py states this split in its module docstring.
   New `live:conformance-rs` task joins the `live` aggregate. Teardown ordering
-  preserved: log groups LAST. `scripts/verify-clean` prefix list is a
+  preserved: log groups LAST. `tools/verify-clean` prefix list is a
   correctness condition if new prefixes appear (none planned — `microvm-`
   covered).
 - Guard-proof rule per REQUIREMENT, not just per trap (critic objection 3):

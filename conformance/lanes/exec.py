@@ -111,7 +111,7 @@ def drive_exec_identity(cli: Cli, launched: Envelope, results: Results) -> None:
     )
 
     # The retry: the identical id, a *different* command. The daemon answers success for a
-    # known id without spawning anything (`agentd/src/exec.rs:366`, decided under the
+    # known id without spawning anything (`crates/agentd/src/exec.rs:366`, decided under the
     # registry lock), so this must succeed and must not run the new command. Detached again,
     # so the retry does not ack either.
     results.ok(
@@ -148,7 +148,7 @@ def drive_exec_identity(cli: Cli, launched: Envelope, results: Results) -> None:
 
     results.ok("ack accepted", lambda: cli.call("ack", "c1", *attach))
     # The second ack is a 409 rather than a 200 with an empty body, because an empty body
-    # would read as "the command produced no output" (`agentd/src/exec.rs:854`).
+    # would read as "the command produced no output" (`crates/agentd/src/exec.rs:854`).
     results.raises(
         "second ack refused with 409",
         "Conflict",
@@ -167,7 +167,7 @@ def drive_exec_start_protocol(cli: Cli, launched: Envelope, results: Results) ->
     Against the suite's own VM, whose image (`conformance_dockerfile`) carries a
     `conformance` passwd row at uid 4242 with home `/home/conformance`, and one image `ENV`
     line, `MICROVMS_CONFORMANCE_IMAGE_ENV=from-image`. Every check name starts with its
-    requirement key (AGENTD-7..16 in `spec/agentd.symspec.json`).
+    requirement key (AGENTD-7..16 in `verify/spec/agentd.symspec.json`).
 
     Live because the facts are the guest's: which rows the image's `/etc/passwd` holds, which
     shells the base image ships, and what environment the platform hands the daemon as the
@@ -614,7 +614,7 @@ def drive_stdin(cli: Cli, launched: Envelope, results: Results) -> None:
 
     The refusal at the end is the opt-in property: a command that did not ask for stdin
     must not have one, or every task command inherits a surprise open descriptor. The daemon
-    answers **409** for it (`agentd/src/exec.rs:700`) — the request is well-formed and it is
+    answers **409** for it (`crates/agentd/src/exec.rs:700`) — the request is well-formed and it is
     the exec that cannot accept it — which is a different fact from the 410 a write after
     EOF gets, and the kind is what says which.
     """
@@ -688,7 +688,7 @@ def drive_token_rotation(cli: Cli, launched: Envelope, results: Results) -> None
     The rotation is real, not simulated: each `Cli.call` is a separate process, so the
     start, the polls, and the ack below run under *different* proxy tokens by construction.
     What a 60-minute wait would add is only the proof that an **expired** token is refused,
-    which is the platform's property (`microvms-app/src/session/proxy.rs:63`), not the
+    which is the platform's property (`crates/microvms-app/src/session/proxy.rs:63`), not the
     daemon's or this client's.
 
     The output produced *before* the reattach is the assertion that matters: bytes buffered

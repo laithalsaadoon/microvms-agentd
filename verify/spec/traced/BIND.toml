@@ -1,0 +1,66 @@
+# The BIND group's traced requirements. The format and the rules are in tools/check-trace.py.
+
+[BIND-6]
+issue = "#222"
+
+[BIND-7]
+issue = "#222"
+
+[BIND-8]
+issue = "#222"
+
+[BIND-9]
+issue = "#222"
+
+[BIND-10]
+issue = "#222"
+
+[BIND-11]
+issue = "#227"
+
+[BIND-12]
+issue = "#227"
+
+[BIND-13]
+issue = "#227"
+waive.live = "a pure function that makes no AWS call; its refusals precede any call, so the service never sees them (zero calls asserted by the Gherkin scenarios and the fuzz harness)"
+
+[BIND-14]
+issue = "#223"
+waive.model = "a stateless selection over the five-row size table; the bolero harness checks minimality and coverage over arbitrary requests instead"
+waive.live = "a pure function of the request and the documented table; it makes no AWS call"
+
+[BIND-15]
+issue = "#223"
+waive.fuzz = "the outcome space (3 region x 2 credential x 3 service worlds) is enumerated exhaustively by the Stateright model; there is no input stream to fuzz"
+
+[BIND-16]
+issue = "#223"
+waive.fuzz = "the outcome space (3 region x 2 credential x 3 service worlds) is enumerated exhaustively by the Stateright model; there is no input stream to fuzz"
+
+[BIND-17]
+issue = "#219"
+
+[BIND-18]
+issue = "#219"
+
+[BIND-19]
+issue = "#219"
+
+[BIND-20]
+issue = "#219"
+
+# The tunnel's identity keys, BIND-21 here and AGENTD-17 and AGENTD-18 in AGENTD.toml, share their
+# model and gherkin waivers, so a change to one is a change to all three. #297's handshake model
+# removes the model waiver, and its frame harnesses the fuzz ones.
+[BIND-21]
+issue = "#297"
+waive.model = "#297 adds a stateright model of the tunnel handshake and its pins; until then the handshake and relay tests hold the key"
+waive.gherkin = "no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate"
+waive.fuzz = "#297 adds a harness over the client's tunnel frame read"
+
+[BIND-22]
+issue = "#297"
+waive.model = "one stream read by one parser has no interleavings to explore; its input space is bytes"
+waive.gherkin = "hostile bytes aren't a scenario a caller drives; the parser's tests feed it directly"
+waive.live = "a live daemon sends well-formed events, so a live run can't present hostile bytes"

@@ -40,21 +40,21 @@ symbol-bearing indexed files.
 
 | Folder | Churn (file-touches) | Share | Symbols |
 | --- | --- | --- | --- |
-| `microvms-core/` | 149 | 17% | 1,572 |
-| `microvms-cli/` | 137 | 15% | 708 |
+| `crates/microvms-core/` | 149 | 17% | 1,572 |
+| `crates/microvms-cli/` | 137 | 15% | 708 |
 | `docs/` | 104 | 12% | — |
 | `./` (root config and README) | 100 | 11% | — |
-| `microvms-py/` | 72 | 8% | 591 |
-| `agentd/` | 71 | 8% | 727 |
+| `bindings/microvms-py/` | 72 | 8% | 591 |
+| `crates/agentd/` | 71 | 8% | 727 |
 | `clients/` (deleted, see below) | 70 | 8% | — |
-| `microvms-js/` | 50 | 6% | 374 |
+| `bindings/microvms-js/` | 50 | 6% | 374 |
 | `.github/` | 31 | 3% | — |
-| `scripts/` | 26 | 3% | 170 |
+| `tools/` | 26 | 3% | 170 |
 | `.erpaval/` | 23 | 3% | — |
 | `conformance/` | 22 | 2% | 96 |
-| `protocol/` | 17 | 2% | 88 |
-| `model/` | 10 | 1% | 104 |
-| `spec/` | 6 | 1% | — |
+| `crates/protocol/` | 17 | 2% | 88 |
+| `crates/model/` | 10 | 1% | 104 |
+| `verify/spec/` | 6 | 1% | — |
 
 Three readings of that table matter.
 
@@ -69,19 +69,19 @@ daemon over a real loopback socket, and both suites passing against real AWS on 
 commit — Python oracle 56/56, Rust CLI 38/38 — is what ended the oracle's job. Recovering any
 of it requires `git show`, and nothing in the tree points a reader at that commit.
 
-**The densest files are also the most-churned files.** `microvms-domain/src/cost.rs` holds 242
-symbols, the highest in the repository, and 7 commits. `agentd/src/exec.rs` 147, `agentd/src/fs.rs`
-137, `microvms-cli/src/guards.rs` (since split into `microvms-cli/src/guards/`) 123 with 13
-commits, `microvms-py/src/cost.rs` 117,
-`microvms-js/src/cost.rs` 106, `microvms-app/src/sandbox.rs` 105 with 11 commits,
-`microvms-app/src/control/image.rs` 99 with 11, `microvms-app/src/control/ops.rs` 96 with 9,
-`microvms-app/src/session/mod.rs` 94. Six of those ten are in both the churn top-20 and the
+**The densest files are also the most-churned files.** `crates/microvms-domain/src/cost.rs` holds 242
+symbols, the highest in the repository, and 7 commits. `crates/agentd/src/exec.rs` 147, `crates/agentd/src/fs.rs`
+137, `crates/microvms-cli/src/guards.rs` (since split into `crates/microvms-cli/src/guards/`) 123 with 13
+commits, `bindings/microvms-py/src/cost.rs` 117,
+`bindings/microvms-js/src/cost.rs` 106, `crates/microvms-app/src/sandbox.rs` 105 with 11 commits,
+`crates/microvms-app/src/control/image.rs` 99 with 11, `crates/microvms-app/src/control/ops.rs` 96 with 9,
+`crates/microvms-app/src/session/mod.rs` 94. Six of those ten are in both the churn top-20 and the
 density top-10. A change to any of them is a change to a file that is simultaneously the
 largest and the least settled thing in its crate.
 
-**`protocol/` and `model/` are the inverse case.** 17 and 10 file-touches, 88 and 104 symbols.
-`protocol/` is small and quiet, and it is also the crate both the daemon and every client
-compile against — `microvms-cli/tests/dependency_direction.rs` makes the direction
+**`crates/protocol/` and `crates/model/` are the inverse case.** 17 and 10 file-touches, 88 and 104 symbols.
+`crates/protocol/` is small and quiet, and it is also the crate both the daemon and every client
+compile against — `crates/microvms-cli/tests/dependency_direction.rs` makes the direction
 `cli -> core -> protocol` a test rather than a convention. Low churn there is a property of
 the wire contract being stable, not of the code being unimportant.
 
@@ -105,12 +105,12 @@ the resulting 400 before the payload can be read; `docs/PLATFORM.md:43` fixes th
 `runHookPayload` ceiling at 4096 bytes and notes the service model states it twice,
 differently.
 
-**Formal requirements.** `spec/core.symspec.json` holds 51 requirements, every one
+**Formal requirements.** `verify/spec/core.symspec.json` holds 51 requirements, every one
 `status: approved`, keyed `TRAP` 13 / `STATE` 12 / `COST` 10 / `CLI` 6 / `ARCH` 5 / `BIND` 5,
 with `verificationMethod` distributed `test` 38 / `analysis` 9 / `inspection` 4, plus a state
 model and one waiver. Its `systemName` field gives the per-subsystem coverage: `microvms-core`
 27, cost engine 10, CLI crate 8, language-bindings layer 3, JavaScript binding 1, Python
-binding 1, sizing model 1. `spec/agentd.symspec.json` adds 6, all `systemName: agentd`. The 13
+binding 1, sizing model 1. `verify/spec/agentd.symspec.json` adds 6, all `systemName: agentd`. The 13
 `TRAP-*` requirements are `docs/PLATFORM.md`'s findings in enforceable form.
 
 **Compounded lessons.** 12 files under `.erpaval/solutions/`, in four categories:
@@ -125,7 +125,7 @@ exactly eight tasks: `lint`, `security`, `test`, `schema:check`, `stubs:check`, 
 `live:check`, `build`. Four of those are drift gates that keep a hand-maintained value honest
 against an independent source: `schema:check` (`mise.toml:189`) asserts `docs/schema.json`
 still describes what the daemon serves, `stubs:check` (`mise.toml:235`) asserts
-`microvms-py/microvms.pyi` still describes the pyo3 surface, `model:check` (`mise.toml:257`)
+`bindings/microvms-py/microvms.pyi` still describes the pyo3 surface, `model:check` (`mise.toml:257`)
 asserts `microvms-core`'s hardcoded constants still match the pinned botocore service model,
 and `live:check` (`mise.toml:438`) asserts the live tier's own wiring, including `mise.toml`
 itself. A gate is stronger than a document because it fails rather than being unread.
@@ -144,14 +144,14 @@ requirements, is therefore verified by a toolchain a second contributor does not
 unconditional gate reports when the requirements and the code diverge.
 
 **`microvms-js` has no typings drift gate.** `.gitignore:29` ignores
-`microvms-js/index.d.ts`, and neither `mise.toml` nor `.github/workflows/ci.yml` mentions
+`bindings/microvms-js/index.d.ts`, and neither `mise.toml` nor `.github/workflows/ci.yml` mentions
 `index.d.ts` anywhere. The Python binding's equivalent artifact is gated by `stubs:check`;
 the Node binding's is generated, ignored, and unchecked, so a divergence between the Rust
 surface and the TypeScript surface shipped to consumers surfaces at a consumer's keyboard.
 
 **`protocol` and `agentd-model` carry zero formal requirements.** No `systemName` in either
-symspec file names them (`protocol/Cargo.toml:2` declares `protocol`, `model/Cargo.toml:2`
-declares `agentd-model`). `protocol/` is the crate the daemon and every client both compile
+symspec file names them (`crates/protocol/Cargo.toml:2` declares `protocol`, `crates/model/Cargo.toml:2`
+declares `agentd-model`). `crates/protocol/` is the crate the daemon and every client both compile
 against, and `docs/PROTOCOL.md` states the wire contract must never change silently. The
 requirement set that would make a silent change fail does not exist for it; the compile error
 from a type change is the whole defense.
@@ -171,13 +171,13 @@ price of live AWS runs.
    the two in agreement.
 4. `docs/TRUST.md` — the boundary contract: what the daemon must refuse, and why the workload
    is untrusted by design.
-5. `spec/core.symspec.json` — the 51 requirements, the 13 `TRAP-*` entries first, since each
+5. `verify/spec/core.symspec.json` — the 51 requirements, the 13 `TRAP-*` entries first, since each
    is a `docs/PLATFORM.md` finding with a `verificationMethod` attached.
 6. `.erpaval/solutions/` — 12 lessons, ordered by whichever subsystem is about to be touched.
    Consulting them before a fix costs minutes; rediscovering one costs a session.
 7. `mise.toml` — the command surface. `mise run check` is the local gate; `mise run live` is
    billable and manual.
-8. `microvms-core/src/` — the largest crate at 39,097 lines (at `78304e3`) and 1,572 symbols.
+8. `crates/microvms-core/src/` — the largest crate at 39,097 lines (at `78304e3`) and 1,572 symbols.
    `constants.rs` and `cost.rs` are where the measured platform values land in code.
 9. `docs/STRATEGY.md` — scope, audience, and the labeling discipline every claim follows:
    measured, documented, vendor-claimed, or inferred.
@@ -196,47 +196,47 @@ the bullets name the count. Shares are computed with
 - `mise.toml` — sole human author (71% of 17 commits). Bring both symspec gates inside
   `check` behind a pinned, repository-local toolchain so the requirement set is verified by
   the command a fresh clone can run, rather than by a path into one home directory.
-- `microvms-cli/src/guards.rs`, since split into `microvms-cli/src/guards/` — sole human author
+- `crates/microvms-cli/src/guards.rs`, since split into `crates/microvms-cli/src/guards/` — sole human author
   (85% of 13 commits). At 123 symbols and the
   highest churn in the CLI crate, this file needs a second reader more than any other; pair a
   review of it with `.erpaval/solutions/test-failures/guards-that-passed-against-broken-code.md`,
   which records four ways its guards passed against broken code.
-- `microvms-cli/src/cli.rs` — sole human author (85% of 13 commits). The command surface
+- `crates/microvms-cli/src/cli.rs` — sole human author (85% of 13 commits). The command surface
   definition is the CLI's contract with every consumer, so changes here belong behind the
-  `microvms-cli/tests/manifest.rs` and `thinness.rs` assertions rather than behind review
+  `crates/microvms-cli/tests/manifest.rs` and `thinness.rs` assertions rather than behind review
   alone.
-- `microvms-app/src/control/image.rs` — sole human author (82% of 11 commits). 99 symbols
+- `crates/microvms-app/src/control/image.rs` — sole human author (82% of 11 commits). 99 symbols
   covering image and version creation, an area where `docs/PLATFORM.md:317` and
   `docs/PLATFORM.md:325` record two service refusals; keep those two sections and this file
   under one change.
-- `microvms-app/src/control/ops.rs` — sole human author (78% of 9 commits). Cross-train a
+- `crates/microvms-app/src/control/ops.rs` — sole human author (78% of 9 commits). Cross-train a
   second reader here before the control-plane call surface grows again, since 96 symbols in
   one file is where a control-plane behavior change hides.
-- `microvms-cli/src/commands/lifecycle.rs` — sole human author (75% of 12 commits). The
+- `crates/microvms-cli/src/commands/lifecycle.rs` — sole human author (75% of 12 commits). The
   lifecycle commands are the operator's path to spending money, so every change here should
   cite the `docs/PLATFORM.md` section whose behavior it depends on.
-- `microvms-app/src/sandbox.rs` — sole human author (73% of 11 commits). 105 symbols
-  implementing the single-writer state machine that the `model/` crate's stateright model also
+- `crates/microvms-app/src/sandbox.rs` — sole human author (73% of 11 commits). 105 symbols
+  implementing the single-writer state machine that the `crates/model/` crate's stateright model also
   encodes; change the model in the same commit so the two descriptions cannot drift.
-- `microvms-domain/src/cost.rs` — `bgagent` automated identity (71% of 7 commits). The densest
+- `crates/microvms-domain/src/cost.rs` — `bgagent` automated identity (71% of 7 commits). The densest
   file in the repository at 242 symbols, holding a hand-pinned us-east-1 rate table that has
-  already drifted once — `microvms-domain/src/cost.rs:1025-1028` records that `0.08` was the
+  already drifted once — `crates/microvms-domain/src/cost.rs:1025-1028` records that `0.08` was the
   plausible-looking wrong value against the correct `dec!(0.0811111030)` — so keep
-  `scripts/check-live-rates.py` in the billable tier and treat a rate edit as a measurement.
-- `agentd/src/routes.rs` — `bgagent` automated identity (86% of 7 commits). This file splits
+  `tools/check-live-rates.py` in the billable tier and treat a rate edit as a measurement.
+- `crates/agentd/src/routes.rs` — `bgagent` automated identity (86% of 7 commits). This file splits
   the daemon endpoints into the Bearer-guarded `control` router and the `open` router at
-  `agentd/src/routes.rs:48-56`, which makes it the repository's authorization boundary; it
+  `crates/agentd/src/routes.rs:48-56`, which makes it the repository's authorization boundary; it
   should carry a named human reviewer on every change, since no commit on it currently does.
 - `docs/reference/cli.md` — sole human author (100% of 9 commits). A hand-written reference
   for a surface that `microvm manifest` already emits machine-readably, so generate the
   overlapping sections or add a drift check, rather than maintaining two descriptions of one
   command set.
-- `spec/core.symspec.json` — `bgagent` automated identity. 51 requirements
+- `verify/spec/core.symspec.json` — `bgagent` automated identity. 51 requirements
   in a single file with no second copy and no gate inside `check`; approve changes to it the
   way a schema change is approved, and pair every edit with the `docs/PLATFORM.md` section it
   encodes.
-- `scripts/check-model-drift.py` — `bgagent` automated identity.
-  `scripts/check-model-drift.py:267` and `:279` hold `PINNED_REGIONS` and
+- `tools/check-model-drift.py` — `bgagent` automated identity.
+  `tools/check-model-drift.py:267` and `:279` hold `PINNED_REGIONS` and
   `PINNED_SIZE_CLASSES` as deliberate hand-maintained copies, and `:70` states they are the
   second reader for two values no AWS service model publishes; any change to the Rust
   constants has to land in this file in the same commit.

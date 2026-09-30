@@ -12,8 +12,8 @@ message here: name what was measured, and admit what is unverified. -->
 - [ ] `cargo test --all`
 - [ ] `cargo run -p agentd --bin schema -- --check` (regenerated if the protocol changed)
 - [ ] `cargo build --release -p agentd --target aarch64-unknown-linux-musl`
-- [ ] `mise run spec` and `mise run spec:core` (if `spec/` changed)
-- [ ] `./scripts/check-lint-coverage.py && uvx ruff check . && uvx ruff format --check .` (if any Python changed)
+- [ ] `mise run spec` and `mise run spec:core` (if `verify/spec/` changed)
+- [ ] `./tools/check-lint-coverage.py && uvx ruff check . && uvx ruff format --check .` (if any Python changed)
 - [ ] `mise exec -- cargo deny check` (if a `Cargo.toml`, `Cargo.lock`, or `.cargo/deny.toml` changed)
 - [ ] `mise exec -- actionlint` (if a workflow changed)
 - [ ] `./conformance/run_rs.py --self-test` (if `conformance/` changed — offline and free)
@@ -23,21 +23,21 @@ message here: name what was measured, and admit what is unverified. -->
 ## Parity
 
 - [ ] No public name changed on any surface (core, CLI commands, `microvms.pyi`, `index.d.ts`).
-- [ ] `parity/capabilities.toml` updated: the other surfaces are implemented, or
+- [ ] `verify/parity/capabilities.toml` updated: the other surfaces are implemented, or
       exempted with a reason, and an issue number when a later change closes the gap.
       `mise run parity:check` passes.
 
 ## Guards
 
 **If this adds a guard, register the deliberate break that proves it fires.** Add its
-entry to its owner's file in `guards/faults/` (the schema is in `scripts/check-guards-fire.py`)
+entry to its owner's file in `verify/guards/faults/` (the schema is in `tools/check-guards-fire.py`)
 and paste the line `mise run guards:fire -- --only <id>` printed for it. A test that passes
 either way gives a false answer.
 
 For a guard no fault can be seeded for mechanically, such as a live check: what you broke,
 that the check failed, and that it passed again after you restored the code.
 
-<!-- e.g. "agentd-fs-pop: removed the `?` from `parts.pop()?` in agentd/src/fs.rs so ../x
+<!-- e.g. "agentd-fs-pop: removed the `?` from `parts.pop()?` in crates/agentd/src/fs.rs so ../x
 became x, and `normalize_rejects_escapes_and_absorbs_benign_traversal` failed;
 `guards:fire -- --only agentd-fs-pop` printed `fired: agentd-fs-pop`." -->
 

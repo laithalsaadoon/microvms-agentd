@@ -6,7 +6,7 @@ sources:
   - clients/python/src/microvms_agentd/sandbox.py    # what already exists
   - clients/python/src/microvms_agentd/transport.py  # proxy auth, header map
   - docs/PROTOCOL.md, docs/TRUST.md                 # the in-VM boundary
-  - spec/agentd.symspec.json                        # requirement vocabulary
+  - verify/spec/agentd.symspec.json                        # requirement vocabulary
 ---
 
 **Status:** COMPLETE
@@ -87,7 +87,7 @@ so these two measured findings get no AC and must not be papered over with one:
 - **"The platform's own hook arrives over loopback."** The finding is that a
   source-address rule rejecting `127.0.0.1` on the bootstrap route is *actively
   wrong*, not weak — it would reject the platform's own bootstrap. The remedy is
-  the daemon's one-shot bootstrap plus the `model/` checks (`docs/TRUST.md`,
+  the daemon's one-shot bootstrap plus the `crates/model/` checks (`docs/TRUST.md`,
   "Why source-address filtering is wrong"). No client-side AC exists, and the
   client must not attempt to compensate.
 - **"Something probes the port with TLS before bootstrap."** Raw TLS

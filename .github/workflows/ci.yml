@@ -141,10 +141,10 @@ jobs:
       # schemas and a seeded break in each case.
       - name: schema compatibility unit tests
         if: matrix.os == 'ubuntu-latest'
-        run: uv run python -m unittest discover -s scripts -p 'test_check_schema_compat.py'
+        run: uv run python -m unittest discover -s tools -p 'test_check_schema_compat.py'
       - name: schema is compatible with the previous release
         if: matrix.os == 'ubuntu-latest'
-        run: ./scripts/check-schema-compat.py
+        run: ./tools/check-schema-compat.py
 
       # `mise run manifest:check`, spelled out, for the schema step's reason. It wasn't in CI
       # before #271, and the capability table's check below reads the CLI from this file, so a
@@ -162,20 +162,20 @@ jobs:
       # a stable release whose rustdoc writes another format_version fails there by name.
       - name: core surface unit tests
         if: matrix.os == 'ubuntu-latest'
-        run: uv run python -m unittest discover -s scripts -p 'test_rustdoc_walk.py'
+        run: uv run python -m unittest discover -s tools -p 'test_rustdoc_walk.py'
       - name: core surface snapshot is not stale
         if: matrix.os == 'ubuntu-latest'
-        run: ./scripts/generate-core-api.py --check
+        run: ./tools/generate-core-api.py --check
       # `mise run parity:check` (#271): every capability resolves on core, the CLI, Python and
       # TypeScript or names why a surface lacks it. After the manifest and snapshot steps,
       # because it trusts both. Its self-test first; its reader cases run the real Griffe and
       # TypeDoc, which is why this leg installs Node.
       - name: capability table unit tests
         if: matrix.os == 'ubuntu-latest'
-        run: uv run python -m unittest discover -s scripts -p 'test_check_parity.py'
+        run: uv run python -m unittest discover -s tools -p 'test_check_parity.py'
       - name: capability table matches the surfaces
         if: matrix.os == 'ubuntu-latest'
-        run: ./scripts/check-parity.py
+        run: ./tools/check-parity.py
 
       # The one release gate that cannot run in `mise run check`: `cargo publish
       # --workspace --dry-run` resolves against crates.io, so `--offline` fails with
@@ -189,7 +189,7 @@ jobs:
       # `check` and asserts the publish set.
       - name: every publishable crate can actually publish
         if: matrix.os == 'ubuntu-latest'
-        run: ./scripts/check-publishable.py --dry-run
+        run: ./tools/check-publishable.py --dry-run
 
       # The background coding example's lint, Terraform validation and tests, with the uv the
       # setup-uv step above installs. A job of its own held one of the account's concurrent job
@@ -218,7 +218,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # betterleaks scans history, and the ratchet's rule 3 reads the base branch's copy of
-          # ratchet/drift.json. A shallow clone has neither.
+          # verify/ratchet/drift.json. A shallow clone has neither.
           fetch-depth: 0
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
@@ -242,7 +242,7 @@ jobs:
         run: |
           uvx semgrep@1.176.1 scan --config p/rust --config p/secrets \
             --severity WARNING --severity ERROR --error --quiet --metrics=off \
-            protocol/src agentd/src model/src microvms-domain/src microvms-app/src microvms-edges/src microvms-core/src microvms-cli/src microvms-py/src microvms-js/src
+            crates/protocol/src crates/agentd/src crates/model/src crates/microvms-domain/src crates/microvms-app/src crates/microvms-edges/src crates/microvms-core/src crates/microvms-cli/src bindings/microvms-py/src bindings/microvms-js/src
       # The whole history, not the tree: a secret committed and later deleted is
       # published the moment the repo is public.
       - name: betterleaks over full history (pinned, checksummed)
@@ -254,9 +254,9 @@ jobs:
       # The unit tests first: they run the header check in throwaway repos and prove it fails on
       # an empty file set, so a pass on the next step means it read this tree.
       - name: license header unit tests
-        run: uv run python -m unittest discover -s scripts -p 'test_license_headers.py'
+        run: uv run python -m unittest discover -s tools -p 'test_license_headers.py'
       - name: license headers
-        run: ./scripts/check-license-headers.py
+        run: ./tools/check-license-headers.py
       # The live suite's own helpers and their negative twins, against a stub CLI (#277). Here
       # because this job has uv and is required; it makes no AWS call.
       - name: conformance self-test
@@ -266,9 +266,9 @@ jobs:
       # unit tests first, for the reason the header check gives. It reads git's index, which
       # this job's full checkout has.
       - name: agents check unit tests
-        run: uv run python -m unittest discover -s scripts -p 'test_check_agents_md.py'
+        run: uv run python -m unittest discover -s tools -p 'test_check_agents_md.py'
       - name: agents check
-        run: ./scripts/check-agents-md.py
+        run: ./tools/check-agents-md.py
       # `mise run changelog:check`: every fragment in changelog.d/ is well named and builds, and
       # a pull request that changes shipped code adds one, which Dependabot's don't have to. On
       # pull requests only, since a push to main has no pull request to hold to it. Here because
@@ -276,13 +276,13 @@ jobs:
       # goes through `env`, not into the command, because a login is the pull request's input.
       # Its unit tests first, for the reason the header check gives.
       - name: changelog unit tests
-        run: uv run python -m unittest discover -s scripts -p 'test_changelog.py'
+        run: uv run python -m unittest discover -s tools -p 'test_changelog.py'
       - name: changelog fragments
         if: github.event_name == 'pull_request'
         env:
           BASE: origin/${{ github.base_ref }}
           AUTHOR: ${{ github.event.pull_request.user.login }}
-        run: ./scripts/changelog.py check --base "$BASE" --author "$AUTHOR"
+        run: ./tools/changelog.py check --base "$BASE" --author "$AUTHOR"
       # The LICENSE file itself, and the crate manifests agreeing with it. The
       # dependency-license audit is cargo-deny, two steps down; this asserts the
       # repo's own claim is consistent.
@@ -322,10 +322,10 @@ jobs:
       # builds nothing.
       - name: ci parity unit tests
         run: |
-          uv run --with 'pyyaml==6.0.3' python -m unittest discover -s scripts -p 'test_check_ci_parity.py'
-          uv run --with 'pyyaml==6.0.3' python -m unittest discover -s scripts -p 'test_ci_local.py'
+          uv run --with 'pyyaml==6.0.3' python -m unittest discover -s tools -p 'test_check_ci_parity.py'
+          uv run --with 'pyyaml==6.0.3' python -m unittest discover -s tools -p 'test_ci_local.py'
       - name: ci parity
-        run: ./scripts/check-ci-parity.py
+        run: ./tools/check-ci-parity.py
       # The drift ratchet (#281). It runs in this job rather than its own because this
       # job is a required status check, and rule 3 only holds where it can block a merge: a
       # separate job would go red and the PR would merge anyway.
@@ -346,39 +346,39 @@ jobs:
           unzip -q ast-grep.zip ast-grep -d "$RUNNER_TEMP/ast-grep"
           echo "$RUNNER_TEMP/ast-grep" >> "$GITHUB_PATH"
       - name: ratchet unit tests
-        run: uv run python -m unittest discover -s scripts -p 'test_ratchet.py'
+        run: uv run python -m unittest discover -s tools -p 'test_ratchet.py'
       # `mise run check` and the pre-commit hook ran this, and CI didn't, so a PR shipped
       # without local hooks could empty a layer's enumerator and merge green. After the
       # ast-grep install because the test and fuzz layers parse with it (#276).
       - name: traceability unit tests
-        run: uv run python -m unittest discover -s scripts -p 'test_check_trace.py'
+        run: uv run python -m unittest discover -s tools -p 'test_check_trace.py'
       - name: requirement traceability
-        run: ./scripts/check-trace.py --check
-      # `mise run guards:list` (#274): each seeded fault in guards/faults/*.toml still applies, and
-      # every Falsification note has an entry or is in guards/unregistered.txt. After the ast-grep
+        run: ./tools/check-trace.py --check
+      # `mise run guards:list` (#274): each seeded fault in verify/guards/faults/*.toml still applies, and
+      # every Falsification note has an entry or is in verify/guards/unregistered.txt. After the ast-grep
       # install because the note census parses the Rust and JS tests with it. The `guards` job
       # below is what seeds the faults. `--base` is the ratchet step's, for the same reason:
       # unregistered.txt may only shrink from the base, and a push to main compares with the
       # commit before it.
       - name: seeded-fault registry unit tests
-        run: uv run --with 'pyyaml==6.0.3' python -m unittest discover -s scripts -p 'test_check_guards_fire.py'
+        run: uv run --with 'pyyaml==6.0.3' python -m unittest discover -s tools -p 'test_check_guards_fire.py'
       - name: seeded-fault registry
         env:
           BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
-        run: ./scripts/check-guards-fire.py list --base "$BASE"
+        run: ./tools/check-guards-fire.py list --base "$BASE"
       # `mise run mutants:check` (#275): the wrapper the `mutants` job runs, that job's own steps
       # read from this file, the `mutants::skip` sites and the exclusions' shape. Here as well
       # as in the `guards` job's entries, so a broken wrapper fails on every push, not twenty
       # minutes into `guards`.
       - name: mutants wrapper unit tests
-        run: uv run --with 'pyyaml==6.0.3' python -m unittest discover -s scripts -p 'test_check_mutants.py'
+        run: uv run --with 'pyyaml==6.0.3' python -m unittest discover -s tools -p 'test_check_mutants.py'
       # A pull request compares with its base branch. A push to main compares with the commit
       # before it: the merge base of main and itself is itself, and rule 3 would pass vacuously.
       # The script appends the per-category counts and their change to the job summary.
       - name: ratchet check
         env:
           BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
-        run: ./scripts/ratchet.py --base "$BASE"
+        run: ./tools/ratchet.py --base "$BASE"
 
   sbom:
     name: SBOM and vulnerability scans
@@ -422,7 +422,7 @@ jobs:
       - name: generate SBOMs (CycloneDX + SPDX)
         run: |
           mkdir -p sbom
-          syft . --exclude './conformance/infra/.terraform/**' --exclude './target/**' --exclude './microvms-js/node_modules/**' \
+          syft . --exclude './conformance/infra/.terraform/**' --exclude './target/**' --exclude './bindings/microvms-js/node_modules/**' \
             -o cyclonedx-json=sbom/microvms-agentd.cdx.json \
             -o spdx-json=sbom/microvms-agentd.spdx.json -q
       - name: grype (audits what the SBOM publishes)
@@ -489,12 +489,12 @@ jobs:
       # plus two pinned literals of its own for the region list and the sizing
       # table — the values no model states, which lost their cross-client reader
       # when the Python client was deleted.
-      - run: ./scripts/check-model-drift.py
+      - run: ./tools/check-model-drift.py
       - name: Model loader regression tests
-        run: uv run --with 'boto3>=1.40' --with 'pyyaml==6.0.3' python -m unittest discover -s scripts -p 'test_model_drift.py'
+        run: uv run --with 'boto3>=1.40' --with 'pyyaml==6.0.3' python -m unittest discover -s tools -p 'test_model_drift.py'
 
       # Every Python file, linted here rather than in a job of its own. `conformance/run_rs.py`
-      # is the live suite's driver and the `scripts/` gates are this job's own tooling, so the
+      # is the live suite's driver and the `tools/` gates are this job's own tooling, so the
       # lint belongs beside the thing it lints. The `python` job that ran the client library's
       # 83 tests went away with that client.
       #
@@ -502,13 +502,13 @@ jobs:
       # two lines had the same defect `mise run lint` did: ruff discovers Python by extension, so
       # `scripts` — seven extensionless PEP 723 gates at the time — contributed nothing, and both
       # lines passed over one file while reading as though they covered two directories. The gates
-      # are now named `scripts/*.py`, which is what makes them ordinary Python to ruff and to
+      # are now named `tools/*.py`, which is what makes them ordinary Python to ruff and to
       # `check-license-headers.py` alike (issue #32), and `check-lint-coverage.py` is what keeps
       # that honest. A single `.` on both sides is also what makes this job and `mise run lint`
       # provably the same check rather than two path lists that agree today.
       # `RUFF` because nothing here puts ruff on PATH, and the script's fallback is an unpinned
       # `uvx ruff`.
-      - run: ./scripts/check-lint-coverage.py
+      - run: ./tools/check-lint-coverage.py
         env:
           RUFF: uvx ruff@0.15.22
       - run: uvx ruff@0.15.22 check .
@@ -544,9 +544,9 @@ jobs:
         run: |
           uv venv .venv-bindings
           . .venv-bindings/bin/activate
-          uvx maturin@1.14.1 develop -m microvms-py/Cargo.toml
+          uvx maturin@1.14.1 develop -m bindings/microvms-py/Cargo.toml
           uv pip install pytest
-          pytest microvms-py/tests -q
+          pytest bindings/microvms-py/tests -q
       # The committed `.pyi` against the crate it describes. Here rather than in the
       # `rust` job beside `schema:check`, because this is where a Python toolchain already
       # exists: the gate needs `uvx maturin generate-stubs` and an interpreter to introspect
@@ -557,7 +557,7 @@ jobs:
       # leave a caller unchecked — it leaves them confidently wrong, with an editor
       # approving a call that raises `AttributeError`.
       - name: python stub is not stale
-        run: ./scripts/generate-py-stubs.py --check
+        run: ./tools/generate-py-stubs.py --check
       # The typed consumer, against the stub as a *caller* gets it: built into a wheel,
       # installed into a throwaway venv, and checked from outside the repo's own layout. A
       # check against the source tree would pass on a stub that never made it into the
@@ -575,42 +575,42 @@ jobs:
       # makes, reaching the opposite conclusion because there is no rolling major to track.
       - name: typed consumer checks against the built wheel
         run: |
-          uvx maturin@1.14.1 build -m microvms-py/Cargo.toml -o dist-wheel
+          uvx maturin@1.14.1 build -m bindings/microvms-py/Cargo.toml -o dist-wheel
           uv venv .venv-typed
           uv pip install --python .venv-typed/bin/python dist-wheel/*.whl
-          uvx ty@0.0.72 check --python .venv-typed microvms-py/examples/typed_usage.py
+          uvx ty@0.0.72 check --python .venv-typed bindings/microvms-py/examples/typed_usage.py
       - name: node binding tests
         run: |
-          npx -y -p @napi-rs/cli@3 napi build --manifest-path Cargo.toml --package microvms-js --platform --output-dir . --cwd microvms-js
-          node --test "microvms-js/__test__/*.mjs"
+          npx -y -p @napi-rs/cli@3 napi build --manifest-path Cargo.toml --package microvms-js --platform --output-dir . --cwd bindings/microvms-js
+          node --test "bindings/microvms-js/__test__/*.mjs"
       # The committed `index.d.ts` against the crate it describes: `stubs:check`'s argument for the
       # other binding. The build above has just rewritten the file in place, so a diff here is the
       # drift. The docs site's TypeScript reference is generated from this file, so a stale copy
       # would publish signatures the package no longer has. `mise run dts:check` is the local form.
       - name: typescript declarations are not stale
         run: |
-          if ! git diff --exit-code -- microvms-js/index.d.ts; then
-            echo "::error file=microvms-js/index.d.ts::stale: run \`mise run dts\` and commit the result"
+          if ! git diff --exit-code -- bindings/microvms-js/index.d.ts; then
+            echo "::error file=bindings/microvms-js/index.d.ts::stale: run \`mise run dts\` and commit the result"
             exit 1
           fi
-      # The committed `index.d.ts` against a caller: `microvms-js/__test__/types/*.ts` compiled
+      # The committed `index.d.ts` against a caller: `bindings/microvms-js/__test__/types/*.ts` compiled
       # with `tsc --strict`. The diff above can't see a declaration the generator leaves out, and
       # `ExecStream` once had no `[Symbol.asyncIterator]()`, so the `for await` its docs show didn't
       # type-check (#262). Here rather than in the `rust` job because this is the job that just
       # rebuilt and diffed the file. `mise run dts:check` runs it locally.
       - name: typed consumer checks against the declarations
-        run: ./scripts/check-dts-consumer.py
+        run: ./tools/check-dts-consumer.py
       # The generated loader against the package name it will be published under. This is the
       # only job that builds the addon, so it is the only place the real `index.js` exists on a
       # pull request — and a loader generated for a stale package name passes every test above,
       # because the tests load the local `.node` file directly and never exercise the
       # optional-dependency fallback a consumer depends on.
       - name: the npm loader resolves its platform packages
-        run: ./scripts/check-npm-loader.py
-      # The bindings entries in guards/faults/*.toml fire in the `guards` job's shards, each
+        run: ./tools/check-npm-loader.py
+      # The bindings entries in verify/guards/faults/*.toml fire in the `guards` job's shards, each
       # worker in an environment of its own, not here.
 
-  # `mise run guards:fire` (#274): each entry in guards/faults/*.toml (every one on a push to main,
+  # `mise run guards:fire` (#274): each entry in verify/guards/faults/*.toml (every one on a push to main,
   # the ones it affects on a pull request) is seeded into a scratch worktree, and its guard must
   # fail for the reason the entry names. Its own job because each fault is one more incremental
   # build, which is why it isn't in `check` either. The script is called directly, since no job
@@ -731,13 +731,13 @@ jobs:
           BASE: origin/${{ github.base_ref }}
           SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
           CARGO_INCREMENTAL: "1"
-        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard "$SHARD" --affected --base "$BASE"
+        run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard "$SHARD" --affected --base "$BASE"
       - name: every seeded fault fires
         if: github.event_name != 'pull_request'
         env:
           SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
           CARGO_INCREMENTAL: "1"
-        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard "$SHARD"
+        run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard "$SHARD"
       # The warm workers' copies and the incremental data cost disk: what the fire left, while
       # their size on the runner is still being measured.
       - name: disk left after the fire
@@ -807,12 +807,12 @@ jobs:
           node-version: '22'
       - name: build what the seeded faults compile
         if: steps.cache.outputs.cache-hit != 'true'
-        run: ./scripts/check-guards-fire.py build --suite rust --suite bindings --target-dir target
+        run: ./tools/check-guards-fire.py build --suite rust --suite bindings --target-dir target
 
   # `mise run mutants` (#275), in shards: cargo-mutants changes the Rust a pull request
   # touches, one mutant at a time (a return value, an operator, a deleted `!`), and the job
   # fails when the mutated package's own tests still pass with one in. `.cargo/mutants.toml`
-  # has the settings and each exclusion's reason, scripts/check-mutants.py the package list
+  # has the settings and each exclusion's reason, tools/check-mutants.py the package list
   # and what each exit code means, and CONTRIBUTING.md how to read a shard's missed.txt.
   #
   # Pull requests only: the question is about a change, and a push to main was asked it on its
@@ -851,7 +851,7 @@ jobs:
         id: diff
         env:
           BASE: origin/${{ github.base_ref }}
-        run: python3 scripts/check-mutants.py --base "$BASE" --detect >> "$GITHUB_OUTPUT"
+        run: python3 tools/check-mutants.py --base "$BASE" --detect >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         if: steps.diff.outputs.rust == 'true'
         with:
@@ -888,7 +888,7 @@ jobs:
         env:
           BASE: origin/${{ github.base_ref }}
           SHARD: ${{ matrix.shard }}/4
-        run: ./scripts/check-mutants.py --base "$BASE" -- --shard "$SHARD" --in-place
+        run: ./tools/check-mutants.py --base "$BASE" -- --shard "$SHARD" --in-place
       # Each mutant's diff and test log, and the missed and timeout lists, one click from the
       # PR. A shard the diff gave no mutants writes none.
       - name: upload mutants.out
@@ -933,7 +933,7 @@ jobs:
           ls -l target/aarch64-unknown-linux-musl/release/agentd
           file target/aarch64-unknown-linux-musl/release/agentd
 
-# The requirements-verification job (symspec over spec/*.symspec.json) ran here
+# The requirements-verification job (symspec over verify/spec/*.symspec.json) ran here
 # while symspec was on npm. The tool this repo actually needs is the v5 line
 # (1.0.0-alpha.0) — the only version that can read core.symspec.json's state
 # model and reachability tier — and it is not published anywhere yet; it runs

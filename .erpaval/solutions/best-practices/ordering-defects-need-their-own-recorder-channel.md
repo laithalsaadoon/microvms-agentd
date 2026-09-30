@@ -2,7 +2,7 @@
 
 **Category:** best-practices
 **Tags:** ordering, seam-test, guards, cost-honesty, upload, preflight
-**Modules:** microvms-cli/src/guards/, microvms-cli/src/commands/lifecycle.rs, microvms-core/src/control/image.rs
+**Modules:** crates/microvms-cli/src/guards/, crates/microvms-cli/src/commands/lifecycle.rs, crates/microvms-core/src/control/image.rs
 **Session:** session-bf11b1 (2026-08-17, issues #46/#47, PR #49)
 
 ## The trap
