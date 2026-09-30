@@ -56,5 +56,5 @@ report names which one a daemon got.
 
 `mise run security` checks shipped source, secrets, license headers,
 dependencies, and workflows. CI also produces SBOMs and runs vulnerability
-scanners. Accepted findings and reasons live in `.vex/`, `.trivyignore.yaml`,
+scanners. Accepted findings and reasons live in `.vex/`, `.config/trivyignore.yaml`,
 and `osv-scanner.toml`.

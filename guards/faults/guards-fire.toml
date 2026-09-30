@@ -374,6 +374,15 @@ message = "FAIL: test_an_overlaid_file_gets_a_fresh_mtime ("
 transform = { file = "scripts/check-guards-fire.py", replace = "                shutil.copy(source, target, follow_symlinks=False)\n", with = "                shutil.copy2(source, target, follow_symlinks=False)\n" }
 
 [[fault]]
+id = "guards-fire-overlay-staged-move"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "WarmWorkers"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_staged_move_leaves_nothing_at_its_old_path ("
+transform = { file = "scripts/check-guards-fire.py", replace = "\"diff\", \"--no-renames\", \"--name-only\", \"-z\", \"HEAD\"", with = "\"diff\", \"--name-only\", \"-z\", \"HEAD\"" }
+
+[[fault]]
 id = "guards-fire-build-runs-tests"
 guard = "test_check_guards_fire.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "BuildCommand"]

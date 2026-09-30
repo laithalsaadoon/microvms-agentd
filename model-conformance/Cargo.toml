@@ -8,11 +8,11 @@ repository.workspace = true
 # `agentd-model` exposes for it, so a change that makes the app and the model disagree fails
 # here while `cargo test -p agentd-model` stays green. The tests can't live in `microvms-app`:
 # it's published, so an edge onto the unpublished model would need a crates.io version that
-# doesn't exist, and deny.toml refuses a path dependency without one (#296, D18).
+# doesn't exist, and .cargo/deny.toml refuses a path dependency without one (#296, D18).
 publish = false
 
 # Dev-dependencies, because the library target is empty: only the tests link these. Each path
-# carries a version for deny.toml's wildcard ban, as agentd's edge onto the model does.
+# carries a version for .cargo/deny.toml's wildcard ban, as agentd's edge onto the model does.
 [dev-dependencies]
 agentd-model = { path = "../model", version = "0.1.0" }
 # `test-support` for the fake control plane the preflight rows and the lifecycle replay run

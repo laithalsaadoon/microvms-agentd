@@ -53,7 +53,7 @@ jobs:
 
       # The links to check are the ones the OUTPUT contains rather than the ones the sources mention:
       # the Reference tier is generated, and its links exist only after a build. The site is built for
-      # its production origin so every internal href resolves under `lychee.toml`'s `base_url` and is
+      # its production origin so every internal href resolves under `.config/lychee.toml`'s `base_url` and is
       # then excluded there; only the external ones are fetched.
       - name: build the site
         working-directory: site
@@ -72,7 +72,7 @@ jobs:
         continue-on-error: true
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
-          args: --config lychee.toml --no-progress 'site/dist/**/*.html'
+          args: --config .config/lychee.toml --no-progress 'site/dist/**/*.html'
           format: markdown
           output: lychee/out.md
           fail: false
@@ -86,7 +86,7 @@ jobs:
             if [ "${{ steps.lychee.outcome }}" = "success" ]; then
               echo "The check ran. Dead or unreachable links, if any, are listed above: each one is"
               echo "somebody's site changing, not a defect in a commit. Fix the link, or add it to"
-              echo "\`lychee.toml\`'s exclusions with the reason."
+              echo "\`.config/lychee.toml\`'s exclusions with the reason."
             else
               echo "The lychee step itself failed to run; read its log rather than this summary."
             fi

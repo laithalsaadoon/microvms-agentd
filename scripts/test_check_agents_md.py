@@ -203,7 +203,7 @@ HEALTHY = {
     "CONTRIBUTING.md": CONTRIBUTING,
     "crate/Cargo.toml": "",
     "crate/src/lib.rs": "fn fs_pop_is_refused() {}\n",
-    "lefthook.yml": LEFTHOOK,
+    ".config/lefthook.yml": LEFTHOOK,
     ".github/workflows/fuzz.yml": FUZZ,
     ".github/dependabot.yml": DEPENDABOT,
     "agentd/fuzz/Cargo.toml": "",
@@ -654,9 +654,9 @@ class AgentsMdTests(unittest.TestCase):
         # The move this guards: a hook's glob keeps a path that left, and the hook stops
         # running on it without a word.
         text = LEFTHOOK.replace("guards/faults/*.toml}", "verify/faults/*.toml}")
-        self.healthy(**{"lefthook.yml": text})
+        self.healthy(**{".config/lefthook.yml": text})
         self.assert_fails_with(
-            "lefthook.yml:9:", "`verify/faults/*.toml` matches no tracked file"
+            ".config/lefthook.yml:9:", "`verify/faults/*.toml` matches no tracked file"
         )
 
     def test_a_lefthook_glob_is_matched_the_way_lefthook_matches_it(self):
@@ -670,7 +670,9 @@ class AgentsMdTests(unittest.TestCase):
             ("crate/src/**/*.rs", False),
         ):
             with self.subTest(glob=glob):
-                self.healthy(**{"lefthook.yml": LEFTHOOK.replace("*.rs,", f"{glob},")})
+                self.healthy(
+                    **{".config/lefthook.yml": LEFTHOOK.replace("*.rs,", f"{glob},")}
+                )
                 if passes:
                     self.assert_passes()
                 else:
@@ -679,25 +681,27 @@ class AgentsMdTests(unittest.TestCase):
     def test_the_opt_in_doublestar_matcher_is_honored(self):
         # Under `glob_matcher: doublestar`, `*` stays in its directory and `**/` may be none.
         text = "glob_matcher: doublestar\n" + LEFTHOOK
-        self.healthy(**{"lefthook.yml": text.replace("*.rs,", "crate/src/**/*.rs,")})
+        self.healthy(
+            **{".config/lefthook.yml": text.replace("*.rs,", "crate/src/**/*.rs,")}
+        )
         self.assert_passes()
-        self.healthy(**{"lefthook.yml": text.replace("*.rs,", "crate/*.rs,")})
+        self.healthy(**{".config/lefthook.yml": text.replace("*.rs,", "crate/*.rs,")})
         self.assert_fails_with("`crate/*.rs` matches no tracked file")
 
     def test_a_stale_path_in_a_lefthook_run_or_root_fails(self):
         cases = {
             "run": (
                 LEFTHOOK.replace("src/lib.rs", "src/main.rs"),
-                "lefthook.yml:8: `src/main.rs` (`crate/src/main.rs`) is no such path",
+                ".config/lefthook.yml:8: `src/main.rs` (`crate/src/main.rs`) is no such path",
             ),
             "root": (
                 LEFTHOOK.replace("root: crate/", "root: crates/crate/"),
-                "lefthook.yml:7: `crates/crate/` (`crates/crate`) is no directory",
+                ".config/lefthook.yml:7: `crates/crate/` (`crates/crate`) is no directory",
             ),
         }
         for key, (text, needle) in cases.items():
             with self.subTest(key=key):
-                self.healthy(**{"lefthook.yml": text})
+                self.healthy(**{".config/lefthook.yml": text})
                 self.assert_fails_with(needle)
 
     def remove(self, relative: str) -> None:
@@ -705,16 +709,16 @@ class AgentsMdTests(unittest.TestCase):
         (self.repo / relative).unlink(missing_ok=True)
 
     def test_a_lefthook_file_that_names_no_path_fails_naming_the_floor(self):
-        self.healthy(**{"lefthook.yml": "pre-commit:\n  parallel: true\n"})
-        self.assert_fails_with("the census read no paths from lefthook.yml")
-        self.remove("lefthook.yml")
-        self.assert_fails_with("the census read no paths from lefthook.yml")
+        self.healthy(**{".config/lefthook.yml": "pre-commit:\n  parallel: true\n"})
+        self.assert_fails_with("the census read no paths from .config/lefthook.yml")
+        self.remove(".config/lefthook.yml")
+        self.assert_fails_with("the census read no paths from .config/lefthook.yml")
 
     def test_a_lefthook_file_without_the_sentinel_fails_naming_it(self):
         text = LEFTHOOK.replace('".github/workflows/*.yml"', '".github/*/*.yml"')
-        self.healthy(**{"lefthook.yml": text})
+        self.healthy(**{".config/lefthook.yml": text})
         self.assert_fails_with(
-            "the census sentinel `.github/workflows/*.yml` isn't among the paths lefthook.yml"
+            "the census sentinel `.github/workflows/*.yml` isn't among the paths .config/lefthook.yml"
         )
 
     def test_a_stale_script_in_a_mise_task_fails_naming_its_line(self):
@@ -941,9 +945,13 @@ class AgentsMdTests(unittest.TestCase):
 
     def test_a_yaml_construct_the_reader_doesnt_take_fails_naming_its_line(self):
         self.healthy(
-            **{"lefthook.yml": LEFTHOOK.replace("pre-commit:", "pre-commit: &pc")}
+            **{
+                ".config/lefthook.yml": LEFTHOOK.replace(
+                    "pre-commit:", "pre-commit: &pc"
+                )
+            }
         )
-        self.assert_fails_with("lefthook.yml:1: a value that starts with `&`")
+        self.assert_fails_with(".config/lefthook.yml:1: a value that starts with `&`")
 
     def test_an_undefined_decision_id_fails_naming_its_line(self):
         cited = CONTRIBUTING + f"CI shards the guards job ({decision(7)}).\n"

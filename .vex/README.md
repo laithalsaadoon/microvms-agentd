@@ -19,7 +19,7 @@ What VEX deliberately does **not** cover:
 
 - **Misconfiguration and secret findings** (trivy's other two scanners). VEX
   speaks only about vulnerabilities in components, so those acceptances live in
-  `.trivyignore.yaml` with a written reason each.
+  `.config/trivyignore.yaml` with a written reason each.
 - **CodeQL / Scorecard alerts**. Those are dismissed in the GitHub UI with a
   recorded reason; they have no VEX identity to match on.
 
@@ -38,5 +38,5 @@ What VEX deliberately does **not** cover:
 2. Bump `version` and refresh `timestamp` (`date -u +%Y-%m-%dT%H:%M:%SZ`).
 3. CI validates the document's shape in the `sbom` job before any scanner runs.
 
-The rule carried over from `.trivyignore.yaml`: an ignore without a reason is a
+The rule carried over from `.config/trivyignore.yaml`: an ignore without a reason is a
 finding someone silenced; an ignore with one is a decision someone made.

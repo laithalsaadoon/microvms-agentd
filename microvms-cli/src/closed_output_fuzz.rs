@@ -27,7 +27,7 @@
 //!
 //! The exit decision is checked against [`MODEL_TABLE`], a literal copy of the specification
 //! table in `model/src/output.rs` (`the_specification_table`). The CLI cannot depend on the
-//! model crate: a path dependency without a version is a wildcard `deny.toml` refuses, and one
+//! model crate: a path dependency without a version is a wildcard `.cargo/deny.toml` refuses, and one
 //! with a version would have to be published for this crate to publish.
 
 use std::io::{self, ErrorKind, Write};
