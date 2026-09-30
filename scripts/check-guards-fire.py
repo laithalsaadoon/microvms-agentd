@@ -38,14 +38,15 @@ Three subcommands:
           any fault, and so does an entry whose `message` the clean run already prints (it
           can't tell the fault's failure from a pass). Then, for each fault: reset the tree,
           seed the fault, run the command, and print one line: `fired`, `DID NOT FIRE`, or
-          `stale anchor`. Last, reset the tree and run every command clean again, which
-          must pass as the first time did. Anything else exits 1.
+          `stale anchor`. After the last fault that builds what a command builds, reset the
+          tree and run the command clean again, which must pass as the first time did (the
+          restored pass, below). Anything else exits 1.
 
           `--jobs N` runs the same passes in N scratch worktrees at once. Each command's
           clean run goes to one worker, each fault starts on the worker that built its
           command clean, and a worker with nothing left takes a fault from the end of
           another's queue. Bindings entries all run on the first worker, since they share
-          `--venv`. Every worker then runs each command it ran again, clean, so each tree is
+          `--venv`. Every worker runs each command it ran again, clean, so each tree is
           shown to come back. The lines print in registry order whatever order they finish
           in, so the output and the summary are the serial run's. Only the first worker
           builds in `--target-dir`; the others build in a target beside their worktree, and
@@ -60,6 +61,57 @@ Three subcommands:
           copied back: a unit another worker built was compiled against that worker's builds
           of its dependencies, and rustc refuses to mix it with the first target's
           (`can't find crate`), so the first target stays one worker's builds.
+
+          The `lint-error` entries on one `cargo clippy` command that seed by transforms fire
+          in one run of it. Each entry's transforms make the edits `seed` makes, on paper,
+          and what the entry changes is the lines that differ. The entries whose lines don't
+          overlap are seeded together (two that write lines at one place both go in, in
+          registry order), and the command runs once with `--message-format=json`, which
+          changes what cargo prints and not what it checks. An entry fired when an error in
+          that run carries its `message` and every primary span of the error lies on the
+          lines the entry's own fault wrote. That's the proof the entry's own run gives:
+          clippy reports a banned call or path at that call or path, so the error is the
+          entry's own text drawing the lint its `message` names, and an error is what makes
+          the command exit non-zero (a warning proves nothing). The one way a batch can
+          differ from the entry's own run is a lint that appears only because another fault
+          in the batch is there: another entry's text supplies a name or an item the entry's
+          text resolves through, so in the batch its text draws the lint and alone it
+          wouldn't, or wouldn't compile. The span rule bounds that to the entry's own lines
+          and its own `message`: another fault can change how the entry's text resolves, but
+          it can't supply the error. The registry's clippy entries write fully qualified
+          paths, so none resolves through another's. Whatever the batch can't read runs
+          alone, for the entries it touches: an entry whose anchor doesn't match once, whose
+          lines overlap an entry already in, or whose fault writes no line; every entry when
+          the batch doesn't compile (an error whose code is rustc's, or that has none: rustc
+          stops before the lints) or its output isn't JSON; and an entry whose `message` an
+          error carries on no entry's lines, since that error may be its fault's lint landing
+          where the batch can't say whose it is. An entry the batch doesn't prove runs alone
+          and gets its own run's verdict, so the verdict lines, their order and each entry's
+          `--logs` file are a run without batches' (a batched entry's log is the batch's run,
+          printed as cargo prints it without JSON, under a line naming the batch). A line per
+          batch after the verdicts says how many entries it proved and why each other one ran
+          alone. Measured 2026-09-30 at 18645c2 with this script, on a loaded 16-core host
+          with `--jobs 4`: the registry's lint entries took 120.8 s of faults one by one and
+          3.4 s batched, with the same verdicts.
+
+          The restored pass runs a build at a time, not after the last fault. A command's
+          build is what `build_of` says it compiles or installs, which every command that
+          builds the same shares (the CLI's unit tests are one build under many `--exact`
+          filters). A worker restores a build, running each command of it that it ran again,
+          clean, once no task that seeds a fault in that build is queued on any worker or
+          running on any, and it takes a ready restore before its next fault. A fault moves
+          between workers only while it's queued, and a batch's fallbacks are queued in the
+          step that ends the batch, so once a build is ready no fault in it can start again:
+          each worker that ran the build restores it once, after the last fault anywhere
+          that builds it. That keeps what running every command after the last fault held.
+          Every fault a worker runs is followed on that worker by its own command's clean
+          run, which rebuilds from clean sources every unit the fault rebuilt, so worker 1's
+          target ends on clean builds even where two builds share a unit. Each command runs
+          clean after the last fault of its build, so no later fault rebuilds what it
+          checked. And a reset removes ignored files too (`git clean -x`), so every run
+          starts from the tree the worker started with, and a fault of another build can't
+          leave anything behind for a command already restored. The restored line's seconds
+          are what the restored pass adds after the last fault's verdict.
 
           `--affected` selects the entries whose own files changed: the registry text of the
           entry changed or is new, or a file it names changed between the merge base of HEAD
@@ -135,7 +187,7 @@ What counts as fired, by `expect`:
   lint-error     the command exits non-zero and its output contains `message`, the lint's
                  own line (`use of a disallowed type ...`). For clippy bans. Not the lint's
                  name: the crate's `#![deny(...)]` note prints every name it lists, whichever
-                 one fired.
+                 one fired. The entries on one clippy command fire in a batch (`fire`).
 
 An entry, in `guards/faults.toml`:
 
@@ -190,6 +242,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import dataclasses
 import fnmatch
 import json
 import os
@@ -1049,7 +1102,11 @@ class Tree:
 
     def reset(self) -> None:
         git(self.path, "checkout", "--quiet", "--", ".")
-        git(self.path, "clean", "-fdq")
+        # `-x` too: runs write ignored files into the tree (napi's addon and loader,
+        # `__pycache__`), faulted runs among them, and the restored pass checks a build while
+        # other builds' faults still run on the same tree. Removed every time, nothing a run
+        # left can reach a command already restored. The tree starts with none.
+        git(self.path, "clean", "-fdqx")
 
     def remove(self) -> None:
         git(self.root, "worktree", "remove", "--force", str(self.path), check=False)
@@ -1169,6 +1226,23 @@ def command_key(fault: Fault) -> tuple:
     return (fault.suite, tuple(map(tuple, fault.run)))
 
 
+def build_of(key: tuple) -> tuple:
+    """What a command builds, which it shares with every command that builds the same: in the
+    command's suite, for each cargo argv what `build_argv` compiles (the argv before `--` when
+    it can't say), and each other argv but the last, the step a test run follows (`maturin
+    develop`, `napi build`). A command with neither builds for itself alone. The restored
+    pass runs by it: see the module docstring."""
+    suite, run = key
+    parts: list[tuple[str, ...]] = []
+    for index, argv in enumerate(run):
+        if Path(argv[0]).name == "cargo":
+            head = argv[: argv.index("--")] if "--" in argv else argv
+            parts.append(tuple(build_argv(list(argv)) or head))
+        elif index < len(run) - 1:
+            parts.append(tuple(argv))
+    return (suite, tuple(parts)) if parts else key
+
+
 @dataclass
 class Worker:
     """One scratch tree and the target it builds into. Worker 1 is the serial run's."""
@@ -1185,6 +1259,12 @@ class Worker:
 class Task:
     key: object
     pinned: bool  # bindings share one venv, so worker 1 runs them all
+    # What a task that seeds faults builds (`build_of`); None for one that seeds none.
+    build: tuple | None = None
+
+
+# What `Board.next` answers when a worker has nothing to take yet but may have soon.
+WAIT = object()
 
 
 class Board:
@@ -1193,31 +1273,96 @@ class Board:
     A worker takes from the front of its own queue, then from the back of the longest other
     queue, so a worker whose commands build fast doesn't sit idle. A worker's queue starts with
     the commands it already built, and a pinned task stays where it is.
+
+    In the fault phase, `restores` holds the builds each worker owes a restored run, and a
+    worker takes a ready one before anything else: a build it has run, with no task that seeds
+    a fault in that build queued on any worker or running on any. Taking such a task adds its
+    build to what the worker owes, and a batch's fallbacks are queued in the same step that
+    ends the batch, so once a build is ready no fault in it can start again and each worker
+    restores it once, after the last one. A worker with nothing ready and nothing to take waits
+    while it owes a build or any fault is running, since a running batch can queue more.
     """
 
-    def __init__(self, queues: list[list[Task]], steal: bool) -> None:
+    def __init__(
+        self,
+        queues: list[list[Task]],
+        steal: bool,
+        restores: list[dict[tuple, None]] | None = None,
+    ) -> None:
         self.queues = [list(q) for q in queues]
         self.steal = steal
         self.cond = threading.Condition()
         self.done: dict[object, list] = {}
         self.error: BaseException | None = None
+        self.restores = restores
+        self.running: dict[tuple, int] = {}
+        # The workers still taking tasks. With none left, a result not yet put never will be.
+        self.left = len(self.queues)
+
+    def ready(self, number: int) -> tuple | None:
+        """A build worker `number` can restore now, if any."""
+        for build in self.restores[number] if self.restores is not None else ():
+            queued = any(task.build == build for queue in self.queues for task in queue)
+            if not queued and not self.running.get(build):
+                return build
+        return None
+
+    def next(self, number: int) -> Task | object | None:
+        """The task worker `number` takes now, `WAIT`, or None when nothing is left for it.
+        Called with the lock held."""
+        build = self.ready(number)
+        if build is not None:
+            del self.restores[number][build]
+            return Task(("restore", build), True)
+        task = self.pop(number)
+        if task is not None:
+            if task.build is not None:
+                self.running[task.build] = self.running.get(task.build, 0) + 1
+                if self.restores is not None:
+                    self.restores[number].setdefault(task.build)
+            return task
+        owed = self.restores is not None and bool(self.restores[number])
+        return WAIT if owed or any(self.running.values()) else None
+
+    def pop(self, number: int) -> Task | None:
+        own = self.queues[number]
+        if own:
+            return own.pop(0)
+        if not self.steal:
+            return None
+        for other in sorted(self.queues, key=len, reverse=True):
+            for index in range(len(other) - 1, -1, -1):
+                if not other[index].pinned:
+                    return other.pop(index)
+        return None
 
     def take(self, number: int) -> Task | None:
+        """The next task for worker `number`, waiting while `next` says to. None when there's
+        nothing left for it, or the run is ending. Wakes each second, as `get` does."""
         with self.cond:
-            own = self.queues[number]
-            if own:
-                return own.pop(0)
-            if not self.steal:
-                return None
-            for other in sorted(self.queues, key=len, reverse=True):
-                for index in range(len(other) - 1, -1, -1):
-                    if not other[index].pinned:
-                        return other.pop(index)
+            while self.error is None:
+                task = self.next(number)
+                if task is not WAIT:
+                    return task
+                self.cond.wait(timeout=1)
             return None
 
-    def put(self, key: object, value: object) -> None:
+    def finish(
+        self,
+        number: int,
+        task: Task,
+        results: list[tuple[object, object]],
+        follow: list[Task],
+    ) -> None:
+        """Put `task`'s results, queue the tasks it leaves at the front of worker `number`'s
+        queue, and count it as no longer running, all in one step, so no worker sees its build
+        as done in between."""
         with self.cond:
-            self.done.setdefault(key, []).append(value)
+            for key, value in results:
+                self.done.setdefault(key, []).append(value)
+            self.queues[number][:0] = follow
+            if task.build is not None:
+                self.running[task.build] -= 1
             self.cond.notify_all()
 
     def fail(self, error: BaseException) -> None:
@@ -1226,27 +1371,45 @@ class Board:
                 self.error = error
             self.cond.notify_all()
 
+    def leave(self) -> None:
+        with self.cond:
+            self.left -= 1
+            self.cond.notify_all()
+
     def get(self, key: object, count: int = 1) -> list:
         """The results for `key` once `count` workers have put one. Wakes each second, so a
-        signal reaches the main thread while it waits."""
+        signal reaches the main thread while it waits. Raises when every worker has stopped
+        short of `count`, a bug in this script, so the run fails rather than hangs."""
         with self.cond:
             while len(self.done.get(key, [])) < count:
                 if self.error is not None:
                     raise self.error
+                if self.left == 0:
+                    have = len(self.done.get(key, []))
+                    raise RuntimeError(
+                        f"guards: every worker stopped with {have} of {count} results "
+                        f"for {key!r}"
+                    )
                 self.cond.wait(timeout=1)
             return self.done[key]
 
 
 def start(workers: list[Worker], board: Board, do) -> list[threading.Thread]:
+    """Run `do` over the board's tasks, one thread a worker. `do` answers the results to put,
+    each a key and a value, and the tasks the worker queues next (a batch's fallbacks)."""
+
     def loop(worker: Worker) -> None:
         try:
             while (task := board.take(worker.number - 1)) is not None:
-                board.put(task.key, do(worker, task))
+                results, follow = do(worker, task)
+                board.finish(worker.number - 1, task, results, follow)
         except Stopped:
             board.fail(Stopped())
         # A worker's crash ends the run, not just its thread: the main thread raises it.
         except BaseException as error:  # noqa: BLE001 - handed on, not swallowed
             board.fail(error)
+        finally:
+            board.leave()
 
     threads = [
         threading.Thread(target=loop, args=(w,), daemon=True, name=f"guards-{w.number}")
@@ -1387,6 +1550,245 @@ def check_pass(
                 ok = False
                 break
     return ok
+
+
+# ── lint batches ─────────────────────────────────────────────────────────────
+
+
+def batchable(fault: Fault) -> bool:
+    """Whether a lint entry can share a run with the others on its command: it's seeded by
+    transforms, and its one argv is a `cargo clippy` that sets no message format of its own."""
+    if fault.expect != "lint-error" or not fault.transforms or len(fault.run) != 1:
+        return False
+    argv = fault.run[0]
+    head = argv[: argv.index("--")] if "--" in argv else argv
+    sub = next((a for a in head[1:] if not a.startswith(("-", "+"))), None)
+    return (
+        Path(argv[0]).name == "cargo"
+        and sub == "clippy"
+        and not any(a.startswith("--message-format") for a in head)
+    )
+
+
+def lint_batches(selected: list[Fault]) -> dict[tuple, list[int]]:
+    """Each command's batchable entries, by position in `selected`, where there are two or
+    more."""
+    groups: dict[tuple, list[int]] = {}
+    for index, fault in enumerate(selected):
+        if batchable(fault):
+            groups.setdefault(command_key(fault), []).append(index)
+    return {key: members for key, members in groups.items() if len(members) > 1}
+
+
+def json_argv(argv: list[str]) -> list[str]:
+    """`argv` with cargo's `--message-format=json`, ahead of the `--` that starts clippy's own
+    flags. It changes what cargo prints, not what it checks or whether a crate is fresh."""
+    at = argv.index("--") if "--" in argv else len(argv)
+    return [*argv[:at], "--message-format=json", *argv[at:]]
+
+
+def changed_lines(before: str, after: str) -> tuple[int, int, list[str]]:
+    """The lines `[start, end)` of `before`, from 0, that `after` replaces, and the lines it
+    puts there: what's left once the lines the two share at each end are set aside."""
+    old = before.splitlines(keepends=True)
+    new = after.splitlines(keepends=True)
+    head = 0
+    while head < min(len(old), len(new)) and old[head] == new[head]:
+        head += 1
+    tail = 0
+    while tail < min(len(old), len(new)) - head and old[-1 - tail] == new[-1 - tail]:
+        tail += 1
+    return head, len(old) - tail, new[head : len(new) - tail]
+
+
+@dataclass
+class Plan:
+    """A batch's seeding: each file's text with every batched entry's lines in, the lines each
+    batched entry wrote (its region: file, first and last line, from 1), and why each entry
+    that isn't batched runs alone. Both keyed by position in the batch."""
+
+    texts: dict[str, str]
+    regions: dict[int, list[tuple[str, int, int]]]
+    alone: dict[int, str]
+
+    def write(self, tree: Path) -> None:
+        for name, text in self.texts.items():
+            (tree / name).write_text(text, encoding="utf-8")
+
+
+def plan_batch(tree: Path, faults: list[Fault]) -> Plan:
+    """Seed `faults` together, on paper. Each entry's transforms make the edits `seed` makes, and
+    what the entry changes in a file is the lines that differ (`changed_lines`). Entries join in
+    order while no two change overlapping lines; two that write lines at one place both join,
+    in registry order. An entry runs alone when its anchor doesn't match once, when its lines
+    overlap an entry that joined, or when it writes no line for a lint to land on."""
+    originals: dict[str, str] = {}
+    taken: list[tuple[int, str, int, int, list[str]]] = []
+    alone: dict[int, str] = {}
+    for position, fault in enumerate(faults):
+        why = seed(tree, fault, dry=True)
+        if why:
+            alone[position] = why
+            continue
+        edited: dict[str, str] = {}
+        for item in fault.transforms:
+            name = os.path.normpath(item["file"])
+            if name not in originals:
+                originals[name] = (tree / name).read_text(encoding="utf-8")
+            text = edited.get(name, originals[name])
+            edited[name] = text.replace(item["replace"], item["with"])
+        hunks = [
+            (name, *changed_lines(originals[name], text))
+            for name, text in edited.items()
+        ]
+        if not any(lines for _, _, _, lines in hunks):
+            alone[position] = "its fault writes no line for its lint to land on"
+            continue
+        clash = next(
+            (
+                faults[other].id
+                for other, file, start, end, _ in taken
+                for name, first, last, _ in hunks
+                if file == name and first < end and start < last
+            ),
+            None,
+        )
+        if clash is not None:
+            alone[position] = f"it changes lines {clash} changes too"
+            continue
+        taken += [(position, *hunk) for hunk in hunks]
+    texts: dict[str, str] = {}
+    regions: dict[int, list[tuple[str, int, int]]] = {}
+    for name in dict.fromkeys(file for _, file, _, _, _ in taken):
+        lines = originals[name].splitlines(keepends=True)
+        out: list[str] = []
+        at = 0
+        for position, _, start, end, new in sorted(
+            (hunk for hunk in taken if hunk[1] == name),
+            key=lambda hunk: (hunk[2], hunk[3], hunk[0]),
+        ):
+            out += lines[at:start]
+            if new:
+                regions.setdefault(position, []).append(
+                    (name, len(out) + 1, len(out) + len(new))
+                )
+            out += new
+            at = end
+        texts[name] = "".join(out + lines[at:])
+    return Plan(texts, regions, alone)
+
+
+def span_at(span: dict, tree: Path) -> tuple[str, int, int]:
+    """A diagnostic span's file, relative to the tree when it's inside, and its lines."""
+    name = str(span.get("file_name") or "")
+    if os.path.isabs(name):
+        try:
+            name = str(Path(os.path.realpath(name)).relative_to(os.path.realpath(tree)))
+        except ValueError:
+            pass
+    return (
+        os.path.normpath(name),
+        int(span.get("line_start") or 0),
+        int(span.get("line_end") or 0),
+    )
+
+
+def attribute(
+    said: str,
+    code: int,
+    regions: dict[int, list[tuple[str, int, int]]],
+    messages: list[str | None],
+    tree: Path,
+) -> tuple[dict[int, str], dict[int, str]]:
+    """Which entries of a batch its run proves fired, each with where its error is, and why
+    each other entry in `regions` runs alone.
+
+    An entry is proven by an error (a diagnostic at level `error`, what makes the command exit
+    non-zero) whose rendered text carries the entry's `message` and whose every primary span
+    lies in that entry's region. An error carrying an entry's `message` that lies in no one
+    entry's region leaves that entry to run alone even when another error proves it, since the
+    batch can't say whose fault that one is. An error in another entry's region proves only
+    that entry. A run that passed, a line of output that isn't JSON, and a compile error (an
+    error whose code is a rustc code, or none) prove nothing: rustc stops before the lints."""
+    positions = sorted(regions)
+    if code == 0:
+        return {}, dict.fromkeys(positions, "the batch's run passed")
+    proven: dict[int, str] = {}
+    tainted: dict[int, str] = {}
+    for line in said.splitlines():
+        if not line.startswith("{"):
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            return {}, dict.fromkeys(
+                positions, f"a line of the batch's output isn't JSON: {line[:80]}"
+            )
+        if not isinstance(record, dict) or record.get("reason") != "compiler-message":
+            continue
+        message = record.get("message") or {}
+        level = str(message.get("level") or "")
+        lint = (message.get("code") or {}).get("code")
+        spans = [
+            span_at(s, tree) for s in message.get("spans") or [] if s.get("is_primary")
+        ]
+        at = ", ".join(f"{file}:{first}" for file, first, _ in spans) or "no line"
+        if level.startswith("error") and (lint is None or CODE.match(str(lint))):
+            why = "the batch doesn't compile: error" + (f"[{lint}]" if lint else "")
+            return {}, dict.fromkeys(positions, f"{why} at {at}")
+        if level != "error":
+            continue
+        rendered = ANSI.sub("", str(message.get("rendered") or message.get("message")))
+        owner = next(
+            (
+                position
+                for position in positions
+                if spans
+                and all(
+                    any(
+                        file == name and start <= first and last <= end
+                        for name, start, end in regions[position]
+                    )
+                    for file, first, last in spans
+                )
+            ),
+            None,
+        )
+        for position in positions:
+            if not messages[position] or messages[position] not in rendered:
+                continue
+            if owner == position:
+                proven.setdefault(position, at)
+            elif owner is None:
+                tainted.setdefault(position, at)
+    unproven = {
+        position: (
+            f"an error carrying its message is on no entry's lines ({tainted[position]})"
+            if position in tainted
+            else "no error carrying its message is on its own lines"
+        )
+        for position in positions
+        if position not in proven or position in tainted
+    }
+    return {p: at for p, at in proven.items() if p not in tainted}, unproven
+
+
+def rendered_log(log: str) -> str:
+    """A batch's log as cargo prints it without `--message-format=json`: each diagnostic's
+    rendered text in place of its record, and the build records dropped."""
+    out: list[str] = []
+    for line in log.splitlines(keepends=True):
+        if line.startswith("{"):
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                record = None
+            if isinstance(record, dict):
+                if record.get("reason") == "compiler-message":
+                    out.append(str((record.get("message") or {}).get("rendered") or ""))
+                continue
+        out.append(line)
+    return "".join(out)
 
 
 # ── --affected ───────────────────────────────────────────────────────────────
@@ -1916,6 +2318,7 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
     procs = Procs()
     workers: list[Worker] = []
     threads: list[threading.Thread] = []
+    boards: list[Board] = []
     jobs = min(args.jobs, len(selected))
     try:
         for number in range(1, jobs + 1):
@@ -1954,21 +2357,27 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
             # dependency's units are copied.
             print(seed_targets(first_target, extra_targets, local))
 
-        def run_clean(label: str):
-            def do(worker: Worker, task: Task):
-                fault = by_key[task.key]
-                started = time.monotonic()
-                fenv = worker.binding_env if fault.suite == "bindings" else worker.env
-                worker.touched.setdefault(task.key)
-                code, output, said = run_commands(
-                    fault, worker.tree.path, fenv, args.timeout, False, procs
-                )
-                return code, output, said, time.monotonic() - started, worker.number
+        def clean(worker: Worker, key: tuple) -> tuple:
+            fault = by_key[key]
+            started = time.monotonic()
+            fenv = worker.binding_env if fault.suite == "bindings" else worker.env
+            worker.touched.setdefault(key)
+            code, output, said = run_commands(
+                fault, worker.tree.path, fenv, args.timeout, False, procs
+            )
+            return code, output, said, time.monotonic() - started, worker.number
 
-            return do
+        def run_clean(worker: Worker, task: Task):
+            return [(task.key, clean(worker, task.key))], []
 
-        def phase(queues: list[list[Task]], steal: bool, do) -> Board:
-            board = Board(queues, steal)
+        def phase(
+            queues: list[list[Task]],
+            steal: bool,
+            do,
+            restores: list[dict[tuple, None]] | None = None,
+        ) -> Board:
+            board = Board(queues, steal, restores)
+            boards.append(board)
             threads.extend(start(workers, board, do))
             return board
 
@@ -1983,18 +2392,27 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
             [Task(k, k[0] == "bindings") for k in q] for q in assign(selected, jobs)
         ]
         counts = dict.fromkeys(by_key, 1)
-        board = phase(clean_queues, True, run_clean("clean"))
+        board = phase(clean_queues, True, run_clean)
         ok = check_pass(selected, board, counts, log, "clean")
         join()
         if not ok:
             return 1
         # Each fault starts on the worker that built its command clean.
         owner = {k: n for n, w in enumerate(workers) for k in w.touched}
+        # A command's lint batch takes its first entry's place: see the module docstring.
+        batches = lint_batches(selected)
+        batched = {index for members in batches.values() for index in members}
         fault_queues: list[list[Task]] = [[] for _ in workers]
         for index, fault in enumerate(selected):
-            fault_queues[owner[command_key(fault)]].append(
-                Task(index, fault.suite == "bindings")
-            )
+            key = command_key(fault)
+            if index not in batched:
+                fault_queues[owner[key]].append(
+                    Task(index, fault.suite == "bindings", build_of(key))
+                )
+            elif batches[key][0] == index:
+                fault_queues[owner[key]].append(
+                    Task(("batch", key), fault.suite == "bindings", build_of(key))
+                )
 
         def run_fault(worker: Worker, task: Task) -> tuple[str, bool]:
             fault = selected[task.key]
@@ -2018,28 +2436,113 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
                 True,
             )
 
+        def run_batch(worker: Worker, task: Task):
+            """Seed a command's lint batch, run the command once, and put a verdict for each
+            entry the run proves; the others go back on this worker's queue to run alone."""
+            key = task.key[1]
+            members = batches[key]
+            faults = [selected[index] for index in members]
+            worker.touched.setdefault(key)
+            worker.tree.reset()
+            plan = plan_batch(worker.tree.path, faults)
+            alone = dict(plan.alone)
+            proven: dict[int, str] = {}
+            elapsed = 0.0
+            ran = len(plan.regions) > 1
+            if ran:
+                plan.write(worker.tree.path)
+                first = faults[0]
+                fenv = worker.binding_env if first.suite == "bindings" else worker.env
+                started = time.monotonic()
+                code, output, said = run_commands(
+                    dataclasses.replace(first, run=[json_argv(first.run[0])]),
+                    worker.tree.path,
+                    fenv,
+                    args.timeout,
+                    True,
+                    procs,
+                )
+                elapsed = time.monotonic() - started
+                proven, unproven = attribute(
+                    said,
+                    code,
+                    plan.regions,
+                    [fault.message for fault in faults],
+                    worker.tree.path,
+                )
+                alone.update(unproven)
+                ids = ", ".join(faults[p].id for p in sorted(plan.regions))
+                for position, at in proven.items():
+                    log(
+                        f"{faults[position].id}.fault.log",
+                        f"guards: fired in one run of its batch, seeded together ({ids}); "
+                        f"its error is at {at}, on lines its own fault wrote\n"
+                        + rendered_log(output),
+                    )
+            else:
+                alone.update(
+                    dict.fromkeys(plan.regions, "no other entry could share its run")
+                )
+            results: list[tuple[object, object]] = [
+                (members[p], (f"fired: {faults[p].id} ({elapsed:.1f} s)", False))
+                for p in sorted(proven)
+            ]
+            results.append((task.key, (ran, sorted(proven), alone, elapsed)))
+            follow = [
+                Task(members[p], faults[p].suite == "bindings", task.build)
+                for p in sorted(alone)
+            ]
+            return results, follow
+
+        def run_restore(worker: Worker, task: Task):
+            """The restored run of each command of one build this worker ran, clean."""
+            build = task.key[1]
+            worker.tree.reset()
+            return [
+                (key, clean(worker, key))
+                for key in list(worker.touched)
+                if build_of(key) == build
+            ], []
+
+        def run_task(worker: Worker, task: Task):
+            if isinstance(task.key, int):
+                return [(task.key, run_fault(worker, task))], []
+            if task.key[0] == "batch":
+                return run_batch(worker, task)
+            return run_restore(worker, task)
+
         state["seeded"] = True
         failures = 0
         total = time.monotonic()
-        board = phase(fault_queues, True, run_fault)
+        # The restored pass runs in this phase too, a build at a time: see `Board` and the
+        # module docstring. Every worker owes each build it ran clean, and each it faults.
+        restores = [dict.fromkeys(build_of(k) for k in w.touched) for w in workers]
+        board = phase(fault_queues, True, run_task, restores)
         for index in range(len(selected)):
             [(line, failed)] = board.get(index)
             print(line)
             failures += failed
-        join()
         print(
             f"guards: {len(selected) - failures} of {len(selected)} fired "
             f"({time.monotonic() - total:.1f} s of faults)"
         )
-        # The restored leg, and what keeps the caller's target and venv clean: see the
-        # module docstring. Every worker runs again each command it ran, so each scratch tree
-        # is shown to come back clean, and worker 1's target ends on clean builds.
-        for worker in workers:
-            worker.tree.reset()
+        for key, members in batches.items():
+            [(ran, proven, alone, elapsed)] = board.get(("batch", key))
+            command = " ".join(by_key[key].run[0])
+            print(
+                f"guards: {len(proven)} of {len(members)} lint entries on `{command}` "
+                f"fired in one run ({elapsed:.1f} s)"
+                if ran
+                else f"guards: no two lint entries on `{command}` could share a run"
+            )
+            for position, why in sorted(alone.items()):
+                print(f"guards: {selected[members[position]].id} ran alone: {why}")
+        # What keeps the caller's target and venv clean: see the module docstring. Every
+        # worker ran each command it ran again, once no fault that builds it was left, so each
+        # scratch tree is shown to come back clean, and worker 1's target ends on clean builds.
+        # A worker's touched commands are final here: every fault has put its verdict.
         started = time.monotonic()
-        restored_queues = [[Task(k, True) for k in w.touched] for w in workers]
         counts = {k: sum(k in w.touched for w in workers) for k in by_key}
-        board = phase(restored_queues, False, run_clean("restored"))
         ok = check_pass(selected, board, counts, log, "restored")
         join()
         if not ok:
@@ -2053,6 +2556,9 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
         return 1 if failures else 0
     finally:
         procs.stop()
+        # A worker waiting for a build to be ready wakes to this and stops.
+        for board in boards:
+            board.fail(Stopped())
         for thread in threads:
             thread.join(timeout=60)
         for worker in workers:
