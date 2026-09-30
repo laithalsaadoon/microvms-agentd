@@ -41,6 +41,7 @@ use std::sync::Arc;
 
 use microvms_core::prelude::*;
 use microvms_core::sandbox::Sandbox;
+use microvms_core::session::serve;
 use microvms_core::session::{
     CompletionOptions, CompletionPlan, DEFAULT_CLIENT_GRACE, GapPolicy, OutputFlow, OutputSink,
     Session, StreamOptions, mint_exec_id,
@@ -1169,6 +1170,70 @@ impl PySession {
                     .map(|offered| offered.to_vec()),
             )
         })?)
+    }
+
+    /// Serves a local TCP port as a tunnel to `guest_port` in the VM, on a background task,
+    /// and returns its handle at once: `microvm tunnel`'s loop.
+    ///
+    /// Each local connection gets a WebSocket of its own through the endpoint proxy, and a
+    /// connection the daemon refuses is listed in the report while the tunnel keeps serving.
+    /// `bind` is a `host:port` to listen on, loopback on a port the OS picks by default, and
+    /// the handle's `local_address` says which. `max_connections` stops accepting after that
+    /// many. With `verify_identity` (a `TunnelIdentity`, such as `Sandbox.tunnel_identity`),
+    /// each connection first proves the far end is the daemon of the VM that identity was
+    /// launched with, and a connection that can't is refused.
+    ///
+    /// The tunnel carries this session's credentials to whoever connects, so bind beyond
+    /// loopback only on a network you trust. Dropping the handle stops the tunnel.
+    #[pyo3(signature = (guest_port, *, bind=None, verify_identity=None, max_connections=None))]
+    fn tunnel(
+        &self,
+        py: Python<'_>,
+        guest_port: u16,
+        bind: Option<&str>,
+        verify_identity: Option<crate::serve::PyTunnelIdentity>,
+        max_connections: Option<u32>,
+    ) -> PyCoreResult<crate::serve::PyTunnel> {
+        let bind = serve::bind_address(bind)?;
+        let identity = verify_identity.map(|identity| identity.inner);
+        let target = self.detached(py, |session| {
+            Ok(serve::TunnelTarget::for_session(
+                session, guest_port, identity,
+            ))
+        })?;
+        let limits = serve::ServeLimits { max_connections };
+        let task = runtime::block_on(py, serve::start_tunnel(bind, target, limits))?;
+        Ok(crate::serve::PyTunnel::new(task))
+    }
+
+    /// Serves a local port as an HTTP and WebSocket forward to `guest_port` in the VM, on a
+    /// background task, and returns its handle at once: `microvm port-forward`'s loop.
+    ///
+    /// Connections are served at once rather than one after another, so a slow request
+    /// doesn't hold the next. A request the endpoint proxy refuses is listed in the report
+    /// with its status while the forward keeps serving. `bind` and `max_connections` are
+    /// `tunnel`'s. Dropping the handle stops the forward.
+    #[pyo3(signature = (guest_port, *, bind=None, max_connections=None))]
+    fn port_forward(
+        &self,
+        py: Python<'_>,
+        guest_port: u16,
+        bind: Option<&str>,
+        max_connections: Option<u32>,
+    ) -> PyCoreResult<crate::serve::PyPortForward> {
+        let bind = serve::bind_address(bind)?;
+        let (endpoint, auth) = self.detached(py, |session| {
+            Ok((
+                session.endpoint().to_string(),
+                session.proxy_auth().cloned(),
+            ))
+        })?;
+        let limits = serve::ServeLimits { max_connections };
+        let task = runtime::block_on(
+            py,
+            serve::start_forward(bind, &endpoint, guest_port, auth, limits),
+        )?;
+        Ok(crate::serve::PyPortForward::new(task))
     }
 
     /// How many proxy tokens this session has minted, or `None` for a direct session.

@@ -806,6 +806,21 @@ impl PySandbox {
         })
     }
 
+    /// The tunnel identity a launch with `identity=True` generated, or that an adopted
+    /// record carried; `None` otherwise.
+    ///
+    /// Holds the host's secret half: pass it to `Session.tunnel(verify_identity=...)`, and
+    /// store it only where the agent token goes.
+    #[getter]
+    fn tunnel_identity(&self) -> Option<crate::serve::PyTunnelIdentity> {
+        self.read(|sandbox| {
+            sandbox
+                .tunnel_identity()
+                .cloned()
+                .map(crate::serve::PyTunnelIdentity::from)
+        })
+    }
+
     /// The session, once launched.
     ///
     /// A new wrapper each call, all reaching the same session under the same lock. There is
@@ -1141,6 +1156,11 @@ impl PySandbox {
     /// outbound traffic. For no egress, pass existing VPC connector ARNs through
     /// `egress_network_connectors`, using a VPC without an internet gateway or NAT
     /// gateway. `deny_egress` sets advisory proxy variables that workloads can bypass.
+    ///
+    /// `identity=True` generates a tunnel identity and delivers the VM's half with the
+    /// launch, so `Session.tunnel(port, verify_identity=sandbox.tunnel_identity)` can prove
+    /// the far end is this VM's daemon.
+    ///
     /// # What the core refuses here, and this file does not
     ///
     /// A second `run` on one sandbox, with **zero** control-plane calls: the agent token is
@@ -1160,6 +1180,7 @@ impl PySandbox {
         agent_token=None,
         client_token=None,
         launch_env=None,
+        identity=false,
         egress=false,
         egress_network_connectors=None,
         deny_egress=false,
@@ -1200,6 +1221,7 @@ impl PySandbox {
         // locally before the launch. Not a doc comment: a doc comment on a function
         // parameter is a compile error.
         launch_env: Option<std::collections::HashMap<String, String>>,
+        identity: bool,
         egress: bool,
         egress_network_connectors: Option<Vec<String>>,
         // `deny_egress` is the advisory in-guest deny: proxy variables pointed at a black
@@ -1238,10 +1260,7 @@ impl PySandbox {
             agent_token,
             client_token,
             launch_env: launch_env.unwrap_or(defaults.launch_env),
-            // The tunnel identity is a CLI/daemon surface (`microvm tunnel
-            // --verify-identity`); the bindings keep the default (off) until a
-            // binding-level verify API exists to consume the material.
-            identity: defaults.identity,
+            identity,
             egress,
             egress_network_connectors: egress_network_connectors.unwrap_or_default(),
             deny_egress,

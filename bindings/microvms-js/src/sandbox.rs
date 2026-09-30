@@ -562,6 +562,10 @@ pub struct RunOptions {
     /// Shares the token's 4096-byte payload budget; the core refuses an over-ceiling
     /// payload before the launch, naming the byte count.
     pub launch_env: Option<std::collections::HashMap<String, String>>,
+    /// Generate a tunnel identity and deliver the VM's half with the launch, so
+    /// `session.tunnel(port, {}, await sandbox.tunnelIdentity())` can prove the far end is
+    /// this VM's daemon.
+    pub identity: Option<bool>,
     /// Request the managed INTERNET_EGRESS connector. Omission does not block egress.
     pub egress: Option<bool>,
     /// Existing VPC network connector ARNs. For no egress, use a VPC without an
@@ -833,6 +837,21 @@ impl Sandbox {
             .map(|window| window.as_secs_f64())
     }
 
+    /// The tunnel identity a launch with `identity: true` generated, or that an adopted record
+    /// carried; `null` otherwise.
+    ///
+    /// Holds the host's secret half: pass it to `session.tunnel(...)`, and store it only
+    /// where the agent token goes.
+    #[napi]
+    pub async fn tunnel_identity(&self) -> Option<crate::serve::TunnelIdentity> {
+        self.inner
+            .lock()
+            .await
+            .tunnel_identity()
+            .cloned()
+            .map(crate::serve::TunnelIdentity::from)
+    }
+
     /// The session, once launched.
     ///
     /// A new wrapper each call, all reaching the same session under the same lock. There is no
@@ -994,10 +1013,7 @@ impl Sandbox {
             agent_token: options.agent_token,
             client_token: options.client_token,
             launch_env: options.launch_env.unwrap_or(defaults.launch_env),
-            // The tunnel identity is a CLI/daemon surface (`microvm tunnel
-            // --verify-identity`); the bindings keep the default (off) until a
-            // binding-level verify API exists to consume the material.
-            identity: defaults.identity,
+            identity: options.identity.unwrap_or(defaults.identity),
             egress: options.egress.unwrap_or(defaults.egress),
             egress_network_connectors: options.egress_network_connectors.unwrap_or_default(),
             deny_egress: options.deny_egress.unwrap_or(defaults.deny_egress),

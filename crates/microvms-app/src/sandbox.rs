@@ -1362,7 +1362,9 @@ impl Sandbox {
     /// A [`crate::names::NameRecord`] for this VM, to register under `name`.
     ///
     /// The egress posture is left unknown: the sandbox does not keep its launch request, and
-    /// a record must not claim a network it cannot vouch for.
+    /// a record must not claim a network it cannot vouch for. The tunnel identity is kept when
+    /// the sandbox holds one, launched with it or adopted from a record that carried it: a
+    /// record without it can't verify the VM later, which is what the pair is for (#263).
     pub fn name_record(&self, name: &str) -> Result<crate::names::NameRecord, Error> {
         let Some(vm) = self.microvm() else {
             return Err(Error::new(
@@ -1380,28 +1382,38 @@ impl Sandbox {
             ));
         };
         // Stamped on the plane's clock, the one every other time this sandbox reads comes from.
-        crate::names::NameRecord::new_at(
+        let mut record = crate::names::NameRecord::new_at(
             name,
             vm.id.as_str(),
             vm.endpoint.as_str(),
             session.agent_token(),
             self.control.region().as_str(),
             self.control.clock().unix_now().as_secs(),
-        )
+        )?;
+        record.set_tunnel_identity(self.tunnel_identity.as_ref());
+        Ok(record)
     }
 
     /// [`Sandbox::adopt`] from a [`crate::names::NameRecord`] kept in any store.
+    ///
+    /// Keeps the record's tunnel identity, so [`Sandbox::tunnel_identity`] and a later
+    /// [`Sandbox::name_record`] carry it. A record holding one half of the pair, or a pair that
+    /// doesn't decode, is refused before any AWS call rather than adopted without it: the
+    /// record claims a verifiable VM, and dropping the claim would hide that it's broken.
     pub async fn adopt_record(
         control: ControlPlane,
         record: crate::names::NameRecord,
     ) -> Result<Self, Error> {
-        Self::adopt(
+        let identity = record.tunnel_identity()?;
+        let mut sandbox = Self::adopt(
             control,
             record.microvm_id,
             record.endpoint,
             record.agent_token,
         )
-        .await
+        .await?;
+        sandbox.tunnel_identity = identity;
+        Ok(sandbox)
     }
 
     /// Hands the VM off to another process and returns what that process needs to adopt it.
@@ -2622,6 +2634,56 @@ mod tests {
                 .kind(),
             ErrorKind::Precondition
         );
+    }
+
+    /// **A record's tunnel identity survives adoption and naming** (#263).
+    ///
+    /// `adopt_record` used to drop the pair and `name_record` never wrote it, so a VM named
+    /// through the SDKs lost what `tunnel --verify-identity` needs to check it. A record with
+    /// half the pair is refused before any AWS call.
+    #[tokio::test]
+    async fn a_records_tunnel_identity_survives_adoption_and_naming() {
+        let identity = crate::identity::LaunchIdentity::from_seeds([7; 32], [9; 32])
+            .expect("valid seeds")
+            .keep();
+        let mut record = crate::names::NameRecord::new_at(
+            "ci",
+            "mvm-abc123",
+            ADOPT_ENDPOINT,
+            ADOPT_TOKEN,
+            "us-east-1",
+            1_767_225_600,
+        )
+        .expect("record");
+        record.identity_host_seed = Some(identity.host_seed_base64());
+        record.identity_vm_public_key = Some(identity.vm_public_key_base64());
+
+        let (plane, recorder, _) = adopt_plane();
+        recorder.answer(
+            "GetMicrovm",
+            Answer::ok(fake::microvm_response("RUNNING", None)),
+        );
+        let sandbox = Sandbox::adopt_record(plane, record.clone())
+            .await
+            .expect("adopts");
+        let kept = sandbox
+            .tunnel_identity()
+            .expect("the record's pair is kept");
+        assert_eq!(kept.host_seed_base64(), identity.host_seed_base64());
+        assert_eq!(kept.vm_public_key_base64(), identity.vm_public_key_base64());
+        let named = sandbox.name_record("again").expect("names");
+        assert_eq!(named.identity_host_seed, record.identity_host_seed);
+        assert_eq!(named.identity_vm_public_key, record.identity_vm_public_key);
+
+        let (plane, recorder, _) = adopt_plane();
+        let mut torn = record;
+        torn.identity_vm_public_key = None;
+        let refused = Sandbox::adopt_record(plane, torn)
+            .await
+            .expect_err("half a pair is refused");
+        assert_eq!(refused.kind(), ErrorKind::InvalidArg);
+        assert!(refused.to_string().contains("one half"), "{refused}");
+        assert!(recorder.calls().is_empty(), "refused before any AWS call");
     }
 
     /// Suspend, resume, and terminate all work through an adopted handle with the usual

@@ -74,6 +74,7 @@ mod provision;
 mod region;
 mod runtime;
 mod sandbox;
+mod serve;
 mod session;
 
 use pyo3::prelude::*;
@@ -163,6 +164,11 @@ mod microvms {
     use super::sandbox::{
         PyBaseImage, PyDetached, PyEnsuredImage, PyImage, PyManagedBaseVersion, PySandbox,
         PyTeardownReport, egress_posture_for, wrap_dockerfile,
+    };
+    #[pymodule_export]
+    use super::serve::{
+        PyConnectionEnd, PyPortForward, PyPortForwardReport, PyTunnel, PyTunnelIdentity,
+        PyTunnelReport,
     };
     #[pymodule_export]
     use super::session::{
