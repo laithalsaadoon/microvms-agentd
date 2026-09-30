@@ -26,7 +26,10 @@ import mise_config  # noqa: E402
 
 
 def load_script():
-    """The script as a module, for its YAML reader and its exception list."""
+    """The script as a module, for its YAML reader and its exception list. Under its own name,
+    not mutmut's `tools.check-agents-md`: most cases run the script from a throwaway repo, where
+    a mutated copy can't find mutmut's config during its stats pass, so tools/check-mutmut.py
+    leaves the script unmutated rather than failing every change to it."""
     spec = importlib.util.spec_from_file_location("check_agents_md", SCRIPT)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module

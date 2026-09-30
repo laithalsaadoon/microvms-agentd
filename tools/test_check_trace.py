@@ -24,7 +24,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 SCRIPT = HERE / "check-trace.py"
-TRACE = runpy.run_path(str(SCRIPT))
+TRACE = runpy.run_path(str(SCRIPT), run_name="tools.check-trace")
 
 Patterns = TRACE["Patterns"]
 collect = TRACE["collect"]

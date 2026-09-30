@@ -34,6 +34,7 @@ depends = [
   "ratchet:check",
   "guards:list",
   "mutants:check",
+  "mutmut:check",
   "targets:check",
   "ci:parity",
 ]

@@ -112,6 +112,18 @@ instead. An entry drops only a function's `replace <function> -> ` mutants, so
 move any logic worth testing out of that function first. A mutant in
 `timeout.txt` made the tests hang, and it's handled like a missed one.
 
+CI's `mutmut` job asks the same question of the gate scripts. `tools/check-mutmut.py` runs
+mutmut over the functions a pull request changes in `tools/*.py` and fails when one has more
+surviving mutants than it had on the base; a new function starts from none, so the survivors in
+code nobody touches wait for a change that meets them. `mise run mutmut` runs it over your branch
+against origin/main (`mise run mutmut -- --jobs 4`), and `mutmut:check` in `check` runs its unit
+tests. mutmut credits a test with a function only when the script's module has mutmut's name for
+it, so a script's own suite loads it with `runpy.run_path(<path>, run_name="tools.<stem>")`; a
+script no suite loads that way isn't measured, and the job says so. A surviving mutant prints
+with its diff: write the assertion that fails with it in. One no test could tell from the
+original takes a no-mutate pragma on its line, with the reason in parentheses after it, which
+the script requires.
+
 Two kinds of code take `#[cfg_attr(test, mutants::skip)]` rather than an
 exclusion: a new test double behind `cfg(any(test, feature = "test-support"))`
 (on its module, or a glob in `.cargo/mutants.toml` for a file of its own), and

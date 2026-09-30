@@ -26,7 +26,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-PARITY = runpy.run_path(str(Path(__file__).with_name("check-ci-parity.py")))
+PARITY = runpy.run_path(
+    str(Path(__file__).with_name("check-ci-parity.py")),
+    run_name="tools.check-ci-parity",
+)
 REPO = Path(__file__).resolve().parents[1]
 
 MISE = """\

@@ -30,7 +30,7 @@ from pathlib import Path
 from unittest import mock
 
 SCRIPT = Path(__file__).with_name("check-parity.py")
-PARITY = runpy.run_path(str(SCRIPT))
+PARITY = runpy.run_path(str(SCRIPT), run_name="tools.check-parity")
 
 TABLE = """
 [flag_groups]

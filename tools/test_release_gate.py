@@ -17,7 +17,7 @@ from pathlib import Path
 SCRIPT = Path(__file__).with_name("release-gate.py")
 ROOT = SCRIPT.parent.parent
 
-_spec = importlib.util.spec_from_file_location("release_gate", SCRIPT)
+_spec = importlib.util.spec_from_file_location("tools.release-gate", SCRIPT)
 gate = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gate)
 

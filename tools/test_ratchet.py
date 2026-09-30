@@ -29,8 +29,10 @@ from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-RATCHET = runpy.run_path(str(HERE / "ratchet.py"))
-HISTORY = runpy.run_path(str(HERE / "ratchet-history.py"))
+RATCHET = runpy.run_path(str(HERE / "ratchet.py"), run_name="tools.ratchet")
+HISTORY = runpy.run_path(
+    str(HERE / "ratchet-history.py"), run_name="tools.ratchet-history"
+)
 
 Scope = RATCHET["Scope"]
 Tree = RATCHET["Tree"]

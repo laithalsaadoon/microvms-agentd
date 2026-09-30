@@ -19,7 +19,7 @@ from pathlib import Path
 from unittest import mock
 
 SCRIPT = Path(__file__).with_name("check-dts-consumer.py")
-DTS = runpy.run_path(str(SCRIPT))
+DTS = runpy.run_path(str(SCRIPT), run_name="tools.check-dts-consumer")
 VERSIONS = {"typescript": "5.9.3", "@types/node": "26.4.0"}
 
 # Stands in for npx. It prints FAKE_TSC only while someone else holds the lock beside the npm

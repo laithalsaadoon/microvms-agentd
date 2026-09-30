@@ -235,8 +235,10 @@ check that holds it, or says that review does.
   no entry and no line in `verify/guards/unregistered.txt`.
 - Tests assert the verdict, not only that something ran or stayed contained.
   CI's `mutants` job fails on a mutant of the changed Rust that no test
-  catches, which is what a test that only checks "it returned" leaves behind.
-  It isn't a required check yet, so read its result before a merge.
+  catches, which is what a test that only checks "it returned" leaves behind,
+  and its `mutmut` job fails when a function a change touches in `tools/*.py`
+  has more surviving mutants than it had on the base. Neither is a required
+  check yet, so read their results before a merge.
 - A requirement is covered by a test that names it, not by a mention.
   `trace:check` counts a key only in a test's name, its own doc comment or
   docstring, a pytest marker, or a Node test's title.

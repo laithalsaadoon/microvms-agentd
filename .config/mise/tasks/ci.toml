@@ -81,6 +81,7 @@ run = [
   { task = "trace:check" },
   { task = "guards:list" },
   { task = "mutants:check" },
+  { task = "mutmut:check" },
   { task = "publish:check" },
   { task = "live:check" },
   { task = "targets:check" },
@@ -163,6 +164,10 @@ description = "CI's `semver` job: the published crates' Rust API against their l
 # `semver:check` fetches each baseline from crates.io, which is why it's a job of its own and not
 # in `check`, which is offline. Its comment says which crate is gated and which is reported.
 run = [{ task = "semver:check" }]
+
+["ci:mutmut"]
+description = "CI's `mutmut` job's command: the mutmut ratchet over the change's functions in tools/*.py. The job passes `--base <its base>`"
+run = "./tools/check-mutmut.py"
 
 ["ci:build"]
 description = "CI's `build` job: the release build of the daemon for the shipping target, and its size and linkage"

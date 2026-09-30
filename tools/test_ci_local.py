@@ -21,7 +21,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-RUNNER = runpy.run_path(str(Path(__file__).with_name("ci-local.py")))
+RUNNER = runpy.run_path(
+    str(Path(__file__).with_name("ci-local.py")), run_name="tools.ci-local"
+)
 
 # A git hook exports these; inherited, the fixture's git would write into the real repo.
 GIT_LEAKS = (
