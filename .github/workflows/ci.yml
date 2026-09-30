@@ -354,7 +354,7 @@ jobs:
         run: uv run python -m unittest discover -s scripts -p 'test_check_trace.py'
       - name: requirement traceability
         run: ./scripts/check-trace.py --check
-      # `mise run guards:list` (#274): each seeded fault in guards/faults.toml still applies, and
+      # `mise run guards:list` (#274): each seeded fault in guards/faults/*.toml still applies, and
       # every Falsification note has an entry or is in guards/unregistered.txt. After the ast-grep
       # install because the note census parses the Rust and JS tests with it. The `guards` job
       # below is what seeds the faults. `--base` is the ratchet step's, for the same reason:
@@ -607,10 +607,10 @@ jobs:
       # optional-dependency fallback a consumer depends on.
       - name: the npm loader resolves its platform packages
         run: ./scripts/check-npm-loader.py
-      # The bindings entries in guards/faults.toml fire in the `guards` job's shards, each
+      # The bindings entries in guards/faults/*.toml fire in the `guards` job's shards, each
       # worker in an environment of its own, not here.
 
-  # `mise run guards:fire` (#274): each entry in guards/faults.toml (every one on a push to main,
+  # `mise run guards:fire` (#274): each entry in guards/faults/*.toml (every one on a push to main,
   # the ones it affects on a pull request) is seeded into a scratch worktree, and its guard must
   # fail for the reason the entry names. Its own job because each fault is one more incremental
   # build, which is why it isn't in `check` either. The script is called directly, since no job

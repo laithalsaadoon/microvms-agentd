@@ -1,0 +1,111 @@
+# ── TypeScript consumer types (#262): index.d.ts against the type probes ─────
+# The first entry is the regression itself: the source loses the `#[napi]` napi-derive reads the
+# stream's yield type from, and a rebuild writes the empty class again. The rest are the probe
+# gate's own floors, run on the committed file.
+
+[[fault]]
+id = "dts-consumer-exec-stream-attribute"
+guard = "scripts/check-dts-consumer.py"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "microvms-js"],
+  ["./scripts/check-dts-consumer.py"],
+]
+expect = "exit-nonzero"
+suite = "bindings"
+message = "TS2504"
+transform = { file = "microvms-js/src/exec.rs", replace = "#[napi]\nimpl AsyncGenerator for ExecStream {\n", with = "impl AsyncGenerator for ExecStream {\n" }
+
+# The index.d.ts anchors below are @napi-rs/cli 3.10.5's text. A CLI release that writes the member
+# differently fails the stale diff first, and the regenerate it forces fails `guards:list` on these
+# anchors in the same change, so they're refreshed together rather than going stale unseen.
+[[fault]]
+id = "dts-consumer-empty-class"
+guard = "scripts/check-dts-consumer.py"
+run = ["./scripts/check-dts-consumer.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "TS2504"
+transform = { file = "microvms-js/index.d.ts", replace = "export declare class ExecStream {\n\n  [globalThis.Symbol.asyncIterator](): globalThis.__NapiRsAsyncGenerator<ExecStream, StreamEvent, void, undefined>\n}\n", with = "export declare class ExecStream {}\n" }
+
+# A member that yields `any` type-checks every loop; the probe's `@ts-expect-error` goes unused.
+[[fault]]
+id = "dts-consumer-any-yield"
+guard = "scripts/check-dts-consumer.py"
+run = ["./scripts/check-dts-consumer.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "TS2578"
+transform = { file = "microvms-js/index.d.ts", replace = "__NapiRsAsyncGenerator<ExecStream, StreamEvent, void, undefined>", with = "__NapiRsAsyncGenerator<ExecStream, any, void, undefined>" }
+
+[[fault]]
+id = "dts-consumer-empty-dts"
+guard = "scripts/check-dts-consumer.py"
+run = ["./scripts/check-dts-consumer.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "is not a module"
+argv_fault = ["--dts", "parity/fixtures/empty.d.ts"]
+
+[[fault]]
+id = "dts-consumer-no-probes"
+guard = "scripts/check-dts-consumer.py"
+run = ["./scripts/check-dts-consumer.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "no type probes under"
+argv_fault = ["--probes", "{empty_dir}"]
+
+[[fault]]
+id = "dts-consumer-no-control"
+guard = "scripts/check-dts-consumer.py"
+run = ["./scripts/check-dts-consumer.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "has no @ts-expect-error control"
+transform = { file = "microvms-js/__test__/types/stream.ts", replace = "    // @ts-expect-error: an event is a StreamEvent, so this fails unless the stream yields `any`\n    const wrong: number = event\n    void wrong\n", with = "" }
+
+# #262 review round 1 (the falsifier's faults). A probe that names the directive only in prose has
+# no control, so a member yielding `any` passed; `@ts-nocheck` drops every diagnostic in the file,
+# so the original empty class passed; and a `.mts` probe was never compiled, with no word.
+[[fault]]
+id = "dts-consumer-control-in-prose"
+guard = "scripts/check-dts-consumer.py"
+run = ["./scripts/check-dts-consumer.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "has no @ts-expect-error control"
+transform = [
+  { file = "microvms-js/__test__/types/stream.ts", replace = "    // @ts-expect-error: an event is a StreamEvent, so this fails unless the stream yields `any`\n    const wrong: number = event\n    void wrong\n", with = "    // the @ts-expect-error control lived here\n" },
+  { file = "microvms-js/index.d.ts", replace = "__NapiRsAsyncGenerator<ExecStream, StreamEvent, void, undefined>", with = "__NapiRsAsyncGenerator<ExecStream, any, void, undefined>" },
+]
+
+[[fault]]
+id = "dts-consumer-nocheck"
+guard = "scripts/check-dts-consumer.py"
+run = ["./scripts/check-dts-consumer.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "turns type-checking off (@ts-nocheck)"
+transform = [
+  { file = "microvms-js/__test__/types/stream.ts", replace = "// SPDX-License-Identifier: Apache-2.0\n", with = "// SPDX-License-Identifier: Apache-2.0\n// @ts-nocheck\n" },
+  { file = "microvms-js/index.d.ts", replace = "export declare class ExecStream {\n\n  [globalThis.Symbol.asyncIterator](): globalThis.__NapiRsAsyncGenerator<ExecStream, StreamEvent, void, undefined>\n}\n", with = "export declare class ExecStream {}\n" },
+]
+
+[[fault]]
+id = "dts-consumer-stray-probe"
+guard = "scripts/check-dts-consumer.py"
+run = ["./scripts/check-dts-consumer.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "isn't compiled: a probe is a *.ts file directly under"
+patch = "guards/faults/dts-consumer-stray-probe.patch"
+
+# A `--listFiles` parse that reads nothing, so the check can't say what tsc compiled.
+[[fault]]
+id = "dts-consumer-lists-nothing"
+guard = "scripts/check-dts-consumer.py"
+run = ["./scripts/check-dts-consumer.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "tsc didn't read"
+transform = { file = "scripts/check-dts-consumer.py", replace = "and line.strip().endswith(\".ts\")", with = "and line.strip().endswith(\".tsx\")" }

@@ -1549,8 +1549,9 @@ mod tests {
     /// TypeScript's take any figure a `Duration` holds, and `Instant + Duration` overflows past
     /// about 9.2e18 seconds.
     ///
-    /// **Falsification**: `guards/faults.toml` entry `app-ready-deadline-overflows` puts the
-    /// unchecked `Instant::now() + timeout` back in `wait_until_ready`, and the wait panics.
+    /// **Falsification**: `guards/faults/seconds-flags.toml` entry `app-ready-deadline-overflows`
+    /// puts the unchecked `Instant::now() + timeout` back in `wait_until_ready`, and the wait
+    /// panics.
     #[tokio::test(start_paused = true)]
     async fn a_ready_wait_longer_than_the_clock_can_hold_still_polls() {
         let recorder =

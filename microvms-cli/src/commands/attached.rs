@@ -3297,8 +3297,8 @@ mod tests {
     /// A sync's `rm` waits its budget plus the delete grace, with no floor of its own: the
     /// daemon's deadline is the budget, so a zero one is the daemon's to refuse.
     ///
-    /// **Falsification**: `guards/faults.toml` entry `cli-sync-client-wait` turns the `+` into a
-    /// `-`, cargo-mutants' own mutant, and the 60 s row reads 30 s.
+    /// **Falsification**: `guards/faults/seconds-flags.toml` entry `cli-sync-client-wait` turns the
+    /// `+` into a `-`, cargo-mutants' own mutant, and the 60 s row reads 30 s.
     #[test]
     fn a_sync_waits_its_budget_plus_the_delete_grace() {
         assert_eq!(

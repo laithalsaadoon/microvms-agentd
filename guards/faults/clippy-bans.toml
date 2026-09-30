@@ -1,0 +1,494 @@
+# ── clippy bans (#282, #285) ─────────────────────────────────────────────────
+
+[[fault]]
+id = "clippy-domain-fs"
+guard = "microvms-domain clippy.toml: std::fs::read"
+run = ["cargo", "clippy", "-p", "microvms-domain", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `std::fs::read`"
+transform = { file = "microvms-domain/src/sizing.rs", replace = "    pub fn baseline_mib(self) -> u32 {\n", with = "    pub fn baseline_mib(self) -> u32 {\n        let _ = std::fs::read(\"x\");\n" }
+
+[[fault]]
+id = "clippy-js-subprocess"
+guard = "microvms-js clippy.toml: std::process::Command"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed type `std::process::Command`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = std::process::Command::new(\"aws\");\n" }
+
+# #273's recorded break: a CLI handler builds a control-plane call itself.
+[[fault]]
+id = "clippy-cli-transport-call-get"
+guard = "microvms-cli clippy.toml: microvms_core::control::transport::Call::get"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::get`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = microvms_core::control::transport::Call::get(\"ListMicrovms\", \"/x\");\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+# #273: every ban in each adapter's clippy.toml, seeded into a real handler. The paths are
+# core's re-exports; each fault names one by the shortest form that compiles.
+[[fault]]
+id = "clippy-cli-call-post-json"
+guard = "microvms-cli clippy.toml: microvms_core::control::transport::Call::post_json"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::post_json`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = microvms_core::control::transport::Call::post_json(\"RunMicrovm\", \"/x\", &());\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-call-patch-json"
+guard = "microvms-cli clippy.toml: microvms_core::control::transport::Call::patch_json"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::patch_json`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = microvms_core::control::transport::Call::patch_json(\"UpdateMicrovmImageVersion\", \"/x\", &());\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-call-post-empty"
+guard = "microvms-cli clippy.toml: microvms_core::control::transport::Call::post_empty"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::post_empty`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = microvms_core::control::transport::Call::post_empty(\"SuspendMicrovm\", \"/x\");\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-call-delete"
+guard = "microvms-cli clippy.toml: microvms_core::control::transport::Call::delete"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::delete`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = microvms_core::control::transport::Call::delete(\"DeleteMicrovmImage\", \"/x\");\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-send-with-retry"
+guard = "microvms-cli clippy.toml: microvms_core::control::transport::send_with_retry"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::send_with_retry`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = microvms_core::control::transport::send_with_retry;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-send-accepting"
+guard = "microvms-cli clippy.toml: microvms_core::control::transport::send_accepting"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::send_accepting`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = microvms_core::control::transport::send_accepting;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-transport-send"
+guard = "microvms-cli clippy.toml: microvms_core::control::transport::Transport::send"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Transport::send`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = <dyn microvms_core::control::transport::Transport>::send;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-from-ports"
+guard = "microvms-cli clippy.toml: microvms_core::control::ControlPlane::from_ports"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::ControlPlane::from_ports`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = microvms_core::control::ControlPlane::from_ports;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-with-transport"
+guard = "microvms-cli clippy.toml: microvms_core::prelude::ControlPlaneExt::with_transport"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::ControlPlaneExt::with_transport`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = <microvms_core::control::ControlPlane as microvms_core::prelude::ControlPlaneExt>::with_transport;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-call-type"
+guard = "microvms-cli clippy.toml: microvms_core::control::transport::Call"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed type `microvms_core::control::transport::Call`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _: Option<microvms_core::control::transport::Call> = None;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-control-plane-new"
+guard = "microvms-cli clippy.toml: microvms_core::prelude::ControlPlaneExt::new"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::ControlPlaneExt::new`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = <microvms_core::control::ControlPlane as microvms_core::prelude::ControlPlaneExt>::new;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-sandbox-new"
+guard = "microvms-cli clippy.toml: microvms_core::prelude::SandboxExt::new"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::SandboxExt::new`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = <microvms_core::sandbox::Sandbox as microvms_core::prelude::SandboxExt>::new;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-session-connect"
+guard = "microvms-cli clippy.toml: microvms_core::prelude::SessionExt::connect"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::SessionExt::connect`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = |e: String, t: String, m| <microvms_core::session::Session as microvms_core::prelude::SessionExt>::connect(e, t, m);\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-session-direct"
+guard = "microvms-cli clippy.toml: microvms_core::prelude::SessionExt::direct"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::SessionExt::direct`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = |e: String, t: String| <microvms_core::session::Session as microvms_core::prelude::SessionExt>::direct(e, t);\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-session-attach"
+guard = "microvms-cli clippy.toml: microvms_core::prelude::SessionExt::attach"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::SessionExt::attach`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = |r, i: String, e: String, t: String| <microvms_core::session::Session as microvms_core::prelude::SessionExt>::attach(r, i, e, t, None, None);\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-session-builder"
+guard = "microvms-cli clippy.toml: microvms_core::session::Session::builder"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::session::Session::builder`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = |e: String, t: String| microvms_core::session::Session::builder(e, t);\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-signed-transport"
+guard = "microvms-cli clippy.toml: microvms_core::control::transport::SignedTransport"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed type `microvms_core::control::transport::SignedTransport`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _: Option<microvms_core::control::transport::SignedTransport> = None;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-signed-build-services"
+guard = "microvms-cli clippy.toml: microvms_core::control::SignedBuildServices"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed type `microvms_core::control::SignedBuildServices`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _: Option<microvms_core::control::SignedBuildServices> = None;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-reqwest-backend"
+guard = "microvms-cli clippy.toml: microvms_core::session::http::ReqwestBackend"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed type `microvms_core::session::http::ReqwestBackend`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _: Option<microvms_core::session::http::ReqwestBackend> = None;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+# The doors review round 1 found missing: the prelude's other credential-resolving
+# constructors, core's `preflight`, and the adapters port (#273).
+[[fault]]
+id = "clippy-cli-sandbox-adopt-in"
+guard = "microvms-cli clippy.toml: microvms_core::prelude::SandboxExt::adopt_in"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::SandboxExt::adopt_in`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _sb = <microvms_core::sandbox::Sandbox as microvms_core::prelude::SandboxExt>::adopt_in(region.clone(), microvm_id.clone(), \"http://x\", \"t\", None).await?;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-sandbox-from-name"
+guard = "microvms-cli clippy.toml: microvms_core::prelude::SandboxExt::from_name"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::SandboxExt::from_name`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _sb = <microvms_core::sandbox::Sandbox as microvms_core::prelude::SandboxExt>::from_name(&microvms_core::names::FileNameStore::new(\"names\"), \"ci\", None, None).await?;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-agent-vm-adopt-in"
+guard = "microvms-cli clippy.toml: microvms_core::prelude::AgentVmExt::adopt_in"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::AgentVmExt::adopt_in`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _vm = <microvms_core::agents::AgentVm as microvms_core::prelude::AgentVmExt>::adopt_in(region.clone(), Vec::new(), microvm_id.clone(), \"http://x\", \"t\", None).await?;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-agent-vm-from-name"
+guard = "microvms-cli clippy.toml: microvms_core::prelude::AgentVmExt::from_name"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::AgentVmExt::from_name`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _vm = <microvms_core::agents::AgentVm as microvms_core::prelude::AgentVmExt>::from_name(&microvms_core::names::FileNameStore::new(\"names\"), Vec::new(), \"ci\", None, None).await?;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-preflight"
+guard = "microvms-cli clippy.toml: microvms_core::preflight::preflight"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::preflight::preflight`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _report = microvms_core::preflight::preflight(Some(region.clone())).await;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-adapters-http-backend"
+guard = "microvms-cli clippy.toml: microvms_core::adapters::Adapters::http_backend"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::adapters::Adapters::http_backend`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _backend = microvms_core::adapters::Adapters::http_backend(&microvms_core::adapters::SystemAdapters, \"http://x\", std::time::Duration::from_secs(1))?;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-adapters-build-services"
+guard = "microvms-cli clippy.toml: microvms_core::adapters::Adapters::build_services"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::adapters::Adapters::build_services`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _services = microvms_core::adapters::Adapters::build_services(&microvms_core::adapters::SystemAdapters, region.clone()).await?;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "clippy-cli-system-adapters"
+guard = "microvms-cli clippy.toml: microvms_core::adapters::SystemAdapters"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed type `microvms_core::adapters::SystemAdapters`"
+transform = { file = "microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _: Option<microvms_core::adapters::SystemAdapters> = None;\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+# The seam's `#[expect]` covers its two door calls, not the whole `impl`: an environment read or
+# a transport call added to a seam method still fails lint.
+[[fault]]
+id = "clippy-cli-seam-env-read"
+guard = "microvms-cli clippy.toml: std::env::var, inside AwsSeam's impl"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `std::env::var`"
+transform = { file = "microvms-cli/src/seam.rs", replace = "    fn control_plane(&self, region: Region) -> BoxFuture<'_, Result<ControlPlane, Error>> {\n        Box::pin(production_plane(region))", with = "    fn control_plane(&self, region: Region) -> BoxFuture<'_, Result<ControlPlane, Error>> {\n        let _ = std::env::var(\"AWS_PROFILE\");\n        Box::pin(production_plane(region))" }
+
+[[fault]]
+id = "clippy-cli-seam-transport"
+guard = "microvms-cli clippy.toml: microvms_core::control::transport::send_with_retry, inside AwsSeam's impl"
+run = ["cargo", "clippy", "-p", "microvms-cli", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::send_with_retry`"
+transform = { file = "microvms-cli/src/seam.rs", replace = "    fn control_plane(&self, region: Region) -> BoxFuture<'_, Result<ControlPlane, Error>> {\n        Box::pin(production_plane(region))", with = "    fn control_plane(&self, region: Region) -> BoxFuture<'_, Result<ControlPlane, Error>> {\n        let _ = microvms_core::control::transport::send_with_retry;\n        Box::pin(production_plane(region))" }
+
+[[fault]]
+id = "clippy-py-call-get"
+guard = "microvms-py clippy.toml: microvms_core::control::transport::Call::get"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::get`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = microvms_core::control::transport::Call::get(\"GetMicrovm\", \"/x\");\n" }
+
+[[fault]]
+id = "clippy-py-call-post-json"
+guard = "microvms-py clippy.toml: microvms_core::control::transport::Call::post_json"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::post_json`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = microvms_core::control::transport::Call::post_json(\"RunMicrovm\", \"/x\", &());\n" }
+
+[[fault]]
+id = "clippy-py-call-patch-json"
+guard = "microvms-py clippy.toml: microvms_core::control::transport::Call::patch_json"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::patch_json`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = microvms_core::control::transport::Call::patch_json(\"UpdateMicrovmImageVersion\", \"/x\", &());\n" }
+
+[[fault]]
+id = "clippy-py-call-post-empty"
+guard = "microvms-py clippy.toml: microvms_core::control::transport::Call::post_empty"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::post_empty`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = microvms_core::control::transport::Call::post_empty(\"SuspendMicrovm\", \"/x\");\n" }
+
+[[fault]]
+id = "clippy-py-call-delete"
+guard = "microvms-py clippy.toml: microvms_core::control::transport::Call::delete"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::delete`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = microvms_core::control::transport::Call::delete(\"DeleteMicrovmImage\", \"/x\");\n" }
+
+[[fault]]
+id = "clippy-py-send-with-retry"
+guard = "microvms-py clippy.toml: microvms_core::control::transport::send_with_retry"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::send_with_retry`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = microvms_core::control::transport::send_with_retry;\n" }
+
+[[fault]]
+id = "clippy-py-send-accepting"
+guard = "microvms-py clippy.toml: microvms_core::control::transport::send_accepting"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::send_accepting`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = microvms_core::control::transport::send_accepting;\n" }
+
+[[fault]]
+id = "clippy-py-transport-send"
+guard = "microvms-py clippy.toml: microvms_core::control::transport::Transport::send"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Transport::send`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = <dyn microvms_core::control::transport::Transport>::send;\n" }
+
+[[fault]]
+id = "clippy-py-from-ports"
+guard = "microvms-py clippy.toml: microvms_core::control::ControlPlane::from_ports"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::ControlPlane::from_ports`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = microvms_core::control::ControlPlane::from_ports;\n" }
+
+[[fault]]
+id = "clippy-py-with-transport"
+guard = "microvms-py clippy.toml: microvms_core::prelude::ControlPlaneExt::with_transport"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::ControlPlaneExt::with_transport`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _ = <microvms_core::control::ControlPlane as microvms_core::prelude::ControlPlaneExt>::with_transport;\n" }
+
+[[fault]]
+id = "clippy-py-call-type"
+guard = "microvms-py clippy.toml: microvms_core::control::transport::Call"
+run = ["cargo", "clippy", "-p", "microvms-py", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed type `microvms_core::control::transport::Call`"
+transform = { file = "microvms-py/src/control.rs", replace = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n", with = "    fn terminate(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<()> {\n        let _: Option<microvms_core::control::transport::Call> = None;\n" }
+
+[[fault]]
+id = "clippy-js-call-get"
+guard = "microvms-js clippy.toml: microvms_core::control::transport::Call::get"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::get`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = microvms_core::control::transport::Call::get(\"GetMicrovm\", \"/x\");\n" }
+
+[[fault]]
+id = "clippy-js-call-post-json"
+guard = "microvms-js clippy.toml: microvms_core::control::transport::Call::post_json"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::post_json`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = microvms_core::control::transport::Call::post_json(\"RunMicrovm\", \"/x\", &());\n" }
+
+[[fault]]
+id = "clippy-js-call-patch-json"
+guard = "microvms-js clippy.toml: microvms_core::control::transport::Call::patch_json"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::patch_json`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = microvms_core::control::transport::Call::patch_json(\"UpdateMicrovmImageVersion\", \"/x\", &());\n" }
+
+[[fault]]
+id = "clippy-js-call-post-empty"
+guard = "microvms-js clippy.toml: microvms_core::control::transport::Call::post_empty"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::post_empty`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = microvms_core::control::transport::Call::post_empty(\"SuspendMicrovm\", \"/x\");\n" }
+
+[[fault]]
+id = "clippy-js-call-delete"
+guard = "microvms-js clippy.toml: microvms_core::control::transport::Call::delete"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Call::delete`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = microvms_core::control::transport::Call::delete(\"DeleteMicrovmImage\", \"/x\");\n" }
+
+[[fault]]
+id = "clippy-js-send-with-retry"
+guard = "microvms-js clippy.toml: microvms_core::control::transport::send_with_retry"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::send_with_retry`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = microvms_core::control::transport::send_with_retry;\n" }
+
+[[fault]]
+id = "clippy-js-send-accepting"
+guard = "microvms-js clippy.toml: microvms_core::control::transport::send_accepting"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::send_accepting`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = microvms_core::control::transport::send_accepting;\n" }
+
+[[fault]]
+id = "clippy-js-transport-send"
+guard = "microvms-js clippy.toml: microvms_core::control::transport::Transport::send"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::transport::Transport::send`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = <dyn microvms_core::control::transport::Transport>::send;\n" }
+
+[[fault]]
+id = "clippy-js-from-ports"
+guard = "microvms-js clippy.toml: microvms_core::control::ControlPlane::from_ports"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::control::ControlPlane::from_ports`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = microvms_core::control::ControlPlane::from_ports;\n" }
+
+[[fault]]
+id = "clippy-js-with-transport"
+guard = "microvms-js clippy.toml: microvms_core::prelude::ControlPlaneExt::with_transport"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed method `microvms_core::prelude::ControlPlaneExt::with_transport`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = <microvms_core::control::ControlPlane as microvms_core::prelude::ControlPlaneExt>::with_transport;\n" }
+
+[[fault]]
+id = "clippy-js-call-type"
+guard = "microvms-js clippy.toml: microvms_core::control::transport::Call"
+run = ["cargo", "clippy", "-p", "microvms-js", "--all-targets", "--", "-D", "warnings"]
+expect = "lint-error"
+suite = "rust"
+message = "use of a disallowed type `microvms_core::control::transport::Call`"
+transform = { file = "microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _: Option<microvms_core::control::transport::Call> = None;\n" }

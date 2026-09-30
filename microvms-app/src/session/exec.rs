@@ -1984,8 +1984,8 @@ mod tests {
     /// poll and exits on the second, so a deadline that saturated into the past would time out
     /// between them instead of waiting.
     ///
-    /// **Falsification**: `guards/faults.toml` entry `app-wait-deadline-overflows` restores the
-    /// unchecked `Instant::now() + after` in `deadline_after`, and the wait panics.
+    /// **Falsification**: `guards/faults/seconds-flags.toml` entry `app-wait-deadline-overflows`
+    /// restores the unchecked `Instant::now() + after` in `deadline_after`, and the wait panics.
     #[tokio::test(start_paused = true)]
     async fn a_wait_longer_than_the_clock_can_hold_still_waits() {
         let recorder = Recorder::with([
