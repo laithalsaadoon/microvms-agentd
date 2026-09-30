@@ -1018,6 +1018,9 @@ pub fn session_constants() -> String {
             // asserted its own copy would assert that the copy is self-consistent.
             r#""wsSubprotocol":"{}","wsAuthSubprotocolPrefix":"{}","#,
             r#""wsPortSubprotocolPrefix":"{}","#,
+            // The waits' defaults, core's (#266), for a caller who leaves a timeout out.
+            r#""defaultExecWaitSeconds":{},"defaultReadyTimeoutSeconds":{},"#,
+            r#""defaultLifecycleTimeoutSeconds":{},"lifecyclePollIntervalSeconds":{},"#,
             r#""phases":[{}],"streamKinds":[{}]}}"#,
         ),
         microvms_core::session::DEFAULT_AGENT_PORT,
@@ -1028,6 +1031,10 @@ pub fn session_constants() -> String {
         microvms_core::session::WS_SUBPROTOCOL,
         microvms_core::session::WS_AUTH_SUBPROTOCOL_PREFIX,
         microvms_core::session::WS_PORT_SUBPROTOCOL_PREFIX,
+        microvms_core::session::DEFAULT_EXEC_WAIT.as_secs_f64(),
+        microvms_core::session::DEFAULT_READY_TIMEOUT.as_secs_f64(),
+        microvms_core::sandbox::DEFAULT_LIFECYCLE_TIMEOUT.as_secs_f64(),
+        microvms_core::sandbox::LIFECYCLE_POLL_INTERVAL.as_secs_f64(),
         phases,
         stream_kinds,
     )

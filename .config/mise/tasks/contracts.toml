@@ -8,9 +8,10 @@ hide = true
 # The generate-and-diff gates below (`schema:check`, `manifest:check`, `core-api:check`,
 # `stubs:check`) declare `sources`, so mise skips one whose inputs haven't changed since it last
 # passed here. mise compares the path, size and mtime of every source against the last passing
-# run, and always counts the file that defines the task, which is this one. CI runs no mise
-# (D14), so CI runs every one of them on every push; the skip is local only, and
-# `mise run --force <task>` runs one anyway.
+# run, and always counts the file that defines the task, which is this one. It keeps that record
+# in its state directory, which no CI job restores (the tools cache holds only installs), so CI
+# runs every one of them on every push; the skip is local only, and `mise run --force <task>`
+# runs one anyway.
 #
 # A skip is only as sound as its list: a file the generator reads and the list leaves out makes a
 # stale artifact pass. Each list starts with what a cargo build of this workspace reads from the
@@ -86,7 +87,7 @@ description = "docs/schema.json against the previous release tag's copy: no rout
 # The unit tests run first, for `trace:check`'s reason: they run the real script over the
 # v0.8.0, v0.9.0 and v0.10.0 schemas and over copies with one break seeded in each.
 run = [
-  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider tools/test_check_schema_compat.py",
+  "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_check_schema_compat.py",
   "./tools/check-schema-compat.py",
 ]
 
@@ -175,7 +176,7 @@ sources = [
 depends = ["toolchain:id"]
 outputs = { auto = true }
 run = [
-  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider tools/test_rustdoc_walk.py",
+  "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_rustdoc_walk.py",
   "./tools/generate-core-api.py --check",
 ]
 
@@ -208,9 +209,8 @@ description = "Fail if the committed Python stub no longer matches the pyo3 surf
 # `libmicrovms.rlib` and `.so` that `test` builds, whose names carry no hash because the crate
 # builds a cdylib. Measured 2026-09-30 at be99c5d: shared, this task rewrote those files and
 # `test`'s next build recompiled three crates; in its own target nothing of `test`'s changes, and
-# a cold build there took 80 s run alone. CI's bindings job runs the script in its shared
-# target, a step at a time, where nothing races it, and reuses `maturin develop`'s build.
-# `targets:check` holds the target.
+# a cold build there took 80 s run alone. CI's `bindings` job runs this task as it is, in the
+# same target. `targets:check` holds the target.
 #
 # `toolchain:id` says how mise skips it and why the list is complete. Its sources are the pyo3
 # crate and the crates below it (in the Rust entries), the toolchain, the crate's
@@ -242,7 +242,7 @@ description = "Regenerate bindings/microvms-js/index.d.ts from the napi-rs surfa
 # `napi build` is the only thing that writes this file: napi-derive records each `#[napi]` item's
 # TypeScript shape at compile time and the CLI stitches them together, with the SPDX header from
 # `bindings/microvms-js/package.json`'s `napi.dtsHeader`. It also writes `index.js` and the platform `.node`
-# addon beside it, both gitignored, so this is the same command `ci.yml`'s bindings job runs.
+# addon beside it, both gitignored; `bindings:js` builds the addon its tests load with this task.
 run = "npx -y -p @napi-rs/cli@3 napi build --manifest-path Cargo.toml --package microvms-js --platform --output-dir . --cwd bindings/microvms-js"
 
 ["dts:check"]
@@ -253,13 +253,13 @@ description = "Fail if the committed TypeScript declarations no longer match the
 # measured 2026-09-24, one checkout's `index.d.ts` was 1,966 lines while `main` generated 2,323.
 #
 # Built into a scratch directory rather than over the committed file, so a stale copy is reported
-# as a diff instead of silently repaired. `ci.yml`'s bindings job runs the same comparison with
-# `git diff` after the build it already does for the node tests.
+# as a diff instead of silently repaired. CI's `bindings` job runs it before `bindings:js`
+# rebuilds the file in place: after that build, the diff compares the file with itself.
 #
 # The diff proves the file matches the generator; `check-dts-consumer.py` proves the generator's
 # output lets a caller type what the docs show. The two differ: `ExecStream` was declared with no
 # `[Symbol.asyncIterator]()`, byte-identical to the build, and `tsc` rejected the `for await` loop
-# `stream()` documents (#262). The bindings job runs the second step on its own too.
+# `stream()` documents (#262).
 #
 # No `sources`, unlike the other generate-and-diff gates: npx resolves `@napi-rs/cli@3` to the
 # newest 3.x on each run, here and in every workflow, so a CLI release can make the committed file
@@ -268,7 +268,7 @@ description = "Fail if the committed TypeScript declarations no longer match the
 # The consumer check's unit tests run first, for `model:check`'s reason: its tsc locate runs under
 # the npx cache's lock and refuses a tsc npx didn't install (#348), and a fake npx proves both.
 run = [
-  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider tools/test_check_dts_consumer.py",
+  "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_check_dts_consumer.py",
   '''
 #!/usr/bin/env bash
 set -euo pipefail
@@ -313,5 +313,5 @@ description = "Fail if a hardcoded API constraint no longer matches botocore's s
 # for anyone who wants that trade knowingly.
 run = [
   "./tools/check-model-drift.py",
-  "{{vars.pytest}} --with 'boto3>=1.40' --with 'pyyaml==6.0.3' pytest -n auto -q -p no:cacheprovider tools/test_model_drift.py",
+  "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_model_drift.py",
 ]

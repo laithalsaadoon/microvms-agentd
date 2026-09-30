@@ -401,6 +401,24 @@ def test_the_refresh_window_is_inside_the_token_lifetime_with_room_to_spare() ->
     assert lifetime - refresh >= lifetime / 2
 
 
+def test_the_wait_defaults_are_published() -> None:
+    """Core's wait defaults, for a caller who leaves a timeout out (#266).
+
+    The stub prints a default named for a core constant as `...`, so this is where the figure
+    is readable: an exec waits five minutes, the daemon's readiness two, a lifecycle transition
+    five at five-second polls.
+    """
+    constants = microvms.session_constants()
+    assert constants["defaultExecWaitSeconds"] == 300.0
+    assert constants["defaultReadyTimeoutSeconds"] == 120.0
+    assert constants["defaultLifecycleTimeoutSeconds"] == 300.0
+    assert (
+        0
+        < constants["lifecyclePollIntervalSeconds"]
+        < constants["defaultLifecycleTimeoutSeconds"]
+    )
+
+
 def test_the_default_agent_port_is_the_one_a_direct_session_lands_on() -> None:
     """One number, reachable two ways.
 
