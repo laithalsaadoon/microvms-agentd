@@ -113,10 +113,6 @@
     { "category": "untraced", "key": "BIND-3", "issue": 306 },
     { "category": "untraced", "key": "BIND-4", "issue": 306 },
     { "category": "untraced", "key": "BIND-5", "issue": 306 },
-    { "category": "untraced", "key": "ARCH-1", "issue": 307 },
-    { "category": "untraced", "key": "ARCH-2", "issue": 307 },
-    { "category": "untraced", "key": "ARCH-3", "issue": 307 },
-    { "category": "untraced", "key": "ARCH-4", "issue": 307 },
     { "category": "untraced", "key": "ARCH-5", "issue": 307 }
   ],
   "decisions": [

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //! The MicroVMs client: the control plane, the in-VM daemon, the cost engine, and
 //! every trap closure, behind the one library crate the CLI and the bindings depend on
-//! (ARCH-1).
+//! (ARCH-1). It depends on none of them (ARCH-4), so a consumer of the library never carries the
+//! CLI's parser and runtime.
 //!
 //! # What this crate is for
 //!
