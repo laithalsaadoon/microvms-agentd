@@ -1,0 +1,33 @@
+# ── the live suite's version-skew section, offline (#298) ────────────────────
+
+# The downloads are only as good as their check: a digest compared with nothing lets any bytes
+# through as the previous release.
+[[fault]]
+id = "conformance-skew-checksum-ignored"
+guard = "conformance/selftest/skew.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  skew: bytes whose sha256 differs are refused"
+transform = { file = "conformance/lanes/skew.py", replace = "    if got != want:\n", with = "    if False:\n" }
+
+# An asset SHA256SUMS doesn't list, read as fine.
+[[fault]]
+id = "conformance-skew-unlisted-asset"
+guard = "conformance/selftest/skew.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  skew: an asset SHA256SUMS doesn't list is refused"
+transform = { file = "conformance/lanes/skew.py", replace = "    if want is None:\n", with = "    if False:\n" }
+
+# On a release's own commit, the tag at HEAD taken as the previous release: the section would
+# skew the release against itself and pass.
+[[fault]]
+id = "conformance-skew-previous-is-head"
+guard = "conformance/selftest/skew.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  skew: on a release's own commit the previous release is the one before"
+transform = { file = "conformance/lanes/skew.py", replace = "        if commit != head:\n", with = "        if True:\n" }
