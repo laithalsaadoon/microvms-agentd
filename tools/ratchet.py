@@ -418,6 +418,27 @@ def dump(data: dict) -> str:
     return "{\n" + ",\n".join(parts) + "\n}\n"
 
 
+# The pointers a git hook exports, as in check-guards-fire.py. Every git call here names its
+# repo with `-C root`, and an inherited `GIT_DIR` overrides that: the tests' throwaway repos
+# would be read through the hook's repo instead (#311). In the real checkout the two name the
+# same repo, so dropping them changes no answer there.
+GIT_ENV_LEAKS = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_CEILING_DIRECTORIES",
+    "GIT_PREFIX",
+)
+
+
+def clean_env() -> dict[str, str]:
+    """`os.environ` without the inherited git pointers, read at call time."""
+    return {k: v for k, v in os.environ.items() if k not in GIT_ENV_LEAKS}
+
+
 def show(root: Path, ref: str, path: str) -> str | None:
     """`path`'s text at `ref`, or None when `ref` has no such file. An unknown ref is an error."""
     commit = subprocess.run(
@@ -432,13 +453,16 @@ def show(root: Path, ref: str, path: str) -> str | None:
         ],
         capture_output=True,
         text=True,
+        env=clean_env(),
     )
     if commit.returncode != 0:
         raise SystemExit(f"--base {ref} doesn't name a commit in {root}")
     spec = f"{commit.stdout.strip()}:{path}"
     if (
         subprocess.run(
-            ["git", "-C", str(root), "cat-file", "-e", spec], capture_output=True
+            ["git", "-C", str(root), "cat-file", "-e", spec],
+            capture_output=True,
+            env=clean_env(),
         ).returncode
         != 0
     ):
@@ -448,6 +472,7 @@ def show(root: Path, ref: str, path: str) -> str | None:
         capture_output=True,
         text=True,
         check=True,
+        env=clean_env(),
     ).stdout
 
 
@@ -510,6 +535,7 @@ def default_base(root: Path) -> str:
         ["git", "-C", str(root), "merge-base", "HEAD", "origin/main"],
         capture_output=True,
         text=True,
+        env=clean_env(),
     )
     if out.returncode != 0:
         raise SystemExit(
