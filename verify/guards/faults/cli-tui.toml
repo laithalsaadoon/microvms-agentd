@@ -1,0 +1,11 @@
+# ── the interactive surface drawn with ratatui (CLI-1, #304) ─────────────────
+
+# The table widget gets no rows, so the frame ratatui draws has the title and the footer but none
+# of the cells, and the content assertions fail.
+[[fault]]
+id = "cli-tui-rows-dropped"
+guard = "tui::tests::every_value_reaches_the_frame_and_a_long_identifier_survives_intact"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "tui::tests::every_value_reaches_the_frame_and_a_long_identifier_survives_intact"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-cli/src/tui.rs", replace = "Table::new(rows, widths)", with = "Table::new(rows.into_iter().take(0), widths)" }

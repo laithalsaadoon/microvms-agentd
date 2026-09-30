@@ -46,6 +46,12 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | BIND-20 | 1 | 1 | 1 | 2 | 3 | 1 |
 | BIND-21 | waived | waived | waived | 1 | 1 | 1 |
 | BIND-22 | waived | waived | 1 | 1 | 1 | waived |
+| CLI-1 | waived | waived | waived | 1 | 2 | waived |
+| CLI-2 | waived | waived | waived | 1 | 5 | waived |
+| CLI-3 | waived | waived | waived | 2 | 1 | 2 |
+| CLI-4 | waived | waived | waived | 3 | 5 | 2 |
+| CLI-5 | waived | waived | waived | 4 | 4 | waived |
+| CLI-6 | waived | waived | waived | 5 | 6 | waived |
 | CLI-7 | 1 | 1 | 1 | 3 | 8 | 1 |
 | CLI-8 | 1 | 1 | 1 | 2 | 3 | 1 |
 | CLI-9 | 1 | 1 | 1 | 2 | 3 | 1 |
@@ -501,6 +507,72 @@ If a daemon event stream carries bytes that are not well-formed server-sent even
 - **test:** `crates/microvms-app/src/session/sse.rs`
 - **impl:** `crates/microvms-app/src/session/sse.rs`
 - **live:** waived: a live daemon sends well-formed events, so a live run can't present hostile bytes
+
+## CLI-1
+
+The CLI crate shall render its interactive surface with ratatui.
+
+- **model:** waived: a rendering choice, not a state
+- **gherkin:** waived: the TUI draws only when stdout is a terminal, and the Gherkin tier runs the binary on pipes
+- **fuzz:** waived: a frame is drawn from rows the command has already rendered as text; there is no input stream
+- **test:** `crates/microvms-cli/src/tui.rs`
+- **impl:** `crates/microvms-cli/src/envelope.rs`, `crates/microvms-cli/src/tui.rs`
+- **live:** waived: the live suite runs the CLI with --json on a pipe, where the TUI never draws
+
+## CLI-2
+
+The CLI crate shall reach the control plane and the endpoint proxy only through microvms-core.
+
+- **model:** waived: a property of the crate's dependencies and of its one door to core, not of a state
+- **gherkin:** waived: the behavioral guard already drives every AWS-touching command through a seam that refuses, which a scenario would restate
+- **fuzz:** waived: there is no input stream; the rule is over the dependency set and the source
+- **test:** `crates/microvms-cli/src/guards/thinness.rs`
+- **impl:** `crates/microvms-app/src/session/exec.rs`, `crates/microvms-cli/src/commands/attached.rs`, `crates/microvms-cli/src/commands/local.rs`, `crates/microvms-cli/src/provision.rs`, `crates/microvms-cli/src/seam.rs`
+- **live:** waived: a live run can't show that a call didn't bypass core; the dependency denylist, the clippy bans and the refusing seam can
+
+## CLI-3
+
+The CLI crate shall emit a stable exit code per documented failure class, distinct from the code for an unexpected error.
+
+- **model:** waived: a fixed table from failure class to code, not a state machine
+- **gherkin:** waived: the table-driven test asserts every row, and tests/exit_codes.rs reads each class's code at the process boundary; a scenario per row would restate the table
+- **fuzz:** waived: the input is a closed enum of failure kinds, which the table-driven test walks exhaustively
+- **test:** `crates/microvms-cli/src/exit.rs`, `crates/microvms-cli/src/guards/exit_codes.rs`
+- **impl:** `crates/microvms-cli/src/exit.rs`
+- **live:** `conformance/lanes/local.py`, `conformance/selftest/suite.py`
+
+## CLI-4
+
+Where JSON output is requested, the CLI crate shall emit exactly one envelope object per invocation on stdout, carrying an outcome discriminant and on failure a machine-readable code.
+
+- **model:** waived: one envelope per invocation follows from main's single write, not from a state; crates/model/src/output.rs models the closed-pipe rules, CLI-7 to CLI-9
+- **gherkin:** waived: tests/exit_codes.rs parses stdout as one document at the process boundary, and the live harness does on every call
+- **fuzz:** waived: the envelope's count isn't input-driven: one call in main writes it, and the closed-output harness fuzzes what happens around it (CLI-9)
+- **test:** `crates/microvms-cli/src/envelope.rs`, `crates/microvms-cli/tests/exit_codes.rs`, `crates/microvms-cli/tests/thinness.rs`
+- **impl:** `crates/microvms-cli/src/commands/attached.rs`, `crates/microvms-cli/src/commands/local.rs`, `crates/microvms-cli/src/commands/mod.rs`, `crates/microvms-cli/src/envelope.rs`, `crates/microvms-cli/src/main.rs`
+- **live:** `conformance/lanes/local.py`, `conformance/selftest/suite.py`
+
+## CLI-5
+
+The CLI crate shall not expose an option that permits a value microvms-core rejects.
+
+- **model:** waived: a property of the parser's closed domains, not of a state
+- **gherkin:** waived: the parser tests enumerate each closed domain and round-trip the manifest's published values; a scenario per value would restate them
+- **fuzz:** waived: the domains are closed sets the tests enumerate exactly, so there is no open input space to search
+- **test:** `crates/microvms-cli/src/cli.rs`, `crates/microvms-cli/src/config.rs`, `crates/microvms-cli/src/manifest.rs`, `crates/microvms-cli/tests/manifest.rs`
+- **impl:** `crates/microvms-cli/src/cli.rs`, `crates/microvms-cli/src/commands/local.rs`, `crates/microvms-cli/src/config.rs`, `crates/microvms-cli/src/manifest.rs`
+- **live:** waived: a value the parser refuses never leaves the process, so the service never sees it
+
+## CLI-6
+
+If a command is interrupted after a MicroVM has launched, then the CLI crate shall tear down the MicroVM and emit the identifiers of every resource it could not delete.
+
+- **model:** waived: one interrupt in one window of one launch; the guard places it there against a scripted control plane
+- **gherkin:** waived: the guard is the scenario: it scripts the control plane, interrupts at RunMicrovm and asserts the exit code, the terminate call, the envelope and the ledger
+- **fuzz:** waived: there is no input stream; the window that matters is the one between the launch and RUNNING
+- **test:** `crates/microvms-app/src/sandbox.rs`, `crates/microvms-cli/src/envelope.rs`, `crates/microvms-cli/src/guards/closed_output.rs`, `crates/microvms-cli/src/guards/interrupt.rs`, `crates/microvms-cli/src/ledger.rs`
+- **impl:** `crates/microvms-app/src/sandbox.rs`, `crates/microvms-cli/src/commands/agent.rs`, `crates/microvms-cli/src/commands/attached.rs`, `crates/microvms-cli/src/commands/lifecycle.rs`, `crates/microvms-cli/src/exit.rs`, `crates/microvms-cli/src/main.rs`
+- **live:** waived: an interrupt has to land between a billable launch and RUNNING, which a live run can't place deterministically; the guard places it at RunMicrovm
 
 ## CLI-7
 

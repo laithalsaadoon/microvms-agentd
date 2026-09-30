@@ -13,6 +13,7 @@ from typing import Any
 
 from harness.cli import Cli
 from harness.constants import BASELINE_MEMORY_MIB, REPO
+from harness.envelope import KindError
 from harness.redact import command_for_log
 from harness.results import Results
 
@@ -81,6 +82,26 @@ def drive_local_commands(cli: Cli, results: Results) -> None:
         and "aws logs tail" in str(logs.data.get("tailCommand")),
         f"logGroup={logs.data.get('logGroup')!r} lines={logs.data.get('lines')!r} "
         f"tailCommand={logs.data.get('tailCommand')!r}",
+    )
+
+    # CLI-3 and CLI-4 on a failure, by name. `Cli.call` asserts both on every invocation (stdout
+    # is one document, and a failure's process exit code is its envelope's `exitCode`), so the
+    # except arm is reached only when both held. `--memory 1500` is outside the size table, so
+    # the parser refuses it before any call (CLI-5).
+    refusal = None
+    try:
+        cli.call("cost", "--running-sec", "3600", "--memory", "1500")
+    except KindError as error:
+        refusal = error.envelope
+    results.eq(
+        "CLI-3: a refused argument exits with the invalid-argument row's code",
+        refusal and refusal.process_exit_code,
+        2,
+    )
+    results.eq(
+        "CLI-4: the refusal is one error envelope carrying its machine-readable code",
+        refusal and (refusal.status, refusal.code),
+        ("error", "ERR_INVALID_ARG"),
     )
 
 
