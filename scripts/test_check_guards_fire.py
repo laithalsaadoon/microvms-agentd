@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 import tomllib
 import types
@@ -49,16 +50,27 @@ GIT_ENV_LEAKS = (
 # `name=value` words: `build=E0599` breaks the build with that code, `<test>=fail` fails that
 # test, `color=yes` wraps each line in ANSI codes the way CI's `CARGO_TERM_COLOR=always` does,
 # `slow=N` sleeps N tenths of a second, and `hang=yes` sleeps past any timeout (with a child
-# that sleeps too, and both pids written under $FAKE_PIDS when it's set). With
+# that sleeps too, and both pids written under $FAKE_PIDS when it's set). `write=F` writes
+# the file F into the tree, and `absent=F` fails the run when F is there. With
 # CARGO_TARGET_DIR set, the runner stands in for a build there: `built.txt` records the state
 # it last ran on, `runs` counts runs, and `flaky=N` fails the Nth run; $FAKE_DEPS, when set,
 # gets the target and the names in its `debug/deps` before each run. $FAKE_LOG, when set,
 # gets a line per run: the target, the venv, the tree, whether the tree was seeded, and the
-# arguments.
+# arguments. $FAKE_SPANS, when set, gets a `start` and an `end` line per run, each with the
+# time, the tree, whether it was seeded, and the arguments.
+#
+# As `cargo clippy`, it also reads the tree's `.rs` files for what rustc would report: a line
+# holding `LINT(text)` gets an error `text` there (a clippy ban's), `LINT@N(text)` the same
+# error at line N instead, `WARN(text)` a warning, and `BROKEN(E0425)` a compile error with
+# that code. Any error exits 101. With `--message-format=json` each is a cargo
+# `compiler-message` record on one line, and `GARBLED()` prints a line that isn't JSON.
 FAKE_RUNNER = """\
 #!{python}
+import atexit
+import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import time
@@ -66,6 +78,24 @@ import time
 texts = [p.read_text() for p in sorted(pathlib.Path(".").glob("state*.txt"))]
 state = dict(w.split("=", 1) for w in " ".join(texts).split())
 tool = pathlib.Path(sys.argv[0]).name
+marks = []
+if tool == "cargo" and "clippy" in sys.argv[1:]:
+    for path in sorted(pathlib.Path(".").rglob("*.rs")):
+        for number, line in enumerate(path.read_text().splitlines(), 1):
+            for kind, at, text in re.findall(r"(LINT|WARN|BROKEN|GARBLED)(?:@(\\d+))?\\(([^)]*)\\)", line):
+                marks.append((kind, path.as_posix(), int(at or number), text))
+seeded = bool(marks) or any(
+    v not in ("ok", "no") for k, v in state.items() if k not in ("slow", "flaky", "absent")
+)
+if os.environ.get("FAKE_SPANS"):
+    def span(edge):
+        with open(os.environ["FAKE_SPANS"], "a") as log:
+            log.write("\\t".join([
+                edge, repr(time.time()), os.getcwd(), "seeded" if seeded else "clean",
+                " ".join(sys.argv[1:]),
+            ]) + "\\n")
+    span("start")
+    atexit.register(span, "end")
 if tool == "cargo" and sys.argv[1:2] == ["metadata"]:
     meta = pathlib.Path("metadata.json")
     if not meta.is_file():
@@ -84,9 +114,6 @@ def say(line):
 
 
 if os.environ.get("FAKE_LOG"):
-    seeded = any(
-        v not in ("ok", "no") for k, v in state.items() if k not in ("slow", "flaky")
-    )
     with open(os.environ["FAKE_LOG"], "a") as log:
         log.write("\\t".join([
             os.environ.get("CARGO_TARGET_DIR", ""),
@@ -106,6 +133,30 @@ if os.environ.get("CARGO_TARGET_DIR"):
         say(f"run {{count}} went red")
         sys.exit(1)
 time.sleep(int(state.get("slow", "0")) / 10)
+if state.get("absent") and pathlib.Path(state["absent"]).exists():
+    say(f"found {{state['absent']}}, which an earlier run left")
+    sys.exit(1)
+if state.get("write"):
+    pathlib.Path(state["write"]).write_text("left behind\\n")
+as_json = "--message-format=json" in sys.argv
+for kind, path, number, text in marks:
+    if kind == "GARBLED":
+        print("{{not json")
+        continue
+    level = "warning" if kind == "WARN" else "error"
+    code = text if kind == "BROKEN" else "clippy::disallowed_methods"
+    head = f"error[{{text}}]: the build broke" if kind == "BROKEN" else f"{{level}}: {{text}}"
+    rendered = f"{{head}}\\n --> {{path}}:{{number}}:1\\n"
+    if as_json:
+        where = {{"file_name": path, "line_start": number, "line_end": number, "is_primary": True}}
+        message = {{"rendered": rendered, "level": level, "message": text, "code": {{"code": code}}, "spans": [where]}}
+        print(json.dumps({{"reason": "compiler-message", "message": message}}))
+    else:
+        say(rendered.rstrip())
+if any(kind in ("LINT", "BROKEN") for kind, _, _, _ in marks):
+    if as_json:
+        print(json.dumps({{"reason": "build-finished", "success": False}}))
+    sys.exit(101)
 if state.get("hang") == "yes":
     child = subprocess.Popen(["sleep", "30"])
     if os.environ.get("FAKE_PIDS"):
@@ -1398,6 +1449,438 @@ class FireInParallel(unittest.TestCase):
         out = fire_repo(self, entry()).run("fire", "--jobs", "0")
         self.assertEqual(out.returncode, 1)
         self.assertIn("--jobs needs a count of 1 or more", out.stderr)
+
+    def test_lint_batches_report_the_serial_verdicts_at_every_job_count(self):
+        # A batch that proves some entries and leaves others to run alone (one that doesn't
+        # fire, one whose error is off its lines, one whose anchor is gone), a second batch on
+        # another command, and an entry of another kind between them.
+        other = [*CLIPPY[:3], "other", *CLIPPY[4:]]
+        repo = lint_repo(
+            self,
+            lint("a", "use of `a`", "    // LINT(use of `a`)\n"),
+            lint("b", "use of `a`", "    let _ = 1;\n", anchor=TWO),
+            lint("c", "use of `c`", "    // LINT@1(use of `c`)\n", anchor=TWO),
+            keyed("t", "g1", "g1"),
+            lint(
+                "gone",
+                "use of `g`",
+                "    // LINT(use of `g`)\n",
+                anchor="    gone();\n",
+            ),
+            lint("d", "use of `d`", "    // LINT(use of `d`)\n", run=other),
+            lint("e", "use of `e`", "    // LINT(use of `e`)\n", anchor=TWO, run=other),
+            state="g1=ok\n",
+        )
+        serial = repo.run("fire")
+        self.assertEqual(serial.returncode, 1, serial.stdout + serial.stderr)
+        for jobs in ("2", "3"):
+            with self.subTest(jobs=jobs):
+                parallel = repo.run("fire", "--jobs", jobs)
+                self.assertEqual(parallel.returncode, serial.returncode)
+                self.assertEqual(verdicts(parallel.stdout), verdicts(serial.stdout))
+        lines = verdicts(serial.stdout)
+        for fid in ("a", "c", "t", "d", "e"):
+            self.assertIn(f"fired: {fid} (t)", lines)
+        self.assertIn(
+            "guards: b ran alone: no error carrying its message is on its own lines",
+            lines,
+        )
+        self.assertIn(
+            "guards: gone ran alone: src/lib.rs: the anchor '    gone();' matches 0 times, not once",
+            lines,
+        )
+        self.assertIn("guards: 5 of 7 fired (t)", lines)
+
+
+# ── lint batches ─────────────────────────────────────────────────────────────
+
+CLIPPY = ["cargo", "clippy", "-p", "fixture", "--all-targets", "--", "-D", "warnings"]
+ONE = "    anchor_one();\n"
+TWO = "    anchor_two();\n"
+LIB = "fn one() {\n" + ONE + "}\n\nfn two() {\n" + TWO + "}\n"
+
+
+def lint(
+    fid: str,
+    message: str,
+    wrote: str,
+    anchor: str = ONE,
+    run: list[str] | None = None,
+    instead: bool = False,
+) -> str:
+    """A lint entry on a clippy command whose fault writes `wrote` ahead of `anchor` in
+    `src/lib.rs`, or in its place with `instead`."""
+    lines = wrote if instead else wrote + anchor
+    # A JSON string is a TOML basic string, newlines escaped.
+    fault = (
+        f'transform = {{ file = "src/lib.rs", replace = {json.dumps(anchor)}, '
+        f"with = {json.dumps(lines)} }}"
+    )
+    return entry(
+        fid=fid,
+        guard="fixture clippy.toml: a ban",
+        run=run or CLIPPY,
+        expect="lint-error",
+        message=message,
+        fault=fault,
+    )
+
+
+def lint_repo(test: unittest.TestCase, *entries: str, state: str = "") -> Repo:
+    return Repo(
+        test,
+        {"guards/faults.toml": "".join(entries), "src/lib.rs": LIB, "state.txt": state},
+    )
+
+
+class FireLintBatches(unittest.TestCase):
+    """The lint entries on one clippy command are seeded together and fire in one run, and
+    each counts only by an error on the lines its own fault wrote. Whatever the batch can't
+    attribute runs alone, so every verdict is the one the entry's own run gives."""
+
+    def fire(
+        self, repo: Repo, *args: str
+    ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+        """The run, and each seeded run it made in order: `batch` for the one with
+        `--message-format=json`, `alone` for an entry's own."""
+        log = repo.tmp.parent / "runs.log"
+        out = repo.run("fire", *args, FAKE_LOG=str(log))
+        rows = [line.split("\t") for line in log.read_text().splitlines()]
+        return out, [
+            "batch" if "--message-format=json" in row[4] else "alone"
+            for row in rows
+            if row[3] == "seeded"
+        ]
+
+    def test_one_run_proves_each_entry_by_the_error_on_its_own_lines(self):
+        repo = lint_repo(
+            self,
+            lint("a", "use of `a`", "    // LINT(use of `a`)\n"),
+            lint("b", "use of `b`", "    // LINT(use of `b`)\n"),
+            lint("c", "use of `c`", "    // LINT(use of `c`)\n", anchor=TWO),
+        )
+        logs = repo.tmp.parent / "logs"
+        out, seeded = self.fire(repo, "--logs", str(logs))
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        for fid in "abc":
+            self.assertIn(f"fired: {fid} (", out.stdout)
+        self.assertEqual(seeded, ["batch"], out.stdout)
+        self.assertIn(
+            "guards: 3 of 3 lint entries on `cargo clippy -p fixture --all-targets -- -D "
+            "warnings` fired in one run (",
+            out.stdout,
+        )
+        # Each entry keeps its own log, the batch's run as cargo prints it without JSON.
+        text = (logs / "b.fault.log").read_text()
+        self.assertIn(
+            "its error is at src/lib.rs:3, on lines its own fault wrote", text
+        )
+        self.assertIn("error: use of `b`\n --> src/lib.rs:3:1", text)
+        self.assertNotIn('"reason"', text)
+
+    def test_an_error_off_the_entrys_own_lines_leaves_it_to_run_alone(self):
+        # b's error is on its own line and on line 1 too, d's on line 1 only: no entry wrote
+        # line 1. Each fires in its own run, which prints its message wherever it lands.
+        repo = lint_repo(
+            self,
+            lint("a", "use of `a`", "    // LINT(use of `a`)\n"),
+            lint("b", "use of `b`", "    // LINT(use of `b`) LINT@1(use of `b`)\n"),
+            lint("d", "use of `d`", "    // LINT@1(use of `d`)\n"),
+        )
+        out, seeded = self.fire(repo)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        for fid in "abd":
+            self.assertIn(f"fired: {fid} (", out.stdout)
+        self.assertEqual(seeded, ["batch", "alone", "alone"], out.stdout)
+        for fid in "bd":
+            self.assertIn(
+                f"guards: {fid} ran alone: an error carrying its message is on no entry's "
+                "lines (src/lib.rs:1)",
+                out.stdout,
+            )
+
+    def test_two_entries_with_one_message_are_each_proven_on_their_own_lines(self):
+        # a and c each write the error; b writes a line that draws only a warning of
+        # another kind, under the same message. Proven by the message alone, b would fire on
+        # a's or c's error.
+        shared = "use of `shared`"
+        repo = lint_repo(
+            self,
+            lint("a", shared, "    // LINT(use of `shared`)\n"),
+            lint("b", shared, "    // WARN(unused)\n", anchor=TWO),
+            lint("c", shared, "    // LINT(use of `shared`)\n", anchor=TWO),
+        )
+        out, seeded = self.fire(repo)
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertIn("fired: a (", out.stdout)
+        self.assertIn("fired: c (", out.stdout)
+        self.assertIn(
+            "DID NOT FIRE: b: the command passed with the fault seeded", out.stdout
+        )
+        self.assertEqual(seeded, ["batch", "alone"], out.stdout)
+        self.assertIn(
+            "guards: b ran alone: no error carrying its message is on its own lines",
+            out.stdout,
+        )
+
+    def test_a_warning_on_the_entrys_own_lines_proves_nothing(self):
+        # b's fault draws a warning, which doesn't fail the command: a's error does, in the
+        # batch, and b's own run passes.
+        repo = lint_repo(
+            self,
+            lint("a", "use of `a`", "    // LINT(use of `a`)\n"),
+            lint("b", "use of `b`", "    // WARN(use of `b`)\n", anchor=TWO),
+        )
+        out, seeded = self.fire(repo)
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertIn("fired: a (", out.stdout)
+        self.assertIn(
+            "DID NOT FIRE: b: the command passed with the fault seeded", out.stdout
+        )
+        self.assertEqual(seeded, ["batch", "alone"], out.stdout)
+
+    def test_a_batch_that_does_not_compile_runs_every_entry_alone(self):
+        repo = lint_repo(
+            self,
+            lint("a", "use of `a`", "    // LINT(use of `a`)\n"),
+            lint("b", "use of `b`", "    // BROKEN(E0425)\n"),
+            lint("c", "use of `c`", "    // LINT(use of `c`)\n", anchor=TWO),
+        )
+        out, seeded = self.fire(repo)
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertIn("fired: a (", out.stdout)
+        self.assertIn("fired: c (", out.stdout)
+        self.assertIn(
+            "DID NOT FIRE: b: the command failed (101) but its output never says 'use of `b`'",
+            out.stdout,
+        )
+        self.assertEqual(seeded, ["batch", "alone", "alone", "alone"], out.stdout)
+        self.assertIn(
+            "guards: a ran alone: the batch doesn't compile: error[E0425] at src/lib.rs:3",
+            out.stdout,
+        )
+
+    def test_entries_that_change_the_same_lines_run_apart(self):
+        repo = lint_repo(
+            self,
+            lint(
+                "a",
+                "use of `a`",
+                "    anchor_one(); // LINT(use of `a`)\n",
+                instead=True,
+            ),
+            lint(
+                "b",
+                "use of `b`",
+                "    anchor_one(); // LINT(use of `b`)\n",
+                instead=True,
+            ),
+            lint("c", "use of `c`", "    // LINT(use of `c`)\n", anchor=TWO),
+        )
+        out, seeded = self.fire(repo)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        for fid in "abc":
+            self.assertIn(f"fired: {fid} (", out.stdout)
+        self.assertEqual(seeded, ["batch", "alone"], out.stdout)
+        self.assertIn("guards: b ran alone: it changes lines a changes too", out.stdout)
+
+    def attribute(self, said: str, code: int = 101) -> tuple[dict, dict]:
+        """`attribute` over two entries, `use of `a`` on lines 2-3 and `use of `b`` on 7."""
+        regions = {0: [("src/lib.rs", 2, 3)], 1: [("src/lib.rs", 7, 7)]}
+        messages = ["use of `a`", "use of `b`"]
+        return fire_module()["attribute"](said, code, regions, messages, Path("/t"))
+
+    @staticmethod
+    def error(
+        text: str, line: int, level: str = "error", code: str | None = "clippy::x"
+    ) -> str:
+        where = {
+            "file_name": "src/lib.rs",
+            "line_start": line,
+            "line_end": line,
+            "is_primary": True,
+        }
+        message = {
+            "rendered": f"{level}: {text}",
+            "level": level,
+            "message": text,
+            "code": {"code": code} if code else None,
+            "spans": [where],
+        }
+        return json.dumps({"reason": "compiler-message", "message": message})
+
+    def test_attribution_reads_nothing_it_cannot_parse_and_nothing_from_a_run_that_passed(
+        self,
+    ):
+        both = self.error("use of `a`", 2) + "\n" + self.error("use of `b`", 7) + "\n"
+        proven, _ = self.attribute(both)
+        self.assertEqual(sorted(proven), [0, 1])
+        proven, why = self.attribute("{not json\n" + both)
+        self.assertEqual(proven, {})
+        self.assertIn("isn't JSON", why[0])
+        proven, why = self.attribute(both, code=0)
+        self.assertEqual(proven, {})
+        self.assertEqual(why[1], "the batch's run passed")
+        # An error with no code, as rustc gives a syntax error, is a compile error too.
+        proven, why = self.attribute(both + self.error("expected `;`", 7, code=None))
+        self.assertEqual(proven, {})
+        self.assertIn("the batch doesn't compile", why[0])
+
+
+# ── the restored pass by build ───────────────────────────────────────────────
+
+
+def spans(log: Path) -> list[dict]:
+    """$FAKE_SPANS's runs, each with its start, end, tree, kind and arguments."""
+    rows = [line.split("\t") for line in log.read_text().splitlines()]
+    runs: list[dict] = []
+    for edge, when, tree, kind, argv in rows:
+        if edge == "start":
+            runs.append(
+                {
+                    "start": float(when),
+                    "end": None,
+                    "tree": tree,
+                    "kind": kind,
+                    "argv": argv,
+                }
+            )
+        else:
+            run = next(
+                r
+                for r in runs
+                if r["end"] is None and (r["tree"], r["argv"]) == (tree, argv)
+            )
+            run["end"] = float(when)
+    return runs
+
+
+class FireRestoredByBuild(unittest.TestCase):
+    """The restored pass runs a build at a time: a worker restores a build it ran once no
+    fault that builds it is queued on any worker or running on any, while other builds'
+    faults still run, and a tree's reset removes what a run left there."""
+
+    def test_a_build_is_restored_after_its_last_fault_and_before_the_others_end(self):
+        # Build one (`-p one`) has two quick faults, build two (`-p two`) two slow ones and a
+        # quick one. Two workers: worker 1 builds two clean, worker 2 builds one, finishes
+        # one's faults, restores one, and takes two's quick fault from worker 1's queue.
+        log = Path(tempfile.mkdtemp()) / "spans.log"
+        self.addCleanup(shutil.rmtree, log.parent, True)
+
+        def fault(fid: str, build: str, guard: str, extra: str = "") -> str:
+            return entry(
+                fid=fid,
+                guard=guard,
+                run=["cargo", "test", "-p", build, "--", "--exact", guard],
+                fault=f'transform = {{ file = "state.txt", replace = "w-{fid}=ok", with = "w-{fid}=ok {guard}=fail{extra}" }}',
+            )
+
+        repo = fire_repo(
+            self,
+            fault("b1", "two", "g2", " slow=12"),
+            fault("b2", "two", "g2", " slow=12"),
+            fault("b3", "two", "g2"),
+            fault("a1", "one", "g1"),
+            fault("a2", "one", "g1"),
+            state="g1=ok g2=ok w-b1=ok w-b2=ok w-b3=ok w-a1=ok w-a2=ok\n",
+        )
+        out = repo.run("fire", "--jobs", "2", FAKE_SPANS=str(log))
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        runs = spans(log)
+        # A tree's clean runs after its first seeded one are its restored runs.
+        restored = []
+        for tree in {r["tree"] for r in runs}:
+            mine = [r for r in runs if r["tree"] == tree]
+            first = next(i for i, r in enumerate(mine) if r["kind"] == "seeded")
+            restored += [r for r in mine[first:] if r["kind"] == "clean"]
+            # Each tree's last run of each command it ran is clean.
+            for argv in {r["argv"] for r in mine}:
+                self.assertEqual(
+                    [r for r in mine if r["argv"] == argv][-1]["kind"],
+                    "clean",
+                    (tree, argv),
+                )
+        for build in ("one", "two"):
+            faults = [
+                r for r in runs if r["kind"] == "seeded" and f"-p {build} " in r["argv"]
+            ]
+            checks = [r for r in restored if f"-p {build} " in r["argv"]]
+            self.assertTrue(faults and checks, runs)
+            for check in checks:
+                self.assertGreater(
+                    check["start"], max(f["end"] for f in faults), (build, runs)
+                )
+        # And there's no barrier: build one comes back while two's faults still run.
+        one = min(r["start"] for r in restored if "-p one " in r["argv"])
+        two = max(
+            r["end"] for r in runs if r["kind"] == "seeded" and "-p two " in r["argv"]
+        )
+        self.assertLess(one, two, runs)
+
+    def test_a_build_is_ready_only_when_none_of_its_faults_is_queued_or_running(self):
+        m = fire_module()
+        board_of, task_of, wait = m["Board"], m["Task"], m["WAIT"]
+        build = ("rust", (("cargo", "test", "--no-run"),))
+        restore = ("restore", build)
+
+        def key(task: object) -> object:
+            return getattr(task, "key", task)
+
+        # Worker 2 ran the build clean. Its one fault waits in worker 1's queue, pinned there.
+        board = board_of([[task_of(0, True, build)], []], True, [{}, {build: None}])
+        self.assertIs(board.next(1), wait)
+        fault = board.next(0)
+        self.assertEqual(key(fault), 0)
+        self.assertIs(board.next(1), wait)
+        board.finish(0, fault, [(0, "fired")], [])
+        self.assertEqual(key(board.next(1)), restore)
+        # Worker 1 took a fault in the build, so it owes the build a restored run too.
+        self.assertEqual(key(board.next(0)), restore)
+        self.assertIsNone(board.next(0))
+        self.assertIsNone(board.next(1))
+        # A batch's fallbacks are queued in the step that ends it, so its build isn't ready.
+        board = board_of(
+            [[task_of(("batch", 0), False, build)], []], True, [{}, {build: None}]
+        )
+        batch = board.next(0)
+        board.finish(0, batch, [], [task_of(5, True, build)])
+        self.assertIs(board.next(1), wait)
+
+    def test_a_result_no_worker_is_left_to_put_fails_the_run(self):
+        # Every worker has stopped and the result was never put: waiting would hang the run.
+        board = fire_module()["Board"]([[], []], True)
+        board.leave()
+        board.leave()
+        raised: list[BaseException] = []
+
+        def wait() -> None:
+            try:
+                board.get("unput")
+            except RuntimeError as error:
+                raised.append(error)
+
+        waiter = threading.Thread(target=wait, daemon=True)
+        waiter.start()
+        waiter.join(timeout=10)
+        self.assertFalse(
+            waiter.is_alive(), "get() waited for a result no worker can put"
+        )
+        self.assertIn("every worker stopped with 0 of 1 results", str(raised[0]))
+
+    def test_an_ignored_file_a_fault_writes_is_gone_before_the_next_run(self):
+        fault = 'transform = { file = "state.txt", replace = "the_guard=ok", with = "the_guard=fail write=junk.log" }'
+        repo = Repo(
+            self,
+            {
+                ".gitignore": "junk.log\n",
+                "guards/faults.toml": entry(fault=fault),
+                "state.txt": "the_guard=ok absent=junk.log\n",
+            },
+        )
+        out = repo.run("fire")
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertIn("fired: one", out.stdout)
+        self.assertIn("guards: restored, every command passes again", out.stdout)
 
 
 def alive(pid: int) -> bool:
