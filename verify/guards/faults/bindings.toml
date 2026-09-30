@@ -351,3 +351,19 @@ expect = "test-failed"
 suite = "bindings"
 message = "cost/estimate-running-and-suspended: ts answered"
 transform = { file = "bindings/microvms-js/src/cost.rs", replace = "        suspended_seconds: options.suspended_seconds.unwrap_or(0.0),\n", with = "        suspended_seconds: options.suspended_seconds.map_or(0.0, |_| 0.0),\n" }
+
+# Python registers its exception classes from `ErrorKind::ALL` through `exception_for` (#266): a
+# kind the loop misses leaves its class raised but not importable, and `test_errors.py`'s table,
+# which names every class, stops importing.
+
+[[fault]]
+id = "py-register-skips-a-kind"
+guard = "bindings/microvms-py/tests/test_errors.py"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_errors.py"],
+]
+expect = "exit-nonzero"
+suite = "bindings"
+message = "has no attribute 'UnexpectedError'"
+transform = { file = "bindings/microvms-py/src/errors.rs", replace = "    for kind in ErrorKind::ALL {\n", with = "    for kind in ErrorKind::ALL.into_iter().skip(1) {\n" }
