@@ -61,6 +61,7 @@ from lanes.sessions import (
     drive_run_to_completion,
     drive_stable_launch,
 )
+from lanes.skew import drive_version_skew
 from lanes.suspend import drive_auto_resume, drive_suspend_resume
 from lanes.teardown import drive_teardown, read_daemon_logs
 from lanes.tunnel import drive_tunnel_identity
@@ -371,6 +372,21 @@ def run_suite(args: argparse.Namespace) -> int:
                 cli,
                 binary,
                 Path(tmp) / "project",
+                aws.client("logs"),
+                results,
+            )
+            # Version skew (#298) beside them: this tree's CLI builds an image around the
+            # previous release's daemon, and the previous release's CLI launches the suite's
+            # image, so an upgrade of either side alone is run end to end.
+            run_section(
+                results,
+                "version_skew",
+                drive_version_skew,
+                cli,
+                launched,
+                binary,
+                dockerfile,
+                Path(tmp) / "skew",
                 aws.client("logs"),
                 results,
             )
