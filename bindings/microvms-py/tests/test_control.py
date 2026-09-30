@@ -81,3 +81,22 @@ def test_an_agent_vm_takes_vpc_connectors_and_checks_them_locally() -> None:
         )
     with pytest.raises(microvms.InvalidArgError, match="pass log_group"):
         vm.launch(image_identifier="arn:image", log_stream="s")
+
+
+def test_terminate_waits_for_a_bool_or_a_number_of_seconds() -> None:
+    """`wait_for_terminated` takes `True`, for the core's lifecycle default, or seconds (#267).
+
+    A sandbox that launched nothing has no VM to wait for, so each report comes back at once:
+    what's asserted is that both shapes reach the core's teardown options, and that a number no
+    duration can be is refused before the teardown runs.
+
+    **Falsification**: map a number to the core's default wait in `Sandbox.terminate` (drop the
+    seconds on their way to `TeardownOpts`) and the negative wait is no longer refused.
+    """
+    for wait in (False, True, 0.5, 120):
+        report = microvms.Sandbox(region()).terminate(wait_for_terminated=wait)
+        assert report.terminate_accepted is False and not report.leaked
+    with pytest.raises(microvms.InvalidArgError):
+        microvms.Sandbox(region()).terminate(wait_for_terminated=-1.0)
+    with pytest.raises(TypeError):
+        microvms.Sandbox(region()).terminate(wait_for_terminated="soon")  # type: ignore[arg-type]

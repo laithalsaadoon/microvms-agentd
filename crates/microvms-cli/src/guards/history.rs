@@ -44,6 +44,7 @@ async fn a_terminate_appends_a_terminated_event_that_survives_the_command() {
         image_name: None,
         delete_image: false,
         wait: false,
+        wait_sec: None,
         state_dir: Some(dir.0.clone()),
         region: region_flags(),
     });
@@ -75,6 +76,7 @@ async fn a_terminate_appends_a_terminated_event_that_survives_the_command() {
         image_name: None,
         delete_image: false,
         wait: false,
+        wait_sec: None,
         state_dir: Some(dir.0.clone()),
         region: region_flags(),
     });
@@ -152,6 +154,7 @@ async fn a_terminate_with_delete_image_derives_the_image_from_the_kept_runs_ledg
         image_name: None,
         delete_image: true,
         wait: false,
+        wait_sec: None,
         state_dir: Some(dir.0.clone()),
         region: region_flags(),
     });
@@ -212,6 +215,7 @@ async fn a_terminate_with_delete_image_derives_the_image_from_the_kept_runs_ledg
         image_name: None,
         delete_image: false,
         wait: false,
+        wait_sec: None,
         state_dir: Some(dir.0.clone()),
         region: region_flags(),
     });
@@ -273,6 +277,7 @@ async fn an_explicit_identifier_that_differs_from_the_record_leaves_the_records_
         image_name: None,
         delete_image: true,
         wait: false,
+        wait_sec: None,
         state_dir: Some(dir.0.clone()),
         region: region_flags(),
     });
@@ -336,6 +341,7 @@ async fn every_record_naming_the_vm_is_narrowed_not_only_the_newest() {
         image_name: None,
         delete_image: false,
         wait: false,
+        wait_sec: None,
         state_dir: Some(dir.0.clone()),
         region: region_flags(),
     });
@@ -368,6 +374,7 @@ async fn a_terminate_with_delete_image_and_no_record_is_refused_before_any_call(
         image_name: None,
         delete_image: true,
         wait: false,
+        wait_sec: None,
         state_dir: Some(dir.0.clone()),
         region: region_flags(),
     });
@@ -678,4 +685,67 @@ async fn a_health_poll_lands_hook_observations_in_history_and_a_repeat_appends_n
     assert_eq!(read[2]["hook"], "suspend");
     assert_eq!(read[2]["firedAt"], 1_756_500_900_u64);
     assert_eq!(read[2]["seq"], 2, "one monotonic sequence across the polls");
+}
+
+/// **`terminate --wait-sec` waits for TERMINATED on its own, for at most that long (#267).**
+///
+/// Without `--wait`: the flag implies it, so a VM the platform reports TERMINATED is reported
+/// that way. Against a VM that stays TERMINATING, the wait ends at the given deadline rather
+/// than the core's lifecycle default: the scripted clock advances by each five-second poll, so
+/// a ten-second wait is three reads where the default would be sixty-one.
+///
+/// **Falsification**: drop `args.wait_sec` from the handler's wait (`--wait` alone decides) and
+/// neither case waits: the first reports TERMINATING and the second reads nothing.
+#[tokio::test]
+async fn a_terminate_with_wait_sec_waits_for_terminated_up_to_that_deadline() {
+    let terminate = |state_dir: std::path::PathBuf| {
+        Command::Terminate(TerminateArgs {
+            microvm_id: "mvm-abc123".into(),
+            image_identifier: None,
+            image_name: None,
+            delete_image: false,
+            wait: false,
+            wait_sec: Some(Duration::from_secs(10)),
+            state_dir: Some(state_dir),
+            region: region_flags(),
+        })
+    };
+
+    let dir = TempDir::new("terminate-wait-sec");
+    let transport = Arc::new(ScriptedTransport::new());
+    transport.answer("TerminateMicrovm", 200, "{}").answer(
+        "GetMicrovm",
+        200,
+        &microvm_body("TERMINATED"),
+    );
+    let seam = ScriptedSeam {
+        transport: Arc::clone(&transport),
+        clock: Arc::new(YieldingClock::default()),
+    };
+    let (result, _) = dispatch_with(&seam, &terminate(dir.0.clone()), full_infra()).await;
+    let rendered = result.expect("the terminate succeeds");
+    assert_eq!(
+        rendered.data["state"], "TERMINATED",
+        "--wait-sec waits by itself"
+    );
+
+    let transport = Arc::new(ScriptedTransport::new());
+    transport.answer("TerminateMicrovm", 200, "{}").answer(
+        "GetMicrovm",
+        200,
+        &microvm_body("TERMINATING"),
+    );
+    let seam = ScriptedSeam {
+        transport: Arc::clone(&transport),
+        clock: Arc::new(YieldingClock::default()),
+    };
+    let (result, stderr) = dispatch_with(&seam, &terminate(dir.0.clone()), full_infra()).await;
+    let rendered = result.expect("a missed deadline is a warning, not a failure");
+    assert_eq!(rendered.data["state"], "TERMINATING");
+    assert_eq!(
+        transport.called("GetMicrovm"),
+        3,
+        "the wait reads until its own deadline, not the core default's"
+    );
+    assert!(stderr.contains("did not reach TERMINATED"), "{stderr}");
 }

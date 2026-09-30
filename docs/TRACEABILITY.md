@@ -78,6 +78,19 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | IMAGE-10 | 1 | 1 | waived | 1 | 1 | 1 |
 | IMAGE-11 | 1 | 1 | waived | 1 | 1 | 1 |
 | IMAGE-12 | waived | waived | waived | 2 | 2 | waived |
+| TRAP-1 | waived | waived | waived | 9 | 19 | waived |
+| TRAP-2 | waived | waived | waived | 1 | 6 | waived |
+| TRAP-3 | waived | waived | waived | 1 | 6 | 1 |
+| TRAP-4 | waived | 1 | 1 | 2 | 4 | waived |
+| TRAP-5 | waived | waived | waived | 2 | 6 | waived |
+| TRAP-6 | waived | 1 | waived | 4 | 12 | waived |
+| TRAP-7 | waived | waived | waived | 5 | 7 | 1 |
+| TRAP-8 | waived | waived | waived | 3 | 7 | waived |
+| TRAP-9 | waived | waived | waived | 5 | 10 | waived |
+| TRAP-10 | waived | waived | waived | 5 | 7 | waived |
+| TRAP-11 | waived | waived | waived | 2 | 6 | waived |
+| TRAP-12 | waived | waived | waived | 1 | 6 | waived |
+| TRAP-13 | waived | waived | waived | 1 | 3 | 1 |
 
 ## AGENTD-1
 
@@ -870,6 +883,149 @@ The language bindings layer shall expose ensure_image as a thin wrapper that ret
 - **test:** `bindings/microvms-js/__test__/ensure.mjs`, `bindings/microvms-py/tests/test_ensure_image.py`
 - **impl:** `bindings/microvms-js/src/sandbox.rs`, `bindings/microvms-py/src/sandbox.rs`
 - **live:** waived: the conformance section drives core's ensure_image, which each binding forwards unchanged
+
+## TRAP-1
+
+The microvms-core shall derive each image create token from a value unique per build attempt, with no caller-supplied token override.
+
+- **model:** waived: a fresh value per build attempt, drawn from the entropy port, not a state
+- **gherkin:** waived: no scenario can show a token is unique: the tests draw two hundred and find no repeat, and recreating one name sends two distinct tokens
+- **fuzz:** waived: the token has no caller input to fuzz: there's no override to feed
+- **test:** `bindings/microvms-py/tests/test_smoke.py`, `crates/microvms-app/src/control/artifact.rs`, `crates/microvms-app/src/control/image.rs`, `crates/microvms-app/src/control/mod.rs`, `crates/microvms-app/src/control/token.rs`, `crates/microvms-cli/src/cli.rs`, `crates/microvms-core/src/lib.rs`, `crates/microvms-core/src/prelude.rs`, `crates/microvms-edges/src/entropy.rs`
+- **impl:** `bindings/microvms-js/src/lib.rs`, `bindings/microvms-js/src/sandbox.rs`, `bindings/microvms-py/src/sandbox.rs`, `crates/microvms-app/src/control/fake.rs`, `crates/microvms-app/src/control/image.rs`, `crates/microvms-app/src/control/microvm.rs`, `crates/microvms-app/src/control/mod.rs`, `crates/microvms-app/src/control/ops.rs`, `crates/microvms-app/src/control/token.rs`, `crates/microvms-app/src/control/transport.rs`, `crates/microvms-app/src/entropy.rs`, `crates/microvms-app/src/sandbox.rs`, `crates/microvms-app/src/testing.rs`, `crates/microvms-cli/src/cli.rs`, `crates/microvms-cli/src/commands/lifecycle.rs`, `crates/microvms-cli/src/ledger.rs`, `crates/microvms-core/src/lib.rs`, `crates/microvms-core/src/prelude.rs`, `crates/microvms-domain/src/constants.rs`
+- **live:** waived: a replayed token wedges an image in CREATING for about fifteen hours (docs/PLATFORM.md), so a live run can't show the failure it closes; every live build sends a fresh one
+
+## TRAP-2
+
+If an image build remains in CREATING past the stall grace period with every build still PENDING, then the microvms-core shall reject the build wait with an error naming the client-token replay signature.
+
+- **model:** waived: one wait's verdict over a sequence of describe answers, which the tests script
+- **gherkin:** waived: the stall is a timed sequence of describe answers, which the tests script against a fake clock; a scenario would restate them
+- **fuzz:** waived: the verdict turns on elapsed time and the builds' statuses, which the tests enumerate
+- **test:** `crates/microvms-app/src/control/image.rs`
+- **impl:** `crates/microvms-app/src/clock.rs`, `crates/microvms-app/src/control/image.rs`, `crates/microvms-app/src/control/mod.rs`, `crates/microvms-app/src/control/ops.rs`, `crates/microvms-cli/src/commands/lifecycle.rs`, `crates/microvms-domain/src/constants.rs`
+- **live:** waived: a stall needs a replayed token's wedged image, about fifteen hours in CREATING (docs/PLATFORM.md)
+
+## TRAP-3
+
+Where guest identity repair is requested, the microvms-core shall set the additional OS capabilities field to the single enum value the pinned service model accepts, via a typed intent flag rather than a free-form capability list.
+
+- **model:** waived: a bool mapped to the one enum value the model accepts, not a state
+- **gherkin:** waived: no behavior to script: a typed flag and the request it writes, which the tests assert
+- **fuzz:** waived: the input is one bool; there is no input space
+- **test:** `crates/microvms-app/src/control/image.rs`
+- **impl:** `bindings/microvms-js/src/sandbox.rs`, `bindings/microvms-py/src/sandbox.rs`, `crates/microvms-app/src/control/image.rs`, `crates/microvms-app/src/control/mod.rs`, `crates/microvms-cli/src/cli.rs`, `crates/microvms-domain/src/constants.rs`
+- **live:** `conformance/lanes/lifecycle.py`
+
+## TRAP-4
+
+The microvms-core shall derive each platform network connector value as a fully-qualified connector ARN for the request region from an enumerated ingress or egress intent, and accept a caller-supplied connector ARN only as a customer-managed egress connector in the request region, never beside the platform egress intent.
+
+- **model:** waived: a derivation from a closed enum and a shape check on caller ARNs, not a state
+- **gherkin:** `crates/microvms-core/tests/features/egress_posture.feature`
+- **fuzz:** `crates/microvms-app/src/control/posture_fuzz.rs`
+- **test:** `crates/microvms-app/src/control/connector.rs`, `crates/microvms-app/src/control/microvm.rs`
+- **impl:** `crates/microvms-app/src/control/microvm.rs`, `crates/microvms-app/src/control/mod.rs`, `crates/microvms-app/src/control/ops.rs`, `crates/microvms-cli/src/cli.rs`
+- **live:** waived: every live launch sends connectors derived this way, but no named check reads them back; the offline tests assert the recorded requests
+
+## TRAP-5
+
+If a run-hook payload exceeds the ceiling of 4096 bytes that the service model declares, then the microvms-core shall reject the launch locally before any control-plane call, naming the service-model ceiling.
+
+- **model:** waived: a length check against one constant, not a state
+- **gherkin:** waived: no behavior to script: the tests cover both sides of the 4096-byte boundary
+- **fuzz:** waived: a length against one ceiling, which the boundary tests cover on both sides
+- **test:** `crates/microvms-app/src/control/artifact.rs`, `crates/microvms-app/src/control/microvm.rs`
+- **impl:** `crates/microvms-app/src/control/artifact.rs`, `crates/microvms-app/src/control/context.rs`, `crates/microvms-app/src/control/microvm.rs`, `crates/microvms-app/src/control/mod.rs`, `crates/microvms-app/src/control/ops.rs`, `crates/microvms-app/src/sandbox.rs`
+- **live:** waived: refused before the first control-plane call, so the service never sees it
+
+## TRAP-6
+
+If the requested region is outside the five regions that run MicroVMs, then the microvms-core shall reject the operation locally before the first control-plane call, naming the null-message AccessDeniedException trap.
+
+- **model:** waived: a membership check over a closed set of five regions, not a state
+- **gherkin:** `crates/microvms-core/tests/features/request_and_preflight.feature`
+- **fuzz:** waived: the region set is a closed enum of five names, and parsing is an exact match the tests enumerate
+- **test:** `bindings/microvms-py/tests/test_smoke.py`, `crates/microvms-app/src/control/ops.rs`, `crates/microvms-app/src/control/transport.rs`, `crates/microvms-domain/src/region.rs`
+- **impl:** `bindings/microvms-js/src/lib.rs`, `bindings/microvms-js/src/region.rs`, `bindings/microvms-js/src/sandbox.rs`, `bindings/microvms-py/src/lib.rs`, `bindings/microvms-py/src/region.rs`, `bindings/microvms-py/src/sandbox.rs`, `crates/microvms-app/src/control/image.rs`, `crates/microvms-app/src/control/ops.rs`, `crates/microvms-app/src/control/transport.rs`, `crates/microvms-app/src/preflight.rs`, `crates/microvms-core/src/prelude.rs`, `crates/microvms-domain/src/region.rs`
+- **live:** waived: refused before the first control-plane call, so the service never sees it
+
+## TRAP-7
+
+The microvms-core shall read the minted proxy token from the auth-token header map and send the proxy auth header and the proxy port header on each endpoint request.
+
+- **model:** waived: a header read and two headers sent on each request, not a state
+- **gherkin:** waived: no behavior to script: the tests assert the headers on the recorded endpoint requests
+- **fuzz:** waived: the headers carry a minted token and a port, with no caller input to fuzz
+- **test:** `bindings/microvms-py/tests/test_session.py`, `crates/microvms-app/src/control/microvm.rs`, `crates/microvms-app/src/control/ops.rs`, `crates/microvms-app/src/session/mod.rs`, `crates/microvms-app/src/session/proxy.rs`
+- **impl:** `bindings/microvms-js/src/session.rs`, `bindings/microvms-py/src/session.rs`, `crates/microvms-app/src/control/fake.rs`, `crates/microvms-app/src/control/microvm.rs`, `crates/microvms-app/src/control/ops.rs`, `crates/microvms-app/src/session/mod.rs`, `crates/microvms-app/src/session/proxy.rs`
+- **live:** `conformance/lanes/lifecycle.py`
+
+## TRAP-8
+
+If a MicroVM reaches a terminal state before RUNNING, then the microvms-core shall reject the launch with the state and stateReason attached.
+
+- **model:** waived: the rule is what a refusal carries, the state and its reason, which the tests assert on scripted terminal states
+- **gherkin:** waived: the tests drive every terminal state before RUNNING against a scripted control plane; a scenario per state would restate them
+- **fuzz:** waived: the input is a closed set of terminal states, which the tests enumerate
+- **test:** `crates/microvms-app/src/control/microvm.rs`, `crates/microvms-app/src/control/ops.rs`, `crates/microvms-app/src/sandbox.rs`
+- **impl:** `bindings/microvms-js/src/sandbox.rs`, `bindings/microvms-py/src/sandbox.rs`, `crates/microvms-app/src/control/microvm.rs`, `crates/microvms-app/src/control/mod.rs`, `crates/microvms-app/src/control/ops.rs`, `crates/microvms-app/src/sandbox.rs`, `crates/microvms-domain/src/constants.rs`
+- **live:** waived: a VM can't be made to reach a terminal state before RUNNING on demand against the live service
+
+## TRAP-9
+
+The microvms-core shall mint the endpoint proxy token inside the request retry path at an interval strictly below the sixty-minute service ceiling.
+
+- **model:** waived: an interval against a ceiling on the clock port, not a state
+- **gherkin:** waived: the refresh is asserted against a fake clock in the tests; a scenario would restate them
+- **fuzz:** waived: the interval is a constant against a sixty-minute ceiling, with no input space
+- **test:** `bindings/microvms-py/tests/test_session.py`, `crates/microvms-app/src/session/exec.rs`, `crates/microvms-app/src/session/mod.rs`, `crates/microvms-app/src/session/proxy.rs`, `crates/microvms-core/tests/turmoil_client.rs`
+- **impl:** `bindings/microvms-js/src/session.rs`, `bindings/microvms-py/src/session.rs`, `crates/microvms-app/src/control/microvm.rs`, `crates/microvms-app/src/control/ops.rs`, `crates/microvms-app/src/sandbox.rs`, `crates/microvms-app/src/session/mod.rs`, `crates/microvms-app/src/session/proxy.rs`, `crates/microvms-cli/src/commands/attached.rs`, `crates/microvms-cli/src/seam.rs`, `crates/microvms-edges/src/session/forward.rs`
+- **live:** waived: the ceiling is sixty minutes, so a live check would hold a billable session past it to see one re-mint; the tests expire the token on a fake clock instead
+
+## TRAP-10
+
+If a requested minimumMemoryInMiB is not one of the five documented size-class baselines, then the microvms-core shall reject the request locally rather than forwarding an off-table value.
+
+- **model:** waived: a membership check over the five documented baselines, not a state
+- **gherkin:** waived: no behavior to script: the tests accept each of the five baselines and refuse the values beside them
+- **fuzz:** waived: the baselines are a closed table the tests enumerate, with nothing between rows to search
+- **test:** `bindings/microvms-py/tests/test_cost.py`, `bindings/microvms-py/tests/test_smoke.py`, `crates/microvms-cli/src/cli.rs`, `crates/microvms-domain/src/cost.rs`, `crates/microvms-domain/src/sizing.rs`
+- **impl:** `bindings/microvms-js/src/cost.rs`, `bindings/microvms-js/src/sandbox.rs`, `bindings/microvms-py/src/cost.rs`, `crates/microvms-app/src/control/mod.rs`, `crates/microvms-app/src/control/ops.rs`, `crates/microvms-cli/src/cli.rs`, `crates/microvms-domain/src/sizing.rs`
+- **live:** waived: refused before the first control-plane call, so the service never sees it
+
+## TRAP-11
+
+The microvms-core shall not request a SHELL_INGRESS connector unless the launch asks for shell access, nor call CreateMicrovmShellAuthToken except to open an interactive shell session.
+
+- **model:** waived: a rule over which operations a lifecycle calls, not over its states
+- **gherkin:** waived: no behavior to script: the full-lifecycle test counts every operation and connector a lifecycle sends
+- **fuzz:** waived: there is no input stream; the rule is over the calls a lifecycle makes
+- **test:** `crates/microvms-app/src/control/connector.rs`, `crates/microvms-app/src/control/microvm.rs`
+- **impl:** `crates/microvms-app/src/control/connector.rs`, `crates/microvms-app/src/control/fake.rs`, `crates/microvms-app/src/control/microvm.rs`, `crates/microvms-app/src/control/mod.rs`, `crates/microvms-app/src/control/transport.rs`, `crates/microvms-edges/src/session/shell.rs`
+- **live:** waived: a live run can't see an operation the client didn't call; the recorded lifecycle can, and counts none
+
+## TRAP-12
+
+The microvms-core shall verify each hardcoded service constraint against the pinned botocore service model in the build gate.
+
+- **model:** waived: a comparison of constants with the pinned service model, not a state
+- **gherkin:** waived: no behavior to script: the gate compares two JSON documents
+- **fuzz:** waived: the inputs are the pinned model and the emitted constants, both fixed
+- **test:** `crates/microvms-domain/src/constants.rs`
+- **impl:** `crates/microvms-app/src/control/mod.rs`, `crates/microvms-app/src/control/ops.rs`, `crates/microvms-cli/src/cli.rs`, `crates/microvms-cli/src/commands/local.rs`, `crates/microvms-domain/src/constants.rs`, `crates/microvms-domain/src/hooks.rs`
+- **live:** waived: the gate reads the pinned model offline and makes no AWS call
+
+## TRAP-13
+
+The sizing model shall read baseline and peak from the documented five-row table rather than computing the peak as four times the baseline.
+
+- **model:** waived: a table lookup, not a state
+- **gherkin:** waived: no behavior to script: the tests read each of the five rows
+- **fuzz:** waived: the table has five rows, which the tests read exhaustively
+- **test:** `crates/microvms-domain/src/sizing.rs`
+- **impl:** `crates/microvms-cli/src/render.rs`, `crates/microvms-core/src/lib.rs`, `crates/microvms-domain/src/sizing.rs`
+- **live:** `conformance/lanes/local.py`
 
 ## Threats
 
