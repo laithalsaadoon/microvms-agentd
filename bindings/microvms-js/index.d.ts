@@ -1731,6 +1731,11 @@ export interface KeepAwakeOptions {
    * platform minimum of 60 is assumed. The interval may be at most half of it.
    */
   idleWindowSec?: number
+  /**
+   * How many retryable poll failures in a row are retried, a second apart, before the
+   * keepalive ends with the error. Default: the core's `DEFAULT_TOLERATED_ERRORS`.
+   */
+  toleratedErrors?: number
 }
 
 /** What a finished keepalive did. */

@@ -16,9 +16,13 @@ import microvms
 
 
 class Health:
-    """Answers `GET /v1/health` from a `busy` script; the last answer repeats."""
+    """Answers `GET /v1/health` from a `busy` script; the last answer repeats.
 
-    def __init__(self, busy: list[bool]) -> None:
+    Any `status` but 200 answers every poll with it instead, the way a daemon that hasn't
+    bootstrapped answers 503.
+    """
+
+    def __init__(self, busy: list[bool], status: int = 200) -> None:
         self.busy = busy
         self.seen: list[tuple[str, str | None]] = []
         owner = self
@@ -26,6 +30,11 @@ class Health:
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:
                 owner.seen.append((self.path, self.headers.get("Authorization")))
+                if status != 200:
+                    self.send_response(status)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
                 index = min(len(owner.seen), len(owner.busy)) - 1
                 body = json.dumps(
                     {
@@ -59,8 +68,8 @@ class Health:
 def health() -> Iterator[type[Health]]:
     made: list[Health] = []
 
-    def factory(busy: list[bool]) -> Health:
-        made.append(Health(busy))
+    def factory(busy: list[bool], status: int = 200) -> Health:
+        made.append(Health(busy, status))
         return made[-1]
 
     yield factory  # type: ignore[misc]
@@ -136,3 +145,25 @@ def test_an_unreachable_daemon_is_retried_then_raised() -> None:
         keepalive.wait(timeout=20)
     with pytest.raises(microvms.RetryableError):
         keepalive.stop()
+
+
+def polls_before_giving_up(health, tolerated: int) -> int:
+    """Every poll answers 503; the keepalive raises once it has retried `tolerated` times."""
+    daemon = health([True], status=503)
+    keepalive = daemon.session.keep_awake(interval=1, tolerated_errors=tolerated)
+    with pytest.raises(microvms.RetryableError):
+        keepalive.wait(timeout=10)
+    return len(daemon.seen)
+
+
+def test_one_tolerated_error_is_one_retry_before_it_raises(health) -> None:
+    """Each retryable failure the keepalive tolerates is one more poll, a second later (#267).
+
+    **Falsification**: drop `tolerated_errors` on its way to the core's `KeepAwake` in
+    `keepalive::policy`, and the core's default retries three times: four polls.
+    """
+    assert polls_before_giving_up(health, 1) == 2
+
+
+def test_no_tolerated_errors_raises_on_the_first_failed_poll(health) -> None:
+    assert polls_before_giving_up(health, 0) == 1
