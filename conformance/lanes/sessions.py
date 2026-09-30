@@ -386,6 +386,15 @@ def drive_lifecycle_by_id(
         "a_vm_is_managed_by_id_through_the_control_plane",
         "a VM is managed by id through the control plane alone",
     )
+    # #254: `Sandbox::run` returns once the daemon answers, so its first exec needs no retry.
+    run_rust_live(
+        cli,
+        launched,
+        results,
+        "live_lifecycle",
+        "the_first_exec_after_run_needs_no_retry",
+        "the first exec after Sandbox::run succeeds without a retry",
+    )
 
     # `run --client-token`, twice: the second is the retry and must adopt the first VM.
     key = f"conformance-{secrets.token_hex(8)}"

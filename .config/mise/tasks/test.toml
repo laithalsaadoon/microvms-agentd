@@ -33,6 +33,23 @@ description = "The mutants wrapper's unit tests, and the skip sites and exclusio
 # wrapper or step fails here rather than as a green shard that mutated nothing.
 run = "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_check_mutants.py"
 
+["mutmut:check"]
+description = "The mutmut ratchet's unit tests: the changed functions, the suites that measure them, the counts and the ratchet. No mutmut run over the tree"
+# `mutants:check`'s place for the gate scripts, in `check` and in CI's `security` job. A fake
+# mutmut stands in for the real one in all but one case, which runs mutmut over a throwaway suite
+# to hold the fake's contract to mutmut's.
+run = "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_check_mutmut.py"
+
+[mutmut]
+description = "Mutation-test the functions this branch changes in tools/*.py against origin/main; fails when one has more surviving mutants than on the base"
+# CI's `mutmut` job. The script's docstring says what it mutates and how it counts. Not in `check`
+# or any hook: each mutant is a run of the tests that call its function, and one function of
+# check-ci-parity.py called by most of its suite took 17 minutes at `--jobs 4` on a shared
+# devbox under a load average near 70 (f2b386b, 2026-09-30). Arguments after `--` go to the
+# script: `mise run mutmut -- --jobs 4 --keep`. Uncommitted and untracked scripts are in what it
+# mutates.
+run = "./tools/check-mutmut.py"
+
 [mutants]
 description = "Mutation-test the Rust this branch changes against origin/main; fails on a mutant its tests miss"
 # CI's `mutants` job, unsharded (#275). The wrapper's docstring says what it runs, and
