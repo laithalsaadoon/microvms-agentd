@@ -3163,6 +3163,170 @@ suite = "script"
 message = "FAIL: test_a_root_guide_missing_a_kind_its_rules_use_fails_naming_it ("
 transform = { file = "scripts/check-agents-md.py", replace = "ROOT_KINDS = (\"task\", \"member\", \"path\", \"job\", \"symbol\")", with = "ROOT_KINDS = (\"task\", \"path\", \"job\", \"symbol\")" }
 
+# The path census: what lefthook.yml, the mise tasks, the workflows, dependabot.yml and the gate
+# scripts' constants name must exist, and each decision id the tree cites must be defined. Its
+# floor (every source reads as empty), a source's sentinel, and a stale path of each kind.
+[[fault]]
+id = "agents-md-census-floor"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "the census read no paths from lefthook.yml"
+transform = { file = "scripts/check-agents-md.py", replace = "            found, refused = readers[source]()", with = "            found, refused = [], []" }
+
+# The workflows still yield their filters and working directories, but no step's `run`.
+[[fault]]
+id = "agents-md-census-sentinel"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "the census sentinel `scripts/check-agents-md.py` isn't among the paths .github/workflows/*.yml names"
+transform = { file = "scripts/check-agents-md.py", replace = "                if isinstance(run := step.get(\"run\"), Scalar):", with = "                if isinstance(run := step.get(\"runs\"), Scalar):" }
+
+# The move this guards against: deny.toml goes under .cargo/ and the hook's glob keeps naming a
+# file that's gone, so the license hook would stop running on it.
+[[fault]]
+id = "agents-md-census-lefthook-glob-stale"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`.cargo/deny.toml` is no such path in this tree"
+transform = { file = "lefthook.yml", replace = "*/Cargo.toml,deny.toml}", with = "*/Cargo.toml,.cargo/deny.toml}" }
+
+[[fault]]
+id = "agents-md-census-mise-run-stale"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`tools/check-license-headers.py` is no such path in this tree"
+transform = { file = "mise.toml", replace = "\"./scripts/check-license-headers.py\",", with = "\"./tools/check-license-headers.py\"," }
+
+[[fault]]
+id = "agents-md-census-workflow-paths-stale"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`crates/agentd/src/fs.rs` is no such path in this tree"
+transform = { file = ".github/workflows/fuzz.yml", replace = "      - 'agentd/src/fs.rs'\n", with = "      - 'crates/agentd/src/fs.rs'\n" }
+
+[[fault]]
+id = "agents-md-census-working-directory-stale"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`crates/agentd` is no directory in this tree"
+transform = { file = ".github/workflows/fuzz.yml", replace = "working-directory: agentd\n", with = "working-directory: crates/agentd\n" }
+
+[[fault]]
+id = "agents-md-census-dependabot-stale"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`/bindings/microvms-js` (`bindings/microvms-js`) is no directory in this tree"
+transform = { file = ".github/dependabot.yml", replace = "directory: /microvms-js", with = "directory: /bindings/microvms-js" }
+
+[[fault]]
+id = "agents-md-census-constant-stale"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`verify/schema-breaks.toml` is no such path in this tree"
+transform = { file = "scripts/check-schema-compat.py", replace = "BREAKS = \"docs/schema-breaks.toml\"", with = "BREAKS = \"verify/schema-breaks.toml\"" }
+
+[[fault]]
+id = "agents-md-census-not-paths-stale"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "CENSUS_NOT_PATHS lists `lychee-report/`"
+transform = { file = "scripts/check-agents-md.py", replace = "    \"lychee/\": ", with = "    \"lychee-report/\": " }
+
+[[fault]]
+id = "agents-md-census-yaml-refused"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "a value that starts with `&`, which the census's YAML reader doesn't take"
+transform = { file = "lefthook.yml", replace = "pre-commit:\n  parallel: true\n", with = "pre-commit: &commit\n  parallel: true\n" }
+
+# A decision loses its table while the tree still cites it. The new name spells no id, since
+# this file is read for citations too.
+[[fault]]
+id = "agents-md-census-decision-undefined"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`D26` is a decision id docs/decisions.toml doesn't define"
+transform = { file = "docs/decisions.toml", replace = "[D26]\n", with = "[node-major]\n" }
+
+[[fault]]
+id = "agents-md-census-decisions-floor"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "docs/decisions.toml defines no decision"
+transform = { file = "scripts/check-agents-md.py", replace = "        defined.add(key)\n", with = "        pass\n" }
+
+[[fault]]
+id = "agents-md-census-citations-floor"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "found no decision id cited in the tree"
+transform = { file = "scripts/check-agents-md.py", replace = "r\"D[0-9]+\"", with = "r\"D[0-9]+x\"" }
+
+# The citation scan stops reading YAML, TOML and Python while Markdown and Rust still cite ids.
+[[fault]]
+id = "agents-md-census-decision-sentinel"
+guard = "scripts/check-agents-md.py"
+run = ["./scripts/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "the sentinel decision `D35` isn't cited anywhere"
+transform = { file = "scripts/check-agents-md.py", replace = "    \":(exclude)*.json\",\n", with = "    \":(exclude)*.json\",\n    \":(exclude)*.yml\",\n    \":(exclude)*.toml\",\n    \":(exclude)*.py\",\n" }
+
+# The unit suite: the matcher semantics the tree alone can't tell apart, since a looser reading
+# still finds a match for every glob in it.
+[[fault]]
+id = "agents-md-unit-lefthook-doublestar"
+guard = "test_check_agents_md.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_agents_md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_lefthook_glob_is_matched_the_way_lefthook_matches_it ("
+transform = { file = "scripts/check-agents-md.py", replace = "        if glob.startswith(\"**/\", at) and dialect == \"doublestar\":\n", with = "        if glob.startswith(\"**/\", at):\n" }
+
+[[fault]]
+id = "agents-md-unit-github-star"
+guard = "test_check_agents_md.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_agents_md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_stale_workflow_paths_filter_fails_under_githubs_syntax ("
+transform = { file = "scripts/check-agents-md.py", replace = "            out.append(\".*\" if dialect in (\"gobwas\", \"file\") else \"[^/]*\")\n", with = "            out.append(\".*\")\n" }
+
+[[fault]]
+id = "agents-md-unit-yaml-indentless-sequence"
+guard = "test_check_agents_md.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_agents_md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ERROR: test_mappings_sequences_and_compact_nesting ("
+transform = { file = "scripts/check-agents-md.py", replace = "        if key and head and head[0] == indent and _is_item(head[1]):\n", with = "        if False:\n" }
+
 [[fault]]
 id = "conformance-doctor-region-lines"
 guard = "conformance/run_rs.py --self-test"
