@@ -318,10 +318,9 @@ test('the total JSON names the floor as priced and flags the bound', () => {
 });
 
 test('the JSON escaping survives a label that would break a hand-built string', () => {
-  // `line_json` and `to_json` are hand-assembled rather than serde-derived, because the shape's
-  // load-bearing property — an absent `usd` key — is what a derive over an `Option` would get
-  // wrong. Hand-assembly puts the escaping on this file's own `quote`, so a label with a quote or a
-  // newline in it is the case that would produce invalid JSON. A caller's label comes from a CLI
+  // `toJson` is core's JSON value written out by serde_json since #255, where it used to be
+  // assembled by hand here with its own quoting. A label with a quote or a newline in it is the
+  // case a hand-built string gets wrong, so it stays pinned. A caller's label comes from a CLI
   // flag, so it is attacker-adjacent input in the ordinary sense.
   const nasty = 'a "quoted" \\ back\nslash\tand tab';
   const report = runReport(SizeClass.defaultClass(), {

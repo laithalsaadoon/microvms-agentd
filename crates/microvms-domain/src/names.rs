@@ -128,6 +128,31 @@ impl NameRecord {
         serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
     }
 
+    /// The record as JSON without its two secrets, the agent token and the identity host
+    /// seed: the form a listing prints, redacted as `Debug` redacts.
+    ///
+    /// Built from the fields it keeps rather than by removing the secrets from
+    /// [`NameRecord::to_json`], so a field added to the record stays out of every listing until
+    /// someone decides it can be shown.
+    pub fn redacted_json(&self) -> serde_json::Value {
+        let mut value = serde_json::json!({
+            "name": self.name,
+            "microvmId": self.microvm_id,
+            "endpoint": self.endpoint,
+            "region": self.region,
+            "at": self.at,
+        });
+        if let Some(object) = value.as_object_mut() {
+            if let Some(key) = &self.identity_vm_public_key {
+                object.insert("identityVmPublicKey".into(), key.clone().into());
+            }
+            if let Some(posture) = &self.egress_posture {
+                object.insert("egressPosture".into(), posture.clone().into());
+            }
+        }
+        value
+    }
+
     /// A record from its JSON form, checked the way [`NameRecord::new_at`] checks.
     pub fn from_json(value: serde_json::Value) -> Result<Self, Error> {
         // The serde message can quote the offending value, which may be the token itself.
@@ -258,6 +283,29 @@ mod tests {
         }))
         .expect_err("at must be numeric");
         assert!(!error.to_string().contains("CANARY"), "{error}");
+    }
+
+    /// **The redacted form is the stored one minus exactly the two secrets (#267).** Every
+    /// field set, so a field added to the record and not decided on here shows up as a
+    /// difference rather than passing unseen.
+    ///
+    /// **Falsification**: build `redacted_json` as `to_json` does and the token and the seed
+    /// are in it.
+    #[test]
+    fn the_redacted_form_is_the_record_without_its_secrets() {
+        let mut full = record("ci", "microvm-a");
+        full.agent_token = "tok-CANARY".into();
+        full.identity_host_seed = Some("seed-CANARY".into());
+        full.identity_vm_public_key = Some("pin".into());
+        full.egress_posture = Some("open".into());
+        let redacted = full.redacted_json();
+        assert!(!redacted.to_string().contains("CANARY"), "{redacted}");
+
+        let mut expected = full.to_json();
+        let object = expected.as_object_mut().expect("an object");
+        object.remove("agentToken");
+        object.remove("identityHostSeed");
+        assert_eq!(redacted, expected);
     }
 
     #[test]

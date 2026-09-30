@@ -41,6 +41,67 @@ sys.exit(3)
 """
 
 
+# Stands in for tsc: it lists the files its tsconfig names, as `--listFiles` does, and reports
+# one diagnostic.
+FAKE_TSC = """#!{python}
+import json, sys
+options = json.load(open(sys.argv[2]))
+for paths in options["compilerOptions"]["paths"].values():
+    print(*paths, sep="\\n")
+print(*options["files"], sep="\\n")
+print("probe.ts(1,1): error TS2322: seeded")
+sys.exit(2)
+"""
+
+
+class ProbeShapeTests(unittest.TestCase):
+    """A problem with the probes' shape is reported without keeping them from compiling."""
+
+    def directory(self, files):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        root = Path(scratch.name)
+        for name, text in files.items():
+            (root / name).write_text(text, encoding="utf-8")
+        return root
+
+    def test_the_strays_and_each_probes_problems_are_reported_and_the_probes_kept(self):
+        root = self.directory(
+            {"a.ts": "// @ts-nocheck\n// @ts-expect-error\n", "b.ts": "", "c.mts": ""}
+        )
+        found, problems = DTS["probes"](root)
+        a, b, c = (str((root / name).resolve()) for name in ("a.ts", "b.ts", "c.mts"))
+        self.assertEqual([str(path) for path in found], [a, b])
+        self.assertEqual(
+            problems,
+            [
+                f"{c} isn't compiled: a probe is a *.ts file directly under {root}",
+                f"{a} turns type-checking off (@ts-nocheck); {b} has no @ts-expect-error control",
+            ],
+        )
+
+    def test_a_directory_with_no_probe_is_refused(self):
+        with self.assertRaisesRegex(DTS["ConsumerError"], "no type probes under"):
+            DTS["probes"](self.directory({}))
+
+    def test_tsc_still_checks_probes_whose_shape_is_refused(self):
+        root = self.directory({"a.ts": "export {}\n"})
+        tsc = self.directory({}) / "tsc"
+        tsc.write_text(FAKE_TSC.format(python=sys.executable), encoding="utf-8")
+        tsc.chmod(0o755)
+        dts = tsc.parent / "index.d.ts"
+        dts.write_text("export {}\n", encoding="utf-8")
+        with mock.patch.dict(DTS["check"].__globals__, {"locate_tsc": lambda v: tsc}):
+            with self.assertRaises(DTS["ConsumerError"]) as raised:
+                DTS["check"](dts, root)
+        lines = str(raised.exception).splitlines()
+        self.assertEqual(
+            lines[0], f"{(root / 'a.ts').resolve()} has no @ts-expect-error control"
+        )
+        self.assertIn("probe.ts(1,1): error TS2322: seeded", lines)
+        self.assertTrue(lines[-1].startswith("tsc 5.9.3 exited 2"), lines)
+
+
 class LocateTscTests(unittest.TestCase):
     def locate(self, tsc):
         """`locate_tsc` with the fake npx first on PATH; `tsc` builds the path npx prints."""

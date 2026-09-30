@@ -448,6 +448,38 @@ class ParityTests(unittest.TestCase):
     def test_a_workflow_that_doesnt_parse_fails(self):
         self.assertFails("doesn't parse", ci="jobs: [\n")
 
+    # ── an unreadable file takes out only the rules that read it ─────────────
+
+    def test_an_unreadable_workflow_is_listed_first_and_the_other_rules_still_run(self):
+        out = self.assertFails(
+            "doesn't parse",
+            ci="jobs: [\n",
+            mise=edit(MISE, 'uv = "0.12.13"', 'uv = "latest"'),
+        )
+        lines = out.splitlines()
+        self.assertTrue(lines[1].startswith("  - .github/workflows/ci.yml: "), out)
+        self.assertIn("  - mise.toml [tools] pins `uv` to latest", lines)
+        # The reach rules read every workflow: fuzz.yml's step alone would leave `check`'s
+        # other tasks reading as unreached.
+        self.assertNotIn("which no task a CI job runs reaches", out)
+
+    def test_an_unreadable_mise_toml_leaves_the_workflow_rules(self):
+        ci = edit(
+            CI,
+            "      - run: mise run ci:one\n",
+            "      - run: mise run ci:one\n      - run: uvx ty check\n",
+        )
+        out = self.assertFails("mise.toml: can't read", mise=None, ci=ci)
+        self.assertIn("runs `uvx ty check`, which names no exact version of ty", out)
+
+    def test_an_unreadable_registry_leaves_the_other_rules(self):
+        out = self.assertFails(
+            "can't read the fault registry",
+            mise=edit(MISE, 'uv = "0.12.13"', 'uv = "latest"'),
+            extra={"verify/guards/faults.toml": REGISTRY},
+        )
+        self.assertIn("mise.toml [tools] pins `uv` to latest", out)
+
 
 # ── CI's `mise run` steps, through real mise over stubbed tasks ──────────────
 

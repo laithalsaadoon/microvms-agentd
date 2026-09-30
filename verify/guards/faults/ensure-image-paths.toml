@@ -1,0 +1,13 @@
+# ── one content-addressed name for every build path (#258) ────────────────────
+
+# The agent image named by the stem and the artifact hash alone, the formula before #258: the
+# two-step name parts from the ensure's, and two sizes share one name.
+[[fault]]
+id = "app-agent-name-without-ensure-identity"
+guard = "agents::tests::the_two_step_name_is_the_name_ensure_gives_and_it_covers_the_size"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "agents::tests::the_two_step_name_is_the_name_ensure_gives_and_it_covers_the_size"]
+expect = "test-failed"
+suite = "rust"
+message = "one name for one agent image"
+note = "crates/microvms-app/src/agents/mod.rs::the_two_step_name_is_the_name_ensure_gives_and_it_covers_the_size"
+transform = { file = "crates/microvms-app/src/agents/mod.rs", replace = "    crate::control::ensure::ensured_image_name(&stem, &identity)\n        .unwrap_or_else(|_| format!(\"{stem}-{}\", &identity[..12]))\n", with = "    let _ = &identity;\n    format!(\"{stem}-{}\", &sandbox.artifact_content_hash_for(request)[..12])\n" }

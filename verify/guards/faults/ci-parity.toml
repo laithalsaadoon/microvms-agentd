@@ -424,3 +424,32 @@ expect = "exit-nonzero"
 suite = "script"
 message = "Dependency 'docs:bracez' not found"
 transform = { file = ".config/mise/tasks/docs.toml", replace = "depends = [\"docs:braces\"]\nrun = \"pnpm exec astro dev\"\n", with = "depends = [\"docs:bracez\"]\nrun = \"pnpm exec astro dev\"\n" }
+
+# An unreadable file takes out only the rules that read it: each part of that, reverted, fails its
+# test.
+[[fault]]
+id = "ci-parity-unreadable-workflow-ends-the-check"
+guard = "test_check_ci_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_ci_parity.py", "-k", "ParityTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_unreadable_workflow_is_listed_first_and_the_other_rules_still_run ("
+transform = { file = "tools/check-ci-parity.py", replace = "    commands = ci_commands(root, problems, tuple(workflows))\n", with = "    if len(workflows) < len(WORKFLOWS):\n        return problems, \"\"\n    commands = ci_commands(root, problems, tuple(workflows))\n" }
+
+[[fault]]
+id = "ci-parity-partial-reach-held"
+guard = "test_check_ci_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_ci_parity.py", "-k", "ParityTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_unreadable_workflow_is_listed_first_and_the_other_rules_still_run ("
+transform = { file = "tools/check-ci-parity.py", replace = "    for dep in depends if every_workflow else []:\n", with = "    for dep in depends:\n" }
+
+[[fault]]
+id = "ci-parity-unreadable-registry-ends-the-check"
+guard = "test_check_ci_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_ci_parity.py", "-k", "ParityTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_unreadable_registry_leaves_the_other_rules ("
+transform = { file = "tools/check-ci-parity.py", replace = "        problems.append(str(error))\n        calls_read = 0\n", with = "        problems[:] = [str(error)]\n        calls_read = 0\n" }

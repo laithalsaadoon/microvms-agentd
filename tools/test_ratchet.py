@@ -11,7 +11,9 @@ The adapter lint tests are here too: each driving adapter's `clippy.toml` is the
 of the subprocess rule the ratchet counts (#285), and they run real clippy the same way.
 """
 
+import contextlib
 import functools
+import io
 import json
 import os
 import re
@@ -500,6 +502,198 @@ class FileTests(unittest.TestCase):
         decision = ("placement", "microvms-cli -> notify", "the watch loop")
         rows = summary(tree(decisions=[decision]), base())
         self.assertEqual(rows["placement"]["decisions"], 1)
+
+
+class RefusalTests(unittest.TestCase):
+    """An input the reading can't take fails the run and takes out only the rules that read it,
+    so one bad input or one broken collector doesn't hide a finding in another category."""
+
+    Refusal = RATCHET["Refusal"]
+    read_decisions = staticmethod(RATCHET["read_decisions"])
+
+    def test_a_refused_decision_leaves_only_its_category_unread(self):
+        kept = {"category": "subprocess", "key": "a.rs: Command::new(x)", "reason": "r"}
+        decisions, refused = self.read_decisions(
+            {
+                "enforced": ["adapter-logic"],
+                "decision": [
+                    {"category": "untraced", "key": "TRAP-14", "reason": "r"},
+                    kept,
+                ],
+            },
+            "decisions.toml",
+        )
+        self.assertEqual(
+            [(r.message.split(":")[0], r.categories) for r in refused],
+            [("decisions.toml", frozenset(["untraced"]))],
+        )
+        self.assertEqual(
+            decisions, {"enforced": ["adapter-logic"], "decisions": [kept]}
+        )
+
+    def test_a_decision_naming_no_category_leaves_every_category_unread(self):
+        for item in ({"category": "layering", "key": "k", "reason": "r"}, "a string"):
+            with self.subTest(item=item):
+                _, refused = self.read_decisions(
+                    {"enforced": [], "decision": [item]}, "d"
+                )
+                self.assertEqual([r.categories for r in refused], [RATCHET["EVERY"]])
+
+    def test_every_refused_decision_is_reported_and_the_first_is_raised(self):
+        data = {
+            "enforced": ["nothing"],
+            "decision": [{"category": "subprocess", "key": " ", "reason": "r"}],
+        }
+        decisions, refused = self.read_decisions(data, "d")
+        self.assertEqual(
+            [r.message for r in refused],
+            [
+                "d: enforced names 'nothing', which isn't a collected category",
+                "d: a key must be a non-empty string: "
+                "{'category': 'subprocess', 'key': ' ', 'reason': 'r'}",
+            ],
+        )
+        # `enforced` is every category's, so none of it is kept once part of it is refused.
+        self.assertEqual(decisions["enforced"], [])
+        with self.assertRaisesRegex(SystemExit, "^d: enforced names 'nothing'"):
+            parse_decisions(data, "d")
+
+    def test_a_collector_refusal_leaves_the_other_collectors_running(self):
+        ws = Workspace(self).crate(
+            "adapter",
+            files={"src/lib.rs": 'fn f() { std::process::Command::new("gh"); }\n'},
+        )
+        empty = Path(ws.root) / "cases"
+        empty.mkdir()
+        scope = ws.scope()._replace(parity_cases=empty)
+        findings, refused = RATCHET["collect_each"](scope)
+        self.assertEqual(
+            keys(findings, "subprocess"),
+            ['adapter/src/lib.rs: std::process::Command::new("gh")'],
+        )
+        self.assertEqual(
+            refused,
+            [
+                self.Refusal(
+                    f"{empty} holds no case, so no marker or skip can be counted",
+                    frozenset(["parity-drift"]),
+                )
+            ],
+        )
+        with self.assertRaisesRegex(SystemExit, "holds no case"):
+            collect(scope)
+
+    def test_an_unread_category_gets_no_rule_and_the_rest_are_held(self):
+        refused = self.Refusal(
+            "spec.json has no requirements object", frozenset(["untraced"])
+        )
+        head = tree(
+            [
+                *BASELINE,
+                ("subprocess", 'a.rs: Command::new("gh")'),
+                ("untraced", "TRAP-14"),
+            ]
+        )._replace(refused=(refused,))
+        failures = rules(head, base())
+        self.assertEqual(kinds(failures), ["new drift"])
+        self.assertIn('[subprocess] a.rs: Command::new("gh")', failures[0])
+        # An unread category with no findings isn't promoted: its zero isn't a measurement.
+        empty = tree([k for k in BASELINE if k[0] != "untraced"])._replace(
+            refused=(refused,)
+        )
+        self.assertEqual(rules(empty, base()), [])
+
+    def test_a_category_that_failed_the_sentinel_gets_no_rule(self):
+        head = tree([*BASELINE, ("parity-gap", "adopt/cli")])
+        self.assertEqual(rules(head, base(), frozenset(["parity-gap"])), [])
+        self.assertEqual(
+            kinds(rules(head, base(), frozenset(["untraced"]))), ["new drift"]
+        )
+
+    def test_a_refused_placement_file_skips_rule_3_alone(self):
+        grown = {"microvms-py": {"normal": {"reqwest"}, "build": set()}}
+        was = {"microvms-py": {"normal": set(), "build": set()}}
+        head = tree([*BASELINE, ("subprocess", 'a.rs: Command::new("gh")')], sets=grown)
+        self.assertEqual(kinds(rules(head, base(sets=was))), ["new drift", "set grew"])
+        refused = self.Refusal("placement.toml: bad", frozenset(["placement"]))
+        self.assertEqual(
+            kinds(rules(head._replace(refused=(refused,)), base(sets=was))),
+            ["new drift"],
+        )
+
+    def test_the_summary_marks_an_unread_category_instead_of_counting_it(self):
+        refused = self.Refusal("x", frozenset(["untraced"]))
+        rows = summary(
+            tree()._replace(refused=(refused,)), base(), frozenset(["parity-gap"])
+        )
+        self.assertEqual(
+            (rows["untraced"]["status"], rows["untraced"]["drift"]), ("unread", None)
+        )
+        self.assertEqual(
+            rows["parity-gap"]["note"], "its collector failed the sentinel"
+        )
+        self.assertEqual(rows["subprocess"]["drift"], 1)
+        line = next(
+            line
+            for line in render_text(rows).splitlines()
+            if line.startswith("untraced")
+        )
+        self.assertEqual(line, "untraced       unread (an input it reads was refused)")
+
+    def test_a_base_is_measured_whole(self):
+        refused = self.Refusal("the first", frozenset(["untraced"]))
+        with self.assertRaisesRegex(SystemExit, "^the first$"):
+            RATCHET["whole"](tree()._replace(refused=(refused,)))
+
+    def run_main(self, broken, head):
+        """`main` over a sentinel result and a head tree, with a base that has the baseline's
+        drift: its exit code and what it printed, stdout then stderr."""
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            mock.patch.dict(
+                RATCHET["main"].__globals__,
+                {
+                    "check_sentinel": lambda scope: broken,
+                    "read_tree": lambda scope: head,
+                    "merge_base_with": lambda root, ref: "0" * 40,
+                    "read_base": lambda root, ref, label: base(),
+                },
+            ),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+            mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}),
+        ):
+            code = RATCHET["main"](["--base", "HEAD"])
+        return code, stdout.getvalue(), stderr.getvalue()
+
+    def test_a_sentinel_failure_is_printed_first_and_the_tree_is_still_held(self):
+        head = tree([*BASELINE, ("subprocess", 'a.rs: Command::new("gh")')])
+        code, out, err = self.run_main(
+            (
+                ["sentinel: the parity-gap collector found nothing"],
+                frozenset(["parity-gap"]),
+            ),
+            head,
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(
+            [line.split(". ")[0] for line in err.splitlines()],
+            [
+                "sentinel: the parity-gap collector found nothing",
+                'new drift: [subprocess] a.rs: Command::new("gh")',
+            ],
+        )
+        self.assertIn("parity-gap     unread (its collector failed the sentinel)", out)
+
+    def test_a_refusal_is_printed_before_the_findings_and_fails_the_run(self):
+        refused = self.Refusal(
+            "spec.json has no requirements object", frozenset(["untraced"])
+        )
+        code, out, err = self.run_main(
+            ([], frozenset()), tree()._replace(refused=(refused,))
+        )
+        self.assertEqual((code, err), (1, "spec.json has no requirements object\n"))
+        self.assertIn("untraced       unread", out)
 
 
 class SnapshotTests(unittest.TestCase):
@@ -1438,8 +1632,13 @@ class UntracedTests(unittest.TestCase):
         root, scope = self.copy()
         for spec in scope.specs:
             spec.write_text(json.dumps({"requirements": {}}))
-        with self.assertRaisesRegex(SystemExit, "defines no requirement keys"):
-            sentinel(scope)
+        failures, failed = RATCHET["check_sentinel"](scope)
+        self.assertEqual(
+            [f for f in failures if "untraced" in f or "requirement" in f],
+            [f"{scope.specs[0]} defines no requirement keys"],
+        )
+        # The refusal is the category's failure: what the collector returned isn't compared.
+        self.assertIn("untraced", failed)
 
     def test_one_empty_spec_is_refused_too(self):
         root, scope = self.copy()

@@ -225,7 +225,7 @@ class RuleTests(unittest.TestCase):
         self.manifest = copy.deepcopy(MANIFEST)
         self.core = copy.deepcopy(CORE)
 
-    def problems(self):
+    def problems(self, unread=frozenset()):
         table = PARITY["parse_table"](self.table)
         surfaces = {
             "core": PARITY["core_surface"](self.core),
@@ -233,7 +233,7 @@ class RuleTests(unittest.TestCase):
             "py": PARITY["py_surface"](self.griffe),
             "ts": PARITY["ts_surface"](self.typedoc),
         }
-        return PARITY["check"](table, surfaces)
+        return PARITY["check"](table, surfaces, unread)
 
     def assertProblem(self, fragment):
         problems = self.problems()
@@ -336,6 +336,54 @@ class RuleTests(unittest.TestCase):
         self.assertIn("py: the parser returned no members", problems)
         # the cause, once, and the sentinels; not one line per row
         self.assertEqual(len(problems), 5, problems)
+
+    def test_an_unread_surface_draws_nothing_and_the_others_are_still_held(self):
+        # Its reason is reported already; a line per sentinel would only repeat it.
+        self.typedoc["children"] = []
+        self.griffe["members"].append(function("orphan"))
+        self.assertEqual(
+            self.problems(unread=frozenset(["ts"])), ["py: orphan belongs to no row"]
+        )
+
+    def test_an_unreadable_surface_is_reported_first_and_the_rest_still_checked(self):
+        self.griffe["members"].append(function("orphan"))
+
+        def refuse(dts, scratch):
+            raise PARITY["ParityError"](f"{dts} has JSDoc tags TypeDoc drops")
+
+        with tempfile.TemporaryDirectory() as scratch:
+            table = Path(scratch) / "capabilities.toml"
+            table.write_text(self.table, encoding="utf-8")
+            out = io.StringIO()
+            with (
+                mock.patch.dict(
+                    PARITY["main"].__globals__,
+                    {
+                        "read_json": lambda path: (
+                            self.core if path.name == "core-api.json" else self.manifest
+                        ),
+                        "run_griffe": lambda pyi: self.griffe,
+                        "run_typedoc": refuse,
+                    },
+                ),
+                mock.patch.object(
+                    sys, "argv", ["check-parity.py", "--table", str(table)]
+                ),
+                contextlib.redirect_stdout(out),
+            ):
+                code = PARITY["main"]()
+        lines = out.getvalue().splitlines()
+        self.assertEqual(code, 1)
+        self.assertEqual(
+            lines[0], f"parity: {PARITY['DTS']} has JSDoc tags TypeDoc drops"
+        )
+        self.assertEqual(
+            lines[1:],
+            [
+                f"parity: {table} doesn't match the surfaces:",
+                "  py: orphan belongs to no row",
+            ],
+        )
 
     def test_an_empty_typedoc_project_fails_on_the_sentinels(self):
         self.typedoc["children"] = []

@@ -288,7 +288,7 @@ async fn dial(port: u16) -> Result<TcpStream, Refusal> {
 }
 
 /// What arrived from the caller's side of a channel.
-enum Inbound {
+pub(crate) enum Inbound {
     /// Bytes for the guest.
     Bytes(Vec<u8>),
     /// The caller's end of stream: it sent everything, and the channel authenticated that.
@@ -481,7 +481,7 @@ fn reset(read: tokio::net::tcp::OwnedReadHalf, write: tokio::net::tcp::OwnedWrit
 /// the responder's reply. Each payload is the sender's offer of the end of stream
 /// (`protocol::identity::HANDSHAKE_PAYLOAD`), and nothing else: the guest port already
 /// travelled in the query string.
-mod handshake {
+pub(crate) mod handshake {
     use axum::extract::ws::{Message, WebSocket};
 
     use super::{Channel, Inbound};
@@ -542,15 +542,12 @@ mod handshake {
         // The refusal that matters: under KK both static keys are mixed into the handshake
         // hash, so a caller pinning the wrong VM or holding the wrong host key fails *here*,
         // in a decryption that cannot be skipped by a verifier that forgot a check.
-        let offer = match responder.read_message(&first, &mut scratch) {
-            Ok(read) => read,
+        let caller_proves_end = match read_hello(&mut responder, &first, &mut scratch) {
+            Ok(offered) => offered,
             Err(error) => {
                 return Err(Failed::new(socket, error.to_string()));
             }
         };
-        // An empty payload is a caller from before the end of stream: it never sends one, so
-        // its close is taken as its end, as it always was.
-        let caller_proves_end = protocol::identity::offers_end_of_stream(&scratch[..offer]);
 
         let written =
             match responder.write_message(&protocol::identity::HANDSHAKE_PAYLOAD, &mut scratch) {
@@ -575,6 +572,41 @@ mod handshake {
                 caller_proves_end,
             }),
             Err(error) => Err(Failed::new(socket, error.to_string())),
+        }
+    }
+
+    /// Reads the caller's handshake message, answering whether its payload offered the end of
+    /// stream.
+    ///
+    /// Apart from the socket so that `tunnel_fuzz` can hand it any bytes. An empty payload is a
+    /// caller from before the end of stream: it never sends one, so its close is taken as its
+    /// end, as it always was.
+    pub(crate) fn read_hello(
+        responder: &mut snow::HandshakeState,
+        first: &[u8],
+        scratch: &mut [u8],
+    ) -> Result<bool, snow::Error> {
+        let offer = responder.read_message(first, scratch)?;
+        Ok(protocol::identity::offers_end_of_stream(&scratch[..offer]))
+    }
+
+    /// Opens one frame the caller sent after the handshake.
+    ///
+    /// Apart from the socket so that `tunnel_fuzz` can hand it any bytes on any path.
+    pub(crate) fn open(
+        transport: &mut snow::TransportState,
+        frame: &[u8],
+        scratch: &mut [u8],
+    ) -> Inbound {
+        match transport.read_message(frame, scratch) {
+            // Whatever the caller offered: the message authenticated, so the caller did send
+            // it. The offer only decides what a close without one means.
+            Ok(count) if protocol::identity::is_end_of_stream(&scratch[..count]) => Inbound::Ended,
+            Ok(count) => Inbound::Bytes(scratch[..count].to_vec()),
+            // A frame that does not authenticate is not a protocol nicety to work around: it is
+            // a forged, replayed or reordered frame (the nonce is its position), and continuing
+            // would relay attacker bytes into the guest (AGENTD-21).
+            Err(error) => Inbound::Failed(format!("a tunnel frame did not authenticate: {error}")),
         }
     }
 
@@ -618,20 +650,7 @@ mod handshake {
                 Some(Ok(_)) => return Inbound::Bytes(Vec::new()),
                 Some(Err(error)) => return Inbound::Failed(error.to_string()),
             };
-            match self.transport.read_message(&frame, &mut self.scratch) {
-                // Whatever the caller offered: the message authenticated, so the caller did
-                // send it. The offer only decides what a close without one means.
-                Ok(count) if protocol::identity::is_end_of_stream(&self.scratch[..count]) => {
-                    Inbound::Ended
-                }
-                Ok(count) => Inbound::Bytes(self.scratch[..count].to_vec()),
-                // A frame that does not authenticate is not a protocol nicety to work around:
-                // it is a forged, replayed or reordered frame (the nonce is its position), and
-                // continuing would relay attacker bytes into the guest (AGENTD-21).
-                Err(error) => {
-                    Inbound::Failed(format!("a tunnel frame did not authenticate: {error}"))
-                }
-            }
+            open(&mut self.transport, &frame, &mut self.scratch)
         }
 
         async fn send(&mut self, bytes: &[u8]) -> bool {

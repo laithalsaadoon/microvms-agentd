@@ -61,12 +61,18 @@ export declare class AgentVm {
   dockerfile(): Promise<string>
   /**
    * The image name for these specs and this daemon binary: `agent-vm-<agents>-<hash12>`.
-   * Content-addressed, so an unchanged binary and spec set name the image a previous run
-   * built; `findImage` looks it up.
+   * Content-addressed, so an unchanged binary, spec set and size name the image a previous
+   * run built; `findImage` looks it up, and `ensureImage` builds or reuses it.
    */
   imageName(options: AgentImageOptions, size?: SizeClass | undefined | null): Promise<string>
   /** The ARN of an existing image named per `imageName`, or `null` when there is none. */
   findImage(options: AgentImageOptions, size?: SizeClass | undefined | null): Promise<string | null>
+  /**
+   * Builds or reuses this VM's image, named per `imageName`: resolved at once when ready,
+   * waited on while building, deleted and rebuilt when failed, and uploaded to
+   * `s3://<s3Bucket>/<s3KeyPrefix>/<name>/artifact.zip` only when a build is needed.
+   */
+  ensureImage(options: AgentEnsureOptions, size?: SizeClass | undefined | null): Promise<EnsuredImage>
   /** The artifact bytes to upload to `s3://<bucket>/<imageName>.zip` before `buildImage`. */
   buildArtifact(options: AgentImageOptions, size?: SizeClass | undefined | null): Promise<Buffer>
   /**
@@ -252,7 +258,8 @@ export declare class CostReport {
   /** Plain text, leading with what the dollars are rather than with the dollars. */
   render(): string
   /**
-   * The `cli.py:688 report_to_dict` shape as a JSON **string**.
+   * Core's JSON shape for a report, as a JSON **string**: the one `microvm cost --json`
+   * and Python's `to_dict` emit (#255).
    *
    * A string for the same reason [`LineItem::to_json`] is: the unpriced line item omits
    * its `usd` key, which no typed return shape can express.
@@ -515,7 +522,7 @@ export declare class LineItem {
   get duration(): Duration | null
   get note(): string
   /**
-   * The `cli.py` `_line_to_dict` shape as a JSON **string**.
+   * Core's JSON shape for a line item, as a JSON **string**.
    *
    * A string rather than an object because the unpriced case must **omit** the `usd` key
    * entirely, and a `#[napi(object)]` return type cannot express an absent key — an
@@ -1174,6 +1181,21 @@ export declare class Unpriced {
 
 /** The layer's fixed values as JSON, for a caller that wants to reason about the guest. */
 export declare function agentConstants(): string
+
+/**
+ * What `ensureImage` builds or reuses from: the daemon binary, the build role, and where
+ * the artifact goes.
+ */
+export interface AgentEnsureOptions {
+  /** The daemon binary's bytes, zipped into the artifact. */
+  binary: Uint8Array
+  /** The build role, which must read the bucket and grant logs on `/aws/lambda-microvms/*`. */
+  buildRoleArn: string
+  /** The bucket the artifact is uploaded to, in the VM's region. */
+  s3Bucket: string
+  /** A key prefix inside the bucket, or absent for the bucket root. */
+  s3KeyPrefix?: string
+}
 
 /** What an agent image is derived from: the daemon binary and the build role. */
 export interface AgentImageOptions {
@@ -2048,7 +2070,15 @@ export interface PlanUsageOptions {
   imageRetainedSeconds?: number
   suspendResumeCycles?: number
   snapshotGb?: number
+  /**
+   * Whether the plan launches, which reads a snapshot. Left out, the core infers it: running
+   * time, or an image of non-zero size, so suspended time alone reads no launch snapshot.
+   */
   launched?: boolean
+  /**
+   * What the report is of. Left out, `"estimate"`: the core's label, the one
+   * `microvm cost --estimate` uses for the same plan (#255).
+   */
   label?: string
 }
 
@@ -2336,8 +2366,12 @@ export interface RunUsageOptions {
   suspendResumeCycles?: number
   /** The suspend snapshot's size. Defaults to the baseline memory footprint. */
   snapshotGb?: number
-  /** Whether a launch happened. A launch reads a snapshot. */
+  /**
+   * Whether a launch happened. A launch reads a snapshot. Left out, the core infers it:
+   * running time, or an image of non-zero size.
+   */
   launched?: boolean
+  /** What the report is of. Left out, `"run"`: the core's label, the one `microvm cost` uses. */
   label?: string
 }
 

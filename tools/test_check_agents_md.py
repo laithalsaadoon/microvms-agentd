@@ -547,6 +547,30 @@ class AgentsMdTests(unittest.TestCase):
         )
         self.assert_fails_with("found no docs to read")
 
+    def test_an_empty_doc_set_still_holds_the_census(self):
+        # The census reads the hooks, tasks and workflows, not the docs, so the floor doesn't
+        # hide a stale path in them.
+        self.healthy(
+            **{
+                "AGENTS.md": None,
+                "CONTRIBUTING.md": None,
+                "crate/AGENTS.md": None,
+                ".github/PULL_REQUEST_TEMPLATE.md": None,
+                ".config/lefthook.yml": LEFTHOOK.replace("src/lib.rs", "src/main.rs"),
+            }
+        )
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertTrue(
+            lines[0].startswith("agents:check: found no docs to read"), lines
+        )
+        self.assertIn(
+            ".config/lefthook.yml:8: `src/main.rs` (`crate/src/main.rs`) is no such path in"
+            " this tree",
+            lines,
+        )
+
     def test_a_doc_set_without_the_root_guide_fails_naming_it(self):
         self.healthy(**{"AGENTS.md": None})
         self.assert_fails_with("AGENTS.md, which this repo always has")

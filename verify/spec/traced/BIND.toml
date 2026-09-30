@@ -80,12 +80,11 @@ issue = "#219"
 issue = "#219"
 
 # The tunnel's keys, BIND-21, BIND-23 and BIND-24 here and AGENTD-17 to AGENTD-21 in AGENTD.toml,
-# share their gherkin waiver. crates/model/src/tunnel.rs carries their model layer, and #297's
-# frame harnesses remove the fuzz waivers.
+# share their gherkin waiver. crates/model/src/tunnel.rs carries their model layer, and the
+# tunnel_fuzz harnesses in agentd and the edges their fuzz layer.
 [BIND-21]
 issue = "#297"
 waive.gherkin = "no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate"
-waive.fuzz = "#297 adds a harness over the client's tunnel frame read"
 
 [BIND-22]
 issue = "#297"
@@ -96,10 +95,8 @@ waive.live = "a live daemon sends well-formed events, so a live run can't presen
 [BIND-23]
 issue = "#342"
 waive.gherkin = "no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate"
-waive.fuzz = "#297 adds a harness over the client's tunnel frame read"
 
 [BIND-24]
 issue = "#297"
 waive.gherkin = "no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate"
-waive.fuzz = "#297 adds a harness over the client's tunnel frame read"
 waive.live = "a live daemon and the endpoint proxy neither replay nor forge a frame, so a live run can't present one; the stand-in tests send both to the client's real relay"

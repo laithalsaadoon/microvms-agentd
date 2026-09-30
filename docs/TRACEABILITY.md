@@ -22,11 +22,11 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | AGENTD-14 | 1 | 1 | 1 | 4 | 3 | 1 |
 | AGENTD-15 | 1 | 1 | 1 | 2 | 2 | 1 |
 | AGENTD-16 | 1 | 1 | 1 | 4 | 4 | 1 |
-| AGENTD-17 | 1 | waived | waived | 2 | 1 | waived |
+| AGENTD-17 | 1 | waived | 1 | 2 | 1 | waived |
 | AGENTD-18 | 1 | waived | waived | 1 | 1 | 1 |
 | AGENTD-19 | 1 | waived | waived | 1 | 1 | waived |
-| AGENTD-20 | 1 | waived | waived | 2 | 1 | waived |
-| AGENTD-21 | 1 | waived | waived | 1 | 1 | waived |
+| AGENTD-20 | 1 | waived | 1 | 2 | 1 | waived |
+| AGENTD-21 | 1 | waived | 1 | 1 | 1 | waived |
 | ARCH-1 | waived | waived | waived | 1 | 2 | waived |
 | ARCH-2 | waived | waived | waived | 1 | 4 | waived |
 | ARCH-3 | waived | waived | waived | 1 | 1 | waived |
@@ -53,10 +53,10 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | BIND-18 | 1 | 1 | 1 | 4 | 3 | 1 |
 | BIND-19 | 1 | 1 | 1 | 2 | 1 | 1 |
 | BIND-20 | 1 | 1 | 1 | 6 | 4 | 1 |
-| BIND-21 | 1 | waived | waived | 1 | 1 | 1 |
+| BIND-21 | 1 | waived | 1 | 1 | 1 | 1 |
 | BIND-22 | waived | waived | 1 | 1 | 1 | waived |
-| BIND-23 | 1 | waived | waived | 1 | 1 | 1 |
-| BIND-24 | 1 | waived | waived | 1 | 1 | waived |
+| BIND-23 | 1 | waived | 1 | 1 | 1 | 1 |
+| BIND-24 | 1 | waived | 1 | 1 | 1 | waived |
 | CLI-1 | waived | waived | waived | 1 | 2 | waived |
 | CLI-2 | waived | waived | waived | 1 | 5 | waived |
 | CLI-3 | waived | waived | waived | 2 | 1 | 2 |
@@ -274,7 +274,7 @@ If the handshake of an identity-verified tunnel is not made with the host key th
 
 - **model:** `crates/model/src/tunnel.rs`
 - **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
-- **fuzz:** waived: #297 adds a harness over the daemon's tunnel frame read
+- **fuzz:** `crates/agentd/src/tunnel_fuzz.rs`
 - **test:** `crates/agentd/src/tunnel_identity.rs`, `crates/agentd/tests/tunnel_relay.rs`
 - **impl:** `crates/agentd/src/tunnel_identity.rs`
 - **live:** waived: no live check presents another host key: that needs a second host identity for one VM, and the relay tests drive the daemon's real route with one
@@ -285,7 +285,7 @@ While the handshake of an identity-verified tunnel has not completed, the agentd
 
 - **model:** `crates/model/src/tunnel.rs`
 - **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
-- **fuzz:** waived: #297 adds a harness over the daemon's tunnel frame read
+- **fuzz:** waived: when the daemon dials is an order of steps, not a function of bytes; the tunnel model checks it over every interleaving and the relay tests against the daemon's real route
 - **test:** `crates/agentd/tests/tunnel_relay.rs`
 - **impl:** `crates/agentd/src/tunnel.rs`
 - **live:** `conformance/lanes/tunnel.py`
@@ -296,7 +296,7 @@ When the guest side of an identity-verified tunnel reaches the end of the guest 
 
 - **model:** `crates/model/src/tunnel.rs`
 - **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
-- **fuzz:** waived: #297 adds a harness over the daemon's tunnel frame read
+- **fuzz:** waived: what the daemon sends at a guest EOF doesn't depend on any byte it read; the tunnel model checks that the end precedes the close, and the client's frame harness that it opens only after every chunk
 - **test:** `crates/agentd/tests/tunnel_relay.rs`
 - **impl:** `crates/agentd/src/tunnel.rs`
 - **live:** waived: the live suite's BIND-23 check observes it: the client reads Closed through the real proxy only when this end of stream crossed it
@@ -307,7 +307,7 @@ If an identity-verified tunnel whose caller offered the end of stream ends witho
 
 - **model:** `crates/model/src/tunnel.rs`
 - **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
-- **fuzz:** waived: #297 adds a harness over the daemon's tunnel frame read
+- **fuzz:** `crates/agentd/src/tunnel_fuzz.rs`
 - **test:** `crates/agentd/tests/tunnel_relay.rs`, `crates/microvms-edges/tests/tunnel_end_of_stream.rs`
 - **impl:** `crates/agentd/src/tunnel.rs`
 - **live:** waived: a live run can't cut the endpoint proxy's connection mid-stream or withhold one frame, so no live check presents a caller end without its end of stream; the relay tests drive the daemon's real route
@@ -318,7 +318,7 @@ If a frame of an identity-verified tunnel does not authenticate at the frame's p
 
 - **model:** `crates/model/src/tunnel.rs`
 - **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
-- **fuzz:** waived: #297 adds a harness over the daemon's tunnel frame read
+- **fuzz:** `crates/agentd/src/tunnel_fuzz.rs`
 - **test:** `crates/agentd/tests/tunnel_relay.rs`
 - **impl:** `crates/agentd/src/tunnel.rs`
 - **live:** waived: a live daemon and the endpoint proxy neither replay nor forge a frame, so a live run can't present one; the relay tests send both to the daemon's real route
@@ -615,7 +615,7 @@ If the far end of an identity-verified tunnel does not complete the handshake ag
 
 - **model:** `crates/model/src/tunnel.rs`
 - **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
-- **fuzz:** waived: #297 adds a harness over the client's tunnel frame read
+- **fuzz:** `crates/microvms-edges/src/session/tunnel_fuzz.rs`
 - **test:** `crates/microvms-core/tests/tunnel_end_to_end.rs`
 - **impl:** `crates/microvms-edges/src/session/tunnel.rs`
 - **live:** `conformance/lanes/tunnel.py`
@@ -637,7 +637,7 @@ If the far end of an identity-verified tunnel whose daemon offered the end of st
 
 - **model:** `crates/model/src/tunnel.rs`
 - **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
-- **fuzz:** waived: #297 adds a harness over the client's tunnel frame read
+- **fuzz:** `crates/microvms-edges/src/session/tunnel_fuzz.rs`
 - **test:** `crates/microvms-edges/tests/tunnel_end_of_stream.rs`
 - **impl:** `crates/microvms-edges/src/session/tunnel.rs`
 - **live:** `conformance/lanes/tunnel.py`
@@ -648,7 +648,7 @@ If a frame of an identity-verified tunnel does not authenticate at the frame's p
 
 - **model:** `crates/model/src/tunnel.rs`
 - **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
-- **fuzz:** waived: #297 adds a harness over the client's tunnel frame read
+- **fuzz:** `crates/microvms-edges/src/session/tunnel_fuzz.rs`
 - **test:** `crates/microvms-edges/tests/tunnel_end_of_stream.rs`
 - **impl:** `crates/microvms-edges/src/session/tunnel.rs`
 - **live:** waived: a live daemon and the endpoint proxy neither replay nor forge a frame, so a live run can't present one; the stand-in tests send both to the client's real relay
@@ -1024,7 +1024,7 @@ The sizing model shall read baseline and peak from the documented five-row table
 - **gherkin:** waived: no behavior to script: the tests read each of the five rows
 - **fuzz:** waived: the table has five rows, which the tests read exhaustively
 - **test:** `crates/microvms-domain/src/sizing.rs`
-- **impl:** `crates/microvms-cli/src/render.rs`, `crates/microvms-core/src/lib.rs`, `crates/microvms-domain/src/sizing.rs`
+- **impl:** `crates/microvms-core/src/lib.rs`, `crates/microvms-domain/src/cost.rs`, `crates/microvms-domain/src/sizing.rs`
 - **live:** `conformance/lanes/local.py`
 
 ## Threats
@@ -1038,7 +1038,7 @@ trace it.
 | A caller holding the agent token but not the host key opens a verified tunnel | AGENTD-17 | `crates/agentd/src/tunnel_identity.rs::only_the_pinned_host_key_completes_a_handshake`, `crates/agentd/tests/tunnel_relay.rs::a_valid_token_with_the_wrong_host_key_is_refused`, `crates/model/src/tunnel.rs::agentd_17_a_token_holder_without_the_host_key_is_refused_before_any_dial` | guarded; under KK no one-sided change turns the pin off, so its seeded fault turns it off in the tunnel model |
 | A verified tunnel's handshake fails, or the VM has no key, and the guest service is reached anyway | AGENTD-18 | `crates/agentd/tests/tunnel_relay.rs::a_refused_caller_never_causes_a_guest_connection`, `crates/agentd/tests/tunnel_relay.rs::identity_against_a_seedless_vm_is_refused_not_downgraded` | guarded |
 | A guest answers a verified tunnel's handshake with a key other than the pinned VM key | BIND-21 | `crates/microvms-core/tests/tunnel_end_to_end.rs::a_wrong_pin_fails_closed_with_a_diagnosis`, `crates/microvms-core/tests/tunnel_end_to_end.rs::a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel` | guarded |
-| A guest or the path replays, reorders or forges tunnel frames after the handshake | AGENTD-21, BIND-24 | `crates/agentd/tests/tunnel_relay.rs::agentd_21_a_replayed_frame_ends_the_tunnel_unrelayed`, `crates/agentd/tests/tunnel_relay.rs::agentd_21_a_forged_frame_ends_the_tunnel_unrelayed`, `crates/microvms-edges/tests/tunnel_end_of_stream.rs::bind_24_a_replayed_frame_fails_the_tunnel_unwritten`, `crates/microvms-edges/tests/tunnel_end_of_stream.rs::bind_24_a_forged_frame_fails_the_tunnel_unwritten`, `crates/model/src/tunnel.rs::bind_24_the_model_finds_a_replay_when_frames_carry_no_position` | guarded; each frame read has no fuzz harness yet (#297) |
+| A guest or the path replays, reorders or forges tunnel frames after the handshake | AGENTD-21, BIND-24 | `crates/agentd/tests/tunnel_relay.rs::agentd_21_a_replayed_frame_ends_the_tunnel_unrelayed`, `crates/agentd/tests/tunnel_relay.rs::agentd_21_a_forged_frame_ends_the_tunnel_unrelayed`, `crates/microvms-edges/tests/tunnel_end_of_stream.rs::bind_24_a_replayed_frame_fails_the_tunnel_unwritten`, `crates/microvms-edges/tests/tunnel_end_of_stream.rs::bind_24_a_forged_frame_fails_the_tunnel_unwritten`, `crates/model/src/tunnel.rs::bind_24_the_model_finds_a_replay_when_frames_carry_no_position`, `crates/agentd/src/tunnel_fuzz.rs::frames_open_in_order_and_the_callers_end_only_after_every_chunk`, `crates/microvms-edges/src/session/tunnel_fuzz.rs::frames_open_in_order_and_the_daemons_end_only_after_every_chunk` | guarded |
 | A guest streams hostile server-sent events to the client | BIND-22 | `crates/microvms-app/src/session/sse.rs::an_unterminated_stream_is_refused_at_the_pending_ceiling`, `crates/microvms-app/src/session/sse.rs::an_unrecognized_or_unparseable_frame_is_dropped_rather_than_raised`, `crates/microvms-app/src/session/sse_fuzz.rs::hostile_stream_bytes_stay_bounded_and_every_event_round_trips` | guarded |
 | A replaced or tampered daemon release asset | BIND-18 | `crates/microvms-edges/src/provision/release.rs::another_signer_identity_is_refused`, `crates/microvms-edges/src/provision/release.rs::one_flipped_byte_in_the_asset_is_refused` | guarded |
 | A release directory (`$MICROVM_RELEASE_DIR`) holding an asset and a matching `SHA256SUMS` but no bundle, or another release's files under the requested tag | BIND-18 | `crates/microvms-edges/src/provision/release.rs::a_release_directory_without_its_bundle_is_refused_despite_a_matching_checksum`, `crates/microvms-edges/src/provision/release.rs::another_releases_files_under_the_requested_tag_are_refused` | guarded |

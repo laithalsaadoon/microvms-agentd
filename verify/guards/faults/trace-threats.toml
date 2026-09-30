@@ -37,7 +37,7 @@ run = ["./tools/check-trace.py", "--check"]
 expect = "exit-nonzero"
 suite = "script"
 message = "a known gap names the issue that closes it"
-transform = { file = "docs/TRUST.md", replace = "| guarded; each frame read has no fuzz harness yet (#297) |", with = "| known gap: each frame read has no fuzz harness yet |" }
+transform = { file = "docs/TRUST.md", replace = "frames_open_in_order_and_the_daemons_end_only_after_every_chunk` | guarded |", with = "frames_open_in_order_and_the_daemons_end_only_after_every_chunk` | known gap: a harness finds nothing |" }
 
 # The floor on empty input: a blank line after the header leaves a table with no rows.
 [[fault]]

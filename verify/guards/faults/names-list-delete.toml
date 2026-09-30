@@ -1,0 +1,32 @@
+# ── `microvm names`: the registry listed without its secrets, and a name deleted (#267) ──
+
+# The redacted form built from the stored one, so the token and the seed are in it.
+[[fault]]
+id = "domain-name-record-redacts-nothing"
+guard = "names::tests::the_redacted_form_is_the_record_without_its_secrets"
+run = ["cargo", "test", "-p", "microvms-domain", "--lib", "--", "--exact", "names::tests::the_redacted_form_is_the_record_without_its_secrets"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/microvms-domain/src/names.rs::the_redacted_form_is_the_record_without_its_secrets"
+transform = { file = "crates/microvms-domain/src/names.rs", replace = "        let mut value = serde_json::json!({\n            \"name\": self.name,\n            \"microvmId\": self.microvm_id,\n            \"endpoint\": self.endpoint,\n            \"region\": self.region,\n            \"at\": self.at,\n        });\n", with = "        let mut value = self.to_json();\n" }
+
+# The CLI lists the stored form instead of the redacted one.
+[[fault]]
+id = "cli-names-lists-secrets"
+guard = "guards::names::names_lists_the_registry_without_its_secrets"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::names::names_lists_the_registry_without_its_secrets"]
+expect = "test-failed"
+suite = "rust"
+message = "a listing printed a secret"
+note = "crates/microvms-cli/src/guards/names.rs::names_lists_the_registry_without_its_secrets"
+transform = { file = "crates/microvms-cli/src/commands/local.rs", replace = "                .map(ledger::NameRecord::redacted_json)\n", with = "                .map(ledger::NameRecord::to_json)\n" }
+
+# `--delete` reports the name deleted without removing its record.
+[[fault]]
+id = "cli-names-delete-skipped"
+guard = "guards::names::names_delete_removes_a_held_name_and_refuses_an_unknown_one"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::names::names_delete_removes_a_held_name_and_refuses_an_unknown_one"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/microvms-cli/src/guards/names.rs::names_delete_removes_a_held_name_and_refuses_an_unknown_one"
+transform = { file = "crates/microvms-cli/src/commands/local.rs", replace = "        if registry.delete(name)? {\n            deleted.push(name.clone());\n        }\n", with = "        deleted.push(name.clone());\n" }
