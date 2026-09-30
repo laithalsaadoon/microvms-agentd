@@ -5,10 +5,11 @@
 //!
 //! Every knob in the file already exists as a `run` flag; the file adds no capability, only
 //! persistence — `microvm run` in a configured project needs zero flags. The precedence is
-//! decided per knob by [`pick`], applied in exactly one place —
-//! `commands::lifecycle::merge_config` — and reported in the envelope's `resolvedConfig` so
-//! a caller never has to re-derive which source won: each knob carries its value *and* the
-//! source it came from (`flag`, `config`, `env`, or `default`).
+//! decided per knob by [`pick`], applied in one place, `commands::lifecycle::merge_config`,
+//! and reported in the envelope's `resolvedConfig` so a caller never has to re-derive which
+//! source won: each knob carries its value *and* the source it came from (`flag`, `config`,
+//! `env`, or `default`). The region's chain is [`merge_region`], which `merge_config` and
+//! `doctor` both call, so `doctor` checks the region `run` launches in.
 //!
 //! # "The flag was given" is read off the parse, not the struct
 //!
@@ -399,6 +400,73 @@ pub fn pick<T: Clone>(explicit: bool, flag: T, config: Option<T>) -> Knob<T> {
             value: flag,
             source: Source::Default,
         },
+    }
+}
+
+/// The region flags with a `microvm.toml` `region` folded in, and the region that chain
+/// resolves to, with the source it came from.
+pub struct MergedRegion {
+    /// The flags, then the file: [`crate::cli::RegionFlags::resolve`] on these walks the rest
+    /// of the chain, the environment and then the built-in.
+    pub flags: crate::cli::RegionFlags,
+    /// The region's name as that resolution will pick it, and the layer that decided it.
+    pub reported: Knob<String>,
+}
+
+/// The region chain every command that reads `microvm.toml` resolves through: the flags,
+/// then the file's `region`, then `$AWS_REGION`/`$AWS_DEFAULT_REGION`, then us-east-1.
+///
+/// A config value joins the flag chain *above* the environment, because the file is project
+/// state and the environment is machine state. `run` and `doctor` both call this, so `doctor`
+/// checks the region `run` launches in (#336). The closed set only: [`load`] already refused
+/// an unlisted name with the flag's own remedy, which is why this is an expect rather than a
+/// second refusal.
+///
+/// The report continues down the chain the resolution itself walks. A report that said
+/// `default` while the launch went where the environment pointed would be the report lying
+/// about the one knob whose chain doesn't end at the file. The environment's word is reported
+/// unvalidated: `resolve` refuses an unlisted name later with the remedy attached, and this
+/// report must not pre-empt that refusal by pretending the value was something else.
+pub fn merge_region(
+    flags: &crate::cli::RegionFlags,
+    config_region: Option<&str>,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> MergedRegion {
+    let from_config = config_region.map(|name| {
+        crate::cli::RegionArg::from_name(name).expect("config::load validated the region domain")
+    });
+    let region = pick(
+        flags.region.is_some() || flags.unlisted_region.is_some(),
+        flags.region,
+        from_config.map(Some),
+    );
+    let mut merged = flags.clone();
+    if flags.unlisted_region.is_none() {
+        merged.region = region.value;
+    }
+    let named = merged
+        .region
+        .map(|arg| arg.region().as_str().to_string())
+        .or_else(|| merged.unlisted_region.clone());
+    let reported = match named {
+        Some(value) => Knob {
+            value,
+            source: region.source,
+        },
+        None => match env("AWS_REGION").or_else(|| env("AWS_DEFAULT_REGION")) {
+            Some(value) => Knob {
+                value,
+                source: Source::Env,
+            },
+            None => Knob {
+                value: microvms_core::Region::UsEast1.as_str().to_string(),
+                source: Source::Default,
+            },
+        },
+    };
+    MergedRegion {
+        flags: merged,
+        reported,
     }
 }
 

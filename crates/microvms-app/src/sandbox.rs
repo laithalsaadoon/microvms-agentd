@@ -913,7 +913,22 @@ impl Sandbox {
     ) -> Result<crate::control::EnsuredImage, Error> {
         // Everything local first: a request this client refuses costs no call at all, the
         // caller-identity lookup included.
-        let prepared = crate::control::ensure::prepare(&self.control, request)?;
+        //
+        // On the blocking pool, not on this task: `prepare` hashes and zips the daemon and
+        // the build context, about a second of CPU for the 2 MB daemon in a debug build.
+        // Inline, it stalls every task on this worker, and a concurrent ensure's credential
+        // fetch parked behind it past the instance-metadata provider's one-second timeout
+        // fails as a missing identity (#309).
+        let control = Arc::clone(&self.control);
+        let prepared =
+            tokio::task::spawn_blocking(move || crate::control::ensure::prepare(&control, request))
+                .await
+                .map_err(|joined| {
+                    Error::new(
+                        ErrorKind::Unexpected,
+                        format!("preparing the image's artifact did not complete: {joined}"),
+                    )
+                })??;
         let services = match &self.build_services {
             Some(services) => Arc::clone(services),
             None => {
