@@ -147,6 +147,18 @@ test('a negative or non-finite duration is refused by the core', () => {
   assert.throws(() => Duration.measured(-1), /credit/);
 });
 
+test('a wait refusal names no report', async () => {
+  // A report's span says why a negative one matters there (the credit above); a timeout has
+  // no report to put a credit on, so its refusal doesn't claim one (#338).
+  const session = Session.direct('http://127.0.0.1:9', 'agent-token');
+  await assert.rejects(session.waitUntilReady(-1), (error) => {
+    assert.equal(codeOf(error), 'ERR_INVALID_ARG');
+    assert.match(error.message, /is not a duration/);
+    assert.doesNotMatch(error.message, /report/);
+    return true;
+  });
+});
+
 test('a plan has no way to pass a measured duration', () => {
   // COST-10: `estimateRun` takes seconds, so there is no field an accidentally-measured
   // duration could be written into.

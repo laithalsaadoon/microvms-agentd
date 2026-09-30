@@ -154,6 +154,21 @@ def test_a_negative_duration_is_refused_by_the_core() -> None:
     assert "credit" in str(raised.value)
 
 
+def test_a_wait_refusal_names_no_report() -> None:
+    """A wait's bad figure is refused by the core too, with nothing about a report (#338).
+
+    A report's span says why a negative one matters there (the credit above); a `timeout`
+    has no report to put a credit on, so its refusal doesn't claim one.
+    """
+    session = microvms.Session.direct("http://127.0.0.1:9", "agent-token")
+    with pytest.raises(microvms.InvalidArgError) as raised:
+        session.wait_until_ready(timeout=-1.0)
+    assert raised.value.code == "ERR_INVALID_ARG"
+    message = str(raised.value)
+    assert "is not a duration" in message, message
+    assert "report" not in message, message
+
+
 def test_a_plan_has_no_way_to_pass_a_measured_duration() -> None:
     """`estimate_run` takes seconds, not `Duration`s, so every phase is projected (COST-10).
 

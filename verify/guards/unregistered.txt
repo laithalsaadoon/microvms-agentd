@@ -151,7 +151,6 @@ crates/microvms-cli/src/render.rs::the_dense_cost_rendering_is_three_fields_and_
 crates/microvms-cli/src/sync.rs::extraction_never_writes_under_the_local_git
 crates/microvms-cli/tests/dependency_direction.rs::each_layer_declares_exactly_the_features_it_is_allowed
 crates/microvms-cli/tests/exit_codes.rs::a_failure_with_progress_enabled_writes_one_json_document_on_stdout
-crates/microvms-cli/tests/exit_codes.rs::a_streamed_exec_that_fails_before_any_event_writes_one_document_on_stdout
 crates/microvms-cli/tests/exit_codes.rs::every_locally_reachable_row_exits_with_its_own_integer_and_code
 crates/microvms-cli/tests/manifest.rs::every_command_the_manifest_lists_is_one_the_binary_routes
 crates/microvms-core/src/lib.rs::the_os_pool_tokens_never_repeat

@@ -20,8 +20,9 @@ belongs in a lower layer (root `AGENTS.md`, Architecture).
   core's resolvers once; everything else takes the lookup it's given. A reviewed `#[expect]`
   is allowed only when it's listed in `LINT_EXCEPTIONS` in `tools/test_ratchet.py` with its
   count, and moving the work down is the usual fix.
-- A flag that takes seconds parses through core's `duration_of_secs_f64`
-  (`cli::parse_seconds`), so a bad value is refused before the handler runs. `clippy.toml`
+- A flag that takes seconds parses through core's `duration::of_secs_f64`
+  (`cli::parse_seconds`), or `cost::duration_of_secs_f64` (`cli::parse_report_seconds`) for a
+  span a cost report prices, so a bad value is refused before the handler runs. `clippy.toml`
   bans the panicking float conversions, `Duration::from_secs_f64` and `from_secs_f32`. A new
   seconds flag gets a row in `cli::tests::every_seconds_flag_refuses_what_is_not_a_duration`,
   since the ban doesn't see a silent zero spelled another way.

@@ -32,7 +32,7 @@ pub const SENTINEL: &str = "wrap-dockerfile/sentinel";
 /// alone. The split is stated once, here, so a tier can't hand an area to the other without the
 /// other one planning it and failing on a case it has no handler for.
 pub const CLI_PROCESS_AREAS: [&str; 2] = ["cost", "egress"];
-pub const CLI_FAKE_AREAS: [&str; 2] = ["image-name", "error"];
+pub const CLI_FAKE_AREAS: [&str; 3] = ["image-name", "error", "names"];
 
 const CASE_KEYS: [&str; 6] = [
     "capability",
@@ -129,6 +129,19 @@ impl Case {
                     .to_string()
             })
             .collect()
+    }
+
+    /// For each of `input.message_mentions`, whether `message` contains it: what a refusal's
+    /// text has to name (the file to inspect, both regions) or must not (the agent token).
+    pub fn message_mentions(&self, message: &str) -> Value {
+        self.input_strings("message_mentions")
+            .into_iter()
+            .map(|mention| {
+                let found = message.contains(&mention);
+                (mention, Value::Bool(found))
+            })
+            .collect::<Map<String, Value>>()
+            .into()
     }
 
     /// `input.binary_hex` as bytes.

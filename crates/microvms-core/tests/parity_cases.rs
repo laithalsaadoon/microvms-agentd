@@ -22,6 +22,7 @@ use microvms_core::control::{ControlPlane, DEFAULT_AGENT_PORT, SystemClock, egre
 use microvms_core::cost::{
     Amount, CalendarDate, CostReport, LineItem, PlanUsage, estimate_run, pinned_rates,
 };
+use microvms_core::names::FileNameStore;
 use microvms_core::prelude::*;
 use microvms_core::sandbox::{RunRequest, Sandbox};
 use microvms_core::session::{HttpBackend, HttpRequest, HttpResponse, OpenStream, Session};
@@ -29,11 +30,12 @@ use microvms_core::{Error, Region, SizeClass};
 use parity_corpus::{Case, Run};
 use serde_json::{Value, json};
 
-const AREAS: [&str; 6] = [
+const AREAS: [&str; 7] = [
     "image-name",
     "cost",
     "error",
     "egress",
+    "names",
     "size-class",
     "wrap-dockerfile",
 ];
@@ -50,6 +52,7 @@ async fn core_answers_the_shared_case_corpus() {
             "cost" => cost(&case),
             "error" => daemon_status(&case).await,
             "egress" => egress(&case).await,
+            "names" => names(&case).await,
             "size-class" => size_class(&case),
             "wrap-dockerfile" => wrap(&case),
             other => unreachable!("planned only the owned areas, not {other}"),
@@ -278,6 +281,39 @@ async fn egress(case: &Case) -> Value {
             Err(error) => refusal(&error),
         },
         other => panic!("{}: no core handler for {other:?} in egress", case.id),
+    }
+}
+
+/// The case's record written where the CLI's registry keeps it, then adopted by name.
+///
+/// `Sandbox::from_name` is `names::resolve`, a plane for the record's region, then
+/// `adopt_record`. The plane is the one step swapped, for the offline one, so a regression that
+/// lets the record through fails on the fake's panic rather than resolving credentials and
+/// calling AWS from the test host. The Python and TypeScript runners call `from_name` itself,
+/// behind a proxy nothing listens on.
+async fn names(case: &Case) -> Value {
+    assert_eq!(
+        case.capability, "from-name",
+        "{}: a from-name case",
+        case.id
+    );
+    let state = tempfile::tempdir().expect("a state directory");
+    let store = FileNameStore::in_state_root(state.path());
+    let name = case.input_str("name");
+    std::fs::create_dir_all(store.dir()).expect("the names directory");
+    std::fs::write(store.path_of(name), case.input_str("record_text")).expect("writes the record");
+    let region: Region = case.input_str("region").parse().expect("a region");
+    let adopted = match microvms_core::names::resolve(&store, name, Some(&region)) {
+        Ok(record) => Sandbox::adopt_record(offline_plane(), record).await,
+        Err(error) => Err(error),
+    };
+    match adopted {
+        Ok(_) => json!({"ok": true}),
+        Err(error) => {
+            let mut answer = refusal(&error);
+            answer["message_mentions"] = case.message_mentions(&error.to_string());
+            answer
+        }
     }
 }
 

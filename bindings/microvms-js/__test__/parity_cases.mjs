@@ -15,7 +15,17 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +33,7 @@ import { isDeepStrictEqual } from 'node:util';
 
 import {
   AgentVm,
+  NameRegistry,
   Region,
   Sandbox,
   Session,
@@ -371,6 +382,33 @@ async function egress(testCase) {
   throw new Error(`${testCase.id}: no TypeScript handler for ${testCase.capability} in egress`);
 }
 
+/** The case's record written where the CLI's registry keeps it, then adopted by name. */
+async function names(testCase) {
+  assert.equal(testCase.capability, 'from-name', testCase.id);
+  const state = mkdtempSync(join(tmpdir(), 'parity-names-'));
+  try {
+    const registry = new NameRegistry(state);
+    mkdirSync(registry.directory, { recursive: true });
+    writeFileSync(join(registry.directory, `${testCase.input.name}.json`), testCase.input.record_text);
+    try {
+      const sandbox = await Sandbox.fromName(
+        Region.parse(testCase.input.region),
+        testCase.input.name,
+        registry,
+      );
+      return { adopted: String(sandbox) };
+    } catch (error) {
+      const answer = refusal(error);
+      answer.message_mentions = Object.fromEntries(
+        testCase.input.message_mentions.map((mention) => [mention, error.message.includes(mention)]),
+      );
+      return answer;
+    }
+  } finally {
+    rmSync(state, { recursive: true, force: true });
+  }
+}
+
 async function sizeClass(testCase) {
   return answered(() => ({
     baseline_mib: SizeClass.fromRequest(testCase.input.cpus, testCase.input.memory_mib).baselineMib,
@@ -386,6 +424,7 @@ const HANDLERS = new Map([
   ['cost', cost],
   ['error', daemonStatus],
   ['egress', egress],
+  ['names', names],
   ['size-class', sizeClass],
   ['wrap-dockerfile', wrap],
 ]);
