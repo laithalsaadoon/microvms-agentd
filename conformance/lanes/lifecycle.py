@@ -113,7 +113,47 @@ def drive_lifecycle(
         isinstance(launched.data.get("cost"), dict),
         f"{type(launched.data.get('cost')).__name__}",
     )
+    check_run_cost(launched.data.get("cost") or {}, results)
     return launched
+
+
+def check_run_cost(report: dict[str, Any], results: Results) -> None:
+    """COST-1, COST-3 and COST-4 on a real run's cost report (`run`'s envelope `cost`).
+
+    A function of the report alone, so the self-test holds each check to failing on a report
+    that breaks its rule.
+    """
+    items = report.get("items") or []
+    # A run's durations were timed, so each is `measured` and none is unlabelled. The set is
+    # empty (and the check fails) when the report carries no duration at all.
+    results.eq(
+        "COST-1 every duration on the run's cost report is labelled measured",
+        sorted(
+            {
+                str((item.get("duration") or {}).get("provenance"))
+                for item in items
+                if item.get("duration")
+            }
+        )
+        or None,
+        ["measured"],
+    )
+    # This run built its image, and AWS publishes no rate for the build: the line is unpriced,
+    # with no dollar figure, rather than `$0.00`.
+    builds = [
+        item.get("amount") or {} for item in items if item.get("phase") == "image-build"
+    ]
+    results.eq(
+        "COST-3 the run's image build is unpriced, not zero dollars",
+        [(amount.get("kind"), "usd" in amount) for amount in builds] or None,
+        [("unpriced", False)],
+    )
+    total = report.get("total") or {}
+    results.eq(
+        "COST-4 the run's total is a lower bound that names its unpriced line",
+        (total.get("isLowerBound"), "image-build" in str(total.get("render"))),
+        (True, True),
+    )
 
 
 def drive_build_logging(

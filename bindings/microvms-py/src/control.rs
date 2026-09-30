@@ -462,6 +462,14 @@ impl PyControlPlane {
         })
     }
 
+    /// The region this plane addresses.
+    #[getter]
+    fn region(&self) -> PyRegion {
+        PyRegion {
+            inner: self.inner.region().clone(),
+        }
+    }
+
     /// `GetMicrovm`.
     fn get(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<PyMicrovm> {
         let plane = Arc::clone(&self.inner);
@@ -527,7 +535,7 @@ impl PyControlPlane {
     /// `stateReason`; running past `timeout` raises `TimeoutError`.
     // Literals, not core's `DEFAULT_LIFECYCLE_TIMEOUT` and `LIFECYCLE_POLL_INTERVAL`: the stub
     // generator writes a named default as `...`, which hides the value from a type checker's
-    // hover and from #300's check that reads each default from `microvms.pyi`.
+    // hover and from `parity:check`, which reads each default from `microvms.pyi` (#300).
     #[pyo3(signature = (microvm_id, wanted, *, fail_on=None, timeout=300.0, poll_interval=5.0))]
     fn wait_for_state(
         &self,
