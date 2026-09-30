@@ -7,7 +7,8 @@
 """Hold the repo's drift to its merge base's: a change can't add drift (#281).
 
 Drift is every place a driving adapter does work that belongs below it, every capability a
-surface lacks until an issue closes it (#271), and every requirement no layer traces yet (#295).
+surface lacks until an issue closes it (#271), every answer the shared case corpus marks a surface
+as giving wrongly, or can't reach on it (#320), and every requirement no layer traces yet (#295).
 This script collects it from the working tree and from the tree of the commit it compares with,
 with the same collectors, and fails when the working tree has drift that commit doesn't: the
 head's drift is a subset of the base's. The base is the merge base of HEAD and origin/main
@@ -58,9 +59,9 @@ its own rewrites it for the chart.
    re-keys it. A new key passes when it takes the place of one of the same category that the
    base has and the working tree doesn't, and the two share their path or their text. Each
    base key takes one replacement. Moving and renaming in one change shares neither, so it
-   takes two changes. A placement, parity-gap or untraced key names an edge, a table row or a
-   requirement, not a place in the code, so it never pairs: renaming a row that carries a gap
-   is new drift.
+   takes two changes. A placement, parity-gap, parity-drift or untraced key names an edge, a
+   table row, a case or a requirement, not a place in the code, so it never pairs: renaming a
+   row that carries a gap, or a case that carries a marker, is new drift.
 2. A decision no finding matches: it's stale, so it goes. A `HELD` category's decisions are
    its check's to hold.
 3. A crate added to an allowed set the base's `verify/arch/placement.toml` already has. A set
@@ -108,6 +109,16 @@ the collector's own diff are what hold the collectors.
   `<Type>.<member>/<surface>` or `<name>/<surface>`. An exemption without an issue is the
   table's own decision and isn't read. `parity:check` holds the table to the surfaces, so a gap
   the table doesn't record fails there, not here.
+- parity-drift: each `known_drift` path and each `skip` in the shared case corpus,
+  `verify/parity/cases/<area>/<case>.json` (#320). A marker says a surface gives another answer
+  than `expect` at those dot paths until its issue fixes it, and a skip that a surface the row
+  names can't be reached offline for the case; the runners hold both to their shape and to the
+  answers, and nothing else counted them. The key is `<area>/<case>/<surface>: known_drift
+  <path>`, one a path, or `<area>/<case>/<surface>: skip`. A marker is counted beside the
+  table's exemption for the same gap, not instead of it: one measures the surface and the other
+  the answer, and both go when the gap closes. A skip that no open issue will close is a
+  decision, with the trace id it names in its reason. A directory with no case, or a marker or
+  skip the collector can't read, is an error.
 - untraced: each requirement key in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
   that no group file in `verify/spec/traced/` lists, a requirement no layer checks (#295). The files
   are read with `tools/check-trace.py`'s own loader. The key is the bare spec key (`TRAP-1`);
@@ -200,6 +211,8 @@ class Scope(NamedTuple):
     composition_root: str | None = None
     #: The capability table whose tracked exemptions are parity gaps. None reads no gaps.
     parity_table: Path | None = None
+    #: The case corpus whose `known_drift` markers and skips are parity drift. None reads none.
+    parity_cases: Path | None = None
     #: The requirement specs whose keys the untraced collector reads.
     specs: tuple[Path, ...] = ()
     #: The directory of group files that list the traced keys. None reads no untraced keys.
@@ -222,6 +235,7 @@ def repo_scope(root: Path) -> Scope:
         composed=("microvms-app",),
         composition_root="microvms-core",
         parity_table=root / "verify" / "parity" / "capabilities.toml",
+        parity_cases=root / "verify" / "parity" / "cases",
         specs=(
             root / "verify" / "spec" / "core.symspec.json",
             root / "verify" / "spec" / "agentd.symspec.json",
@@ -239,6 +253,7 @@ SENTINEL = Scope(
     composed=("kernel",),
     composition_root="root",
     parity_table=SENTINEL_ROOT / "parity" / "capabilities.toml",
+    parity_cases=SENTINEL_ROOT / "parity" / "cases",
     specs=(
         SENTINEL_ROOT / "spec" / "core.symspec.json",
         SENTINEL_ROOT / "spec" / "agentd.symspec.json",
@@ -254,6 +269,7 @@ COLLECTED = (
     "port-impl",
     "adapter-logic",
     "parity-gap",
+    "parity-drift",
     "untraced",
 )
 
@@ -291,6 +307,10 @@ PROMOTE = {
         "tools/check-parity.py refusing an exemption with an issue, once #280 closes the "
         "last gap"
     ),
+    "parity-drift": (
+        "the corpus runners refusing a known_drift marker, once #255, #256 and #258 remove the "
+        "last (a skip no issue will close is a decision)"
+    ),
     "untraced": (
         "tools/check-trace.py failing on a spec key no file in verify/spec/traced/ lists, once #301 "
         "to #307 trace the last key"
@@ -308,6 +328,11 @@ NEW_DRIFT_FIX = {
     "parity-gap": (
         "Give that surface the capability, or, if the gap is permanent, drop the exemption's "
         "issue in verify/parity/capabilities.toml so it reads as a decision."
+    ),
+    "parity-drift": (
+        "Make the surface give the case's answer rather than marking or skipping it there. A "
+        "skip no open issue will close takes a decision naming the trace id it cites, with its "
+        f"reason, in {DECISIONS}."
     ),
     "untraced": (
         "Trace the requirement: list its key in its group's file, verify/spec/traced/<GROUP>.toml, "
@@ -668,9 +693,12 @@ def default_base(root: Path) -> str:
 
 
 def location_and_text(category: str, key: str) -> tuple[str | None, str | None]:
-    """A Rust key's `<path>` and `<text>` halves. Placement, parity-gap and untraced keys name
-    edges, table rows and requirements, not places."""
-    if category in ("placement", "parity-gap", "untraced") or ": " not in key:
+    """A Rust key's `<path>` and `<text>` halves. Placement, parity-gap, parity-drift and untraced
+    keys name edges, table rows, cases and requirements, not places."""
+    if (
+        category in ("placement", "parity-gap", "parity-drift", "untraced")
+        or ": " not in key
+    ):
         return None, None
     path, text = key.split(": ", 1)
     return path, text
@@ -1119,6 +1147,55 @@ def parity_gaps(scope: Scope) -> Counter:
     )
 
 
+def parity_drift(scope: Scope) -> Counter:
+    """Each `known_drift` path and each `skip` in the scope's case corpus (#320).
+
+    Cases are `<area>/<case>.json` directly under the corpus, the files the runners load. The
+    runners hold a marker to the answers and both to their full shape; this reads only what it
+    counts, and refuses what it can't read rather than counting it as nothing. A corpus with no
+    case is an error, not an empty category: every marker would read as fixed.
+    """
+    if scope.parity_cases is None:
+        return Counter()
+    cases = sorted(scope.parity_cases.glob("*/*.json"))
+    if not cases:
+        raise SystemExit(
+            f"{scope.parity_cases} holds no case, so no marker or skip can be counted"
+        )
+    found: Counter = Counter()
+    for path in cases:
+        name = f"{path.parent.name}/{path.stem}"
+        try:
+            case = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as error:
+            raise SystemExit(f"{path}: {error}") from None
+        if not isinstance(case, dict):
+            raise SystemExit(f"{path}: a case is a JSON object")
+        markers = case.get("known_drift", {})
+        skips = case.get("skip", {})
+        if not isinstance(markers, dict) or not isinstance(skips, dict):
+            raise SystemExit(
+                f"{path}: known_drift and skip are objects keyed by surface"
+            )
+        for surface, marker in markers.items():
+            paths = marker.get("keys") if isinstance(marker, dict) else None
+            if (
+                not isinstance(paths, list)
+                or not paths
+                or not all(isinstance(p, str) and p for p in paths)
+            ):
+                raise SystemExit(
+                    f"{path}: known_drift.{surface}.keys must be a non-empty list of dot paths"
+                )
+            for dotted in paths:
+                found[("parity-drift", f"{name}/{surface}: known_drift {dotted}")] += 1
+        for surface, reason in skips.items():
+            if not isinstance(reason, str) or not reason.strip():
+                raise SystemExit(f"{path}: skip.{surface} needs a reason")
+            found[("parity-drift", f"{name}/{surface}: skip")] += 1
+    return found
+
+
 def untraced(scope: Scope) -> Counter:
     """Each requirement key in the scope's specs that no traced group file lists (#295).
 
@@ -1181,7 +1258,12 @@ def untraced(scope: Scope) -> Counter:
 def collect(scope: Scope, require_ports: bool = False) -> Counter:
     """Every finding in `scope`, as a count per `(category, key)`. None is in a `HELD` category."""
     found = crates(scope, cargo_metadata(scope))
-    return rust(scope, found, require_ports) + parity_gaps(scope) + untraced(scope)
+    return (
+        rust(scope, found, require_ports)
+        + parity_gaps(scope)
+        + parity_drift(scope)
+        + untraced(scope)
+    )
 
 
 def sentinel(scope: Scope) -> list[str]:

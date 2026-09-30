@@ -357,10 +357,13 @@ def drive_lifecycle_by_id(
             os.environ["MICROVM_AGENT_TOKEN"] = previous
         for microvm_id in sorted(set(ids)):
             try:
+                # `--wait-sec` alone, which implies `--wait` (#267): the envelope's state is
+                # TERMINATED only if the bounded wait ran.
                 torn = cli.call(
                     "terminate",
                     microvm_id,
-                    "--wait",
+                    "--wait-sec",
+                    "240",
                     "--region",
                     cli.region,
                     timeout=300.0,
@@ -369,6 +372,11 @@ def drive_lifecycle_by_id(
                     "the client-token VM was terminated",
                     not torn.data.get("leaked"),
                     f"leaked={torn.data.get('leaked')!r}",
+                )
+                results.eq(
+                    "terminate --wait-sec waits for TERMINATED",
+                    torn.data.get("state"),
+                    "TERMINATED",
                 )
             except Exception as exc:  # noqa: BLE001 - a teardown failure is a finding
                 results.check("the client-token VM was terminated", False, repr(exc))

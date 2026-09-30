@@ -172,7 +172,7 @@ class AgentVm:
         """
         The session, once `launch` has run.
         """
-    def terminate(self, /, *, delete_image: bool = False, delete_log_group: bool = False, delete_attempts: int |None = None, delete_backoff: float |None = None, wait_for_terminated: bool = False) -> TeardownReport:
+    def terminate(self, /, *, delete_image: bool = False, delete_log_group: bool = False, delete_attempts: int |None = None, delete_backoff: float |None = None, wait_for_terminated: bool |float = ...) -> TeardownReport:
         """
         Tears down, best-effort, never raising; see `Sandbox.terminate`.
         """
@@ -1133,6 +1133,31 @@ class LineItem:
     def unit(self, /) -> str: ...
 
 @final
+class ManagedBaseVersion:
+    """
+    One version of a managed base image, from `ListManagedMicrovmImageVersions`.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def created_at(self, /) -> float:
+        """
+        Unix seconds.
+        """
+    @property
+    def image_arn(self, /) -> str: ...
+    @property
+    def image_version(self, /) -> str:
+        """
+        A bare integer for a managed base (`"0"`, `"1"`), where a custom image's versions read
+        `"1.0"`: the value `build_image`'s pin takes, not one to compare with a build's readback.
+        """
+    @property
+    def updated_at(self, /) -> float |None:
+        """
+        Unix seconds, when the service reported it.
+        """
+
+@final
 class Microvm:
     """
     A MicroVM as `GetMicrovm` last described it.
@@ -1855,10 +1880,24 @@ class Sandbox:
         Spelled as the service spells it, because a reader compares it against a
         `GetMicrovm` response and `Suspended` beside `SUSPENDED` reads like two facts.
         """
+    def managed_base_versions(self, /, base_image_arn: str) -> list[ManagedBaseVersion]:
+        """
+        `ListManagedMicrovmImageVersions`, every page: the versions of a managed base, the
+        values `build_image`'s base-version pin takes.
+        
+        `base_image_arn` is the base's full ARN, such as
+        `arn:aws:lambda:us-east-1:aws:microvm-image:al2023-1`; a bare name is refused.
+        """
     @property
     def microvm_id(self, /) -> str |None:
         """
         The VM id, once launched.
+        """
+    def preflight(self, /, *, name: str, binary: Sequence[int], code_artifact_uri: str, build_role_arn: str, size: SizeClass |None = None, base_image: BaseImage |None = None, dockerfile: str |None = None, repair_guest_identity: bool = False, inherit_workdir: bool = False, run_hook_timeout: RunHookTimeout |None = None, build_hook_timeout: BuildHookTimeout |None = None, tags: dict[str, str] |None = None, log_group: str |None = None, log_stream: str |None = None, token_scope: str |None = None) -> None:
+        """
+        Every local guard `build_image` runs, with zero calls: raises the refusal `build_image`
+        would, so a caller who uploads its own artifact checks the request before paying for
+        the upload. Takes `build_image`'s keywords.
         """
     def resume(self, /) -> Session:
         """
@@ -1942,7 +1981,7 @@ class Sandbox:
         `None` before this sandbox launches a VM. This accessor reports the requested
         window; `GetMicrovm` also returns the service's idle policy.
         """
-    def terminate(self, /, *, delete_image: bool = False, delete_log_group: bool = False, delete_attempts: int |None = None, delete_backoff: float |None = None, wait_for_terminated: bool = False) -> TeardownReport:
+    def terminate(self, /, *, delete_image: bool = False, delete_log_group: bool = False, delete_attempts: int |None = None, delete_backoff: float |None = None, wait_for_terminated: bool |float = ...) -> TeardownReport:
         """
         Tears down, best-effort, **never raising**.
         
@@ -1957,7 +1996,8 @@ class Sandbox:
         
         `wait_for_terminated=False` by default: the caller is on the way out, and a teardown
         that blocked five minutes on a state nobody reads is five minutes of a CI job. The
-        report then honestly ends in `"TERMINATING"`.
+        report then honestly ends in `"TERMINATING"`. `True` waits for TERMINATED up to the
+        core's lifecycle default; a number of seconds waits up to that instead.
         """
     @property
     def token_installed(self, /) -> bool:

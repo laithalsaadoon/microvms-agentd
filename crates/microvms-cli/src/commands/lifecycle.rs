@@ -68,8 +68,7 @@ use std::time::Duration;
 
 use microvms_core::control::{ControlPlane, CreateImageRequest, ProjectFiles, WaitOpts};
 use microvms_core::sandbox::{
-    DEFAULT_LIFECYCLE_TIMEOUT, LIFECYCLE_POLL_INTERVAL, RunRequest, Sandbox, TeardownOpts,
-    TeardownReport,
+    DEFAULT_LIFECYCLE_TIMEOUT, RunRequest, Sandbox, TeardownOpts, TeardownReport,
 };
 use microvms_core::{Error, ErrorKind};
 use serde_json::{Map, json};
@@ -2036,7 +2035,7 @@ pub async fn suspend<O: std::io::Write, E: std::io::Write>(
             &microvm_id,
             &microvms_core::control::microvm::SUSPEND_WANTED,
             &[],
-            wait_opts(args.timeout),
+            WaitOpts::for_lifecycle(args.timeout),
         )
         .await?;
 
@@ -2096,7 +2095,7 @@ pub async fn resume<O: std::io::Write, E: std::io::Write>(
             &microvm_id,
             &["RUNNING"],
             &microvms_core::constants::DEAD_STATES,
-            wait_opts(args.timeout),
+            WaitOpts::for_lifecycle(args.timeout),
         )
         .await?;
 
@@ -2233,13 +2232,19 @@ pub async fn terminate<O: std::io::Write, E: std::io::Write>(
             ));
         }
     }
-    if args.wait && leaked.is_empty() {
+    // `--wait-sec` bounds the wait; `--wait` alone takes the core's lifecycle default.
+    let wait = args
+        .wait_sec
+        .or(args.wait.then_some(DEFAULT_LIFECYCLE_TIMEOUT));
+    if let Some(timeout) = wait
+        && leaked.is_empty()
+    {
         match plane
             .wait_for_state(
                 &microvm_id,
                 &["TERMINATED"],
                 &[],
-                wait_opts(DEFAULT_LIFECYCLE_TIMEOUT),
+                WaitOpts::for_lifecycle(timeout),
             )
             .await
         {
@@ -2450,17 +2455,6 @@ fn image_name_of(identifier: &str) -> String {
         .to_string()
 }
 
-/// A lifecycle wait with the caller's deadline and core's poll interval.
-fn wait_opts(timeout: Duration) -> WaitOpts {
-    WaitOpts {
-        timeout,
-        poll_interval: LIFECYCLE_POLL_INTERVAL,
-        // No stall grace: that is the image build's TRAP-2 probe, and a lifecycle transition
-        // has no build list to probe.
-        stall_grace: Duration::MAX,
-    }
-}
-
 /// Seconds since the epoch, for a per-invocation image name and a registry record's `at`.
 pub(crate) fn epoch_secs() -> u64 {
     std::time::SystemTime::now()
@@ -2653,17 +2647,6 @@ mod tests {
         assert_eq!(from_run.timeout_sec, from_exec.timeout_sec);
         assert!(from_run.exec_id.starts_with("x-"), "{}", from_run.exec_id);
         assert!(from_exec.exec_id.starts_with("x-"), "{}", from_exec.exec_id);
-    }
-
-    /// The wait carries the caller's deadline and core's poll interval.
-    ///
-    /// A negative `--timeout` never reaches here: `cli::parse_seconds` refuses it at parse time
-    /// (#268), which `cli::tests::every_seconds_flag_refuses_what_is_not_a_duration` holds.
-    #[test]
-    fn a_lifecycle_wait_carries_the_callers_deadline_and_cores_poll_interval() {
-        let wait = wait_opts(Duration::from_secs(300));
-        assert_eq!(wait.timeout, Duration::from_secs(300));
-        assert_eq!(wait.poll_interval, LIFECYCLE_POLL_INTERVAL);
     }
 
     /// **#74, `--project` detection.** A directory with exactly one manifest+lockfile pair

@@ -221,7 +221,10 @@ route, status or field, or a field an older client or daemon doesn't send
 becoming required; [Protocol](docs/PROTOCOL.md) has the rule. An intended break
 bumps `PROTOCOL_VERSION` and lists each break in `docs/schema-breaks.toml`. It
 refuses a clone with no release tag, so run `git fetch --unshallow --tags` in a
-shallow one.
+shallow one. The live suite's `version_skew` section runs the same claim end to end
+(`conformance/lanes/skew.py`): this tree's CLI drives the previous release's daemon, and
+that release's CLI drives this tree's, each through a launch, an exec, a file copied up and
+back, health and a teardown.
 
 Use current boto3 models and AWS documentation to identify capabilities the
 package should expose, verify request serialization, and check CLI/SDK parity

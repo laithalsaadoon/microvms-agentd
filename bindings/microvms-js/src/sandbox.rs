@@ -51,6 +51,7 @@ use microvms_core::sandbox::{
     Detached as CoreDetached, RunRequest, Sandbox as CoreSandbox, TeardownOpts,
     TeardownReport as CoreTeardownReport,
 };
+use napi::bindgen_prelude::Either;
 use napi_derive::napi;
 use tokio::sync::Mutex;
 
@@ -418,6 +419,19 @@ pub struct BuildImageOptions {
 ///
 /// A caller writes `sandbox.buildImage(opts, size, runTimeout, buildTimeout)` with the last
 /// three optional.
+/// One version of a managed base image, from `ListManagedMicrovmImageVersions`.
+#[napi(object)]
+pub struct ManagedBaseVersion {
+    pub image_arn: String,
+    /// A bare integer for a managed base (`"0"`, `"1"`), where a custom image's versions read
+    /// `"1.0"`: the value `buildImage`'s pin takes, not one to compare with a build's readback.
+    pub image_version: String,
+    /// Unix seconds.
+    pub created_at: f64,
+    /// Unix seconds, when the service reported it.
+    pub updated_at: Option<f64>,
+}
+
 impl BuildImageOptions {
     /// The core request, with the guarded values applied.
     fn into_request(
@@ -584,8 +598,9 @@ pub struct TeardownOptions {
     pub delete_backoff: Option<f64>,
     /// `false` by default: the caller is on the way out, and a teardown that blocked five
     /// minutes on a state nobody reads is five minutes of a CI job. The report then honestly
-    /// ends in `"TERMINATING"`.
-    pub wait_for_terminated: Option<bool>,
+    /// ends in `"TERMINATING"`. `true` waits for TERMINATED up to the core's lifecycle default;
+    /// a number of seconds waits up to that instead.
+    pub wait_for_terminated: Option<Either<bool, f64>>,
 }
 
 impl TeardownOptions {
@@ -604,8 +619,10 @@ impl TeardownOptions {
             },
             wait_for_terminated: defaults.wait_for_terminated,
         };
-        if self.wait_for_terminated.unwrap_or(false) {
-            opts = opts.waiting_for_terminated();
+        match self.wait_for_terminated {
+            None | Some(Either::A(false)) => {}
+            Some(Either::A(true)) => opts = opts.waiting_for_terminated(),
+            Some(Either::B(timeout)) => opts.wait_for_terminated = Some(seconds_async(timeout)?),
         }
         Ok(opts)
     }
@@ -905,6 +922,48 @@ impl Sandbox {
         let request = options.into_request(size, run_hook_timeout, build_hook_timeout);
         let guard = self.inner.lock().await;
         Ok(guard.build_artifact_for(&request).map_err(js_async)?.into())
+    }
+
+    /// Every local guard `buildImage` runs, with zero calls: rejects with the refusal
+    /// `buildImage` would, so a caller who uploads its own artifact checks the request before
+    /// paying for the upload. Takes `buildImage`'s arguments.
+    #[napi]
+    pub async fn preflight(
+        &self,
+        options: BuildImageOptions,
+        size: Option<&SizeClass>,
+        run_hook_timeout: Option<&RunHookTimeout>,
+        build_hook_timeout: Option<&BuildHookTimeout>,
+    ) -> Result<(), AsyncError> {
+        let request = options.into_request(size, run_hook_timeout, build_hook_timeout);
+        let guard = self.inner.lock().await;
+        guard.preflight(&request).map_err(js_async)
+    }
+
+    /// `ListManagedMicrovmImageVersions`, every page: the versions of a managed base, the
+    /// values `buildImage`'s base-version pin takes.
+    ///
+    /// `baseImageArn` is the base's full ARN, such as
+    /// `arn:aws:lambda:us-east-1:aws:microvm-image:al2023-1`; a bare name is refused.
+    #[napi]
+    pub async fn managed_base_versions(
+        &self,
+        base_image_arn: String,
+    ) -> Result<Vec<ManagedBaseVersion>, AsyncError> {
+        let guard = self.inner.lock().await;
+        let versions = guard
+            .managed_base_versions(&base_image_arn)
+            .await
+            .map_err(js_async)?;
+        Ok(versions
+            .into_iter()
+            .map(|version| ManagedBaseVersion {
+                image_arn: version.image_arn,
+                image_version: version.image_version,
+                created_at: version.created_at,
+                updated_at: version.updated_at,
+            })
+            .collect())
     }
 
     /// Launches a MicroVM, waits for RUNNING, and resolves with its session.

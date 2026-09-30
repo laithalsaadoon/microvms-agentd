@@ -108,7 +108,7 @@ run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p",
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_no_adapter_source_turns_the_lints_off_outside_its_listed_sites ("
-transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "/// A lifecycle wait with the caller's deadline and core's poll interval.\nfn wait_opts(", with = "/// A lifecycle wait with the caller's deadline and core's poll interval.\n#[expect(clippy::disallowed_methods, reason = \"x\")]\nfn wait_opts(" }
+transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "pub(crate) fn epoch_secs() -> u64 {\n", with = "#[expect(clippy::disallowed_methods, reason = \"x\")]\npub(crate) fn epoch_secs() -> u64 {\n" }
 
 [[fault]]
 id = "lint-exceptions-test-only-skip"
