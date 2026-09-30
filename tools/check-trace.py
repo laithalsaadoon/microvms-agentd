@@ -150,8 +150,6 @@ CLI_GUARDS = Path("crates/microvms-cli/src/guards")
 # out of the matrix as quietly as one that vanished. An entry here that starts yielding
 # a key is reported, so this list can only shrink.
 KEYLESS = {
-    "crates/microvms-edges/tests": "the release-bundle test names no requirement yet; listed so "
-    "the first one that does is counted",
     "crates/agentd/fuzz/fuzz_targets": "the cargo-fuzz tar harness guards extraction, which no "
     "spec requirement covers; the keyed fuzz harnesses are bolero targets under src/ and "
     "tests/",

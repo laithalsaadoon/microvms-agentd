@@ -873,6 +873,25 @@
       "verificationMethod": "test",
       "verifies": []
     },
+    "7e4b90f1-c93a-4941-8188-9905e549362b": {
+      "createdAt": "2026-09-30T12:00:00.000Z",
+      "derives": [],
+      "id": "7e4b90f1-c93a-4941-8188-9905e549362b",
+      "key": "BIND-23",
+      "negated": false,
+      "patternType": "unwanted-behavior",
+      "priority": "critical",
+      "refines": [],
+      "satisfies": [],
+      "sentence": "If the far end of an identity-verified tunnel whose daemon offered the end of stream closes the tunnel without the daemon's end of stream, then the microvms-core shall report the tunnel as truncated rather than closed.",
+      "status": "draft",
+      "systemName": "microvms-core",
+      "systemResponse": "report the tunnel as truncated rather than closed",
+      "trigger": "the far end of an identity-verified tunnel whose daemon offered the end of stream closes the tunnel without the daemon's end of stream",
+      "updatedAt": "2026-09-30T12:00:00.000Z",
+      "verificationMethod": "test",
+      "verifies": []
+    },
     "834e04ac-4606-4779-811a-068e3a1d65ee": {
       "createdAt": "2026-08-08T01:55:36.058Z",
       "derives": [],

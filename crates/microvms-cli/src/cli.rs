@@ -1349,6 +1349,12 @@ pub struct TunnelArgs {
     /// or a record replayed from another VM fails the handshake itself (4403 or a pin
     /// diagnosis), and no guest connection is ever made for a refused caller.
     ///
+    /// Each connection's end is proved too: the daemon sends an end of stream inside the
+    /// session before it closes, and a connection that ends without one is counted in
+    /// `connectionsTruncated` with a warning, since it may have been cut short on the path. A
+    /// daemon from before the end of stream sends none, and its connections are counted in
+    /// `connectionsUnproven`.
+    ///
     /// Needs the identity material, so it works with `--name <NAME>` (the registry record
     /// carries it) or with the two `--identity-*` flags pasted from `run`'s envelope.
     ///
