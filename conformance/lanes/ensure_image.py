@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,24 @@ ENSURE_PREFIX = "conformance-ensure"
 
 #: The ready spellings `Image.is_ready` accepts.
 READY_IMAGE_STATES = ("CREATED", "UPDATED", "ACTIVE", "AVAILABLE")
+
+#: The cleanup's four checks, named once so the self-test's scenarios can say which fail.
+ENSURE_VM_TERMINATED = "the ensure-image VM is terminated"
+ENSURE_IMAGE_GONE = "the ensured image is deleted"
+ENSURE_OBJECTS_GONE = "the ensure-image artifacts are deleted from S3"
+ENSURE_GROUP_GONE = "the ensure-image build log group is deleted"
+
+#: Where the service writes an image's build log: `<prefix><image name>`.
+SERVICE_LOG_PREFIX = "/aws/lambda-microvms/"
+
+#: How long cleanup keeps at the run's VMs, and then at its images, before it reports what's
+#: left: an image still `CREATING` refuses deletion, and a VM takes a while to terminate.
+CLEANUP_SECONDS = 10 * 60
+CLEANUP_POLL_SECONDS = 15
+
+#: The name in an image ARN, written `microvm-image:<name>` or `microvm-image/<name>`, before
+#: any version suffix.
+IMAGE_ARN_NAME = re.compile(r"microvm-image[:/]([^:/]+)")
 
 
 def ensure_image_checks(
@@ -120,9 +139,10 @@ def drive_ensure_image(binary: Path, aws: Any, results: Results) -> None:
     forces a rebuild under the same name. Its report becomes the named IMAGE checks in
     `ensure_image_checks`.
 
-    Cleanup is this function's and is verified independently of the test's own: the image
-    is absent, the VM is TERMINATED, the S3 objects under the run's key prefix are deleted,
-    and the service-created log group is deleted, each read back through boto3.
+    Cleanup is this function's and is verified independently of the test's own: every VM
+    launched from the run's images is TERMINATED, every image the run's prefix names is
+    absent, the S3 objects under the run's key prefix are deleted, and the service-created
+    log groups are deleted, each read back through boto3 (`ensure_image_cleanup`).
     """
     nonce = secrets.token_hex(4)
     prefix = f"{ENSURE_PREFIX}-{nonce}"
@@ -189,60 +209,215 @@ def ensure_image_cleanup(
     key_prefix: str,
     aws: Any,
     results: Results,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
 ) -> None:
-    """Deletes what the ensure-image run created and reads each deletion back."""
+    """Deletes what the ensure-image run created and reads each deletion back.
+
+    Everything is found by the run's prefix, which carries its nonce, as well as by what the
+    report names: a test that fails before it records its image or its VM still leaves them
+    (#310), and a report with nothing in it must not read as an account with nothing in it.
+    VMs go first, so no VM still runs from an image the next step deletes.
+    """
     plane = aws.client(SERVICE)
+    ensure_image_vm_cleanup(report, prefix, plane, results, sleep, clock)
+    ensure_image_image_cleanup(report, prefix, plane, results, sleep, clock)
+
     s3 = aws.client("s3")
-    logs = aws.client("logs")
-    name = str(report.get("name") or "")
-    arn = report.get("arn")
-
-    image_gone = True
-    detail = "no image was created"
-    if arn:
-        try:
-            state = plane.get_microvm_image(imageIdentifier=arn).get("state")
-            image_gone = False
-            detail = f"still present as {state}"
-            with contextlib.suppress(Exception):
-                plane.delete_microvm_image(imageIdentifier=arn)
-        except Exception as exc:  # noqa: BLE001 - the error class is the finding
-            image_gone = type(exc).__name__ == "ResourceNotFoundException"
-            detail = type(exc).__name__
-    results.check("the ensured image is deleted", image_gone, detail)
-
-    vm_id = (report.get("vm") or {}).get("id")
-    vm_state = "no VM was launched"
-    vm_ok = True
-    if vm_id:
-        try:
-            vm_state = str(plane.get_microvm(microvmIdentifier=vm_id).get("state"))
-            vm_ok = vm_state == "TERMINATED"
-        except Exception as exc:  # noqa: BLE001
-            vm_state, vm_ok = type(exc).__name__, False
-    results.check("the ensure-image VM is terminated", vm_ok, f"{vm_id}: {vm_state}")
-
-    listed = s3.list_objects_v2(Bucket=bucket, Prefix=f"{key_prefix}/")
-    keys = [item["Key"] for item in listed.get("Contents") or []]
-    if keys:
-        s3.delete_objects(
-            Bucket=bucket, Delete={"Objects": [{"Key": key} for key in keys]}
+    try:
+        listed = s3.list_objects_v2(Bucket=bucket, Prefix=f"{key_prefix}/")
+        keys = [item["Key"] for item in listed.get("Contents") or []]
+        if keys:
+            s3.delete_objects(
+                Bucket=bucket, Delete={"Objects": [{"Key": key} for key in keys]}
+            )
+        remaining = s3.list_objects_v2(Bucket=bucket, Prefix=f"{key_prefix}/").get(
+            "KeyCount", 0
         )
-    remaining = s3.list_objects_v2(Bucket=bucket, Prefix=f"{key_prefix}/").get(
-        "KeyCount", 0
-    )
+        results.check(
+            ENSURE_OBJECTS_GONE,
+            remaining == 0,
+            f"deleted={keys!r} remaining={remaining}",
+        )
+    except Exception as exc:  # noqa: BLE001 - the error class is the finding
+        results.check(ENSURE_OBJECTS_GONE, False, type(exc).__name__)
+
+    logs = aws.client("logs")
+    try:
+        found = ensure_image_log_groups(logs, prefix)
+        for group in found:
+            with contextlib.suppress(Exception):
+                logs.delete_log_group(logGroupName=group)
+        left = ensure_image_log_groups(logs, prefix)
+        results.check(
+            ENSURE_GROUP_GONE,
+            not left,
+            f"prefix={SERVICE_LOG_PREFIX}{prefix} deleted={found!r} remaining={left!r}",
+        )
+    except Exception as exc:  # noqa: BLE001 - the error class is the finding
+        results.check(ENSURE_GROUP_GONE, False, type(exc).__name__)
+
+
+def run_owns(prefix: str, name: str | None) -> bool:
+    """Whether an image name is this run's: the prefix alone, or the prefix and its hash."""
+    return bool(name) and (name == prefix or str(name).startswith(f"{prefix}-"))
+
+
+def image_name_of(arn: str | None) -> str | None:
+    """The image name in an image ARN, whichever separator it's written with."""
+    match = IMAGE_ARN_NAME.search(arn or "")
+    return match.group(1) if match else None
+
+
+def ensure_image_images(plane: Any, prefix: str) -> list[dict[str, Any]]:
+    """Every image this run's prefix names, across every page of the listing."""
+    return [
+        item
+        for page in plane.get_paginator("list_microvm_images").paginate()
+        for item in page.get("items", [])
+        if run_owns(prefix, item.get("name"))
+    ]
+
+
+def ensure_image_vms(plane: Any, prefix: str) -> dict[str, str]:
+    """Every VM launched from one of this run's images, by id, with its listed state."""
+    return {
+        str(item.get("microvmId")): str(item.get("state"))
+        for page in plane.get_paginator("list_microvms").paginate()
+        for item in page.get("items", [])
+        if run_owns(prefix, image_name_of(item.get("imageArn")))
+    }
+
+
+def ensure_image_log_groups(logs: Any, prefix: str) -> list[str]:
+    """Every build log group of this run's images, across every page of the listing."""
+    names = [
+        str(group.get("logGroupName"))
+        for page in logs.get_paginator("describe_log_groups").paginate(
+            logGroupNamePrefix=f"{SERVICE_LOG_PREFIX}{prefix}"
+        )
+        for group in page.get("logGroups", [])
+    ]
+    return [
+        name
+        for name in names
+        if run_owns(prefix, name.removeprefix(SERVICE_LOG_PREFIX))
+    ]
+
+
+def image_state(plane: Any, arn: str | None) -> str | None:
+    """The state `GetMicrovmImage` reports for `arn`, or None once it's gone (or never was).
+
+    Only `ResourceNotFoundException` reads as gone. Any other error is returned as its class
+    name, so a call that can't answer never passes for one that said the image is deleted.
+    """
+    if not arn:
+        return None
+    try:
+        return str(plane.get_microvm_image(imageIdentifier=arn).get("state"))
+    except Exception as exc:  # noqa: BLE001 - the error class is the finding
+        if type(exc).__name__ == "ResourceNotFoundException":
+            return None
+        return type(exc).__name__
+
+
+def ensure_image_vm_cleanup(
+    report: dict[str, Any],
+    prefix: str,
+    plane: Any,
+    results: Results,
+    sleep: Callable[[float], None],
+    clock: Callable[[], float],
+) -> None:
+    """Terminates every VM of the run that isn't yet, and waits for each to read TERMINATED.
+
+    The VMs are the listing's, matched by the image each was launched from, plus the one
+    the report names, read by its id. An error from either read ends the wait as a failure.
+    The detail keeps the first read, which is what the test's own teardown left.
+    """
+    vm_id = (report.get("vm") or {}).get("id")
+    states: dict[str, str] = {}
+    first: dict[str, str] | None = None
+    error = None
+    deadline = clock() + CLEANUP_SECONDS
+    while True:
+        try:
+            states = ensure_image_vms(plane, prefix)
+            if vm_id:
+                states[vm_id] = str(
+                    plane.get_microvm(microvmIdentifier=vm_id).get("state")
+                )
+        except Exception as exc:  # noqa: BLE001 - the error class is the finding
+            error = type(exc).__name__
+            break
+        if first is None:
+            first = dict(states)
+        live = [vm for vm, state in states.items() if state != "TERMINATED"]
+        for vm in live:
+            if states[vm] != "TERMINATING":
+                with contextlib.suppress(Exception):
+                    plane.terminate_microvm(microvmIdentifier=vm)
+        if not live or clock() > deadline:
+            break
+        sleep(CLEANUP_POLL_SECONDS)
     results.check(
-        "the ensure-image artifacts are deleted from S3",
-        remaining == 0,
-        f"deleted={keys!r} remaining={remaining}",
+        ENSURE_VM_TERMINATED,
+        error is None and all(state == "TERMINATED" for state in states.values()),
+        f"report={vm_id!r} found={first!r} last={states!r}"
+        + (f" error={error}" if error else ""),
     )
 
-    group = f"/aws/lambda-microvms/{name or prefix}"
-    with contextlib.suppress(Exception):
-        logs.delete_log_group(logGroupName=group)
-    left = logs.describe_log_groups(logGroupNamePrefix=group).get("logGroups") or []
+
+def ensure_image_image_cleanup(
+    report: dict[str, Any],
+    prefix: str,
+    plane: Any,
+    results: Results,
+    sleep: Callable[[float], None],
+    clock: Callable[[], float],
+) -> None:
+    """Deletes every image of the run, retrying until the listing and the report's ARN agree
+    it's gone.
+
+    The delete is retried because an image still `CREATING` (a build the test abandoned)
+    refuses it, so one attempt could report a leak as cleaned. The ARN is read as well as
+    the listing, so a listing that reads nothing (a changed page shape) can't pass for a
+    deleted image when the report says one exists.
+    """
+    arn = report.get("arn")
+    seen: list[str] = [arn] if arn else []
+    last: dict[str, str] = {}
+    remaining: list[dict[str, Any]] | None = None
+    by_arn: str | None = None
+    deadline = clock() + CLEANUP_SECONDS
+    while True:
+        try:
+            remaining = ensure_image_images(plane, prefix)
+        except Exception as exc:  # noqa: BLE001 - the error class is the finding
+            last["listing"] = type(exc).__name__
+            remaining = None
+            break
+        for image in remaining:
+            listed = str(image.get("imageArn"))
+            if listed not in seen:
+                seen.append(listed)
+            last[listed] = str(image.get("state"))
+            if image.get("state") != "DELETING":
+                with contextlib.suppress(Exception):
+                    plane.delete_microvm_image(imageIdentifier=listed)
+        by_arn = image_state(plane, arn)
+        if by_arn is not None and arn:
+            last[f"{arn} (by ARN)"] = by_arn
+            if by_arn != "DELETING":
+                with contextlib.suppress(Exception):
+                    plane.delete_microvm_image(imageIdentifier=arn)
+            by_arn = image_state(plane, arn)
+        if (not remaining and by_arn is None) or clock() > deadline:
+            break
+        sleep(CLEANUP_POLL_SECONDS)
     results.check(
-        "the ensure-image build log group is deleted",
-        not [g for g in left if g.get("logGroupName") == group],
-        f"group={group!r} remaining={[g.get('logGroupName') for g in left]!r}",
+        ENSURE_IMAGE_GONE,
+        remaining == [] and by_arn is None,
+        f"prefix={prefix!r} found={seen!r} last={last!r} "
+        f"the test's own delete={report.get('cleanup')!r}",
     )
