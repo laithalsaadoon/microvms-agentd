@@ -1,0 +1,129 @@
+# ── the live-gated release: release.yml's job graph, the gate's rule, and the draft read from disk ──
+
+# release.yml's job graph (`tools/release-gate.py graph`, `mise run release:check`). Each entry
+# breaks one rule in the real release.yml, or the detector the rules stand on.
+
+[[fault]]
+id = "release-gate-publish-needs"
+guard = "tools/release-gate.py"
+run = ["./tools/release-gate.py", "graph"]
+expect = "exit-nonzero"
+suite = "script"
+message = "job `npm` publishes (`npm publish`) and doesn't name `live-gate` in its `needs`"
+transform = { file = ".github/workflows/release.yml", replace = "    needs: [addons, live-gate]\n", with = "    needs: addons\n" }
+
+[[fault]]
+id = "release-gate-environment"
+guard = "tools/release-gate.py"
+run = ["./tools/release-gate.py", "graph"]
+expect = "exit-nonzero"
+suite = "script"
+message = "job `github-release` publishes (`draft=false`) outside the `release` environment"
+transform = { file = ".github/workflows/release.yml", replace = "    needs: [draft, live-gate]\n    runs-on: ubuntu-latest\n    environment: release\n", with = "    needs: [draft, live-gate]\n    runs-on: ubuntu-latest\n" }
+
+# Dropping `--draft` publishes the release on the tag push, from a job that doesn't wait.
+[[fault]]
+id = "release-gate-draft-flag"
+guard = "tools/release-gate.py"
+run = ["./tools/release-gate.py", "graph"]
+expect = "exit-nonzero"
+suite = "script"
+message = "job `draft` publishes (`gh release create without --draft`) and doesn't name `live-gate`"
+transform = { file = ".github/workflows/release.yml", replace = "          --draft\n", with = "" }
+
+[[fault]]
+id = "release-gate-status-override"
+guard = "tools/release-gate.py"
+run = ["./tools/release-gate.py", "graph"]
+expect = "exit-nonzero"
+suite = "script"
+message = "with `if: always()`, which runs it after a job it needs failed"
+transform = { file = ".github/workflows/release.yml", replace = "    needs: [guard, wheels, sdist, addons, cli, live-gate]\n", with = "    needs: [guard, wheels, sdist, addons, cli, live-gate]\n    if: always()\n" }
+
+[[fault]]
+id = "release-gate-verify-step"
+guard = "tools/release-gate.py"
+run = ["./tools/release-gate.py", "graph"]
+expect = "exit-nonzero"
+suite = "script"
+message = "job `live-gate` doesn't run `tools/release-gate.py verify`"
+transform = { file = ".github/workflows/release.yml", replace = "        run: ./tools/release-gate.py verify --tag", with = "        run: echo --tag" }
+
+[[fault]]
+id = "release-gate-continue-on-error"
+guard = "tools/release-gate.py"
+run = ["./tools/release-gate.py", "graph"]
+expect = "exit-nonzero"
+suite = "script"
+message = "job `live-gate` sets `continue-on-error`"
+transform = { file = ".github/workflows/release.yml", replace = "      actions: read # lists live-conformance.yml's runs and downloads their marker\n", with = "      actions: read # lists live-conformance.yml's runs and downloads their marker\n    continue-on-error: true\n" }
+
+# The floor: a release.yml whose jobs the check can't find.
+[[fault]]
+id = "release-gate-floor"
+guard = "tools/release-gate.py"
+run = ["./tools/release-gate.py", "graph"]
+expect = "exit-nonzero"
+suite = "script"
+message = "has no jobs, so there's nothing to hold to the gate"
+transform = { file = ".github/workflows/release.yml", replace = "\njobs:\n", with = "\nretired-jobs:\n" }
+
+# The sentinel: a detector that stops matching `cargo publish` still finds the crates.io job by
+# its auth action, so only the sentinel says it read less.
+[[fault]]
+id = "release-gate-sentinel"
+guard = "tools/release-gate.py"
+run = ["./tools/release-gate.py", "graph"]
+expect = "exit-nonzero"
+suite = "script"
+message = "no job in .github/workflows/release.yml runs `cargo publish` (crates.io)"
+transform = { file = "tools/release-gate.py", replace = "(\"cargo publish\", re.compile(r\"\\bcargo\\s+publish\\b\" + _NOT_DRY)),", with = "(\"cargo publish\", re.compile(r\"\\bcargo\\s+publishes\\b\" + _NOT_DRY))," }
+
+# What counts as a live pass (`decide`, which `verify` runs in release.yml's `live-gate`).
+
+[[fault]]
+id = "release-gate-unit-commit"
+guard = "test_release_gate.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_release_gate.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_run_on_another_commit_is_refused ("
+transform = { file = "tools/release-gate.py", replace = "                (\"head_sha\", commit),\n", with = "" }
+
+[[fault]]
+id = "release-gate-unit-ref"
+guard = "test_release_gate.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_release_gate.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_run_on_another_ref_is_refused ("
+transform = { file = "tools/release-gate.py", replace = "                (\"head_branch\", tag),\n", with = "" }
+
+[[fault]]
+id = "release-gate-unit-conclusion"
+guard = "test_release_gate.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_release_gate.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_failed_or_unfinished_run_is_refused ("
+transform = { file = "tools/release-gate.py", replace = "                (\"conclusion\", \"success\"),\n", with = "" }
+
+# A marker from an earlier draft of the same tag is the one a stale run would offer.
+[[fault]]
+id = "release-gate-unit-sums"
+guard = "test_release_gate.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_release_gate.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_marker_for_another_draft_is_refused ("
+transform = { file = "tools/release-gate.py", replace = "        if marker.get(\"sha256sums\") != sums:\n", with = "        if False:\n" }
+
+# The draft read from `$MICROVM_RELEASE_DIR`: a missing bundle must refuse, since answering
+# Unreachable would send the policy to a SHA256SUMS the same directory supplies.
+[[fault]]
+id = "release-dir-never-checksum"
+guard = "provision::release::tests::a_release_directory_without_its_bundle_is_refused_despite_a_matching_checksum"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "provision::release::tests::a_release_directory_without_its_bundle_is_refused_despite_a_matching_checksum"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/microvms-edges/src/provision/release.rs", replace = "Err(reason) => Bundles::Absent(reason),", with = "Err(reason) => Bundles::Unreachable(reason)," }

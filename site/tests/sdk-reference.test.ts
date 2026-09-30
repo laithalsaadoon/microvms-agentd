@@ -173,6 +173,22 @@ describe("the TypeScript SDK reference", () => {
     expect(html).toContain(summary)
   })
 
+  it("writes a symbol-keyed member as the declarations do, not as a property", () => {
+    // typedoc-plugin-markdown reduced `[asyncIterator](): T` to `asyncIterator: T` (#337).
+    const keyed = [...TS_BODIES].flatMap(([name, body]) =>
+      [...body.matchAll(/^ {2}\[globalThis\.Symbol\.(\w+)\]\(\): /gm)].map((match) => ({
+        name,
+        key: match[1] ?? ""
+      }))
+    )
+    expect(keyed).toContainEqual({ name: "ExecStream", key: "asyncIterator" })
+    for (const { name, key } of keyed) {
+      const { twin } = built(`reference/typescript/classes/${name.toLowerCase()}`)
+      expect(twin, name).toContain(`\`\`\`ts\n[Symbol.${key}](): `)
+      expect(twin, name).not.toMatch(new RegExp(`^${key}: `, "m"))
+    }
+  })
+
   it("documents no constructor napi-rs did not declare", () => {
     // `Region` has only static factories, so `new Region()` throws; the page must not offer it.
     expect(TS_BODIES.get("Region")).toBeDefined()

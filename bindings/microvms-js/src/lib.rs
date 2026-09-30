@@ -19,9 +19,11 @@
 //! This is the single most important line in the crate. `#[napi(object)]` converts to and from
 //! a plain JS object *by structure*, so `{ seconds: 3600 }` would satisfy a
 //! `RunHookTimeout` parameter and `{ amount: 1.5 }` an `EstimatedUsd` — which is precisely
-//! the coercion those types exist to prevent. A `#[napi]` class is nominal: napi v3 emits a
-//! real TypeScript class, `tsc` rejects an object literal, and at runtime the argument
-//! conversion rejects a non-instance *before* any Rust runs.
+//! the coercion those types exist to prevent. A `#[napi]` class is a real TypeScript class, so
+//! `tsc` rejects those two object literals, which lack the class's other members, and at runtime
+//! the argument conversion rejects a non-instance *before* any Rust runs. `tsc` still compares
+//! classes by structure, so two classes with the same members are one type to it; [`hooks`]
+//! says how the two timeout classes differ. `__test__/types/hooks.ts` holds both claims.
 //!
 //! `#[napi(object)]` appears only where the shape carries no closure and is either a pure
 //! result ([`exec::ExecResult`], [`session::Health`], [`sandbox::TeardownReport`]) or an

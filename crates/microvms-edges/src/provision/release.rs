@@ -32,6 +32,22 @@
 //! every release carries both the bundle asset and `SHA256SUMS`, and before that neither, so
 //! none of these refusals turns away a release the checksum would have passed.
 //!
+//! # A release on disk
+//!
+//! With [`RELEASE_DIR_VARIABLE`] set, [`HttpsFetch`] reads release `<tag>`'s files from
+//! `$MICROVM_RELEASE_DIR/<tag>/`, where `gh release download <tag> --dir` puts them, and not
+//! from GitHub. It's for a release nobody can download anonymously yet: the release workflow
+//! drafts each release, and a draft is visible only to an account that can push, so the live
+//! run that gates publishing reads the draft's assets from disk (`live-conformance.yml`). It
+//! serves a machine that can't reach GitHub as well.
+//!
+//! The proof doesn't change. The bundle must be the `agentd.sigstore.json` beside the asset
+//! and verify against [`Signer::release`] for the requested tag, and every failure to read it
+//! is [`Bundles::Absent`]: a directory always answers, so this source never reaches the
+//! `SHA256SUMS` fallback, and the one proof it can give is the attestation. A set variable is
+//! the source: a directory without the requested release is an error, never a fall-through
+//! to GitHub, for the reason a caller-supplied binary is.
+//!
 //! # Why every request gets a runtime of its own
 //!
 //! [`Fetch`] is synchronous, and the CLI calls it from inside its own tokio runtime, on a worker
@@ -41,7 +57,8 @@
 
 use std::fmt;
 use std::future::Future;
-use std::path::Path;
+use std::io::Read as _;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use microvms_app::provision::{
@@ -56,6 +73,10 @@ pub const BUNDLE_ASSET: &str = "agentd.sigstore.json";
 
 /// The variable whose token raises the attestations API's rate limit.
 pub const TOKEN_VARIABLE: &str = "GITHUB_TOKEN";
+
+/// The variable naming a directory of downloaded releases, read in place of GitHub: release
+/// `<tag>`'s files are in `<dir>/<tag>/`. See the module docs.
+pub const RELEASE_DIR_VARIABLE: &str = "MICROVM_RELEASE_DIR";
 
 /// The largest daemon asset accepted. Releases so far are about 2 MiB; a ceiling keeps a
 /// hostile or broken server from filling memory.
@@ -193,6 +214,59 @@ pub fn asset_url(tag: &str, asset: &str) -> String {
 /// The attestations API's URL for the artifact whose SHA-256 is `sha256`.
 pub fn attestations_url(sha256: &str) -> String {
     format!("https://api.github.com/repos/{RELEASE_REPO}/attestations/sha256:{sha256}")
+}
+
+/// Releases already on disk, release `<tag>`'s files in `<root>/<tag>/`: the source behind
+/// [`RELEASE_DIR_VARIABLE`]. See the module docs for why it never answers
+/// [`Bundles::Unreachable`].
+#[derive(Clone, Debug)]
+struct DirectoryRelease {
+    root: PathBuf,
+}
+
+impl DirectoryRelease {
+    /// Release `tag`'s file `name`, with the variable that pointed here named in any error.
+    fn read(&self, tag: &str, name: &str, limit: usize) -> Result<Vec<u8>, String> {
+        read_limited(&self.root.join(tag).join(name), limit)
+            .map_err(|reason| format!("${RELEASE_DIR_VARIABLE}: {reason}"))
+    }
+}
+
+impl ReleaseSource for DirectoryRelease {
+    fn asset(&self, tag: &str, name: &str) -> Result<Vec<u8>, String> {
+        self.read(tag, name, ASSET_LIMIT)
+    }
+
+    fn checksums(&self, tag: &str) -> Result<String, String> {
+        let body = self.read(tag, CHECKSUMS, SMALL_LIMIT)?;
+        String::from_utf8(body).map_err(|_| format!("{CHECKSUMS} is not UTF-8"))
+    }
+
+    fn attestations(&self, tag: &str, _: &str) -> Bundles {
+        // Absent on every failure, a missing file and an unreadable one alike. Unreachable
+        // would send the policy to `SHA256SUMS`, and a directory holding an asset with a
+        // matching checksum but no bundle is exactly a replaced asset.
+        match self.read(tag, BUNDLE_ASSET, SMALL_LIMIT) {
+            Ok(body) => Bundles::Published(vec![String::from_utf8_lossy(&body).into()]),
+            Err(reason) => Bundles::Absent(reason),
+        }
+    }
+}
+
+/// The bytes of the file at `path`, refused when there are more than `limit` of them: the same
+/// ceiling a download has.
+fn read_limited(path: &Path, limit: usize) -> Result<Vec<u8>, String> {
+    let file = std::fs::File::open(path)
+        .map_err(|error| format!("could not open {}: {error}", path.display()))?;
+    let mut bytes = Vec::new();
+    // One byte past the limit is enough to tell a file over it from one exactly at it.
+    file.take(limit as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+    if bytes.len() > limit {
+        return Err(format!("{} is over {limit} bytes", path.display()));
+    }
+    Ok(bytes)
 }
 
 /// The bundles in an attestations API response, as JSON text for the verifier.
@@ -443,17 +517,26 @@ impl<S: ReleaseSource, V: AttestationVerifier> Fetch for PolicyFetch<S, V> {
     }
 }
 
-/// The shipped [`Fetch`]: [`PolicyFetch`] over [`GitHubRelease`] and [`SigstoreVerifier`].
+/// The shipped [`Fetch`]: [`PolicyFetch`] over [`GitHubRelease`] and [`SigstoreVerifier`], or
+/// over the release directory [`RELEASE_DIR_VARIABLE`] names when it's set.
 #[derive(Clone, Debug, Default)]
 pub struct HttpsFetch {
     release: GitHubRelease,
+    directory: Option<DirectoryRelease>,
 }
 
 impl HttpsFetch {
-    /// A fetch that sends [`TOKEN_VARIABLE`]'s value from `env` to the attestations API.
+    /// A fetch that sends [`TOKEN_VARIABLE`]'s value from `env` to the attestations API, or,
+    /// when `env` sets [`RELEASE_DIR_VARIABLE`], one that reads the release from that
+    /// directory. An empty value is unset.
     pub fn from_env(env: &dyn Fn(&str) -> Option<String>) -> Self {
         Self {
             release: GitHubRelease::from_env(env),
+            directory: env(RELEASE_DIR_VARIABLE)
+                .filter(|root| !root.is_empty())
+                .map(|root| DirectoryRelease {
+                    root: PathBuf::from(root),
+                }),
         }
     }
 }
@@ -465,11 +548,25 @@ impl Fetch for HttpsFetch {
         dest: &Path,
         progress: &mut dyn FnMut(&str),
     ) -> Result<Verification, String> {
-        PolicyFetch {
-            source: self.release.clone(),
-            verifier: SigstoreVerifier::public_good()?,
+        let verifier = SigstoreVerifier::public_good()?;
+        match &self.directory {
+            Some(directory) => {
+                progress(&format!(
+                    "reading {ASSET} {tag} from {} (${RELEASE_DIR_VARIABLE})",
+                    directory.root.join(tag).display()
+                ));
+                PolicyFetch {
+                    source: directory.clone(),
+                    verifier,
+                }
+                .fetch(tag, dest, progress)
+            }
+            None => PolicyFetch {
+                source: self.release.clone(),
+                verifier,
+            }
+            .fetch(tag, dest, progress),
         }
-        .fetch(tag, dest, progress)
     }
 }
 
@@ -895,7 +992,13 @@ mod tests {
         let with =
             GitHubRelease::from_env(&|name| (name == TOKEN_VARIABLE).then(|| "ghp_secret".into()));
         assert_eq!(with.token.as_deref(), Some("ghp_secret"));
-        let printed = format!("{:?}", HttpsFetch { release: with });
+        let printed = format!(
+            "{:?}",
+            HttpsFetch {
+                release: with,
+                directory: None,
+            }
+        );
         assert!(!printed.contains("ghp_secret"), "{printed}");
         assert!(printed.contains("redacted"), "{printed}");
         assert_eq!(
@@ -905,6 +1008,109 @@ mod tests {
         assert_eq!(GitHubRelease::from_env(&|_| None).token, None);
         let fetch = HttpsFetch::from_env(&|name| (name == TOKEN_VARIABLE).then(|| "t".into()));
         assert_eq!(fetch.release.token.as_deref(), Some("t"));
+    }
+
+    /// The committed release in `<root>/<tag>/`, laid out as `gh release download --dir`
+    /// writes it, with or without its bundle.
+    fn release_dir(tag: &str, bundle: bool) -> tempfile::TempDir {
+        let root = tempfile::tempdir().expect("a temp dir");
+        let dir = root.path().join(tag);
+        std::fs::create_dir(&dir).expect("the tag's directory");
+        std::fs::write(dir.join(ASSET), agentd()).expect("the asset");
+        std::fs::write(dir.join(CHECKSUMS), SUMS).expect("the checksums");
+        if bundle {
+            std::fs::write(dir.join(BUNDLE_ASSET), BUNDLE).expect("the bundle");
+        }
+        root
+    }
+
+    /// The shipped fetch with `$MICROVM_RELEASE_DIR` naming `root`.
+    fn from_dir(root: &Path) -> HttpsFetch {
+        let root = root.display().to_string();
+        HttpsFetch::from_env(&|name| (name == RELEASE_DIR_VARIABLE).then(|| root.clone()))
+    }
+
+    /// **A release read from `$MICROVM_RELEASE_DIR` is proven by its attestation** (BIND-18):
+    /// the committed release on disk verifies against its own bundle and lands at the
+    /// destination, and the first progress line names where it was read from.
+    #[test]
+    fn a_release_directory_is_proven_by_its_attestation() {
+        let root = release_dir(TAG, true);
+        let dest = root.path().join("installed");
+        let mut lines = Vec::new();
+        let verification = from_dir(root.path())
+            .fetch(TAG, &dest, &mut |line| lines.push(line.to_string()))
+            .expect("the directory's release verifies");
+        assert_eq!(verification, Verification::Attestation);
+        assert_eq!(std::fs::read(&dest).expect("installed"), agentd());
+        let dir = root.path().join(TAG).display().to_string();
+        assert!(
+            lines[0].contains(&dir) && lines[0].contains(RELEASE_DIR_VARIABLE),
+            "{lines:?}"
+        );
+    }
+
+    /// **A release directory without its bundle is refused, even with a matching
+    /// `SHA256SUMS`** (BIND-18): a directory always answers, so the checksum is never
+    /// consulted, and nothing is installed.
+    #[test]
+    fn a_release_directory_without_its_bundle_is_refused_despite_a_matching_checksum() {
+        let root = release_dir(TAG, false);
+        let dest = root.path().join("installed");
+        let refusal = from_dir(root.path())
+            .fetch(TAG, &dest, &mut |_| {})
+            .expect_err("no bundle, no proof");
+        assert!(refusal.contains("publishes no attestation"), "{refusal}");
+        assert!(refusal.contains(RELEASE_DIR_VARIABLE), "{refusal}");
+        assert!(!dest.exists());
+    }
+
+    /// **Another release's files under the requested tag are refused** (BIND-18): the genuine
+    /// v0.7.0 laid out as v0.8.0 fails the signer, which is pinned to the tag asked for, so a
+    /// directory can't pass an older release off as a newer one.
+    #[test]
+    fn another_releases_files_under_the_requested_tag_are_refused() {
+        let root = release_dir("v0.8.0", true);
+        let dest = root.path().join("installed");
+        let refusal = from_dir(root.path())
+            .fetch("v0.8.0", &dest, &mut |_| {})
+            .expect_err("v0.7.0's bundle doesn't prove v0.8.0");
+        assert!(refusal.contains("identity mismatch"), "{refusal}");
+        assert!(!dest.exists());
+    }
+
+    /// A set variable is the source: a directory without the requested release is an error
+    /// naming the missing file, not a fetch from GitHub. An empty variable is unset.
+    #[test]
+    fn a_release_directory_without_the_release_is_an_error_and_an_empty_one_is_unset() {
+        let root = tempfile::tempdir().expect("a temp dir");
+        let refusal = from_dir(root.path())
+            .fetch(TAG, &root.path().join("installed"), &mut |_| {})
+            .expect_err("nothing to read");
+        let missing = root.path().join(TAG).join(ASSET).display().to_string();
+        assert!(refusal.contains(&missing), "{refusal}");
+        assert!(
+            HttpsFetch::from_env(&|_| Some(String::new()))
+                .directory
+                .is_none()
+        );
+        assert!(HttpsFetch::from_env(&|_| None).directory.is_none());
+    }
+
+    /// The directory's `SHA256SUMS` reads back whole, though the policy never asks for it from
+    /// a directory, and a file over its limit is refused while one at the limit is read.
+    #[test]
+    fn a_release_directory_reads_its_checksums_and_refuses_a_file_over_its_limit() {
+        let root = release_dir(TAG, true);
+        let directory = DirectoryRelease {
+            root: root.path().to_path_buf(),
+        };
+        assert_eq!(directory.checksums(TAG).as_deref(), Ok(SUMS));
+        let file = root.path().join("four");
+        std::fs::write(&file, b"four").expect("a file");
+        assert_eq!(read_limited(&file, 4).as_deref(), Ok(&b"four"[..]));
+        let refusal = read_limited(&file, 3).expect_err("over the limit");
+        assert!(refusal.contains("over 3 bytes"), "{refusal}");
     }
 
     /// A request runs from inside a runtime too, which is where the CLI calls it from. A

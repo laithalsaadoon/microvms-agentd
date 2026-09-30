@@ -401,42 +401,44 @@ impl PyExit {
     }
 }
 
-/// One core event as the Python object for its shape.
-pub(crate) fn event_to_py(py: Python<'_>, event: ExecEvent) -> PyResult<Py<PyAny>> {
-    match event {
-        ExecEvent::Output {
-            stream,
-            offset,
-            data,
-        } => Ok(Py::new(
-            py,
-            PyOutputChunk {
+/// One stream event as the class for its shape: what `ExecStream.__next__` yields and
+/// `run_to_completion`'s `on_output` receives.
+///
+/// An enum rather than a `Py<PyAny>`, so the stub says `OutputChunk | Gap | Exit` where it
+/// said `Any`: pyo3 introspects a derived `IntoPyObject` enum as the union of its variants,
+/// and a typed caller's `isinstance` narrowing then reaches each class's getters (#337).
+#[derive(IntoPyObject)]
+pub(crate) enum StreamEvent {
+    Output(PyOutputChunk),
+    Gap(PyGap),
+    Exit(PyExit),
+}
+
+impl From<ExecEvent> for StreamEvent {
+    fn from(event: ExecEvent) -> Self {
+        match event {
+            ExecEvent::Output {
+                stream,
+                offset,
+                data,
+            } => StreamEvent::Output(PyOutputChunk {
                 stream: stream.as_str(),
                 offset,
                 data,
-            },
-        )?
-        .into_any()),
-        ExecEvent::Gap { from, to } => Ok(Py::new(
-            py,
-            PyGap {
+            }),
+            ExecEvent::Gap { from, to } => StreamEvent::Gap(PyGap {
                 start: from,
                 end: to,
-            },
-        )?
-        .into_any()),
-        ExecEvent::Exit(exit) => Ok(Py::new(
-            py,
-            PyExit {
+            }),
+            ExecEvent::Exit(exit) => StreamEvent::Exit(PyExit {
                 timed_out: exit.timed_out,
                 exit_code: exit.exit_code,
                 signal: exit.signal,
                 truncated: exit.truncated,
                 writers_may_be_alive: exit.writers_may_be_alive,
                 offset: exit.offset,
-            },
-        )?
-        .into_any()),
+            }),
+        }
     }
 }
 
@@ -509,7 +511,11 @@ impl ExecStream {
     ///
     /// Blocks with the GIL released, so another Python thread can run while this one
     /// waits on the daemon.
-    fn __next__(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+    ///
+    /// The end is raised rather than returned as `None`, which pyo3 would also turn into
+    /// `StopIteration`, because the stub is read off this return type: `None` would put
+    /// `| None` in an event loop's element type, where no `None` is ever yielded.
+    fn __next__(&self, py: Python<'_>) -> PyResult<StreamEvent> {
         let received = py.detach(|| {
             let mut receiver = self
                 .receiver
@@ -518,9 +524,9 @@ impl ExecStream {
             runtime::block_on_detached(receiver.recv())
         });
         match received {
-            Some(Ok(event)) => Ok(Some(event_to_py(py, event)?)),
+            Some(Ok(event)) => Ok(event.into()),
             Some(Err(error)) => Err(to_py_err(py, &error)),
-            None => Ok(None),
+            None => Err(pyo3::exceptions::PyStopIteration::new_err(())),
         }
     }
 }

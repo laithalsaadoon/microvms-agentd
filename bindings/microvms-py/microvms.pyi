@@ -722,12 +722,16 @@ class ExecStream:
     and never across a Python callback, so it cannot deadlock against the GIL.
     """
     def __iter__(self, /) -> ExecStream: ...
-    def __next__(self, /) -> Any |None:
+    def __next__(self, /) -> OutputChunk |Gap |Exit:
         """
         The next event, or `StopIteration` when the stream ends.
         
         Blocks with the GIL released, so another Python thread can run while this one
         waits on the daemon.
+        
+        The end is raised rather than returned as `None`, which pyo3 would also turn into
+        `StopIteration`, because the stub is read off this return type: `None` would put
+        `| None` in an event loop's element type, where no `None` is ever yielded.
         """
 
 @final

@@ -1,0 +1,14 @@
+# ── Python consumer types (#337): the wheel's stub against examples/typed_usage.py ───
+# CI's "typed consumer checks against the built wheel" step, the same commands in a scratch
+# directory. `collect_stream`'s `assert_type` is the control for the stream's events: with
+# `__next__` typed `Any`, as the stub had it with `| None`, every isinstance branch passes and
+# only the assertion fails.
+
+[[fault]]
+id = "py-typed-consumer-stream-any"
+guard = "bindings/microvms-py/examples/typed_usage.py under ty"
+run = ["bash", "-c", "set -eu; out=$(mktemp -d); trap 'rm -rf \"$out\"' EXIT; uvx maturin@1.14.1 build -q -m bindings/microvms-py/Cargo.toml -o \"$out/wheel\"; uv venv -q \"$out/venv\"; uv pip install -q --python \"$out/venv/bin/python\" \"$out\"/wheel/*.whl; uvx ty@0.0.72 check --python \"$out/venv\" bindings/microvms-py/examples/typed_usage.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "error[type-assertion-failure]"
+transform = { file = "bindings/microvms-py/microvms.pyi", replace = "    def __next__(self, /) -> OutputChunk |Gap |Exit:\n", with = "    def __next__(self, /) -> Any:\n" }
