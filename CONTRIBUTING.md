@@ -15,14 +15,15 @@ mise run ci:local      # CI's Linux jobs, each in a clone shaped like its checko
 mise tasks             # all available tasks
 ```
 
-`ci:local` isn't part of `check`: it builds the tree once per job, keeping a target
-per job (tens of GB under `$TMPDIR`, or `$CI_LOCAL_DIR`), and fuzzes for fuzz.yml's
-time bounds. `mise run ci:<job>` runs one job (`ci:rust`, `ci:security`, `ci:drift`,
-`ci:bindings`, `ci:guards`, `ci:build`, `ci:fuzz`). It tests your branch, and CI tests
-its merge with main, so rebase onto a fresh origin/main before you rely on it. A new
-step in ci.yml needs an entry in `ci/local.toml`, or, for a setup action, a reason in
-its `[actions]` table; the file also records each step `ci:local` skips and why, and
-`ci:parity` in `check` fails without it.
+Each CI job runs one mise task, so `mise run ci:<job>` runs that job's steps here, in this
+worktree (`ci:rust`, `ci:security`, `ci:drift`, `ci:bindings`, `ci:guards`, `ci:build`,
+`ci:fuzz-cli-core`; `mise tasks` lists the rest). A check CI should run is a task the job's `ci:`
+task calls, and `ci:parity` in `check` fails when a task `check` depends on isn't one some job
+reaches. `ci:local` isn't part of `check`: it runs the Linux jobs in clones shaped like their
+checkouts, building the tree once per job and keeping a target per job (tens of GB under
+`$TMPDIR`, or `$CI_LOCAL_DIR`), and fuzzes for fuzz.yml's time bounds; `mise run ci:local --
+security` runs one job. It tests your branch, and CI tests its merge with main, so rebase onto a
+fresh origin/main before you rely on it.
 
 `check` does not create AWS resources. Initial dependency downloads, security
 rule loading, and advisory updates can require network access. Documentation,

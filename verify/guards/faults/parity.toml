@@ -111,8 +111,8 @@ guard = "tools/check-parity.py"
 run = ["./tools/check-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "type Session: ts: spawn has no Python twin and no exemption"
-transform = { file = "verify/parity/capabilities.toml", replace = "name = \"Session\"\nexempt_members.ts = { spawn = { exempt = \"Python has no split-stream spawn\", issue = \"#261\" } }\n", with = "name = \"Session\"\n" }
+message = "type AgentVm: ts: create has no Python twin and no exemption"
+transform = { file = "verify/parity/capabilities.toml", replace = "name = \"AgentVm\"\nexempt_members.ts = { create = \"the async factory idiom; Python constructs with AgentVm(...)\" }\n", with = "name = \"AgentVm\"\n" }
 
 # The self-test's named cases, each against the code that makes it pass.
 [[fault]]

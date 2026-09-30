@@ -52,6 +52,11 @@ on:
       - 'crates/microvms-app/src/session/sse_fuzz.rs'
       - 'crates/microvms-app/src/session/mod.rs'
       - '.github/workflows/fuzz.yml'
+      # The tasks that hold the jobs' steps, the file that pins their tools, and the action
+      # that installs mise.
+      - '.config/mise/tasks/ci.toml'
+      - 'mise.toml'
+      - '.github/actions/mise/**'
 
 permissions:
   contents: read
@@ -64,11 +69,13 @@ permissions:
 # workspace, which nightly's `-Zfeature-unification` does here. Features are additive, so each
 # harness still fuzzes its own crate's code, against dependencies built with every feature some
 # member of the workspace turns on; stable `cargo test` runs each harness per crate on every
-# pull request. The `cargo install` steps run stable cargo (`rust-toolchain.toml`), which
-# ignores both keys with a warning.
-env:
-  CARGO_UNSTABLE_FEATURE_UNIFICATION: "true"
-  CARGO_RESOLVER_FEATURE_UNIFICATION: workspace
+# pull request. The two `ci:fuzz-*` tasks set both keys in their own `env`; the stable cargo that
+# builds their tools ignores them with a warning.
+#
+# Each job has ci.yml's shape: its checkout, the toolchain and cache, `.github/actions/mise`,
+# and one `mise run ci:fuzz-<job>`, whose task holds the builds and the side-by-side fuzzing.
+# cargo-bolero and cargo-fuzz are those tasks' own tools, pinned in mise.toml's `[vars]` and
+# built into the tools cache the `guards-cache` job saves on main.
 
 jobs:
   # The CLI's closed-output harness (CLI-7, CLI-8, CLI-9; #216), in-crate since the CLI has no
@@ -93,39 +100,8 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: install cargo-bolero
-        run: cargo install cargo-bolero --version 0.13.4 --locked
-      # `+nightly`, because `rust-toolchain.toml` pins stable and libFuzzer needs `-Z`. One
-      # harness of each crate, for one input, which builds the crate's fuzz binaries for all of
-      # its harnesses before any of them fuzzes.
-      - name: build the harnesses
-        run: |
-          cargo +nightly bolero test closed_output_fuzz::output_plan -p microvms-cli --runs 1
-          cargo +nightly bolero test wrap_case -p microvms-core --runs 1
-      # One harness a vCPU, each with its output in a log of its own, printed whole once all
-      # have ended: a failed harness's outside a collapsed group, after an error naming it.
-      - name: fuzz the harnesses side by side
-        run: |
-          logs=$(mktemp -d) status=0
-          declare -a harness=()
-          start() { "${@:2}" > "$logs/$1.log" 2>&1 & harness[$!]=$1; }
-          finish() {
-            for pid in "${!harness[@]}"; do
-              name=${harness[$pid]}
-              if wait "$pid"; then
-                echo "::group::$name passed"; cat "$logs/$name.log"; echo "::endgroup::"
-              else
-                status=1; echo "::error::$name failed; its output follows"; cat "$logs/$name.log"
-              fi
-            done
-            harness=()
-          }
-          start closed-output cargo +nightly bolero test closed_output_fuzz::output_plan -p microvms-cli -T 120s
-          start wrap cargo +nightly bolero test wrap_case -p microvms-core -T 120s
-          start ignore-rules cargo +nightly bolero test ignore_rules_agree_with_mobys_regex_translation -p microvms-core -T 60s
-          start context-hash cargo +nightly bolero test the_context_hash_extends_the_legacy_one_and_follows_every_entry -p microvms-core -T 60s
-          finish
-          exit "$status"
+      - uses: ./.github/actions/mise
+      - run: mise run ci:fuzz-cli-core
       # A crash writes a reproducer into the harness's `__fuzz__/`; surface it rather than
       # letting it die with the runner.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -161,47 +137,8 @@ jobs:
             .
             crates/agentd/fuzz
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: install cargo-fuzz and cargo-bolero
-        run: |
-          cargo install cargo-fuzz --locked
-          cargo install cargo-bolero --version 0.13.4 --locked
-      # `cargo fuzz` runs from the directory that holds `fuzz/`, here and below.
-      - name: build tar_extract
-        working-directory: crates/agentd
-        run: cargo +nightly fuzz build tar_extract
-      # See the `cli-core` job.
-      - name: build the harnesses
-        run: |
-          cargo +nightly bolero test exec_start_fuzz::start_resolution -p agentd --runs 1
-          cargo +nightly bolero test provision_fuzz::version -p microvms-edges --runs 1
-          cargo +nightly bolero test control::posture_fuzz::posture_matches_the_launch -p microvms-app --runs 1
-      # See the `cli-core` job. Four two-minute harnesses, then the four provisioning parsers.
-      - name: fuzz the harnesses side by side
-        run: |
-          logs=$(mktemp -d) status=0
-          declare -a harness=()
-          start() { "${@:2}" > "$logs/$1.log" 2>&1 & harness[$!]=$1; }
-          finish() {
-            for pid in "${!harness[@]}"; do
-              name=${harness[$pid]}
-              if wait "$pid"; then
-                echo "::group::$name passed"; cat "$logs/$name.log"; echo "::endgroup::"
-              else
-                status=1; echo "::error::$name failed; its output follows"; cat "$logs/$name.log"
-              fi
-            done
-            harness=()
-          }
-          start tar-extract env -C crates/agentd cargo +nightly fuzz run tar_extract -- -max_total_time=120
-          start exec-start cargo +nightly bolero test exec_start_fuzz::start_resolution -p agentd -T 120s
-          start egress-posture cargo +nightly bolero test control::posture_fuzz::posture_matches_the_launch -p microvms-app -T 120s
-          start event-stream cargo +nightly bolero test session::sse_fuzz::hostile_stream_bytes_stay_bounded_and_every_event_round_trips -p microvms-app -T 120s
-          finish
-          for target in version sums record elf; do
-            start "provision-$target" cargo +nightly bolero test "provision_fuzz::$target" -p microvms-edges -T 30s
-          done
-          finish
-          exit "$status"
+      - uses: ./.github/actions/mise
+      - run: mise run ci:fuzz-daemon-edges-app
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: failure()
         with:

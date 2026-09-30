@@ -31,7 +31,7 @@ description = "The mutants wrapper's unit tests, and the skip sites and exclusio
 # The cheap half of `mutants`, in `check` and in CI's `security` job. A fake cargo stands in for
 # cargo-mutants, and the CI job's own steps run from ci.yml over a throwaway repo, so a broken
 # wrapper or step fails here rather than as a green shard that mutated nothing.
-run = "{{vars.pytest}} --with 'pyyaml==6.0.3' pytest -n auto -q -p no:cacheprovider tools/test_check_mutants.py"
+run = "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_check_mutants.py"
 
 [mutants]
 description = "Mutation-test the Rust this branch changes against origin/main; fails on a mutant its tests miss"
@@ -44,6 +44,50 @@ description = "Mutation-test the Rust this branch changes against origin/main; f
 #
 # A per-task tool, for the lychee task's reason: nothing else needs it on a fresh clone. mise
 # builds it from source (mise.toml's `[settings]` says why), about three minutes the first
-# time. CI installs the same version's release binary by checksum.
-tools = { "cargo:cargo-mutants" = "27.1.0" }
+# time. CI builds the same version into its tools cache (`ci:tools`).
+tools = { "cargo:cargo-mutants" = "{{vars.cargo_mutants}}" }
 run = "./tools/check-mutants.py"
+
+# ── the bindings, built and tested the way they ship ────────────────────────
+#
+# `cargo test --workspace` reports no tests for the binding crates: their suites run only under
+# the toolchains that ship them, which is where BIND-2 and BIND-5 live (nine planted bypasses,
+# each with a test that goes red if the door reopens). Out of `check`, because each builds a
+# binding; CI's `bindings` job runs them, and `mise run ci:bindings` runs that job here.
+
+["bindings:py"]
+description = "Build the Python binding into .venv-bindings and run its tests"
+# `maturin develop` installs into the active environment, so the tests get one of their own,
+# made fresh each run.
+shell = "bash -e -c"
+run = '''
+uv venv --clear -q .venv-bindings
+. .venv-bindings/bin/activate
+uvx maturin@1.14.1 develop -m bindings/microvms-py/Cargo.toml
+uv pip install pytest
+pytest bindings/microvms-py/tests -q
+'''
+
+["bindings:py-typed"]
+description = "The typed consumer against the stub as a caller gets it: built into a wheel, installed into a throwaway venv, and checked with ty"
+# A check against the source tree would pass on a stub that never made it into the wheel, which
+# is the failure `py.typed` makes invisible. `ty` rather than mypy or pyright: it's Astral's
+# checker, so it arrives through uvx with no Node runtime, and it reads `py.typed` and `.pyi` by
+# the same PEP 561 rules. Pinned exactly, for a reason its version states: `ty` is pre-1.0, and
+# pre-release checkers add diagnostics between patch releases.
+shell = "bash -e -c"
+run = '''
+rm -rf dist-wheel
+uvx maturin@1.14.1 build -m bindings/microvms-py/Cargo.toml -o dist-wheel
+uv venv --clear -q .venv-typed
+uv pip install --python .venv-typed/bin/python dist-wheel/*.whl
+uvx ty@0.0.72 check --python .venv-typed bindings/microvms-py/examples/typed_usage.py
+'''
+
+["bindings:js"]
+description = "Build the Node addon in place and run its tests"
+# `dts` is the build: it also rewrites `index.d.ts`, so run `dts:check` before this, not after.
+run = [
+  { task = "dts" },
+  'node --test "bindings/microvms-js/__test__/*.mjs"',
+]

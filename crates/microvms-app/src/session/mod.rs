@@ -35,6 +35,7 @@ pub mod files;
 pub mod http;
 pub mod keepalive;
 pub mod proxy;
+pub mod split;
 pub mod sse;
 
 use std::sync::Arc;
@@ -55,6 +56,7 @@ pub use proxy::{
     PROXY_PORT_HEADER, ProxyAuth, ProxyToken, TokenMinter, WS_AUTH_SUBPROTOCOL_PREFIX,
     WS_PORT_SUBPROTOCOL_PREFIX, WS_SUBPROTOCOL,
 };
+pub use split::{GapLog, GapPolicy, OutputGap, Split, SplitItem};
 pub use sse::{ExecEvent, Frame, SseParser};
 
 use crate::error::{Error, ErrorKind, WireKind};
