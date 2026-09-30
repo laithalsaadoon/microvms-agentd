@@ -113,6 +113,9 @@ fn launch(
 
 /// **BIND-11, BIND-12 and BIND-13.** The request-side answer is the decision table's row, a
 /// refused answer is the launch's own refusal, and the session reports the answered posture.
+///
+/// **TRAP-4's caller half.** A connector that isn't a customer-managed connector ARN in the
+/// launch region, and any connector beside `egress`, is refused before a control-plane call.
 #[test]
 fn posture_matches_the_launch() {
     let runtime = tokio::runtime::Builder::new_current_thread()
