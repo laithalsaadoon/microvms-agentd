@@ -157,3 +157,69 @@ expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_an_explicit_base_is_read_at_its_merge_base_with_head ("
 transform = { file = "tools/ratchet.py", replace = "        [\"git\", \"-C\", str(root), \"merge-base\", \"HEAD\", commit.stdout.strip()],\n", with = "        [\"git\", \"-C\", str(root), \"rev-parse\", commit.stdout.strip()],\n" }
+
+# A refusal takes out only the rules that read what it refused, so one bad input doesn't hide a
+# finding in another category: each part of that, reverted, fails its test.
+[[fault]]
+id = "ratchet-collector-refusal-unreads-everything"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "RefusalTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_collector_refusal_leaves_the_other_collectors_running ("
+transform = { file = "tools/ratchet.py", replace = "            refused.append(Refusal(str(error), frozenset(categories)))\n", with = "            refused.append(Refusal(str(error), EVERY))\n" }
+
+[[fault]]
+id = "ratchet-decision-refusal-unreads-everything"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "RefusalTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_refused_decision_leaves_only_its_category_unread ("
+transform = { file = "tools/ratchet.py", replace = "        own = frozenset([named]) if named in CATEGORIES else EVERY\n", with = "        own = EVERY\n" }
+
+[[fault]]
+id = "ratchet-unread-category-held"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "RefusalTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_unread_category_gets_no_rule_and_the_rest_are_held ("
+transform = { file = "tools/ratchet.py", replace = "        if category in skipped:\n            continue\n", with = "" }
+
+[[fault]]
+id = "ratchet-refused-placement-holds-rule-3"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "RefusalTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_refused_placement_file_skips_rule_3_alone ("
+transform = { file = "tools/ratchet.py", replace = "    if \"placement\" in head.unread:\n        return failures\n", with = "" }
+
+[[fault]]
+id = "ratchet-summary-counts-unread"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "RefusalTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_summary_marks_an_unread_category_instead_of_counting_it ("
+transform = { file = "tools/ratchet.py", replace = "        if category in head.unread or category in untrusted:\n", with = "        if False:\n" }
+
+[[fault]]
+id = "ratchet-sentinel-ends-the-run"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "RefusalTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_sentinel_failure_is_printed_first_and_the_tree_is_still_held ("
+transform = { file = "tools/ratchet.py", replace = "        if args.command == \"snapshot\":\n            return 1\n    head = read_tree(REPO)\n", with = "        return 1\n    head = read_tree(REPO)\n" }
+
+# The base is still measured whole: a refused category there would compare as having no drift.
+[[fault]]
+id = "ratchet-base-read-in-part"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "BaseTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_base_the_collectors_refuse_fails ("
+transform = { file = "tools/ratchet.py", replace = "    if tree.refused:\n        raise SystemExit(tree.refused[0].message)\n", with = "" }

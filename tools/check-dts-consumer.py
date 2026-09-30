@@ -45,6 +45,10 @@ The check fails when:
 - `tsc` exits non-zero (its diagnostics print as they are);
 - `tsc --listFiles` doesn't list the declarations and every probe, so a probe that silently
   resolved the package name somewhere else, or a listing this script can't read, fails by name.
+
+A stray file or a probe's missing control or pragma doesn't stop the probes compiling: those
+problems print first, and what `tsc` says about the probes follows them. Only a directory with
+no probe, and an input or a compiler that can't be found, end the check where they are.
 """
 
 from __future__ import annotations
@@ -102,32 +106,37 @@ def package_name(package: Path = JS_PACKAGE) -> str:
     return name
 
 
-def probes(directory: Path) -> list[Path]:
+def probes(directory: Path) -> tuple[list[Path], list[str]]:
+    """The probes under `directory`, and what's wrong with the directory and with them: the
+    files that aren't probes on one line, then the probes' own problems on another. A problem
+    here doesn't stop the probes compiling, since what `tsc` says about them is a finding too;
+    only a directory with no probe at all is refused outright."""
     found = sorted(path.resolve() for path in directory.glob("*.ts"))
     stray = sorted(
         path.resolve()
         for path in directory.rglob("*")
         if path.resolve() not in found and not path.is_dir()
     )
+    problems = []
     if stray:
-        raise ConsumerError(
+        problems.append(
             "; ".join(
                 f"{path} isn't compiled: a probe is a *.ts file directly under {directory}"
                 for path in stray
             )
         )
     if not found:
-        raise ConsumerError(f"no type probes under {directory}")
-    problems = []
+        raise ConsumerError("\n".join([*problems, f"no type probes under {directory}"]))
+    shape = []
     for path in found:
         text = path.read_text(encoding="utf-8")
         if NOCHECK in text:
-            problems.append(f"{path} turns type-checking off ({NOCHECK})")
+            shape.append(f"{path} turns type-checking off ({NOCHECK})")
         if not DIRECTIVE.search(text):
-            problems.append(f"{path} has no {CONTROL} control")
-    if problems:
-        raise ConsumerError("; ".join(problems))
-    return found
+            shape.append(f"{path} has no {CONTROL} control")
+    if shape:
+        problems.append("; ".join(shape))
+    return found, problems
 
 
 def clean_env() -> dict[str, str]:
@@ -187,7 +196,7 @@ def listed(output: str) -> set[Path]:
 def check(dts: Path, directory: Path) -> str:
     versions = pins()
     name = package_name()
-    found = probes(directory)
+    found, problems = probes(directory)
     tsc = locate_tsc(versions)
     # <npx cache>/node_modules/.bin/tsc, so @types sits beside .bin
     type_roots = tsc.parent.parent / "@types"
@@ -223,7 +232,6 @@ def check(dts: Path, directory: Path) -> str:
         )
     output = done.stdout + done.stderr
     read = listed(output)
-    problems = []
     if done.returncode != 0:
         diagnostics = [
             line for line in output.splitlines() if Path(line.strip()) not in read

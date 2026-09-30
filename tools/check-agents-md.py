@@ -1642,9 +1642,12 @@ def check(root: Path) -> list[str]:
     docs = listed(root, *DOC_PATHSPECS)
     docs = [d for d in docs if (root / d).is_file()]
     if not docs:
+        # The census reads the files that run things, not the docs, so it still holds them.
+        present = {f for f in listed(root) if (root / f).exists()}
         return [
             "agents:check: found no docs to read (`git ls-files` returned nothing for"
-            f" {', '.join(DOC_PATHSPECS)}); run this from the repo root or pass --root"
+            f" {', '.join(DOC_PATHSPECS)}); run this from the repo root or pass --root",
+            *census(root, present)[0],
         ]
     problems: list[str] = []
     if ROOT_DOC not in docs:

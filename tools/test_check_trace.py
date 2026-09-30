@@ -11,6 +11,8 @@ it, ast-grep included, because a collector tested against a mocked parser proves
 ast-grep comes from `mise.toml`, so run this through `mise run trace:check`.
 """
 
+import contextlib
+import io
 import os
 import runpy
 import stat
@@ -20,6 +22,7 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -943,6 +946,100 @@ class TracedFiles(unittest.TestCase):
             "verify/spec/traced/CLI.toml: CLI-9 is malformed",
             "verify/spec/traced/GATE.toml isn't named for a requirement group",
             "verify/spec/traced/IMAGE.toml doesn't parse",
+        )
+
+
+class ReadPastRefusals(unittest.TestCase):
+    """A refused traced file fails the run without hiding the rest: the other files' entries,
+    the layers and the threat table are still held, and its problems print first."""
+
+    def read(self, files: dict[str, str]) -> tuple[dict, list[str]]:
+        tree = Tree(
+            self, {f"verify/spec/traced/{name}": text for name, text in files.items()}
+        )
+        return TRACE["read_traced"](
+            tree.root / "verify" / "spec" / "traced", GROUPS, tree.root
+        )
+
+    def test_a_file_that_doesnt_parse_leaves_the_other_files_entries(self):
+        loaded, problems = self.read({"CLI.toml": CLI_FILE, "IMAGE.toml": "[IMAGE-1\n"})
+        self.assertEqual(list(loaded), ["CLI-9", "CLI-10"])
+        self.assertEqual(len(problems), 1)
+        self.assertIn("verify/spec/traced/IMAGE.toml doesn't parse", problems[0])
+
+    def test_a_key_outside_its_group_is_listed_twice_and_kept_in_its_own_file(self):
+        loaded, problems = self.read(
+            {"CLI.toml": CLI_FILE, "IMAGE.toml": '[CLI-9]\nissue = "#1"\n'}
+        )
+        self.assertEqual(
+            problems,
+            [
+                "verify/spec/traced/IMAGE.toml: CLI-9 isn't in the IMAGE group; a group file "
+                "lists only its group's keys",
+                "CLI-9 is listed in more than one file: verify/spec/traced/CLI.toml, "
+                "verify/spec/traced/IMAGE.toml",
+            ],
+        )
+        self.assertEqual(loaded["CLI-9"].file, "verify/spec/traced/CLI.toml")
+
+    def test_the_sentinel_waits_for_a_whole_load(self):
+        # A refused file already fails the run and names itself; the sentinel's line would only
+        # repeat that some file went unread.
+        line = "the sentinel CLI-7 is not in verify/spec/traced/CLI.toml"
+        self.assertIn(line, layer_floors({}, traced("CLI-8")))
+        self.assertNotIn(line, layer_floors({}, traced("CLI-8"), whole=False))
+
+    def run_main(self, globals_: dict) -> tuple[int, str]:
+        """`main --check` over the real tree with some of its globals replaced: its exit code
+        and its stderr."""
+        stderr = io.StringIO()
+        with (
+            mock.patch.dict(TRACE["main"].__globals__, globals_),
+            mock.patch.object(sys, "argv", ["check-trace.py", "--check"]),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(stderr),
+        ):
+            code = TRACE["main"]()
+        return code, stderr.getvalue()
+
+    def real(self) -> dict:
+        sentences = TRACE["spec_keys"]()
+        return load_traced(
+            TRACE["TRACED_DIR"], {key.rsplit("-", 1)[0] for key in sentences}
+        )
+
+    def test_a_refused_file_prints_first_and_the_other_entries_are_still_held(self):
+        entries = {
+            **self.real(),
+            "CLI-99": Traced("#1", {}, "verify/spec/traced/CLI.toml"),
+        }
+        refusal = "verify/spec/traced/IMAGE.toml doesn't parse: Expected ']'"
+        code, err = self.run_main(
+            {"read_traced": lambda directory, groups, root=ROOT: (entries, [refusal])}
+        )
+        self.assertEqual(code, 1)
+        lines = err.splitlines()
+        self.assertEqual(lines[0], f"trace: {refusal}")
+        self.assertIn(
+            "trace: verify/spec/traced/CLI.toml: CLI-99 is traced but not defined in either "
+            "spec",
+            lines,
+        )
+        # The matrix reads every file, so nothing is compared with the doc.
+        self.assertFalse(any("is stale" in line for line in lines), lines)
+
+    def test_a_stale_doc_is_reported_beside_another_problem(self):
+        entries = self.real()
+        untraced = sorted(set(TRACE["spec_keys"]()) - set(entries))[0]
+        entries[untraced] = Traced("#1", {}, "verify/spec/traced/X.toml")
+        code, err = self.run_main(
+            {"read_traced": lambda directory, groups, root=ROOT: (entries, [])}
+        )
+        self.assertEqual(code, 1)
+        self.assertRegex(err, rf"trace: {untraced} has no \w+ layer")
+        self.assertIn(
+            "trace: docs/TRACEABILITY.md is stale: run ./tools/check-trace.py --write",
+            err,
         )
 
 
