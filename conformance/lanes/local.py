@@ -49,7 +49,7 @@ def drive_local_commands(cli: Cli, results: Results) -> None:
     # The documented row for 1024 MiB: peak 4096. Written as a literal pair rather
     # than derived, for the same reason the core's table is data.
     results.check(
-        "the cost size object reports its static headroom from the table",
+        "TRAP-13 the cost size object reports its static headroom from the table",
         size.get("baselineMib") == BASELINE_MEMORY_MIB
         and size.get("peakMib") == 4096
         and size.get("headroomMib") == size["peakMib"] - size["baselineMib"],

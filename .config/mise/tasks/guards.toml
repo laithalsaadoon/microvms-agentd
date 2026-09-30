@@ -11,7 +11,7 @@ description = "Every task, fault id, path, file, CI job and code name AGENTS.md,
 # The unit tests run first, for `trace:check`'s reason: they build throwaway repos and run the
 # real script over them, so an extractor that stopped matching fails there first.
 run = [
-  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider tools/test_check_agents_md.py",
+  "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_check_agents_md.py",
   "./tools/check-agents-md.py",
 ]
 
@@ -20,15 +20,15 @@ description = "Every seeded fault in verify/guards/faults/*.toml still applies, 
 # The cheap half of #274, and the half that runs on every push: it reads the registry, checks
 # each transform anchor and patch against the tree, and holds the Falsification notes in the
 # tests to verify/guards/faults/*.toml or verify/guards/unregistered.txt, which only shrinks from the merge
-# base with origin/main (CI passes the PR's base, as for the ratchet). The script's docstring
-# has the rules. ast-grep from `[tools]` reads the Rust and JS tests, stdlib `ast` the Python
-# ones, and the base is a local ref, so it's offline.
+# base with origin/main (CI's `GATE_BASE`, as for the ratchet). The script's docstring has the
+# rules. ast-grep from `[tools]` reads the Rust and JS tests, stdlib `ast` the Python ones, and
+# the base is a local ref, so it's offline.
 #
 # The unit tests run first, for `trace:check`'s reason: they build throwaway repos with a fake
 # runner and drive every verdict through the real script, `fire` included.
 run = [
-  "{{vars.pytest}} --with 'pyyaml==6.0.3' pytest -n auto -q -p no:cacheprovider tools/test_check_guards_fire.py",
-  "./tools/check-guards-fire.py list",
+  "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_check_guards_fire.py",
+  './tools/check-guards-fire.py list ${GATE_BASE:+--base "$GATE_BASE"}',
 ]
 
 ["guards:fire"]
@@ -51,5 +51,5 @@ description = "Seed each registered fault in a scratch worktree and require its 
 # the selection, one leg of that job's matrix (#345). The script's docstring has all three.
 #
 # cargo-mutants is here for the `fuzz_extract` exclusion's entry, at the `mutants` task's pin.
-tools = { "cargo:cargo-mutants" = "27.1.0" }
+tools = { "cargo:cargo-mutants" = "{{vars.cargo_mutants}}" }
 run = "./tools/check-guards-fire.py fire"
