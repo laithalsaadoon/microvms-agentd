@@ -75,6 +75,16 @@ and the summary says so: that's the change that moved the decisions out of `drif
 still reads its sets. A base that can't be read fails: a ref that names no commit, or a tree
 the collectors refuse.
 
+An input the working tree's reading can't take is a refusal: a file that doesn't parse or has
+the wrong shape, a decision it can't hold, or a collector refusing what it reads (a case it
+can't read, a spec with no requirements). A refusal fails the run and takes out only the
+rules that read that input: a collector's refusal its own categories, a decision's refusal its
+category, a refusal of the decisions file's shape or of `enforced` every category, and one of
+`verify/arch/placement.toml` placement and rule 3. Every other category is still collected and
+held, so one bad input doesn't hide a finding elsewhere. The refusals print first, and the
+summary marks each category they left unread. The base is measured whole: a base with a
+refused category would compare as having no drift there.
+
 Both trees are measured by this script's collectors, not the base's, so a change to a collector
 moves both sides at once: a rule that reaches further finds drift the base already had, and one
 that reaches less shrinks both. The sentinel below, each collector's unit tests, and review of
@@ -149,8 +159,10 @@ That's visible in the key, not silent.
 
 Each collector first runs against `verify/ratchet/fixtures/sentinel/`, which must produce exactly the
 findings its `expected.json` lists. A collector that finds nothing there fails the check, so a
-broken tool invocation can't report zero drift. A `HELD` category has no collector here, so the
-sentinel has nothing to prove for it: its check's own tests do that.
+broken tool invocation can't report zero drift. Its categories then get no rule on the working
+tree, since what it finds there isn't a measurement either, and the other categories still do.
+A `HELD` category has no collector here, so the sentinel has nothing to prove for it: its
+check's own tests do that.
 
 Usage, from anywhere:
 
@@ -361,15 +373,31 @@ def describe(category: str, key: str) -> str:
 # ── the files ───────────────────────────────────────────────────────────────
 
 
-def parse_decisions(data: object, where: str) -> dict:
-    """Validate a decisions file's contents. Anything off is a hard failure naming `where`.
+class Refusal(NamedTuple):
+    """An input a tree's reading couldn't take, and the categories whose rules read it."""
+
+    #: What was refused, naming its file or its collector.
+    message: str
+    #: The categories it leaves unread: none of their rules run.
+    categories: frozenset[str]
+
+
+#: What a refusal of a whole file leaves unread: every category's rules read it.
+EVERY = frozenset(COLLECTED)
+
+
+def read_decisions(data: object, where: str) -> tuple[dict, list[Refusal]]:
+    """A decisions file's contents, and each thing in it that's refused, naming `where`.
 
     The result has `enforced`, a list of categories, and `decisions`, a list of tables with
-    exactly `category`, `key` and `reason`.
+    exactly `category`, `key` and `reason`. A refused decision isn't in it and leaves its own
+    category unread, or every category when it names none this reads. A refusal of the file's
+    shape or of `enforced` leaves every category unread, since each one's rules read both.
     """
+    refused: list[Refusal] = []
 
-    def fail(message: str):
-        raise SystemExit(f"{where}: {message}")
+    def refuse(message: str, categories: frozenset[str] = EVERY) -> None:
+        refused.append(Refusal(f"{where}: {message}", categories))
 
     # `decision` may be absent: TOML has no empty array of tables. `enforced` may not, so a
     # file that lost its first line doesn't read as nothing enforced.
@@ -378,41 +406,70 @@ def parse_decisions(data: object, where: str) -> dict:
         or "enforced" not in data
         or not set(data) <= {"enforced", "decision"}
     ):
-        fail("expected `enforced` and the [[decision]] tables, and nothing else")
+        refuse("expected `enforced` and the [[decision]] tables, and nothing else")
+        return {"enforced": [], "decisions": []}, refused
     enforced = data["enforced"]
     if (
         not isinstance(enforced, list)
         or not all(isinstance(category, str) for category in enforced)
         or len(set(enforced)) != len(enforced)
     ):
-        fail("enforced must be a list of distinct category names")
-    for category in enforced:
-        if category not in COLLECTED:
-            fail(f"enforced names {category!r}, which isn't a collected category")
+        refuse("enforced must be a list of distinct category names")
+        enforced = []
+    elif unknown := [category for category in enforced if category not in COLLECTED]:
+        for category in unknown:
+            refuse(f"enforced names {category!r}, which isn't a collected category")
+        enforced = []
 
     decisions = data.get("decision", [])
     if not isinstance(decisions, list):
-        fail("each decision is a [[decision]] table")
+        refuse("each decision is a [[decision]] table")
+        decisions = []
+    kept = []
     for item in decisions:
+        named = item.get("category") if isinstance(item, dict) else None
+        own = frozenset([named]) if named in CATEGORIES else EVERY
         if not isinstance(item, dict) or set(item) != {"category", "key", "reason"}:
-            fail(f"each decision has exactly category, key and reason: {item!r}")
+            refuse(f"each decision has exactly category, key and reason: {item!r}", own)
+            continue
         category, key, reason = item["category"], item["key"], item["reason"]
         if category not in CATEGORIES:
-            fail(f"unknown category {category!r}")
+            refuse(f"unknown category {category!r}")
+            continue
         if category in NOT_COLLECTED:
-            fail(
+            refuse(
                 f"{category} is not collected yet ({NOT_COLLECTED[category]}), so nothing can "
-                "be decided in it"
+                "be decided in it",
+                own,
             )
+            continue
         if not isinstance(key, str) or not key.strip():
-            fail(f"a key must be a non-empty string: {item!r}")
+            refuse(f"a key must be a non-empty string: {item!r}", own)
+            continue
         if not isinstance(reason, str) or not reason.strip():
-            fail(f"a decision states its reason: {item!r}")
+            refuse(f"a decision states its reason: {item!r}", own)
+            continue
         if category in NO_DECISIONS:
-            fail(
-                f"{describe(category, key)} can't be a decision: {NO_DECISIONS[category]}"
+            refuse(
+                f"{describe(category, key)} can't be a decision: {NO_DECISIONS[category]}",
+                own,
             )
-    return {"enforced": list(enforced), "decisions": list(decisions)}
+            continue
+        kept.append(item)
+    return {"enforced": list(enforced), "decisions": kept}, refused
+
+
+def parse_decisions(data: object, where: str) -> dict:
+    """Validate a decisions file's contents. Anything off is a hard failure naming `where`: the
+    first refusal `read_decisions` makes.
+
+    The result has `enforced`, a list of categories, and `decisions`, a list of tables with
+    exactly `category`, `key` and `reason`.
+    """
+    decisions, refused = read_decisions(data, where)
+    if refused:
+        raise SystemExit(refused[0].message)
+    return decisions
 
 
 def placement_from(text: str, where: str) -> dict[str, dict]:
@@ -484,6 +541,13 @@ class Tree(NamedTuple):
     sets: dict
     #: The findings no decision covers, and the placement drift: what rule 1 compares.
     drift: Counter
+    #: What its reading refused, in the order it read the inputs.
+    refused: tuple[Refusal, ...] = ()
+
+    @property
+    def unread(self) -> frozenset[str]:
+        """The categories a refusal left unread."""
+        return frozenset().union(*(refusal.categories for refusal in self.refused))
 
 
 def read_text(path: Path, name: str) -> str:
@@ -495,23 +559,53 @@ def read_text(path: Path, name: str) -> str:
 
 
 def read_tree(scope: Scope, where: str = "") -> Tree:
-    """The drift of the tree at `scope.root`. `where` prefixes a file's name in an error."""
-    sets = placement_from(
-        read_text(scope.root / PLACEMENT, f"{where}{PLACEMENT}"), f"{where}{PLACEMENT}"
-    )
-    text = read_text(scope.root / DECISIONS, f"{where}{DECISIONS}")
+    """The drift of the tree at `scope.root`. `where` prefixes a file's name in a refusal.
+
+    An input it can't read is a refusal in the result, not the end of the reading: the
+    placement file leaves placement unread, and rule 3 with it; the decisions file, or one of
+    its decisions, what `read_decisions` says; and each collector its own categories. Every
+    other input is still read, so a tree with one bad input still shows what the rest hold.
+    """
+    refused: list[Refusal] = []
     try:
-        data = tomllib.loads(text)
+        sets = placement_from(
+            read_text(scope.root / PLACEMENT, f"{where}{PLACEMENT}"),
+            f"{where}{PLACEMENT}",
+        )
+    except SystemExit as error:
+        refused.append(Refusal(str(error), frozenset(["placement"])))
+        sets = {}
+    decisions: dict = {"enforced": [], "decisions": []}
+    try:
+        data = tomllib.loads(read_text(scope.root / DECISIONS, f"{where}{DECISIONS}"))
+    except SystemExit as error:
+        refused.append(Refusal(str(error), EVERY))
     except tomllib.TOMLDecodeError as error:
-        raise SystemExit(f"{where}{DECISIONS}: {error}") from None
-    decisions = parse_decisions(data, f"{where}{DECISIONS}")
-    findings = collect(scope, require_ports=True)
+        refused.append(Refusal(f"{where}{DECISIONS}: {error}", EVERY))
+    else:
+        decisions, more = read_decisions(data, f"{where}{DECISIONS}")
+        refused += more
+    findings, more = collect_each(scope, require_ports=True)
+    refused += more
     covered = Counter(
         (d["category"], d["key"])
         for d in decisions["decisions"]
         if d["category"] not in HELD
     )
-    return Tree(findings, decisions, sets, findings - covered + placement_drift(sets))
+    return Tree(
+        findings,
+        decisions,
+        sets,
+        findings - covered + placement_drift(sets),
+        tuple(refused),
+    )
+
+
+def whole(tree: Tree) -> Tree:
+    """`tree`, or its first refusal raised: a base is measured whole or not at all."""
+    if tree.refused:
+        raise SystemExit(tree.refused[0].message)
+    return tree
 
 
 class Base(NamedTuple):
@@ -602,7 +696,7 @@ def read_base(root: Path, ref: str, label: str) -> Base:
         except FileNotFoundError:
             return Base(label, sets, None)
         try:
-            return Base(label, sets, read_tree(repo_scope(tree), where))
+            return Base(label, sets, whole(read_tree(repo_scope(tree), where)))
         except SystemExit as error:
             raise SystemExit(
                 f"{label}'s tree can't be measured, so there's nothing to compare with: "
@@ -777,8 +871,14 @@ def grown_sets(sets: dict, base_sets: dict | None, base_label: str) -> list[str]
     return failures
 
 
-def rules(head: Tree, base: Base) -> list[str]:
-    """Every failure of the four rules, in category order, then rule 3's."""
+def rules(head: Tree, base: Base, untrusted: frozenset[str] = frozenset()) -> list[str]:
+    """Every failure of the four rules, in category order, then rule 3's.
+
+    A category the head left unread, or whose collector failed the sentinel (`untrusted`), gets
+    no rule: its findings aren't a measurement, and the refusal or the sentinel's failure fails
+    the run already. Rule 3 reads the placement file alone, so only its refusal skips rule 3.
+    """
+    skipped = head.unread | untrusted
     failures: list[str] = []
     enforced = head.decisions["enforced"]
     decided = Counter(
@@ -790,6 +890,8 @@ def rules(head: Tree, base: Base) -> list[str]:
     added = [] if base.tree is None else additions(head.drift, base.tree.drift)
 
     for category in COLLECTED:
+        if category in skipped:
+            continue
         for c, key in added:
             if c == category:
                 failures.append(
@@ -814,16 +916,20 @@ def rules(head: Tree, base: Base) -> list[str]:
                 f"promote {category}: move its rule into {PROMOTE[category]}, then list it "
                 f"under enforced in {DECISIONS}."
             )
+    if "placement" in head.unread:
+        return failures
     return failures + grown_sets(head.sets, base.sets, base.label)
 
 
 # ── the summary and the snapshot ───────────────────────────────────────────
 
 
-def summary(head: Tree, base: Base) -> dict:
+def summary(head: Tree, base: Base, untrusted: frozenset[str] = frozenset()) -> dict:
     """Per category: its status, the drift here and at the base, and its decisions.
 
     With no base drift (rule 1 skipped), the base's count is None, so its change reads "new".
+    A category `rules` skips (`untrusted`, or one the head left unread) has no count either:
+    what its collector returned isn't a measurement.
     """
     drift = Counter(category for category, _ in head.drift.elements())
     base_drift = (
@@ -841,6 +947,17 @@ def summary(head: Tree, base: Base) -> dict:
                 "base": None,
                 "decisions": None,
                 "note": NOT_COLLECTED[category],
+            }
+            continue
+        if category in head.unread or category in untrusted:
+            rows[category] = {
+                "status": "unread",
+                "drift": None,
+                "base": None,
+                "decisions": None,
+                "note": "an input it reads was refused"
+                if category in head.unread
+                else "its collector failed the sentinel",
             }
             continue
         rows[category] = {
@@ -864,8 +981,8 @@ def change(row: dict) -> str:
 def render_text(rows: dict) -> str:
     lines = [f"{'category':<14} {'drift':>5} {'change':>6} {'decisions':>9}"]
     for category, row in rows.items():
-        if row["status"] == "not collected":
-            lines.append(f"{category:<14} not collected ({row['note']})")
+        if row["drift"] is None:
+            lines.append(f"{category:<14} {row['status']} ({row['note']})")
         else:
             line = f"{category:<14} {row['drift']:>5} {change(row):>6} {row['decisions']:>9}"
             if row["status"] == "enforced":
@@ -884,8 +1001,8 @@ def render_markdown(rows: dict, failures: list[str], base_note: str) -> str:
         "| --- | ---: | ---: | ---: |",
     ]
     for category, row in rows.items():
-        if row["status"] == "not collected":
-            lines.append(f"| {category} | not collected ({row['note']}) | | |")
+        if row["drift"] is None:
+            lines.append(f"| {category} | {row['status']} ({row['note']}) | | |")
         else:
             name = f"{category} (enforced)" if row["status"] == "enforced" else category
             lines.append(
@@ -1287,27 +1404,60 @@ def untraced(scope: Scope) -> Counter:
     return Counter(("untraced", key) for key in keys - checked)
 
 
-def collect(scope: Scope, require_ports: bool = False) -> Counter:
-    """Every finding in `scope`, as a count per `(category, key)`. None is in a `HELD` category."""
-    found = crates(scope, cargo_metadata(scope))
-    return (
-        rust(scope, found, require_ports)
-        + parity_gaps(scope)
-        + parity_drift(scope)
-        + untraced(scope)
+def collect_each(
+    scope: Scope, require_ports: bool = False
+) -> tuple[Counter, list[Refusal]]:
+    """Every finding in `scope`, and each collector's refusal of its input.
+
+    A collector refuses by raising `SystemExit`. Its refusal leaves its own categories unread
+    and the other collectors still run, so one unreadable input doesn't hide what the rest
+    find. The Rust collector's three categories come from one ast-grep scan, so they share its
+    refusal.
+    """
+    collectors = (
+        (
+            ("subprocess", "port-impl", "adapter-logic"),
+            lambda: rust(scope, crates(scope, cargo_metadata(scope)), require_ports),
+        ),
+        (("parity-gap",), lambda: parity_gaps(scope)),
+        (("parity-drift",), lambda: parity_drift(scope)),
+        (("untraced",), lambda: untraced(scope)),
     )
+    findings: Counter = Counter()
+    refused: list[Refusal] = []
+    for categories, read in collectors:
+        try:
+            findings += read()
+        except SystemExit as error:
+            refused.append(Refusal(str(error), frozenset(categories)))
+    return findings, refused
 
 
-def sentinel(scope: Scope) -> list[str]:
-    """Failures unless each collector reports exactly the scope's `expected.json`."""
+def collect(scope: Scope, require_ports: bool = False) -> Counter:
+    """Every finding in `scope`, as a count per `(category, key)`. None is in a `HELD` category.
+    A collector's refusal is raised, the first one's."""
+    findings, refused = collect_each(scope, require_ports)
+    if refused:
+        raise SystemExit(refused[0].message)
+    return findings
+
+
+def check_sentinel(scope: Scope) -> tuple[list[str], frozenset[str]]:
+    """Failures unless each collector reports exactly the scope's `expected.json`, and the
+    categories that failed. A collector that refuses the sentinel fails with its refusal, and
+    its categories aren't compared, since what it returned is nothing."""
     path = scope.root / "expected.json"
     expected = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     # No `require_ports`: an empty port-impl category is reported below as a failure.
-    found = collect(scope)
-    failures = []
+    found, refused = collect_each(scope)
+    failures = [refusal.message for refusal in refused]
+    failed = set().union(*(refusal.categories for refusal in refused))
     for category in COLLECTED:
         if category in HELD:
             continue
+        if category in failed:
+            continue
+        before = len(failures)
         got = Counter({k: n for (c, k), n in found.items() if c == category})
         want = Counter(expected.get(category, []))
         if not got:
@@ -1323,7 +1473,14 @@ def sentinel(scope: Scope) -> list[str]:
             failures.append(
                 f"sentinel: {describe(category, key)} was not reported in {scope.root}"
             )
-    return failures
+        if len(failures) > before:
+            failed.add(category)
+    return failures, frozenset(failed)
+
+
+def sentinel(scope: Scope) -> list[str]:
+    """Failures unless each collector reports exactly the scope's `expected.json`."""
+    return check_sentinel(scope)[0]
 
 
 # ── entry point ─────────────────────────────────────────────────────────────
@@ -1369,21 +1526,31 @@ def main(argv: list[str]) -> int:
     if args.check and args.command != "snapshot":
         parser.error("--check goes with snapshot")
 
-    failures = sentinel(SENTINEL)
-    if failures:
-        print("\n".join(failures), file=sys.stderr)
-        return 1
+    # What breaks the reading prints first, as it did when it ended the run: a sentinel failure
+    # and a refusal each take out only the categories they're about, and the rest still run.
+    broken, untrusted = check_sentinel(SENTINEL)
+    if broken:
+        print("\n".join(broken), file=sys.stderr)
+        if args.command == "snapshot":
+            return 1
     head = read_tree(REPO)
+    refusals = [refusal.message for refusal in head.refused]
+    if refusals:
+        print("\n".join(refusals), file=sys.stderr)
+    broken += refusals
 
     if args.command == "snapshot":
+        # The snapshot is the tree's drift, so it's written only from a whole measurement.
+        if refusals:
+            return 1
         return write_snapshot(ROOT / DRIFT, snapshot(head), args.check)
 
     ref = merge_base_with(ROOT, args.base) if args.base else default_base(ROOT)
     base = read_base(
         ROOT, ref, f"the merge base with {args.base}" if args.base else ref[:12]
     )
-    failures = rules(head, base)
-    rows = summary(head, base)
+    failures = rules(head, base, untrusted)
+    rows = summary(head, base, untrusted)
     base_note = (
         base.label
         if base.tree is not None
@@ -1397,6 +1564,7 @@ def main(argv: list[str]) -> int:
                     "base": base.label,
                     "bootstrap": base.tree is None,
                     "categories": rows,
+                    "refused": broken,
                     "failures": failures,
                 },
                 indent=2,
@@ -1407,12 +1575,11 @@ def main(argv: list[str]) -> int:
         print(render_text(rows))
     if step_summary := os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(step_summary, "a", encoding="utf-8") as out:
-            out.write(render_markdown(rows, failures, base_note))
+            out.write(render_markdown(rows, broken + failures, base_note))
     if failures:
         sys.stdout.flush()
         print("\n".join(failures), file=sys.stderr)
-        return 1
-    return 0
+    return 1 if broken or failures else 0
 
 
 if __name__ == "__main__":

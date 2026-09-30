@@ -26,6 +26,10 @@ Each surface is read by the tool that already owns it:
   installs runs under a lock beside it, and a second caller waits for the first install
   instead of extracting over it (#347).
 
+A surface that can't be read fails the check with its reason, printed first, and is read as
+having no names: no cell is resolved on it and it draws no "empty" failure, while every other
+surface is still checked, so one unreadable surface doesn't hide a gap on another.
+
 The check fails when:
 
 (a) a public name belongs to no row: a module function or value (Python module attributes, TS
@@ -79,6 +83,7 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -288,7 +293,13 @@ def normalize(name: str) -> str:
     return name.replace("_", "").lower()
 
 
-def check(table: dict[str, Any], surfaces: dict[str, Surface]) -> list[str]:
+def check(
+    table: dict[str, Any],
+    surfaces: dict[str, Surface],
+    unread: frozenset[str] = frozenset(),
+) -> list[str]:
+    """What's wrong with the table against the surfaces. An `unread` surface is empty, and its
+    reason is already reported: the rows naming it aren't resolved there."""
     problems = [f"table: unknown key {key}" for key in sorted(set(table) - TABLE_KEYS)]
     groups = table.get("flag_groups") or {}
     rows = table.get("capability") or []
@@ -299,7 +310,9 @@ def check(table: dict[str, Any], surfaces: dict[str, Surface]) -> list[str]:
     # say the same thing again and bury the cause.
     empty = {key for key, surface in surfaces.items() if not surface.names}
     problems += [
-        f"{key}: the parser returned no members" for key in SURFACES if key in empty
+        f"{key}: the parser returned no members"
+        for key in SURFACES
+        if key in empty - unread
     ]
 
     known = set().union(*surfaces["cli"].flags.values())
@@ -335,7 +348,7 @@ def check(table: dict[str, Any], surfaces: dict[str, Surface]) -> list[str]:
                 continue
             for name in names:
                 mapped[key].add(name.split()[0] if key == "cli" else name)
-                if key in empty and not sentinel:
+                if key in unread or (key in empty and not sentinel):
                     continue
                 why = resolves(key, name, surfaces[key], groups)
                 if why:
@@ -618,22 +631,36 @@ def main() -> int:
             table = parse_table(args.table.read_text(encoding="utf-8"))
         except tomllib.TOMLDecodeError as error:
             raise ParityError(f"{args.table}: {error}") from error
-        if args.exemptions:
-            return print_exemptions(table)
-        with tempfile.TemporaryDirectory(prefix="parity-") as scratch:
-            surfaces = {
-                "core": core_surface(read_json(args.core_api)),
-                "cli": cli_surface(read_json(args.manifest)),
-                "py": py_surface(run_griffe(args.pyi)),
-                "ts": ts_surface(run_typedoc(args.dts, Path(scratch))),
-            }
-    except (ParityError, OSError, json.JSONDecodeError) as error:
+    except (ParityError, OSError) as error:
         print(f"parity: {error}")
         return 1
-    problems = pin_problems() + check(table, surfaces)
+    if args.exemptions:
+        return print_exemptions(table)
+    readers: dict[str, Callable[[Path], Surface]] = {
+        "core": lambda scratch: core_surface(read_json(args.core_api)),
+        "cli": lambda scratch: cli_surface(read_json(args.manifest)),
+        "py": lambda scratch: py_surface(run_griffe(args.pyi)),
+        "ts": lambda scratch: ts_surface(run_typedoc(args.dts, scratch)),
+    }
+    surfaces: dict[str, Surface] = {}
+    refused: dict[str, str] = {}
+    with tempfile.TemporaryDirectory(prefix="parity-") as scratch:
+        for key, read in readers.items():
+            try:
+                surfaces[key] = read(Path(scratch))
+            except (ParityError, OSError, json.JSONDecodeError) as error:
+                surfaces[key] = Surface()
+                refused[key] = str(error)
+                if not args.json:
+                    print(f"parity: {error}")
+    problems = pin_problems() + check(table, surfaces, frozenset(refused))
     if args.json:
         json.dump(
-            {"ok": not problems, "problems": problems, "exemptions": exemptions(table)},
+            {
+                "ok": not refused and not problems,
+                "problems": [*refused.values(), *problems],
+                "exemptions": exemptions(table),
+            },
             sys.stdout,
             indent=2,
         )
@@ -644,11 +671,11 @@ def main() -> int:
         print(f"parity: {shown} doesn't match the surfaces:")
         for problem in problems:
             print(f"  {problem}")
-    else:
+    elif not refused:
         print(
             "parity: every row resolves on its surfaces, and every name rule (a) holds has a row"
         )
-    return 1 if problems else 0
+    return 1 if refused or problems else 0
 
 
 if __name__ == "__main__":

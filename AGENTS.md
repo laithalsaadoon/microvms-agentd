@@ -168,6 +168,15 @@ capabilities, or `verify/parity/capabilities.toml` says why one doesn't.
   fails `ratchet:check` on one in adapter source that has no decision there. A
   flag or keyword default isn't held yet: #300 checks those through the
   generated surfaces.
+- A bug in behavior the surfaces share is a case in `verify/parity/cases/`,
+  which every surface's runner checks against one `expect`, not a new test and
+  seeded fault on each surface. Where main marks the wrong surface with
+  `known_drift`, the marker is the failing-first proof, since every runner fails
+  a marked path that starts agreeing, and the fix deletes it. A case the corpus
+  doesn't have yet lands with the fix, and the pull request shows it failing on
+  the merge base (review holds that). The ratchet counts markers as parity-drift,
+  so a pull request can't add one, and the runners' own seeded faults prove each
+  runner can fail. CONTRIBUTING.md has the rest.
 
 ## Maintenance rules
 
@@ -204,6 +213,26 @@ capabilities, or `verify/parity/capabilities.toml` says why one doesn't.
 Publishing and version changes are documented in CONTRIBUTING.md. Do not
 change the stub generator's maturin pin without checking its output-path
 behavior. Run Ruff on `.` so the repository selection is respected.
+
+## Pull requests
+
+CONTRIBUTING.md's "Pull requests" has the rules and the review budget.
+
+- One issue per pull request, or one box of a tracker's checklist, with a
+  change that depends on another open one stacked on it. Past the soft cap on
+  changed lines of product code, the body has a `Size:` line saying why it's
+  one change.
+- A finding the change doesn't need to be correct goes in the body's Follow-ups
+  section and onto the parent tracker's checklist. It gets an issue only when
+  it's a security defect, a panic, data loss, or a design question.
+- Review scales with risk and size, each reviewer reports at most five
+  findings, and a reviewer who asks for another seeded fault names the mutant
+  or input the existing guards miss.
+
+`pr-body:check` in `check` holds the template to the sections every body needs,
+and CI's `security` job runs it on each pull request's body: What and why,
+Evidence, Guards and Follow-ups each there and filled in, and the `Size:` line
+past the cap. Dependabot's pull requests are skipped. The rest is review's.
 
 ## Code comments
 

@@ -12,6 +12,8 @@ pub mod http;
 pub mod serve;
 pub mod shell;
 pub mod tunnel;
+#[cfg(test)]
+mod tunnel_fuzz;
 
 pub use forward::{
     DEFAULT_EXCHANGE_TIMEOUT, ForwardClient, ForwardEvent, ForwardSpec, forwards_request_header,
