@@ -169,7 +169,7 @@ class AgentVm:
         """
         The session, once `launch` has run.
         """
-    def terminate(self, /, *, delete_image: bool = False, delete_log_group: bool = False, delete_attempts: int |None = None, delete_backoff: float |None = None, wait_for_terminated: bool = False) -> TeardownReport:
+    def terminate(self, /, *, delete_image: bool = False, delete_log_group: bool = False, delete_attempts: int |None = None, delete_backoff: float |None = None, wait_for_terminated: bool |float = ...) -> TeardownReport:
         """
         Tears down, best-effort, never raising; see `Sandbox.terminate`.
         """
@@ -1935,7 +1935,7 @@ class Sandbox:
         `None` before this sandbox launches a VM. This accessor reports the requested
         window; `GetMicrovm` also returns the service's idle policy.
         """
-    def terminate(self, /, *, delete_image: bool = False, delete_log_group: bool = False, delete_attempts: int |None = None, delete_backoff: float |None = None, wait_for_terminated: bool = False) -> TeardownReport:
+    def terminate(self, /, *, delete_image: bool = False, delete_log_group: bool = False, delete_attempts: int |None = None, delete_backoff: float |None = None, wait_for_terminated: bool |float = ...) -> TeardownReport:
         """
         Tears down, best-effort, **never raising**.
         
@@ -1950,7 +1950,8 @@ class Sandbox:
         
         `wait_for_terminated=False` by default: the caller is on the way out, and a teardown
         that blocked five minutes on a state nobody reads is five minutes of a CI job. The
-        report then honestly ends in `"TERMINATING"`.
+        report then honestly ends in `"TERMINATING"`. `True` waits for TERMINATED up to the
+        core's lifecycle default; a number of seconds waits up to that instead.
         """
     @property
     def token_installed(self, /) -> bool:

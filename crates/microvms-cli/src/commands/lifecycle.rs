@@ -2224,14 +2224,15 @@ pub async fn terminate<O: std::io::Write, E: std::io::Write>(
             ));
         }
     }
-    if args.wait && leaked.is_empty() {
+    // `--wait-sec` bounds the wait; `--wait` alone takes the core's lifecycle default.
+    let wait = args
+        .wait_sec
+        .or(args.wait.then_some(DEFAULT_LIFECYCLE_TIMEOUT));
+    if let Some(timeout) = wait
+        && leaked.is_empty()
+    {
         match plane
-            .wait_for_state(
-                &microvm_id,
-                &["TERMINATED"],
-                &[],
-                wait_opts(DEFAULT_LIFECYCLE_TIMEOUT),
-            )
+            .wait_for_state(&microvm_id, &["TERMINATED"], &[], wait_opts(timeout))
             .await
         {
             Ok(settled) => state = settled.state,

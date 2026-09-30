@@ -260,6 +260,16 @@ impl PyImage {
     }
 }
 
+/// `wait_for_terminated` as a caller gives it: a `bool`, or how many seconds to wait.
+///
+/// `Flag` first: PyO3's `bool` extraction takes only a real `bool`, while an `f64` extraction
+/// would read `True` as one second.
+#[derive(FromPyObject)]
+pub(crate) enum WaitForTerminated {
+    Flag(bool),
+    Seconds(f64),
+}
+
 /// What a teardown did, and what it left behind.
 ///
 /// Returned rather than raised — see the module docs.
@@ -1149,14 +1159,15 @@ impl PySandbox {
     ///
     /// `wait_for_terminated=False` by default: the caller is on the way out, and a teardown
     /// that blocked five minutes on a state nobody reads is five minutes of a CI job. The
-    /// report then honestly ends in `"TERMINATING"`.
+    /// report then honestly ends in `"TERMINATING"`. `True` waits for TERMINATED up to the
+    /// core's lifecycle default; a number of seconds waits up to that instead.
     #[pyo3(signature = (
         *,
         delete_image=false,
         delete_log_group=false,
         delete_attempts=None,
         delete_backoff=None,
-        wait_for_terminated=false,
+        wait_for_terminated=WaitForTerminated::Flag(false),
     ))]
     pub(crate) fn terminate(
         &self,
@@ -1165,7 +1176,7 @@ impl PySandbox {
         delete_log_group: bool,
         delete_attempts: Option<u32>,
         delete_backoff: Option<f64>,
-        wait_for_terminated: bool,
+        wait_for_terminated: WaitForTerminated,
     ) -> PyCoreResult<PyTeardownReport> {
         // The two retry knobs default to the core's own figures rather than to numbers
         // written here: twenty attempts fifteen seconds apart is the difference between a
@@ -1182,8 +1193,12 @@ impl PySandbox {
             },
             wait_for_terminated: defaults.wait_for_terminated,
         };
-        if wait_for_terminated {
-            opts = opts.waiting_for_terminated();
+        match wait_for_terminated {
+            WaitForTerminated::Flag(false) => {}
+            WaitForTerminated::Flag(true) => opts = opts.waiting_for_terminated(),
+            WaitForTerminated::Seconds(timeout) => {
+                opts.wait_for_terminated = Some(seconds(timeout)?);
+            }
         }
         // `terminate` answers a report rather than a `Result`, so the `Ok` here is this
         // wrapper's and never the core's — a teardown cannot raise, which is the whole
