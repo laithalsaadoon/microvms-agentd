@@ -5,7 +5,7 @@
 # build. A recorded exception carries `#[expect(..., reason = "...")]` at the call site, and
 # `AdapterLintTests` in `tools/test_ratchet.py` lists every such site, so a new one (or an
 # `allow` anywhere) fails `ratchet:check` until a reviewer adds it there. A subprocess exception
-# also needs its entry or decision in `verify/ratchet/drift.json`.
+# is also drift the ratchet counts, or a decision in `verify/ratchet/decisions.toml`.
 #
 # `microvms_core::env::process` is banned by name as well: it's the production lookup, meant to
 # be handed to core's resolvers once, where the adapter composes them. Calling it is the same

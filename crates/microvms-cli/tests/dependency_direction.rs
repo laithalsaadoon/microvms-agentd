@@ -35,13 +35,14 @@
 //! The last tests go past the edges between our crates to every direct dependency of each crate
 //! with a set in `verify/arch/placement.toml` (#285): the driving adapters and the layers below
 //! them. This file is the one place those edges are computed. Each such crate depends on exactly
-//! its set plus the placement records `verify/ratchet/drift.json` holds for it: an entry is
-//! drift with the issue that removes it, and a decision is a permanent exception with its
-//! reason. A layer holds no record. The ratchet counts the entries and holds both files to the
-//! base branch's copies, so a PR can't add an entry or grow a set the base has; it doesn't read
-//! the manifests itself. The domain's and the app's dependencies' declared features are asserted
-//! too, since a feature can add I/O to a crate the set already allows: tokio's `net`, `fs` and
-//! `process` are the edges' and never the app's.
+//! its set plus its placement records: its `drift` table there, work it does that belongs below
+//! it with the issue that moves it, and its placement decisions in
+//! `verify/ratchet/decisions.toml`, permanent exceptions with their reasons. A layer holds no
+//! record. The ratchet reads the drift from each tree's `placement.toml` and holds it and the
+//! sets to the base branch's, so a change can't add drift or grow a set the base has; it doesn't
+//! read the manifests itself. The domain's and the app's dependencies' declared features are
+//! asserted too, since a feature can add I/O to a crate the set already allows: tokio's `net`,
+//! `fs` and `process` are the edges' and never the app's.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -434,51 +435,93 @@ fn listed(table: &toml::Value, kind: &str) -> BTreeSet<String> {
         .unwrap_or_default()
 }
 
+/// A placement record: one edge a crate may have outside its set. Its key is the ratchet's,
+/// `<crate> -> <dependency>`, with ` (build)` after a build dependency, so a record for a normal
+/// edge never allows a build edge or the other way round.
+struct Record {
+    /// Where it's written: `drift`, a crate's drift table in `verify/arch/placement.toml`, or
+    /// `decision`, a placement decision in `verify/ratchet/decisions.toml`.
+    source: &'static str,
+    key: String,
+    crate_name: String,
+    dependency: String,
+    kind: &'static str,
+}
+
+/// Every placement record: each crate's drift, then each placement decision.
+fn placement_records() -> Vec<Record> {
+    let mut records = Vec::new();
+    for (crate_name, table) in &placement_sets() {
+        let Some(drift) = table.get("drift") else {
+            continue;
+        };
+        for (kind, _) in KINDS {
+            for dependency in listed(drift, kind) {
+                records.push(Record {
+                    source: "drift",
+                    key: edge(crate_name, &dependency, kind),
+                    crate_name: crate_name.clone(),
+                    dependency,
+                    kind,
+                });
+            }
+        }
+    }
+    let decisions: toml::Table = repo_file("verify/ratchet/decisions.toml")
+        .parse()
+        .expect("verify/ratchet/decisions.toml is TOML");
+    let decisions = decisions
+        .get("decision")
+        .and_then(toml::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for decision in decisions
+        .iter()
+        .filter(|decision| decision["category"].as_str() == Some("placement"))
+    {
+        let key = decision["key"]
+            .as_str()
+            .expect("a decision's key is a string");
+        let (crate_name, dependency, kind) = edge_of(key);
+        records.push(Record {
+            source: "decision",
+            key: key.to_string(),
+            crate_name,
+            dependency,
+            kind,
+        });
+    }
+    records
+}
+
 /// What a crate with a set in `verify/arch/placement.toml` may depend on directly, for one kind
-/// (`normal` or `build`).
+/// (`normal` or `build`): its set, plus each crate a placement record allows it.
 ///
-/// Its set in `verify/arch/placement.toml`, plus each crate a placement record in
-/// `verify/ratchet/drift.json` allows it: an entry, which is drift with the issue that removes
-/// it, or a decision, which is a permanent exception with its reason. Both files are read here
-/// rather than copied, so this test and the ratchet's base rule read one record. The ratchet
-/// refuses an entry the base branch doesn't have and a crate added to a set the base has, so a
-/// decision is the one way a crate joins what a PR's base allows.
+/// The files are read here rather than copied, so this test and the ratchet read one record.
+/// The ratchet refuses a crate added to a set the base branch has and drift the base doesn't
+/// have, so a decision is the one way a crate joins what a change's base allows.
 fn allowed(crate_name: &str, kind: &str) -> BTreeSet<String> {
     let sets = placement_sets();
     let table = sets
         .get(crate_name)
         .unwrap_or_else(|| panic!("verify/arch/placement.toml has no [{crate_name}] table"));
     let mut allowed = listed(table, kind);
-    for key in placement_records("entries")
-        .into_iter()
-        .chain(placement_records("decisions"))
-    {
-        let (from, onto, record_kind) = edge_of(&key);
-        if from == crate_name && record_kind == kind {
-            allowed.insert(onto);
+    for record in placement_records() {
+        if record.crate_name == crate_name && record.kind == kind {
+            allowed.insert(record.dependency);
         }
     }
     allowed
 }
 
-/// The keys of the placement `entries` or `decisions` in `verify/ratchet/drift.json`.
-fn placement_records(list: &str) -> Vec<String> {
-    let drift: serde_json::Value =
-        serde_json::from_str(&repo_file("verify/ratchet/drift.json")).expect("drift.json is JSON");
-    drift[list]
-        .as_array()
-        .unwrap_or_else(|| panic!("drift.json has a {list} list"))
-        .iter()
-        .filter(|record| record["category"] == "placement")
-        .map(|record| record["key"].as_str().expect("a key").to_string())
-        .collect()
+/// A placement key for one edge, as the ratchet writes it.
+fn edge(crate_name: &str, dependency: &str, kind: &str) -> String {
+    let suffix = if kind == "build" { " (build)" } else { "" };
+    format!("{crate_name} -> {dependency}{suffix}")
 }
 
-/// A placement key, `<crate> -> <dependency>`, as the crate, the dependency and its kind.
-///
-/// The ratchet's keys write ` (build)` after a build dependency, so a record for a normal edge
-/// never allows a build edge or the other way round. A key of any other shape panics naming it,
-/// since it would allow nothing while the ratchet still counted it.
+/// A placement decision's key as the crate, the dependency and its kind. A key of any other
+/// shape panics naming it, since it would allow nothing.
 fn edge_of(key: &str) -> (String, String, &'static str) {
     let (edge, kind) = match key.strip_suffix(" (build)") {
         Some(edge) => (edge, "build"),
@@ -490,8 +533,8 @@ fn edge_of(key: &str) -> (String, String, &'static str) {
             (from.to_string(), onto.to_string(), kind)
         }
         _ => panic!(
-            "verify/ratchet/drift.json has the placement key {key:?}, which isn't `<crate> -> \
-             <dependency>`, with ` (build)` after a build dependency, so it allows nothing"
+            "verify/ratchet/decisions.toml has the placement key {key:?}, which isn't `<crate> \
+             -> <dependency>`, with ` (build)` after a build dependency, so it allows nothing"
         ),
     }
 }
@@ -508,22 +551,22 @@ const KINDS: [(&str, cargo_metadata::DependencyKind); 2] = [
 const ADAPTERS: [&str; 3] = ["microvms-cli", "microvms-py", "microvms-js"];
 
 /// **The driving-adapter contract, and BIND-3 and BIND-4.** Each adapter depends directly on
-/// exactly what it may use, normal and build: its set in `verify/arch/placement.toml` and its
-/// placement records in `verify/ratchet/drift.json`.
+/// exactly what it may use, normal and build: its set in `verify/arch/placement.toml`, its drift
+/// there, and its placement decisions.
 ///
 /// For the bindings that set is the thin wrapper BIND-3 and BIND-4 describe: core and the wire
 /// types it returns, PyO3 or napi-rs to bridge to the host, serde_json and tokio to convert
 /// values and drive core's futures, and no crate that does work of its own.
 ///
 /// Exact both ways, like the edge assertions above: a crate added to an adapter's manifest
-/// fails, and so does a listed crate the adapter no longer uses, since a stale set entry or
-/// drift entry allows more than the crate needs. The CLI's entries are directory sync's crates,
-/// which #260 moves into core; the change that drops one from the manifest deletes its entry.
-/// The bindings hold no entry.
+/// fails, and so does a listed crate the adapter no longer uses, since a stale set or drift entry
+/// allows more than the crate needs. The CLI's drift is directory sync's crates, which #260
+/// moves into core; the change that drops one from the manifest drops it from the drift table.
+/// The bindings carry no drift.
 ///
 /// This is the only check that reads the adapters' manifests for the ratchet's placement
-/// category. The ratchet counts the entries and refuses one its base doesn't have; this test
-/// holds them to the tree, which is how it finds new drift and a fix the file still lists.
+/// category. The ratchet counts the drift and refuses any its base doesn't have; this test holds
+/// it to the tree, which is how it finds new drift and a fix the record still lists.
 ///
 /// **Falsification**: add `globset = "0.4"` to `bindings/microvms-py/Cargo.toml` and this goes red
 /// naming it, and so does `reqwest` added to the CLI's `[dependencies]`. Delete `napi-build`
@@ -531,14 +574,15 @@ const ADAPTERS: [&str; 3] = ["microvms-cli", "microvms-py", "microvms-js"];
 #[test]
 fn each_adapter_depends_on_exactly_its_allowed_set() {
     for binding in ["microvms-py", "microvms-js"] {
-        let entries: Vec<String> = placement_records("entries")
+        let drift: Vec<String> = placement_records()
             .into_iter()
-            .filter(|key| edge_of(key).0 == binding)
+            .filter(|record| record.source == "drift" && record.crate_name == binding)
+            .map(|record| record.key)
             .collect();
         assert!(
-            entries.is_empty(),
-            "{binding} has placement entries in verify/ratchet/drift.json: {entries:?}. The \
-             bindings' sets have been exact since #285, and the ratchet refuses a new entry, so \
+            drift.is_empty(),
+            "{binding} has placement drift in verify/arch/placement.toml: {drift:?}. The \
+             bindings' sets have been exact since #285, and the ratchet refuses new drift, so \
              the file was edited around the check. Fix the dependency instead."
         );
     }
@@ -552,29 +596,30 @@ fn each_adapter_depends_on_exactly_its_allowed_set() {
             let stale: Vec<&String> = allowed.difference(&actual).collect();
             assert!(
                 added.is_empty() && stale.is_empty(),
-                "{adapter}'s direct {kind} dependencies differ from its set in \
-                 verify/arch/placement.toml and its placement records in \
-                 verify/ratchet/drift.json. Outside the set: {added:?}. Listed but unused: \
+                "{adapter}'s direct {kind} dependencies differ from its set and its drift in \
+                 verify/arch/placement.toml and its placement decisions in \
+                 verify/ratchet/decisions.toml. Outside the set: {added:?}. Listed but unused: \
                  {stale:?}. An adapter parses input, converts types, bridges to the host, and \
                  renders output (AGENTS.md, Architecture); a crate doing other work belongs in a \
                  lower layer, or takes a placement decision with its reason, since the ratchet \
-                 refuses a new entry. A crate listed but unused comes out of the set, or its \
-                 entry or decision comes out of verify/ratchet/drift.json."
+                 refuses new drift. A crate listed but unused comes out of the set or the drift, \
+                 or its decision out of verify/ratchet/decisions.toml."
             );
         }
     }
 }
 
 /// Every set in `verify/arch/placement.toml` belongs to a crate the tests here hold exactly,
-/// and every placement record in `verify/ratchet/drift.json` allows one edge of such a crate.
+/// and every placement record allows one edge of such a crate.
 ///
 /// The adapter and layer tests hold [`ADAPTERS`] and [`LAYERS`] and nothing else, so a set for
-/// another crate would be one no check reads. A record for a crate without a set, one naming a
-/// crate its set already lists, and one listed twice would each allow nothing while the ratchet
-/// counted it as drift. A table takes only the two lists those tests read.
+/// another crate would be one no check reads. A decision for a crate without a set, a record
+/// naming a crate its set already lists, and a record written twice would each allow nothing
+/// while the ratchet counted it. A table takes only the two lists those tests read and a drift
+/// table of the same two.
 ///
-/// **Falsification**: add a placement entry keyed `microvms-edges -> reqwest` to
-/// `verify/ratchet/drift.json` and this goes red naming `microvms-edges`.
+/// **Falsification**: add a placement decision keyed `microvms-edges -> reqwest` to
+/// `verify/ratchet/decisions.toml` and this goes red naming `microvms-edges`.
 #[test]
 fn every_set_and_placement_record_belongs_to_a_crate_held_here() {
     let sets = placement_sets();
@@ -591,40 +636,57 @@ fn every_set_and_placement_record_belongs_to_a_crate_held_here() {
          (microvms-edges, where the I/O crates belong) has no table."
     );
     for (crate_name, table) in &sets {
-        let lists: Vec<&String> = table
+        let table = table
             .as_table()
-            .unwrap_or_else(|| panic!("[{crate_name}] in verify/arch/placement.toml is a table"))
+            .unwrap_or_else(|| panic!("[{crate_name}] in verify/arch/placement.toml is a table"));
+        let lists: Vec<&String> = table
             .keys()
-            .filter(|list| !matches!(list.as_str(), "normal" | "build"))
+            .filter(|list| !matches!(list.as_str(), "normal" | "build" | "drift"))
             .collect();
         assert!(
             lists.is_empty(),
-            "[{crate_name}] in verify/arch/placement.toml takes only normal and build lists, not \
-             {lists:?}"
+            "[{crate_name}] in verify/arch/placement.toml takes only normal and build lists and a \
+             drift table, not {lists:?}"
         );
+        if let Some(drift) = table.get("drift") {
+            let lists: Vec<&String> = drift
+                .as_table()
+                .unwrap_or_else(|| panic!("[{crate_name}.drift] is a table"))
+                .keys()
+                .filter(|list| !matches!(list.as_str(), "normal" | "build"))
+                .collect();
+            assert!(
+                lists.is_empty(),
+                "[{crate_name}.drift] in verify/arch/placement.toml takes only normal and build \
+                 lists, not {lists:?}"
+            );
+        }
     }
 
     let mut seen = BTreeSet::new();
-    for key in placement_records("entries")
-        .into_iter()
-        .chain(placement_records("decisions"))
-    {
+    for record in placement_records() {
+        let key = &record.key;
         assert!(
             seen.insert(key.clone()),
-            "verify/ratchet/drift.json records the placement key {key:?} twice, and one edge is one \
-             record"
+            "the placement record {key:?} is written twice, the second time as a {}, and one \
+             edge is one record",
+            record.source
         );
-        let (from, onto, kind) = edge_of(&key);
-        let table = sets.get(&from).unwrap_or_else(|| {
+        let table = sets.get(&record.crate_name).unwrap_or_else(|| {
             panic!(
-                "verify/ratchet/drift.json has the placement record {key:?}, which names {from}, a \
-                 crate with no set in verify/arch/placement.toml, so no check holds it to the tree"
+                "verify/ratchet/decisions.toml has the placement decision {key:?}, which names \
+                 {}, a crate with no set in verify/arch/placement.toml, so no check holds it to \
+                 the tree",
+                record.crate_name
             )
         });
         assert!(
-            !listed(table, kind).contains(&onto),
-            "verify/ratchet/drift.json has the placement record {key:?}, but [{from}] {kind} in \
-             verify/arch/placement.toml already lists {onto}, so the record allows nothing"
+            !listed(table, record.kind).contains(&record.dependency),
+            "the placement {} {key:?} names a crate that [{}] {} in \
+             verify/arch/placement.toml already lists, so the record allows nothing",
+            record.source,
+            record.crate_name,
+            record.kind
         );
     }
 }
@@ -635,7 +697,7 @@ fn every_set_and_placement_record_belongs_to_a_crate_held_here() {
 const LAYERS: [&str; 3] = ["microvms-domain", "microvms-app", "microvms-core"];
 
 /// **ARCH-6, ARCH-7 and ARCH-8.** Each layer below the adapters depends directly on exactly its
-/// set in `verify/arch/placement.toml`, normal and build, and `verify/ratchet/drift.json` holds nothing for it.
+/// set in `verify/arch/placement.toml`, normal and build, with no drift and no placement decision.
 ///
 /// The set is how a layer's I/O ban reaches past `std`: tokio's `net`, getrandom and reqwest
 /// can't be named in a clippy.toml one method at a time, and they don't need to be when they
@@ -648,18 +710,14 @@ const LAYERS: [&str; 3] = ["microvms-domain", "microvms-app", "microvms-core"];
 /// outside the set.
 #[test]
 fn each_layer_depends_on_exactly_its_allowed_set() {
-    let records: Vec<String> = placement_records("entries")
+    let records: Vec<String> = placement_records()
         .into_iter()
-        .chain(placement_records("decisions"))
-        .filter(|key| {
-            LAYERS
-                .iter()
-                .any(|layer| key.starts_with(&format!("{layer} -> ")))
-        })
+        .filter(|record| LAYERS.contains(&record.crate_name.as_str()))
+        .map(|record| record.key)
         .collect();
     assert!(
         records.is_empty(),
-        "verify/ratchet/drift.json records placement for a layer below the adapters: {records:?}. A \
+        "a layer below the adapters has placement drift or a placement decision: {records:?}. A \
          dependency outside a layer's set isn't drift to count; it's a port to add, or work that \
          belongs in microvms-edges."
     );

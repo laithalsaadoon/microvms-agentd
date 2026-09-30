@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for `tools/ratchet.py`: the four failure rules, the collectors, and the seeded faults.
 
-The rule tests drive `compare` with small in-memory files. The collector and seeded-fault tests
-build throwaway cargo workspaces under a temporary directory and run the real tools over them
-(`cargo metadata` and `ast-grep`), because a collector tested against a mocked tool proves the
-mock. Both tools come from `mise.toml`, so run this through `mise run ratchet:check`.
+The rule tests drive `rules` with small in-memory trees. The collector, base and seeded-fault
+tests build throwaway cargo workspaces and git repositories under a temporary directory and run
+the real tools over them (`cargo metadata`, `ast-grep` and `git`), because a collector tested
+against a mocked tool proves the mock. The tools come from `mise.toml`, so run this through
+`mise run ratchet:check`.
 
 The adapter lint tests are here too: each driving adapter's `clippy.toml` is the enforcing half
 of the subprocess rule the ratchet counts (#285), and they run real clippy the same way.
@@ -32,29 +33,30 @@ RATCHET = runpy.run_path(str(HERE / "ratchet.py"))
 HISTORY = runpy.run_path(str(HERE / "ratchet-history.py"))
 
 Scope = RATCHET["Scope"]
-compare = RATCHET["compare"]
+Tree = RATCHET["Tree"]
+Base = RATCHET["Base"]
+HELD = RATCHET["HELD"]
+rules = RATCHET["rules"]
 collect = RATCHET["collect"]
-parse = RATCHET["parse"]
-updated = RATCHET["updated"]
+parse_decisions = RATCHET["parse_decisions"]
+placement_from = RATCHET["placement_from"]
+placement_drift = RATCHET["placement_drift"]
 summary = RATCHET["summary"]
 render_text = RATCHET["render_text"]
 sentinel = RATCHET["sentinel"]
+snapshot = RATCHET["snapshot"]
+write_snapshot = RATCHET["write_snapshot"]
 read_base = RATCHET["read_base"]
-read_base_sets = RATCHET["read_base_sets"]
 read_base_collected = RATCHET["read_base_collected"]
-dump = RATCHET["dump"]
 grown_sets = RATCHET["grown_sets"]
-sets_from = RATCHET["sets_from"]
 
 
-def ratchet(entries=(), decisions=(), enforced=()):
-    """A parsed drift file from `(category, key, issue)` and `(category, key, reason)` tuples."""
-    return parse(
+def decisions_file(decisions=(), enforced=()):
+    """A parsed decisions file from `(category, key, reason)` tuples."""
+    return parse_decisions(
         {
-            "version": 1,
             "enforced": list(enforced),
-            "entries": [{"category": c, "key": k, "issue": i} for c, k, i in entries],
-            "decisions": [
+            "decision": [
                 {"category": c, "key": k, "reason": r} for c, k, r in decisions
             ],
         },
@@ -66,20 +68,33 @@ def found(*pairs):
     return Counter(pairs)
 
 
-# One entry in each collected category, so rule 4 is quiet unless a test wants it.
+# One piece of drift in each collected category, so rule 4 is quiet unless a test wants it.
 BASELINE = [
-    ("placement", "microvms-cli -> tar", 260),
-    ("subprocess", 'crates/microvms-cli/src/seam.rs: Command::new("aws")', 258),
-    ("port-impl", "crates/microvms-cli/src/seam.rs: TokenMinter for PlaneMinter", 270),
+    ("placement", "microvms-cli -> tar"),
+    ("subprocess", 'crates/microvms-cli/src/seam.rs: Command::new("aws")'),
+    ("port-impl", "crates/microvms-cli/src/seam.rs: TokenMinter for PlaneMinter"),
     (
         "adapter-logic",
         "bindings/microvms-js/src/control.rs: literal-default: options.timeout.unwrap_or(300.0)",
-        273,
     ),
-    ("parity-gap", "wait-until-running/cli", 269),
-    ("untraced", "TRAP-1", 301),
+    ("parity-gap", "wait-until-running/cli"),
+    ("untraced", "TRAP-1"),
 ]
-BASELINE_FOUND = found(*((c, k) for c, k, _ in BASELINE))
+
+
+def tree(drift=BASELINE, decisions=(), enforced=(), sets=None):
+    """A measured tree with `drift`, whose findings are that drift plus what `decisions` decide.
+
+    A held category's drift is its record, not a finding, and its decisions are its check's.
+    """
+    drift = Counter(drift)
+    decided = Counter((c, k) for c, k, _ in decisions if c not in HELD)
+    findings = Counter({k: n for k, n in drift.items() if k[0] not in HELD}) + decided
+    return Tree(findings, decisions_file(decisions, enforced), sets or {}, drift)
+
+
+def base(drift=BASELINE, decisions=(), sets=None, label="main"):
+    return Base(label, sets, tree(drift, decisions))
 
 
 class Workspace:
@@ -142,33 +157,34 @@ def keys(counter, category):
     )
 
 
+def kinds(failures):
+    """Each failure's kind, the text before its first colon."""
+    return [failure.split(":")[0] for failure in failures]
+
+
 class RuleTests(unittest.TestCase):
     """Each of the four failure rules, and the cases that must pass."""
 
-    def test_a_file_that_matches_the_tree_passes(self):
-        self.assertEqual(
-            compare(BASELINE_FOUND, ratchet(BASELINE), ratchet(BASELINE), "main"), []
-        )
+    def test_a_tree_with_the_bases_drift_passes(self):
+        self.assertEqual(rules(tree(), base()), [])
 
     def test_rule_1_new_drift_fails(self):
-        now = BASELINE_FOUND + found(
-            ("subprocess", 'bindings/microvms-py/src/exec.rs: Command::new("aws")')
-        )
+        new = ("subprocess", 'bindings/microvms-py/src/exec.rs: Command::new("aws")')
         self.assertEqual(
-            compare(now, ratchet(BASELINE), ratchet(BASELINE), "main"),
+            rules(tree([*BASELINE, new]), base()),
             [
                 'new drift: [subprocess] bindings/microvms-py/src/exec.rs: Command::new("aws"). '
                 "Move the work to the layer whose job it is (I/O belongs in microvms-edges, "
-                "behind a port in microvms-app), or add a decision with its reason."
+                "behind a port in microvms-app), or add a decision with its reason in "
+                "verify/ratchet/decisions.toml."
             ],
         )
 
     def test_rule_1_a_new_parity_gap_points_at_the_table(self):
         # A gap isn't work in the wrong layer, so the layering advice would send the reader to
         # the wrong file.
-        now = BASELINE_FOUND + found(("parity-gap", "adopt/cli"))
         self.assertEqual(
-            compare(now, ratchet(BASELINE), ratchet(BASELINE), "main"),
+            rules(tree([*BASELINE, ("parity-gap", "adopt/cli")]), base()),
             [
                 "new drift: [parity-gap] adopt/cli. Give that surface the capability, or, if "
                 "the gap is permanent, drop the exemption's issue in "
@@ -179,9 +195,8 @@ class RuleTests(unittest.TestCase):
     def test_rule_1_an_untraced_requirement_points_at_traced(self):
         # A requirement with no trace isn't work in the wrong layer either: the fix is an entry
         # in its group's traced file and the layers it names.
-        now = BASELINE_FOUND + found(("untraced", "TRAP-14"))
         self.assertEqual(
-            compare(now, ratchet(BASELINE), ratchet(BASELINE), "main"),
+            rules(tree([*BASELINE, ("untraced", "TRAP-14")]), base()),
             [
                 "new drift: [untraced] TRAP-14. Trace the requirement: list its key in its "
                 "group's file, verify/spec/traced/<GROUP>.toml, give it each layer or a waiver with its "
@@ -190,220 +205,130 @@ class RuleTests(unittest.TestCase):
             ],
         )
 
-    def test_rule_1_a_decision_covers_its_key(self):
-        now = BASELINE_FOUND + found(
-            ("subprocess", "crates/agentd/src/exec.rs: Command::new(shell)")
+    def test_rule_1_new_placement_drift_points_at_its_record(self):
+        # Placement drift is the record in placement.toml, so adding to it is the edit.
+        failures = rules(
+            tree([*BASELINE, ("placement", "microvms-cli -> reqwest")]), base()
         )
-        file = ratchet(
-            BASELINE,
-            [
-                (
-                    "subprocess",
-                    "crates/agentd/src/exec.rs: Command::new(shell)",
-                    "agentd's job",
-                )
-            ],
-        )
-        self.assertEqual(compare(now, file, ratchet(BASELINE), "main"), [])
-
-    def test_rule_2_an_unrecorded_fix_fails(self):
-        fixed = (
-            "subprocess",
-            'crates/microvms-cli/src/upload.rs: Command::new("aws")',
-            258,
-        )
-        file = ratchet([*BASELINE, fixed])
         self.assertEqual(
-            compare(BASELINE_FOUND, file, file, "main"),
+            failures,
             [
-                'fixed: [subprocess] crates/microvms-cli/src/upload.rs: Command::new("aws"). '
-                "Run `mise run ratchet:update` and commit the file."
+                "new drift: [placement] microvms-cli -> reqwest. A crate's drift in "
+                "verify/arch/placement.toml can only shrink: move the work to the layer whose "
+                "job it is, or add a decision for the edge with its reason in "
+                "verify/ratchet/decisions.toml."
             ],
         )
 
-    def test_rules_1_and_2_leave_a_held_category_to_its_check(self):
-        # dependency_direction.rs computes placement and holds the file's records to the tree.
-        # Nothing here collects it, so a record with no finding isn't a fix, and a finding a
-        # caller passed in isn't new drift.
-        self.assertEqual(
-            RATCHET["HELD"],
-            {"placement": "crates/microvms-cli/tests/dependency_direction.rs"},
-        )
-        file = ratchet(BASELINE)
-        unrecorded = BASELINE_FOUND + found(("placement", "microvms-cli -> reqwest"))
-        self.assertEqual(compare(unrecorded, file, ratchet(BASELINE), "main"), [])
-        uncollected = BASELINE_FOUND - found(BASELINE[0][:2])
-        self.assertEqual(compare(uncollected, file, ratchet(BASELINE), "main"), [])
+    def test_rule_1_drift_that_leaves_passes(self):
+        # A fix removes drift by fixing the code, and nothing else changes: no list is edited.
+        gone = ("subprocess", 'crates/microvms-cli/src/upload.rs: Command::new("aws")')
+        self.assertEqual(rules(tree(), base([*BASELINE, gone])), [])
 
-    def test_rule_4_holds_a_held_category_too(self):
-        entries = [e for e in BASELINE if e[0] != "placement"]
-        now = found(*((c, k) for c, k, _ in entries))
-        failures = compare(now, ratchet(entries), ratchet(BASELINE), "main")
-        self.assertEqual([f.split(":")[0] for f in failures], ["promote placement"])
-
-    def test_rule_2_a_stale_decision_fails_too(self):
-        file = ratchet(
-            BASELINE, [("subprocess", "gone.rs: Command::new(x)", "was needed")]
-        )
-        failures = compare(BASELINE_FOUND, file, ratchet(BASELINE), "main")
-        self.assertEqual(len(failures), 1)
-        self.assertTrue(
-            failures[0].startswith("fixed: [subprocess] gone.rs: Command::new(x).")
-        )
-
-    def test_rule_3_an_entry_absent_from_the_base_fails(self):
-        added = ("placement", "microvms-cli -> sha2", 260)
-        now = BASELINE_FOUND + found(("placement", "microvms-cli -> sha2"))
-        failures = compare(
-            now, ratchet([*BASELINE, added]), ratchet(BASELINE), "origin/main"
-        )
-        self.assertEqual(len(failures), 1)
-        self.assertTrue(
-            failures[0].startswith(
-                "not in the base: [placement] microvms-cli -> sha2 is an entry here but not "
-                "in origin/main's verify/ratchet/drift.json,"
-            ),
-            failures[0],
-        )
-
-    def test_rule_3_a_decision_absent_from_the_base_passes(self):
-        now = BASELINE_FOUND + found(
-            ("subprocess", 'doctor.rs: Command::new("terraform")')
-        )
-        file = ratchet(
-            BASELINE,
-            [("subprocess", 'doctor.rs: Command::new("terraform")', "reads tf state")],
-        )
-        self.assertEqual(compare(now, file, ratchet(BASELINE), "main"), [])
-
-    def test_rule_3_points_an_untraced_entry_at_traced(self):
-        # An untraced requirement can't take a decision, so rule 3's layering advice ("or add
-        # a decision") would send the reader to a file that refuses it.
-        added = ("untraced", "TRAP-14", 301)
-        now = BASELINE_FOUND + found(added[:2])
-        failures = compare(now, ratchet([*BASELINE, added]), ratchet(BASELINE), "main")
-        self.assertEqual(len(failures), 1, failures)
-        self.assertTrue(failures[0].startswith("not in the base: [untraced] TRAP-14"))
-        self.assertTrue(
-            failures[0].endswith(
-                "Entries can only be removed: trace the requirement in its group's file, "
-                "verify/spec/traced/<GROUP>.toml, instead."
-            ),
-            failures[0],
-        )
-
-    def test_rule_3_is_skipped_when_the_base_has_no_file(self):
-        # The bootstrap: the PR that creates verify/ratchet/drift.json has no base copy to compare with.
-        self.assertEqual(compare(BASELINE_FOUND, ratchet(BASELINE), None, "main"), [])
-
-    #: What a base whose ratchet.py predates the adapter-logic collector collects.
-    BEFORE_ADAPTER_LOGIC = ("placement", "subprocess", "port-impl")
-
-    def test_rule_3_is_skipped_for_a_category_the_base_does_not_collect(self):
-        # The bootstrap for a newly collected category: the base's file couldn't record its
-        # findings, so the PR that starts collecting it has to be able to list them.
-        first = (
-            "adapter-logic",
-            "bindings/microvms-js/src/exec.rs: literal-default: const DEFAULT_WAIT: f64 = 300.0;",
-            273,
-        )
-        base = ratchet(BASELINE[:3])
-        now = BASELINE_FOUND + found(first[:2])
-        failures = compare(
-            now,
-            ratchet([*BASELINE, first]),
-            base,
-            "main",
-            base_collected=self.BEFORE_ADAPTER_LOGIC,
-        )
-        self.assertEqual(failures, [])
-
-    def test_rule_3_still_applies_to_a_category_the_base_collects(self):
-        # The bootstrap is per category: a category the base collected can't use it, even in
-        # the PR that bootstraps another one.
-        added = (
+    def test_rule_1_a_decision_covers_its_finding(self):
+        decision = (
             "subprocess",
-            'bindings/microvms-js/src/session.rs: Command::new("gh")',
-            258,
+            "crates/agentd/src/exec.rs: Command::new(shell)",
+            "agentd's job",
         )
-        now = BASELINE_FOUND + found(added[:2])
-        failures = compare(
-            now,
-            ratchet([*BASELINE, added]),
-            ratchet(BASELINE[:3]),
-            "main",
-            base_collected=self.BEFORE_ADAPTER_LOGIC,
+        head = tree(decisions=[decision])
+        self.assertIn(decision[:2], head.findings)
+        self.assertEqual(rules(head, base()), [])
+
+    def test_rule_1_a_decision_taken_away_is_new_drift(self):
+        # Each tree is measured with its own decisions, so dropping one turns its finding into
+        # drift the base didn't have.
+        decision = (
+            "subprocess",
+            "crates/agentd/src/exec.rs: Command::new(shell)",
+            "agentd's job",
         )
-        self.assertEqual(len(failures), 1, failures)
-        self.assertTrue(
-            failures[0].startswith(
-                'not in the base: [subprocess] bindings/microvms-js/src/session.rs: Command::new("gh")'
-            ),
-            failures[0],
+        head = tree([*BASELINE, decision[:2]])
+        self.assertEqual(kinds(rules(head, base(decisions=[decision]))), ["new drift"])
+
+    def test_rule_1_is_skipped_when_the_base_predates_the_decisions(self):
+        # The one change that moves the decisions out of drift.json has a base without the
+        # file, so there's no base drift to hold it to. Rule 3 still reads the base's sets.
+        new = ("subprocess", 'bindings/microvms-py/src/exec.rs: Command::new("aws")')
+        self.assertEqual(rules(tree([*BASELINE, new]), Base("main", None, None)), [])
+
+    def moved(self, old, new):
+        """rules() after the tree re-keys `old` (in the base) as `new`."""
+        return rules(
+            tree([*BASELINE, ("subprocess", new)]),
+            base([*BASELINE, ("subprocess", old)]),
         )
 
-    def moved(self, old, new, issue=284):
-        """compare() after the file re-keys `old` (in the base) as `new` (found now)."""
-        base = ratchet([*BASELINE, ("subprocess", old, 284)])
-        file = ratchet([*BASELINE, ("subprocess", new, issue)])
-        now = BASELINE_FOUND + found(("subprocess", new))
-        return compare(now, file, base, "main")
-
-    def test_rule_3_a_move_to_another_file_or_crate_passes(self):
+    def test_rule_1_a_move_to_another_file_or_crate_passes(self):
         old = "crates/microvms-core/src/provision.rs: std::process::Command::new(&argv[0])"
         new = "crates/microvms-edges/src/subprocess.rs: std::process::Command::new(&argv[0])"
         self.assertEqual(self.moved(old, new), [])
 
-    def test_rule_3_a_rename_in_place_passes(self):
+    def test_rule_1_a_rename_in_place_passes(self):
         old = "crates/microvms-core/src/provision.rs: std::process::Command::new(&argv[0])"
         new = "crates/microvms-core/src/provision.rs: std::process::Command::new(&command[0])"
         self.assertEqual(self.moved(old, new), [])
 
-    def test_rule_3_an_unchanged_key_may_name_another_issue(self):
-        key = "crates/microvms-core/src/provision.rs: std::process::Command::new(&argv[0])"
-        self.assertEqual(self.moved(key, key, issue=290), [])
-
-    def test_rule_3_a_move_and_a_rename_at_once_fails(self):
+    def test_rule_1_a_move_and_a_rename_at_once_fails(self):
         old = "crates/microvms-core/src/provision.rs: std::process::Command::new(&argv[0])"
         new = "crates/microvms-edges/src/subprocess.rs: std::process::Command::new(&command[0])"
-        self.assertEqual(
-            [f.split(":")[0] for f in self.moved(old, new)], ["not in the base"]
-        )
+        self.assertEqual(kinds(self.moved(old, new)), ["new drift"])
 
-    def test_rule_3_a_move_under_another_issue_fails(self):
-        old = "crates/microvms-core/src/provision.rs: std::process::Command::new(&argv[0])"
-        new = "crates/microvms-edges/src/subprocess.rs: std::process::Command::new(&argv[0])"
-        self.assertEqual(
-            [f.split(":")[0] for f in self.moved(old, new, issue=999)],
-            ["not in the base"],
-        )
-
-    def test_rule_3_a_new_key_beside_its_original_fails(self):
-        # The original is still listed, so there's nothing for the new key to replace.
+    def test_rule_1_a_new_key_beside_its_original_fails(self):
+        # The original is still there, so there's nothing for the new key to replace.
         key = "crates/microvms-core/src/provision.rs: std::process::Command::new(&argv[0])"
         copy = "crates/microvms-edges/src/subprocess.rs: std::process::Command::new(&argv[0])"
-        base = ratchet([*BASELINE, ("subprocess", key, 284)])
-        file = ratchet([*BASELINE, ("subprocess", key, 284), ("subprocess", copy, 284)])
-        now = BASELINE_FOUND + found(("subprocess", key), ("subprocess", copy))
+        head = tree([*BASELINE, ("subprocess", key), ("subprocess", copy)])
         self.assertEqual(
-            [f.split(":")[0] for f in compare(now, file, base, "main")],
-            ["not in the base"],
+            kinds(rules(head, base([*BASELINE, ("subprocess", key)]))), ["new drift"]
         )
 
-    def test_rule_3_a_placement_entry_cannot_be_swapped_for_another(self):
-        # Placement keys name crates, not places, so they never re-key on a move.
-        base = ratchet(BASELINE)
-        entries = [("placement", "microvms-cli -> reqwest", 260), *BASELINE[1:]]
-        now = found(*((c, k) for c, k, _ in entries))
-        self.assertEqual(
-            [f.split(":")[0] for f in compare(now, ratchet(entries), base, "main")],
-            ["not in the base"],
+    def test_rule_1_a_placement_or_parity_key_never_pairs(self):
+        # They name an edge and a table row, not places in the code, so a swap isn't a move.
+        for category, old, new in (
+            ("placement", "microvms-cli -> tar", "microvms-cli -> reqwest"),
+            ("parity-gap", "wait-until-running/cli", "wait-until-running/py"),
+        ):
+            with self.subTest(category=category):
+                drift = [d for d in BASELINE if d[0] != category]
+                failures = rules(
+                    tree([*drift, (category, new)]), base([*drift, (category, old)])
+                )
+                self.assertEqual(kinds(failures), ["new drift"])
+
+    def test_rule_1_counts_duplicate_keys(self):
+        # Two identical calls in one file share a key, so the key is drift twice.
+        twice = [*BASELINE, BASELINE[1]]
+        self.assertEqual(kinds(rules(tree(twice), base())), ["new drift"])
+        self.assertEqual(rules(tree(twice), base(twice)), [])
+
+    def test_rule_2_a_stale_decision_fails(self):
+        head = tree(
+            decisions=[("subprocess", "gone.rs: Command::new(x)", "was needed")]
         )
+        head = head._replace(
+            findings=head.findings - found(("subprocess", "gone.rs: Command::new(x)"))
+        )
+        self.assertEqual(
+            rules(head, base()),
+            [
+                "stale decision: [subprocess] gone.rs: Command::new(x) decides a finding the "
+                "tree doesn't have. Delete it from verify/ratchet/decisions.toml."
+            ],
+        )
+
+    def test_rule_2_leaves_a_held_category_to_its_check(self):
+        # dependency_direction.rs holds a placement decision to the tree; nothing here finds
+        # the edge it allows.
+        self.assertEqual(
+            HELD, {"placement": "crates/microvms-cli/tests/dependency_direction.rs"}
+        )
+        decision = ("placement", "microvms-cli -> notify", "the watch loop")
+        self.assertEqual(rules(tree(decisions=[decision]), base()), [])
 
     def test_rule_4_an_empty_category_must_be_promoted(self):
-        entries = [e for e in BASELINE if e[0] != "subprocess"]
-        now = found(*((c, k) for c, k, _ in entries))
-        failures = compare(now, ratchet(entries), ratchet(BASELINE), "main")
+        drift = [d for d in BASELINE if d[0] != "subprocess"]
+        failures = rules(tree(drift), base())
         self.assertEqual(len(failures), 1)
         self.assertTrue(
             failures[0].startswith("promote subprocess: move its rule into "),
@@ -411,65 +336,49 @@ class RuleTests(unittest.TestCase):
         )
 
     def test_rule_4_decisions_do_not_keep_a_category_open(self):
-        entries = [e for e in BASELINE if e[0] != "subprocess"]
+        drift = [d for d in BASELINE if d[0] != "subprocess"]
         decision = (
             "subprocess",
             "crates/agentd/src/exec.rs: Command::new(shell)",
             "agentd's job",
         )
-        now = found(*((c, k) for c, k, _ in entries), decision[:2])
-        failures = compare(now, ratchet(entries, [decision]), ratchet(BASELINE), "main")
-        self.assertEqual([f.split(":")[0] for f in failures], ["promote subprocess"])
-
-    def test_an_enforced_category_is_still_collected(self):
-        # `enforced` quiets rule 4 and nothing else, so listing a category can't waive drift.
-        entries = [e for e in BASELINE if e[0] != "subprocess"]
-        now = found(
-            *((c, k) for c, k, _ in entries), ("subprocess", "x.rs: Command::new(y)")
-        )
-        file = ratchet(entries, enforced=["subprocess"])
         self.assertEqual(
-            [f.split(":")[0] for f in compare(now, file, ratchet(BASELINE), "main")],
-            ["new drift"],
+            kinds(rules(tree(drift, [decision]), base())), ["promote subprocess"]
+        )
+
+    def test_rule_4_holds_a_held_category_too(self):
+        drift = [d for d in BASELINE if d[0] != "placement"]
+        self.assertEqual(kinds(rules(tree(drift), base())), ["promote placement"])
+
+    def test_an_enforced_category_cannot_carry_drift(self):
+        # `enforced` quiets rule 4 and nothing else, so listing a category never waives drift,
+        # even drift the base had too.
+        failures = rules(tree(enforced=["subprocess"]), base())
+        self.assertEqual(len(failures), 1, failures)
+        self.assertTrue(
+            failures[0].startswith(
+                "subprocess is enforced by each crate's clippy.toml as a disallowed type "
+                '(#285), so it can\'t carry drift: crates/microvms-cli/src/seam.rs: Command::new("aws").'
+            ),
+            failures[0],
         )
 
     def test_an_enforced_category_keeps_its_decisions(self):
-        entries = [e for e in BASELINE if e[0] != "subprocess"]
+        drift = [d for d in BASELINE if d[0] != "subprocess"]
         decision = (
             "subprocess",
             "crates/agentd/src/exec.rs: Command::new(shell)",
             "agentd's job",
         )
-        now = found(*((c, k) for c, k, _ in entries), decision[:2])
-        file = ratchet(entries, [decision], enforced=["subprocess"])
-        self.assertEqual(compare(now, file, ratchet(BASELINE), "main"), [])
-
-    def test_an_enforced_category_cannot_carry_entries(self):
-        with self.assertRaisesRegex(SystemExit, "subprocess is enforced"):
-            ratchet(BASELINE, enforced=["subprocess"])
-
-    def test_duplicate_keys_are_counted(self):
-        # Two identical calls in one file share a key, so the file lists the entry twice.
-        twice = BASELINE_FOUND + found(BASELINE[1][:2])
-        self.assertEqual(
-            [f.split(":")[0] for f in compare(twice, ratchet(BASELINE), None, "main")],
-            ["new drift"],
-        )
-        self.assertEqual(
-            compare(twice, ratchet([*BASELINE, BASELINE[1]]), None, "main"), []
-        )
-
-    def test_a_category_that_is_not_collected_cannot_carry_entries(self):
-        with not_collected_yet():
-            with self.assertRaisesRegex(SystemExit, "later-gap is not collected yet"):
-                ratchet([*BASELINE, ("later-gap", "x", 271)])
+        head = tree(drift, [decision], enforced=["subprocess"])
+        self.assertEqual(rules(head, base()), [])
 
 
 def not_collected_yet():
     """The ratchet's globals with one category defined but not collected, as parity-gap was
     until #271. Nothing is in `NOT_COLLECTED` today, so the tests of that path plant one."""
     return mock.patch.dict(
-        parse.__globals__,
+        parse_decisions.__globals__,
         {
             "NOT_COLLECTED": {"later-gap": "until its collector lands"},
             "CATEGORIES": (*RATCHET["COLLECTED"], "later-gap"),
@@ -478,27 +387,15 @@ def not_collected_yet():
 
 
 class FileTests(unittest.TestCase):
-    """The file's schema, `update`, and the summary."""
-
-    def test_an_entry_names_its_issue(self):
-        with self.assertRaisesRegex(SystemExit, "issue"):
-            parse(
-                {
-                    "version": 1,
-                    "enforced": [],
-                    "entries": [{"category": "placement", "key": "a -> b"}],
-                    "decisions": [],
-                },
-                "test",
-            )
+    """The hand-written files' schemas, the summary, and the snapshot."""
 
     def test_a_decision_names_its_reason(self):
         with self.assertRaisesRegex(SystemExit, "reason"):
-            ratchet(BASELINE, [("subprocess", "x.rs: Command::new(y)", "  ")])
+            decisions_file([("subprocess", "x.rs: Command::new(y)", "  ")])
 
     def test_an_unknown_category_is_refused(self):
         with self.assertRaisesRegex(SystemExit, "unknown category"):
-            ratchet([("layering", "x", 1)])
+            decisions_file([("layering", "x", "why")])
 
     def test_an_untraced_decision_is_refused(self):
         # A decision would take a requirement out of the count with no layer checking it: a
@@ -508,83 +405,147 @@ class FileTests(unittest.TestCase):
             r"\[untraced\] TRAP-14 can't be a decision: a requirement that can't carry a "
             "layer waives that layer in its group's file, verify/spec/traced/<GROUP>.toml",
         ):
-            ratchet(BASELINE, [("untraced", "TRAP-14", "not worth a test")])
+            decisions_file([("untraced", "TRAP-14", "not worth a test")])
 
-    def test_a_key_is_either_an_entry_or_a_decision(self):
-        with self.assertRaisesRegex(SystemExit, "both an entry and a decision"):
-            ratchet(BASELINE, [(*BASELINE[0][:2], "why not")])
+    def test_a_category_that_is_not_collected_takes_no_decision(self):
+        with not_collected_yet():
+            with self.assertRaisesRegex(SystemExit, "later-gap is not collected yet"):
+                decisions_file([("later-gap", "x", "why")])
 
-    def test_update_deletes_fixed_entries_and_never_adds_one(self):
-        fixed = BASELINE[1][:2]
-        new = ("subprocess", 'bindings/microvms-py/src/exec.rs: Command::new("aws")')
-        now = BASELINE_FOUND - found(fixed) + found(new)
-        data, removed = updated(ratchet(BASELINE), now)
-        self.assertEqual(removed, [f"[subprocess] {fixed[1]}"])
-        after = {(e["category"], e["key"]) for e in data["entries"]}
-        self.assertNotIn(fixed, after)
-        self.assertNotIn(new, after)
-        self.assertEqual(len(data["entries"]), len(BASELINE) - 1)
+    def test_enforced_names_collected_categories_once(self):
+        for enforced in (["layering"], ["subprocess", "subprocess"]):
+            with self.subTest(enforced=enforced):
+                with self.assertRaisesRegex(SystemExit, "enforced"):
+                    decisions_file(enforced=enforced)
 
-    def test_update_leaves_a_held_category_alone(self):
-        # No collector here finds placement, so every placement record would read as fixed.
-        # dependency_direction.rs names the one a fix leaves behind.
-        decision = ("placement", "microvms-cli -> notify", "the watch loop")
-        file = ratchet(BASELINE, [decision])
-        data, removed = updated(file, BASELINE_FOUND - found(BASELINE[0][:2]))
-        self.assertEqual(removed, [])
-        self.assertEqual(data, file)
+    def test_the_file_holds_enforced_and_decisions_and_nothing_else(self):
+        # A misspelled table would otherwise read as no decisions at all.
+        for data in (
+            {"decision": []},
+            {"enforced": [], "decisions": []},
+            {"enforced": [], "decision": [{"category": "subprocess", "key": "k"}]},
+        ):
+            with self.subTest(data=data):
+                with self.assertRaises(SystemExit):
+                    parse_decisions(data, "test")
+        self.assertEqual(
+            parse_decisions({"enforced": []}, "test"),
+            {"enforced": [], "decisions": []},
+        )
 
-    def test_update_removes_only_the_surplus_copy_of_a_duplicate(self):
-        data, removed = updated(ratchet([*BASELINE, BASELINE[1]]), BASELINE_FOUND)
-        self.assertEqual(len(removed), 1)
-        self.assertEqual(len(data["entries"]), len(BASELINE))
+    def test_the_checked_in_decisions_parse(self):
+        # The floor for the real file: a reader that found nothing in it would turn every
+        # decided finding into drift on both trees, and compare them equal.
+        path = ROOT / "verify" / "ratchet" / "decisions.toml"
+        file = parse_decisions(
+            tomllib.loads(path.read_text(encoding="utf-8")), str(path)
+        )
+        self.assertTrue(file["decisions"])
+        self.assertIn("adapter-logic", file["enforced"])
+
+    def test_placement_drift_is_read_from_the_drift_table(self):
+        sets = placement_from(
+            '[cli]\nnormal = ["core"]\n\n[cli.drift]\nnormal = ["tar"]\nbuild = ["cc"]\n',
+            "test",
+        )
+        self.assertEqual(sets["cli"]["normal"], {"core"})
+        self.assertEqual(
+            placement_drift(sets),
+            found(("placement", "cli -> tar"), ("placement", "cli -> cc (build)")),
+        )
+
+    def test_a_placement_table_takes_only_its_lists(self):
+        for text in (
+            '[cli]\ndev = ["x"]\n',
+            '[cli]\nnormal = "core"\n',
+            '[cli.drift]\ndev = ["x"]\n',
+            "[cli\n",
+        ):
+            with self.subTest(text=text):
+                with self.assertRaises(SystemExit):
+                    placement_from(text, "test")
 
     def test_the_summary_says_not_collected_rather_than_zero(self):
         with not_collected_yet():
-            rows = summary(ratchet(BASELINE), ratchet(BASELINE))
+            rows = summary(tree(), base())
             text = render_text(rows)
         self.assertEqual(rows["later-gap"]["status"], "not collected")
-        self.assertIsNone(rows["later-gap"]["entries"])
-        self.assertEqual(rows["placement"]["entries"], 1)
+        self.assertIsNone(rows["later-gap"]["drift"])
+        self.assertEqual(rows["placement"]["drift"], 1)
         line = next(line for line in text.splitlines() if line.startswith("later-gap"))
         self.assertIn("not collected", line)
         self.assertNotIn("0", line)
 
-    def test_parity_gap_is_collected(self):
-        rows = summary(ratchet(BASELINE), ratchet(BASELINE))
-        self.assertEqual(rows["parity-gap"]["status"], "collected")
-        self.assertEqual(rows["parity-gap"]["entries"], 1)
-
-    def test_the_summary_says_new_for_a_category_the_base_does_not_collect(self):
-        rows = summary(
-            ratchet(BASELINE),
-            ratchet(BASELINE[:3]),
-            base_collected=("placement", "subprocess", "port-impl"),
-        )
-        self.assertIsNone(rows["adapter-logic"]["base"])
-        line = next(
-            line
-            for line in render_text(rows).splitlines()
-            if line.startswith("adapter-logic")
-        )
-        self.assertIn("new", line)
-
     def test_the_summary_reports_the_change_from_the_base(self):
-        base = ratchet([*BASELINE, ("placement", "microvms-cli -> sha2", 260)])
-        rows = summary(ratchet(BASELINE), base)
+        rows = summary(tree(), base([*BASELINE, ("placement", "microvms-cli -> sha2")]))
         self.assertEqual(
-            (rows["placement"]["entries"], rows["placement"]["base"]), (1, 2)
+            (rows["placement"]["drift"], rows["placement"]["base"]), (1, 2)
         )
         self.assertIn("-1", render_text(rows))
 
+    def test_the_summary_says_new_when_rule_1_is_skipped(self):
+        rows = summary(tree(), Base("main", None, None))
+        self.assertIsNone(rows["subprocess"]["base"])
+        line = next(
+            line
+            for line in render_text(rows).splitlines()
+            if line.startswith("subprocess")
+        )
+        self.assertIn("new", line)
+
+    def test_the_summary_counts_decisions_in_every_category(self):
+        decision = ("placement", "microvms-cli -> notify", "the watch loop")
+        rows = summary(tree(decisions=[decision]), base())
+        self.assertEqual(rows["placement"]["decisions"], 1)
+
+
+class SnapshotTests(unittest.TestCase):
+    """`verify/ratchet/drift.json`, which the chart reads and the check never does."""
+
+    def test_the_snapshot_lists_the_drift_by_category_one_key_a_line(self):
+        decision = ("placement", "microvms-cli -> notify", "the watch loop")
+        text = snapshot(tree([*BASELINE, BASELINE[1]], [decision]))
+        data = json.loads(text)
+        self.assertEqual(data["version"], 2)
+        self.assertEqual(list(data["drift"]), list(RATCHET["COLLECTED"]))
+        self.assertEqual(data["drift"]["subprocess"], [BASELINE[1][1]] * 2)
+        self.assertEqual(data["decisions"]["placement"], 1)
+        self.assertIn(f"      {json.dumps(BASELINE[0][1])}\n", text)
+
+    def test_a_stale_snapshot_fails_its_check(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "drift.json"
+        text = snapshot(tree())
+        with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+            self.assertEqual(write_snapshot(path, text, check=True), 1)
+            self.assertFalse(path.exists())
+            self.assertEqual(write_snapshot(path, text, check=False), 0)
+            self.assertEqual(write_snapshot(path, text, check=True), 0)
+            self.assertEqual(
+                write_snapshot(path, snapshot(tree(BASELINE[1:])), check=True), 1
+            )
+        self.assertEqual(path.read_text(encoding="utf-8"), text)
+
+    def test_the_checked_in_snapshot_is_one_the_history_reads(self):
+        # Stale or not, it has to be a point the chart can plot.
+        path = ROOT / "verify" / "ratchet" / "drift.json"
+        counts, decisions = HISTORY["counts_of"](
+            path.read_text(encoding="utf-8"), str(path)
+        )
+        self.assertEqual(set(counts), set(RATCHET["COLLECTED"]))
+        self.assertGreater(decisions, 0)
+
 
 class SetTests(unittest.TestCase):
-    """Rule 3's other half: an allowed set can shrink but not grow."""
+    """Rule 3: an allowed set can shrink but not grow."""
 
-    BASE = sets_from('[microvms-py]\nnormal = ["microvms-core", "tokio"]\n', "base")
+    BASE = placement_from(
+        '[microvms-py]\nnormal = ["microvms-core", "tokio"]\n', "base"
+    )
 
     def test_a_crate_added_to_a_set_fails(self):
-        now = sets_from(
+        now = placement_from(
             '[microvms-py]\nnormal = ["microvms-core", "tokio", "reqwest"]\n', "now"
         )
         failures = grown_sets(now, self.BASE, "origin/main")
@@ -597,11 +558,11 @@ class SetTests(unittest.TestCase):
         )
 
     def test_a_set_that_shrinks_passes(self):
-        now = sets_from('[microvms-py]\nnormal = ["microvms-core"]\n', "now")
+        now = placement_from('[microvms-py]\nnormal = ["microvms-core"]\n', "now")
         self.assertEqual(grown_sets(now, self.BASE, "origin/main"), [])
 
     def test_a_set_for_a_new_crate_passes(self):
-        now = sets_from(
+        now = placement_from(
             '[microvms-py]\nnormal = ["microvms-core"]\n'
             '[microvms-domain]\nnormal = ["serde"]\n',
             "now",
@@ -611,38 +572,12 @@ class SetTests(unittest.TestCase):
     def test_no_base_sets_is_the_bootstrap(self):
         self.assertEqual(grown_sets(self.BASE, None, "origin/main"), [])
 
-
-class LayoutTests(unittest.TestCase):
-    """`update` writes the checked-in layout, so its diff is the entries it removed."""
-
-    def test_the_checked_in_file_is_in_the_written_layout(self):
-        text = (ROOT / "verify" / "ratchet" / "drift.json").read_text(encoding="utf-8")
-        self.assertEqual(dump(json.loads(text)), text)
-
-    def test_removing_an_entry_changes_one_line(self):
-        text = (ROOT / "verify" / "ratchet" / "drift.json").read_text(encoding="utf-8")
-        file = parse(json.loads(text), "drift.json")
-        now = Counter(
-            (e["category"], e["key"]) for e in file["entries"] + file["decisions"]
+    def test_rules_include_rule_3(self):
+        now = placement_from(
+            '[microvms-py]\nnormal = ["microvms-core", "tokio", "reqwest"]\n', "now"
         )
-        # The first entry `update` can remove: a held category's stay.
-        index, entry = next(
-            (i, e)
-            for i, e in enumerate(file["entries"])
-            if e["category"] not in RATCHET["HELD"]
-        )
-        gone = (entry["category"], entry["key"])
-        data, _ = updated(file, now - Counter([gone]))
-        before, after = text.splitlines(), dump(data).splitlines()
-        self.assertEqual(len(before) - len(after), 1)
-        # The file's first four lines open it: the brace, version, enforced and "entries": [.
-        self.assertEqual(
-            [line for line in before if line not in after], [before[4 + index]]
-        )
-
-    def test_empty_lists_round_trip(self):
-        data = ratchet()
-        self.assertEqual(parse(json.loads(dump(data)), "test"), data)
+        failures = rules(tree(sets=now), base(sets=self.BASE))
+        self.assertEqual(kinds(failures), ["set grew"])
 
 
 RUST_TEST_FORMS = """\
@@ -1570,8 +1505,8 @@ class SentinelTests(unittest.TestCase):
 
 
 class SeededFaultTests(unittest.TestCase):
-    """The faults #281 names. Each also fired once by hand in the real tree (see the PR). #285's
-    placement faults are `dependency_direction.rs`'s now, in the registry."""
+    """The faults #281 names, over real collector runs. Each also fired on the real tree (see the
+    PR). #285's placement faults are `dependency_direction.rs`'s, in the registry."""
 
     def test_an_aws_subprocess_in_microvms_js_fails_with_a_subprocess_key(self):
         ws = (
@@ -1579,7 +1514,7 @@ class SeededFaultTests(unittest.TestCase):
             .crate(
                 "microvms-js",
                 files={
-                    "src/session.rs": """\
+                    "src/session.rs": """\\
                         pub fn upload() {
                             std::process::Command::new("aws");
                         }
@@ -1596,45 +1531,49 @@ class SeededFaultTests(unittest.TestCase):
         self.assertIn(
             f"new drift: [subprocess] {key}. Move the work to the layer "
             "whose job it is (I/O belongs in microvms-edges, behind a port in "
-            "microvms-app), or add a decision with its reason.",
-            compare(now, ratchet(), None, "main"),
+            "microvms-app), or add a decision with its reason in "
+            "verify/ratchet/decisions.toml.",
+            rules(tree([*BASELINE, *now.elements()]), base()),
         )
 
     def sentinel_copy(self):
+        """A copy of the sentinel, and its drift measured as a base: every finding, with the
+        real tree's placement drift beside it so rule 4 is quiet about placement."""
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         copy = Path(tmp.name) / "sentinel"
         shutil.copytree(RATCHET["SENTINEL"].root, copy)
         scope = RATCHET["SENTINEL"]._replace(root=copy)
-        expected = json.loads((copy / "expected.json").read_text())
-        # The sentinel has no placement to find, since dependency_direction.rs computes it;
-        # the real file's CLI entry keeps rule 4 quiet about it.
-        entries = [(c, k, 1) for c, ks in expected.items() for k in ks] + [BASELINE[0]]
-        return scope, entries
+        return scope, Base("main", None, self.measured(scope))
 
-    def test_an_entry_deleted_without_a_fix_fails_rule_1(self):
-        scope, entries = self.sentinel_copy()
-        now = collect(scope)
-        self.assertEqual(compare(now, ratchet(entries), None, "main"), [])
-        deleted = entries[0]
-        failures = compare(now, ratchet(entries[1:]), None, "main")
-        self.assertEqual([f.split(":")[0] for f in failures], ["new drift"])
-        self.assertIn(deleted[1], failures[0])
+    @staticmethod
+    def measured(scope):
+        findings = collect(scope)
+        placement = found(BASELINE[0])
+        return Tree(findings, decisions_file(), {}, findings + placement)
 
-    def test_a_fix_without_an_updated_file_fails_rule_2(self):
-        scope, entries = self.sentinel_copy()
+    def test_a_subprocess_added_to_the_sentinel_fails_rule_1(self):
+        scope, before = self.sentinel_copy()
+        self.assertEqual(rules(self.measured(scope), before), [])
+        lib = scope.root / "adapter" / "src" / "lib.rs"
+        lib.write_text(
+            lib.read_text() + '\nfn added() { std::process::Command::new("gh"); }\n'
+        )
+        failures = rules(self.measured(scope), before)
+        self.assertEqual(kinds(failures), ["new drift"])
+        self.assertIn(
+            'adapter/src/lib.rs: std::process::Command::new("gh")', failures[0]
+        )
+
+    def test_a_fix_in_the_sentinel_passes_with_nothing_else_edited(self):
+        scope, before = self.sentinel_copy()
         lib = scope.root / "adapter" / "src" / "lib.rs"
         text = lib.read_text()
         self.assertIn('std::process::Command::new("aws");', text)
         lib.write_text(text.replace('std::process::Command::new("aws");', "", 1))
-        failures = compare(collect(scope), ratchet(entries), None, "main")
-        self.assertEqual(
-            failures,
-            [
-                'fixed: [subprocess] adapter/src/lib.rs: std::process::Command::new("aws"). '
-                "Run `mise run ratchet:update` and commit the file."
-            ],
-        )
+        after = self.measured(scope)
+        self.assertLess(sum(after.drift.values()), sum(before.tree.drift.values()))
+        self.assertEqual(rules(after, before), [])
 
 
 # The crate-root attribute that turns the adapters' clippy rules into errors under a plain
@@ -1644,9 +1583,9 @@ DENY = "#![deny(clippy::disallowed_methods, clippy::disallowed_types)]"
 # Every site in an adapter's `src/` that turns one of those lints off, by file and lint, with
 # how many `#[expect]` attributes it carries there. Clippy itself can't tell a reviewed
 # exception from a quiet bypass, so this list is the record: a new `expect` fails until it's
-# added here, and an `allow` or `warn` fails outright. A `disallowed_types` site also needs its
-# subprocess entry or decision in `verify/ratchet/drift.json`. The environment reads have no drift
-# category, so for them this list is the only record.
+# added here, and an `allow` or `warn` fails outright. A `disallowed_types` site's subprocess is
+# also drift the ratchet counts, or a decision in `verify/ratchet/decisions.toml`. The environment
+# reads have no drift category, so for them this list is the only record.
 LINT_EXCEPTIONS = {
     # The CLI's composition root, which hands core's process lookup to every handler.
     ("crates/microvms-cli/src/main.rs", "clippy::disallowed_methods"): 1,
@@ -2451,16 +2390,13 @@ class AdapterLintTests(unittest.TestCase):
                     found[(rel, lint)] += 1
         self.assertEqual(dict(found), LINT_EXCEPTIONS)
 
-        drift = json.loads(
-            (ROOT / "verify" / "ratchet" / "drift.json").read_text(encoding="utf-8")
+        # Each shipped site's subprocess is a finding the ratchet counts: drift, or a decision
+        # with its reason in verify/ratchet/decisions.toml.
+        subprocess_keys = keys(
+            RATCHET["read_tree"](RATCHET["REPO"]).findings, "subprocess"
         )
-        subprocess_keys = [
-            record["key"]
-            for record in drift["entries"] + drift["decisions"]
-            if record["category"] == "subprocess"
-        ]
         # A test-only file's banned types are fakes (the scripted transports), and the ratchet
-        # reads no test code, so there's no drift record for them to point at.
+        # reads no test code, so there's no finding for them to point at.
         for rel, lint in LINT_EXCEPTIONS:
             if (
                 lint == "clippy::disallowed_types"
@@ -2470,8 +2406,8 @@ class AdapterLintTests(unittest.TestCase):
                 with self.subTest(site=rel):
                     self.assertTrue(
                         any(key.startswith(f"{rel}: ") for key in subprocess_keys),
-                        f"{rel} expects a subprocess with no entry or decision in "
-                        "verify/ratchet/drift.json",
+                        f"{rel} expects a subprocess the ratchet doesn't find, so it's "
+                        "neither drift nor a decision in verify/ratchet/decisions.toml",
                     )
 
     def test_lint_levels_reads_the_level_and_skips_comments(self):
@@ -3140,10 +3076,12 @@ def crate_dir(name):
     raise AssertionError(f"no workspace package is named {name}")
 
 
-def git_repo(test):
-    tmp = tempfile.TemporaryDirectory()
-    test.addCleanup(tmp.cleanup)
-    root = Path(tmp.name)
+def git_repo(test, root=None):
+    """A git repository at `root`, or in a new temporary directory."""
+    if root is None:
+        tmp = tempfile.TemporaryDirectory()
+        test.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
     git(root, "init", "-q", "-b", "main")
     git(root, "config", "user.email", "test@example.com")
     git(root, "config", "user.name", "test")
@@ -3174,41 +3112,96 @@ def ratchet_script(root, collected=None):
 
 
 def drift_file(entries):
+    """A version 1 `drift.json`, the hand-kept file the snapshot replaced, with `(category,
+    key)` entries."""
     return {
         "version": 1,
         "enforced": [],
-        "entries": [{"category": c, "key": k, "issue": i} for c, k, i in entries],
+        "entries": [{"category": c, "key": k, "issue": 1} for c, k in entries],
         "decisions": [],
     }
 
 
+def snapshot_file(drift, decisions=0):
+    """A version 2 `drift.json`, the generated snapshot: `(category, key)` drift."""
+    return {
+        "version": 2,
+        "drift": {
+            c: sorted(k for cat, k in drift if cat == c) for c in RATCHET["COLLECTED"]
+        },
+        "decisions": {
+            c: decisions if c == "subprocess" else 0 for c in RATCHET["COLLECTED"]
+        },
+    }
+
+
 class BaseTests(unittest.TestCase):
-    def test_a_base_without_the_file_is_the_bootstrap(self):
-        root = git_repo(self)
-        commit(root, "first")
-        self.assertIsNone(read_base(root, "HEAD"))
+    """The base: its tree exported from git and measured with this script's collectors."""
 
-    def test_a_base_with_the_file_is_parsed(self):
-        root = git_repo(self)
-        commit(root, "baseline", drift_file(BASELINE))
-        base = read_base(root, "HEAD")
-        self.assertEqual(len(base["entries"]), len(BASELINE))
-
-    def test_the_base_sets_are_read_from_the_ref(self):
-        root = git_repo(self)
-        (root / "verify" / "arch").mkdir(parents=True)
-        (root / "verify" / "arch" / "placement.toml").write_text(
-            '[a]\nnormal = ["b"]\n'
+    def repo(self, decisions=True):
+        """A committed tree the ratchet can measure: an adapter with a subprocess, over a
+        kernel with a port, its placement set, and, unless told otherwise, a decisions file."""
+        ws = (
+            Workspace(self)
+            .crate("kernel", files={"src/lib.rs": "pub trait Fetch {}\n"})
+            .crate(
+                "adapter",
+                deps='kernel = { path = "../kernel" }',
+                files={"src/lib.rs": 'fn f() { std::process::Command::new("aws"); }\n'},
+            )
         )
-        commit(root, "sets")
+        ws.scope()
+        ws.write("verify/arch/placement.toml", '[adapter]\nnormal = ["kernel"]\n')
+        if decisions:
+            ws.write("verify/ratchet/decisions.toml", "enforced = []\n")
+        git_repo(self, ws.root)
+        commit(ws.root, "base")
+        return ws
+
+    def read_base(self, root, ref="HEAD"):
+        # The repository's scope names its real crates; the throwaway tree has two.
+        scope = {"repo_scope": lambda tree: Scope(root=tree, adapters=("adapter",))}
+        with mock.patch.dict(read_base.__globals__, scope):
+            return read_base(root, ref, ref)
+
+    def test_the_base_is_measured_from_its_commit_not_the_working_tree(self):
+        ws = self.repo()
+        ws.write("adapter/src/lib.rs", "fn f() {}\n")
+        base = self.read_base(ws.root)
         self.assertEqual(
-            read_base_sets(root, "HEAD"), {"a": {"normal": {"b"}, "build": set()}}
+            keys(base.tree.drift, "subprocess"),
+            ['adapter/src/lib.rs: std::process::Command::new("aws")'],
         )
+        self.assertEqual(base.sets["adapter"]["normal"], {"kernel"})
+
+    def test_a_base_without_decisions_predates_rule_1(self):
+        base = self.read_base(self.repo(decisions=False).root)
+        self.assertIsNone(base.tree)
+        # Rule 3 still reads its sets.
+        self.assertEqual(base.sets["adapter"]["normal"], {"kernel"})
 
     def test_a_base_without_sets_has_none(self):
         root = git_repo(self)
         commit(root, "first")
-        self.assertIsNone(read_base_sets(root, "HEAD"))
+        self.assertEqual(read_base(root, "HEAD", "HEAD"), Base("HEAD", None, None))
+
+    def test_a_base_the_collectors_refuse_fails(self):
+        # A base with no drift would pass every change, so one that can't be measured is an
+        # error, not an empty base.
+        ws = self.repo()
+        git(ws.root, "rm", "-q", "Cargo.toml")
+        commit(ws.root, "no workspace")
+        with self.assertRaisesRegex(
+            SystemExit,
+            "HEAD's tree can't be measured, so there's nothing to compare with",
+        ):
+            self.read_base(ws.root)
+
+    def test_an_unknown_base_ref_is_an_error_rather_than_a_bootstrap(self):
+        root = git_repo(self)
+        commit(root, "first")
+        with self.assertRaisesRegex(SystemExit, "no-such-ref"):
+            read_base(root, "no-such-ref", "no-such-ref")
 
     def test_the_base_collected_categories_are_read_from_its_script(self):
         root = git_repo(self)
@@ -3220,8 +3213,8 @@ class BaseTests(unittest.TestCase):
         self.assertEqual(read_base_collected(root, "HEAD"), ("placement", "subprocess"))
 
     def test_a_base_script_without_a_collected_tuple_is_an_error(self):
-        # A parser that finds nothing can't read as "the base collected nothing", which would
-        # skip rule 3 for every category.
+        # A parser that finds nothing can't read as "that commit collected nothing", which
+        # would chart every category as not counted there.
         root = git_repo(self)
         (root / "tools").mkdir()
         (root / "tools" / "ratchet.py").write_text("CATEGORIES = ()\n")
@@ -3232,12 +3225,6 @@ class BaseTests(unittest.TestCase):
         commit(root, "no script")
         with self.assertRaisesRegex(SystemExit, "no tools/ratchet.py"):
             read_base_collected(root, "HEAD")
-
-    def test_an_unknown_base_ref_is_an_error_rather_than_a_bootstrap(self):
-        root = git_repo(self)
-        commit(root, "first")
-        with self.assertRaisesRegex(SystemExit, "no-such-ref"):
-            read_base(root, "no-such-ref")
 
 
 class HistoryTests(unittest.TestCase):
@@ -3295,6 +3282,30 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(working["counts"]["adapter-logic"], 1)
         self.assertEqual(working["counts"]["placement"], 0)
 
+    def test_a_snapshot_is_a_point_as_the_hand_kept_file_was(self):
+        # The history spans both: the file drift.json was until the merge-base rule, and the
+        # snapshot it is since.
+        root = git_repo(self)
+        ratchet_script(root)
+        commit(root, "kept by hand", drift_file(BASELINE))
+        commit(root, "snapshot", snapshot_file(BASELINE[1:], decisions=4))
+        first, second = HISTORY["history"](root)
+        self.assertEqual(first["total"], len(BASELINE))
+        self.assertEqual(second["counts"]["placement"], 0)
+        self.assertEqual(second["counts"]["subprocess"], 1)
+        self.assertEqual(second["total"], len(BASELINE) - 1)
+        self.assertEqual(second["decisions"], 4)
+
+    def test_a_snapshot_it_cannot_read_is_an_error(self):
+        for data in (
+            {"version": 3},
+            {"version": 2, "drift": []},
+            {"version": 2, "drift": {"placement": "x"}, "decisions": {}},
+        ):
+            with self.subTest(data=data):
+                with self.assertRaises(SystemExit):
+                    HISTORY["counts_of"](json.dumps(data), "test")
+
     def test_untraced_is_null_before_the_commit_that_collects_it(self):
         # #295's first PR adds every untraced key as an entry at once. A zero before it would
         # chart a jump from a clean count to the whole backlog, when nobody had counted it yet.
@@ -3340,13 +3351,18 @@ class InheritedGitEnvTests(unittest.TestCase):
             with mock.patch.dict(os.environ, hook):
                 root = git_repo(self)
                 ratchet_script(root)
+                (root / "verify" / "arch").mkdir(parents=True)
+                (root / "verify" / "arch" / "placement.toml").write_text(
+                    '[a]\nnormal = ["b"]\n'
+                )
                 sha = commit(root, "baseline", drift_file(BASELINE))
             self.assertEqual(state(), before)
             with mock.patch.dict(os.environ, hook):
-                base = read_base(root, "HEAD")
+                base = read_base(root, "HEAD", "HEAD")
                 points = HISTORY["history"](root)
-            self.assertIsNotNone(base)
-            self.assertEqual(len(base["entries"]), len(BASELINE))
+            # The decoy has no placement.toml, so an export that read it would have no sets.
+            self.assertIsNotNone(base.sets)
+            self.assertEqual(base.sets["a"]["normal"], {"b"})
             self.assertEqual([p["sha"] for p in points], [sha])
 
 
