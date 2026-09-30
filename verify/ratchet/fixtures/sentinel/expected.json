@@ -1,5 +1,4 @@
 {
-  "placement": ["adapter -> cc (build)", "adapter -> tar"],
   "subprocess": [
     "adapter/src/lib.rs: std::process::Command::new(\"aws\")",
     "adapter/src/lib.rs: tokio::process::Command::new(\"gh\")",
