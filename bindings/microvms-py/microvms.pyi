@@ -462,7 +462,8 @@ class CostReport:
         """
     def to_dict(self, /) -> dict:
         """
-        The `cli.py:688 report_to_dict` shape, key for key.
+        Core's JSON shape for a report, as a dict: the one `microvm cost --json` and
+        TypeScript's `toJson` emit (#255).
         """
     @property
     def total(self, /) -> Total:
@@ -1388,7 +1389,8 @@ class LineItem:
         """
     def to_dict(self, /) -> dict:
         """
-        The `cli.py` `_line_to_dict` shape. An unpriced line has **no** `usd` key at all.
+        Core's JSON shape for a line item, as a dict. An unpriced line has **no** `usd` key at
+        all.
         """
     @property
     def unit(self, /) -> str: ...
@@ -2364,9 +2366,14 @@ class Session:
         control plane's job and it happens inside every request (TRAP-9), so a caller
         handing a token in would be handing in one that expires.
         """
-    def download_file(self, /, path: str) -> bytes:
+    def download_file(self, /, path: str, *, start_line: int |None = None, end_line: int |None = None) -> bytes:
         """
-        Reads one file.
+        Reads one file, or lines `start_line` through `end_line` of it.
+        
+        The range is 1-based and inclusive, and the daemon slices the file, so reading lines
+        40 to 60 of a large log reads those lines alone. Either bound may be `None` (line 1,
+        through EOF), and an `end_line` past the last line reads through EOF. Line 0 and an end
+        before the start raise `InvalidArgError` before any request.
         """
     def download_tar(self, /, remote: str) -> bytes:
         """
@@ -2766,7 +2773,7 @@ def egress_posture_for(egress: bool = False, connectors: Sequence[str] |None = N
     `region`, each connector ARN is checked against the region it names.
     """
 
-def estimate_run(size: SizeClass, *, running_seconds: float = 0.0, suspended_seconds: float = 0.0, image_gb: float |None = None, image_retained_seconds: float |None = None, suspend_resume_cycles: int = 0, snapshot_gb: float |None = None, launched: bool = True, label: str = "plan", rates: RateTable |None = None) -> CostReport:
+def estimate_run(size: SizeClass, *, running_seconds: float = 0.0, suspended_seconds: float = 0.0, image_gb: float |None = None, image_retained_seconds: float |None = None, suspend_resume_cycles: int = 0, snapshot_gb: float |None = None, launched: bool |None = None, label: str |None = None, rates: RateTable |None = None) -> CostReport:
     """
     What a plan will cost, before spending anything (COST-10).
     
@@ -2774,6 +2781,10 @@ def estimate_run(size: SizeClass, *, running_seconds: float = 0.0, suspended_sec
     [`run_report`]: not the arithmetic, which is shared, but what the durations admit about
     themselves — and it is why this signature has no `Duration` parameter at all, so an
     accidentally-measured one is not something a caller can write.
+    
+    Leave `launched` out and the core infers it: running time, or an image of non-zero size, so
+    a plan of suspended time alone reads no launch snapshot. Leave `label` out and the report
+    is labelled `"estimate"`, what `microvm cost --estimate` labels the same plan (#255).
     """
 
 def install_agent_access(session: Session, agents: Sequence[AgentSpec], token: BearerToken) -> None:
@@ -2854,7 +2865,7 @@ def provision_agentd_report(version: str |None = None, state_dir: str |PathLike[
     verification, the path, the version, and the digest.
     """
 
-def run_report(size: SizeClass, *, running: Duration |None = None, suspended: Duration |None = None, image_build: Duration |None = None, image_gb: float |None = None, image_retained: Duration |None = None, suspend_resume_cycles: int = 0, snapshot_gb: float |None = None, launched: bool = True, label: str = "run", rates: RateTable |None = None) -> CostReport:
+def run_report(size: SizeClass, *, running: Duration |None = None, suspended: Duration |None = None, image_build: Duration |None = None, image_gb: float |None = None, image_retained: Duration |None = None, suspend_resume_cycles: int = 0, snapshot_gb: float |None = None, launched: bool |None = None, label: str |None = None, rates: RateTable |None = None) -> CostReport:
     """
     Per-phase attribution for one sandbox's lifecycle.
     
@@ -2866,6 +2877,11 @@ def run_report(size: SizeClass, *, running: Duration |None = None, suspended: Du
     takes it so a report is a pure function of its inputs and a test does not have to
     travel in time; a Python caller who needs that reaches for the core through Rust, and
     exposing a date here would be a knob whose only use is faking staleness.
+    
+    Leave `launched` out and the core infers it: running time, or an image of non-zero size
+    (a launch reads a snapshot, so claiming one adds a transfer line). Leave `label` out and
+    the report is labelled `"run"`. Both defaults are the core's, the ones `microvm cost`
+    applies.
     """
 
 def session_constants() -> dict:

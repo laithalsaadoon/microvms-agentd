@@ -35,7 +35,10 @@ doesn't give. It fails when:
   shell word list: options before the tool are skipped (with their values), `--from <spec>`
   names the package, and `tool@X.Y.Z` or `tool==X.Y.Z` is the version. mise.lock records the
   exact version behind a pin such as `node = "22"`, and CI installs from it with `--locked`.
-- a file it reads is missing, empty, or doesn't parse.
+- a file it reads is missing, empty, or doesn't parse. That takes out only the rules that
+  read the file: the reach rules read every workflow, so an unreadable one leaves the floor
+  and the unreached-task rule unheld (a task only it runs would read as unreached), and every
+  other rule still runs over what was read.
 
 The tasks are mise.toml's and those of the TOML files its `[task_config] includes` names, read
 by tools/mise_config.py, the loader every gate that reads them shares.
@@ -55,9 +58,9 @@ import runpy
 import shlex
 import sys
 import tomllib
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import mise_config
 import yaml
@@ -300,10 +303,14 @@ def reached(tasks: dict[str, dict], roots: list[str]) -> set[str]:
 
 
 def check_reach(
-    tasks: dict[str, dict], commands: list[Command], problems: list[str]
+    tasks: dict[str, dict],
+    commands: list[Command],
+    problems: list[str],
+    every_workflow: bool = True,
 ) -> tuple[list[str], int]:
-    """The tasks CI runs, and how many `check` dependencies they reach."""
-    if not commands:
+    """The tasks CI runs, and how many `check` dependencies they reach. The floor and the
+    unreached-task rule hold only over `every_workflow`'s commands."""
+    if every_workflow and not commands:
         problems.append(
             f"no step in {' or '.join(WORKFLOWS)} runs `mise run`, so CI runs no task"
         )
@@ -332,7 +339,7 @@ def check_reach(
                     f'runs calls another as {{ task = "{found.group(1)}" }}, which this '
                     "check follows and whose failure fails the caller"
                 )
-    for dep in depends:
+    for dep in depends if every_workflow else []:
         if dep not in seen:
             problems.append(
                 f"`{GATE}` depends on `{dep}`, which no task a CI job runs reaches, so CI "
@@ -493,12 +500,12 @@ def task_texts(config: mise_config.Config) -> Iterator[tuple[str, str]]:
 
 def check_pins(
     root: Path,
-    config: mise_config.Config,
+    config: mise_config.Config | None,
     workflows: dict[str, dict],
     problems: list[str],
 ) -> int:
     count = 0
-    for where, text in task_texts(config):
+    for where, text in task_texts(config) if config is not None else []:
         count += check_uvx(text, where, problems)
     for wf, data in workflows.items():
         for job, body in (data.get("jobs") or {}).items():
@@ -522,20 +529,40 @@ def check_pins(
 
 
 def check(root: Path) -> tuple[list[str], str]:
-    """The problems found, and a one-line summary of what was held."""
+    """The problems found, and a one-line summary of what was held.
+
+    A file that can't be read is a problem, listed before the rules' (it used to be the only
+    one), and each rule that reads it is skipped; every other rule still runs.
+    """
     problems: list[str] = []
-    try:
-        config = load_mise(root)
-        mise, tasks = config.data, config.tables()
-        toolchain = load_toml(root / TOOLCHAIN, TOOLCHAIN)
-        workflows = {wf: load_yaml(root / wf, wf) for wf in WORKFLOWS}
-        commands = ci_commands(root, problems)
-        roots, gated = check_reach(tasks, commands, problems)
-        channel = check_rust(workflows[RUST_WORKFLOW], mise, toolchain, problems)
+
+    def read(load: Callable[..., Any], *args: object) -> Any:
+        try:
+            return load(*args)
+        except Unreadable as error:
+            problems.append(str(error))
+            return None
+
+    config = read(load_mise, root)
+    toolchain = read(load_toml, root / TOOLCHAIN, TOOLCHAIN)
+    loaded = {wf: read(load_yaml, root / wf, wf) for wf in WORKFLOWS}
+    workflows = {wf: data for wf, data in loaded.items() if data is not None}
+    commands = ci_commands(root, problems, tuple(workflows))
+    roots, gated, channel, tools = [], 0, None, 0
+    if config is not None:
+        every = len(workflows) == len(WORKFLOWS)
+        roots, gated = check_reach(config.tables(), commands, problems, every)
         tools = check_latest(config, problems)
+        if toolchain is not None and RUST_WORKFLOW in workflows:
+            channel = check_rust(
+                workflows[RUST_WORKFLOW], config.data, toolchain, problems
+            )
+    try:
         calls_read = check_pins(root, config, workflows, problems)
     except Unreadable as error:
-        return [str(error)], ""
+        # The registry is read last, so the tasks' and workflows' calls are held already.
+        problems.append(str(error))
+        calls_read = 0
     summary = (
         f"CI's jobs run {len(roots)} tasks, which reach all {gated} of `{GATE}`'s; rust "
         f"{channel}; {tools} tool pins and {calls_read} uv tool calls exact"

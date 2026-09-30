@@ -53,7 +53,10 @@ whatever order the files hold them in.
 and refuses to load a file that isn't named `<GROUP>.toml` for a group the specs define, a key
 outside its file's group, a key listed twice (TOML refuses one repeated in a file, and the
 loader one listed in two), an entry of any other shape, and a directory with no group file.
-Each refusal names its file.
+Each refusal names its file. This script reads past a refusal: it prints the refusals first and
+still holds the entries the other files give, every layer and the threat table, so one bad file
+doesn't hide another finding. Only the sentinel key and the rendered matrix, which read every
+file, wait for a load with no refusal.
 
 It also refuses a mention of an unknown key anywhere in a file it reads, comments included,
 so a typo such as `CLI-10` for `CLI-9` cannot pass as coverage. Keys are recognized by the
@@ -455,6 +458,22 @@ def load_traced(
     and read as fewer keys to trace. So every problem is collected, each naming its file, and
     raised together. A file is named relative to `root`, or in full when it isn't under it.
     """
+    traced, problems = read_traced(directory, groups, root)
+    if problems:
+        raise SystemExit("\n".join(f"trace: {problem}" for problem in problems))
+    return traced
+
+
+def read_traced(
+    directory: Path, groups: set[str], root: Path = ROOT
+) -> tuple[dict[str, Traced], list[str]]:
+    """The entries `load_traced` reads, and every problem it would raise, each naming its file.
+
+    What a problem is about gives up no entry, and the rest still do: a file that doesn't
+    parse or isn't named for a group gives up none, and a malformed entry or a key outside its
+    file's group gives up that key there. A key listed in two files keeps the entry in its own
+    group's file. So `main` can hold the entries that loaded while the problems fail the run.
+    """
 
     def shown(path: Path) -> str:
         return rel(path, root) if path.is_relative_to(root) else path.as_posix()
@@ -506,14 +525,25 @@ def load_traced(
         problems.append(
             f"{shown(directory)} holds no group file, so no requirement is traced"
         )
-    if problems:
-        raise SystemExit("\n".join(f"trace: {problem}" for problem in problems))
 
     def order(key: str) -> tuple[str, int]:
         group, number = key.rsplit("-", 1)
         return group, int(number)
 
-    return {key: listed[key][0] for key in sorted(listed, key=order)}
+    # A key outside its file's group still counts toward listing a key twice, above, but it
+    # isn't that file's to trace.
+    kept = {
+        key: own[0]
+        for key, entries in listed.items()
+        if (
+            own := [
+                entry
+                for entry in entries
+                if re.fullmatch(rf"{re.escape(Path(entry.file).stem)}-\d+", key)
+            ]
+        )
+    }
+    return {key: kept[key] for key in sorted(kept, key=order)}, problems
 
 
 def rel(path: Path, root: Path = ROOT) -> str:
@@ -558,9 +588,15 @@ def enumerator_floors(root: Path = ROOT) -> list[str]:
 
 
 def layer_floors(
-    found: dict[str, dict[str, set[str]]], traced: dict[str, Traced]
+    found: dict[str, dict[str, set[str]]],
+    traced: dict[str, Traced],
+    whole: bool = True,
 ) -> list[str]:
-    """A layer or a listed entry that gave up no key, and traced files without the sentinel."""
+    """A layer or a listed entry that gave up no key, and traced files without the sentinel.
+
+    The sentinel proves the traced files were all read, so it isn't held when they weren't
+    (`whole` false): their refusal fails the run already, and says which file it was.
+    """
     problems = [
         f"the {layer} collector found no requirement key in any file it read"
         for layer in LAYERS
@@ -581,7 +617,7 @@ def layer_floors(
                 )
         elif not yields:
             problems.append(f"the entry {entry} yields files but no requirement key")
-    if SENTINEL not in traced:
+    if whole and SENTINEL not in traced:
         home = TRACED_DIR / f"{SENTINEL.rsplit('-', 1)[0]}.toml"
         problems.append(f"the sentinel {SENTINEL} is not in {rel(home)}")
     return problems
@@ -1198,9 +1234,15 @@ def main() -> int:
 
     sentences = spec_keys()
     patterns = Patterns(sentences)
-    traced = load_traced(TRACED_DIR, {key.rsplit("-", 1)[0] for key in sentences})
+    traced, refused = read_traced(
+        TRACED_DIR, {key.rsplit("-", 1)[0] for key in sentences}
+    )
+    # A traced file's problems print first, as they did when they ended the run. The layers,
+    # the other files' entries and the threat table don't read that file, so they're still held.
+    for problem in refused:
+        print(f"trace: {problem}", file=sys.stderr)
     found = collect(patterns)
-    problems = enumerator_floors() + layer_floors(found, traced)
+    problems = enumerator_floors() + layer_floors(found, traced, whole=not refused)
 
     for key, entry in traced.items():
         if key not in sentences:
@@ -1235,22 +1277,23 @@ def main() -> int:
         status = "guarded" if row.status.startswith("guarded") else "gap"
         print(f"{row.line:<11}  {status:<7}  {', '.join(row.keys) or 'none'}")
 
+    # The matrix is rendered from every traced file and the specs' sentences, so a refused file
+    # or a traced key no spec defines leaves nothing to compare the doc with. Any other problem
+    # leaves the render whole, and a stale doc is a finding beside it.
     rendered = (
-        render(found, sentences, traced, threats) if not problems or args.write else ""
+        render(found, sentences, traced, threats)
+        if not refused and all(key in sentences for key in traced)
+        else ""
     )
     if args.write and rendered:
         DOC.write_text(rendered)
         print(f"wrote {rel(DOC)}")
-    if (
-        args.check
-        and not problems
-        and (not DOC.exists() or DOC.read_text() != rendered)
-    ):
+    if args.check and rendered and (not DOC.exists() or DOC.read_text() != rendered):
         problems.append(f"{rel(DOC)} is stale: run ./tools/check-trace.py --write")
 
     for problem in problems:
         print(f"trace: {problem}", file=sys.stderr)
-    return 1 if problems else 0
+    return 1 if problems or refused else 0
 
 
 if __name__ == "__main__":

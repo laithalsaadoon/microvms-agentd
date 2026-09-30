@@ -24,9 +24,20 @@ pub(crate) fn u16_number(value: f64, field: &str) -> Result<u16, Error> {
     Ok(integer(value, f64::from(u16::MAX), field)? as u16)
 }
 
+/// A whole number up to `Number.MAX_SAFE_INTEGER`, past which a JS number can't represent
+/// every integer exactly.
+fn safe_integer(value: f64, field: &str) -> Result<u64, Error> {
+    Ok(integer(value, 9_007_199_254_740_991.0, field)? as u64)
+}
+
 pub(crate) fn offset_number(value: f64) -> Result<u64, Error> {
     // Larger JS numbers cannot represent every byte offset exactly.
-    Ok(integer(value, 9_007_199_254_740_991.0, "offset")? as u64)
+    safe_integer(value, "offset")
+}
+
+/// An optional line number. Zero converts: whether a line exists is core's to say.
+pub(crate) fn optional_line(value: Option<f64>, field: &str) -> Result<Option<u64>, Error> {
+    value.map(|value| safe_integer(value, field)).transpose()
 }
 
 pub(crate) fn optional_u32(value: Option<f64>, field: &str) -> Result<Option<u32>, Error> {

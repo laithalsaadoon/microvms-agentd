@@ -2114,6 +2114,15 @@
           {
             "choices": null,
             "default": null,
+            "help": "Read only lines START through END of a file in the VM, 1-based and inclusive",
+            "name": "lines",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
             "help": "The VM's endpoint, as reported by `run`",
             "name": "endpoint",
             "positional": false,
@@ -3175,6 +3184,37 @@
         ],
         "responseType": "microvm.history",
         "summary": "Print what was asked of one MicroVM and what the platform reported back",
+        "supportsJson": true
+      },
+      {
+        "alternateResponse": null,
+        "name": "names",
+        "parameters": [
+          {
+            "choices": null,
+            "default": null,
+            "help": "Delete this name's record first; repeat for more. A name the registry doesn't hold is refused, and then nothing is deleted",
+            "name": "delete",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Where the registry lives. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
+            "name": "state-dir",
+            "positional": false,
+            "required": false,
+            "type": "path"
+          }
+        ],
+        "responseKeys": [
+          "names",
+          "deleted"
+        ],
+        "responseType": "microvm.names",
+        "summary": "List the names this machine's registry holds, or delete one whose VM is gone",
         "supportsJson": true
       },
       {

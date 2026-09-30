@@ -289,7 +289,7 @@ impl LineItem {
         self.inner.note.clone()
     }
 
-    /// The `cli.py` `_line_to_dict` shape as a JSON **string**.
+    /// Core's JSON shape for a line item, as a JSON **string**.
     ///
     /// A string rather than an object because the unpriced case must **omit** the `usd` key
     /// entirely, and a `#[napi(object)]` return type cannot express an absent key — an
@@ -297,54 +297,13 @@ impl LineItem {
     /// by anything permissive. A caller does `JSON.parse`, which is one visible step.
     #[napi]
     pub fn to_json(&self) -> String {
-        line_json(&self.inner)
+        self.inner.to_json().to_string()
     }
 
     #[napi(js_name = "toString")]
     pub fn display_string(&self) -> String {
         self.inner.to_string()
     }
-}
-
-/// `cli.py:725 _line_to_dict`, as a JSON string.
-///
-/// Hand-assembled rather than through a serde derive, because the shape's one load-bearing
-/// property — the `usd` key being *absent* rather than null for an unpriced line — is
-/// exactly what a derive over an `Option` field would get wrong.
-///
-/// (cli.py line numbers resolve at `git show 'c4d396e^:clients/python/src/microvms_agentd/cli.py'` — the retired oracle.)
-fn line_json(item: &CoreLineItem) -> String {
-    let amount = match (item.amount.estimate(), item.amount.unpriced_reason()) {
-        (Some(usd), _) => format!(
-            r#"{{"kind":"estimated-usd","usd":{}}}"#,
-            quote(&usd.amount().to_string())
-        ),
-        // No `usd` key at all.
-        (None, Some(reason)) => {
-            format!(r#"{{"kind":"unpriced","reason":{}}}"#, quote(reason))
-        }
-        // Unreachable while `Amount` has two variants, and written rather than
-        // `unreachable!()` because a panic across the napi boundary is not an ordinary
-        // error — a third variant should render as visibly incomplete, not abort Node.
-        (None, None) => format!(r#"{{"kind":{}}}"#, quote(item.amount.kind())),
-    };
-    let duration = match item.duration {
-        Some(duration) => format!(
-            r#"{{"seconds":{},"provenance":{}}}"#,
-            duration.duration().as_secs_f64(),
-            quote(duration.provenance().as_str())
-        ),
-        None => "null".to_string(),
-    };
-    format!(
-        r#"{{"phase":{},"line":{},"quantity":{},"unit":{},"amount":{amount},"duration":{duration},"note":{}}}"#,
-        quote(item.phase.as_str()),
-        item.line
-            .map_or_else(|| "null".to_string(), |line| quote(line.as_str())),
-        quote(&item.quantity.to_string()),
-        quote(&item.unit),
-        quote(&item.note),
-    )
 }
 
 /// A JSON string literal, via serde_json — the writer that defines the grammar
@@ -720,61 +679,14 @@ impl CostReport {
         self.inner.render()
     }
 
-    /// The `cli.py:688 report_to_dict` shape as a JSON **string**.
+    /// Core's JSON shape for a report, as a JSON **string**: the one `microvm cost --json`
+    /// and Python's `to_dict` emit (#255).
     ///
     /// A string for the same reason [`LineItem::to_json`] is: the unpriced line item omits
     /// its `usd` key, which no typed return shape can express.
     #[napi]
     pub fn to_json(&self) -> String {
-        let size = self.inner.size();
-        let rates = self.inner.rates();
-        let total = self.inner.total();
-        let items = self
-            .inner
-            .items()
-            .iter()
-            .map(line_json)
-            .collect::<Vec<_>>()
-            .join(",");
-        // One `format!` per fragment rather than one `concat!`ed template: `format_args!`
-        // cannot capture a named variable when the template comes from a macro expansion,
-        // and the alternative — positional `{}` for all sixteen values — is a template
-        // nobody can check against its arguments by eye.
-        let size_json = format!(
-            r#"{{"baselineMib":{},"baselineVcpu":{},"peakMib":{},"peakVcpu":{},"describe":{}}}"#,
-            size.baseline_mib(),
-            size.baseline_vcpu(),
-            size.peak_mib(),
-            size.peak_vcpu(),
-            quote(&size.to_string()),
-        );
-        let rates_json = format!(
-            r#"{{"region":{},"retrieved":{},"sourceUrl":{}}}"#,
-            quote(&rates.region().to_string()),
-            quote(&rates.retrieved().to_string()),
-            quote(rates.source_url()),
-        );
-        let total_json = format!(
-            r#"{{"priced":{},"isLowerBound":{},"render":{}}}"#,
-            quote(&total.floor().amount().to_string()),
-            total.is_lower_bound(),
-            quote(&total.to_string()),
-        );
-        let label = quote(self.inner.label());
-        let fully_measured = self.inner.fully_measured();
-        let complete = self.inner.is_complete();
-        let staleness = self
-            .inner
-            .staleness()
-            .map_or_else(|| "null".to_string(), quote);
-        // `estimated` is a literal `true` and not the word "cost": these are estimates
-        // derived from published rates, and the field name is the only place that
-        // distinction survives a copy-paste.
-        format!(r#"{{"label":{label},"size":{size_json},"rates":{rates_json},"estimated":true,"#)
-            + &format!(
-                r#""fullyMeasured":{fully_measured},"complete":{complete},"staleness":{staleness},"#
-            )
-            + &format!(r#""items":[{items}],"total":{total_json}}}"#)
+        self.inner.to_json().to_string()
     }
 }
 
@@ -884,8 +796,10 @@ pub struct RunUsageOptions<'a> {
     pub suspend_resume_cycles: Option<f64>,
     /// The suspend snapshot's size. Defaults to the baseline memory footprint.
     pub snapshot_gb: Option<f64>,
-    /// Whether a launch happened. A launch reads a snapshot.
+    /// Whether a launch happened. A launch reads a snapshot. Left out, the core infers it:
+    /// running time, or an image of non-zero size.
     pub launched: Option<bool>,
+    /// What the report is of. Left out, `"run"`: the core's label, the one `microvm cost` uses.
     pub label: Option<String>,
 }
 
@@ -901,7 +815,7 @@ pub fn run_report(
     rates: Option<&RateTable>,
 ) -> napi::Result<CostReport, String> {
     let options = options.unwrap_or_default();
-    let usage = RunUsage {
+    let mut usage = RunUsage {
         running: options.running.map(|duration| duration.inner),
         suspended: options.suspended.map(|duration| duration.inner),
         image_build: options.image_build.map(|duration| duration.inner),
@@ -914,8 +828,9 @@ pub fn run_report(
         .map_err(js)?
         .unwrap_or(0),
         snapshot_gb: options.snapshot_gb,
-        launched: options.launched.unwrap_or(true),
+        launched: false,
     };
+    usage.launched = options.launched.unwrap_or_else(|| usage.infer_launched());
     let table = rates.map_or_else(cost::pinned_rates, |rates| rates.inner.clone());
     Ok(CostReport::wrap(
         cost::run_report(
@@ -923,7 +838,7 @@ pub fn run_report(
             &usage,
             &table,
             CalendarDate::today_utc(),
-            options.label.unwrap_or_else(|| "run".to_string()),
+            options.label.as_deref().unwrap_or(cost::DEFAULT_RUN_LABEL),
         )
         .map_err(js)?,
     ))
@@ -943,7 +858,11 @@ pub struct PlanUsageOptions {
     pub image_retained_seconds: Option<f64>,
     pub suspend_resume_cycles: Option<f64>,
     pub snapshot_gb: Option<f64>,
+    /// Whether the plan launches, which reads a snapshot. Left out, the core infers it: running
+    /// time, or an image of non-zero size, so suspended time alone reads no launch snapshot.
     pub launched: Option<bool>,
+    /// What the report is of. Left out, `"estimate"`: the core's label, the one
+    /// `microvm cost --estimate` uses for the same plan (#255).
     pub label: Option<String>,
 }
 
@@ -959,7 +878,7 @@ pub fn estimate_run(
     rates: Option<&RateTable>,
 ) -> napi::Result<CostReport, String> {
     let options = options.unwrap_or_default();
-    let plan = PlanUsage {
+    let mut plan = PlanUsage {
         running_seconds: options.running_seconds.unwrap_or(0.0),
         suspended_seconds: options.suspended_seconds.unwrap_or(0.0),
         image_gb: options.image_gb,
@@ -971,8 +890,9 @@ pub fn estimate_run(
         .map_err(js)?
         .unwrap_or(0),
         snapshot_gb: options.snapshot_gb,
-        launched: options.launched.unwrap_or(true),
+        launched: false,
     };
+    plan.launched = options.launched.unwrap_or_else(|| plan.infer_launched());
     let table = rates.map_or_else(cost::pinned_rates, |rates| rates.inner.clone());
     Ok(CostReport::wrap(
         cost::estimate_run(
@@ -980,7 +900,10 @@ pub fn estimate_run(
             &plan,
             &table,
             CalendarDate::today_utc(),
-            options.label.unwrap_or_else(|| "plan".to_string()),
+            options
+                .label
+                .as_deref()
+                .unwrap_or(cost::DEFAULT_ESTIMATE_LABEL),
         )
         .map_err(js)?,
     ))

@@ -4,11 +4,7 @@
     "size_mib": 2048,
     "running_seconds": 600,
     "suspended_seconds": 3600,
-    "suspend_resume_cycles": 1,
-    "defaults": {
-      "launched": true,
-      "label": "estimate"
-    }
+    "suspend_resume_cycles": 1
   },
   "expect": {
     "complete": true,
@@ -119,21 +115,5 @@
   },
   "ignore": [
     "staleness"
-  ],
-  "known_drift": {
-    "py": {
-      "issue": "#255",
-      "keys": [
-        "label",
-        "size.headroomMib"
-      ]
-    },
-    "ts": {
-      "issue": "#255",
-      "keys": [
-        "label",
-        "size.headroomMib"
-      ]
-    }
-  }
+  ]
 }

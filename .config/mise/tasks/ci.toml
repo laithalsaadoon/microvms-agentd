@@ -69,17 +69,20 @@ run = [
 description = "CI's `security` job: the security gates, then every offline gate over the repository's own records and tooling"
 # Here because the job is a required check and builds nothing, and the ratchet's rule 3 only
 # holds where it can block a merge. The job's checkout has the full history, which betterleaks
-# scans and which the base refs of `ratchet:check`, `guards:list` and `changelog:check` need;
-# the job sets `GATE_BASE`, `PR_BASE` and `PR_AUTHOR` for them.
+# scans and which the base refs of `ratchet:check`, `guards:list`, `changelog:check` and
+# `pr-body:check` need; the job sets `GATE_BASE`, `PR_BASE` and `PR_AUTHOR` for them, and
+# `pr-body:check` reads the pull request's body from the runner's `GITHUB_EVENT_PATH`.
 run = [
   { task = "security" },
   { task = "conformance:self-test" },
   { task = "agents:check" },
   { task = "changelog:check" },
+  { task = "pr-body:check" },
   { task = "ci:parity" },
   { task = "ratchet:check" },
   { task = "trace:check" },
   { task = "guards:list" },
+  { task = "fail-to-pass:check" },
   { task = "mutants:check" },
   { task = "publish:check" },
   { task = "live:check" },
@@ -214,7 +217,9 @@ exit "$status"
 ["ci:fuzz-daemon-edges-app"]
 description = "fuzz.yml's `daemon-edges-app` job: the cargo-fuzz tar target and the daemon's, the edges' and the app's harnesses under libFuzzer, side by side. Needs a nightly toolchain"
 # `ci:fuzz-cli-core` says how the harnesses build and fuzz. `cargo fuzz` runs from the directory
-# that holds `fuzz/`. Four two-minute harnesses, then the four provisioning parsers.
+# that holds `fuzz/`. Four two-minute harnesses, then the four provisioning parsers, then the
+# verified tunnel's four (#297), a minute each. The tunnel harnesses build with their crates'
+# harnesses above, so they add no build line.
 tools = { "cargo:cargo-fuzz" = "{{vars.cargo_fuzz}}", "cargo:cargo-bolero" = "{{vars.cargo_bolero}}" }
 env = { CARGO_UNSTABLE_FEATURE_UNIFICATION = "true", CARGO_RESOLVER_FEATURE_UNIFICATION = "workspace" }
 shell = "bash -e -c"
@@ -246,6 +251,11 @@ finish
 for target in version sums record elf; do
   start "provision-$target" cargo +nightly bolero test "provision_fuzz::$target" -p microvms-edges -T 30s
 done
+finish
+start tunnel-hello cargo +nightly bolero test tunnel_fuzz::a_handshake_opens_only_from_the_launching_host -p agentd -T 60s
+start tunnel-frames cargo +nightly bolero test tunnel_fuzz::frames_open_in_order_and_the_callers_end_only_after_every_chunk -p agentd -T 60s
+start tunnel-reply cargo +nightly bolero test session::tunnel_fuzz::a_reply_opens_only_from_the_pinned_vm -p microvms-edges -T 60s
+start tunnel-client-frames cargo +nightly bolero test session::tunnel_fuzz::frames_open_in_order_and_the_daemons_end_only_after_every_chunk -p microvms-edges -T 60s
 finish
 exit "$status"
 ''',

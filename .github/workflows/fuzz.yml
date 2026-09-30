@@ -51,6 +51,14 @@ on:
       - 'crates/microvms-app/src/session/sse.rs'
       - 'crates/microvms-app/src/session/sse_fuzz.rs'
       - 'crates/microvms-app/src/session/mod.rs'
+      # The verified tunnel's handshake and frame reads on both sides, which read bytes a guest
+      # or the path can write (#297), the offer and end-of-stream rules they share, and the
+      # module files whose `mod tunnel_fuzz;` compiles each harness.
+      - 'crates/agentd/src/tunnel*.rs'
+      - 'crates/agentd/src/lib.rs'
+      - 'crates/microvms-edges/src/session/tunnel*.rs'
+      - 'crates/microvms-edges/src/session/mod.rs'
+      - 'crates/protocol/src/identity.rs'
       - '.github/workflows/fuzz.yml'
       # The tasks that hold the jobs' steps, the file that pins their tools, and the action
       # that installs mise.
@@ -119,7 +127,10 @@ jobs:
   # rests on (BIND-17..BIND-20), thirty seconds each; the app's egress-posture harness
   # (BIND-11..13; #227): the request-side answer against the launch over arbitrary options; and
   # its event-stream harness (BIND-22; #297): `SseParser::feed` and `decode` over hostile bytes,
-  # floods past the pending-bytes ceiling included.
+  # floods past the pending-bytes ceiling included; and the verified tunnel's four (AGENTD-17,
+  # AGENTD-20, AGENTD-21, BIND-21, BIND-23, BIND-24; #297), a minute each: each side's handshake
+  # read over hostile messages and its frame read over a path that drops, replays, swaps, flips
+  # and forges.
   daemon-edges-app:
     name: fuzz (daemon, edges and app harnesses, bounded)
     runs-on: ubuntu-latest
@@ -147,6 +158,7 @@ jobs:
             crates/agentd/fuzz/artifacts/
             crates/agentd/src/__fuzz__/
             crates/microvms-edges/src/__fuzz__/
+            crates/microvms-edges/src/session/__fuzz__/
             crates/microvms-app/src/control/__fuzz__/
             crates/microvms-app/src/session/__fuzz__/
           if-no-files-found: ignore
