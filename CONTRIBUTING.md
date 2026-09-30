@@ -76,7 +76,7 @@ Locally, `mise run guards:fire -- --jobs 4` seeds faults in four scratch worktre
 once and reports what a serial run reports, in the same order; add `--venv-per-worker`
 to fire the binding entries too. On each push to main, CI's `guards` job fires every
 entry under strace and records what each one's runs read (`--record`). A pull request
-restores the latest record of each of main's legs and keeps each recorded `fired` verdict whose inputs are
+restores main's latest records (every leg's, from one push) and keeps each recorded `fired` verdict whose inputs are
 all unchanged since the recorded commit (`--reuse`): it fires an entry whose registry
 entry, a file or directory its runs read, a tool they ran, the environment or
 tools/check-guards-fire.py changed, and one whose command reads the git history or

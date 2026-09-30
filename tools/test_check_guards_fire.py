@@ -9,6 +9,7 @@ the scratch worktree included. The census cases run the real ast-grep, so run th
 """
 
 import dataclasses
+import fnmatch
 import json
 import os
 import re
@@ -3874,7 +3875,8 @@ EXPRESSIONS: dict[str, str] = {}
 # Where the fire steps keep the record, which the cache steps save and restore.
 VERDICTS = "$RUNNER_TEMP/guards-verdicts"
 VERDICTS_PATH = "${{ runner.temp }}/guards-verdicts"
-VERDICTS_KEY = "guards-verdicts-${{ matrix.shard }}-of-${{ strategy.job-total }}-"
+# The one cache entry a push's records are saved under together.
+RECORDS_KEY = "guards-records-"
 EXPRESSION = re.compile(r"\$\{\{\s*(.+?)\s*\}\}")
 MISE_RUN = re.compile(r"(?<![\w./-])mise\s+run\s+(\S+)([^\n]*)")
 # The action each job installs mise and its tools through.
@@ -4074,6 +4076,7 @@ class GuardsJob(unittest.TestCase):
         # Each leg on a runner of its own: its temp directory, and the cache ci.yml's steps save
         # into and restore from, by their own keys, paths and prefixes.
         cache: dict[str, Path] = {}
+        artifacts: dict[str, Path] = {}
         (push,) = self.fire_steps("push")
         fired = []
         for shard in legs:
@@ -4086,14 +4089,34 @@ class GuardsJob(unittest.TestCase):
                 [f"shard-{shard}-of-{len(legs)}.json"],
                 "push: each leg writes its own record",
             )
-            for step in self.cache_steps("actions/cache/save", "push"):
+            for step in self.cache_steps("actions/upload-artifact", "push"):
                 given = step["with"]
-                key = self.render(given["key"], shard, len(legs), temp)
-                cache[key] = Path(self.render(given["path"], shard, len(legs), temp))
+                name = self.render(given["name"], shard, len(legs), temp)
+                artifacts[name] = Path(
+                    self.render(given["path"], shard, len(legs), temp)
+                )
         self.assertEqual(
             len(fired), len(set(fired)), f"push: an entry fires twice: {fired}"
         )
         self.assertEqual(set(fired), {*ORDER, "sc", "bi"}, "push: the shards together")
+        # The job that saves the push's records once its legs are done, on a runner of its own.
+        joined = repo.tmp.parent / "records-temp"
+        for step in self.records_job().get("steps") or []:
+            given = step.get("with") or {}
+            if str(step.get("uses", "")).startswith("actions/download-artifact@"):
+                into = Path(self.render(given["path"], 0, len(legs), joined))
+                for name, source in artifacts.items():
+                    if fnmatch.fnmatchcase(name, given["pattern"]):
+                        # `merge-multiple` puts every artifact's files in `path` itself.
+                        where = into if given.get("merge-multiple") else into / name
+                        where.mkdir(parents=True, exist_ok=True)
+                        for record in source.iterdir():
+                            shutil.copy(record, where)
+            elif str(step.get("uses", "")).startswith("actions/cache/save@"):
+                saved = Path(self.render(given["path"], 0, len(legs), joined))
+                # The action saves nothing, with a warning, when the path isn't there.
+                if saved.exists():
+                    cache[self.render(given["key"], 0, len(legs), joined)] = saved
         # HEAD plays the pull request's merge commit: one rust, one script and one bindings
         # entry's files change, and a new entry on `crate`'s command makes it heavier, which
         # moves most commands to another leg, as a pull request that adds a fault does (#416).
@@ -4149,10 +4172,9 @@ class GuardsJob(unittest.TestCase):
                     None,
                 )
                 if hit is not None:
+                    # The saved tree as it was, subdirectories and all.
                     into = Path(self.render(given["path"], shard, len(legs), temp))
-                    into.mkdir(parents=True, exist_ok=True)
-                    for record in cache[hit].iterdir():
-                        shutil.copy(record, into)
+                    shutil.copytree(cache[hit], into, dirs_exist_ok=True)
             return temp
 
         (pr,) = self.fire_steps("pull_request")
@@ -4191,6 +4213,20 @@ class GuardsJob(unittest.TestCase):
             return answers[match.group(1)]
 
         return EXPRESSION.sub(value, str(text))
+
+    def records_job(self) -> dict:
+        """The job that saves main's records for the pull requests."""
+        found = [
+            job
+            for job in workflow_jobs().values()
+            if any(
+                str(s.get("uses", "")).startswith("actions/download-artifact@")
+                and "guards-verdicts" in str((s.get("with") or {}).get("pattern"))
+                for s in job.get("steps") or []
+            )
+        ]
+        self.assertEqual(len(found), 1, "one job saves the legs' records together")
+        return found[0]
 
     def cache_steps(self, action: str, event: str) -> list[dict]:
         """The guards job's `action` steps that run on `event`."""
@@ -4231,41 +4267,53 @@ class GuardsJob(unittest.TestCase):
         self.assertEqual(push_argv[-2:], ["--record", VERDICTS])
         self.assertEqual(pr_argv, [*push_argv[:-2], "--reuse", VERDICTS])
 
-    def test_each_leg_reads_every_legs_record_and_saves_its_own(self):
-        # A pull request's leg restores every leg's record, each under the key that leg saves on
-        # main and by its prefix, into the directory both fire steps name, after strace is
-        # there: a leg's slice moves when the registry's weights do, so a leg that read only its
-        # own leg's record found most of its commands in none (#416). Main never restores one,
-        # a pull request never saves one, and nothing else in the workflow caches it.
+    def test_a_pull_request_reads_every_legs_record_from_one_push(self):
+        # Each push leg uploads its record, and one job, once every leg is done (`always()`, so
+        # a failed leg costs only its own), saves them together under the push's commit; a pull
+        # request's leg restores that entry into the directory the fire reads, after strace and
+        # before the fire. A leg's slice moves when the registry's weights do, so a leg that
+        # read only its own leg's record found most of its commands in none (#416), and legs
+        # that read the six records separately mixed two pushes' splits (#450's first run).
+        # Main never restores, a pull request never uploads or saves, and nothing else caches
+        # the records.
         steps = guards_job().get("steps") or []
-        restores = self.cache_steps("actions/cache/restore", "pull_request")
-        (save,) = self.cache_steps("actions/cache/save", "push")
+        (restore,) = self.cache_steps("actions/cache/restore", "pull_request")
+        (upload,) = self.cache_steps("actions/upload-artifact", "push")
+        self.assertEqual(restore.get("if"), ON_PULL_REQUEST)
+        self.assertEqual(upload.get("if"), ON_PUSH)
+        self.assertEqual(restore["with"].get("path"), VERDICTS_PATH)
         self.assertEqual(
-            [s for s in steps if str(s.get("uses", "")).startswith("actions/cache")],
-            [*restores, save],
-            "a cache step runs on both legs",
+            restore["with"].get("key"),
+            RECORDS_KEY + "${{ github.event.pull_request.base.sha }}",
         )
-        for step in restores:
-            self.assertEqual(step.get("if"), ON_PULL_REQUEST)
-        self.assertEqual(save.get("if"), ON_PUSH)
-        for step in (*restores, save):
-            self.assertEqual((step.get("with") or {}).get("path"), VERDICTS_PATH)
-        self.assertEqual(save["with"].get("key"), VERDICTS_KEY + "${{ github.sha }}")
-        legs = self.legs()
-        read = []
-        for step in restores:
-            prefix = str(step["with"].get("restore-keys"))
-            match = re.fullmatch(
-                r"guards-verdicts-(\d+)-of-\$\{\{ strategy\.job-total \}\}-", prefix
-            )
-            self.assertIsNotNone(match, f"a restore of no one leg's record: {prefix}")
-            read.append(int(match.group(1)))
-            self.assertEqual(
-                step["with"].get("key"),
-                prefix + "${{ github.event.pull_request.base.sha }}",
-            )
+        self.assertEqual(restore["with"].get("restore-keys"), RECORDS_KEY)
+        self.assertEqual(upload["with"].get("path"), VERDICTS_PATH)
         self.assertEqual(
-            sorted(read), legs, "the legs whose records a pull request reads"
+            upload["with"].get("name"), "guards-verdicts-${{ matrix.shard }}"
+        )
+        self.assertEqual(upload["with"].get("if-no-files-found"), "error")
+        job = self.records_job()
+        needs = job.get("needs")
+        self.assertIn(
+            "guards", [needs] if isinstance(needs, str) else list(needs or [])
+        )
+        self.assertEqual(job.get("if"), "always() && github.event_name == 'push'")
+        (download, save) = job.get("steps") or []
+        self.assertTrue(
+            str(download.get("uses")).startswith("actions/download-artifact@")
+        )
+        self.assertEqual(
+            download.get("with"),
+            {
+                "pattern": "guards-verdicts-*",
+                "merge-multiple": True,
+                "path": VERDICTS_PATH,
+            },
+        )
+        self.assertTrue(str(save.get("uses")).startswith("actions/cache/save@"))
+        self.assertEqual(
+            save.get("with"),
+            {"path": VERDICTS_PATH, "key": RECORDS_KEY + "${{ github.sha }}"},
         )
         (strace,) = [
             s for s in steps if "apt-get install -y strace" in s.get("run", "")
@@ -4274,18 +4322,38 @@ class GuardsJob(unittest.TestCase):
         (pr,) = self.fire_steps("pull_request")
         (push,) = self.fire_steps("push")
         at = steps.index
-        for step in restores:
-            self.assertLess(at(strace), at(step))
-            self.assertLess(at(step), at(pr))
-        self.assertLess(at(push), at(save))
+        self.assertLess(at(strace), at(restore))
+        self.assertLess(at(restore), at(pr))
+        self.assertLess(at(push), at(upload))
         caches = [
-            name
+            (name, s.get("uses", "").split("@")[0])
             for name, job in workflow_jobs().items()
             for s in job.get("steps") or []
-            if str(s.get("uses", "")).startswith("actions/cache")
-            and "guards-verdicts" in json.dumps(s.get("with") or {})
+            if str(s.get("uses", "")).startswith(
+                (
+                    "actions/cache",
+                    "actions/upload-artifact",
+                    "actions/download-artifact",
+                )
+            )
+            and "guards-" in json.dumps(s.get("with") or {})
+            and (
+                "guards-verdicts" in json.dumps(s.get("with") or {})
+                or "guards-records" in json.dumps(s.get("with") or {})
+            )
         ]
-        self.assertEqual(caches, ["guards"] * (len(restores) + 1), caches)
+        self.assertEqual(
+            sorted(caches),
+            sorted(
+                [
+                    ("guards", "actions/cache/restore"),
+                    ("guards", "actions/upload-artifact"),
+                    ("guards-records", "actions/download-artifact"),
+                    ("guards-records", "actions/cache/save"),
+                ]
+            ),
+            caches,
+        )
 
     def test_ci_local_answers_the_guards_job_as_a_pull_request(self):
         # ci:local runs one leg, the pull request's, as one run of its whole selection. Its
@@ -4449,9 +4517,9 @@ class GuardsJob(unittest.TestCase):
                             "guards-cache",
                         ):
                             self.assertNotEqual(given.get("tools-cache"), "exact", name)
-                        # The guards legs' record of each verdict is main's too, and
-                        # test_each_leg_reads_the_record_its_leg_saves_on_main holds its key.
-                        record = str(given.get("key", "")).startswith(VERDICTS_KEY)
+                        # Main's records of each verdict are main's too, and
+                        # test_a_pull_request_reads_every_legs_record_from_one_push holds their key.
+                        record = str(given.get("key", "")).startswith(RECORDS_KEY)
                         if (
                             str(step.get("uses", "")).startswith("actions/cache/save@")
                             and not record

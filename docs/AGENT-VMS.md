@@ -70,9 +70,11 @@ Written in the EARS shapes the rest of `verify/spec/` uses. `AGENT-n` is the id.
   creates and hands `/workspace` to that uid, sets `WORKDIR /workspace`, and ends with
   the stanza's `ENV`, `EXPOSE`, `ENTRYPOINT []`, `CMD ["/agentd"]` lines. The output
   shall pass every local guard `Sandbox::preflight` runs.
-- **AGENT-3.** When a profile set is unchanged and the daemon binary is unchanged, the
-  derived image name shall be unchanged, so `build --reuse` semantics hold: the name is
-  `agent-vm-<profiles>-<12 hex of the artifact content hash>`.
+- **AGENT-3.** When a profile set, the daemon binary and the size class are unchanged, the
+  derived image name shall be unchanged, so reuse holds: the name is
+  `agent-vm-<profiles>-<12 hex>`, the hex being `Sandbox::ensure_image`'s identity over the
+  artifact content hash, the base image and the size class, and `AgentVm::ensure_image`
+  gives the image that name.
 - **AGENT-4.** `agents::bedrock::mint` shall produce a Bedrock bearer token from the
   caller's AWS credential chain by SigV4 query presigning, with the lifetime the caller
   asks for, capped at the service's 12-hour ceiling, and shall never write the token to
@@ -185,6 +187,7 @@ pub mod agents {
         pub fn image_request(&self, binary: Vec<u8>, artifact_uri, build_role_arn, size) -> CreateImageRequest;
         pub fn launch_request(&self, image_identifier, execution_role_arn) -> RunRequest;  // egress on
         pub async fn build(&mut self, request) -> Result<&Image, Error>;
+        pub async fn ensure_image(&mut self, binary, build_role_arn, size, s3_bucket, s3_key_prefix) -> Result<EnsuredImage, Error>;
         pub async fn launch(&mut self, request) -> Result<&Session, Error>;
         pub async fn install_access(&self, access: &BedrockAccess) -> Result<(), Error>;
         pub async fn prompt(&self, agent: Agent, task: &str, opts) -> Result<ExecHandle, Error>;
@@ -194,11 +197,13 @@ pub mod agents {
 }
 ```
 
-The artifact upload stays the caller's, exactly as it is for `Sandbox::build_image`:
-this path does not upload, and `AgentVm::image_request` returns the request
-whose `code_artifact_uri` the caller fills before calling `build`. The free functions
-exist beside the struct because the CLI's refresh and prompt paths hold an attached
-`Session` and no `Sandbox`; `AgentVm`'s methods delegate to them.
+On the two-step path the artifact upload stays the caller's, exactly as it is for
+`Sandbox::build_image`: `AgentVm::image_request` returns the request whose
+`code_artifact_uri` the caller fills before calling `build`. `AgentVm::ensure_image` is
+the one-call path: it builds or reuses the image under the same name through
+`Sandbox::ensure_image`, which uploads the artifact itself only when a build is needed.
+The free functions exist beside the struct because the CLI's refresh and prompt paths
+hold an attached `Session` and no `Sandbox`; `AgentVm`'s methods delegate to them.
 
 ## The CLI surface
 

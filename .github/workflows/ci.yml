@@ -261,56 +261,23 @@ jobs:
       # fails a pull request and not main's next push.
       - name: strace
         run: command -v strace > /dev/null || { sudo apt-get update && sudo apt-get install -y strace; }
-      # Every leg's record from main's latest push, each under the key its leg saved: the one at
-      # the pull request's base when that push finished, or the newest before it. A leg's slice
-      # moves whenever the registry's weights change, and a pull request that adds an entry moves
-      # most commands to another leg (#416's, 2026-09-30, moved 40 of shard 0's 42), so a leg reads all six
-      # legs' records and keeps a command's verdict whichever leg recorded it. Each record is its
-      # own file in the one directory (`shard-<leg>-of-<legs>.json`), and `--reuse` reads them
-      # all. One step a leg, since a cache entry restores one key; test_check_guards_fire.py
-      # holds them to the matrix's legs. Only main's legs save under these keys.
-      - name: main's record of what each verdict read, leg 0
+      # Main's records of what each verdict read: every leg's, from one push, saved together by
+      # `guards-records` once the push's legs are done. The one at the pull request's base, or
+      # the newest before it. A leg's slice moves whenever the registry's weights change, and a
+      # pull request that adds an entry moves most commands to another leg (#416's, 2026-09-30,
+      # moved 40 of shard 0's 42), so a leg reads every leg's record and keeps a command's
+      # verdict whichever leg recorded it. The records come from one push because the split
+      # moves between pushes too: legs that restored their records separately got some from a
+      # push still saving and some from the one before, and a command the two splits put on
+      # different legs was in neither (#450's first run). Each record is its own file
+      # (`shard-<leg>-of-<legs>.json`), and `--reuse` reads them all.
+      - name: main's records of what each verdict read
         if: github.event_name == 'pull_request'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/guards-verdicts
-          key: guards-verdicts-0-of-${{ strategy.job-total }}-${{ github.event.pull_request.base.sha }}
-          restore-keys: guards-verdicts-0-of-${{ strategy.job-total }}-
-      - name: main's record of what each verdict read, leg 1
-        if: github.event_name == 'pull_request'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/guards-verdicts
-          key: guards-verdicts-1-of-${{ strategy.job-total }}-${{ github.event.pull_request.base.sha }}
-          restore-keys: guards-verdicts-1-of-${{ strategy.job-total }}-
-      - name: main's record of what each verdict read, leg 2
-        if: github.event_name == 'pull_request'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/guards-verdicts
-          key: guards-verdicts-2-of-${{ strategy.job-total }}-${{ github.event.pull_request.base.sha }}
-          restore-keys: guards-verdicts-2-of-${{ strategy.job-total }}-
-      - name: main's record of what each verdict read, leg 3
-        if: github.event_name == 'pull_request'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/guards-verdicts
-          key: guards-verdicts-3-of-${{ strategy.job-total }}-${{ github.event.pull_request.base.sha }}
-          restore-keys: guards-verdicts-3-of-${{ strategy.job-total }}-
-      - name: main's record of what each verdict read, leg 4
-        if: github.event_name == 'pull_request'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/guards-verdicts
-          key: guards-verdicts-4-of-${{ strategy.job-total }}-${{ github.event.pull_request.base.sha }}
-          restore-keys: guards-verdicts-4-of-${{ strategy.job-total }}-
-      - name: main's record of what each verdict read, leg 5
-        if: github.event_name == 'pull_request'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/guards-verdicts
-          key: guards-verdicts-5-of-${{ strategy.job-total }}-${{ github.event.pull_request.base.sha }}
-          restore-keys: guards-verdicts-5-of-${{ strategy.job-total }}-
+          key: guards-records-${{ github.event.pull_request.base.sha }}
+          restore-keys: guards-records-
       # `ci:guards` holds the fire's command and turns incremental builds on for it. `--target-dir
       # target` for rust-cache: the script's own default target exists so a developer's next
       # cargo run can't pick up a scratch build, and nothing here builds after `fire`. The two
@@ -326,15 +293,16 @@ jobs:
         env:
           SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
         run: mise run ci:guards --target-dir target --record "$RUNNER_TEMP/guards-verdicts"
-      # Under a key per leg and commit, which every pull request leg's restore of this leg finds
-      # by its prefix. A leg whose fire failed saves nothing, and pull requests read that leg's
-      # previous record.
-      - name: save the record for pull requests
+      # For `guards-records`, which saves every leg's together. A leg whose fire failed uploads
+      # nothing, and pull requests fire the commands it held.
+      - name: the record, for the pull requests
         if: github.event_name != 'pull_request'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
+          name: guards-verdicts-${{ matrix.shard }}
           path: ${{ runner.temp }}/guards-verdicts
-          key: guards-verdicts-${{ matrix.shard }}-of-${{ strategy.job-total }}-${{ github.sha }}
+          retention-days: 1
+          if-no-files-found: error
       # The warm workers' copies and the incremental data cost disk: what the fire left, while
       # their size on the runner is still being measured.
       - name: disk left after the fire
@@ -365,6 +333,28 @@ jobs:
 
   # The caches pull requests restore, saved here and nowhere else, on a push to main.
   #
+  # Main's records from one push as one cache entry, which a pull request's legs restore. It
+  # runs once every leg is done, `always()` so a failed leg doesn't cost the others' records,
+  # and saves under the push's commit. A pull request restores records from one push only:
+  # each leg's slice differs between pushes whose registries differ, so records from two pushes
+  # can miss a command both held. It checks nothing out and runs no task.
+  guards-records:
+    name: seeded faults' records for pull requests
+    needs: guards
+    if: always() && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: guards-verdicts-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/guards-verdicts
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/guards-verdicts
+          key: guards-records-${{ github.sha }}
+
   # The dependency cache the `guards` legs and `mutants` restore, after compiling what every rust
   # entry's cargo commands compile and every bindings entry's extension builds
   # (`check-guards-fire.py build`), so each leg restores every build the registry needs, where it

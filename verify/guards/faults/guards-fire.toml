@@ -1042,7 +1042,7 @@ guard = "test_check_guards_fire.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_push_records_every_entry_and_a_pull_request_fires_what_it_cant_keep"]
 expect = "exit-nonzero"
 suite = "script"
-message = "push: an entry fires in two shards"
+message = "push: each leg writes its own record"
 transform = { file = ".github/workflows/ci.yml", replace = "        run: mise run ci:guards --target-dir target --record \"$RUNNER_TEMP/guards-verdicts\"\n", with = "        run: mise run ci:guards --target-dir target --record \"$RUNNER_TEMP/guards-verdicts\" --shard 0/1\n" }
 
 # The cache between main's legs and the pull requests': main stops recording, a pull request
@@ -1056,64 +1056,79 @@ expect = "exit-nonzero"
 suite = "script"
 message = "push: each leg writes its own record"
 transform = { file = ".github/workflows/ci.yml", replace = "        run: mise run ci:guards --target-dir target --record \"$RUNNER_TEMP/guards-verdicts\"\n", with = "        run: mise run ci:guards --target-dir target\n" }
-
 [[fault]]
 id = "guards-job-save-on-pr"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_each_leg_reads_every_legs_record_and_saves_its_own"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_pull_request_reads_every_legs_record_from_one_push"]
 expect = "exit-nonzero"
 suite = "script"
-message = "FAIL: test_each_leg_reads_every_legs_record_and_saves_its_own ("
-transform = { file = ".github/workflows/ci.yml", replace = "      - name: save the record for pull requests\n        if: github.event_name != 'pull_request'\n", with = "      - name: save the record for pull requests\n        if: github.event_name == 'pull_request'\n" }
-
+message = "FAIL: test_a_pull_request_reads_every_legs_record_from_one_push ("
+transform = { file = ".github/workflows/ci.yml", replace = "      - name: the record, for the pull requests\n        if: github.event_name != 'pull_request'\n", with = "      - name: the record, for the pull requests\n        if: github.event_name == 'pull_request'\n" }
 [[fault]]
 id = "guards-job-restore-other-leg"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_each_leg_reads_every_legs_record_and_saves_its_own"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_pull_request_reads_every_legs_record_from_one_push"]
 expect = "exit-nonzero"
 suite = "script"
-message = "FAIL: test_each_leg_reads_every_legs_record_and_saves_its_own ("
-transform = { file = ".github/workflows/ci.yml", replace = "          restore-keys: guards-verdicts-0-of-${{ strategy.job-total }}-\n", with = "          restore-keys: guards-verdicts-\n" }
-
+message = "FAIL: test_a_pull_request_reads_every_legs_record_from_one_push ("
+transform = { file = ".github/workflows/ci.yml", replace = "          restore-keys: guards-records-\n", with = "          restore-keys: guards-verdicts-\n" }
 [[fault]]
 id = "guards-job-restore-path"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_each_leg_reads_every_legs_record_and_saves_its_own"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_pull_request_reads_every_legs_record_from_one_push"]
 expect = "exit-nonzero"
 suite = "script"
-message = "FAIL: test_each_leg_reads_every_legs_record_and_saves_its_own ("
-transform = { file = ".github/workflows/ci.yml", replace = "          path: ${{ runner.temp }}/guards-verdicts\n          key: guards-verdicts-0-of-${{ strategy.job-total }}-${{ github.event.pull_request.base.sha }}\n", with = "          path: guards-verdicts\n          key: guards-verdicts-0-of-${{ strategy.job-total }}-${{ github.event.pull_request.base.sha }}\n" }
+message = "FAIL: test_a_pull_request_reads_every_legs_record_from_one_push ("
+transform = { file = ".github/workflows/ci.yml", replace = "          path: ${{ runner.temp }}/guards-verdicts\n          key: guards-records-${{ github.event.pull_request.base.sha }}\n", with = "          path: guards-verdicts\n          key: guards-records-${{ github.event.pull_request.base.sha }}\n" }
 
 [[fault]]
 id = "guards-job-strace-push-only"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_each_leg_reads_every_legs_record_and_saves_its_own"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_pull_request_reads_every_legs_record_from_one_push"]
 expect = "exit-nonzero"
 suite = "script"
-message = "FAIL: test_each_leg_reads_every_legs_record_and_saves_its_own ("
+message = "FAIL: test_a_pull_request_reads_every_legs_record_from_one_push ("
 transform = { file = ".github/workflows/ci.yml", replace = "      - name: strace\n        run: command -v strace", with = "      - name: strace\n        if: github.event_name != 'pull_request'\n        run: command -v strace" }
 
-# A pull request's leg stops reading one leg's record, and every command that leg recorded fires
-# wherever the split puts it.
+# Every leg uploads its record under one name, so one leg's record stands for all six and the
+# commands the other legs recorded fire (#416).
 [[fault]]
-id = "guards-job-restore-every-leg"
-guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_each_leg_reads_every_legs_record_and_saves_its_own"]
-expect = "exit-nonzero"
-suite = "script"
-message = "the legs whose records a pull request reads"
-transform = { file = ".github/workflows/ci.yml", replace = "      - name: main's record of what each verdict read, leg 5\n        if: github.event_name == 'pull_request'\n        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0\n        with:\n          path: ${{ runner.temp }}/guards-verdicts\n          key: guards-verdicts-5-of-${{ strategy.job-total }}-${{ github.event.pull_request.base.sha }}\n          restore-keys: guards-verdicts-5-of-${{ strategy.job-total }}-\n", with = "" }
-
-# A leg reads its own leg's record where it read leg 1's, as every leg once did: a command leg 1
-# recorded fires on the leg a new entry moved it to (#416).
-[[fault]]
-id = "guards-job-restore-own-leg"
+id = "guards-job-records-one-name"
 guard = "test_check_guards_fire.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_push_records_every_entry_and_a_pull_request_fires_what_it_cant_keep"]
 expect = "exit-nonzero"
 suite = "script"
 message = "pull_request: the shards together"
-transform = { file = ".github/workflows/ci.yml", replace = "          key: guards-verdicts-1-of-${{ strategy.job-total }}-${{ github.event.pull_request.base.sha }}\n          restore-keys: guards-verdicts-1-of-${{ strategy.job-total }}-\n", with = "          key: guards-verdicts-${{ matrix.shard }}-of-${{ strategy.job-total }}-${{ github.event.pull_request.base.sha }}\n          restore-keys: guards-verdicts-${{ matrix.shard }}-of-${{ strategy.job-total }}-\n" }
+transform = { file = ".github/workflows/ci.yml", replace = "          name: guards-verdicts-${{ matrix.shard }}\n", with = "          name: guards-verdicts\n" }
+
+# The records land in a directory per leg, where `--reuse` reads none of them.
+[[fault]]
+id = "guards-job-records-merge"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_push_records_every_entry_and_a_pull_request_fires_what_it_cant_keep"]
+expect = "exit-nonzero"
+suite = "script"
+message = "pull_request: the shards together"
+transform = { file = ".github/workflows/ci.yml", replace = "          pattern: guards-verdicts-*\n          merge-multiple: true\n", with = "          pattern: guards-verdicts-*\n          merge-multiple: false\n" }
+
+# The records job saves before the legs have uploaded, or only when every leg passed.
+[[fault]]
+id = "guards-job-records-needs"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_pull_request_reads_every_legs_record_from_one_push"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_pull_request_reads_every_legs_record_from_one_push ("
+transform = { file = ".github/workflows/ci.yml", replace = "    name: seeded faults' records for pull requests\n    needs: guards\n", with = "    name: seeded faults' records for pull requests\n" }
+
+[[fault]]
+id = "guards-job-records-always"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_pull_request_reads_every_legs_record_from_one_push"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_pull_request_reads_every_legs_record_from_one_push ("
+transform = { file = ".github/workflows/ci.yml", replace = "    if: always() && github.event_name == 'push'\n", with = "    if: github.event_name == 'push'\n" }
 
 # `--reuse` reads one of the records in its directory, so a command another leg recorded fires.
 [[fault]]
