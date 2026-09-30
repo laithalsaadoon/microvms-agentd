@@ -66,28 +66,29 @@ tree, when a test gains a `**Falsification**` note with no entry
 (`verify/guards/unregistered.txt` lists the older ones and only shrinks), and when the
 single file the registry used to be, verify/guards/faults.toml, comes back: nothing
 reads it. CI's `guards` job seeds the Rust, script and binding
-faults a pull request affects and, on every push to main, all of them; each of its
+faults: all of them on every push to main, and on a pull request each one whose recorded
+verdict its change could move; each of its
 workers builds the bindings into its own Python environment (`--venv-per-worker`). A guard no fault can be seeded for, such
 as a live check, is still broken by hand, restored, and recorded in the PR.
 
 Locally, `mise run guards:fire -- --jobs 4` seeds faults in four scratch worktrees at
 once and reports what a serial run reports, in the same order; add `--venv-per-worker`
-to fire the binding entries too. `-- --affected` fires
-only the entries whose own files changed against origin/main (`--base <ref>` for
-another base) and names the ones it skips. It's what CI's `guards` job runs on a pull
-request, and it isn't the full fire: a change that reaches a guard through code the
-entry doesn't name, such as the type a clippy ban names, isn't seen. (A change to the
-script, a build input such as Cargo.lock, a Cargo.toml or mise.toml, or ci.yml's `guards`
-job or top-level `env` selects every entry.) Main's push runs the full fire after the
-merge, so a fault only it catches turns main red. Both run as a matrix of shards, each
-firing its share of the selection within 60 minutes, and the required
-`seeded faults fire` check is their combined result;
-`mise run guards:fire -- --affected --shard=1/6` runs one pull request leg's share here.
-When your change reaches guards that way, run
-`mise run guards:fire -- --jobs 4 --venv-per-worker` before you push. A red `seeded faults fire` on main is
-fixed before the next merge, because the next pull request that selects every entry
-fails on it as well. If your pull request fails an entry it didn't touch, look at main's
-last push run first.
+to fire the binding entries too. On each push to main, CI's `guards` job fires every
+entry under strace and records what each one's runs read (`--record`). A pull request
+restores main's latest record and keeps each recorded `fired` verdict whose inputs are
+all unchanged since the recorded commit (`--reuse`): it fires an entry whose registry
+entry, a file or directory its runs read, a tool they ran, the environment or
+tools/check-guards-fire.py changed, and one whose command reads the git history or
+downloads by a version range. Each entry's line says why it fires or which commit's
+verdict it keeps, the script's docstring has the rule, and with no record every entry
+fires. Both run as a matrix of shards, each firing its share within 60 minutes, and the
+required `seeded faults fire` check is their combined result. To run the pull request's
+selection here, record once on a committed checkout of main with
+`mise run guards:fire -- --venv-per-worker --record <dir>` (it needs strace), then run
+`mise run guards:fire -- --venv-per-worker --reuse <dir>` on your branch. A red
+`seeded faults fire` on main is fixed before the next merge, because a pull request never
+keeps a verdict main's record didn't see fire, so every one fails on it as well. If your
+pull request fails an entry it didn't touch, look at main's last push run first.
 
 CI's `mutants` job runs cargo-mutants over the Rust a pull request changes, and
 `mise run mutants` runs it over your branch against origin/main. It isn't in

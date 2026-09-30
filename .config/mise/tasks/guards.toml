@@ -45,10 +45,11 @@ description = "Seed each registered fault in a scratch worktree and require its 
 # `-- --jobs N` runs faults in N scratch worktrees at once with the serial run's verdicts
 # and output; each extra worker builds in its own target, removed when the run ends, which
 # starts as a copy of target/guards-fire's dependency units (never the workspace's own crates).
-# `-- --affected` fires only the entries whose own files or registry text changed against
-# origin/main: a rule, not a trace. It's what CI's `guards` job runs on a pull request, and the
-# full fire runs on every push to main (#323). `-- --shard k/N` fires shard k (from 0) of N of
-# the selection, one leg of that job's matrix (#345). The script's docstring has all three.
+# `-- --record DIR` traces every run with strace and writes what each entry's verdict read, as
+# CI's `guards` job does on every push to main; `-- --reuse DIR` keeps each recorded `fired`
+# verdict whose inputs haven't changed since the recorded commit and fires the rest, as it does
+# on a pull request. `-- --shard k/N` fires shard k (from 0) of N of the selection, one leg of
+# that job's matrix (#345). The script's docstring has all four.
 #
 # cargo-mutants is here for the `fuzz_extract` exclusion's entry, at the `mutants` task's pin.
 tools = { "cargo:cargo-mutants" = "27.1.0" }

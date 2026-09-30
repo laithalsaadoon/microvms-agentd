@@ -101,10 +101,9 @@ suite = "script"
 message = "FAIL: test_a_version_the_fault_seeds_passes ("
 transform = { file = "tools/check-guards-fire.py", replace = "lines = (root / patch).read_text(encoding=\"utf-8\").splitlines()", with = "lines = []" }
 
-# `fire --jobs` and `fire --affected` (#315), through the script's own suite: verdicts in
-# registry order, a miss still reported as one, a target per worker and none left behind, a
-# signal that ends every command and removes every tree, and a selection that reads the seeded
-# file, the guard's file and the entry's own text. `-k` runs only the class the fault reaches.
+# `fire --jobs` (#315), through the script's own suite: verdicts in registry order, a miss
+# still reported as one, a target per worker and none left behind, and a signal that ends every
+# command and removes every tree. `-k` runs only the class the fault reaches.
 
 [[fault]]
 id = "guards-fire-jobs-order"
@@ -160,144 +159,7 @@ suite = "script"
 message = "FAIL: test_a_signal_ends_every_command_and_removes_every_tree_and_target ("
 transform = { file = "tools/check-guards-fire.py", replace = "        for worker in workers:\n            worker.tree.remove()\n", with = "        for worker in workers[:1]:\n            worker.tree.remove()\n" }
 
-[[fault]]
-id = "guards-fire-affected-seeded-file"
-guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
-expect = "exit-nonzero"
-suite = "script"
-message = "FAIL: test_a_changed_seeded_file_selects_only_its_entries ("
-transform = { file = "tools/check-guards-fire.py", replace = "out = {t[\"file\"] for t in fault.transforms}", with = "out: set[str] = set()" }
-
-[[fault]]
-id = "guards-fire-affected-guard-file"
-guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
-expect = "exit-nonzero"
-suite = "script"
-message = "FAIL: test_a_changed_guard_file_selects_its_entry ("
-transform = { file = "tools/check-guards-fire.py", replace = "rf\"fn {re.escape(name)}\\b\",", with = "rf\"fn {re.escape(name)}_\\b\"," }
-
-[[fault]]
-id = "guards-fire-affected-registry"
-guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
-expect = "exit-nonzero"
-suite = "script"
-message = "FAIL: test_a_changed_or_new_entry_is_affected ("
-transform = { file = "tools/check-guards-fire.py", replace = "elif before[fault.id] != raw[fault.id]:", with = "elif False:" }
-
-# A base from before the split read without its single file: every entry reads as new, and the
-# first pull request after the split fires them all.
-[[fault]]
-id = "guards-fire-affected-former-base"
-guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
-expect = "exit-nonzero"
-suite = "script"
-message = "FAIL: test_a_base_with_the_former_single_file_compares_entry_by_entry ("
-transform = { file = "tools/check-guards-fire.py", replace = "        names.append(FORMER_REGISTRY)\n", with = "        pass\n" }
-
-[[fault]]
-id = "guards-fire-affected-skips-unsaid"
-guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
-expect = "exit-nonzero"
-suite = "script"
-message = "FAIL: test_a_changed_seeded_file_selects_only_its_entries ("
-transform = { file = "tools/check-guards-fire.py", replace = "+ (f\": {', '.join(skipped)}\" if skipped else \"\")", with = "+ \"\"" }
-
-[[fault]]
-id = "guards-fire-affected-empty-diff"
-guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
-expect = "exit-nonzero"
-suite = "script"
-message = "FAIL: test_a_changed_guard_file_selects_its_entry ("
-transform = { file = "tools/check-guards-fire.py", replace = "return {p for p in (diff + \"\\0\" + untracked).split(\"\\0\") if p}, commit", with = "return set(), commit" }
-
-[[fault]]
-id = "guards-fire-affected-suite-script"
-guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
-expect = "exit-nonzero"
-suite = "script"
-message = "FAIL: test_a_changed_script_selects_the_unit_suite_that_tests_it ("
-transform = { file = "tools/check-guards-fire.py", replace = "out |= {f\"{where}/{n}.py\" for n in (name, f\"check-{name}\")} & files", with = "out |= set()" }
-
-# Fix round 1: the `--affected` sources the falsifier found untested, and the restored pass on
-# more than one worker.
-[[fault]]
-id = "guards-fire-affected-clippy"
-guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
-expect = "exit-nonzero"
-suite = "script"
-message = "FAIL: test_a_changed_clippy_toml_selects_its_lint_entries ("
-transform = { file = "tools/check-guards-fire.py", replace = "            if clippy in files:\n", with = "            if False:\n" }
-
-[[fault]]
-id = "guards-fire-affected-untracked"
-guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
-expect = "exit-nonzero"
-suite = "script"
-message = "FAIL: test_an_untracked_file_counts ("
-transform = { file = "tools/check-guards-fire.py", replace = "    return {p for p in (diff + \"\\0\" + untracked).split(\"\\0\") if p}, commit", with = "    return {p for p in (diff).split(\"\\0\") if p}, commit" }
-
-[[fault]]
-id = "guards-fire-affected-patch"
-guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
-expect = "exit-nonzero"
-suite = "script"
-message = "FAIL: test_a_changed_patch_selects_its_entry ("
-transform = { file = "tools/check-guards-fire.py", replace = "        out.add(fault.patch)\n", with = "        pass\n" }
-
-[[fault]]
-id = "guards-fire-affected-renames"
-guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
-expect = "exit-nonzero"
-suite = "script"
-message = "FAIL: test_a_renamed_file_selects_by_its_old_name ("
-transform = { file = "tools/check-guards-fire.py", replace = "\"diff\", \"--name-only\", \"--no-renames\", \"-z\"", with = "\"diff\", \"--name-only\", \"-M\", \"-z\"" }
-
-[[fault]]
-id = "guards-fire-affected-build-input"
-guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
-expect = "exit-nonzero"
-suite = "script"
-message = "FAIL: test_a_build_input_selects_every_entry ("
-transform = { file = "tools/check-guards-fire.py", replace = "        elif inputs:\n", with = "        elif False:\n" }
-
-[[fault]]
-id = "guards-fire-affected-venv-exit"
-guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
-expect = "exit-nonzero"
-suite = "script"
-message = "test_an_affected_selection_the_missing_venv_empties_exits_like_nothing_affected ("
-transform = { file = "tools/check-guards-fire.py", replace = "    if not selected and args.affected:\n", with = "    if False:\n" }
-
-[[fault]]
-id = "guards-fire-affected-owed"
-guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
-expect = "exit-nonzero"
-suite = "script"
-message = "FAIL: test_a_changed_seeded_file_selects_only_its_entries ("
-transform = { file = "tools/check-guards-fire.py", replace = "        if skipped:\n            print(\n                \"guards: --affected selects by", with = "        if False:\n            print(\n                \"guards: --affected selects by" }
-
-[[fault]]
-id = "guards-fire-affected-siblings"
-guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
-expect = "exit-nonzero"
-suite = "script"
-message = "FAIL: test_a_script_a_tested_script_loads_selects_the_suite ("
-transform = { file = "tools/check-guards-fire.py", replace = "    out |= sibling_scripts(root, {f for f in out if f.endswith(\".py\")}, files)", with = "    out |= set()" }
+# Fix round 1: the restored pass on more than one worker.
 
 [[fault]]
 id = "guards-fire-jobs-restored-every-worker"
@@ -317,11 +179,11 @@ suite = "script"
 message = "FAIL: test_a_worker_that_takes_a_fault_runs_its_command_clean_again ("
 transform = { file = "tools/check-guards-fire.py", replace = "            worker.touched.setdefault(command_key(fault))\n            worker.tree.reset()\n", with = "            worker.tree.reset()\n" }
 
-# The `guards` job's two legs (#323): a pull request fires the entries its diff affects and a
-# push to main fires every entry, each in shards under the same budget (#345). `GuardsJob` runs both steps as ci.yml writes them and
-# holds ci/local.toml's answers to them, `FireAffected` holds the rule that a change to the job's
-# own steps selects every entry, and test_check_ci_parity.py holds ci:local to a budget written
-# as an expression.
+# The `guards` job's two legs (#323): a push to main fires and records every entry and a pull
+# request fires the entries whose recorded verdicts it can't keep, each in shards under the same
+# budget (#345). `GuardsJob` runs both steps as ci.yml writes them, holds the cache steps between
+# them and ci/local.toml's answers to them, and test_check_ci_parity.py holds ci:local to a
+# budget written as an expression.
 
 # The pull request's step loses its selection, so a pull request fires every entry again.
 # Warm workers: each extra worker's target starts as a copy of the first one's
@@ -688,11 +550,11 @@ transform = { file = "tools/check-guards-fire.py", replace = "    if fault.suite
 [[fault]]
 id = "guards-job-fire-not-incremental"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_fire_steps_build_incrementally"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_the_fire_steps_build_incrementally ("
-transform = { file = ".github/workflows/ci.yml", replace = "          CARGO_INCREMENTAL: \"1\"\n        run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n", with = "        run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n" }
+transform = { file = ".github/workflows/ci.yml", replace = "          CARGO_INCREMENTAL: \"1\"\n        run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --record \"$RUNNER_TEMP/guards-verdicts\"\n", with = "        run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --record \"$RUNNER_TEMP/guards-verdicts\"\n" }
 
 [[fault]]
 id = "guards-job-legs-save-cache"
@@ -718,31 +580,31 @@ transform = { file = ".github/workflows/ci.yml", replace = "          shared-key
 [[fault]]
 id = "guards-job-push-drops-bindings"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_pull_request_step_is_the_push_step_reusing_what_it_records"]
 expect = "exit-nonzero"
 suite = "script"
 message = "AssertionError: Lists differ: ['rust', 'script'] != ['rust', 'script', 'bindings']"
-transform = { file = ".github/workflows/ci.yml", replace = "--suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n", with = "--suite rust --suite script --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n" }
+transform = { file = ".github/workflows/ci.yml", replace = "--suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --record", with = "--suite rust --suite script --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --record" }
 
 [[fault]]
 id = "guards-job-pr-drops-bindings"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_push_records_every_entry_and_a_pull_request_fires_what_it_cant_keep"]
 expect = "exit-nonzero"
 suite = "script"
-message = "FAIL: test_a_pull_request_fires_the_entries_it_affects_and_a_push_fires_every_entry ("
-transform = { file = ".github/workflows/ci.yml", replace = "--suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n", with = "--suite rust --suite script --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n" }
+message = "FAIL: test_a_push_records_every_entry_and_a_pull_request_fires_what_it_cant_keep ("
+transform = { file = ".github/workflows/ci.yml", replace = "--suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --reuse", with = "--suite rust --suite script --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --reuse" }
 
 [[fault]]
 id = "guards-job-no-venv-per-worker"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_pull_request_step_is_the_push_step_reusing_what_it_records"]
 expect = "exit-nonzero"
 suite = "script"
 message = " : the push step's environments"
 transform = [
-  { file = ".github/workflows/ci.yml", replace = "--suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n", with = "--suite rust --suite script --suite bindings --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n" },
-  { file = ".github/workflows/ci.yml", replace = "--suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n", with = "--suite rust --suite script --suite bindings --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n" },
+  { file = ".github/workflows/ci.yml", replace = "--suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --reuse \"$RUNNER_TEMP/guards-verdicts\"\n", with = "--suite rust --suite script --suite bindings --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --reuse \"$RUNNER_TEMP/guards-verdicts\"\n" },
+  { file = ".github/workflows/ci.yml", replace = "--suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --record \"$RUNNER_TEMP/guards-verdicts\"\n", with = "--suite rust --suite script --suite bindings --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --record \"$RUNNER_TEMP/guards-verdicts\"\n" },
 ]
 
 [[fault]]
@@ -782,52 +644,52 @@ message = "FAIL: test_the_legs_restore_the_one_cache_a_push_to_main_saves ("
 transform = { file = ".github/workflows/ci.yml", replace = "      # The `guards` legs' Node, for `napi build`.\n      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7\n        with:\n          node-version: '22'\n", with = "" }
 
 [[fault]]
-id = "guards-job-pr-affected"
+id = "guards-job-pr-reuse"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_pull_request_step_is_the_push_step_reusing_what_it_records"]
 expect = "exit-nonzero"
 suite = "script"
-message = "FAIL: test_the_pull_request_step_is_the_push_step_plus_the_selection ("
-transform = { file = ".github/workflows/ci.yml", replace = " --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n", with = " --jobs 4 --shard \"$SHARD\"\n" }
+message = "FAIL: test_the_pull_request_step_is_the_push_step_reusing_what_it_records ("
+transform = { file = ".github/workflows/ci.yml", replace = " --jobs 4 --shard \"$SHARD\" --reuse \"$RUNNER_TEMP/guards-verdicts\"\n", with = " --jobs 4 --shard \"$SHARD\"\n" }
 
 # Either leg drops the script suite, which only this job fires.
 [[fault]]
 id = "guards-job-pr-suite"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_pull_request_step_is_the_push_step_reusing_what_it_records"]
 expect = "exit-nonzero"
 suite = "script"
-message = "FAIL: test_the_pull_request_step_is_the_push_step_plus_the_selection ("
-transform = { file = ".github/workflows/ci.yml", replace = "--suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --affected", with = "--suite rust --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --affected" }
+message = "FAIL: test_the_pull_request_step_is_the_push_step_reusing_what_it_records ("
+transform = { file = ".github/workflows/ci.yml", replace = "--suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --reuse", with = "--suite rust --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --reuse" }
 
 [[fault]]
 id = "guards-job-push-suite"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_pull_request_step_is_the_push_step_reusing_what_it_records"]
 expect = "exit-nonzero"
 suite = "script"
 message = "AssertionError: Lists differ: ['rust', 'bindings'] != ['rust', 'script', 'bindings']"
-transform = { file = ".github/workflows/ci.yml", replace = "--suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n", with = "--suite rust --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n" }
+transform = { file = ".github/workflows/ci.yml", replace = "--suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --record", with = "--suite rust --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --record" }
 
-# Main's push stops being the full fire.
+# Main's push stops being the full fire and the record, by reusing one.
 [[fault]]
-id = "guards-job-push-affected"
+id = "guards-job-push-reuse"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_pull_request_step_is_the_push_step_reusing_what_it_records"]
 expect = "exit-nonzero"
 suite = "script"
-message = "'--affected' unexpectedly found in"
-transform = { file = ".github/workflows/ci.yml", replace = "--target-dir target --jobs 4 --shard \"$SHARD\"\n", with = "--target-dir target --jobs 4 --shard \"$SHARD\" --affected\n" }
+message = "FAIL: test_the_pull_request_step_is_the_push_step_reusing_what_it_records ("
+transform = { file = ".github/workflows/ci.yml", replace = " --shard \"$SHARD\" --record \"$RUNNER_TEMP/guards-verdicts\"\n", with = " --shard \"$SHARD\" --reuse \"$RUNNER_TEMP/guards-verdicts\"\n" }
 
-# Both fire steps run on a pull request.
+# Both fire steps run on a pull request, so none runs on main's push.
 [[fault]]
 id = "guards-job-push-runs"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_push_records_every_entry_and_a_pull_request_fires_what_it_cant_keep"]
 expect = "exit-nonzero"
 suite = "script"
-message = "pull_request: 2 fire steps run, not one"
-transform = { file = ".github/workflows/ci.yml", replace = "      - name: every seeded fault fires\n        if: github.event_name != 'pull_request'\n", with = "      - name: every seeded fault fires\n        if: github.event_name == 'pull_request'\n" }
+message = "push: 0 fire steps run, not one"
+transform = { file = ".github/workflows/ci.yml", replace = "      - name: every seeded fault fires, and its record is written\n        if: github.event_name != 'pull_request'\n", with = "      - name: every seeded fault fires, and its record is written\n        if: github.event_name == 'pull_request'\n" }
 
 # The shards' budget drops below D35's 60 minutes, the budget a full fire of every shard was
 # modeled against.
@@ -840,15 +702,15 @@ suite = "script"
 message = "AssertionError: 30 != 60 : each shard's budget, on a pull request and on main's push"
 transform = { file = ".github/workflows/ci.yml", replace = "    name: seeded faults fire (shard ${{ matrix.shard }} of ${{ strategy.job-total }})\n    runs-on: ubuntu-latest\n    timeout-minutes: 60\n", with = "    name: seeded faults fire (shard ${{ matrix.shard }} of ${{ strategy.job-total }})\n    runs-on: ubuntu-latest\n    timeout-minutes: 30\n" }
 
-# A shallow checkout again, with no base branch for `--affected` to diff against.
+# A shallow checkout again, without the record's commit for `--reuse` to diff from.
 [[fault]]
 id = "guards-job-fetch-depth"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_checkout_has_the_history_the_records_commit_needs"]
 expect = "exit-nonzero"
 suite = "script"
-message = "FAIL: test_the_checkout_has_the_base_branch_the_merge_base_needs ("
-transform = { file = ".github/workflows/ci.yml", replace = "          # `--affected` diffs against the base branch, which a shallow clone doesn't have.\n          fetch-depth: 0\n", with = "          # `--affected` diffs against the base branch, which a shallow clone doesn't have.\n" }
+message = "FAIL: test_the_checkout_has_the_history_the_records_commit_needs ("
+transform = { file = ".github/workflows/ci.yml", replace = "          # `--reuse` diffs the tree from the record's commit, which a shallow clone doesn't have.\n          fetch-depth: 0\n", with = "          # `--reuse` diffs the tree from the record's commit, which a shallow clone doesn't have.\n" }
 
 # The empty input: ci.yml has no `guards` job for the suite to read.
 [[fault]]
@@ -904,40 +766,26 @@ transform = { file = "tools/check-ci-parity.py", replace = "        if timeout i
 [[fault]]
 id = "guards-job-jobs"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_pull_request_step_is_the_push_step_reusing_what_it_records"]
 expect = "exit-nonzero"
 suite = "script"
 message = " : the push step's --jobs"
-transform = { file = ".github/workflows/ci.yml", replace = "run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n      - name: every seeded fault fires\n        if: github.event_name != 'pull_request'\n        env:\n          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}\n          CARGO_INCREMENTAL: \"1\"\n        run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n", with = "run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 1 --shard \"$SHARD\" --affected --base \"$BASE\"\n      - name: every seeded fault fires\n        if: github.event_name != 'pull_request'\n        env:\n          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}\n          CARGO_INCREMENTAL: \"1\"\n        run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 1 --shard \"$SHARD\"\n" }
+transform = [
+  { file = ".github/workflows/ci.yml", replace = " --jobs 4 --shard \"$SHARD\" --reuse \"$RUNNER_TEMP/guards-verdicts\"\n", with = " --jobs 1 --shard \"$SHARD\" --reuse \"$RUNNER_TEMP/guards-verdicts\"\n" },
+  { file = ".github/workflows/ci.yml", replace = " --jobs 4 --shard \"$SHARD\" --record \"$RUNNER_TEMP/guards-verdicts\"\n", with = " --jobs 1 --shard \"$SHARD\" --record \"$RUNNER_TEMP/guards-verdicts\"\n" },
+]
 
 [[fault]]
 id = "guards-job-timeout"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_pull_request_step_is_the_push_step_reusing_what_it_records"]
 expect = "exit-nonzero"
 suite = "script"
 message = "AssertionError: None != '900' : the push step's --timeout"
-transform = { file = ".github/workflows/ci.yml", replace = "run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n      - name: every seeded fault fires\n        if: github.event_name != 'pull_request'\n        env:\n          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}\n          CARGO_INCREMENTAL: \"1\"\n        run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\"\n", with = "run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --target-dir target --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n      - name: every seeded fault fires\n        if: github.event_name != 'pull_request'\n        env:\n          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}\n          CARGO_INCREMENTAL: \"1\"\n        run: ./tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --target-dir target --jobs 4 --shard \"$SHARD\"\n" }
-
-# The pull request's step stops diffing against its own base branch: a literal origin/main, or no
-# `BASE` at all, which the script reads as origin/main.
-[[fault]]
-id = "guards-job-pr-base-literal"
-guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
-expect = "exit-nonzero"
-suite = "script"
-message = "guards: no merge base of HEAD and origin/main"
-transform = { file = ".github/workflows/ci.yml", replace = "      - name: the seeded faults a pull request affects fire\n        if: github.event_name == 'pull_request'\n        env:\n          BASE: origin/${{ github.base_ref }}\n", with = "      - name: the seeded faults a pull request affects fire\n        if: github.event_name == 'pull_request'\n        env:\n          BASE: origin/main\n" }
-
-[[fault]]
-id = "guards-job-pr-base-unset"
-guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "GuardsJob"]
-expect = "exit-nonzero"
-suite = "script"
-message = "guards: no merge base of HEAD and origin/main"
-transform = { file = ".github/workflows/ci.yml", replace = "      - name: the seeded faults a pull request affects fire\n        if: github.event_name == 'pull_request'\n        env:\n          BASE: origin/${{ github.base_ref }}\n", with = "      - name: the seeded faults a pull request affects fire\n        if: github.event_name == 'pull_request'\n        env:\n" }
+transform = [
+  { file = ".github/workflows/ci.yml", replace = " --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --reuse \"$RUNNER_TEMP/guards-verdicts\"\n", with = " --target-dir target --jobs 4 --shard \"$SHARD\" --reuse \"$RUNNER_TEMP/guards-verdicts\"\n" },
+  { file = ".github/workflows/ci.yml", replace = " --timeout 900 --target-dir target --jobs 4 --shard \"$SHARD\" --record \"$RUNNER_TEMP/guards-verdicts\"\n", with = " --target-dir target --jobs 4 --shard \"$SHARD\" --record \"$RUNNER_TEMP/guards-verdicts\"\n" },
+]
 
 # ci/local.toml's answers stop describing one pull request: ci:local would run main's full fire,
 # or one shard of the pull request's selection instead of all of it.
@@ -1095,27 +943,16 @@ suite = "script"
 message = "FAIL: test_each_shard_keeps_its_documented_slice ("
 transform = { file = "tools/check-guards-fire.py", replace = "        lightest = min(range(bins), key=lambda n: (load[n], n))\n", with = "        lightest = min(range(bins), key=lambda n: (load[n], -n))\n" }
 
-# The slice is cut before the selection: of the registry before `--affected`, of the whole
-# registry filtered to the selection, or before the bindings drop.
-[[fault]]
-id = "guards-fire-shard-before-selection"
-guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_the_banner_counts_the_affected_selection"]
-expect = "exit-nonzero"
-suite = "script"
-message = "FAIL: test_the_banner_counts_the_affected_selection ("
-transform = [
-  { file = "tools/check-guards-fire.py", replace = "    if spec is not None:\n        k, n = spec\n        whole, commands = len(selected), len(command_weights(selected))\n        selected = shard(selected, k, n)\n        print(\n            f\"guards: shard {k} of {n} keeps {len(selected)} of {whole} selected entries \"\n            f\"({len(command_weights(selected))} of {commands} commands)\"\n        )\n        if not selected:\n            print(\"guards: this shard's slice is empty, so nothing to fire\")\n            return 0\n", with = "" },
-  { file = "tools/check-guards-fire.py", replace = "    if args.affected:\n", with = "    if spec is not None:\n        k, n = spec\n        whole, commands = len(selected), len(command_weights(selected))\n        selected = shard(selected, k, n)\n        print(\n            f\"guards: shard {k} of {n} keeps {len(selected)} of {whole} selected entries \"\n            f\"({len(command_weights(selected))} of {commands} commands)\"\n        )\n        if not selected:\n            print(\"guards: this shard's slice is empty, so nothing to fire\")\n            return 0\n    if args.affected:\n" },
-]
+# The slice is cut of the selection: not of the whole registry filtered to it afterwards, and
+# not before the bindings drop.
 
 [[fault]]
 id = "guards-fire-shard-registry-slice"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_each_shard_fires_its_share_of_the_affected_entries"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_an_empty_slice_passes_and_says_so"]
 expect = "exit-nonzero"
 suite = "script"
-message = "FAIL: test_each_shard_fires_its_share_of_the_affected_entries ("
+message = "FAIL: test_an_empty_slice_passes_and_says_so ("
 transform = { file = "tools/check-guards-fire.py", replace = "        selected = shard(selected, k, n)\n", with = "        selected = [f for f in shard(faults, k, n) if f in selected]\n" }
 
 [[fault]]
@@ -1216,26 +1053,74 @@ run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "disc
 expect = "exit-nonzero"
 suite = "script"
 message = "pull_request: the fire step's SHARD isn't its leg of the matrix"
-transform = { file = ".github/workflows/ci.yml", replace = "          BASE: origin/${{ github.base_ref }}\n          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}\n", with = "          BASE: origin/${{ github.base_ref }}\n          SHARD: ${{ matrix.shard }}/4\n" }
+transform = { file = ".github/workflows/ci.yml", replace = "      - name: the seeded faults whose recorded verdicts a pull request can't keep fire\n        if: github.event_name == 'pull_request'\n        env:\n          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}\n", with = "      - name: the seeded faults whose recorded verdicts a pull request can't keep fire\n        if: github.event_name == 'pull_request'\n        env:\n          SHARD: ${{ matrix.shard }}/4\n" }
 
 # A leg drops `--shard`, so every shard fires the whole selection.
 [[fault]]
 id = "guards-job-shard-pr-flag"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_pull_request_fires_the_entries_it_affects_and_a_push_fires_every_entry"]
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_push_records_every_entry_and_a_pull_request_fires_what_it_cant_keep"]
 expect = "exit-nonzero"
 suite = "script"
 message = "pull_request: an entry fires in two shards"
-transform = { file = ".github/workflows/ci.yml", replace = " --jobs 4 --shard \"$SHARD\" --affected --base \"$BASE\"\n", with = " --jobs 4 --affected --base \"$BASE\"\n" }
+transform = { file = ".github/workflows/ci.yml", replace = " --jobs 4 --shard \"$SHARD\" --reuse \"$RUNNER_TEMP/guards-verdicts\"\n", with = " --jobs 4 --reuse \"$RUNNER_TEMP/guards-verdicts\"\n" }
 
 [[fault]]
 id = "guards-job-shard-push-flag"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_pull_request_fires_the_entries_it_affects_and_a_push_fires_every_entry"]
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_push_records_every_entry_and_a_pull_request_fires_what_it_cant_keep"]
 expect = "exit-nonzero"
 suite = "script"
 message = "push: an entry fires in two shards"
-transform = { file = ".github/workflows/ci.yml", replace = " --jobs 4 --shard \"$SHARD\"\n", with = " --jobs 4\n" }
+transform = { file = ".github/workflows/ci.yml", replace = " --jobs 4 --shard \"$SHARD\" --record \"$RUNNER_TEMP/guards-verdicts\"\n", with = " --jobs 4 --record \"$RUNNER_TEMP/guards-verdicts\"\n" }
+
+# The cache between main's legs and the pull requests': main stops recording, a pull request
+# saves one of its own, a leg restores another leg's record or from another directory than the
+# fire reads, and strace goes missing from the pull request's legs.
+[[fault]]
+id = "guards-job-push-record"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_push_records_every_entry_and_a_pull_request_fires_what_it_cant_keep"]
+expect = "exit-nonzero"
+suite = "script"
+message = "push: each leg writes its own record"
+transform = { file = ".github/workflows/ci.yml", replace = " --shard \"$SHARD\" --record \"$RUNNER_TEMP/guards-verdicts\"\n", with = " --shard \"$SHARD\"\n" }
+
+[[fault]]
+id = "guards-job-save-on-pr"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_each_leg_reads_the_record_its_leg_saves_on_main"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_each_leg_reads_the_record_its_leg_saves_on_main ("
+transform = { file = ".github/workflows/ci.yml", replace = "      - name: save the record for pull requests\n        if: github.event_name != 'pull_request'\n", with = "      - name: save the record for pull requests\n        if: github.event_name == 'pull_request'\n" }
+
+[[fault]]
+id = "guards-job-restore-other-leg"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_each_leg_reads_the_record_its_leg_saves_on_main"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_each_leg_reads_the_record_its_leg_saves_on_main ("
+transform = { file = ".github/workflows/ci.yml", replace = "          restore-keys: guards-verdicts-${{ matrix.shard }}-of-${{ strategy.job-total }}-\n", with = "          restore-keys: guards-verdicts-\n" }
+
+[[fault]]
+id = "guards-job-restore-path"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_each_leg_reads_the_record_its_leg_saves_on_main"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_each_leg_reads_the_record_its_leg_saves_on_main ("
+transform = { file = ".github/workflows/ci.yml", replace = "          path: ${{ runner.temp }}/guards-verdicts\n          key: guards-verdicts-${{ matrix.shard }}-of-${{ strategy.job-total }}-${{ github.event.pull_request.base.sha }}\n", with = "          path: guards-verdicts\n          key: guards-verdicts-${{ matrix.shard }}-of-${{ strategy.job-total }}-${{ github.event.pull_request.base.sha }}\n" }
+
+[[fault]]
+id = "guards-job-strace-push-only"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_each_leg_reads_the_record_its_leg_saves_on_main"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_each_leg_reads_the_record_its_leg_saves_on_main ("
+transform = { file = ".github/workflows/ci.yml", replace = "      - name: install strace\n        run: |\n", with = "      - name: install strace\n        if: github.event_name != 'pull_request'\n        run: |\n" }
 
 # One failed shard cancels the others.
 [[fault]]
@@ -1336,31 +1221,436 @@ transform = { file = ".github/workflows/ci.yml", replace = "    if: always()\n  
 
 # A change to the `guards` job's steps or the workflow's `env` (CI's side of mise.toml) stops
 # selecting every entry.
-[[fault]]
-id = "guards-fire-affected-workflow"
-guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
-expect = "exit-nonzero"
-suite = "script"
-message = "FAIL: test_a_change_to_the_guards_jobs_steps_or_the_workflow_env_selects_every_entry ("
-transform = { file = "tools/check-guards-fire.py", replace = "        elif workflow:\n", with = "        elif False:\n" }
 
 # The parser that returns nothing.
-[[fault]]
-id = "guards-fire-affected-workflow-parser-empty"
-guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
-expect = "exit-nonzero"
-suite = "script"
-message = "FAIL: test_a_change_to_the_guards_jobs_steps_or_the_workflow_env_selects_every_entry ("
-transform = { file = "tools/check-guards-fire.py", replace = "    return kept\n", with = "    return []\n" }
 
 # The empty input: a deleted ci.yml counts as unchanged.
+
+# The verdict cache (`fire --record`, `fire --reuse`): a pull request keeps main's recorded
+# `fired` verdict only while nothing the entry's runs read differs from the record's commit.
+# Each entry drops one reason an entry fires, so a pull request would keep a verdict its change
+# could move, and runs the one `VerdictCache` case that reason fails. The record's own refusals
+# (an uncommitted tree, no strace) and its positive path (a record that keeps every verdict)
+# have one each.
+
 [[fault]]
-id = "guards-fire-affected-workflow-deleted"
+id = "guards-fire-reuse-content"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "FireAffected"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_changed_file_its_command_read_fires_its_entries_alone"]
 expect = "exit-nonzero"
 suite = "script"
-message = "FAIL: test_a_deleted_or_emptied_workflow_selects_every_entry ("
-transform = { file = "tools/check-guards-fire.py", replace = "    except FileNotFoundError:\n        head = \"\"\n", with = "    except FileNotFoundError:\n        return False\n" }
+message = "FAIL: test_a_changed_file_its_command_read_fires_its_entries_alone ("
+transform = { file = "tools/check-guards-fire.py", replace = "        hit = sorted(closure.content & since.changed)\n", with = "        hit = []\n" }
+
+[[fault]]
+id = "guards-fire-reuse-worktree"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_an_uncommitted_change_counts_as_the_tree"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_uncommitted_change_counts_as_the_tree ("
+transform = { file = "tools/check-guards-fire.py", replace = "                    self.root, \"diff\", \"--name-only\", \"--no-renames\", \"-z\", commit\n", with = "                    self.root, \"diff\", \"--name-only\", \"--no-renames\", \"-z\", commit, \"HEAD\"\n" }
+
+[[fault]]
+id = "guards-fire-reuse-seeded"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_changed_patch_fires_its_entry_though_no_command_reads_it"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_changed_patch_fires_its_entry_though_no_command_reads_it ("
+transform = { file = "tools/check-guards-fire.py", replace = "        extra.content |= seeded_files(root, fault)\n", with = "" }
+
+[[fault]]
+id = "guards-fire-reuse-entry"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_changed_registry_entry_fires"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_changed_registry_entry_fires ("
+transform = { file = "tools/check-guards-fire.py", replace = "        if entry.get(\"table\") != self.tables.get(fault.id):\n", with = "        if False:\n" }
+
+[[fault]]
+id = "guards-fire-reuse-tool"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_changed_tool_fires_the_commands_that_ran_it"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_changed_tool_fires_the_commands_that_ran_it ("
+transform = { file = "tools/check-guards-fire.py", replace = "            if self.digest(tool) != (record.get(\"tools\") or {}).get(tool):\n", with = "            if False:\n" }
+
+[[fault]]
+id = "guards-fire-reuse-listed"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_new_entry_in_a_listed_directory_fires_and_a_changed_one_does_not"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_new_entry_in_a_listed_directory_fires_and_a_changed_one_does_not ("
+transform = { file = "tools/check-guards-fire.py", replace = "            if self.children(where, since.then, commit) != self.children(\n                where, self.now, \"now\"\n            ):\n", with = "            if False:\n" }
+
+[[fault]]
+id = "guards-fire-reuse-absent"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_new_file_where_a_command_looked_and_found_none_fires"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_new_file_where_a_command_looked_and_found_none_fires ("
+transform = { file = "tools/check-guards-fire.py", replace = "            if path in self.now or path in self.now_dirs:\n", with = "            if False:\n" }
+
+[[fault]]
+id = "guards-fire-reuse-present"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_path_a_command_found_there_that_is_gone_fires"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_path_a_command_found_there_that_is_gone_fires ("
+transform = { file = "tools/check-guards-fire.py", replace = "            if path not in self.now and path not in self.now_dirs:\n", with = "            if False:\n" }
+
+[[fault]]
+id = "guards-fire-reuse-history"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_command_that_reads_the_git_history_always_fires"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_command_that_reads_the_git_history_always_fires ("
+transform = { file = "tools/check-guards-fire.py", replace = "        if closure.git == \"history\":\n", with = "        if False:\n" }
+
+[[fault]]
+id = "guards-fire-reuse-tracked-paths"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_command_that_lists_the_tracked_files_fires_when_a_path_is_added"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_command_that_lists_the_tracked_files_fires_when_a_path_is_added ("
+transform = { file = "tools/check-guards-fire.py", replace = "        if closure.git == \"tree\" and self.now != since.then:\n", with = "        if False:\n" }
+
+[[fault]]
+id = "guards-fire-reuse-floating"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_command_that_downloads_by_a_range_always_fires"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_command_that_downloads_by_a_range_always_fires ("
+transform = { file = "tools/check-guards-fire.py", replace = "        if closure.floating:\n", with = "        if False:\n" }
+
+[[fault]]
+id = "guards-fire-trace-floating-collected"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_command_that_downloads_by_a_range_always_fires"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_command_that_downloads_by_a_range_always_fires ("
+transform = { file = "tools/check-guards-fire.py", replace = "                    if floating(spec) and not own\n", with = "                    if False\n" }
+
+[[fault]]
+id = "guards-fire-reuse-lock"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_cargo_lock_change_fires_a_build_that_compiles_a_changed_package_only"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_cargo_lock_change_fires_a_build_that_compiles_a_changed_package_only ("
+transform = { file = "tools/check-guards-fire.py", replace = "            hit = sorted(closure.locked & self.changed_packages(commit, since))\n", with = "            hit = []\n" }
+
+[[fault]]
+id = "guards-fire-reuse-script"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_change_to_the_fire_script_fires_every_entry"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_change_to_the_fire_script_fires_every_entry ("
+transform = { file = "tools/check-guards-fire.py", replace = "        if THIS in since.changed:\n", with = "        if False:\n" }
+
+[[fault]]
+id = "guards-fire-reuse-environment"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_different_environment_or_timeout_fires_every_entry"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_different_environment_or_timeout_fires_every_entry ("
+transform = { file = "tools/check-guards-fire.py", replace = "        if moved:\n", with = "        if False:\n" }
+
+[[fault]]
+id = "guards-fire-reuse-timeout"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_different_environment_or_timeout_fires_every_entry"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_different_environment_or_timeout_fires_every_entry ("
+transform = { file = "tools/check-guards-fire.py", replace = "    out[\"--timeout\"] = str(timeout)\n", with = "" }
+
+[[fault]]
+id = "guards-fire-record-secret"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_different_environment_or_timeout_fires_every_entry"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_different_environment_or_timeout_fires_every_entry ("
+transform = { file = "tools/check-guards-fire.py", replace = " and not ENV_SECRET.search(name)", with = "" }
+
+[[fault]]
+id = "guards-fire-reuse-no-record"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_no_record_or_no_trace_or_no_verdict_fires"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_no_record_or_no_trace_or_no_verdict_fires ("
+transform = { file = "tools/check-guards-fire.py", replace = "            return \"no record has its command\", None\n", with = "            return None, \"0\" * 40\n" }
+
+[[fault]]
+id = "guards-fire-reuse-untraced"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_no_record_or_no_trace_or_no_verdict_fires"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_no_record_or_no_trace_or_no_verdict_fires ("
+transform = { file = "tools/check-guards-fire.py", replace = "        if not closure.traced:\n", with = "        if False:\n" }
+
+[[fault]]
+id = "guards-fire-reuse-verdict"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_an_entry_the_record_says_did_not_fire_fires_again"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_entry_the_record_says_did_not_fire_fires_again ("
+transform = { file = "tools/check-guards-fire.py", replace = "        if entry.get(\"verdict\") != \"fired\":\n", with = "        if False:\n" }
+
+[[fault]]
+id = "guards-fire-reuse-no-entry"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_record_without_the_entry_or_from_another_clone_fires"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_record_without_the_entry_or_from_another_clone_fires ("
+transform = { file = "tools/check-guards-fire.py", replace = "            return f\"the record from {at} has no verdict for it\", None\n", with = "            return None, commit\n" }
+
+[[fault]]
+id = "guards-fire-reuse-clone"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_record_without_the_entry_or_from_another_clone_fires"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_record_without_the_entry_or_from_another_clone_fires ("
+transform = { file = "tools/check-guards-fire.py", replace = "            return f\"the record's commit {at} isn't in this clone\", None\n", with = "            return None, commit\n" }
+
+[[fault]]
+id = "guards-fire-reuse-legs"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_each_legs_record_answers_for_its_own_commands"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_each_legs_record_answers_for_its_own_commands ("
+transform = { file = "tools/check-guards-fire.py", replace = "        for record in records:\n            for command in record.get(\"commands\") or []:\n", with = "        for record in records[:1]:\n            for command in record.get(\"commands\") or []:\n" }
+
+[[fault]]
+id = "guards-fire-shard-before-reuse"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_shard_keeps_its_slice_whatever_record_it_reads"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_shard_keeps_its_slice_whatever_record_it_reads ("
+transform = [
+  { file = "tools/check-guards-fire.py", replace = "    if spec is not None:\n        k, n = spec\n        whole, commands = len(selected), len(command_weights(selected))\n        selected = shard(selected, k, n)\n        print(\n            f\"guards: shard {k} of {n} keeps {len(selected)} of {whole} selected entries \"\n            f\"({len(command_weights(selected))} of {commands} commands)\"\n        )\n        if not selected:\n            print(\"guards: this shard's slice is empty, so nothing to fire\")\n            return 0\n", with = "" },
+  { file = "tools/check-guards-fire.py", replace = "    logs = Path(args.logs).resolve() if args.logs else None\n", with = "    if spec is not None:\n        k, n = spec\n        whole, commands = len(selected), len(command_weights(selected))\n        selected = shard(selected, k, n)\n        print(\n            f\"guards: shard {k} of {n} keeps {len(selected)} of {whole} selected entries \"\n            f\"({len(command_weights(selected))} of {commands} commands)\"\n        )\n        if not selected:\n            print(\"guards: this shard's slice is empty, so nothing to fire\")\n            return 0\n    logs = Path(args.logs).resolve() if args.logs else None\n" },
+]
+
+[[fault]]
+id = "guards-fire-record-dirty"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_record_needs_a_committed_tree_and_strace"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_record_needs_a_committed_tree_and_strace ("
+transform = { file = "tools/check-guards-fire.py", replace = "            if changed.split():\n", with = "            if False:\n" }
+
+[[fault]]
+id = "guards-fire-record-strace"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_record_needs_a_committed_tree_and_strace"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_record_needs_a_committed_tree_and_strace ("
+transform = { file = "tools/check-guards-fire.py", replace = "    if args.record and shutil.which(\"strace\", path=env.get(\"PATH\")) is None:\n", with = "    if False:\n" }
+
+[[fault]]
+id = "guards-fire-record-clean-closure"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_record_keeps_every_fired_verdict_while_nothing_it_read_changed"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_record_keeps_every_fired_verdict_while_nothing_it_read_changed ("
+transform = { file = "tools/check-guards-fire.py", replace = "                recorded[key] = (elapsed, worker.closure(trace, fault.run))\n", with = "                recorded[key] = (elapsed, Closure())\n" }
+
+
+# The trace reader (`read_trace`) over strace's own lines: its floor (no trace, or one that never
+# shows its command starting, says nothing), its sentinel (a known trace yields its known reads),
+# and each way it could read a run as depending on less than it did.
+
+[[fault]]
+id = "guards-fire-trace-floor"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "TraceReading"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_trace_that_never_shows_its_command_starting_says_nothing ("
+transform = { file = "tools/check-guards-fire.py", replace = "    out.traced = seen > 0 and started == seen and not unplaced\n", with = "    out.traced = not unplaced\n" }
+
+[[fault]]
+id = "guards-fire-trace-sentinel"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "TraceReading"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_each_call_places_its_path_and_says_what_it_read ("
+transform = { file = "tools/check-guards-fire.py", replace = "            quoted = QUOTED.match(body, at.end()) if at else QUOTED.match(body)\n", with = "            quoted = None\n" }
+
+[[fault]]
+id = "guards-fire-trace-padded-return"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "TraceReading"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_each_call_places_its_path_and_says_what_it_read ("
+transform = { file = "tools/check-guards-fire.py", replace = "    at = body.rfind(\" = \")\n    while at >= 0 and not body[:at].rstrip().endswith(\")\"):\n        at = body.rfind(\" = \", 0, at)\n    if at < 0:\n        return None, None\n    match = RETURNED.match(body[at + 3 :])\n", with = "    at = body.rfind(\") = \")\n    if at < 0:\n        return None, None\n    match = RETURNED.match(body[at + 4 :])\n" }
+
+[[fault]]
+id = "guards-fire-trace-unplaced"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "TraceReading"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_path_against_a_directory_strace_couldnt_name_says_nothing ("
+transform = { file = "tools/check-guards-fire.py", replace = "            elif at and at.group(1) != \"AT_FDCWD\" and anchor is None:\n", with = "            elif False:\n" }
+
+[[fault]]
+id = "guards-fire-trace-git-settings"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "TraceReading"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_git_command_that_reads_the_history_or_a_non_git_reader_is_history ("
+transform = { file = "tools/check-guards-fire.py", replace = "                if opened and not failed and not GIT_SETTINGS.search(rel):\n", with = "                if opened and not failed:\n" }
+
+[[fault]]
+id = "guards-fire-trace-git-reader"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "TraceReading"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_git_command_that_reads_the_history_or_a_non_git_reader_is_history ("
+transform = { file = "tools/check-guards-fire.py", replace = "        else:\n            kind = \"history\"\n        out.git = ", with = "        else:\n            kind = \"tree\"\n        out.git = " }
+
+[[fault]]
+id = "guards-fire-trace-cargo-git"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "TraceReading"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_git_command_that_reads_the_history_or_a_non_git_reader_is_history ("
+transform = { file = "tools/check-guards-fire.py", replace = "            kind = \"history\" if command in (\"package\", \"publish\") else \"tree\"\n", with = "            kind = \"tree\"\n" }
+
+[[fault]]
+id = "guards-fire-trace-rev-parse"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "TraceReading"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_git_command_that_reads_the_history_or_a_non_git_reader_is_history ("
+transform = { file = "tools/check-guards-fire.py", replace = "        if len(options) < len(before) and command not in GIT_PATHS:\n", with = "        if False:\n" }
+
+[[fault]]
+id = "guards-fire-trace-grep-revision"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "TraceReading"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_git_command_that_reads_the_history_or_a_non_git_reader_is_history ("
+transform = { file = "tools/check-guards-fire.py", replace = "        return \"tree\" if len(positional) <= (0 if patterns else 1) else \"history\"\n", with = "        return \"tree\"\n" }
+
+[[fault]]
+id = "guards-fire-trace-cargo-member"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "TraceReading"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_cargo_process_reads_a_member_outside_its_build_for_its_manifest_alone ("
+transform = { file = "tools/check-guards-fire.py", replace = "                if member is not None and member not in build[1]:\n", with = "                if False:\n" }
+
+[[fault]]
+id = "guards-fire-trace-cargo-lock"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "TraceReading"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_cargo_process_reads_a_member_outside_its_build_for_its_manifest_alone ("
+transform = { file = "tools/check-guards-fire.py", replace = "                if rel == \"Cargo.lock\" and not failed:\n                    out.locked |= build[0]\n                    continue\n", with = "" }
+
+[[fault]]
+id = "guards-fire-trace-cargo-dev"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "TraceReading"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_cargo_process_reads_a_member_outside_its_build_for_its_manifest_alone ("
+transform = { file = "tools/check-guards-fire.py", replace = "                if (top or not dev) and dep not in seen:\n", with = "                if not dev and dep not in seen:\n" }
+
+[[fault]]
+id = "guards-fire-trace-toolchain"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "TraceReading"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_cargo_process_reads_a_member_outside_its_build_for_its_manifest_alone ("
+transform = { file = "tools/check-guards-fire.py", replace = "        out.tools.add(TOOLCHAIN)\n", with = "        pass\n" }
+
+[[fault]]
+id = "guards-fire-trace-temp-tools"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "TraceReading"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_program_under_the_temp_directory_is_the_commands_own_and_a_script_brings_its_interpreter ("
+transform = { file = "tools/check-guards-fire.py", replace = "                    for s in (*view.skip, *view.downloads, temporary, \"/proc\", \"/dev\")\n", with = "                    for s in (*view.skip, *view.downloads, \"/proc\", \"/dev\")\n" }
+
+[[fault]]
+id = "guards-fire-trace-fixture-downloads"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "TraceReading"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_program_under_the_temp_directory_is_the_commands_own_and_a_script_brings_its_interpreter ("
+transform = { file = "tools/check-guards-fire.py", replace = "                    if floating(spec) and not own\n", with = "                    if floating(spec)\n" }
+
+[[fault]]
+id = "guards-fire-trace-shebang"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "TraceReading"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_program_under_the_temp_directory_is_the_commands_own_and_a_script_brings_its_interpreter ("
+transform = { file = "tools/check-guards-fire.py", replace = "                    interpreter = shebang(real)\n", with = "                    interpreter = None\n" }
+
+[[fault]]
+id = "guards-fire-trace-download-cache"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "TraceReading"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_program_under_the_temp_directory_is_the_commands_own_and_a_script_brings_its_interpreter ("
+transform = { file = "tools/check-guards-fire.py", replace = "                    for s in (*view.skip, *view.downloads, temporary, \"/proc\", \"/dev\")\n", with = "                    for s in (*view.skip, temporary, \"/proc\", \"/dev\")\n" }
+
+[[fault]]
+id = "guards-fire-trace-floating"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "TraceReading"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_download_by_a_range_is_floating_and_one_by_an_exact_version_is_not ("
+transform = { file = "tools/check-guards-fire.py", replace = "    return not (EXACT_PIP.match(spec) or EXACT_AT.match(spec))\n", with = "    return False\n" }
+
+[[fault]]
+id = "guards-fire-trace-script-deps"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "TraceReading"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_download_by_a_range_is_floating_and_one_by_an_exact_version_is_not ("
+transform = { file = "tools/check-guards-fire.py", replace = "                specs += list(tomllib.loads(body).get(\"dependencies\") or [])\n", with = "                pass\n" }

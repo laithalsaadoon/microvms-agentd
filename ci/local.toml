@@ -26,11 +26,11 @@
 # the full history plus origin/main, and anything else clones one commit with no remote.
 #
 # `[expressions]` answers for a pull request only. A push to main (the `BASE` expression's
-# `HEAD^` side) isn't modeled, so `ci:guards` runs the pull request's `--affected` selection,
-# never main's full fire. It runs it as shard 0 of 1, the whole selection in one run under the
-# job's 60 minutes, where CI splits it across the matrix; `mise run guards:fire -- --jobs 4
-# --venv-per-worker` is the full fire here, and `-- --venv-per-worker --affected --shard k/6`
-# one CI leg's share.
+# `HEAD^` side) isn't modeled, so `ci:guards` runs the pull request's step, never main's record.
+# It runs it as shard 0 of 1, the whole registry in one run under the job's 60 minutes, where CI
+# splits it across the matrix, and with no record restored (the cache is CI's), so every entry
+# fires: the full fire. `mise run guards:fire -- --venv-per-worker --shard k/6 --reuse DIR` is
+# one CI leg's share over a record made here with `--record DIR`.
 
 workflows = ["ci.yml", "fuzz.yml"]
 
@@ -53,6 +53,8 @@ workflows = ["ci.yml", "fuzz.yml"]
 "astral-sh/setup-uv" = "mise installs uv at the version `ci:parity` holds equal to this step's input"
 "actions/setup-node" = "mise installs Node at the major `ci:parity` holds equal to this step's input"
 "actions/upload-artifact" = "it keeps a failed job's files on CI; ci-local.py keeps a failed job's whole tree in `failed-<job>/` instead"
+"actions/cache/restore" = "it restores main's record of what each seeded fault's verdict read, which is CI's; without one, `--reuse` fires every entry, as ci:guards does here"
+"actions/cache/save" = "it saves main's record on a push to main, which ci:local doesn't model"
 "hashicorp/setup-terraform" = "it installs Terraform for the `rust` job's `background coding example` step only, which this file skips; `mise run background:check` runs that step's commands with mise's Terraform"
 
 # ── ci.yml ──────────────────────────────────────────────────────────────────
@@ -152,10 +154,14 @@ task = "guards"
 steps = [
   "install ast-grep (pinned, checksummed)",
   "install cargo-mutants (pinned, checksummed)",
-  "the seeded faults a pull request affects fire",
-  "every seeded fault fires",
+  "install strace",
+  "the seeded faults whose recorded verdicts a pull request can't keep fire",
+  "every seeded fault fires, and its record is written",
   "disk left after the fire",
 ]
+
+[job."ci.yml".guards.local."install strace"]
+skip = "`sudo apt-get` installs the runner's strace, which only `--record` runs (main's push) and one TraceReading case uses; the pull request's step ci:guards runs doesn't record, and that case skips where strace isn't installed"
 
 [job."ci.yml".guards.local."install cargo-mutants (pinned, checksummed)"]
 run = "cargo install --locked cargo-mutants@27.1.0"

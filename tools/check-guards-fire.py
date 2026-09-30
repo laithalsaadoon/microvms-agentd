@@ -117,49 +117,73 @@ Three subcommands:
           leave anything behind for a command already restored. The restored line's seconds
           are what the restored pass adds after the last fault's verdict.
 
-          `--affected` selects the entries whose own files changed: the entry changed or is
-          new against the base's registry, or a file it names changed between the merge base of
-          HEAD and `--base` (origin/main by default) and the working tree, untracked files and
-          both sides of a rename included. The base's registry is read in either layout, its
-          files in `verify/guards/faults/` or the single `verify/guards/faults.toml` it was before the split,
-          and an entry is compared by its table, not by where it sits: one moved to another
-          file unchanged isn't selected. The files are the ones it seeds (transform files, the
-          patch and what it touches) and its guard's (the `note`'s path, a path in `guard` or
-          in an argv, the script a unit suite tests, the sibling scripts a named script loads
-          or imports, the `-p` crate's file that defines a cargo test, the crate's clippy.toml
-          for a lint). A change to this script, or to a build input every command reads
-          (any Cargo.toml, Cargo.lock, rust-toolchain.toml, .cargo/config.toml, the root
-          clippy.toml, mise.toml, mise.lock), selects every entry, and so does a change to
-          ci.yml's `guards` job or its top-level `env` (CI's side of mise.toml: that job's
-          steps install the toolchain every command runs under). It's a rule, not a trace:
-          a change to code a guard reaches without naming it (the module that defines a type
-          a clippy ban names, a helper a test calls) selects nothing, so a green run here
-          isn't the full fire. It prints why each entry is in, the ids it skipped, and where
-          the full fire runs when it skipped any. CI's `guards` job runs it on a pull request
-          against the pull request's base, and fires every entry on each push to main (#323).
+          `--record DIR` (CI's `guards` legs on a push to main) runs every clean run and every
+          seeded run under strace (`STRACE`), and writes a record to DIR: the commit, the
+          environment, each tool's digest, and per command its clean run's closure and
+          seconds, with each entry's registry table, verdict, seconds and what its fault run
+          read beyond the clean one, the files the fault is made from among them. The fault
+          run is traced too because a fault can make its command read a file the clean run
+          didn't (a changed path, a new `mod`). A run's closure (`read_trace`, `Closure`) is
+          the tracked files it opened or looked at, the paths it looked for and didn't find,
+          the directories it listed, whether it read the git directory for the tracked paths
+          alone or for the history, the programs it ran from outside the tree (by real path;
+          one under the temp directory is its own output, and one in uv's or npm's download
+          cache is a download), and the downloads uv, uvx or npx fetched by a range rather
+          than an exact version. A cargo process reads every
+          member's manifest and looks at every member's targets, but `cargo metadata`'s graph
+          (`Graph`, every feature on) says which packages its selection can compile: a member
+          outside them counts for its manifest and for what's there, not for its files' text,
+          and Cargo.lock counts as the entries of the packages it can compile, so a lockfile
+          change reaches only the builds that compile what changed. That member rule is the one
+          assumption past what the trace sees: a member a build doesn't compile reaches it only
+          through its manifest, which cargo reads for every build. A cargo process whose build
+          the graph can't name counts every file it touched, the lockfile's text included.
+          It needs a committed tree, since a pull request diffs from the record's commit, and
+          strace on PATH. The record's seconds are traced runs', slower than the same runs
+          without strace.
+
+          `--reuse DIR` (CI's pull requests) keeps an entry's recorded `fired` verdict instead
+          of firing it when every input its runs had is the same in the tree: its registry
+          table, this script, the environment (`environment`: the variables `ENV_PREFIXES`
+          names, the timeout and where the bindings entries build), each tool it ran, every
+          file it read, each path it looked at still there and each it didn't find still
+          missing, each directory it listed holding the same names, each Cargo.lock package its
+          build can compile, and no download by a range; and it read the git directory for the
+          tracked paths alone, none of which was added or removed. The tree, uncommitted and
+          untracked files included, is compared with the record's commit, not with the merge
+          base, so a change main made after the record counts. A command with no record or no
+          trace, an entry whose recorded verdict isn't `fired`, and a command that reads the
+          history always fire. Every entry prints why it fires or which commit's verdict it
+          keeps. It's a test cache's soundness, as Bazel's is: a verdict is a function of what
+          its runs read, given no network, clock or randomness in it, and given that a download
+          by an exact version (uv's `==`, uvx's and npx's `@x.y.z`, a crate by Cargo.lock's
+          checksum) is the same bytes on every run, its own dependencies included. It reads
+          every record in DIR, one from each leg that recorded, and takes each command's from
+          the first that has it. With no record, every entry fires, as the full fire does.
 
           `--shard k/N` fires shard k of N (numbered from 0, as cargo-mutants numbers its
-          shards) of what the other flags select: it's cut after `--only`, `--suite`,
-          `--affected` and the bindings drop, and the restored pass runs the shard's own
-          commands. CI's `guards` job runs one shard a leg (#345). The N shards partition the
-          selection, and shard k of N of the same tree and base is always the same entries. A
-          shard holds whole commands, so a command's clean and restored runs happen once across
-          the matrix. Each command weighs its clean and restored runs (`command_overhead`) plus
-          the sum of its entries' rough cost in a CI shard (`entry_cost`, in units that give a
-          Rust entry 14: 24 for an entry that builds the CLI, 17 for a script one, 2 for a
-          lint entry, which fires in its command's batch, 119 for a bindings entry that builds
-          the Node addon and 53 for another bindings one), and commands go heaviest first onto
-          the lightest shard, a tie in weight to the command that comes first in the registry
-          and a tie in load to the lower shard; a shard's entries keep registry order. A cost,
-          not a count, because an entry's cost spans an order of magnitude and a command's
-          entries sit together: one `napi build` entry costs about eight Rust ones, and a
-          command's own runs cost several of its entries. Commands stay whole because splitting
-          one repeats its clean and restored runs in each shard that holds part of it. It
-          prints which shard
-          it is and how much of the selection it keeps, and a shard with nothing in its slice
-          exits 0.
-          `mise run guards:fire -- --affected --shard 1/6` runs one pull request leg's share
-          here.
+          shards) of what the other flags select: it's cut after `--only`, `--suite` and the
+          bindings drop and before `--reuse`, so a leg's slice doesn't depend on which record
+          it restored and each leg's reuse is its own decision, and the restored pass runs the
+          shard's own commands. CI's `guards` job runs one shard a leg (#345). The N shards
+          partition the selection, and shard k of N of the same tree is always the same
+          entries. A shard holds whole commands, so a command's clean and restored runs happen
+          once across the matrix. Each command weighs its clean and restored runs
+          (`command_overhead`) plus the sum of its entries' rough cost in a CI shard
+          (`entry_cost`, in units that give a Rust entry 14: 24 for an entry that builds the
+          CLI, 17 for a script one, 2 for a lint entry, which fires in its command's batch, 119
+          for a bindings entry that builds the Node addon and 53 for another bindings one), and
+          commands go heaviest first onto the lightest shard, a tie in weight to the command
+          that comes first in the registry and a tie in load to the lower shard; a shard's
+          entries keep registry order. A cost, not a count, because an entry's cost spans an
+          order of magnitude and a command's entries sit together: one `napi build` entry costs
+          about eight Rust ones, and a command's own runs cost several of its entries. Commands
+          stay whole because splitting one repeats its clean and restored runs in each shard
+          that holds part of it. The weights aren't a record's measured seconds, since legs can
+          restore different records and a split that differs between legs isn't a partition.
+          It prints which shard it is and how much of the selection it keeps, and a shard with
+          nothing in its slice exits 0. `mise run guards:fire -- --venv-per-worker --shard 1/6
+          --reuse DIR` runs one pull request leg's share here.
 
           Cargo builds into `--target-dir`, by default `guards-fire` under the caller's
           target (`$CARGO_TARGET_DIR`, or `<repo>/target`). It persists, so a fault costs an
@@ -281,7 +305,7 @@ from __future__ import annotations
 import argparse
 import ast
 import dataclasses
-import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -305,21 +329,6 @@ REGISTRY = f"{REGISTRY_DIR}/*.toml"
 # The single file the registry was before it was split by owner. Nothing reads it, so an entry
 # a branch from before the split leaves there would stop firing silently: the loader refuses it.
 FORMER_REGISTRY = f"{REGISTRY_DIR}.toml"
-# What every build or command reads: a change to one can move any entry's verdict.
-BUILD_INPUTS = {
-    "Cargo.lock",
-    "rust-toolchain.toml",
-    ".cargo/config.toml",
-    "clippy.toml",
-    "mise.toml",
-    "mise.lock",
-}
-# CI's side of mise.toml: on the runner, the `guards` job's own steps install the toolchain and
-# tools every command runs under (the Rust components, uv, Node, the ast-grep and cargo-mutants
-# pins), and the workflow's top-level `env` reaches every step. A change to either selects every
-# entry, as a mise.toml change does.
-CI_WORKFLOW = ".github/workflows/ci.yml"
-CI_JOB = "guards"
 UNREGISTERED = "verify/guards/unregistered.txt"
 
 # Built, not written, so this file doesn't carry the marker it counts.
@@ -1287,11 +1296,13 @@ def run_commands(
     timeout: int,
     seeded: bool,
     procs: Procs,
+    trace: Path | None = None,
 ) -> tuple[int, str, str]:
     """The exit code, the log (each argv echoed before its output), and the output alone.
 
     Verdicts read the output alone: an echoed argv that happens to contain an entry's
-    `message` would otherwise match on every run.
+    `message` would otherwise match on every run. With `trace`, each argv runs under strace
+    (`STRACE`), which writes argv N's trace to `<trace>.N` and changes nothing it prints.
     """
     output: list[str] = []
     said: list[str] = []
@@ -1303,6 +1314,8 @@ def run_commands(
                     a.replace("{empty_dir}", empty) for a in fault.argv_fault
                 ]
             output.append(f"$ {' '.join(argv)}\n")
+            if trace is not None:
+                argv = [*STRACE, f"{trace}.{index}", *argv]
             try:
                 done, out = procs.run(argv, tree, env, timeout)
             except FileNotFoundError:
@@ -1354,6 +1367,27 @@ class Worker:
     binding_env: dict[str, str]
     # The commands this worker ran, clean or seeded: its restored pass runs each again.
     touched: dict[tuple, None] = field(default_factory=dict)
+    # With `--record`, what its traces are read against and where they're written.
+    view: View | None = None
+    traces: Path | None = None
+    runs: int = 0
+
+    def trace(self) -> Path | None:
+        """A new trace's path, beside the worktree, when this worker records."""
+        if self.traces is None:
+            return None
+        self.runs += 1
+        return self.traces / str(self.runs)
+
+    def closure(self, trace: Path | None, run: list[list[str]]) -> Closure | None:
+        """What the traced run at `trace` read, its trace files removed."""
+        if trace is None or self.view is None:
+            return None
+        files = [trace.parent / f"{trace.name}.{i}" for i in range(len(run))]
+        found = read_trace([f for f in files if f.exists()], self.view)
+        for path in files:
+            path.unlink(missing_ok=True)
+        return found
 
 
 @dataclass
@@ -1928,226 +1962,1269 @@ def rendered_log(log: str) -> str:
     return "".join(out)
 
 
-# ── --affected ───────────────────────────────────────────────────────────────
+# ── the verdict cache ────────────────────────────────────────────────────────
+
+# How `--record` traces a run: every process the command starts (`-f`), the file and process
+# calls alone (the seccomp filter stops a tracee on those and no others, which keeps a traced
+# run near its own speed), each fd and AT_FDCWD printed with its path (`-y`), and strings long
+# enough to hold a git command's arguments. The trace file's path follows `-o`, then the argv.
+STRACE = (
+    "strace",
+    "-f",
+    "-qq",
+    "--seccomp-bpf",
+    "-y",
+    "-s",
+    "4096",
+    "-e",
+    "trace=%file,%process,fchdir",
+    "-e",
+    "signal=none",
+    "-o",
+)
+RECORD_VERSION = 1
+# This script, in the tree: it decides every verdict, so a record from before it changed
+# proves nothing about the tree after.
+THIS = "tools/check-guards-fire.py"
+# The environment a verdict can read, by name: cargo's and rustc's settings, Python's, uv's,
+# Node's and npm's, the locale, the time zone, and PATH (which program a name runs). The fire's
+# own CARGO_TARGET_DIR is a place that differs by run and worker, not an input; a name that
+# holds a credential is never written down, and never moves a verdict.
+ENV_PREFIXES = (
+    "CARGO",
+    "RUST",
+    "PYTHON",
+    "UV_",
+    "NODE",
+    "NPM_",
+    "npm_",
+    "LANG",
+    "LC_",
+    "TZ",
+    "PATH",
+)
+ENV_PLACES = {"CARGO_TARGET_DIR"}
+ENV_SECRET = re.compile(r"TOKEN|SECRET|PASSWORD|CREDENTIAL|_KEY$", re.IGNORECASE)
+# A tool that tells cargo's and rustc's toolchain apart when cargo compiles nothing: a build
+# whose every unit is fresh runs no rustc, so the programs it ran don't name the compiler that
+# built what it links.
+RUST_TOOLS = {"cargo", "rustc", "rustdoc", "clippy-driver", "cargo-clippy", "rustup"}
+TOOLCHAIN = "rustc -vV"
+
+TRACE_LINE = re.compile(
+    r"^(\d+) +(?:<\.\.\. ([a-z0-9_]+) resumed>(.*)|([a-z0-9_]+)\((.*))$"
+)
+UNFINISHED = " <unfinished ...>"
+QUOTED = re.compile(r'"((?:[^"\\]|\\.)*)"')
+DIRFD = re.compile(r"^(AT_FDCWD|-?\d+)(?:<((?:[^>\\]|\\.)*)>)?, ")
+FCHDIR = re.compile(r"^-?\d+<((?:[^>\\]|\\.)*)>\)")
+RETURNED = re.compile(
+    r"^(-?\d+|\?|0x[0-9a-f]+)(?:<((?:[^>\\]|\\.)*)>)?(?: (E[A-Z0-9]+))?"
+)
+ESCAPE = re.compile(r"\\(?:([0-7]{1,3})|x([0-9a-fA-F]{2})|(.))")
+SIMPLE_ESCAPES = {
+    "n": "\n",
+    "t": "\t",
+    "r": "\r",
+    "v": "\v",
+    "f": "\f",
+    "a": "\a",
+    "b": "\b",
+}
+OPENS = {"open", "openat", "openat2", "creat"}
+LOOKS = {
+    "stat",
+    "lstat",
+    "stat64",
+    "lstat64",
+    "newfstatat",
+    "fstatat64",
+    "statx",
+    "access",
+    "faccessat",
+    "faccessat2",
+    "readlink",
+    "readlinkat",
+}
+EXECS = {"execve", "execveat"}
+FORKS = {"clone", "clone2", "clone3", "fork", "vfork"}
+# The calls whose first argument is a directory fd a relative path is read against.
+AT_CALLS = {
+    "openat",
+    "openat2",
+    "newfstatat",
+    "fstatat64",
+    "statx",
+    "faccessat",
+    "faccessat2",
+    "readlinkat",
+    "execveat",
+}
+# A path the tree doesn't have.
+MISSING = {"ENOENT", "ENOTDIR"}
+# Files in a git directory that hold the clone's own settings, which every clone of the repo
+# has the same: reading them isn't reading the history or the index. The empty path is a
+# worktree's `.git` file itself, which only says where its git directory is (ast-grep's
+# ignore rules read it to find `info/exclude`).
+GIT_SETTINGS = re.compile(
+    r"^$|(?:^|/)(?:config|config\.worktree|description|commondir|gitdir|info/exclude|info/attributes|hooks/.*)$"
+)
+# The git commands whose answer is the tree alone (its files, the index's list of them, the
+# ignore rules), with every option each may take: a command outside these, or an option it
+# doesn't list, reads the history as far as the cache can tell. `GIT_PATHS` take paths as
+# arguments; any other argument to the others is a revision.
+GIT_PATHS = {"ls-files", "check-ignore"}
+GIT_TREE = {
+    "ls-files": {
+        "-z",
+        "-c",
+        "--cached",
+        "-o",
+        "--others",
+        "--exclude-standard",
+        "-d",
+        "--deleted",
+        "-m",
+        "--modified",
+        "--directory",
+        "--no-empty-directory",
+        "--error-unmatch",
+        "--full-name",
+        "--",
+    },
+    "check-ignore": {
+        "--stdin",
+        "-z",
+        "-q",
+        "--quiet",
+        "-v",
+        "--verbose",
+        "-n",
+        "--non-matching",
+        "--no-index",
+        "--",
+    },
+    "rev-parse": {
+        "--show-toplevel",
+        "--show-prefix",
+        "--show-cdup",
+        "--git-dir",
+        "--git-common-dir",
+        "--absolute-git-dir",
+        "--is-inside-work-tree",
+        "--is-inside-git-dir",
+        "--is-bare-repository",
+        "--path-format=absolute",
+        "--path-format=relative",
+    },
+}
+# `git grep`'s flags that take no value, and those whose value is the next argument: a grep over
+# the working tree searches files it opens, which the trace sees. `--cached` or a revision
+# searches the index or the history instead.
+GREP_FLAGS = {
+    "--untracked",
+    "--no-index",
+    "--exclude-standard",
+    "-I",
+    "-i",
+    "--ignore-case",
+    "-n",
+    "--line-number",
+    "-w",
+    "--word-regexp",
+    "-E",
+    "--extended-regexp",
+    "-F",
+    "--fixed-strings",
+    "-G",
+    "--basic-regexp",
+    "-P",
+    "--perl-regexp",
+    "-l",
+    "--files-with-matches",
+    "-L",
+    "--files-without-match",
+    "-c",
+    "--count",
+    "-h",
+    "-H",
+    "-o",
+    "--only-matching",
+    "-q",
+    "--quiet",
+    "-z",
+    "--null",
+    "--full-name",
+    "-v",
+    "--invert-match",
+    "--column",
+    "--recurse-submodules",
+    "--no-color",
+    "--all-match",
+    "--and",
+    "--or",
+    "--not",
+    "(",
+    ")",
+}
+GREP_VALUES = {
+    "-e",
+    "-f",
+    "-A",
+    "-B",
+    "-C",
+    "-m",
+    "--max-count",
+    "--max-depth",
+    "--threads",
+}
 
 
-def changed_since(root: Path, ref: str) -> tuple[set[str], str]:
-    """Paths that differ between the merge base with `ref` and the working tree, both sides
-    of a rename, untracked files included; and the merge base."""
-    base = git(root, "merge-base", "HEAD", ref, check=False)
-    if base.returncode != 0:
-        raise SystemExit(
-            f"guards: no merge base of HEAD and {ref}, so --affected has nothing to diff "
-            "against. Fetch it, or pass another --base."
-        )
-    commit = base.stdout.strip()
-    diff = git(root, "diff", "--name-only", "--no-renames", "-z", commit).stdout
-    untracked = git(root, "ls-files", "--others", "--exclude-standard", "-z").stdout
-    return {p for p in (diff + "\0" + untracked).split("\0") if p}, commit
+# A download the command asks for by exact version: `name==1.2.3` to uv, `name@1.2.3` to uvx
+# or npx. Anything else (a range, a major, a bare name) resolves to whatever is newest when it
+# runs, so a release upstream can move the verdict with nothing in the tree changed.
+EXACT_PIP = re.compile(r"^[A-Za-z0-9._-]+(?:\[[^\]]*\])?==[0-9][0-9A-Za-z.+!-]*$")
+EXACT_AT = re.compile(
+    r"^@?[A-Za-z0-9._/-]+@[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$"
+)
+SCRIPT_DEPS = re.compile(r"^# /// script$(.*?)^# ///$", re.MULTILINE | re.DOTALL)
 
 
-def base_entries(root: Path, commit: str) -> dict[str, dict]:
-    """The registry's entries at `commit`, by id, in either layout: its files in REGISTRY_DIR,
-    or FORMER_REGISTRY, the single file it was before the split. A base on either side of the
-    split compares the same way, so the first PR after it doesn't read every entry as new.
-    Empty when `commit` has no registry; a file that doesn't parse gives up no entry."""
-    listed = git(root, "ls-tree", "-z", "--name-only", commit, "--", f"{REGISTRY_DIR}/")
-    names = [n for n in listed.stdout.split("\0") if registry_file(n)]
-    former = git(root, "cat-file", "-e", f"{commit}:{FORMER_REGISTRY}", check=False)
-    if former.returncode == 0:
-        names.append(FORMER_REGISTRY)
-    texts = {n: git(root, "show", f"{commit}:{n}").stdout for n in names}
-    tables, _ = parse_registry(texts)
-    return {
-        t.data["id"]: t.data
-        for t in tables
-        if isinstance(t.data, dict) and isinstance(t.data.get("id"), str)
-    }
-
-
-def workflow_inputs(text: str) -> list[str]:
-    """The workflow's top-level `env` block and its `guards` job, blank and comment lines
-    dropped. A line scan, not a YAML parse: this script has no dependencies, and ci.yml starts
-    each top-level key at column 0 and each job's key at two spaces."""
-    kept: list[str] = []
-    top = job = None
-    for line in text.splitlines():
-        body = line.strip()
-        if not body or body.startswith("#"):
-            continue
-        if not line[0].isspace():
-            top, job = line.split(":", 1)[0], None
-        elif top == "jobs" and re.match(r"  \S", line):
-            job = line.split(":", 1)[0].strip()
-        if top == "env" or (top == "jobs" and job == CI_JOB):
-            kept.append(line)
-    return kept
-
-
-def workflow_inputs_changed(root: Path, commit: str) -> bool:
-    """Whether ci.yml's `guards` job or its top-level `env` differs between `commit` and the
-    working tree. A deleted ci.yml differs from any base that had them."""
-    try:
-        head = (root / CI_WORKFLOW).read_text(encoding="utf-8")
-    except FileNotFoundError:
-        head = ""
-    # Empty when the base has no ci.yml.
-    base = git(root, "show", f"{commit}:{CI_WORKFLOW}", check=False).stdout
-    return workflow_inputs(base) != workflow_inputs(head)
-
-
-def crate_dirs(root: Path, files: set[str]) -> dict[str, str]:
-    """Each workspace package's name and directory, from the tracked Cargo.toml files."""
-    out: dict[str, str] = {}
-    for path in sorted(f for f in files if f.endswith("Cargo.toml")):
+def downloads(argv: list[str], cwd: str | None, tree: str) -> list[str]:
+    """The packages a uv, uvx or npx command line asks to download: `--with`, `--from`,
+    uvx's tool, npx's `-p`, and a script's PEP 723 `dependencies` when uv runs one."""
+    name = Path(argv[0]).name if argv else ""
+    specs: list[str] = []
+    if name not in ("uv", "uvx", "npx"):
+        return specs
+    items = iter(argv[1:])
+    positional: list[str] = []
+    script = None
+    for arg in items:
+        if arg == "--":
+            break
+        if arg in ("--with", "--from", "-p", "--package") and not (
+            name == "uv" and arg == "-p"
+        ):
+            specs.append(next(items, ""))
+        elif arg.startswith(("--with=", "--from=", "--package=")):
+            specs.append(arg.split("=", 1)[1])
+        elif arg == "--script":
+            script = next(items, None)
+        elif arg in ("--python", "-p", "--directory", "--project", "-c", "--call"):
+            next(items, None)
+        elif not arg.startswith("-"):
+            positional.append(arg)
+            if name != "uv" or positional[:1] != ["run"] or len(positional) > 1:
+                break
+    if name == "uvx" and positional and not any(a in ("--from",) for a in argv):
+        specs.append(positional[0])
+    if name == "uv" and positional[:1] == ["pip"] and "install" in argv:
+        # What `uv pip install` names: a requirement, not a local path or wheel. A requirements
+        # file's pins aren't on the command line, so it counts as a range.
+        items = iter(argv[argv.index("install") + 1 :])
+        for arg in items:
+            if arg in ("-r", "--requirement"):
+                specs.append(f"the requirements in {next(items, '')}")
+            elif arg in (
+                "--python",
+                "-p",
+                "-c",
+                "--constraint",
+                "--index-url",
+                "--extra-index-url",
+            ):
+                next(items, None)
+            elif (
+                not arg.startswith("-") and "/" not in arg and not arg.endswith(".whl")
+            ):
+                specs.append(arg)
+    if name == "uv" and script is None and positional[:1] == ["run"]:
+        rest = [a for a in argv[argv.index("run") + 1 :] if not a.startswith("-")]
+        script = next((a for a in rest if a.endswith(".py")), None)
+    if script is not None:
+        path = Path(script) if os.path.isabs(script) else Path(cwd or tree, script)
         try:
-            package = tomllib.loads((root / path).read_text(encoding="utf-8")).get(
-                "package", {}
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            text = ""
+        block = SCRIPT_DEPS.search(text)
+        if block:
+            body = "\n".join(
+                line.removeprefix("#").removeprefix(" ")
+                for line in block.group(1).splitlines()
             )
-        except (OSError, tomllib.TOMLDecodeError):
+            try:
+                specs += list(tomllib.loads(body).get("dependencies") or [])
+            except tomllib.TOMLDecodeError:
+                specs.append(f"the unreadable PEP 723 block of {script}")
+    return [s for s in specs if s]
+
+
+def floating(spec: str) -> bool:
+    """Whether a download resolves by a range rather than one exact version."""
+    return not (EXACT_PIP.match(spec) or EXACT_AT.match(spec))
+
+
+def unquote(text: str) -> str:
+    """A string as strace prints it, read back: C escapes and octal bytes, as UTF-8."""
+
+    def one(match: re.Match) -> str:
+        if match.group(1):
+            return chr(int(match.group(1), 8))
+        if match.group(2):
+            return chr(int(match.group(2), 16))
+        return SIMPLE_ESCAPES.get(match.group(3), match.group(3))
+
+    raw = ESCAPE.sub(one, text)
+    try:
+        return raw.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return raw
+
+
+def trace_calls(lines) -> list[tuple[int, str, str]]:
+    """Each call in a `strace -f` log: the pid, the call's name, and what follows its `(`, with a
+    call strace split around another process's (`<unfinished ...>`, `<... resumed>`) joined."""
+    pending: dict[int, tuple[str, str]] = {}
+    out: list[tuple[int, str, str]] = []
+    for line in lines:
+        match = TRACE_LINE.match(line.rstrip("\n"))
+        if match is None:
             continue
-        if isinstance(package.get("name"), str):
-            out[package["name"]] = str(Path(path).parent)
+        pid = int(match.group(1))
+        if match.group(2) is not None:
+            if pid not in pending:
+                continue
+            name, head = pending.pop(pid)
+            body = head + match.group(3)
+        else:
+            name, body = match.group(4), match.group(5)
+        if body.endswith(UNFINISHED):
+            pending[pid] = (name, body[: -len(UNFINISHED)])
+            continue
+        out.append((pid, name, body))
     return out
 
 
-def sibling_scripts(root: Path, scripts: set[str], files: set[str]) -> set[str]:
-    """The scripts beside each of `scripts` that it loads by file name (`runpy.run_path`
-    on `Path(__file__).with_name("x.py")`) or imports, and theirs in turn. Read with `ast`:
-    ci-local.py runs from check-ci-parity.py's `plan()`, so a change there moves ci-local's
-    suite too."""
-    seen: set[str] = set()
-    todo = sorted(scripts)
-    while todo:
-        path = todo.pop()
-        if path in seen:
-            continue
-        seen.add(path)
-        try:
-            tree = ast.parse((root / path).read_text(encoding="utf-8"))
-        except (OSError, SyntaxError, ValueError):
-            continue
-        here = Path(path).parent
-        names: set[str] = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                if node.value.endswith(".py") and "/" not in node.value:
-                    names.add(node.value)
-            elif isinstance(node, ast.Import):
-                names |= {f"{a.name}.py" for a in node.names}
-            elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
-                names.add(f"{node.module}.py")
-        for name in names:
-            sibling = str(here / name) if str(here) != "." else name
-            if sibling in files and sibling not in seen:
-                todo.append(sibling)
-    return seen - scripts
+def returned(body: str) -> tuple[int | None, str | None]:
+    """A call's return value (None when it didn't return one) and its error name."""
+    # strace pads a resumed call's `) = ` to a column, so the `)` may sit spaces before it.
+    at = body.rfind(" = ")
+    while at >= 0 and not body[:at].rstrip().endswith(")"):
+        at = body.rfind(" = ", 0, at)
+    if at < 0:
+        return None, None
+    match = RETURNED.match(body[at + 3 :])
+    if match is None or match.group(1) == "?":
+        return None, None
+    value = match.group(1)
+    return (int(value, 16) if value.startswith("0x") else int(value)), match.group(3)
 
 
-def fault_files(
-    root: Path, fault: Fault, files: set[str], crates: dict[str, str]
-) -> set[str]:
-    """The files an entry's verdict rests on: what it seeds, and the guard and gate it runs.
+def exec_argv(body: str) -> list[str]:
+    """The argv an `execve` line passes: the quoted strings of its second argument."""
+    start = body.find(", [")
+    if start < 0:
+        return []
+    out: list[str] = []
+    at = start + 3
+    while at < len(body):
+        if body[at] == "]":
+            break
+        match = QUOTED.match(body, at)
+        if match is None:
+            break
+        out.append(unquote(match.group(1)))
+        at = match.end()
+        # strace marks a string it cut short with `...` after its quote.
+        if body.startswith("...", at):
+            at += 3
+        if body.startswith(", ", at):
+            at += 2
+    return out
 
-    The guard's file is found where the entry says it: its `note`, a path in `guard` or in
-    an argv (a pytest node id, a script, `-s DIR -p FILE` for unittest and the script that
-    suite tests), and for a cargo test the file in the `-p` crate that defines the test
-    function, or the crate's clippy.toml for a lint.
+
+def git_reads(argv: list[str]) -> str:
+    """What a git command that read the repo's git directory answers from: "tree" when it's the
+    tree alone (the working tree's files, the tracked paths, the ignore rules), "history"
+    otherwise. The global options before the command are skipped."""
+    args = list(argv[1:])
+    while args and args[0].startswith("-"):
+        flag = args.pop(0)
+        if flag in ("-C", "-c", "--git-dir", "--work-tree", "--namespace") and args:
+            args.pop(0)
+    if not args:
+        return "history"
+    command, rest = args[0], args[1:]
+    if command in GIT_TREE:
+        before = rest[: rest.index("--")] if "--" in rest else rest
+        options = [a for a in before if a.startswith("-")]
+        if len(options) < len(before) and command not in GIT_PATHS:
+            return "history"
+        return "tree" if all(a in GIT_TREE[command] for a in options) else "history"
+    if command == "grep":
+        before = rest[: rest.index("--")] if "--" in rest else rest
+        patterns = 0
+        positional: list[str] = []
+        items = iter(before)
+        for arg in items:
+            if arg in GREP_VALUES:
+                patterns += arg in ("-e", "-f")
+                next(items, None)
+            elif any(
+                arg.startswith(f"{v}=") for v in GREP_VALUES if v.startswith("--")
+            ):
+                continue
+            elif arg.startswith("-") or arg in ("(", ")"):
+                if arg not in GREP_FLAGS:
+                    return "history"
+            else:
+                positional.append(arg)
+        # Without -e or -f the first positional is the pattern; any other is a revision.
+        return "tree" if len(positional) <= (0 if patterns else 1) else "history"
+    return "history"
+
+
+@dataclass
+class Closure:
+    """What a traced run read in the tree, as paths from its root.
+
+    `content`: files whose text reaches the verdict. `present`: paths whose being there does,
+    and not their text (cargo checking a member it doesn't build has a `src/lib.rs`).
+    `absent`: paths it looked for and didn't find. `listed`: directories it read the entries
+    of. `git`: "tree" when it read the git directory for the tracked paths or the ignore rules
+    alone, "history" when for anything else. `tools`: the programs it ran from outside the
+    tree, by real path. `locked`: the Cargo.lock packages its cargo builds compile, as
+    `name version`, when cargo read the lockfile for them. `floating`: the downloads uv, uvx or
+    npx fetched by a range rather than an exact version. `traced`: the trace saw the command
+    start, without which it says nothing.
     """
+
+    content: set[str] = field(default_factory=set)
+    present: set[str] = field(default_factory=set)
+    absent: set[str] = field(default_factory=set)
+    listed: set[str] = field(default_factory=set)
+    git: str | None = None
+    tools: set[str] = field(default_factory=set)
+    locked: set[str] = field(default_factory=set)
+    floating: set[str] = field(default_factory=set)
+    traced: bool = False
+
+    SETS = ("content", "present", "absent", "listed", "tools", "locked", "floating")
+
+    def union(self, other: Closure) -> Closure:
+        out = Closure(
+            **{k: getattr(self, k) | getattr(other, k) for k in self.SETS},
+            traced=self.traced and other.traced,
+        )
+        out.git = (
+            "history" if "history" in (self.git, other.git) else self.git or other.git
+        )
+        return out
+
+    def beyond(self, base: Closure) -> Closure:
+        """What this closure has that `base` doesn't: an entry's fault run, beside its
+        command's clean one."""
+        out = Closure(
+            **{k: getattr(self, k) - getattr(base, k) for k in self.SETS},
+            traced=self.traced,
+        )
+        out.git = self.git if self.git != base.git else None
+        return out
+
+    def to_json(self) -> dict:
+        out: dict[str, object] = {
+            k: sorted(getattr(self, k)) for k in self.SETS if getattr(self, k)
+        }
+        if self.git:
+            out["git"] = self.git
+        out["traced"] = self.traced
+        return out
+
+    @classmethod
+    def from_json(cls, data: dict) -> Closure:
+        return cls(
+            **{k: set(data.get(k, [])) for k in cls.SETS},
+            git=data.get("git"),
+            traced=bool(data.get("traced")),
+        )
+
+
+@dataclass
+class Graph:
+    """The workspace's packages, from `cargo metadata --all-features`: each local member's
+    directory, and every package's dependencies, so a cargo command's build is the set of
+    packages its selection reaches."""
+
+    members: dict[str, str]  # a local package's id -> its directory in the tree
+    names: dict[str, str]  # a local package's name -> its id
+    deps: dict[
+        str, list[tuple[str, bool]]
+    ]  # id -> (dependency id, whether a dev-dependency only)
+    locked: dict[str, str]  # id -> `name version`
+
+    def __post_init__(self) -> None:
+        self.dirs = frozenset(self.members.values())
+
+    def reach(self, roots: set[str]) -> set[str]:
+        """Every package the roots' builds can compile: their own dependencies of every kind,
+        and past them, normal and build ones. Every feature is on, so it's no smaller than any
+        build of the roots."""
+        seen = set(roots)
+        todo = [(r, True) for r in roots]
+        while todo:
+            package, top = todo.pop()
+            for dep, dev in self.deps.get(package, []):
+                if (top or not dev) and dep not in seen:
+                    seen.add(dep)
+                    todo.append((dep, False))
+        return seen
+
+    def member_of(self, rel: str) -> str | None:
+        """The member directory `rel` is in, the deepest one."""
+        parts = rel.split("/")
+        for end in range(len(parts), 0, -1):
+            candidate = "/".join(parts[:end])
+            if candidate in self.dirs:
+                return candidate
+        return None
+
+
+def cargo_graph(tree: Path, env: dict[str, str]) -> Graph | None:
+    """The workspace's `Graph`, or None when `cargo metadata` can't say (every cargo call is
+    then read as depending on every file it touched)."""
+    try:
+        out = subprocess.run(
+            ["cargo", "metadata", "--format-version", "1", "--all-features"],
+            cwd=tree,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=600,
+        )
+        data = json.loads(out.stdout) if out.returncode == 0 else None
+    except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        data = None
+    if not isinstance(data, dict) or not isinstance(data.get("resolve"), dict):
+        return None
+    base = Path(os.path.realpath(tree))
+    members: dict[str, str] = {}
+    names: dict[str, str] = {}
+    locked: dict[str, str] = {}
+    for package in data.get("packages") or []:
+        locked[package["id"]] = f"{package['name']} {package['version']}"
+        if package.get("source") is None:
+            where = Path(os.path.realpath(package["manifest_path"])).parent
+            try:
+                members[package["id"]] = where.relative_to(base).as_posix() or "."
+            except ValueError:
+                continue
+            names[package["name"]] = package["id"]
+    deps: dict[str, list[tuple[str, bool]]] = {}
+    for node in data["resolve"].get("nodes") or []:
+        deps[node["id"]] = [
+            (d["pkg"], all(k.get("kind") == "dev" for k in d.get("dep_kinds") or [{}]))
+            for d in node.get("deps") or []
+        ]
+    return Graph(members, names, deps, locked)
+
+
+def cargo_roots(argv: list[str], cwd: str | None, graph: Graph) -> set[str] | None:
+    """The workspace packages a cargo command selects (`-p`, `--manifest-path`, `--workspace`,
+    or the package it runs in), or None when it can't be told."""
+    args = argv[1:]
+    if "--" in args:
+        args = args[: args.index("--")]
+    packages: list[str] = []
+    manifest: str | None = None
+    everything = False
+    command = None
+    items = iter(args)
+    for arg in items:
+        if arg.startswith("+"):
+            continue
+        if arg in ("-p", "--package"):
+            packages.append(next(items, ""))
+        elif arg.startswith("--package="):
+            packages.append(arg.split("=", 1)[1])
+        elif arg.startswith("-p") and len(arg) > 2 and not arg.startswith("--"):
+            packages.append(arg[2:])
+        elif arg == "--manifest-path":
+            manifest = next(items, "")
+        elif arg.startswith("--manifest-path="):
+            manifest = arg.split("=", 1)[1]
+        elif arg in ("--workspace", "--all"):
+            everything = True
+        elif arg in ("--config", "--color", "-Z"):
+            next(items, None)
+        elif command is None and not arg.startswith("-"):
+            command = arg
+    if command in (
+        "metadata",
+        "tree",
+        "pkgid",
+        "locate-project",
+        "update",
+        "generate-lockfile",
+    ):
+        everything = True
+    if everything:
+        return set(graph.members)
+    if packages:
+        found = {graph.names.get(p.split("@")[0].split(":")[-1]) for p in packages}
+        return None if None in found else found
+    if cwd is None or "-C" in args:
+        return None
+    place = cwd
+    if manifest is not None:
+        place = os.path.normpath(os.path.join(cwd, os.path.dirname(manifest) or "."))
+    if place == ".":
+        # The workspace's root manifest, which is virtual: cargo builds every member there.
+        return set(graph.members)
+    member = graph.member_of(place)
+    if member is None:
+        return None
+    return {i for i, d in graph.members.items() if d == member}
+
+
+@dataclass
+class View:
+    """What a worker's traces are read against: its tree (the path it was made at and that
+    path's real one), the caller's checkout, the git directories, the targets and scratch it
+    builds in, which paths the tree tracks, the workspace's graph, and uv's and npm's download
+    caches."""
+
+    trees: tuple[str, ...]
+    root: tuple[str, ...]
+    git_dirs: tuple[str, ...]
+    skip: tuple[str, ...]
+    files: frozenset[str]
+    dirs: frozenset[str]
+    graph: Graph | None
+    downloads: tuple[str, ...] = ()
+
+    def place(self, path: str) -> tuple[str, str]:
+        """Where a normalized absolute path is: ("repo", its path from the tree's root),
+        ("git", its path in a git directory), or ("outside", "")."""
+        for base in self.trees:
+            if path == base or path.startswith(base + "/"):
+                rel = path[len(base) + 1 :] or "."
+                if rel == ".git" or rel.startswith(".git/"):
+                    return "git", rel[5:]
+                return "repo", rel
+        for base in self.git_dirs:
+            if path == base or path.startswith(base + "/"):
+                return "git", path[len(base) + 1 :]
+        for base in self.skip:
+            if path == base or path.startswith(base + "/"):
+                return "outside", ""
+        for base in self.root:
+            if path == base or path.startswith(base + "/"):
+                rel = path[len(base) + 1 :] or "."
+                if rel == ".git" or rel.startswith(".git/"):
+                    return "git", rel[5:]
+                return "repo", rel
+        return "outside", ""
+
+
+def ancestors(files) -> frozenset[str]:
+    """Every directory the files are in, from the root (".") down."""
+    out = {"."}
+    for path in files:
+        parts = path.split("/")[:-1]
+        for end in range(1, len(parts) + 1):
+            out.add("/".join(parts[:end]))
+    return frozenset(out)
+
+
+def shebang(path: str) -> str | None:
+    """The interpreter a script's `#!` names, if it has one."""
+    try:
+        with open(path, "rb") as handle:
+            head = handle.read(256)
+    except OSError:
+        return None
+    if not head.startswith(b"#!"):
+        return None
+    words = head[2:].split(b"\n", 1)[0].split()
+    return os.fsdecode(words[0]) if words else None
+
+
+def read_trace(paths: list[Path], view: View) -> Closure:
+    """The closure of one run's traces, one file per argv of its command, each started in the
+    tree's root. See `Closure` for what each part holds, and the module docstring's `--record`
+    for how a cargo process's reads count. A trace that doesn't show its command starting, or
+    names a path it can't place (a relative path against a directory fd strace couldn't name),
+    comes back untraced, and its entries always fire."""
+    out = Closure()
+    touched: dict[int, None] = {}
+    argv_of: dict[int, list[str]] = {}
+    exe_of: dict[int, str] = {}
+    # A cargo process whose build the graph knows: the Cargo.lock names of what it compiles,
+    # and the member directories it compiles in.
+    builds: dict[int, tuple[set[str], set[str]] | None] = {}
+    seen = started = 0
+    unplaced = False
+    # The temp directory the fire and its commands share (it passes TMPDIR on).
+    temporary = os.path.realpath(tempfile.gettempdir())
+    for trace in paths:
+        try:
+            with open(trace, encoding="utf-8", errors="replace") as handle:
+                calls = trace_calls(handle)
+        except OSError:
+            continue
+        seen += 1
+        parents: dict[int, int] = {}
+        for pid, name, body in calls:
+            if name in FORKS:
+                child, _ = returned(body)
+                if child and child > 0:
+                    parents.setdefault(child, pid)
+        cwd: dict[int, str] = {}
+        first = calls[0][0] if calls else None
+        began = False
+        for pid, name, body in calls:
+            if pid not in cwd:
+                parent = parents.get(pid)
+                cwd[pid] = cwd.get(parent, view.trees[0])
+                for table in (argv_of, exe_of, builds):
+                    if parent in table:
+                        table[pid] = table[parent]
+            code, error = returned(body)
+            if name == "fchdir":
+                match = FCHDIR.match(body)
+                if code == 0 and match:
+                    cwd[pid] = unquote(match.group(1))
+                continue
+            at = DIRFD.match(body) if name in AT_CALLS else None
+            anchor = unquote(at.group(2)) if at and at.group(2) else None
+            if at and at.group(1) == "AT_FDCWD" and anchor:
+                cwd[pid] = anchor
+            quoted = QUOTED.match(body, at.end()) if at else QUOTED.match(body)
+            if quoted is None:
+                continue
+            text = unquote(quoted.group(1))
+            if text.startswith("/"):
+                path = os.path.normpath(text)
+            elif at and at.group(1) != "AT_FDCWD" and anchor is None:
+                unplaced = True
+                continue
+            else:
+                path = os.path.normpath(os.path.join(anchor or cwd[pid], text))
+            if name == "chdir":
+                if code == 0:
+                    cwd[pid] = path
+                continue
+            if name in EXECS:
+                if code != 0:
+                    continue
+                argv_of[pid] = exec_argv(body)
+                real = os.path.realpath(path)
+                exe_of[pid] = real
+                began |= pid == first
+                here = view.place(cwd[pid])
+                own = real == temporary or real.startswith(temporary + "/")
+                out.floating |= {
+                    spec
+                    for spec in downloads(
+                        argv_of[pid],
+                        cwd[pid] if here[0] == "repo" else None,
+                        view.trees[0],
+                    )
+                    # A test's own fake uv or npx asks for nothing on the command's behalf.
+                    if floating(spec) and not own
+                }
+                where, rel = view.place(real)
+                if where == "repo":
+                    if rel in view.files:
+                        out.content.add(rel)
+                    interpreter = shebang(real)
+                    if interpreter:
+                        out.tools.add(os.path.realpath(interpreter))
+                elif where == "outside" and not any(
+                    real == s or real.startswith(s + "/")
+                    for s in (*view.skip, *view.downloads, temporary, "/proc", "/dev")
+                ):
+                    # A program the command wrote under the temp directory itself (a test's
+                    # fake tool) is its own output, not a tool it was given; one uvx or npx
+                    # fetched into its cache is a download, which `floating` answers for (a
+                    # runner that hasn't fetched it yet has no file to compare).
+                    out.tools.add(real)
+                builds[pid] = None
+                if Path(path).name == "cargo" and view.graph is not None:
+                    roots = cargo_roots(
+                        argv_of[pid], here[1] if here[0] == "repo" else None, view.graph
+                    )
+                    if roots is not None:
+                        reach = view.graph.reach(roots)
+                        builds[pid] = (
+                            {
+                                view.graph.locked[p]
+                                for p in reach
+                                if p in view.graph.locked
+                            },
+                            {
+                                view.graph.members[p]
+                                for p in reach
+                                if p in view.graph.members
+                            },
+                        )
+                continue
+            if name not in OPENS and name not in LOOKS:
+                continue
+            where, rel = view.place(path)
+            opened = name in OPENS
+            failed = code is not None and code < 0
+            if where == "git":
+                if opened and not failed and not GIT_SETTINGS.search(rel):
+                    touched.setdefault(pid)
+                continue
+            if where != "repo":
+                continue
+            missing = failed and error in MISSING
+            build = builds.get(pid)
+            if build is not None:
+                # A cargo process whose build is known: the lockfile counts for the packages
+                # it compiles, and a member outside the build only for its manifest and the
+                # paths that are there.
+                if rel == "Cargo.lock" and not failed:
+                    out.locked |= build[0]
+                    continue
+                member = view.graph.member_of(rel)
+                if member is not None and member not in build[1]:
+                    if rel in view.files and opened and not failed:
+                        out.content.add(rel)
+                    elif (rel in view.files or rel in view.dirs) and not missing:
+                        out.present.add(rel)
+                    continue
+            if rel in view.files:
+                out.content.add(rel)
+            elif rel in view.dirs:
+                if opened and not failed:
+                    out.listed.add(rel)
+                else:
+                    out.present.add(rel)
+            elif missing:
+                out.absent.add(rel)
+        started += began
+    for pid in touched:
+        exe = Path(exe_of.get(pid, "")).name
+        if exe == "git":
+            kind = git_reads(argv_of.get(pid, []))
+        elif exe == "cargo":
+            # cargo reads the repository through libgit2 to list a package's files, tracked and
+            # untracked; `package` and `publish` also write the commit into what they make.
+            command = next(
+                (a for a in argv_of.get(pid, [])[1:] if not a.startswith(("-", "+"))),
+                None,
+            )
+            kind = "history" if command in ("package", "publish") else "tree"
+        else:
+            kind = "history"
+        out.git = "history" if "history" in (out.git, kind) else kind
+    if any(Path(t).name in RUST_TOOLS or "/.rustup/" in t for t in out.tools):
+        out.tools.add(TOOLCHAIN)
+    out.traced = seen > 0 and started == seen and not unplaced
+    return out
+
+
+def tool_digest(tool: str, cwd: Path, env: dict[str, str]) -> str | None:
+    """A tool's identity: the sha256 of the file it runs, or of `rustc -vV`'s answer in the
+    tree (where rust-toolchain.toml picks it) for the toolchain. None when it isn't here."""
+    if tool == TOOLCHAIN:
+        try:
+            done = subprocess.run(
+                ["rustc", "-vV"],
+                cwd=cwd,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return None
+        return (
+            hashlib.sha256(done.stdout.encode()).hexdigest()
+            if done.returncode == 0
+            else None
+        )
+    digest = hashlib.sha256()
+    try:
+        with open(tool, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
+def environment(env: dict[str, str], timeout: int, venvs: str) -> dict[str, str]:
+    """What a verdict reads from the fire's own settings and environment, each value as a
+    digest: the variables `ENV_PREFIXES` names, the per-command timeout, and where the bindings
+    entries build (`venvs`)."""
+    out = {
+        name: hashlib.sha256(value.encode()).hexdigest()[:16]
+        for name, value in env.items()
+        if name.startswith(ENV_PREFIXES)
+        and name not in ENV_PLACES
+        and not ENV_SECRET.search(name)
+    }
+    out["--timeout"] = str(timeout)
+    out["--venv"] = venvs
+    return out
+
+
+def download_caches(env: dict[str, str]) -> tuple[str, ...]:
+    """Where uv and npm keep what they download, as each says."""
+    out: list[str] = []
+    for argv in (["uv", "cache", "dir"], ["npm", "config", "get", "cache"]):
+        try:
+            done = subprocess.run(
+                argv, env=env, capture_output=True, text=True, timeout=120
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+        if done.returncode == 0 and done.stdout.strip().startswith("/"):
+            out.append(os.path.realpath(done.stdout.strip()))
+    return tuple(out)
+
+
+def tree_view(
+    root: Path,
+    tree: Tree,
+    targets: list[str],
+    graph: Graph | None,
+    extra: list[str],
+    downloads: tuple[str, ...] = (),
+) -> View:
+    """A worker's `View`: the paths its traces name, and what its tree tracks."""
+    listed = git(tree.path, "ls-files", "-z").stdout.split("\0")
+    files = frozenset(p for p in listed if p)
+    common = git(
+        root, "rev-parse", "--path-format=absolute", "--git-common-dir", check=False
+    )
+    dirs = (
+        [common.stdout.strip()]
+        if common.returncode == 0 and common.stdout.strip()
+        else []
+    )
+
+    def both(path: str) -> tuple[str, ...]:
+        return tuple(dict.fromkeys([os.path.normpath(path), os.path.realpath(path)]))
+
+    return View(
+        trees=both(str(tree.path)),
+        root=both(str(root)),
+        git_dirs=tuple(p for d in dirs for p in both(d)),
+        skip=tuple(
+            p
+            for d in [*targets, str(tree.scratch), str(root / "target"), *extra]
+            for p in both(d)
+        ),
+        files=files,
+        dirs=ancestors(files),
+        graph=graph,
+        downloads=downloads,
+    )
+
+
+def seeded_files(root: Path, fault: Fault) -> set[str]:
+    """The files an entry's fault is made from, which the fire reads rather than its command:
+    its transforms' files, and its patch and what the patch touches."""
     out = {t["file"] for t in fault.transforms}
     if fault.patch:
         out.add(fault.patch)
         numstat = git(root, "apply", "--numstat", fault.patch, check=False).stdout
         out |= {line.split("\t")[-1] for line in numstat.splitlines() if "\t" in line}
-    if fault.note:
-        out.add(fault.note.partition("::")[0])
-    words = fault.guard.split()
-    for argv in fault.run:
-        words += [w for a in argv for w in a.split()]
-        if "-s" in argv and "-p" in argv:
-            where, suite = argv[argv.index("-s") + 1], argv[argv.index("-p") + 1]
-            out |= {f for f in files if fnmatch.fnmatchcase(f, f"{where}/{suite}")}
-            # And the script the suite tests, whose change can move its verdict as much as
-            # the suite's own: test_ratchet.py is ratchet.py's, test_model_drift.py is
-            # check-model-drift.py's.
-            name = suite.removeprefix("test_").removesuffix(".py").replace("_", "-")
-            out |= {f"{where}/{n}.py" for n in (name, f"check-{name}")} & files
-    for word in words:
-        for part in word.split("::"):
-            path = part.removeprefix("./").rstrip(":,")
-            if path in files:
-                out.add(path)
-    out |= sibling_scripts(root, {f for f in out if f.endswith(".py")}, files)
-    last = fault.run[-1]
-    package = next(
-        (
-            last[i + 1]
-            for i, a in enumerate(last[:-1])
-            if a in ("-p", "--package") and last[i + 1] in crates
-        ),
-        None,
-    )
-    if package is not None:
-        where = crates[package]
-        if fault.expect == "lint-error":
-            clippy = f"{where}/clippy.toml"
-            if clippy in files:
-                out.add(clippy)
-        elif fault.expect == "test-failed" and runner(last) == "cargo":
-            name = fault.guard.rpartition("::")[2]
-            found = git(
-                root,
-                "grep",
-                "--untracked",
-                "-l",
-                "-E",
-                rf"fn {re.escape(name)}\b",
-                "--",
-                where,
-                check=False,
-            ).stdout
-            out |= set(found.split())
     return out
 
 
-def affected(
-    root: Path, faults: list[Fault], ref: str
-) -> tuple[dict[str, str], str, int]:
-    """Why each affected entry is selected (id -> reason), the base, and the changed count."""
-    changed, commit = changed_since(root, ref)
-    before = base_entries(root, commit)
-    files = set(git(root, "ls-files", "-z").stdout.split("\0")) | changed
-    files.discard("")
-    crates = crate_dirs(root, files)
-    tables, _ = registry_tables(root)
-    raw = {t.data["id"]: t.data for t in tables if isinstance(t.data, dict)}
-    reasons: dict[str, str] = {}
-    this = "tools/check-guards-fire.py"
-    inputs = sorted(
-        p for p in changed if p in BUILD_INPUTS or Path(p).name == "Cargo.toml"
+def normal(value: object) -> object:
+    """A registry table as JSON reads it back, so a table and its record compare equal."""
+    return json.loads(json.dumps(value, sort_keys=True))
+
+
+def write_record(path: Path, record: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".partial")
+    temporary.write_text(
+        json.dumps(record, sort_keys=True, separators=(",", ":")), encoding="utf-8"
     )
-    workflow = CI_WORKFLOW in changed and workflow_inputs_changed(root, commit)
-    for fault in faults:
-        if this in changed:
-            reasons[fault.id] = f"{this} changed, and it decides every verdict"
-        elif inputs:
-            reasons[fault.id] = (
-                f"{inputs[0]} changed, and every build or command reads it"
+    temporary.replace(path)
+
+
+def make_record(
+    root: Path,
+    selected: list[Fault],
+    recorded: dict[object, tuple],
+    wanted: dict[str, str],
+    tree: Path,
+    env: dict[str, str],
+) -> dict:
+    """What `--record` writes: the commit, the environment and each tool it ran by digest, and
+    per command its clean run's closure and seconds, with each entry's registry table, verdict,
+    seconds, and what its fault run read beyond the clean one, the files it seeds among them."""
+    tables, _ = registry_tables(root)
+    raw = {
+        t.data["id"]: normal(t.data)
+        for t in tables
+        if isinstance(t.data, dict) and "id" in t.data
+    }
+    commands: dict[tuple, dict] = {}
+    tools: set[str] = set()
+    for fault in selected:
+        key = command_key(fault)
+        if key not in recorded:
+            continue
+        seconds, clean = recorded[key]
+        clean = clean or Closure()
+        command = commands.setdefault(
+            key,
+            {
+                "suite": key[0],
+                "run": [list(a) for a in key[1]],
+                "seconds": round(seconds, 2),
+                "closure": clean.to_json(),
+                "entries": {},
+            },
+        )
+        tools |= clean.tools
+        if fault.id not in recorded:
+            continue
+        word, took, closure = recorded[fault.id]
+        extra = (
+            (closure or Closure()).beyond(clean) if closure else Closure(traced=True)
+        )
+        extra.content |= seeded_files(root, fault)
+        tools |= extra.tools
+        command["entries"][fault.id] = {
+            "table": raw.get(fault.id),
+            "verdict": word,
+            "seconds": round(took, 2),
+            "closure": extra.to_json(),
+        }
+    return {
+        "version": RECORD_VERSION,
+        "commit": git(root, "rev-parse", "HEAD").stdout.strip(),
+        "environment": wanted,
+        "tools": {t: tool_digest(t, tree, env) for t in sorted(tools)},
+        "commands": list(commands.values()),
+    }
+
+
+def load_records(directory: Path) -> tuple[list[dict], list[str]]:
+    """Every record in `directory`, newest first by its file's name order, and the files that
+    aren't one (each named, and none of their verdicts kept)."""
+    records: list[dict] = []
+    problems: list[str] = []
+    if not directory.is_dir():
+        return [], [f"{directory} doesn't exist"]
+    for path in sorted(directory.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            problems.append(f"{path.name} doesn't parse: {error}")
+            continue
+        if not isinstance(data, dict) or data.get("version") != RECORD_VERSION:
+            problems.append(f"{path.name} isn't a version {RECORD_VERSION} record")
+            continue
+        data["file"] = path.name
+        records.append(data)
+    return records, problems
+
+
+@dataclass
+class Since:
+    """How the tree differs from one record's commit: the paths that changed (tracked or not,
+    either side of a rename), the paths the commit tracked, and the Cargo.lock packages that
+    changed."""
+
+    changed: set[str]
+    then: frozenset[str]
+    then_dirs: frozenset[str]
+    locked: set[str] | None = None
+
+
+def lock_packages(text: str) -> dict[str, object]:
+    """Cargo.lock's packages, `name version` to the rest of each entry."""
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return {}
+    return {
+        f"{p.get('name')} {p.get('version')}": normal(
+            {k: v for k, v in p.items() if k not in ("name", "version")}
+        )
+        for p in data.get("package") or []
+        if isinstance(p, dict)
+    }
+
+
+class Reuse:
+    """The records `--reuse` reads, and why each entry fires or keeps its recorded verdict."""
+
+    def __init__(
+        self,
+        root: Path,
+        records: list[dict],
+        env: dict[str, str],
+        wanted: dict[str, str],
+    ):
+        self.root = root
+        self.env = env
+        self.wanted = wanted
+        self.commands: dict[tuple, tuple[dict, dict]] = {}
+        for record in records:
+            for command in record.get("commands") or []:
+                key = (command["suite"], tuple(map(tuple, command["run"])))
+                self.commands.setdefault(key, (record, command))
+        tables, _ = registry_tables(root)
+        self.tables = {
+            t.data["id"]: normal(t.data)
+            for t in tables
+            if isinstance(t.data, dict) and "id" in t.data
+        }
+        listed = git(root, "ls-files", "-z").stdout + "\0"
+        listed += git(root, "ls-files", "--others", "--exclude-standard", "-z").stdout
+        self.now = frozenset(p for p in listed.split("\0") if p)
+        self.now_dirs = ancestors(self.now)
+        self.since_cache: dict[str, Since | None] = {}
+        self.digests: dict[str, str | None] = {}
+        self.children_cache: dict[str, dict[str, frozenset[str]]] = {}
+
+    def since(self, commit: str) -> Since | None:
+        if commit not in self.since_cache:
+            known = git(
+                self.root, "cat-file", "-e", f"{commit}^{{commit}}", check=False
             )
-        elif workflow:
-            reasons[fault.id] = (
-                f"the `{CI_JOB}` job or the top-level `env` in {CI_WORKFLOW} changed, "
-                "and CI runs every command under them"
+            if known.returncode != 0:
+                self.since_cache[commit] = None
+            else:
+                diff = git(
+                    self.root, "diff", "--name-only", "--no-renames", "-z", commit
+                ).stdout
+                untracked = git(
+                    self.root, "ls-files", "--others", "--exclude-standard", "-z"
+                ).stdout
+                then = git(
+                    self.root, "ls-tree", "-r", "--name-only", "-z", commit
+                ).stdout
+                files = frozenset(p for p in then.split("\0") if p)
+                self.since_cache[commit] = Since(
+                    {p for p in (diff + "\0" + untracked).split("\0") if p},
+                    files,
+                    ancestors(files),
+                )
+        return self.since_cache[commit]
+
+    def changed_packages(self, commit: str, since: Since) -> set[str]:
+        if since.locked is None:
+            before = lock_packages(
+                git(self.root, "show", f"{commit}:Cargo.lock", check=False).stdout
             )
-        elif fault.id not in before:
-            reasons[fault.id] = f"the entry is new in {fault.file}"
-        elif before[fault.id] != raw[fault.id]:
-            reasons[fault.id] = f"the entry changed in {fault.file}"
-        else:
-            hit = sorted(fault_files(root, fault, files, crates) & changed)
+            try:
+                after = lock_packages(
+                    (self.root / "Cargo.lock").read_text(encoding="utf-8")
+                )
+            except OSError:
+                after = {}
+            since.locked = {
+                k for k in before.keys() | after.keys() if before.get(k) != after.get(k)
+            }
+        return since.locked
+
+    def digest(self, tool: str) -> str | None:
+        if tool not in self.digests:
+            self.digests[tool] = tool_digest(tool, self.root, self.env)
+        return self.digests[tool]
+
+    def children(self, where: str, files: frozenset[str], tag: str) -> frozenset[str]:
+        """The names directly in `where` among `files` and the directories they're in."""
+        if tag not in self.children_cache:
+            table: dict[str, set[str]] = {}
+            for path in files:
+                parts = path.split("/")
+                for depth in range(len(parts)):
+                    parent = "/".join(parts[:depth]) or "."
+                    table.setdefault(parent, set()).add(parts[depth])
+            self.children_cache[tag] = {k: frozenset(v) for k, v in table.items()}
+        return self.children_cache[tag].get(where, frozenset())
+
+    def why(self, fault: Fault) -> tuple[str | None, str | None]:
+        """Why `fault` fires (None when it keeps its recorded verdict), and the commit the record
+        it keeps came from."""
+        found = self.commands.get(command_key(fault))
+        if found is None:
+            return "no record has its command", None
+        record, command = found
+        entry = (command.get("entries") or {}).get(fault.id)
+        commit = str(record.get("commit"))
+        at = commit[:12]
+        if entry is None:
+            return f"the record from {at} has no verdict for it", None
+        if entry.get("verdict") != "fired":
+            return f"the record from {at} says {entry.get('verdict')}", None
+        if entry.get("table") != self.tables.get(fault.id):
+            return f"its entry in {fault.file} changed since {at}", None
+        since = self.since(commit)
+        if since is None:
+            return f"the record's commit {at} isn't in this clone", None
+        if THIS in since.changed:
+            return f"{THIS} changed since {at}, and it decides every verdict", None
+        moved = sorted(
+            k
+            for k in self.wanted.keys() | (record.get("environment") or {}).keys()
+            if self.wanted.get(k) != (record.get("environment") or {}).get(k)
+        )
+        if moved:
+            return f"the environment differs from {at}'s in {', '.join(moved)}", None
+        closure = Closure.from_json(command.get("closure") or {}).union(
+            Closure.from_json(entry.get("closure") or {"traced": True})
+        )
+        if not closure.traced:
+            return f"the record from {at} has no trace of its command", None
+        if closure.git == "history":
+            return "its command reads the git history", None
+        if closure.floating:
+            spec = sorted(closure.floating)[0]
+            return f"its command downloads {spec}, which a release can change", None
+        for tool in sorted(closure.tools):
+            if self.digest(tool) != (record.get("tools") or {}).get(tool):
+                return (
+                    f"{tool} differs from the one {at}'s run ran, or isn't here",
+                    None,
+                )
+        hit = sorted(closure.content & since.changed)
+        if hit:
+            return f"{hit[0]} changed since {at}", None
+        for path in sorted(closure.present):
+            if path not in self.now and path not in self.now_dirs:
+                return f"{path} is gone since {at}", None
+        for path in sorted(closure.absent):
+            if path in self.now or path in self.now_dirs:
+                return f"{path} is new since {at}, and its command looked for it", None
+        for where in sorted(closure.listed):
+            if self.children(where, since.then, commit) != self.children(
+                where, self.now, "now"
+            ):
+                return (
+                    f"{where}/ gained or lost an entry since {at}, and its command lists it",
+                    None,
+                )
+        if closure.git == "tree" and self.now != since.then:
+            return (
+                f"its command lists the tracked files, and a path was added or removed since {at}",
+                None,
+            )
+        if closure.locked and "Cargo.lock" in since.changed:
+            hit = sorted(closure.locked & self.changed_packages(commit, since))
             if hit:
-                reasons[fault.id] = f"{hit[0]} changed"
-    return reasons, commit, len(changed)
+                return (
+                    f"Cargo.lock changed {hit[0]} since {at}, and its build compiles it",
+                    None,
+                )
+        return None, commit
 
 
 # ── warm workers ─────────────────────────────────────────────────────────────
@@ -2527,30 +3604,6 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
         if (not args.only or f.id in args.only)
         and (not args.suite or f.suite in args.suite)
     ]
-    if args.affected:
-        ref = args.base or "origin/main"
-        reasons, commit, count = affected(root, selected, ref)
-        skipped = [f.id for f in selected if f.id not in reasons]
-        selected = [f for f in selected if f.id in reasons]
-        for fault in selected:
-            print(f"affected: {fault.id}: {reasons[fault.id]}")
-        print(
-            f"guards: --affected against {ref} ({commit[:12]}, {count} paths changed) "
-            f"selects {len(selected)} and skips {len(skipped)} entries"
-            + (f": {', '.join(skipped)}" if skipped else "")
-        )
-        if skipped:
-            print(
-                "guards: --affected selects by the files each entry names, so a change "
-                "that reaches a skipped guard some other way isn't seen; the full fire "
-                "runs on every push to main, or here without --affected"
-            )
-        if not selected:
-            print("guards: no selected entry names a changed file, so nothing to fire")
-            return 0
-    elif args.base:
-        print("guards: --base is for --affected", file=sys.stderr)
-        return 1
     venv = Path(args.venv).resolve() if args.venv else None
     if venv is None and not args.venv_per_worker:
         bindings = [f for f in selected if f.suite == "bindings"]
@@ -2567,11 +3620,6 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
                 "`--venv-per-worker` (CI's guards job) or `--venv DIR`"
             )
         selected = [f for f in selected if f.suite != "bindings"]
-    if not selected and args.affected:
-        # Affected, then filtered to nothing by the missing --venv: the same answer as
-        # nothing affected, since the bindings line above says what didn't run.
-        print("guards: no affected entry runs without --venv, so nothing to fire")
-        return 0
     if not selected:
         print("guards: no entry selected", file=sys.stderr)
         return 1
@@ -2589,6 +3637,49 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
     env = clean_env()
     env["CARGO_TARGET_DIR"] = fire_target(root, env, args.target_dir)
     env.pop("VIRTUAL_ENV", None)
+    wanted = environment(
+        env,
+        args.timeout,
+        "per-worker" if args.venv_per_worker else "shared" if venv else "none",
+    )
+    if args.record and shutil.which("strace", path=env.get("PATH")) is None:
+        print(
+            "guards: --record traces every run with strace, which isn't on PATH",
+            file=sys.stderr,
+        )
+        return 1
+    if args.reuse:
+        records, problems = load_records(Path(args.reuse))
+        for problem in problems:
+            print(f"guards: --reuse: {problem}; its verdicts aren't kept")
+        reuse = Reuse(root, records, env, wanted)
+        firing: list[Fault] = []
+        commits: dict[str, int] = {}
+        for fault in selected:
+            why, commit = reuse.why(fault)
+            if why is not None:
+                firing.append(fault)
+                print(f"fires: {fault.id}: {why}")
+                continue
+            commits[commit] = commits.get(commit, 0) + 1
+            print(f"reused: {fault.id} (fired at {commit[:12]})")
+        kept = len(selected) - len(firing)
+        print(
+            f"guards: --reuse {args.reuse} ({len(records)} records) keeps {kept} of "
+            f"{len(selected)} entries' fired verdicts"
+            + (
+                " (recorded at " + ", ".join(c[:12] for c in sorted(commits)) + ")"
+                if commits
+                else ""
+            )
+            + f", and {len(firing)} fire"
+        )
+        selected = firing
+        if not selected:
+            print(
+                "guards: every selected entry keeps its recorded verdict, so nothing to fire"
+            )
+            return 0
     logs = Path(args.logs).resolve() if args.logs else None
     if logs:
         logs.mkdir(parents=True, exist_ok=True)
@@ -2668,19 +3759,57 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
             # Before the first build of this run: see `dependency_unit` for why only a
             # dependency's units are copied.
             print(seed_targets(first_target, extra_targets, local))
+        # With `--record`: each command's clean closure and seconds, and each entry's verdict,
+        # seconds and fault-run closure, as the workers put them.
+        recorded: dict[object, tuple] = {}
+        if args.record:
+            if changed.split():
+                print(
+                    "guards: --record needs a committed tree, since a pull request diffs "
+                    f"from the record's commit; commit or stash {len(changed.split())} paths",
+                    file=sys.stderr,
+                )
+                return 1
+            graph = cargo_graph(first.path, env)
+            print(
+                "guards: --record traces every clean and seeded run with strace; "
+                + (
+                    f"cargo metadata names {len(graph.members)} workspace members"
+                    if graph
+                    else "cargo metadata didn't answer, so every file a cargo process "
+                    "touches counts"
+                )
+            )
+            targets = [w.env["CARGO_TARGET_DIR"] for w in workers]
+            caches = download_caches(env)
+            for worker in workers:
+                worker.view = tree_view(
+                    root,
+                    worker.tree,
+                    targets,
+                    graph,
+                    [str(logs)] if logs else [],
+                    caches,
+                )
+                worker.traces = worker.tree.scratch / "traces"
+                worker.traces.mkdir()
 
-        def clean(worker: Worker, key: tuple) -> tuple:
+        def clean(worker: Worker, key: tuple, traced: bool = False) -> tuple:
             fault = by_key[key]
             started = time.monotonic()
             fenv = worker.binding_env if fault.suite == "bindings" else worker.env
             worker.touched.setdefault(key)
+            trace = worker.trace() if traced else None
             code, output, said = run_commands(
-                fault, worker.tree.path, fenv, args.timeout, False, procs
+                fault, worker.tree.path, fenv, args.timeout, False, procs, trace
             )
-            return code, output, said, time.monotonic() - started, worker.number
+            elapsed = time.monotonic() - started
+            if trace is not None:
+                recorded[key] = (elapsed, worker.closure(trace, fault.run))
+            return code, output, said, elapsed, worker.number
 
         def run_clean(worker: Worker, task: Task):
-            return [(task.key, clean(worker, task.key))], []
+            return [(task.key, clean(worker, task.key, traced=True))], []
 
         def phase(
             queues: list[list[Task]],
@@ -2735,15 +3864,23 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
             worker.tree.reset()
             why = seed(worker.tree.path, fault, dry=False)
             if why:
+                recorded[fault.id] = ("stale anchor", 0.0, None)
                 return f"stale anchor: {fault.id}: {why}", True
             started = time.monotonic()
             fenv = worker.binding_env if fault.suite == "bindings" else worker.env
+            trace = worker.trace()
             code, output, said = run_commands(
-                fault, worker.tree.path, fenv, args.timeout, True, procs
+                fault, worker.tree.path, fenv, args.timeout, True, procs, trace
             )
             elapsed = time.monotonic() - started
             log(f"{fault.id}.fault.log", output)
             why = verdict(fault, code, said)
+            if trace is not None:
+                recorded[fault.id] = (
+                    "fired" if why is None else "did not fire",
+                    elapsed,
+                    worker.closure(trace, fault.run),
+                )
             if why is None:
                 return f"fired: {fault.id} ({elapsed:.1f} s)", False
             return (
@@ -2769,6 +3906,7 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
                 first = faults[0]
                 fenv = worker.binding_env if first.suite == "bindings" else worker.env
                 started = time.monotonic()
+                trace = worker.trace()
                 code, output, said = run_commands(
                     dataclasses.replace(first, run=[json_argv(first.run[0])]),
                     worker.tree.path,
@@ -2776,6 +3914,7 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
                     args.timeout,
                     True,
                     procs,
+                    trace,
                 )
                 elapsed = time.monotonic() - started
                 proven, unproven = attribute(
@@ -2785,6 +3924,12 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
                     [fault.message for fault in faults],
                     worker.tree.path,
                 )
+                if trace is not None:
+                    # A batch's run read what each entry's own would have, and the files each
+                    # other entry seeded besides: their union stands for every proven entry.
+                    closure = worker.closure(trace, first.run)
+                    for position in proven:
+                        recorded[faults[position].id] = ("fired", elapsed, closure)
                 alone.update(unproven)
                 ids = ", ".join(faults[p].id for p in sorted(plan.regions))
                 for position, at in proven.items():
@@ -2868,6 +4013,17 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
             f"guards: restored, every command passes again "
             f"({time.monotonic() - started:.1f} s)"
         )
+        if args.record:
+            where = Path(args.record) / (
+                f"shard-{spec[0]}-of-{spec[1]}.json" if spec else "all.json"
+            )
+            write_record(
+                where, make_record(root, selected, recorded, wanted, first.path, env)
+            )
+            print(
+                f"guards: recorded {sum(1 for f in selected if f.id in recorded)} verdicts "
+                f"of {len(by_key)} commands in {where}"
+            )
         return 1 if failures else 0
     finally:
         procs.stop()
@@ -2944,19 +4100,22 @@ def main(argv: list[str] | None = None) -> int:
         help="run faults in N scratch worktrees at once, each with its own target (1)",
     )
     fire.add_argument(
-        "--affected",
-        action="store_true",
-        help="select only the entries whose files or registry text changed against --base",
-    )
-    fire.add_argument(
-        "--base",
-        help="the ref --affected diffs against, through its merge base with HEAD "
-        "(default: origin/main)",
-    )
-    fire.add_argument(
         "--shard",
         metavar="K/N",
         help="fire only shard K of N (from 0) of the selection, as one leg of CI's matrix",
+    )
+    cache = fire.add_mutually_exclusive_group()
+    cache.add_argument(
+        "--record",
+        metavar="DIR",
+        help="trace every run with strace and write each entry's verdict and what it read "
+        "to a record in DIR (CI's push to main)",
+    )
+    cache.add_argument(
+        "--reuse",
+        metavar="DIR",
+        help="keep the fired verdict a record in DIR holds for each entry when nothing it read "
+        "has changed since the record's commit, and fire the rest (CI's pull requests)",
     )
     args = parser.parse_args(argv)
     root = (
