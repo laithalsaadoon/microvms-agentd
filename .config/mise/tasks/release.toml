@@ -36,10 +36,10 @@ description = "Every job in release.yml that publishes waits on the live gate an
 # the flow and the rules), and the gate holds only while every publishing job needs it. A job
 # that drops it publishes on the tag push again, which nothing else here would notice before a
 # tag did. In `check` for `live:check`'s reason: it reads one file, so it costs the same as a
-# lint. release.yml's `guard` job runs the same graph check against the tagged commit. The unit
-# tests run first, for `trace:check`'s reason.
+# lint, and CI's `security` job runs it. release.yml's `guard` job runs the same graph check
+# against the tagged commit. The unit tests run first, for `trace:check`'s reason.
 run = [
-  "{{vars.pytest}} --with 'pyyaml==6.0.3' pytest -n auto -q -p no:cacheprovider tools/test_release_gate.py",
+  "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_release_gate.py",
   "./tools/release-gate.py graph",
 ]
 
@@ -64,11 +64,21 @@ description = "The npm package's loader and glibc floor. Needs a built addon"
 #
 # `--all-platforms` is deliberately absent here. One `napi build` produces one triple, which is
 # what a developer has locally; the release job adds the flag because that is the only place
-# all four exist. `ci.yml`'s bindings job runs this same pair.
+# all four exist. CI's `bindings` job runs the loader half: its addon is a native build on the
+# runner's glibc, which the floor refuses by design, and the release job holds the floor on the
+# addons it ships.
 run = [
-  "./tools/check-npm-loader.py",
+  { task = "npm:loader" },
   "./tools/check-addon-glibc.py bindings/microvms-js",
 ]
+
+["npm:loader"]
+description = "The generated npm loader resolves the platform packages the package is published with. Needs a built addon"
+# The loader against the package name it will be published under. `bindings:js` is the build that
+# writes the real `index.js` on a pull request, and a loader generated for a stale package name
+# passes every test there, because the tests load the local `.node` file directly and never
+# exercise the optional-dependency fallback a consumer depends on.
+run = "./tools/check-npm-loader.py"
 
 ["publish:dry-run"]
 description = "Package and verify every publishable crate as if the others were released"
@@ -100,12 +110,14 @@ run = "./tools/check-publishable.py --dry-run"
 description = "Every changelog.d/ fragment is well named and builds, and a branch that changes shipped code adds one. Offline once uv has towncrier"
 # In `check` for `ratchet:check`'s reason: it reads the working tree against its merge base with
 # origin/main, a local ref, so a branch learns it needs a fragment before a push rather than
-# from CI's `security` job, which runs the same command with the pull request's base and
-# author. The unit tests run first, for `trace:check`'s reason: they build throwaway repos and
-# run the real script over them.
+# from CI's `security` job. There `PR_BASE` and `PR_AUTHOR` carry the pull request's base and
+# author; a push to main sets neither, and main against its own merge base changes nothing. The
+# author goes through the environment, not into the command, because a login is the pull
+# request's input. The unit tests run first, for `trace:check`'s reason: they build throwaway
+# repos and run the real script over them.
 run = [
-  "uv run python -m unittest discover -s tools -p 'test_changelog.py'",
-  "./tools/changelog.py check",
+  "uv run --locked python -m unittest discover -s tools -p 'test_changelog.py'",
+  './tools/changelog.py check ${PR_BASE:+--base "$PR_BASE"} ${PR_AUTHOR:+--author "$PR_AUTHOR"}',
 ]
 
 ["changelog:draft"]

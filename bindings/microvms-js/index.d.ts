@@ -816,6 +816,20 @@ export declare class Sandbox {
    */
   buildArtifact(options: BuildImageOptions, size?: SizeClass | undefined | null, runHookTimeout?: RunHookTimeout | undefined | null, buildHookTimeout?: BuildHookTimeout | undefined | null): Promise<Buffer>
   /**
+   * Every local guard `buildImage` runs, with zero calls: rejects with the refusal
+   * `buildImage` would, so a caller who uploads its own artifact checks the request before
+   * paying for the upload. Takes `buildImage`'s arguments.
+   */
+  preflight(options: BuildImageOptions, size?: SizeClass | undefined | null, runHookTimeout?: RunHookTimeout | undefined | null, buildHookTimeout?: BuildHookTimeout | undefined | null): Promise<void>
+  /**
+   * `ListManagedMicrovmImageVersions`, every page: the versions of a managed base, the
+   * values `buildImage`'s base-version pin takes.
+   *
+   * `baseImageArn` is the base's full ARN, such as
+   * `arn:aws:lambda:us-east-1:aws:microvm-image:al2023-1`; a bare name is refused.
+   */
+  managedBaseVersions(baseImageArn: string): Promise<Array<ManagedBaseVersion>>
+  /**
    * Launches a MicroVM, waits for RUNNING, and resolves with its session.
    *
    * # What the core refuses here, and this file does not
@@ -1769,6 +1783,45 @@ export interface KeepAwakeReport {
 export interface ListMicrovmsOptions {
   imageIdentifier?: string
   imageVersion?: string
+}
+
+/**
+ * The three guarded values a build takes, as separate parameters rather than fields.
+ *
+ * # Why they are not in [`BuildImageOptions`]
+ *
+ * Measured, not preferred. A `#[napi(object)]` field holding a class instance must be a
+ * `ClassInstance<'a, T>`, which carries raw `napi_value`/`napi_env` pointers and is therefore
+ * **not `Send`** — and napi's async path requires `Future: Send`. So an options object with a
+ * `size: SizeClass` field cannot be a parameter of an `async fn`, which
+ * `Sandbox.buildImage` has to be. The compiler said so in as many words:
+ * `future created by async block is not Send ... has type BuildImageOptions<'_> which is not
+ * Send`.
+ *
+ * A *reference* parameter — `Option<&SizeClass>` — has no such problem, because napi
+ * dereferences it before the future is built. So the guarded types move out of the bag and
+ * into the signature, which loses the keyword-argument look and keeps every closure:
+ *
+ * * `size` still refuses an off-table baseline, because the only way to have a `SizeClass` is
+ *   `SizeClass.fromBaselineMib` or `SizeClass.defaultClass` (TRAP-10).
+ * * `runHookTimeout` and `buildHookTimeout` are still two distinct classes, so they still
+ *   cannot be transposed — which was the whole reason they are types (BIND-2).
+ *
+ * A caller writes `sandbox.buildImage(opts, size, runTimeout, buildTimeout)` with the last
+ * three optional.
+ * One version of a managed base image, from `ListManagedMicrovmImageVersions`.
+ */
+export interface ManagedBaseVersion {
+  imageArn: string
+  /**
+   * A bare integer for a managed base (`"0"`, `"1"`), where a custom image's versions read
+   * `"1.0"`: the value `buildImage`'s pin takes, not one to compare with a build's readback.
+   */
+  imageVersion: string
+  /** Unix seconds. */
+  createdAt: number
+  /** Unix seconds, when the service reported it. */
+  updatedAt?: number
 }
 
 /** A MicroVM as `GetMicrovm` last described it. */
