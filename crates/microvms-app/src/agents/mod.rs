@@ -48,7 +48,7 @@ use crate::control::{CreateImageRequest, Image};
 use crate::error::{Error, ErrorKind};
 use crate::region::Region;
 use crate::sandbox::{RunRequest, Sandbox, TeardownOpts, TeardownReport};
-use crate::session::{ExecHandle, Session};
+use crate::session::{ExecHandle, ExecResult, Session};
 use crate::sizing::SizeClass;
 
 pub use bedrock::{BearerToken, Minted};
@@ -701,6 +701,27 @@ pub async fn prompt(
         .await
 }
 
+/// Starts one task, waits for it and acks it: the task's whole result (#266).
+///
+/// `options.timeout` is the daemon's budget for the agent process and the caller's wait at
+/// once, [`DEFAULT_PROMPT_TIMEOUT`] when it's `None`. One figure for both, so the daemon stops
+/// the agent when the caller stops waiting for it, rather than leaving it to run on behind a
+/// wait that gave up.
+pub async fn prompt_sync(
+    session: &Session,
+    spec: &AgentSpec,
+    task: &str,
+    options: &PromptOptions,
+) -> Result<ExecResult, Error> {
+    let timeout = options.timeout.unwrap_or(DEFAULT_PROMPT_TIMEOUT);
+    let bounded = PromptOptions {
+        timeout: Some(timeout),
+        ..options.clone()
+    };
+    let request = prompt_request_with(spec, task, &bounded, || session.mint_exec_id())?;
+    session.run_sync(request, timeout).await
+}
+
 /// One VM with coding agents in it: the [`Sandbox`] plus the specs it was built for.
 ///
 /// Runtime-checked, like the sandbox it wraps, and for the same reason: one object is
@@ -885,6 +906,17 @@ impl AgentVm {
     ) -> Result<ExecHandle, Error> {
         let spec = spec_for(&self.specs, agent)?;
         prompt(self.require_session()?, spec, task, options).await
+    }
+
+    /// [`prompt_sync`] on this VM's session, for one of the agents it carries.
+    pub async fn prompt_sync(
+        &self,
+        agent: Agent,
+        task: &str,
+        options: &PromptOptions,
+    ) -> Result<ExecResult, Error> {
+        let spec = spec_for(&self.specs, agent)?;
+        prompt_sync(self.require_session()?, spec, task, options).await
     }
 
     /// Tears the VM down; see [`Sandbox::terminate`].
@@ -1602,5 +1634,43 @@ mod tests {
         );
         assert!(VERSION_PROBE_WAIT > VERSION_PROBE_TIMEOUT);
         assert_eq!(start["reap_group_on_exit"], true);
+    }
+
+    /// A synchronous prompt sends one figure as the daemon's budget and waits the same one,
+    /// core's default when the caller names none, and answers the whole result (#266).
+    ///
+    /// **Falsification**: `verify/guards/faults/agent-recipes.toml` entry
+    /// `app-prompt-sync-unbounded` starts the exec with the caller's `None` budget, and the
+    /// default row goes red on `timeout_sec`.
+    #[tokio::test(start_paused = true)]
+    async fn a_synchronous_prompt_bounds_the_daemon_by_the_wait_it_makes() {
+        for (timeout, sent) in [(None, 900.0), (Some(Duration::from_secs(60)), 60.0)] {
+            let recorder = Recorder::with([
+                Reply::ok(serde_json::json!({"exec_id":"p1","phase":"running"})),
+                Reply::ok(serde_json::json!({"exec_id":"p1","phase":"exited"})),
+                Reply::ok(serde_json::json!({
+                    "exec_id":"p1","phase":"exited","exit_code":0,"signal":null,
+                    "stdout":"done","stderr":"","truncated":false,
+                    "writers_may_be_alive":false
+                })),
+            ]);
+            let (session, _, _) = session_with(Arc::clone(&recorder));
+            let options = PromptOptions {
+                timeout,
+                ..PromptOptions::default()
+            };
+            let result = prompt_sync(
+                &session,
+                &AgentSpec::new(Agent::ClaudeCode),
+                "review the diff",
+                &options,
+            )
+            .await
+            .expect("a result");
+            assert_eq!(result.stdout(), "done");
+            let start: serde_json::Value =
+                serde_json::from_slice(&recorder.requests()[0].body).expect("a JSON start");
+            assert_eq!(start["timeout_sec"], sent, "timeout_sec for {timeout:?}");
+        }
     }
 }
