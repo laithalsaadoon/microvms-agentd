@@ -508,6 +508,14 @@ test('both proxy headers are published, because one without the other is rejecte
   assert.notEqual(constants.proxyAuthHeader, constants.proxyPortHeader);
 });
 
+test('the running wait is published beside the daemon wait', () => {
+  // `run` waits `defaultRunningTimeoutSeconds` for RUNNING, and then
+  // `defaultReadyTimeoutSeconds` for the daemon to answer (#254).
+  const constants = JSON.parse(sessionConstants());
+  assert.equal(constants.defaultRunningTimeoutSeconds, 300);
+  assert.equal(constants.defaultReadyTimeoutSeconds, 120);
+});
+
 test('the refresh window is inside the token lifetime with room to spare', () => {
   // A long run crosses the sixty-minute ceiling mid-flight, so the refresh has to precede it. A
   // window at or past the lifetime would mint a replacement only after the old token had already

@@ -160,7 +160,7 @@ ts = "Session.health"
 [[capability]]
 id = "wait-until-ready"
 core = "microvms_core::session::Session::wait_until_ready"
-cli = { exempt = "`run` waits inside the command and `health` is one probe", issue = "#254" }
+cli = { exempt = "`run` waits for the daemon inside core's launch and `health` is one probe; a standalone wait is `wait`", issue = "#269" }
 py = "Session.wait_until_ready"
 ts = "Session.waitUntilReady"
 

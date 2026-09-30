@@ -3322,6 +3322,37 @@ mod tests {
         }
     }
 
+    /// **The exec waits' `--timeout` defaults are core's `DEFAULT_EXEC_WAIT` (#254).** A
+    /// clap default for a `Duration` flag is a string the parser reads, so it can't name the
+    /// constant; this parse is what holds the two together.
+    ///
+    /// **Falsification**: change `exec`'s `default_value = "300"` to `"301"` and its row reads
+    /// 301s where core waits 300s.
+    #[test]
+    fn the_exec_wait_flags_default_to_the_cores_exec_wait() {
+        let attached = [
+            "--endpoint",
+            "https://mvm-1.example",
+            "--agent-token",
+            "t",
+            "--microvm-id",
+            "mvm-1",
+        ];
+        let rows: [(&str, Vec<&str>); 2] = [
+            ("run", vec!["--no-config"]),
+            ("exec", [&attached[..], &["true"]].concat()),
+        ];
+        for (command, rest) in rows {
+            let argv = ["microvm", command].into_iter().chain(rest);
+            let cli = Cli::try_parse_from(argv).expect("parses");
+            assert_eq!(
+                parsed_seconds(&cli.command, "--timeout"),
+                Some(microvms_core::session::DEFAULT_EXEC_WAIT),
+                "{command} --timeout"
+            );
+        }
+    }
+
     /// **#268.** Every flag that takes seconds refuses, at parse time, a value that isn't a
     /// duration: non-finite, negative, too large for one, or not a number. Zero, a fraction and
     /// a whole figure parse to exactly that duration, and those rows are also what keep the
