@@ -33,9 +33,10 @@ suite = "bindings"
 note = "bindings/microvms-js/__test__/exec.mjs::a stream survives more events than the channel can hold"
 transform = { file = "bindings/microvms-js/src/exec.rs", replace = "match sender.send(Ok(event)).await {", with = "match sender.try_send(Ok(event)) {" }
 
-# `session.spawn()`'s stream rejections keep the code chain (#252): the gap branch, the drive-error
-# branch, and the stderr copy of one rejection each put back a bare `napi::Error`; the rest keep
-# the messages and send the two rejections at once.
+# `session.spawn()`'s stream rejections keep the code chain (#252). Since #261 the rejections
+# are core's (`session/split.rs`) and the binding converts each channel item in `chunk`: a bare
+# `napi::Error` there drops the chain, and core's stderr copy, its drive-error text and its two
+# sends at once are each put back the way #252 found them.
 
 [[fault]]
 id = "js-spawn-gap-code-chain"
@@ -48,7 +49,7 @@ expect = "test-failed"
 suite = "bindings"
 message = "stdout: the ERR_ code is on the cause"
 note = "bindings/microvms-js/__test__/process.mjs::a gap errors both streams by default and names the range to resume from"
-transform = { file = "bindings/microvms-js/src/process.rs", replace = "                                    reject_both(\n                                        &out_tx,\n                                        &err_tx,\n                                        microvms_core::Error::wire(\n                                            microvms_core::WireKind::OutputGap,\n                                            message,\n                                        ),\n                                    )\n                                    .await;\n", with = "                                    let _ = out_tx\n                                        .send(Err(napi::Error::new(\n                                            napi::Status::GenericFailure,\n                                            message.clone(),\n                                        )))\n                                        .await;\n                                    let _ = err_tx\n                                        .send(Err(napi::Error::new(\n                                            napi::Status::GenericFailure,\n                                            message,\n                                        )))\n                                        .await;\n" }
+transform = { file = "bindings/microvms-js/src/process.rs", replace = "        .map_err(|error| js_async(error).into())\n", with = "        .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))\n" }
 
 [[fault]]
 id = "js-spawn-gap-stderr-chain"
@@ -59,8 +60,8 @@ run = [
 ]
 expect = "test-failed"
 suite = "bindings"
-message = "stderr: the ERR_ code is on the cause"
-transform = { file = "bindings/microvms-js/src/process.rs", replace = "err_tx.send(Err(copy))", with = "err_tx.send(Err(napi::Error::new(napi::Status::GenericFailure, copy.reason)))" }
+message = "stderr: the wire kind is one level deeper"
+transform = { file = "crates/microvms-app/src/session/split.rs", replace = "        Some(wire) => Error::wire(wire, error.to_string()),\n", with = "        Some(_) => Error::new(error.kind(), error.to_string()),\n" }
 
 [[fault]]
 id = "js-spawn-budget-code-chain"
@@ -73,7 +74,7 @@ expect = "test-failed"
 suite = "bindings"
 message = "stdout: the ERR_ code is on the cause"
 note = "bindings/microvms-js/__test__/process.mjs::an exhausted reconnect budget rejects both streams with its code"
-transform = { file = "bindings/microvms-js/src/process.rs", replace = "                reject_both(&out_tx, &err_tx, error).await;\n", with = "                let message = error.to_string();\n                let _ = out_tx\n                    .send(Err(napi::Error::new(\n                        napi::Status::GenericFailure,\n                        message.clone(),\n                    )))\n                    .await;\n                let _ = err_tx\n                    .send(Err(napi::Error::new(napi::Status::GenericFailure, message)))\n                    .await;\n" }
+transform = { file = "bindings/microvms-js/src/process.rs", replace = "        .map_err(|error| js_async(error).into())\n", with = "        .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))\n" }
 
 [[fault]]
 id = "js-spawn-refusal-code-chain"
@@ -86,7 +87,7 @@ expect = "test-failed"
 suite = "bindings"
 message = "stdout: the ERR_ code is on the cause"
 note = "bindings/microvms-js/__test__/process.mjs::a refused reconnect rejects both streams with its code and wire kind"
-transform = { file = "bindings/microvms-js/src/process.rs", replace = "                reject_both(&out_tx, &err_tx, error).await;\n", with = "                let message = error.to_string();\n                let _ = out_tx\n                    .send(Err(napi::Error::new(\n                        napi::Status::GenericFailure,\n                        message.clone(),\n                    )))\n                    .await;\n                let _ = err_tx\n                    .send(Err(napi::Error::new(napi::Status::GenericFailure, message)))\n                    .await;\n" }
+transform = { file = "bindings/microvms-js/src/process.rs", replace = "        .map_err(|error| js_async(error).into())\n", with = "        .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))\n" }
 
 [[fault]]
 id = "js-spawn-gap-stderr-message"
@@ -98,7 +99,7 @@ run = [
 expect = "test-failed"
 suite = "bindings"
 message = "stderr: the message names the lost range"
-transform = { file = "bindings/microvms-js/src/process.rs", replace = "    let copy = rejection.try_clone().unwrap_or_else(|failed| failed);\n", with = "    let mut copy = rejection.try_clone().unwrap_or_else(|failed| failed);\n    copy.reason = String::new();\n" }
+transform = { file = "crates/microvms-app/src/session/split.rs", replace = "        Some(wire) => Error::wire(wire, error.to_string()),\n", with = "        Some(wire) => Error::wire(wire, String::new()),\n" }
 
 [[fault]]
 id = "js-spawn-budget-message"
@@ -110,7 +111,7 @@ run = [
 expect = "test-failed"
 suite = "bindings"
 message = "stdout: the message is the drive error text"
-transform = { file = "bindings/microvms-js/src/process.rs", replace = "                reject_both(&out_tx, &err_tx, error).await;\n", with = "                let error = match error.wire_kind() {\n                    Some(wire_kind) => {\n                        microvms_core::Error::wire(wire_kind, \"the output stream failed\")\n                    }\n                    None => microvms_core::Error::new(error.kind(), \"the output stream failed\"),\n                };\n                reject_both(&out_tx, &err_tx, error).await;\n" }
+transform = { file = "crates/microvms-app/src/session/split.rs", replace = "        reject_both(&out_tx, &err_tx, error).await;\n", with = "        let error = match error.wire_kind() {\n            Some(wire_kind) => Error::wire(wire_kind, \"the output stream failed\"),\n            None => Error::new(error.kind(), \"the output stream failed\"),\n        };\n        reject_both(&out_tx, &err_tx, error).await;\n" }
 
 [[fault]]
 id = "js-spawn-refusal-message"
@@ -122,7 +123,7 @@ run = [
 expect = "test-failed"
 suite = "bindings"
 message = "stdout: the message is the drive error text"
-transform = { file = "bindings/microvms-js/src/process.rs", replace = "                reject_both(&out_tx, &err_tx, error).await;\n", with = "                let error = match error.wire_kind() {\n                    Some(wire_kind) => {\n                        microvms_core::Error::wire(wire_kind, \"the output stream failed\")\n                    }\n                    None => microvms_core::Error::new(error.kind(), \"the output stream failed\"),\n                };\n                reject_both(&out_tx, &err_tx, error).await;\n" }
+transform = { file = "crates/microvms-app/src/session/split.rs", replace = "        reject_both(&out_tx, &err_tx, error).await;\n", with = "        let error = match error.wire_kind() {\n            Some(wire_kind) => Error::wire(wire_kind, \"the output stream failed\"),\n            None => Error::new(error.kind(), \"the output stream failed\"),\n        };\n        reject_both(&out_tx, &err_tx, error).await;\n" }
 
 [[fault]]
 id = "js-spawn-stderr-first-reader"
@@ -135,7 +136,7 @@ expect = "test-failed"
 suite = "bindings"
 message = "stderr never settled while stdout held a chunk"
 note = "bindings/microvms-js/__test__/process.mjs::a stderr reader gets the drive error while a stdout chunk sits unread"
-transform = { file = "bindings/microvms-js/src/process.rs", replace = "    let _ = tokio::join!(out_tx.send(Err(rejection)), err_tx.send(Err(copy)));\n", with = "    let _ = out_tx.send(Err(rejection)).await;\n    let _ = err_tx.send(Err(copy)).await;\n" }
+transform = { file = "crates/microvms-app/src/session/split.rs", replace = "    let _ = tokio::join!(out_tx.send(Err(error)), err_tx.send(Err(copy)));\n", with = "    let _ = out_tx.send(Err(error)).await;\n    let _ = err_tx.send(Err(copy)).await;\n" }
 
 # The shared case corpus's binding runners (#272). The two wrap entries are core's regression
 # seen through each binding; the label entries fix a #255 drift without removing its marker;
