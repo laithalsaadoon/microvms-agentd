@@ -51,12 +51,9 @@ workflows = ["ci.yml", "fuzz.yml"]
 "astral-sh/setup-uv" = "mise installs uv at the version `ci:parity` holds equal to this step's input"
 "actions/setup-node" = "mise installs Node at the major `ci:parity` holds equal to this step's input"
 "actions/upload-artifact" = "it keeps a failed job's files on CI; ci-local.py keeps a failed job's whole tree in `failed-<job>/` instead"
+"hashicorp/setup-terraform" = "it installs Terraform for the `rust` job's `background coding example` step only, which this file skips; `mise run background:check` runs that step's commands with mise's Terraform"
 
 # ── ci.yml ──────────────────────────────────────────────────────────────────
-
-[job."ci.yml".background-example]
-skip = "`mise run background:check` runs the same commands, and it's in `check`"
-steps = ["Check example"]
 
 [job."ci.yml".rust]
 task = "rust"
@@ -73,7 +70,11 @@ steps = [
   "capability table unit tests",
   "capability table matches the surfaces",
   "every publishable crate can actually publish",
+  "background coding example",
 ]
+
+[job."ci.yml".rust.local."background coding example"]
+skip = "`mise run background:check` runs the same commands, and it's in `check`"
 
 [job."ci.yml".security]
 task = "security"
@@ -198,70 +199,22 @@ reason = "that linker is the gcc the skipped step installs; without it, .cargo/c
 # run doesn't change the caller's cargo-fuzz or cargo-bolero. Nightly comes from rustup, as the
 # workflow's `dtolnay/rust-toolchain` step does on CI: `rustup toolchain install nightly` once.
 
-[job."fuzz.yml".fuzz]
+[job."fuzz.yml".cli-core]
 task = "fuzz"
-steps = ["install cargo-fuzz", "fuzz tar_extract for two minutes"]
+steps = ["install cargo-bolero", "build the harnesses", "fuzz the harnesses side by side"]
 
-[job."fuzz.yml".fuzz.local."install cargo-fuzz"]
+[job."fuzz.yml".cli-core.local."install cargo-bolero"]
 env = { CARGO_INSTALL_ROOT = "{tools}" }
 reason = "into ci:local's tool directory, not the caller's ~/.cargo/bin"
 
-[job."fuzz.yml".closed-output]
-task = "fuzz"
-steps = ["install cargo-bolero", "fuzz the closed-output harness for two minutes"]
-
-[job."fuzz.yml".closed-output.local."install cargo-bolero"]
-env = { CARGO_INSTALL_ROOT = "{tools}" }
-reason = "into ci:local's tool directory, not the caller's ~/.cargo/bin"
-
-[job."fuzz.yml".wrap-dockerfile]
-task = "fuzz"
-steps = ["install cargo-bolero", "fuzz the wrap harness for two minutes"]
-
-[job."fuzz.yml".wrap-dockerfile.local."install cargo-bolero"]
-env = { CARGO_INSTALL_ROOT = "{tools}" }
-reason = "into ci:local's tool directory, not the caller's ~/.cargo/bin"
-
-[job."fuzz.yml".exec-start]
-task = "fuzz"
-steps = ["install cargo-bolero", "fuzz the exec-start harness for two minutes"]
-
-[job."fuzz.yml".exec-start.local."install cargo-bolero"]
-env = { CARGO_INSTALL_ROOT = "{tools}" }
-reason = "into ci:local's tool directory, not the caller's ~/.cargo/bin"
-
-[job."fuzz.yml".provision]
-task = "fuzz"
-steps = ["install cargo-bolero", "fuzz the provisioning parsers"]
-
-[job."fuzz.yml".provision.local."install cargo-bolero"]
-env = { CARGO_INSTALL_ROOT = "{tools}" }
-reason = "into ci:local's tool directory, not the caller's ~/.cargo/bin"
-
-[job."fuzz.yml".egress-posture]
-task = "fuzz"
-steps = ["install cargo-bolero", "fuzz the egress-posture harness for two minutes"]
-
-[job."fuzz.yml".egress-posture.local."install cargo-bolero"]
-env = { CARGO_INSTALL_ROOT = "{tools}" }
-reason = "into ci:local's tool directory, not the caller's ~/.cargo/bin"
-
-[job."fuzz.yml".sse]
-task = "fuzz"
-steps = ["install cargo-bolero", "fuzz the event-stream harness for two minutes"]
-
-[job."fuzz.yml".sse.local."install cargo-bolero"]
-env = { CARGO_INSTALL_ROOT = "{tools}" }
-reason = "into ci:local's tool directory, not the caller's ~/.cargo/bin"
-
-[job."fuzz.yml".build-context]
+[job."fuzz.yml".daemon-edges-app]
 task = "fuzz"
 steps = [
-  "install cargo-bolero",
-  "fuzz the ignore rules for one minute",
-  "fuzz the context hash for one minute",
+  "install cargo-fuzz and cargo-bolero",
+  "build the harnesses",
+  "fuzz the harnesses side by side",
 ]
 
-[job."fuzz.yml".build-context.local."install cargo-bolero"]
+[job."fuzz.yml".daemon-edges-app.local."install cargo-fuzz and cargo-bolero"]
 env = { CARGO_INSTALL_ROOT = "{tools}" }
 reason = "into ci:local's tool directory, not the caller's ~/.cargo/bin"
