@@ -4,7 +4,7 @@
 # dependencies = ["griffelib==2.3.0"]
 # ///
 # SPDX-License-Identifier: Apache-2.0
-"""Read `microvms-py/microvms.pyi` with Griffe and print the public surface as JSON.
+"""Read `bindings/microvms-py/microvms.pyi` with Griffe and print the public surface as JSON.
 
 The site's Python reference (`site/scripts/reference/sdk/python.mjs`) is rendered from this
 output, so the parsing is Griffe's rather than a second hand-written reader of the stub.
@@ -23,7 +23,7 @@ because the stub has no importable module beside it in the repository: `load` se
 
 Usage, from the repository root or anywhere:
 
-    uv run --script site/scripts/reference/griffe_dump.py microvms-py/microvms.pyi
+    uv run --script site/scripts/reference/griffe_dump.py bindings/microvms-py/microvms.pyi
 
 The JSON is printed to stdout. Nothing is written.
 """

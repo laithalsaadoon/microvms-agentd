@@ -1,12 +1,12 @@
 # What `mise run ci:local` runs for each CI job on Linux, and why anything differs (#315).
 #
-# `scripts/ci-local.py` reads each job's steps from the workflow itself and runs their `run:`
+# `tools/ci-local.py` reads each job's steps from the workflow itself and runs their `run:`
 # text as it's written there, so a command can't drift between CI and this file. What lives here
 # is the part a workflow can't say about a local run:
 #
 # - `steps`: every `run:` step of the job by its label (its `name`, or the first line of its
 #   `run` when it has none), in the workflow's order, plus any `uses:` step that runs a local
-#   command below. `./scripts/check-ci-parity.py` (`ci:parity`, in `check` and CI) fails on a
+#   command below. `./tools/check-ci-parity.py` (`ci:parity`, in `check` and CI) fails on a
 #   `run:` step missing here, on a label here that names no step, and on a job with no entry.
 # - `task`: the `ci:<task>` mise task that runs the job. A job with `skip` instead doesn't run
 #   locally, and the reason says why.
@@ -127,9 +127,9 @@ steps = [
 [job."ci.yml".drift]
 task = "drift"
 steps = [
-  "./scripts/check-model-drift.py",
+  "./tools/check-model-drift.py",
   "Model loader regression tests",
-  "./scripts/check-lint-coverage.py",
+  "./tools/check-lint-coverage.py",
   "uvx ruff@0.15.22 check .",
   "uvx ruff@0.15.22 format --check .",
 ]
@@ -165,7 +165,7 @@ reason = "the release binary needs glibc 2.39, newer than some Linux hosts have 
 skip = "a runner diagnostic: it reads the runner's disk and `$RUNNER_TEMP`, which a local run has neither of"
 
 [job."ci.yml".guards-cache]
-skip = "it runs on a push to main only, to fill the dependency cache the guards legs restore; a local fire builds what it needs in its own persistent target, and `./scripts/check-guards-fire.py build` runs the same build"
+skip = "it runs on a push to main only, to fill the dependency cache the guards legs restore; a local fire builds what it needs in its own persistent target, and `./tools/check-guards-fire.py build` runs the same build"
 steps = ["build what the seeded faults compile"]
 
 [job."ci.yml".guards-result]

@@ -1,0 +1,54 @@
+# The IMAGE group's traced requirements. The format and the rules are in tools/check-trace.py.
+
+[IMAGE-1]
+issue = "#220"
+waive.live = "a pure function of Dockerfile text; it makes no AWS call"
+
+[IMAGE-2]
+issue = "#220"
+
+[IMAGE-3]
+issue = "#220"
+waive.live = "a pure function of Dockerfile text; it makes no AWS call"
+
+[IMAGE-4]
+issue = "#220"
+
+[IMAGE-5]
+issue = "#220"
+waive.model = "a binding pass-through has no states; core's are modeled as IMAGE-1..4"
+waive.gherkin = "the scenarios are core's (IMAGE-1..4); each binding's tests check the pass-through"
+waive.fuzz = "the binding hands the text unchanged to core's fuzzed function"
+waive.live = "a pure function of Dockerfile text; it makes no AWS call"
+
+[IMAGE-6]
+issue = "#221"
+waive.model = "a pure function of the build inputs; the name has no states to explore"
+
+[IMAGE-7]
+issue = "#221"
+waive.model = "reading a directory has no states; the ignore rules are fuzzed against moby's own regex translation instead"
+
+[IMAGE-8]
+issue = "#221"
+
+# IMAGE-9 to IMAGE-11 share one fuzz waiver, since the ensure_image decisions' input space is
+# interleavings, so a change to it is a change to all three.
+[IMAGE-9]
+issue = "#221"
+waive.fuzz = "the input space is two callers interleaved against the platform, which crates/model/src/image.rs checks exhaustively; the decision table is ten rows, all pinned by the_plan_table"
+
+[IMAGE-10]
+issue = "#221"
+waive.fuzz = "the input space is two callers interleaved against the platform, which crates/model/src/image.rs checks exhaustively; the decision table is ten rows, all pinned by the_plan_table"
+
+[IMAGE-11]
+issue = "#221"
+waive.fuzz = "the input space is two callers interleaved against the platform, which crates/model/src/image.rs checks exhaustively; the decision table is ten rows, all pinned by the_plan_table"
+
+[IMAGE-12]
+issue = "#221"
+waive.model = "a binding pass-through has no states; core's are modeled as IMAGE-8..11"
+waive.gherkin = "the scenarios are core's (IMAGE-6..11); each binding's tests check the pass-through"
+waive.fuzz = "the binding hands its arguments unchanged to core's fuzzed functions"
+waive.live = "the conformance section drives core's ensure_image, which each binding forwards unchanged"

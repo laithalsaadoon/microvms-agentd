@@ -6,10 +6,10 @@
  * `scripts/sync-docs.mjs` publishes `docs/` and `authored/`; this script publishes the pages that
  * `scripts/reference/pages.mjs` derives from `docs/manifest.json` and `docs/schema.json`, and the SDK
  * pages that `scripts/reference/sdk/` derives from the two binding declaration files:
- * `microvms-py/microvms.pyi` through Griffe (run by `uv`) and `microvms-js/index.d.ts` through
+ * `bindings/microvms-py/microvms.pyi` through Griffe (run by `uv`) and `bindings/microvms-js/index.d.ts` through
  * TypeDoc. Both declaration files are committed and drift-gated against the Rust source, so every
  * page here is a function of a file the build can see. It also writes the Architecture drift page,
- * which `scripts/reference/drift.mjs` derives from the git history of `ratchet/drift.json`. The two share
+ * which `scripts/reference/drift.mjs` derives from the git history of `verify/ratchet/drift.json`. The two share
  * `src/content/docs/reference/`, so ownership has to be explicit:
  *
  * - This script keeps its own manifest, `.reference-manifest.json`, listing every file it wrote. On the

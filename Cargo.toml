@@ -1,29 +1,29 @@
 [workspace]
 members = [
-    "agentd",
-    "microvms-app",
-    "microvms-cli",
-    "microvms-core",
-    "microvms-domain",
-    "microvms-edges",
-    "microvms-js",
-    "microvms-py",
-    "model",
-    "model-conformance",
-    "protocol",
+    "crates/agentd",
+    "crates/microvms-app",
+    "crates/microvms-cli",
+    "crates/microvms-core",
+    "crates/microvms-domain",
+    "crates/microvms-edges",
+    "crates/model",
+    "crates/model-conformance",
+    "crates/protocol",
+    "bindings/microvms-js",
+    "bindings/microvms-py",
 ]
 resolver = "3"
 # Its own workspace, because cargo-fuzz builds it with sanitizer flags and a
 # nightly toolchain that must not leak into the shipping graph. It carries its
 # own lockfile for the same reason.
-exclude = ["agentd/fuzz"]
+exclude = ["crates/agentd/fuzz"]
 
 # The list was declared whole at the start so parallel tasks wouldn't conflict on
 # it. `microvms-domain` joined later (#282), when core's rules and values moved
 # into a crate that can't do I/O, and `microvms-app` and `microvms-edges` joined when
 # the use cases and the port implementations split out of core (#283). `model-conformance`
 # joined when the app's tables were first checked against the model's (#296).
-# `microvms-cli/tests/dependency_direction.rs` pins the list so a member can't join
+# `crates/microvms-cli/tests/dependency_direction.rs` pins the list so a member can't join
 # without that test naming it.
 
 [workspace.package]
@@ -31,7 +31,7 @@ edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/laithalsaadoon/microvms-agentd"
 # Default-deny, and an allowlist rather than a denylist for the same reason
-# `microvms-cli/tests/thinness.rs` gives: a denylist is defeated by the crate
+# `crates/microvms-cli/tests/thinness.rs` gives: a denylist is defeated by the crate
 # nobody thought to write down. A member added later is unpublishable until
 # someone says otherwise in its own manifest, next to the reason.
 #

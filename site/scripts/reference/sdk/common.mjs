@@ -3,8 +3,8 @@
  * What the two SDK references share: routes, docstring hygiene, the README quickstart, and the
  * overview page's index table.
  *
- * `typescript.mjs` renders `microvms-js/index.d.ts` through TypeDoc and `python.mjs` renders
- * `microvms-py/microvms.pyi` through Griffe. Each returns `ReferencePage` records in the shape
+ * `typescript.mjs` renders `bindings/microvms-js/index.d.ts` through TypeDoc and `python.mjs` renders
+ * `bindings/microvms-py/microvms.pyi` through Griffe. Each returns `ReferencePage` records in the shape
  * `../pages.mjs` defines, and `../../gen-reference.mjs` writes them under the same ownership
  * manifest as the CLI reference, so a page here cannot collide with a page the sync writes and
  * cannot outlive the declaration it describes.
@@ -35,16 +35,16 @@ export const LANGUAGES = Object.freeze({
   python: Object.freeze({
     directory: `${TIER}/python`,
     label: "Python",
-    source: "microvms-py/microvms.pyi",
-    readme: "microvms-py/README.md",
+    source: "bindings/microvms-py/microvms.pyi",
+    readme: "bindings/microvms-py/README.md",
     regenerate: "mise run stubs",
     check: "mise run stubs:check"
   }),
   typescript: Object.freeze({
     directory: `${TIER}/typescript`,
     label: "TypeScript",
-    source: "microvms-js/index.d.ts",
-    readme: "microvms-js/README.md",
+    source: "bindings/microvms-js/index.d.ts",
+    readme: "bindings/microvms-js/README.md",
     regenerate: "mise run dts",
     check: "mise run dts:check"
   })

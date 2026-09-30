@@ -52,12 +52,12 @@ An image refuses deletion while its VM is still terminating, so one pass is some
 
 ```bash
 mise run live:verify-clean
-./scripts/verify-clean.py --delete
+./tools/verify-clean.py --delete
 ```
 
 `live:verify-clean` queries the account directly and is independent of the code that did the cleanup, which is the point: `terraform destroy` once reported nine resources destroyed while six service-created log groups survived, because Terraform never owned them. It reports more than a pass or a fail. A **leak** is something still costing money that nothing intends to keep: a live MicroVM, an image, a log group. **Standing** is the Terraform stack, which you may keep applied on purpose. **Pending** is a deletion still in flight, where the right response is to re-run in a minute. Exit 0 when nothing leaked, 1 otherwise. `--delete` removes the leaks and leaves the stack to `terraform destroy`, and expect to run it more than once, because an image refuses deletion while its VM is still terminating.
 
-It only recognizes resources under this project's own name prefixes, so anything else in the account is untouched. It needs the repository (`scripts/verify-clean.py` runs under `uv`) and credentials for the account. [Run the live suite](/learn/operations/run-the-live-suite/) puts it at the end of every billable run.
+It only recognizes resources under this project's own name prefixes, so anything else in the account is untouched. It needs the repository (`tools/verify-clean.py` runs under `uv`) and credentials for the account. [Run the live suite](/learn/operations/run-the-live-suite/) puts it at the end of every billable run.
 
 ## 5. Why a VM leaks
 

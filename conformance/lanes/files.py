@@ -6,8 +6,8 @@ Every hostile archive is a live check. The archives are built with `tarfile`
 (`harness/archives.py`), written to a temp file, and handed to `microvm cp --tar`. The expected
 outcome is the **daemon's** refusal surfacing as `data.kind: ProtocolError` with exit 5, not
 this suite's opinion of the archive and not the CLI's. The CLI deliberately doesn't
-pre-validate an archive (`microvms-cli/src/commands/attached.rs`, and the byte-scan guard in
-`microvms-cli/src/guards/files.rs` that proves it), because a client-side check would make
+pre-validate an archive (`crates/microvms-cli/src/commands/attached.rs`, and the byte-scan guard in
+`crates/microvms-cli/src/guards/files.rs` that proves it), because a client-side check would make
 these checks pass against the client's copy of the member rules while the extractor that runs in
 production went untested.
 """
@@ -84,7 +84,7 @@ def drive_file_transfer(
 
     # `vm:` names the DIRECTORY, and the daemon packs it. That is the whole shape of these
     # two routes and the first live round is what taught it: `GET /v1/fs/tar` requires a
-    # directory (`agentd/src/fs.rs:786` — a non-directory is an explicit 400 "use
+    # directory (`crates/agentd/src/fs.rs:786` — a non-directory is an explicit 400 "use
     # /v1/fs/file") and packs it itself with `pack_tree`, which carries the `tar` crate so
     # that no client and no base image needs one.
     #
@@ -144,7 +144,7 @@ def drive_file_transfer(
     #
     # Handed to `microvm cp --tar` as pre-built files. The expected failure is the
     # DAEMON's, surfacing as `data.kind: ProtocolError` with exit 5 — the CLI does not
-    # pre-validate an archive, and `microvms-cli/src/guards/files.rs`'s byte-scan proves it. A
+    # pre-validate an archive, and `crates/microvms-cli/src/guards/files.rs`'s byte-scan proves it. A
     # client-side check would make these four pass against the client's copy of the member
     # rules while the extractor that runs in production went untested.
     print("\n-- hostile archives --")

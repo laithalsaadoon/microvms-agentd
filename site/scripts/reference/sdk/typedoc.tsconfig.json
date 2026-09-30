@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "files": ["../../../../microvms-js/index.d.ts"]
+  "files": ["../../../../bindings/microvms-js/index.d.ts"]
 }

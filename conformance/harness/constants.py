@@ -18,6 +18,6 @@ BASELINE_MEMORY_MIB = 1024
 SUSPEND_WINDOW_SEC = 40
 
 
-#: The repository root: every `cargo` call and `scripts/` path the lanes use is
+#: The repository root: every `cargo` call and `tools/` path the lanes use is
 #: relative to it, wherever the suite is run from.
 REPO = Path(__file__).resolve().parents[2]

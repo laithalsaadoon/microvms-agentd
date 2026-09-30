@@ -1,0 +1,1159 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["boto3>=1.40", "pyyaml==6.0.3"]
+# ///
+# SPDX-License-Identifier: Apache-2.0
+"""Compare Rust API constraints with boto3's current Lambda MicroVM model.
+
+Reads `microvm constants --emit-json` from a fresh cargo build. Fails on changed
+constraints, unavailable models, new API versions, or missing Rust constants.
+Regions and size classes are checked against documented/measured tables because
+the service model does not describe them. The ratchet's operation-literal rule must
+name exactly the model's operations. Unchecked constraints are reported.
+No AWS calls or credentials are needed; initial dependency resolution may use the
+network. To audit against the latest SDK, run:
+`uv run --upgrade --script tools/check-model-drift.py`.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+SERVICE = "lambda-microvms"
+API_VERSION = "2025-09-09"
+
+REPO = Path(__file__).resolve().parent.parent
+
+#: The ratchet's ast-grep rule that refuses an operation name written as a literal in a driving
+#: adapter (#273). Its regex alternates over every operation by name, so an operation the model
+#: gains and the rule lacks is one an adapter could hard-code without the ratchet seeing it.
+OPERATION_RULE = REPO / "verify" / "ratchet" / "rules" / "operation-literal.yml"
+
+#: The `"(A|B|...)"` group inside the rule's regex.
+OPERATION_GROUP = re.compile(r'"\(([^()]*)\)"')
+OPERATION_NAME = re.compile(r"[A-Z][A-Za-z]+")
+
+#: How the Rust object is produced when no `--rust-binary` and no `--rust-json` was
+#: given. `cargo run` rather than a prebuilt path, and the trade is worth stating: a
+#: path can be stale, and a *stale* constants dump is the exact failure this gate
+#: exists to prevent — it would compare a value nobody ships and report agreement.
+#: `cargo run -q` rebuilds if it must and costs 0.4s warm (measured 2026-08-08), which
+#: is nothing beside the rest of `mise run check`. It also keeps `model:check` free of
+#: a build dependency, so a fresh clone runs this the same way CI does.
+RUST_SOURCE_ARGV = (
+    "cargo",
+    "run",
+    "-q",
+    "-p",
+    "microvms-cli",
+    "--",
+    "constants",
+    "--emit-json",
+)
+
+
+def load_model() -> tuple[dict[str, Any], str]:
+    """Load the effective boto3 model and fail if its latest API version changed."""
+    import boto3
+    import botocore
+    from botocore.exceptions import DataNotFoundError, UnknownServiceError
+
+    loader = boto3.Session()._session.get_component("data_loader")
+    try:
+        latest = loader.determine_latest_version(SERVICE, "service-2")
+        if latest != API_VERSION:
+            raise SystemExit(
+                f"latest {SERVICE} API version is {latest}, expected {API_VERSION}. "
+                "Review the new model and update the Rust client and drift checks."
+            )
+        model = loader.load_service_model(SERVICE, "service-2", api_version=latest)
+    except (DataNotFoundError, UnknownServiceError) as error:
+        raise SystemExit(
+            f"cannot load {SERVICE} with botocore {botocore.__version__}: {error}. "
+            "Install a boto3 release that includes the service model."
+        ) from error
+    return (
+        model,
+        f"boto3 {boto3.__version__}, botocore {botocore.__version__} data loader",
+    )
+
+
+#: Every constant name the gate compares, spelled as `microvms-core`'s `as_json()` keys
+#: them.
+#:
+#: Asserted as a *closed set* in both directions: a name here the client does not carry
+#: fails, and a key the Rust object carries that is not here fails too. Both directions,
+#: because the failure mode is a rename that makes a comparison silently stop happening
+#: rather than start disagreeing — which no compiler catches, since the coupling is a
+#: string in a file the compiler never reads.
+CONSTANT_NAMES = (
+    "MODEL_API_VERSION",
+    "MAX_RUN_HOOK_PAYLOAD_BYTES",
+    "DOCUMENTED_RUN_HOOK_PAYLOAD_BYTES",
+    "MAX_IMAGE_NAME_LEN",
+    "IMAGE_NAME_PATTERN",
+    "MAX_VERSION_LEN",
+    "VERSION_PATTERN",
+    "MAX_NON_BLANK_LEN",
+    "NON_BLANK_PATTERN",
+    "MAX_IDENTIFIER_LEN",
+    "MAX_IMAGE_ARN_LEN",
+    "MAX_TAG_KEY_LEN",
+    "MAX_TAG_VALUE_LEN",
+    "TAG_COMPONENT_PATTERN",
+    "MAX_LOG_GROUP_LEN",
+    "LOG_GROUP_PATTERN",
+    "MAX_LOG_STREAM_LEN",
+    "LOG_STREAM_PATTERN",
+    "MAX_USER_LOG_STREAM_LEN",
+    "MIN_ROLE_ARN_LEN",
+    "MAX_ROLE_ARN_LEN",
+    "ROLE_ARN_PATTERN",
+    "MIN_PORT",
+    "MAX_PORT",
+    "MIN_IDLE_DURATION_SEC",
+    "MAX_DURATION_SEC",
+    "MAX_MICROVM_HOOK_TIMEOUT_SEC",
+    "MAX_IMAGE_HOOK_TIMEOUT_SEC",
+    "MAX_HOOK_PORT",
+    "CAPABILITIES",
+    "ARCHITECTURES",
+    "MAX_NETWORK_CONNECTORS",
+    "MAX_NETWORK_CONNECTOR_LEN",
+    "MAX_IMAGE_EGRESS_CONNECTORS",
+    "IMAGE_VERSION_STATUSES",
+    "HOOK_STATES",
+    # The five state enums, which used to be literals in this file. See the block where
+    # `MICROVM_STATES` and friends were defined for the whole argument; the short version is
+    # that pinning them here meant the gate verified the model against the script with no
+    # reader in the client, so a respelled state failed the gate and nothing else.
+    "MICROVM_STATES",
+    "IMAGE_STATES",
+    "IMAGE_VERSION_STATES",
+    "BUILD_STATES",
+    "CHIPSETS",
+    "MAX_RESOURCES",
+    "MAX_CLIENT_TOKEN_LEN",
+    "MODEL_IMAGE_READY_STATES",
+    "TOLERATED_IMAGE_READY_STATES",
+    "TERMINAL_STATES",
+    "DEAD_STATES",
+    "MICROVM_REGIONS",
+    "SIZE_CLASSES",
+)
+
+#: Names whose value is a set rather than an ordered sequence.
+#:
+#: Sorted before comparison, which is the honest reading: the code that consumes them
+#: does membership tests, so an order difference is not a disagreement. Listed explicitly
+#: rather than inferred from the value's type, because `SIZE_CLASSES` is a list whose
+#: order *is* meaningful (smallest baseline first) and sorting it would hide a reordering
+#: that matters.
+UNORDERED_NAMES = frozenset(
+    {
+        "CAPABILITIES",
+        "ARCHITECTURES",
+        "MODEL_IMAGE_READY_STATES",
+        "TOLERATED_IMAGE_READY_STATES",
+        "TERMINAL_STATES",
+        "DEAD_STATES",
+        "MICROVM_REGIONS",
+        # The `MicrovmImageVersionStatus` enum. Sorted, because the code that reads it does a
+        # membership test against a wire string — and the two values happen to be in the same
+        # order the model lists them, so an unsorted comparison would pass today and become a
+        # false failure the day AWS reorders the enum without changing it.
+        "IMAGE_VERSION_STATUSES",
+        # The other five enums, for the same reason. Every consumer of these does a membership
+        # test — `TERMINAL_STATES.contains(&state)`, `Image::is_ready`, the subset assertions in
+        # `constants.rs` — so an order difference is not a disagreement, and an unsorted
+        # comparison would turn an AWS reordering into a false drift report.
+        "HOOK_STATES",
+        "MICROVM_STATES",
+        "IMAGE_STATES",
+        "IMAGE_VERSION_STATES",
+        "BUILD_STATES",
+        "CHIPSETS",
+    }
+)
+
+# ── the two values the model cannot check, and their second reader ────────────
+#
+# Both of these were verified by the Python-vs-Rust cross-comparison and by nothing
+# else, because the model states neither. That comparison went away with the Python
+# client, so these literals are what replaces it: a deliberate second copy, held here
+# rather than imported, for the same reason the cross-check was never optional
+# decoration — a value compared only against itself passes by construction.
+#
+# Port a change to both sides in the same commit. That is the cost of the pattern and
+# it is the intended one; this repo's harbor-harvest sibling makes the same trade for
+# its tool/library twins.
+
+#: Measured 2026-08-07, and `microvms-core`'s `MICROVM_REGIONS` must equal this.
+PINNED_REGIONS = (
+    "ap-northeast-1",
+    "eu-west-1",
+    "us-east-1",
+    "us-east-2",
+    "us-west-2",
+)
+
+#: The documented sizing table, smallest baseline first. Two of the five rows are
+#: measured rather than documented (512 -> ~2 GB guest, 2048 -> ~8 GB); TRAP-13 is why
+#: the rows are *read* rather than computed as 4x the baseline, so a formula here would
+#: be the bug the table exists to prevent.
+PINNED_SIZE_CLASSES = (
+    {"baseline_mib": 512, "baseline_vcpu": 0.25, "peak_mib": 2048, "peak_vcpu": 1.0},
+    {"baseline_mib": 1024, "baseline_vcpu": 0.5, "peak_mib": 4096, "peak_vcpu": 2.0},
+    {"baseline_mib": 2048, "baseline_vcpu": 1.0, "peak_mib": 8192, "peak_vcpu": 4.0},
+    {"baseline_mib": 4096, "baseline_vcpu": 2.0, "peak_mib": 16384, "peak_vcpu": 8.0},
+    {"baseline_mib": 8192, "baseline_vcpu": 4.0, "peak_mib": 32768, "peak_vcpu": 16.0},
+)
+
+
+@dataclass(frozen=True)
+class Source:
+    """One client's constants, and where they were read from.
+
+    Values arrive as a plain name-to-value mapping rather than as a module or a JSON
+    object, so `check` below runs against a shape that says nothing about where it came
+    from. That was what made "the same named comparisons" a fact when there were two
+    clients; it is kept now because a `check` written against the JSON object directly
+    would have to be rewritten to compare a second source again.
+    """
+
+    #: Prefixes every result name, so the report says whose constant drifted.
+    label: str
+    #: The file or the argv the values came from, printed in the header.
+    origin: str
+    values: dict[str, Any]
+
+    def get(self, name: str) -> Any:
+        """The value for `name`, or a loud failure.
+
+        Never a default and never `None`: a missing name means a rename happened and a
+        comparison is about to silently not happen, which is the failure this whole
+        script is about. Failing here converts it into the one thing it must be — an
+        exit 1 that names the constant.
+        """
+        try:
+            return self.values[name]
+        except KeyError:
+            raise SystemExit(
+                f"the {self.label} client has no constant named {name!r}. Either it was "
+                "renamed on one side only, or this script's CONSTANT_NAMES is stale. A "
+                "renamed constant does not fail compilation in either language — it "
+                "makes this comparison stop happening, and a check that stops happening "
+                "reports clean. Fix the name, do not remove the entry."
+            ) from None
+
+
+def normalize(name: str, value: Any) -> Any:
+    """One client's value in the form the other's can be compared against.
+
+    Tuples, sets, and frozensets all become lists; the set-like names are sorted (see
+    `UNORDERED_NAMES`); a sizing row becomes the four-key object with its vCPU counts as
+    floats. Everything else passes through, so an int stays an int and a mismatch between
+    4096 and "4096" is still a mismatch.
+
+    Still applied to both sides even though only one client is read from a subprocess
+    now, because `PINNED_SIZE_CLASSES` goes through it too — which is what makes the
+    comparison a comparison of values rather than of JSON spellings.
+    """
+    if name == "SIZE_CLASSES":
+        return [
+            {
+                "baseline_mib": row["baseline_mib"],
+                "baseline_vcpu": float(row["baseline_vcpu"]),
+                "peak_mib": row["peak_mib"],
+                "peak_vcpu": float(row["peak_vcpu"]),
+            }
+            for row in value
+        ]
+    if isinstance(value, frozenset | set | tuple | list):
+        items = list(value)
+        return sorted(items) if name in UNORDERED_NAMES else items
+    return value
+
+
+def read_rust_source(argv: Sequence[str], repo: Path) -> Source:
+    """The Rust client's constants, through `microvm constants --emit-json`.
+
+    A subprocess rather than a parse of `constants.rs`: the CLI prints
+    `microvms_core::constants::as_json()` verbatim, so the object this reads is a function
+    of the `pub const`s themselves and cannot drift from them. `as_json` is emitted
+    through `serde_json` rather than formatted by hand for the same reason. (The two
+    literal tables above — `PINNED_REGIONS`, `PINNED_SIZE_CLASSES` — are the deliberate
+    exception, because a comparison needs two readers and the model is not one of them for
+    those values.)
+
+    Every failure mode here is an exit rather than an empty source. A gate that reports
+    "no drift" because it could not read its one client is worse than no gate.
+    """
+    try:
+        proc = subprocess.run(
+            list(argv), cwd=repo, capture_output=True, text=True, check=False
+        )
+    except FileNotFoundError as exc:
+        raise SystemExit(
+            f"could not run {' '.join(argv)}: {exc}. The Rust constants are this gate's "
+            "only source (TRAP-12), so failing to read them leaves microvms-core's "
+            "hardcoded constraints compared against nothing — and a gate that reports no "
+            "drift because it read no client is worse than no gate. Build the CLI with "
+            "`mise run build:cli` and point --rust-binary at it, or run this without a "
+            "flag and let `cargo run` build it."
+        ) from None
+    if proc.returncode != 0:
+        raise SystemExit(
+            f"{' '.join(argv)} exited {proc.returncode}:\n{proc.stdout}\n{proc.stderr}"
+        )
+    return Source(
+        label="rust",
+        origin=" ".join(argv),
+        values=parse_rust_object(proc.stdout, " ".join(argv)),
+    )
+
+
+def parse_rust_object(text: str, origin: str) -> dict[str, Any]:
+    """The emitted object, with its key set asserted closed against `CONSTANT_NAMES`.
+
+    Both directions. A missing key is caught by `Source.get`, but an *extra* key has to
+    be caught here: a constant added to `microvms-core` and emitted without a comparison
+    being written for it is a constraint that looks covered — it is in the dump the gate
+    reads — and is not. That is the shape of every failure this script exists for.
+    """
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(
+            f"{origin} did not print one JSON object ({exc}). `constants --emit-json` "
+            "writes the bare object and nothing else; progress goes to stderr. Output "
+            f"was:\n{text[:400]}"
+        ) from None
+    if not isinstance(parsed, dict):
+        raise SystemExit(f"{origin} printed a {type(parsed).__name__}, not an object")
+
+    extra = sorted(set(parsed) - set(CONSTANT_NAMES))
+    if extra:
+        raise SystemExit(
+            f"{origin} emits constant(s) this gate does not compare: {extra}. A constant "
+            "in the dump with no comparison written for it reads as covered and is not. "
+            "Add it to CONSTANT_NAMES and give it a comparison — against the model, or "
+            "against a pinned literal here if the model states nothing about it (see "
+            "PINNED_REGIONS)."
+        )
+    return {name: normalize(name, parsed[name]) for name in parsed}
+
+
+@dataclass
+class Result:
+    """One named comparison, so a pass is as visible as a failure.
+
+    Named because the enumeration *is* the report: a reader has to be able to see
+    which constraints were compared without reading this file, or a checker that
+    covers three things looks the same as one that covers thirty.
+    """
+
+    name: str
+    ours: Any
+    model: Any
+    ok: bool
+    note: str = ""
+    #: What the two printed values are called on a failure. `("ours", "model")` for a
+    #: model comparison, and the two client labels for a cross-comparison — because a
+    #: client-vs-client disagreement printed as "ours / model" names the *model* as the
+    #: source of a value the model never stated, which is the reader sent to the wrong
+    #: file to fix it.
+    sides: tuple[str, str] = ("ours", "model")
+
+
+@dataclass
+class Checker:
+    model: dict[str, Any]
+    #: Which client's values these results are about. Prefixes every result name, so a
+    #: two-client report says *whose* constant drifted rather than only that one did.
+    label: str = ""
+    results: list[Result] = field(default_factory=list)
+    #: Every shape this run read a constraint out of. Drives the coverage report:
+    #: anything constrained in the model and absent from here is stated by AWS and
+    #: bound to nothing in our code, which is the honest thing to print.
+    touched: set[str] = field(default_factory=set)
+
+    def shape(self, name: str) -> dict[str, Any]:
+        try:
+            return self.model["shapes"][name]
+        except KeyError:
+            raise SystemExit(
+                f"the model has no shape {name!r}. A renamed shape is drift this script "
+                "cannot interpret, so it fails rather than skipping the constraint."
+            ) from None
+
+    def record(
+        self,
+        name: str,
+        ours: Any,
+        model: Any,
+        *,
+        note: str = "",
+        sides: tuple[str, str] = ("ours", "model"),
+    ) -> None:
+        """One comparison. `sides` names the two printed values on a failure.
+
+        Defaulted to `("ours", "model")` because most comparisons here really are against
+        the model. The two that are not — `MICROVM_REGIONS` and `SIZE_CLASSES`, which the
+        model says nothing about — pass their own, so a disagreement does not name the
+        model as the source of a value it never stated and send the reader to the wrong
+        file to fix it.
+        """
+        tagged = f"[{self.label}] {name}" if self.label else name
+        self.results.append(Result(tagged, ours, model, ours == model, note, sides))
+
+    def enum(self, label: str, shape: str, ours: Iterable[str]) -> None:
+        self.touched.add(shape)
+        self.record(
+            label, tuple(sorted(ours)), tuple(sorted(self.shape(shape)["enum"]))
+        )
+
+    def bound(self, label: str, shape: str, key: str, ours: Any) -> None:
+        self.touched.add(shape)
+        self.record(label, ours, self.shape(shape).get(key))
+
+    def pattern(self, label: str, shape: str, ours: str) -> None:
+        self.touched.add(shape)
+        self.record(label, ours, self.shape(shape).get("pattern"))
+
+
+def rule_operations(path: Path) -> tuple[str, ...]:
+    """The operation names `path`'s regex alternates over, in the rule's order.
+
+    Read with a YAML parser rather than a regex over the file, since the rule is YAML and its
+    regex is a quoted scalar. Anything but exactly one `regex` clause holding a non-empty group
+    of operation-shaped names is an error: a rule this can't read would otherwise compare as an
+    empty list, and the failure would name the model rather than the parse.
+    """
+    import yaml
+
+    try:
+        rule = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise SystemExit(
+            f"{path} is missing, so the operation list can't be checked"
+        ) from None
+    clauses = rule.get("rule", {}).get("all", []) if isinstance(rule, dict) else []
+    regexes = [c["regex"] for c in clauses if isinstance(c, dict) and "regex" in c]
+    if len(regexes) != 1:
+        raise SystemExit(
+            f"{path} should have one `regex` under `rule.all`, and has {len(regexes)}"
+        )
+    group = OPERATION_GROUP.search(regexes[0])
+    names = tuple(group.group(1).split("|")) if group else ()
+    if not names or not all(OPERATION_NAME.fullmatch(name) for name in names):
+        raise SystemExit(
+            f'{path}\'s regex has no `"(Name|Name|...)"` group of operation names: {regexes[0]!r}'
+        )
+    return names
+
+
+def operations_result(path: Path, model: dict[str, Any]) -> Result:
+    """The rule's operation names against the model's, as one comparison.
+
+    Sorted but not deduplicated, so a name the rule repeats is a disagreement too: the
+    alternation is a set written as a list.
+    """
+    names = rule_operations(path)
+    ours = tuple(sorted(names))
+    theirs = tuple(sorted(model.get("operations", {})))
+    label = (
+        path.relative_to(REPO).as_posix() if path.is_relative_to(REPO) else str(path)
+    )
+    return Result(
+        "operation-literal rule's operations",
+        ours,
+        theirs,
+        ours == theirs,
+        note=f"{len(names)} operations, each refused as an adapter literal",
+        sides=(label, "model"),
+    )
+
+
+def check(src: Source, model: dict[str, Any]) -> Checker:
+    """Every constraint one client hardcodes, compared against its model shape.
+
+    Grouped by the trap each one closes rather than by shape name, because the
+    grouping is what tells a reader why the constraint is worth pinning.
+
+    Takes a `Source` rather than a module, which is what lets the Python client and the
+    Rust client run through *this* function rather than through two that could drift.
+    Every value arrives through `src.get`, so a name missing on either side is an exit
+    naming the constant rather than an `AttributeError` or a skipped comparison.
+    """
+    c = Checker(model, label=src.label)
+
+    # The 4x documentation bug this script was written for.
+    #
+    # The shape is resolved through the member reference rather than named directly,
+    # because AWS renames synthetic string shapes without changing their constraints:
+    # botocore 1.43.82 (2026-08-28) renamed `RunMicrovmRequestRunHookPayloadString` to
+    # `RunHookPayload` with `max: 4096` intact, and the hardcoded name failed this gate
+    # on a model that still agreed with us. The member name `runHookPayload` is the wire
+    # contract and cannot be renamed compatibly, so it is the stable handle.
+    payload_shape = (
+        model["shapes"]["RunMicrovmRequest"]["members"]
+        .get("runHookPayload", {})
+        .get("shape", "")
+    )
+    if not payload_shape:
+        raise SystemExit(
+            "RunMicrovmRequest no longer has a runHookPayload member. That is not a "
+            "rename this script can follow — the wire contract changed; re-read the "
+            "constraint."
+        )
+    c.bound(
+        "runHookPayload max bytes",
+        payload_shape,
+        "max",
+        src.get("MAX_RUN_HOOK_PAYLOAD_BYTES"),
+    )
+
+    # And the other half of that bug, which is in the model itself. Issue #24 asked for the
+    # 16 KB claim to be pinned beside the constant so nobody "corrects" 4096 from the model's
+    # prose — this is the comparison that makes the claim checked rather than merely mentioned.
+    #
+    # Read out of the **documentation string** rather than out of a shape, because that is
+    # where the wrong number lives: `RunMicrovmRequest.runHookPayload`'s docs say "Maximum:
+    # 16,384 bytes" while the shape it names says `max: 4096`. So the model contradicts itself,
+    # and the client's two constants record both sides.
+    #
+    # A substring test rather than a parse, because AWS's prose is prose: the figure is written
+    # with a comma and embedded in a sentence, and a regex over it would be a second thing to
+    # keep right. What matters is that the claim is still there — the day it is fixed, this line
+    # goes red and `DOCUMENTED_RUN_HOOK_PAYLOAD_BYTES` and its warning should be deleted.
+    documented = src.get("DOCUMENTED_RUN_HOOK_PAYLOAD_BYTES")
+    payload_docs = model["shapes"]["RunMicrovmRequest"]["members"][
+        "runHookPayload"
+    ].get("documentation", "")
+    c.record(
+        "runHookPayload documentation still claims the wrong ceiling",
+        f"{documented:,}",
+        f"{documented:,}" if f"{documented:,}" in payload_docs else payload_docs,
+        note=(
+            "the model's own prose is 4x its shape; the client pins both so the shape is not "
+            "'corrected' from the prose"
+        ),
+        sides=("client's DOCUMENTED_RUN_HOOK_PAYLOAD_BYTES", "model's doc string"),
+    )
+    # And the relationship, so the two constants cannot be collapsed into one.
+    c.record(
+        "documented runHookPayload ceiling > the shape's",
+        documented > src.get("MAX_RUN_HOOK_PAYLOAD_BYTES"),
+        True,
+        note="wrong in the permissive direction, which is why it is the dangerous one",
+        sides=(src.label, "required"),
+    )
+
+    # ARM64-only is machine-checkable, not folklore.
+    c.enum("Architecture enum", "Architecture", src.get("ARCHITECTURES"))
+    # Why `build_image` takes `repair_guest_identity: bool` and not a capability list:
+    # there is exactly one accepted value, so a list can only express a mistake.
+    c.enum("Capability enum", "Capability", src.get("CAPABILITIES"))
+
+    # The state machines the client's polling loops branch on. A state added to the
+    # model that no loop knows is a VM this client waits out rather than reports.
+    #
+    # Read from the **client** now, where these five were literals in this file until issue #24.
+    # The old shape was the gap the previous comment here admitted: the gate compared the model
+    # against this script, so a `MicrovmState` AWS respelled failed the gate and had no
+    # compile-time or test-time consequence for `control/microvm.rs`'s polling loops — the
+    # failure and the blindness were unrelated facts. With the sets in `microvms-core`,
+    # `constants.rs`'s `every_state_set_the_polling_loops_use_is_a_subset_of_the_models_enum`
+    # goes red on the same change and names the loop.
+    #
+    # It does not make a new state a compile error. A wire string cannot be exhaustively
+    # matched, and narrowing a *response* enum is the mistake `ops.rs` documents at length. What
+    # it buys is a reader.
+    c.enum("MicrovmState enum", "MicrovmState", src.get("MICROVM_STATES"))
+    c.enum("MicrovmImageState enum", "MicrovmImageState", src.get("IMAGE_STATES"))
+    c.enum(
+        "MicrovmImageVersionState enum",
+        "MicrovmImageVersionState",
+        src.get("IMAGE_VERSION_STATES"),
+    )
+    c.enum("BuildState enum", "BuildState", src.get("BUILD_STATES"))
+    # `Chipset` was the one issue #24 called "drift-checked but deserialized nowhere". It is
+    # deserialized now — `MicrovmImageBuildSummaryWire.chipset` and
+    # `GetImageBuildResponseWire.chipset` both read it, added by the build-introspection work
+    # that put the model's five missing required members on those two shapes.
+    c.enum("Chipset enum", "Chipset", src.get("CHIPSETS"))
+    # `HookState`, which is a **request** enum on six members of every `CreateMicrovmImage` —
+    # so a value the model dropped is a call this client makes and the service refuses, six
+    # fields at once. It was `"ENABLED"` as a `&str` local with no constant naming either value
+    # (issue #24); `ops::HookState` is the typed spelling now and this array is what the gate
+    # reads.
+    c.enum("HookState enum", "HookState", src.get("HOOK_STATES"))
+
+    # Terminal-state sets are subsets rather than equalities, so they get their own
+    # comparison: the check is that every member is a real state, which is what
+    # catches a typo'd or removed spelling.
+    model_states = set(c.shape("MicrovmState")["enum"])
+    for label, ours in (
+        ("TERMINAL_STATES ⊆ MicrovmState", src.get("TERMINAL_STATES")),
+        ("DEAD_STATES ⊆ MicrovmState", src.get("DEAD_STATES")),
+    ):
+        unknown = sorted(set(ours) - model_states)
+        c.record(
+            label, unknown, [], note="states our code branches on that the model omits"
+        )
+
+    # `IMAGE_READY_STATES` deliberately carries two spellings the enum does not have
+    # (`ACTIVE`, `AVAILABLE`), kept for older API versions. So the model-derived half
+    # is what gets compared — asserting the whole set against the enum would fail
+    # forever, and asserting nothing would let a real removal through.
+    #
+    # The tolerated half is checked too, from the other direction: those two spellings
+    # must stay *absent* from the enum. If AWS adds one, it is no longer a legacy
+    # tolerance and belongs in the model-backed set — and nothing else would say so.
+    ready_enum = set(c.shape("MicrovmImageState")["enum"])
+    unknown_ready = sorted(set(src.get("MODEL_IMAGE_READY_STATES")) - ready_enum)
+    c.record(
+        "MODEL_IMAGE_READY_STATES ⊆ MicrovmImageState",
+        unknown_ready,
+        [],
+        note="tolerated-legacy spellings are held separately, in TOLERATED_IMAGE_READY_STATES",
+    )
+    c.record(
+        "TOLERATED_IMAGE_READY_STATES ∩ MicrovmImageState = ∅",
+        sorted(set(src.get("TOLERATED_IMAGE_READY_STATES")) & ready_enum),
+        [],
+        note="a tolerated spelling the model has adopted is no longer legacy — promote it",
+    )
+
+    # Image name: rejected locally because the create call happens after the upload.
+    c.bound("ImageName max length", "ImageName", "max", src.get("MAX_IMAGE_NAME_LEN"))
+    c.pattern("ImageName pattern", "ImageName", src.get("IMAGE_NAME_PATTERN"))
+
+    # The `Version` shape, which `CreateMicrovmImage.baseImageVersion` and
+    # `RunMicrovm.imageVersion` both use. Issue #24 named `NonBlankString` — the same
+    # `min 1 / max 2048 / [^\s]+` triple — as the model's most-reused unguarded shape, and
+    # these two members are where the client now guards it. Both are checked against
+    # `Version` rather than `NonBlankString`, because that is the shape the two request
+    # members actually name; the two shapes are identical today and checking the wrong one
+    # would pass while pinning nothing about the members in question.
+    c.bound("Version max length", "Version", "max", src.get("MAX_VERSION_LEN"))
+    c.bound("Version min length", "Version", "min", 1)
+    c.pattern("Version pattern", "Version", src.get("VERSION_PATTERN"))
+    # And `NonBlankString`, which now has its **own** two constants rather than borrowing
+    # `Version`'s. The previous shape here checked `MAX_VERSION_LEN` against both shapes and
+    # said so in the label ("same guard"), which was honest while one guard covered both — but
+    # it meant the day AWS moved one, the gate would report drift naming a constant that was
+    # right for the other shape. Two constants, two comparisons, and
+    # `the_version_and_non_blank_shapes_agree_today_and_are_still_two_constants` in the crate is
+    # what says they agree.
+    #
+    # The client sends `CodeArtifact.uri`, `CreateMicrovmImage.baseImageArn`, and
+    # `ListMicrovmImages.nameFilter` as this shape, plus `GetMicrovmImageBuild`'s `buildId` and
+    # `imageVersion` URI members. `require_non_blank` is the guard.
+    c.bound(
+        "NonBlankString max length",
+        "NonBlankString",
+        "max",
+        src.get("MAX_NON_BLANK_LEN"),
+    )
+    c.bound("NonBlankString min length", "NonBlankString", "min", 1)
+    c.pattern("NonBlankString pattern", "NonBlankString", src.get("NON_BLANK_PATTERN"))
+
+    # The two identifier shapes, and the contradiction between them. Twelve URI, body, and
+    # querystring members across every implemented operation; `require_valid_identifier` is the
+    # guard, and it refuses above 256 on the request side.
+    for shape in ("MicrovmIdentifier", "MicrovmImageIdentifier"):
+        c.bound(f"{shape} max length", shape, "max", src.get("MAX_IDENTIFIER_LEN"))
+        c.bound(f"{shape} min length", shape, "min", 1)
+    # `MicrovmImageArn` is a **response** shape — `GetMicrovmResponse.imageArn` and two siblings
+    # — so nothing is guarded against it. It is pinned because the *relationship* is the finding:
+    # the model permits a 2048-character ARN in a response that is illegal as a request
+    # identifier. If AWS ever narrows this to 256 the contradiction is gone, and this line plus
+    # `constants.rs`'s `a_legal_image_arn_can_be_longer_than_a_legal_identifier` are what would
+    # say so.
+    c.bound(
+        "MicrovmImageArn max length",
+        "MicrovmImageArn",
+        "max",
+        src.get("MAX_IMAGE_ARN_LEN"),
+    )
+    c.record(
+        "MicrovmImageArn max > MicrovmImageIdentifier max (the model's own contradiction)",
+        src.get("MAX_IMAGE_ARN_LEN") > src.get("MAX_IDENTIFIER_LEN"),
+        True,
+        note="a legal response value can be an illegal request value; the client refuses on the request side",
+        sides=(src.label, "required"),
+    )
+
+    # Tags, sent on every `CreateMicrovmImage` that carries any and checked by nothing until
+    # issue #24. The key and the value are two shapes with two ceilings and two minima, sharing
+    # one pattern — `require_valid_tags` names which half failed for exactly that reason.
+    c.bound("TagKey max length", "TagKey", "max", src.get("MAX_TAG_KEY_LEN"))
+    c.bound("TagKey min length", "TagKey", "min", 1)
+    c.bound("TagValue max length", "TagValue", "max", src.get("MAX_TAG_VALUE_LEN"))
+    # 0, not 1. An empty tag *value* is legal where an empty key is not, and a guard that used
+    # one rule for both would refuse a legal request.
+    c.bound("TagValue min length", "TagValue", "min", 0)
+    # One pattern, both shapes, checked separately: they are two shapes and the client's one
+    # matcher covers both only for as long as they agree.
+    for shape in ("TagKey", "TagValue"):
+        c.pattern(f"{shape} pattern", shape, src.get("TAG_COMPONENT_PATTERN"))
+
+    # The build-logging pair (issue #98), bound the way the
+    # `RunMicrovmRequestClientTokenString` precedent was: the coverage report named these
+    # shapes unbound, and binding the stream one is what carries the discriminator
+    # arithmetic — the client caps a caller's stream at 495 because it always appends
+    # `/<16 hex>`, and 495 + 17 must equal the shape's max or a legal-looking config is a
+    # ValidationException after the artifact upload.
+    c.bound(
+        "logging.cloudWatch.logGroup max",
+        "CloudWatchLoggingLogGroupString",
+        "max",
+        src.get("MAX_LOG_GROUP_LEN"),
+    )
+    c.bound(
+        "logging.cloudWatch.logGroup min", "CloudWatchLoggingLogGroupString", "min", 1
+    )
+    c.pattern(
+        "logging.cloudWatch.logGroup pattern",
+        "CloudWatchLoggingLogGroupString",
+        src.get("LOG_GROUP_PATTERN"),
+    )
+    c.bound(
+        "logging.cloudWatch.logStream max",
+        "CloudWatchLoggingLogStreamString",
+        "max",
+        src.get("MAX_LOG_STREAM_LEN"),
+    )
+    c.bound(
+        "logging.cloudWatch.logStream min", "CloudWatchLoggingLogStreamString", "min", 1
+    )
+    c.pattern(
+        "logging.cloudWatch.logStream pattern",
+        "CloudWatchLoggingLogStreamString",
+        src.get("LOG_STREAM_PATTERN"),
+    )
+    # The discriminator arithmetic itself, held against the shape's max rather than a
+    # literal: user ceiling + '/' + 16 hex == wire ceiling. If AWS moves the shape, this
+    # names the constant that has to move with it.
+    c.record(
+        "user log-stream ceiling + 17-char discriminator == the shape's max",
+        src.get("MAX_USER_LOG_STREAM_LEN") + 17,
+        model["shapes"]["CloudWatchLoggingLogStreamString"].get("max"),
+        note="the client always appends `/<16 hex>` per create attempt",
+        sides=(src.label, "model"),
+    )
+
+    # `RoleArn`. The pattern was already pinned here, against a literal in this file — moved to
+    # the client because there is a matcher for it now (`is_valid_role_arn`), so the value has a
+    # reader. `buildRoleArn` is the member issue #24 named: its rejection lands after the
+    # artifact upload.
+    c.bound("RoleArn min length", "RoleArn", "min", src.get("MIN_ROLE_ARN_LEN"))
+    c.bound("RoleArn max length", "RoleArn", "max", src.get("MAX_ROLE_ARN_LEN"))
+    c.pattern("RoleArn pattern", "RoleArn", src.get("ROLE_ARN_PATTERN"))
+
+    # `PortNumber`, which bounds `PortSpecification.port` and both ends of a `PortRange`. The
+    # min is the live half — `u16` closes the ceiling — and `with_port(0)` was representable.
+    c.bound("PortNumber min", "PortNumber", "min", src.get("MIN_PORT"))
+    c.bound("PortNumber max", "PortNumber", "max", src.get("MAX_PORT"))
+    # `HooksPortInteger`'s min, checked here where only its max was before. Same reason every
+    # other min is now checked: this client does not use botocore, so a `min` is enforced by the
+    # crate or by nothing.
+    c.bound("hooks.port min", "HooksPortInteger", "min", src.get("MIN_PORT"))
+    # `allowedPorts` is `min: 1` on the list itself, which `mint_auth_token_for` refuses. Held
+    # against a literal because the client's refusal is an emptiness check rather than a
+    # published bound.
+    c.bound("allowedPorts min items", "ListOfPortSpecification", "min", 1)
+
+    # The two values `UpdateMicrovmImageVersion` accepts. A request enum, so a value the model
+    # dropped is a call this client makes and the service refuses.
+    c.enum(
+        "MicrovmImageVersionStatus enum",
+        "MicrovmImageVersionStatus",
+        src.get("IMAGE_VERSION_STATUSES"),
+    )
+
+    # The eight-hour ceiling on a VM's life.
+    c.bound(
+        "maximumDurationInSeconds max",
+        "RunMicrovmRequestMaximumDurationInSecondsInteger",
+        "max",
+        src.get("MAX_DURATION_SEC"),
+    )
+
+    # The 60x gap that makes confusing the two hook families a trap. Each of the six
+    # shapes is checked separately rather than one per family: they are six shapes in
+    # the model and AWS can move one without moving its siblings, which is exactly
+    # the drift a per-family check would hide.
+    for hook in ("Run", "Resume", "Suspend", "Terminate"):
+        c.bound(
+            f"microvmHooks.{hook.lower()}TimeoutInSeconds max",
+            f"MicrovmHooks{hook}TimeoutInSecondsInteger",
+            "max",
+            src.get("MAX_MICROVM_HOOK_TIMEOUT_SEC"),
+        )
+    for hook in ("Ready", "Validate"):
+        c.bound(
+            f"microvmImageHooks.{hook.lower()}TimeoutInSeconds max",
+            f"MicrovmImageHooks{hook}TimeoutInSecondsInteger",
+            "max",
+            src.get("MAX_IMAGE_HOOK_TIMEOUT_SEC"),
+        )
+    c.bound("hooks.port max", "HooksPortInteger", "max", src.get("MAX_HOOK_PORT"))
+
+    # List ceilings. `ResourcesList` max 1 is why "two memory floors" is unaskable.
+    c.bound(
+        "NetworkConnector max length",
+        "NetworkConnector",
+        "max",
+        src.get("MAX_NETWORK_CONNECTOR_LEN"),
+    )
+    c.bound("NetworkConnector min length", "NetworkConnector", "min", 1)
+    c.bound(
+        "NetworkConnectorList max",
+        "NetworkConnectorList",
+        "max",
+        src.get("MAX_NETWORK_CONNECTORS"),
+    )
+    c.bound("ResourcesList max", "ResourcesList", "max", src.get("MAX_RESOURCES"))
+
+    # **Issue #24's wrong-by-10x hazard, pinned.** The image-level egress lists are `max 1`
+    # where the VM-level `NetworkConnectorList` above is `max 10`, and the client's only
+    # connector guard used to be the 10. Reusing it for an image-level list would be wrong by
+    # an order of magnitude in the permissive direction.
+    #
+    # All seven shapes separately rather than one representative, for the reason the six hook
+    # timeouts get seven lines: they are seven shapes in the model and AWS can move one without
+    # moving its siblings, which is exactly the drift a single check would hide.
+    for shape in (
+        "CreateMicrovmImageRequestEgressNetworkConnectorsList",
+        "CreateMicrovmImageResponseEgressNetworkConnectorsList",
+        "GetMicrovmImageVersionOutputEgressNetworkConnectorsList",
+        "MicrovmImageVersionSummaryEgressNetworkConnectorsList",
+        "UpdateMicrovmImageRequestEgressNetworkConnectorsList",
+        "UpdateMicrovmImageResponseEgressNetworkConnectorsList",
+        "UpdateMicrovmImageVersionResponseEgressNetworkConnectorsList",
+    ):
+        c.bound(
+            f"{shape} max",
+            shape,
+            "max",
+            src.get("MAX_IMAGE_EGRESS_CONNECTORS"),
+        )
+    # And the inequality itself, so an edit that collapsed the two constants fails here as well
+    # as in the crate's own test. Held against a literal `True` rather than against a shape,
+    # because "these two model values differ" is a fact about the model that no single shape
+    # states.
+    c.record(
+        "image-level egress max < VM-level NetworkConnectorList max",
+        src.get("MAX_IMAGE_EGRESS_CONNECTORS") < src.get("MAX_NETWORK_CONNECTORS"),
+        True,
+        note="collapsing the two constants is permissive by 10x on the image-level list",
+        sides=(src.label, "required"),
+    )
+
+    # The paginated listings' page-size bounds. The two managed ones are new call sites and
+    # their `maxResults` is `1..=50` like every other listing's — checked because the client
+    # sends no page size on any production path, so a bound that moved would be invisible until
+    # something did.
+    for shape in (
+        "ListManagedMicrovmImagesInputMaxResultsInteger",
+        "ListManagedMicrovmImageVersionsInputMaxResultsInteger",
+        "ListMicrovmImageBuildsInputMaxResultsInteger",
+        "ListMicrovmImageVersionsInputMaxResultsInteger",
+        "ListMicrovmImagesRequestMaxResultsInteger",
+        "ListMicrovmsRequestMaxResultsInteger",
+    ):
+        c.bound(f"{shape} max", shape, "max", MAX_LIST_PAGE_SIZE)
+        c.bound(f"{shape} min", shape, "min", 1)
+    c.bound(
+        "EnvironmentVariableMap max",
+        "EnvironmentVariableMap",
+        "max",
+        MAX_ENVIRONMENT_VARIABLES,
+    )
+
+    # `min: 60` with no max. This comment used to say it was "the one constraint here botocore
+    # *does* enforce locally — so the client adds no check for it", and that was the exemption
+    # issue #24 dismantled: the premise is true of botocore and the conclusion does not apply,
+    # because `microvms-core` signs with `aws-sigv4` and sends with `reqwest` and never touches
+    # `validate.py`. It was inherited from the deleted Python client, where it held. Measured:
+    # `max_idle_sec: 59` reached the wire.
+    #
+    # So it is read from the client now rather than from a literal here, and
+    # `require_idle_duration` is the guard.
+    c.bound(
+        "idlePolicy.maxIdleDurationSeconds min",
+        "IdlePolicyMaxIdleDurationSecondsInteger",
+        "min",
+        src.get("MIN_IDLE_DURATION_SEC"),
+    )
+    # `suspendedDurationSeconds` is `min: 0`, which is why there is no guard for it: every `u32`
+    # satisfies it. Pinned so a future tightening is noticed — if AWS gives this a floor, a
+    # `suspended_sec` this client sends today becomes a rejected launch.
+    c.bound(
+        "idlePolicy.suspendedDurationSeconds min",
+        "IdlePolicySuspendedDurationSecondsInteger",
+        "min",
+        0,
+    )
+
+    # The most expensive incident this repo has had came from not knowing these are
+    # permanent keys. Asserted as a set, so a *fourth* idempotency-token member added
+    # by AWS fails here — a create-shaped call whose token this client does not
+    # randomize is the wedge again.
+    found = {
+        f"{shape}.{member}"
+        for shape, body in model["shapes"].items()
+        for member, spec in body.get("members", {}).items()
+        if spec.get("idempotencyToken")
+    }
+    c.record(
+        "idempotencyToken members", sorted(IDEMPOTENCY_TOKEN_MEMBERS), sorted(found)
+    )
+
+    # All three token shapes, separately. This one earned its place: the coverage
+    # report below named `RunMicrovmRequestClientTokenString` as unbound, and checking
+    # it found that `run`'s token — which defaults its scope to a full image ARN —
+    # exceeded 128 characters for a legal 64-character image name in the
+    # longest-named region. It would have failed the launch on a field the caller
+    # never set. The uncovered list is not decoration.
+    for verb in ("CreateMicrovmImage", "RunMicrovm", "UpdateMicrovmImage"):
+        c.bound(
+            f"{verb}Request.clientToken max",
+            f"{verb}RequestClientTokenString",
+            "max",
+            src.get("MAX_CLIENT_TOKEN_LEN"),
+        )
+
+    # The tokens this client mints against that ceiling are NOT checked here, and that
+    # is not a gap. `crates/microvms-app/src/control/token.rs` asserts the property in-crate —
+    # `the_worst_legal_scope_fits_the_hundred_twenty_eight_character_ceiling` mints
+    # against the worst legal 64-character-image-name ARN in the longest-named region —
+    # and it does it better, because it can also pin the arithmetic behind the cap. This
+    # script used to run it too, through the Python client's minters; exporting a minter
+    # through `constants --emit-json` so it could keep doing so would put a nonce in a
+    # drift dump for no gain. The check is a length bound, and the crate that owns the
+    # minting is the right place to bound it.
+
+    # `MICROVM_REGIONS` cannot be checked against the model at all, and saying so is the
+    # point. The model states no region list, and the two botocore calls that look like
+    # they might substitute for one disagree: get_available_endpoints returns an empty
+    # list while get_available_regions returns all 34 Lambda regions, since
+    # `endpointPrefix` is `lambda`. Neither is the five-region truth.
+    #
+    # So this compares the client against `PINNED_REGIONS` — a literal in this file. It
+    # was the Python-vs-Rust cross-comparison until that client was deleted, and what is
+    # left in its place has to be a *second reader*: the previous shape here compared
+    # `len(src.get(...))` against itself, which was honest while the cross-check carried
+    # the real assertion and is vacuous without it.
+    c.record(
+        "MICROVM_REGIONS",
+        src.get("MICROVM_REGIONS"),
+        sorted(PINNED_REGIONS),
+        note="NOT model-backed: measured 2026-08-07, held against this script's literal",
+        sides=(src.label, "pinned here"),
+    )
+    # Same status, same reason, same replacement: the five-row sizing table is read from
+    # AWS documentation and two measured rows (512 → ~2 GB guest, 2048 → ~8 GB), not from
+    # any model shape. TRAP-13 is why the rows are read rather than computed as 4x the
+    # baseline.
+    c.record(
+        "SIZE_CLASSES",
+        src.get("SIZE_CLASSES"),
+        normalize("SIZE_CLASSES", PINNED_SIZE_CLASSES),
+        note="NOT model-backed: documented table, two rows measured 2026-08-07 (TRAP-13)",
+        sides=(src.label, "pinned here"),
+    )
+
+    # Not a constant of the client's: the ratchet's rule that keeps operation names out of the
+    # adapters. Appended rather than recorded, so it carries no client label.
+    c.results.append(operations_result(OPERATION_RULE, model))
+
+    return c
+
+
+# `cross_check` lived here: every constant compared between the two clients rather than
+# against the model. It went with the Python client. What it uniquely covered —
+# `MICROVM_REGIONS` and `SIZE_CLASSES`, the two values no model shape states — is now
+# covered by `PINNED_REGIONS` and `PINNED_SIZE_CLASSES` inside `check`, which is a second
+# reader rather than a second client. Everything else it covered is still covered by the
+# model comparison it ran alongside.
+
+
+#: Constraints below are held here rather than imported because nothing in the
+#: client hardcodes them yet. They are still worth pinning: each one is a ceiling a
+#: future caller could cross, and a pinned value that turns out to differ from the
+#: model is how we learn the model moved. Keeping them here rather than dropping
+#: them is the difference between a checker that covers what we use and one that
+#: covers what the service states.
+#
+# Six names left this block for issue #24: the five state enums and `MIN_IDLE_DURATION_SEC`.
+# They were the ones this comment's own caveat applied worst to — a literal here made the gate
+# compare the model against *this script*, with no reader in the client at all, so a respelled
+# `MicrovmState` failed the gate and had no consequence for the polling loops that branch on
+# states. They live in `crates/microvms-domain/src/constants.rs` now, where a subset assertion names the
+# loop. `ROLE_ARN_PATTERN` went the same way once there was a matcher to read it.
+#
+# What is left here is genuinely unbound by the client, and each one says why at its use site.
+MAX_ENVIRONMENT_VARIABLES = 50
+#: Every paginated listing's `maxResults` ceiling, all six identical today.
+#:
+#: Held here rather than in `microvms-core`'s constants because no production path sends a page
+#: size at all: `paths::image_versions_paged` is the one function that can, its only caller is
+#: `tests/live_pagination.rs`, and it clamps to `1..=50` against a literal in `transport.rs`. So
+#: the client's copy of this bound is a clamp in a test-only path, and the honest thing is to pin
+#: the model's value here rather than to publish a constant nothing production reads.
+MAX_LIST_PAGE_SIZE = 50
+IDEMPOTENCY_TOKEN_MEMBERS = (
+    "CreateMicrovmImageRequest.clientToken",
+    "RunMicrovmRequest.clientToken",
+    "UpdateMicrovmImageRequest.clientToken",
+)
+
+
+def uncovered(model: dict[str, Any], touched: set[str]) -> list[str]:
+    """Shapes the model constrains that no check above binds to our code.
+
+    The honest half of the report. A checker that prints only its passes cannot be
+    distinguished from one that checks three things, and the reader's next question —
+    "what did you not look at?" — has to be answerable without reading the source.
+    """
+    constrained = {
+        name
+        for name, body in model["shapes"].items()
+        if {"enum", "min", "max", "pattern"} & set(body)
+    }
+    return sorted(constrained - touched)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="list every constraint the model states that no check binds",
+    )
+    parser.add_argument(
+        "--rust-binary",
+        type=Path,
+        help=(
+            "read the Rust constants from this `microvm` binary instead of through "
+            "`cargo run`. Faster, at the cost of comparing whatever that binary was "
+            "built from"
+        ),
+    )
+    parser.add_argument(
+        "--rust-json",
+        type=Path,
+        help=(
+            "read the Rust constants from a JSON file. For the guard proof: doctoring a "
+            "value here proves this gate fails on a Rust-side drift without editing a "
+            "crate. Not a normal mode — a hand-written file is not what ships"
+        ),
+    )
+    args = parser.parse_args()
+
+    repo = REPO
+    model, path = load_model()
+
+    # One source, and no flag that can skip it. `--skip-rust` used to exist for a
+    # Python-only checkout; with the Python client deleted, skipping this would leave the
+    # gate comparing nothing and reporting no drift, which is the one outcome the
+    # docstring above forbids.
+    if args.rust_json:
+        text = args.rust_json.read_text()
+        source = Source(
+            label="rust",
+            origin=f"{args.rust_json} (--rust-json)",
+            values=parse_rust_object(text, str(args.rust_json)),
+        )
+    elif args.rust_binary:
+        source = read_rust_source(
+            [str(args.rust_binary), "constants", "--emit-json"], repo
+        )
+    else:
+        source = read_rust_source(RUST_SOURCE_ARGV, repo)
+
+    # The API version before anything is compared. A constraint checked against a
+    # different model version is a constraint that was not checked, so this is a hard
+    # stop rather than a drift line among thirty others.
+    if source.get("MODEL_API_VERSION") != API_VERSION:
+        print(
+            f"DRIFT the {source.label} client's MODEL_API_VERSION is "
+            f"{source.get('MODEL_API_VERSION')!r} but this script compares against "
+            f"{API_VERSION!r} ({source.origin})"
+        )
+        return 1
+
+    checker = check(source, model)
+    results = checker.results
+    touched = checker.touched
+    drifted = [r for r in results if not r.ok]
+    missing = uncovered(model, touched)
+
+    print(f"service model: {SERVICE} {API_VERSION}")
+    print(f"  from: {path}")
+    print("\n1 client compared:")
+    print(f"  {source.label:7} {source.origin}")
+    print(f"\n{len(results)} constraint(s) compared:")
+    for result in results:
+        mark = "ok  " if result.ok else "DRIFT"
+        line = f"  {mark} {result.name}"
+        if not result.ok:
+            left, right = result.sides
+            width = max(len(left), len(right))
+            line += (
+                f"\n        {left:<{width}}: {result.ours!r}"
+                f"\n        {right:<{width}}: {result.model!r}"
+            )
+        elif result.note:
+            line += f"  ({result.note})"
+        print(line)
+
+    print(f"\n{len(missing)} constrained shape(s) the model states and no check binds:")
+    if args.verbose:
+        for name in missing:
+            body = model["shapes"][name]
+            stated = {
+                k: v for k, v in body.items() if k in ("enum", "min", "max", "pattern")
+            }
+            print(f"  -- {name} {stated}")
+    else:
+        print(f"  {', '.join(missing[:8])}{', ...' if len(missing) > 8 else ''}")
+        print("  (--verbose for all, with the value each one states)")
+    print(
+        "  These are constraints AWS states that nothing in the client is pinned to.\n"
+        "  Not a failure — most are response-only or unused shapes — but they are the\n"
+        "  answer to 'what did this not check', and that answer has to be printable."
+    )
+
+    if drifted:
+        print(
+            f"\n{len(drifted)} constraint(s) drifted. Either the model moved, one of our"
+        )
+        print("values was wrong, or a value the model cannot state disagrees with this")
+        print(
+            "script's pinned copy of it. Read the model, fix the constant, and re-measure"
+        )
+        print("if it is a ceiling.")
+        return 1
+    print(
+        f"\nno drift: {len(results)} constraint(s) agree across {source.label} and the "
+        "shipped model"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

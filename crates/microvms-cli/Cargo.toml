@@ -1,0 +1,180 @@
+[package]
+name = "microvms-cli"
+version = "0.10.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = true
+description = "the `microvm` binary: a working sandbox in one command, and nothing microvms-core does not do"
+readme = "README.md"
+keywords = ["microvms", "lambda", "aws", "sandbox", "cli"]
+categories = ["command-line-utilities", "virtualization"]
+
+# ── no lib target, deliberately (ARCH-5) ────────────────────────────────────
+#
+# There is exactly one `[[bin]]` below and no `src/lib.rs`, so this crate exports
+# nothing a binding could depend on. That absence *is* ARCH-5's witness ("nothing a
+# binding needs lives in the CLI") and it is asserted mechanically:
+# `tests/dependency_direction.rs` reads `cargo metadata` and fails if a `lib` target
+# ever appears here. Compare the alternative — a lib target with a doc comment asking
+# people not to use it — which is a request rather than a property.
+[[bin]]
+name = "microvm"
+path = "src/main.rs"
+
+# ── no second path to AWS (CLI-2, AC-5-4) ───────────────────────────────────
+#
+# There is no `reqwest`, no `aws-*`, no `hyper`, no `aws-sigv4` here, and there cannot
+# be one: `tests/thinness.rs` reads this manifest through `cargo metadata` and refuses
+# any crate that could open a socket to AWS or sign a request outside `microvms-core`.
+# That is the whole rule. Dependencies are otherwise welcome — a maintained crate beats
+# hand-rolled code, and nothing polices this manifest's size.
+#
+# The CLI reaches AWS through `microvms-core` and through nothing else. That is
+# CLI-2, and the honest way to state it is a denylist a test can read.
+[dependencies]
+# The whole product surface. Every AWS call, every trap closure, the cost engine,
+# and the error taxonomy the exit table is a rendering of.
+microvms-core = { version = "0.10.0", path = "../microvms-core" }
+# No direct `protocol` edge: the wire types are named through
+# `microvms_core::protocol::` (core's re-export), so this crate has exactly one
+# door to everything below it. The direct edge existed while core lacked the
+# re-export and was retired as the "fine future cleanup" its own comment named.
+# 4.6.6 was the registry's max_stable_version on 2026-08-08 (research-cli.yaml).
+# `derive` because the command tree is the manifest's only source: a builder tree
+# would be a second place the surface is written down.
+clap = { version = "4.6.6", features = ["derive"] }
+# The interactive surface (CLI-1). Default features keep the crossterm backend, which
+# is what `ratatui::init`/`restore` use and what installs the panic hook that
+# un-wedges a terminal (research-cli.yaml sources [8][9]).
+ratatui = "0.30.2"
+# The envelope. Hand-rolling the JSON was considered and rejected: the envelope has a
+# string field carrying a service error message, and hand-escaping that is how a
+# quote in an AWS error breaks an agent's parse.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# `rt-multi-thread` because this crate *is* the process and therefore is the thing
+# entitled to choose a runtime — `microvms-core` deliberately does not (its tokio
+# entry carries no runtime feature). `signal` is CLI-6's interrupt: `ctrl_c()` is a
+# future the launch path selects against, which is what makes the guard testable
+# without sending a real signal to a test process.
+# `io-std` is `shell`'s: the PTY passthrough reads raw keystrokes from stdin and
+# writes terminal bytes to stdout as async streams, and tokio's wrappers are the
+# maintained way to do that without hand-rolling a blocking-thread pump.
+tokio = { version = "1.53", features = [
+    "rt-multi-thread",
+    "macros",
+    "signal",
+    "time",
+    "io-std",
+] }
+# The project config file (`microvm.toml`, issue #73). Parse-only in practice:
+# `toml::from_str` into a serde struct with `deny_unknown_fields`, so a typo'd key is
+# a refusal rather than a silently ignored setting. The config file is a CLI-surface
+# concern — core deliberately knows nothing about where its arguments come from —
+# which is why the dependency lands here rather than in `microvms-core`.
+toml = "1"
+# Artifact-glob validation and matching (`artifacts = ["dist/**"]` in microvm.toml,
+# issues #73/#72). `doctor` compiles every declared glob so a bad pattern is a finding
+# before a run spends a launch on it, and `run <DIR>` selects downloaded members with
+# the same compiled set — one grammar, validated and consumed by the same crate.
+globset = "0.4"
+# `run <DIR>` sync mode (issue #72): pack the project directory for upload, and unpack
+# the glob-selected *regular-file* members of the returned archive. The daemon stays
+# the only tree extractor for uploads (its openat2 confinement, `crates/agentd/src/fs.rs`);
+# this side extracts only members it selected, via `unpack_in`'s traversal refusal.
+# Same version agentd carries, so the lock gains no second copy.
+tar = "0.4.46"
+# Terminal cell widths for the TUI's column sizing. Already in the tree under
+# ratatui; naming it directly is what lets column_widths measure display cells
+# rather than chars — a CJK glyph is two cells, and chars().count() under-sizes
+# the column it sits in.
+unicode-width = "0.2"
+# Content hashes for `sync` (`sync.rs`): the file-tree manifest that decides which bytes
+# move. In-process rather than shelled to `sha256sum`, which does not exist on Windows;
+# the same version core's artifact hash uses, so the lock gains no second copy. NOT a
+# second path to AWS: hashing is arithmetic. `const-hex` renders the digest the way
+# core's artifact hash does — sha2 0.11's output type carries no LowerHex impl.
+sha2 = "0.11"
+const-hex = "1.19"
+# `sync --watch` (issue #71): filesystem events for the live edit loop. The
+# cross-platform watcher the ecosystem settled on (inotify/FSEvents/ReadDirectory-
+# ChangesW behind one API) — hand-rolling any one of those would be a platform's
+# worth of edge cases for one flag. NOT a second path to AWS: it watches the local
+# tree, and the bytes still travel through `microvms-core`'s session like every
+# other upload. Correctness never depends on its event stream — every event only
+# triggers a re-hash, and the hash compare is what decides whether bytes move.
+notify = "8"
+
+# ── the fast install path (issue #76) ───────────────────────────────────────
+#
+# `cargo binstall microvms-cli` resolves these templates against the GitHub release's
+# `microvm-<target>` archives instead of compiling for minutes. The asset name is the
+# *binary's* name, spelled here and in release.yml's `cli` job, and the two must move
+# together — binstall fails with a 404 naming the URL when they drift. Windows ships a
+# zip because nothing there consumes tar; every other target is a tar.gz.
+#
+# Homebrew was considered for the same job and declined: a formula or tap is a second
+# repository with its own release cadence to maintain, and binstall + these assets +
+# `cargo install` already cover macOS. Recorded here and on issue #76 so the next person
+# does not re-litigate it from scratch.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/microvm-{ target }{ archive-suffix }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
+
+[dev-dependencies]
+# The same core, with the shared test doubles (`microvms_core::testing`) the guards script it
+# through. The version is here because `check-publishable.py` refuses a versionless path
+# dependency of any kind, and resolver 3 keeps the feature out of a normal build.
+microvms-core = { version = "0.10.0", path = "../microvms-core", features = ["test-support"] }
+# Temp files/dirs for the test suites: random names with O_EXCL creation and
+# guaranteed cleanup on drop. Replaces eight hand-rolled pid+thread-id helpers
+# that deleted-then-created by fixed name.
+tempfile = "3"
+# The structural guards read the real dependency graph rather than parsing TOML:
+# `cargo metadata` resolves path dependencies and workspace inheritance, so an edge
+# added transitively or through a renamed key is still an edge this sees. Parsing
+# `Cargo.toml` by hand would check the file, not the build.
+cargo_metadata = "0.23.1"
+# The same tokio, with the test clock — the same entry again, not a new edge.
+#
+# `test-util` is what `#[tokio::test(start_paused = true)]` needs. One guard requires
+# it: the cut-stream test drives core's reconnect loop, which backs off up to four
+# seconds across twenty attempts, so a real clock spends about a minute inside one
+# test. `mise run check` is a pre-push gate, and a gate that costs a minute for one
+# assertion is a gate people learn to skip.
+#
+# A dev-dependency rather than a feature on the normal entry, deliberately: under
+# resolver 3 a dev-only feature is not unified into a non-test build, so `cargo build`
+# ships a binary with no test clock in it. Enabling `test-util` on the normal entry
+# would put tokio's time-manipulation surface in the shipped artifact for a test's
+# benefit, which is the same trade `envelope.rs` refuses with `into_streams` being
+# `cfg(test)`.
+tokio = { version = "1.53", features = ["test-util"] }
+# The behavior spec for CLI-7..9 (#216): Gherkin scenarios in `tests/features/`, run by
+# `tests/bdd.rs` against the real binary, tagged with the requirement each one verifies.
+# Rust rather than Python's behave so it runs under `cargo test` on all three CI systems.
+# `output-junit` writes a report when `CUCUMBER_JUNIT` names a file.
+cucumber = { version = "0.23", features = ["output-junit"] }
+# The fuzz harness for the output layer (#216). `bolero::check!` runs as an ordinary
+# `#[test]` on stable and as a coverage-guided target under `cargo bolero test`, which is
+# what this crate needs: it has no lib target (ARCH-5), so a separate fuzz crate could not
+# link the `Output` type it exercises.
+bolero = "0.13"
+# The Rust lexer the thinness scan reads source through (#277), already in the graph under the
+# derive macros. A hand-rolled quote tracker took a `'"'` char literal for a string delimiter
+# and read the rest of the file inside out, which hid a real seam bypass. A lexer that follows
+# the language's token rules can't make that mistake. `span-locations` gives each token its line
+# and column, so a failure still names a line.
+proc-macro2 = { version = "1.0.107", features = ["span-locations"] }
+
+[[test]]
+name = "bdd"
+harness = false
+
+[lints.rust]
+# No hand-written `unsafe` in this crate; a future one is a build error, not a scan finding.
+unsafe_code = "forbid"

@@ -1,0 +1,169 @@
+# ── fix round 1 (#315 reviews): every uvx spelling, uv, `uses:` steps, unmodeled keys ──
+# 
+# The falsifier's spellings: an option before the tool, `--from`, `uv tool run`. Each runs
+# another ruff on CI, and the old `uvx <tool>@X` pattern read none of them.
+[[fault]]
+id = "ci-parity-uvx-option-first"
+guard = "tools/check-ci-parity.py"
+run = ["./tools/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ruff: ci.yml job `rust` step `background coding example` runs 0.1.0, and mise.toml pins"
+transform = { file = ".github/workflows/ci.yml", replace = "uvx ruff@0.15.22 check examples/background-coding-agent", with = "uvx -q ruff@0.1.0 check examples/background-coding-agent" }
+
+[[fault]]
+id = "ci-parity-uvx-from"
+guard = "tools/check-ci-parity.py"
+run = ["./tools/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ruff: ci.yml job `rust` step `background coding example` runs 0.1.0, and mise.toml pins"
+transform = { file = ".github/workflows/ci.yml", replace = "uvx ruff@0.15.22 check examples/background-coding-agent", with = "uvx --from ruff==0.1.0 ruff check examples/background-coding-agent" }
+
+[[fault]]
+id = "ci-parity-uv-tool-run"
+guard = "tools/check-ci-parity.py"
+run = ["./tools/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ruff: ci.yml job `rust` step `background coding example` runs 0.1.0, and mise.toml pins"
+transform = { file = ".github/workflows/ci.yml", replace = "uvx ruff@0.15.22 check examples/background-coding-agent", with = "uv tool run ruff@0.1.0 check examples/background-coding-agent" }
+
+[[fault]]
+id = "ci-parity-uvx-unreadable"
+guard = "tools/check-ci-parity.py"
+run = ["./tools/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "can't be read; write it as `uvx <tool>@X.Y.Z`"
+transform = { file = ".github/workflows/ci.yml", replace = "uvx ruff@0.15.22 check examples/background-coding-agent", with = "uvx 'ruff@0.15.22 check examples/background-coding-agent" }
+
+[[fault]]
+id = "ci-parity-unit-uvx-valued"
+guard = "test_check_ci_parity.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_ci_parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_uvx_spelling_is_compared ("
+transform = { file = "tools/check-ci-parity.py", replace = "        elif name in UVX_VALUED and not eq:\n", with = "        elif False:\n" }
+
+[[fault]]
+id = "ci-parity-task-pin"
+guard = "tools/check-ci-parity.py"
+run = ["./tools/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ruff: mise.toml [tasks.'docs:links'] tools pins `ruff` = '0.1.0', and [tools] pins"
+transform = { file = "mise.toml", replace = "tools = { \"aqua:lycheeverse/lychee\" = \"0.24.2\" }", with = "tools = { \"aqua:lycheeverse/lychee\" = \"0.24.2\", ruff = \"0.1.0\" }" }
+
+[[fault]]
+id = "ci-parity-uv-unpinned"
+guard = "tools/check-ci-parity.py"
+run = ["./tools/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "has no `version` input, so it runs the latest release"
+transform = { file = ".github/workflows/ci.yml", replace = "          version: \"0.12.13\" # mise.toml's uv; ci:parity compares them\n          enable-cache: false\n      # For the capability table's check (#271)", with = "          enable-cache: false\n      # For the capability table's check (#271)" }
+
+[[fault]]
+id = "ci-parity-uv-mise-side"
+guard = "tools/check-ci-parity.py"
+run = ["./tools/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "and mise.toml pins 0.12.14"
+transform = { file = "mise.toml", replace = "uv = \"0.12.13\"", with = "uv = \"0.12.14\"" }
+
+# A lint shipped as an action, in a job ci:local runs (the critic's `typos` probe).
+[[fault]]
+id = "ci-parity-uses-uncovered"
+guard = "tools/check-ci-parity.py"
+run = ["./tools/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml job `drift` step `typos` runs the action `crate-ci/typos`, which ci/local.toml neither lists"
+transform = { file = ".github/workflows/ci.yml", replace = "      - run: uvx ruff@0.15.22 format --check .\n", with = "      - run: uvx ruff@0.15.22 format --check .\n      - name: typos\n        uses: crate-ci/typos@0000000000000000000000000000000000000000\n" }
+
+[[fault]]
+id = "ci-parity-actions-stale"
+guard = "tools/check-ci-parity.py"
+run = ["./tools/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "[actions] names `actions/cache`, which no step ci:local runs uses"
+transform = { file = "ci/local.toml", replace = "[actions]\n", with = "[actions]\n\"actions/cache\" = \"a cache\"\n" }
+
+[[fault]]
+id = "ci-parity-job-key"
+guard = "tools/check-ci-parity.py"
+run = ["./tools/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml job `drift` sets `if`, which ci:local doesn't model"
+transform = { file = ".github/workflows/ci.yml", replace = "    name: hardcoded constraints match the service model\n    runs-on: ubuntu-latest\n", with = "    name: hardcoded constraints match the service model\n    runs-on: ubuntu-latest\n    if: github.event_name == 'push'\n" }
+
+[[fault]]
+id = "ci-parity-step-key"
+guard = "tools/check-ci-parity.py"
+run = ["./tools/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "sets `continue-on-error`, which ci:local doesn't model"
+transform = { file = ".github/workflows/ci.yml", replace = "      - run: uvx ruff@0.15.22 format --check .\n", with = "      - run: uvx ruff@0.15.22 format --check .\n        continue-on-error: true\n" }
+
+[[fault]]
+id = "ci-parity-top-defaults"
+guard = "tools/check-ci-parity.py"
+run = ["./tools/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml sets top-level `defaults`, which ci:local doesn't model"
+transform = { file = ".github/workflows/ci.yml", replace = "\njobs:\n", with = "\ndefaults:\n  run:\n    shell: sh\njobs:\n" }
+
+[[fault]]
+id = "ci-parity-runs-on"
+guard = "tools/check-ci-parity.py"
+run = ["./tools/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml job `drift` runs on `macos-latest`, and ci:local runs Linux jobs only"
+transform = { file = ".github/workflows/ci.yml", replace = "    name: hardcoded constraints match the service model\n    runs-on: ubuntu-latest\n", with = "    name: hardcoded constraints match the service model\n    runs-on: macos-latest\n" }
+
+# The floors for the two new readers: a uv-call pattern that matches nothing, and a step reader
+# that never sees a `uses:` step, each fail by name instead of comparing nothing.
+[[fault]]
+id = "ci-parity-uvx-sentinel"
+guard = "tools/check-ci-parity.py"
+run = ["./tools/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ruff: found nowhere in ci.yml"
+transform = { file = "tools/check-ci-parity.py", replace = "UV_CALL = re.compile(r\"(?<![\\w./-])(uvx|uv\\s+tool\\s+run)(?=\\s)\")", with = "UV_CALL = re.compile(r\"(?<![\\w./-])(uvxx|uv\\s+tool\\s+runx)(?=\\s)\")" }
+
+[[fault]]
+id = "ci-parity-uses-sentinel"
+guard = "tools/check-ci-parity.py"
+run = ["./tools/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "[actions] names `actions/checkout`, which no step ci:local runs uses"
+transform = { file = "tools/check-ci-parity.py", replace = "        if \"uses\" not in step or label in listed:\n            continue\n", with = "        if True:\n            continue\n" }
+
+# A timed-out step killed first, before the signal it cleans up on (the gauntlet's finding).
+[[fault]]
+id = "ci-local-unit-timeout-grace"
+guard = "test_ci_local.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ci_local.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_timed_out_step_gets_a_signal_it_can_clean_up_on ("
+transform = { file = "tools/ci-local.py", replace = "ESCALATION = ((signal.SIGINT, 7.5), (signal.SIGTERM, 2.5), (signal.SIGKILL, None))", with = "ESCALATION = ((signal.SIGKILL, None),)" }
+
+[[fault]]
+id = "ci-local-unit-keep-failed"
+guard = "test_ci_local.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ci_local.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "test_a_failed_jobs_tree_outlives_the_next_jobs_clone ("
+transform = { file = "tools/ci-local.py", replace = "            if results[-1][\"status\"] != \"passed\":\n                keep_failed(", with = "            if False:\n                keep_failed(" }

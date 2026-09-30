@@ -398,7 +398,7 @@ export default defineConfig({
             { label: "Exit codes", link: "/reference/exit-codes/" },
             { label: "Response types", link: "/reference/response-types/" },
             { label: "Wire schema", link: "/reference/wire-schema/" },
-            // Generated from the git history of `ratchet/drift.json` (`scripts/reference/drift.mjs`).
+            // Generated from the git history of `verify/ratchet/drift.json` (`scripts/reference/drift.mjs`).
             { label: "Architecture drift", link: "/reference/architecture-drift/" },
             {
               /*
@@ -413,7 +413,7 @@ export default defineConfig({
             {
               /*
                * The two SDKs, written by `scripts/gen-reference.mjs` from the committed declaration
-               * files: Griffe over `microvms-py/microvms.pyi`, TypeDoc over `microvms-js/index.d.ts`.
+               * files: Griffe over `bindings/microvms-py/microvms.pyi`, TypeDoc over `bindings/microvms-js/index.d.ts`.
                * The class and interface lists autogenerate for the reason the commands do: a class
                * added to a binding reaches the rail on the run that publishes its page.
                */

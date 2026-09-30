@@ -1,0 +1,170 @@
+# ── parity: the capability table's gate (#271) ──────────────────────────────
+
+# The issue's three deliberate breaks: a stub method gone (rule (b)), a sentinel's cell gone
+# (rule (c)), and the Griffe step pointed at an empty stub (the sentinels).
+[[fault]]
+id = "parity-stub-file-exists"
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "file-exists: py: Session.file_exists isn't on the surface"
+transform = { file = "bindings/microvms-py/microvms.pyi", replace = "    def file_exists(self, /, path: str) -> bool:\n        \"\"\"\n        Whether a path exists, distinguishing absence from every other refusal.\n        \"\"\"\n", with = "" }
+
+[[fault]]
+id = "parity-health-ts-cell"
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "health: ts: no cell; name the surface or exempt it"
+transform = { file = "verify/parity/capabilities.toml", replace = "py = \"Session.health\"\nts = \"Session.health\"\n", with = "py = \"Session.health\"\n" }
+
+[[fault]]
+id = "parity-empty-pyi"
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "sentinel launch: py: Sandbox.run isn't on the surface"
+argv_fault = ["--pyi", "verify/parity/fixtures/empty.pyi"]
+
+# Every other input empty, and each reader returning nothing from a real input.
+[[fault]]
+id = "parity-empty-dts"
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "sentinel launch: ts: Sandbox.run isn't on the surface"
+argv_fault = ["--dts", "verify/parity/fixtures/empty.d.ts"]
+
+[[fault]]
+id = "parity-empty-manifest"
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "sentinel launch: cli: run isn't on the surface"
+argv_fault = ["--manifest", "verify/parity/fixtures/empty.json"]
+
+[[fault]]
+id = "parity-empty-core-api"
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "sentinel launch: core: microvms_core::sandbox::Sandbox::run isn't on the surface"
+argv_fault = ["--core-api", "verify/parity/fixtures/empty.json"]
+
+[[fault]]
+id = "parity-empty-table"
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "table: no [[capability]] rows"
+argv_fault = ["--table", "verify/parity/fixtures/empty.toml"]
+
+[[fault]]
+id = "parity-py-reader-empty"
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "sentinel run-report: py: run_report isn't on the surface"
+transform = { file = "tools/check-parity.py", replace = "        if dunder(name):\n", with = "        if name:\n" }
+
+# A TypeDoc whose JSON moved its members under another key reads as an empty project.
+[[fault]]
+id = "parity-ts-reader-empty"
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "sentinel run-report: ts: runReport isn't on the surface"
+transform = { file = "tools/check-parity.py", replace = "    read_ts_children(project.get(\"children\") or [], \"\", surface)\n", with = "    read_ts_children(project.get(\"members\") or [], \"\", surface)\n" }
+
+[[fault]]
+id = "parity-typedoc-pin"
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "here and 0.28.21 in site/package.json"
+transform = { file = "site/package.json", replace = "    \"typedoc\": \"0.28.20\",\n", with = "    \"typedoc\": \"0.28.21\",\n" }
+
+# Rule (a) and the type pairing over the real surfaces: a row pointed away from the method it
+# mapped, and an exempt member deleted.
+[[fault]]
+id = "parity-row-unmapped"
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "py: RateTable.age_days belongs to no row"
+transform = { file = "verify/parity/capabilities.toml", replace = "py = \"RateTable.age_days\"\n", with = "py = \"RateTable.staleness\"\n" }
+
+[[fault]]
+id = "parity-exempt-member-deleted"
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "type Session: ts: spawn has no Python twin and no exemption"
+transform = { file = "verify/parity/capabilities.toml", replace = "name = \"Session\"\nexempt_members.ts = { spawn = { exempt = \"Python has no split-stream spawn\", issue = \"#261\" } }\n", with = "name = \"Session\"\n" }
+
+# The self-test's named cases, each against the code that makes it pass.
+[[fault]]
+id = "parity-test-unmapped-function"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_unmapped_python_function_fails ("
+transform = { file = "tools/check-parity.py", replace = "        for name in sorted(surface.functions - covered):\n", with = "        for name in sorted(surface.functions & covered):\n" }
+
+[[fault]]
+id = "parity-test-missing-name"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_row_naming_a_typescript_method_that_does_not_exist_fails ("
+transform = { file = "tools/check-parity.py", replace = "return None if name in surface.names else f\"{name} isn't on the surface\"", with = "return None" }
+
+[[fault]]
+id = "parity-test-missing-cell"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_missing_cli_cell_with_no_exemption_fails ("
+transform = { file = "tools/check-parity.py", replace = "                problems.append(f\"{where}: no cell; name the surface or exempt it\")\n", with = "" }
+
+[[fault]]
+id = "parity-test-empty-reason"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_exemption_with_an_empty_reason_fails ("
+transform = { file = "tools/check-parity.py", replace = "    if not isinstance(reason, str) or not reason.strip():\n", with = "    if not isinstance(reason, str):\n" }
+
+[[fault]]
+id = "parity-test-issue-form"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_issue_that_is_not_a_number_fails ("
+transform = { file = "tools/check-parity.py", replace = "ISSUE = re.compile(r\"#[1-9][0-9]*\")", with = "ISSUE = re.compile(r\".+\")" }
+
+[[fault]]
+id = "parity-test-empty-sentinel"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_empty_griffe_dump_fails_on_the_sentinels ("
+transform = { file = "tools/check-parity.py", replace = "                        f\"sentinel {row_id}: {key}: {why}\"\n", with = "                        f\"{row_id}: {key}: {why}\"\n" }

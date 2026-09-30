@@ -12,7 +12,7 @@ class Envelope:
     """One `--json` invocation's whole stdout, parsed.
 
     Every field unconditional on the failure side, which is the CLI's own contract
-    (`microvms-cli/src/envelope.rs:24`: "A key that appears conditionally is a key
+    (`crates/microvms-cli/src/envelope.rs:24`: "A key that appears conditionally is a key
     every consumer has to guard"). This dataclass takes it at its word and reads them
     directly, so a field that goes missing is a `KeyError` here rather than a `None`
     that flows into an assertion and passes.
@@ -73,7 +73,7 @@ class KindError(Exception):
     **Why the kind and not the code.** `Results.raises` in the deleted oracle asserted the client
     exception *type* — `Conflict` versus `NotFound` — because "a 404 arriving where a
     400 belongs fails here as loudly as it should". The CLI's exit code cannot carry
-    that: `microvms-cli/src/exit.rs:40` collapses five `WireKind`s onto one
+    that: `crates/microvms-cli/src/exit.rs:40` collapses five `WireKind`s onto one
     `ERR_PROTOCOL` deliberately, since "a shell branching on `$?` cannot act
     differently on a 400 than on a 409".
 

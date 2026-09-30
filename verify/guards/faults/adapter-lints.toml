@@ -1,0 +1,263 @@
+# ── #273's clippy bans, the adapter-logic hard gate and model:check's operations ─
+
+[[fault]]
+id = "adapter-lint-exact-list"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_adapter_bans_exactly_its_listed_paths ("
+transform = { file = "bindings/microvms-py/clippy.toml", replace = "  { path = \"microvms_core::control::transport::send_accepting\", reason = \"a control-plane call belongs in microvms-app, which names the operation, builds the request and owns retries; call the ControlPlane method that wraps it\" },\n", with = "" }
+
+[[fault]]
+id = "adapter-lint-transport-cli"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_adapter_refuses_each_transport_call ("
+transform = { file = "crates/microvms-cli/clippy.toml", replace = "  { path = \"microvms_core::control::transport::Call::get\", reason = \"a control-plane call belongs in microvms-app, which names the operation, builds the request and owns retries; call the ControlPlane method that wraps it\" },\n", with = "" }
+
+[[fault]]
+id = "adapter-lint-transport-py"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_adapter_refuses_each_transport_call ("
+transform = { file = "bindings/microvms-py/clippy.toml", replace = "  { path = \"microvms_core::control::transport::Call::get\", reason = \"a control-plane call belongs in microvms-app, which names the operation, builds the request and owns retries; call the ControlPlane method that wraps it\" },\n", with = "" }
+
+[[fault]]
+id = "adapter-lint-transport-js"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_adapter_refuses_each_transport_call ("
+transform = { file = "bindings/microvms-js/clippy.toml", replace = "  { path = \"microvms_core::control::transport::Call::get\", reason = \"a control-plane call belongs in microvms-app, which names the operation, builds the request and owns retries; call the ControlPlane method that wraps it\" },\n", with = "" }
+
+[[fault]]
+id = "adapter-lint-transport-send"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_adapter_refuses_each_transport_call ("
+transform = { file = "bindings/microvms-js/clippy.toml", replace = "  { path = \"microvms_core::control::transport::Transport::send\", reason = \"a control-plane call belongs in microvms-app, which names the operation, builds the request and owns retries; call the ControlPlane method that wraps it\" },\n", with = "" }
+
+[[fault]]
+id = "adapter-lint-alias"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_alias_a_ufcs_call_and_a_glob_import_are_refused_too ("
+transform = { file = "crates/microvms-cli/clippy.toml", replace = "  { path = \"microvms_core::control::transport::Call::post_empty\", reason = \"a control-plane call belongs in microvms-app, which names the operation, builds the request and owns retries; call the ControlPlane method that wraps it\" },\n", with = "" }
+
+[[fault]]
+id = "adapter-lint-ufcs"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_alias_a_ufcs_call_and_a_glob_import_are_refused_too ("
+transform = { file = "bindings/microvms-py/clippy.toml", replace = "  { path = \"microvms_core::prelude::ControlPlaneExt::with_transport\", reason = \"a control plane over a hand-picked transport is a second path to AWS; core's ControlPlane::new wires the signed transport (the CLI gets it through src/seam.rs)\" },\n", with = "" }
+
+[[fault]]
+id = "adapter-lint-doors"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_cli_refuses_each_core_door_by_path_alias_and_ufcs ("
+transform = { file = "crates/microvms-cli/clippy.toml", replace = "  { path = \"microvms_core::prelude::SessionExt::direct\", reason = \"the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens\" },\n", with = "" }
+
+# Review round 1's door: the stand-in core carries the prelude's adopt and name constructors, so
+# a ban deleted from the CLI's file fails the door test, not only the exact-list one.
+[[fault]]
+id = "adapter-lint-doors-from-name"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_cli_refuses_each_core_door_by_path_alias_and_ufcs ("
+transform = { file = "crates/microvms-cli/clippy.toml", replace = "  { path = \"microvms_core::prelude::AgentVmExt::from_name\", reason = \"the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens\" },\n", with = "" }
+
+[[fault]]
+id = "adapter-lint-bindings-doors"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_bindings_may_call_core_doors ("
+transform = { file = "bindings/microvms-js/clippy.toml", replace = "  { path = \"microvms_core::prelude::ControlPlaneExt::with_transport\", reason = \"a control plane over a hand-picked transport is a second path to AWS; core's ControlPlane::new wires the signed transport (the CLI gets it through src/seam.rs)\" },\n", with = "  { path = \"microvms_core::prelude::ControlPlaneExt::with_transport\", reason = \"a control plane over a hand-picked transport is a second path to AWS; core's ControlPlane::new wires the signed transport (the CLI gets it through src/seam.rs)\" },\n  { path = \"microvms_core::prelude::ControlPlaneExt::new\", reason = \"the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens\" },\n" }
+
+[[fault]]
+id = "adapter-lint-stand-in-resolves"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_adapter_refuses_each_transport_call ("
+transform = { file = "tools/test_ratchet.py", replace = "            pub fn send_accepting(_transport: &dyn Transport, _call: Call, _accept: &[u16]) {}\n", with = "            pub fn send_accepted(_transport: &dyn Transport, _call: Call, _accept: &[u16]) {}\n" }
+
+[[fault]]
+id = "lint-exceptions-new-expect"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_no_adapter_source_turns_the_lints_off_outside_its_listed_sites ("
+transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "/// A lifecycle wait with the caller's deadline and core's poll interval.\nfn wait_opts(", with = "/// A lifecycle wait with the caller's deadline and core's poll interval.\n#[expect(clippy::disallowed_methods, reason = \"x\")]\nfn wait_opts(" }
+
+[[fault]]
+id = "lint-exceptions-test-only-skip"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_no_adapter_source_turns_the_lints_off_outside_its_listed_sites ("
+transform = { file = "tools/test_ratchet.py", replace = "                and \"#![cfg(test)]\"\n", with = "                and \"#![cfg(never)]\"\n" }
+
+[[fault]]
+id = "adapter-logic-op-struct-literal"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_operation_in_a_struct_literal_is_flagged ("
+transform = { file = "verify/ratchet/rules/operation-literal.yml", replace = "    - any: [kind: string_literal, kind: raw_string_literal]\n", with = "    - any: [kind: raw_string_literal]\n" }
+
+[[fault]]
+id = "ratchet-operation-literal-gate"
+guard = "verify/ratchet/rules/operation-literal.yml"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "new drift: [adapter-logic] crates/microvms-cli/src/commands/lifecycle.rs: operation-literal: \"ListMicrovms\""
+transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = microvms_core::control::transport::Call::get(\"ListMicrovms\", \"/x\");\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "ratchet-literal-default-gate"
+guard = "verify/ratchet/rules/literal-default.yml"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "new drift: [adapter-logic] crates/microvms-cli/src/commands/lifecycle.rs: literal-default: Duration::from_secs(7)"
+transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _ = Duration::from_secs(7);\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
+
+[[fault]]
+id = "ratchet-literal-default-binding"
+guard = "verify/ratchet/rules/literal-default.yml"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "new drift: [adapter-logic] bindings/microvms-py/src/exec.rs: literal-default: const DEFAULT_WAIT: f64 = 300.0;"
+transform = { file = "bindings/microvms-py/src/exec.rs", replace = "const DEFAULT_WAIT: f64 = microvms_core::session::DEFAULT_EXEC_WAIT.as_secs_f64();", with = "const DEFAULT_WAIT: f64 = 300.0;" }
+
+# The falsifier's shapes at the sites it seeded them, through the hard gate.
+[[fault]]
+id = "ratchet-literal-default-static"
+guard = "verify/ratchet/rules/literal-default.yml"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "new drift: [adapter-logic] bindings/microvms-py/src/exec.rs: literal-default: static DEFAULT_WAIT: f64 = 300.0;"
+transform = { file = "bindings/microvms-py/src/exec.rs", replace = "const DEFAULT_WAIT: f64 = microvms_core::session::DEFAULT_EXEC_WAIT.as_secs_f64();", with = "static DEFAULT_WAIT: f64 = 300.0;" }
+
+[[fault]]
+id = "ratchet-literal-default-map-or"
+guard = "verify/ratchet/rules/literal-default.yml"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "literal-default: options.timeout.map_or(300.0, |t| t)"
+transform = { file = "bindings/microvms-js/src/control.rs", replace = ".unwrap_or(DEFAULT_LIFECYCLE_TIMEOUT.as_secs_f64()),", with = ".map_or(300.0, |t| t)," }
+
+[[fault]]
+id = "ratchet-adapter-logic-decision"
+guard = "verify/ratchet/drift.json"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "new drift: [adapter-logic] crates/microvms-cli/src/commands/attached.rs: literal-default: Duration::from_millis(250)"
+transform = { file = "verify/ratchet/drift.json", replace = "    {\n      \"category\": \"adapter-logic\",\n      \"key\": \"crates/microvms-cli/src/commands/attached.rs: literal-default: Duration::from_millis(250)\",\n      \"reason\": \"the quiet period `sync --watch` waits after a file event so one save's burst of events runs one sync pass; it paces the CLI's interactive watch loop, the terminal affordance the notify placement decision names, and the sync pass it wakes goes to core in #260\"\n    },\n", with = "" }
+
+[[fault]]
+id = "model-drift-operations"
+guard = "tools/check-model-drift.py"
+run = ["./tools/check-model-drift.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "DRIFT operation-literal rule's operations"
+transform = { file = "verify/ratchet/rules/operation-literal.yml", replace = "|ListTags|", with = "|" }
+
+[[fault]]
+id = "model-drift-operations-empty-parse"
+guard = "tools/test_model_drift.py"
+run = ["uv", "run", "--with", "boto3>=1.40", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_model_drift.py", "-k", "OperationRuleTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_rule_the_parser_cant_read_is_an_error_not_an_empty_list ("
+transform = { file = "tools/check-model-drift.py", replace = "    if not names or not all(", with = "    if names and not all(" }
+
+[[fault]]
+id = "model-drift-operations-repeated"
+guard = "tools/test_model_drift.py"
+run = ["uv", "run", "--with", "boto3>=1.40", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_model_drift.py", "-k", "OperationRuleTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_repeated_name_is_drift ("
+transform = { file = "tools/check-model-drift.py", replace = "    ours = tuple(sorted(names))\n", with = "    ours = tuple(sorted(set(names)))\n" }
+
+[[fault]]
+id = "model-drift-operations-rule-short"
+guard = "tools/test_model_drift.py"
+run = ["uv", "run", "--with", "boto3>=1.40", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_model_drift.py", "-k", "OperationRuleTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_rule_missing_an_operation_is_drift ("
+transform = { file = "tools/check-model-drift.py", replace = "        ours == theirs,\n", with = "        set(ours) <= set(theirs),\n" }
+
+[[fault]]
+id = "model-drift-operations-rule-long"
+guard = "tools/test_model_drift.py"
+run = ["uv", "run", "--with", "boto3>=1.40", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_model_drift.py", "-k", "OperationRuleTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_operation_only_the_rule_names_is_drift ("
+transform = { file = "tools/check-model-drift.py", replace = "        ours == theirs,\n", with = "        set(ours) >= set(theirs),\n" }
+
+# An empty input: the js file loses both tables, so it lists nothing.
+[[fault]]
+id = "adapter-lint-empty-config"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_adapter_bans_exactly_its_listed_paths ("
+transform = [
+  { file = "bindings/microvms-js/clippy.toml", replace = "\ndisallowed-types = [\n", with = "\nunused-types = [\n" },
+  { file = "bindings/microvms-js/clippy.toml", replace = "\ndisallowed-methods = [\n", with = "\nunused-methods = [\n" },
+]
+
+# A parser that returns nothing: the diagnostic regex can't match clippy's line.
+[[fault]]
+id = "adapter-lint-empty-parse"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_adapter_refuses_each_transport_call ("
+transform = { file = "tools/test_ratchet.py", replace = "use of a disallowed (?:method|type)", with = "use of a banned (?:method|type)" }
+
+# CI sets CARGO_TERM_COLOR=always for every job. Without `--color never` the stand-in's colored
+# diagnostics don't match, and PR #314's first CI run failed seven AdapterLintTests on it.
+[[fault]]
+id = "adapter-lint-colored-output"
+guard = "test_ratchet.py"
+run = ["env", "CARGO_TERM_COLOR=always", "uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLintTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_every_adapter_refuses_each_transport_call ("
+transform = { file = "tools/test_ratchet.py", replace = "\"--quiet\",\n                \"--color\",\n                \"never\",\n", with = "\"--quiet\",\n" }

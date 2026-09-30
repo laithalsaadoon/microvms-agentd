@@ -20,7 +20,7 @@ What the compiler cannot decide is what this file covers:
   uncalled and are not dead. `#[derive(Serialize, Deserialize)]` impls, trait impls
   satisfying a bound, and `#[test]` functions read the same way.
 - napi-rs renames snake_case Rust to camelCase JS, so a `#[napi]` export exercised only from
-  `microvms-js/__test__/*.mjs` is invisible to a snake_case search.
+  `bindings/microvms-js/__test__/*.mjs` is invisible to a snake_case search.
 
 Method: a symbol is a candidate when no edge of kind
 `calls | references | instantiates | imports | implements | extends` targets it in the
@@ -31,7 +31,7 @@ anywhere in the git-tracked tree. `contains` edges are excluded because every sy
 551 after dropping test files and `#[cfg(test)]` modules → 465 after dropping two whole-file
 test-only modules → 112 after the alias-aware reference search → 2 after removing 110 trait
 and language-protocol members → **1** after hand-dropping a trait associated type
-(`microvms-js/src/exec.rs:273`, `type Return = ()` inside
+(`bindings/microvms-js/src/exec.rs:273`, `type Return = ()` inside
 `impl AsyncGenerator for ExecStream`) that the automated filter missed because it matched
 trait methods but not associated types. No dead-code analyzer is integrated in this repo
 (no `cargo-udeps`, `cargo-machete`, `vulture`, or `knip` in `mise.toml`, `Cargo.toml`,
@@ -41,24 +41,24 @@ trait methods but not associated types. No dead-code analyzer is integrated in t
 
 | Symbol | Path | Last modified |
 | --- | --- | --- |
-| `SessionBuilder::with_timeout` | `microvms-app/src/session/mod.rs:450` | 2026-08-15 |
+| `SessionBuilder::with_timeout` | `crates/microvms-app/src/session/mod.rs:450` | 2026-08-15 |
 
 **Confidence: high.** `git grep -n "with_timeout\|withTimeout" -- .` over the whole
 git-tracked tree returns exactly one line — the declaration. Every sibling on the same
-builder has a caller: `with_minter` (`microvms-app/src/session/mod.rs:421`) from
-`microvms-cli/src/seam.rs`, `microvms-app/src/sandbox.rs`, and
-`microvms-core/tests/turmoil_client.rs`; `with_proxy_auth`
-(`microvms-app/src/session/mod.rs:429`) from `microvms-core/tests/turmoil_client.rs`;
-`with_backend` (`microvms-app/src/session/mod.rs:436`) from `microvms-cli/src/guards/`
-and `microvms-core/tests/turmoil_client.rs`; `with_port`
-(`microvms-app/src/session/mod.rs:443`) from `microvms-cli/src/seam.rs` and
-`microvms-app/src/sandbox.rs`.
+builder has a caller: `with_minter` (`crates/microvms-app/src/session/mod.rs:421`) from
+`crates/microvms-cli/src/seam.rs`, `crates/microvms-app/src/sandbox.rs`, and
+`crates/microvms-core/tests/turmoil_client.rs`; `with_proxy_auth`
+(`crates/microvms-app/src/session/mod.rs:429`) from `crates/microvms-core/tests/turmoil_client.rs`;
+`with_backend` (`crates/microvms-app/src/session/mod.rs:436`) from `crates/microvms-cli/src/guards/`
+and `crates/microvms-core/tests/turmoil_client.rs`; `with_port`
+(`crates/microvms-app/src/session/mod.rs:443`) from `crates/microvms-cli/src/seam.rs` and
+`crates/microvms-app/src/sandbox.rs`.
 
 The field it writes is live — only the setter is unreached. `SessionBuilder::build` reads
-`self.timeout` at `microvms-app/src/session/mod.rs:459` and `:471`, and `Session::run`
-back-fills a per-request `None` from it at `microvms-app/src/session/mod.rs:110-111`.
-`Session::builder` is the sole constructor (`microvms-app/src/session/mod.rs:224-225`) and
-seeds every path with `DEFAULT_REQUEST_TIMEOUT` (`microvms-app/src/session/mod.rs:231`).
+`self.timeout` at `crates/microvms-app/src/session/mod.rs:459` and `:471`, and `Session::run`
+back-fills a per-request `None` from it at `crates/microvms-app/src/session/mod.rs:110-111`.
+`Session::builder` is the sole constructor (`crates/microvms-app/src/session/mod.rs:224-225`) and
+seeds every path with `DEFAULT_REQUEST_TIMEOUT` (`crates/microvms-app/src/session/mod.rs:231`).
 
 **What would falsify this.** Three conditions hold; any one of them failing moves this row
 out of the table.
@@ -67,13 +67,13 @@ out of the table.
    reachable by anything that depends on it. The package is published on crates.io and has language bindings. This analysis
    cannot establish the absence of downstream callers, so removing public API
    requires a compatibility decision; lack of local references is insufficient.
-2. No binding re-exports it. `microvms-py/microvms.pyi` contains no `with_timeout`, and no
+2. No binding re-exports it. `bindings/microvms-py/microvms.pyi` contains no `with_timeout`, and no
    `withTimeout` exists in `microvms-js`.
 3. No host runtime dispatches to it. Its only attribute is `#[must_use]` — no `#[napi]`,
    no `#[pymethods]`.
 
 **Related defect in the same construct.** The builder's doc comment at
-`microvms-app/src/session/mod.rs:223` reads "A builder, for the cases that need a port, a
+`crates/microvms-app/src/session/mod.rs:223` reads "A builder, for the cases that need a port, a
 timeout, or a custom backend." The port case and the backend case each have callers; the
 timeout case has none. The comment asserts a motivating case that does not exist in the tree.
 
@@ -88,23 +88,23 @@ files that a basename search calls orphans, each cleared against its real invoca
 
 | File | Reached by |
 | --- | --- |
-| `microvms-py/tests/test_stubs.py` | `pytest microvms-py/tests -q` at `.github/workflows/ci.yml:308`; pytest auto-discovers `test_*.py`, so no file names it |
-| `microvms-js/__test__/support/decimal.mjs` | `microvms-js/__test__/cost.mjs:40` |
-| `microvms-js/__test__/support/sse.mjs` | `microvms-js/__test__/cost.mjs:41`, `microvms-js/__test__/errors.mjs:40`, `microvms-js/__test__/exec.mjs:44`, `microvms-js/__test__/process.mjs:31`, `microvms-js/__test__/session.mjs:33` |
+| `bindings/microvms-py/tests/test_stubs.py` | `pytest bindings/microvms-py/tests -q` at `.github/workflows/ci.yml:308`; pytest auto-discovers `test_*.py`, so no file names it |
+| `bindings/microvms-js/__test__/support/decimal.mjs` | `bindings/microvms-js/__test__/cost.mjs:40` |
+| `bindings/microvms-js/__test__/support/sse.mjs` | `bindings/microvms-js/__test__/cost.mjs:41`, `bindings/microvms-js/__test__/errors.mjs:40`, `bindings/microvms-js/__test__/exec.mjs:44`, `bindings/microvms-js/__test__/process.mjs:31`, `bindings/microvms-js/__test__/session.mjs:33` |
 | `conformance/infra/main.tf` | `terraform -chdir=conformance/infra` at `mise.toml:54`, `mise.toml:95`, `mise.toml:482`, `mise.toml:726` |
 
 Two modules are compiled only under `cfg(test)` and are live test code, not dead source:
-`microvms-cli/src/guards/` (inner `#![cfg(test)]` at `microvms-cli/src/guards/mod.rs:25` and in
-each file under it, plus `#[cfg(test)] mod guards;` at `microvms-cli/src/main.rs:36-37`) and
-`microvms-app/src/control/fake.rs` (`#[cfg(test)] pub(crate) mod fake;` at
-`microvms-app/src/control/mod.rs:900-901`).
+`crates/microvms-cli/src/guards/` (inner `#![cfg(test)]` at `crates/microvms-cli/src/guards/mod.rs:25` and in
+each file under it, plus `#[cfg(test)] mod guards;` at `crates/microvms-cli/src/main.rs:36-37`) and
+`crates/microvms-app/src/control/fake.rs` (`#[cfg(test)] pub(crate) mod fake;` at
+`crates/microvms-app/src/control/mod.rs:900-901`).
 
 ## Dead imports
 
 | Path | Symbol | Imported from |
 | --- | --- | --- |
-| `microvms-cli/src/commands/lifecycle.rs:2495` | `_DocsOnly` (alias of `ControlPlane`) | `microvms_core::control::ControlPlane`, re-bound from `microvms-cli/src/commands/lifecycle.rs:69` |
-| `microvms-cli/src/commands/attached.rs:948` | `_DocsOnly` (alias of `ErrorKind`) | `microvms_core::ErrorKind`, re-bound from `microvms-cli/src/commands/attached.rs:40` |
+| `crates/microvms-cli/src/commands/lifecycle.rs:2495` | `_DocsOnly` (alias of `ControlPlane`) | `microvms_core::control::ControlPlane`, re-bound from `crates/microvms-cli/src/commands/lifecycle.rs:69` |
+| `crates/microvms-cli/src/commands/attached.rs:948` | `_DocsOnly` (alias of `ErrorKind`) | `microvms_core::ErrorKind`, re-bound from `crates/microvms-cli/src/commands/attached.rs:40` |
 
 **Confidence: high that nothing names `_DocsOnly`; do not delete either line on its own.**
 Both carry `#[allow(unused_imports, reason = …)]`, so `rustc` never reports them, and both
@@ -115,28 +115,28 @@ three-line construct (doc comment, attribute, `use`), and rebuilding:
 - `cargo clippy -p microvms-cli --all-targets` emits two new warnings —
   `unused import: ControlPlane` and `unused import: ErrorKind` — because the `_DocsOnly`
   re-export is what consumes the code-level import at
-  `microvms-cli/src/commands/lifecycle.rs:69` and
-  `microvms-cli/src/commands/attached.rs:40`. Under `-D warnings` that is a build failure.
+  `crates/microvms-cli/src/commands/lifecycle.rs:69` and
+  `crates/microvms-cli/src/commands/attached.rs:40`. Under `-D warnings` that is a build failure.
 - `cargo doc --no-deps -p microvms-cli` emits the same eight warnings with or without the
   constructs, and neither `ControlPlane` nor `ErrorKind` appears among them. The stated
   reason — "Re-exported so `[ControlPlane]` is nameable in this module's docs"
-  (`microvms-cli/src/commands/lifecycle.rs:2493`) — is not the mechanism. The intra-doc link
-  at `microvms-cli/src/commands/lifecycle.rs:10` resolves from the `:69` import directly.
+  (`crates/microvms-cli/src/commands/lifecycle.rs:2493`) — is not the mechanism. The intra-doc link
+  at `crates/microvms-cli/src/commands/lifecycle.rs:10` resolves from the `:69` import directly.
 
 The two differ in whether the whole construct earns its place:
 
 - `ControlPlane` is a trait, so its name never appears in an expression; the `:69` import is
-  what makes `[ControlPlane]` at `microvms-cli/src/commands/lifecycle.rs:10` resolve. Removing
+  what makes `[ControlPlane]` at `crates/microvms-cli/src/commands/lifecycle.rs:10` resolve. Removing
   the pair means removing that doc link. Load-bearing as a unit.
-- `ErrorKind` is named nowhere in `microvms-cli/src/commands/attached.rs` except its import
+- `ErrorKind` is named nowhere in `crates/microvms-cli/src/commands/attached.rs` except its import
   at `:40` and the two `_DocsOnly` lines at `:2794-2796`. The only documentation that links
   `[ErrorKind]` is the doc comment justifying the import that makes it resolvable. Removable
   as a unit — `:40`'s `ErrorKind`, plus all three lines at `:2794-2796`.
 
 **Non-Rust surfaces, both clean.** `uvx ruff check --select F401,F811,F841` over all 17
-tracked `.py` files plus `microvms-py/microvms.pyi` reports no findings; F401 is in the
+tracked `.py` files plus `bindings/microvms-py/microvms.pyi` reports no findings; F401 is in the
 repo's own selected set (`ruff.toml`) and `mise.toml:93` runs `ruff check .` across the whole
-repo. The eight `microvms-js/__test__/*.mjs` files have no linter, so their
+repo. The eight `bindings/microvms-js/__test__/*.mjs` files have no linter, so their
 `import … from '…'` bindings were checked directly for non-comment uses: zero unused.
 
 ## See also

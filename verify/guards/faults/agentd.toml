@@ -1,0 +1,9 @@
+# ── agentd ───────────────────────────────────────────────────────────────────
+
+[[fault]]
+id = "agentd-fs-pop"
+guard = "fs::tests::normalize_rejects_escapes_and_absorbs_benign_traversal"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "fs::tests::normalize_rejects_escapes_and_absorbs_benign_traversal"]
+expect = "test-failed"
+suite = "rust"
+transform = { file = "crates/agentd/src/fs.rs", replace = "parts.pop()?;", with = "parts.pop();" }

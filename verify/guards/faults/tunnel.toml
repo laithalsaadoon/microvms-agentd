@@ -1,0 +1,41 @@
+# ── the verified tunnel's guards (#297) ──────────────────────────────────────
+
+# The daemon dials the guest before the handshake decides, so a refused caller reaches it.
+[[fault]]
+id = "agentd-tunnel-dial-before-handshake"
+guard = "a_refused_caller_never_causes_a_guest_connection"
+run = ["cargo", "test", "-p", "agentd", "--test", "tunnel_relay", "--", "--exact", "a_refused_caller_never_causes_a_guest_connection"]
+expect = "test-failed"
+suite = "rust"
+message = "a refused caller must never cause a connection to the guest service"
+transform = { file = "crates/agentd/src/tunnel.rs", replace = "    let mut noise = match handshake::respond(socket, responder).await {", with = "    let _early = dial(port).await;\n    let mut noise = match handshake::respond(socket, responder).await {" }
+
+# A VM with no seed relays the identity tunnel as a plain one instead of refusing it.
+[[fault]]
+id = "agentd-tunnel-seedless-downgrade"
+guard = "identity_against_a_seedless_vm_is_refused_not_downgraded"
+run = ["cargo", "test", "-p", "agentd", "--test", "tunnel_relay", "--", "--exact", "identity_against_a_seedless_vm_is_refused_not_downgraded"]
+expect = "test-failed"
+suite = "rust"
+message = "the daemon refuses a seedless identity tunnel rather than relaying it"
+transform = { file = "crates/agentd/src/tunnel.rs", replace = "    let Some(material) = material else {\n", with = "    let Some(material) = material else {\n        if port != 0 {\n            relay(socket, port).await;\n            return;\n        }\n" }
+
+# The client reads its own failed check of the reply as a clean end instead of an error.
+[[fault]]
+id = "bind21-client-pin-failure-read-as-a-clean-end"
+guard = "a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "tunnel_end_to_end", "--", "--exact", "a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel"]
+expect = "test-failed"
+suite = "rust"
+message = "a reply that doesn't verify must fail the tunnel, not end Closed"
+transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "        Some(identity) => match initiate(&mut socket, identity, guest_port).await? {", with = "        Some(identity) => match initiate(&mut socket, identity, guest_port)\n            .await\n            .unwrap_or(Initiated::Refused(TunnelEnd::Closed))\n        {" }
+
+# The client falls back to a plain relay when the reply doesn't verify.
+[[fault]]
+id = "bind21-client-pin-failure-downgrades"
+guard = "a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "tunnel_end_to_end", "--", "--exact", "a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel"]
+expect = "test-failed"
+suite = "rust"
+message = "a reply that doesn't verify ends the tunnel rather than relaying"
+transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "        Some(identity) => match initiate(&mut socket, identity, guest_port).await? {\n            Initiated::Transport(transport) => Some(transport),\n            Initiated::Refused(end) => return Ok(Opened::Refused(end)),\n        },", with = "        Some(identity) => match initiate(&mut socket, identity, guest_port).await {\n            Ok(Initiated::Transport(transport)) => Some(transport),\n            Ok(Initiated::Refused(end)) => return Ok(Opened::Refused(end)),\n            Err(_) => None,\n        }," }

@@ -25,7 +25,7 @@ client process stayed running; progress was read only with `cli.py show` and
   launching, so it left no VM.
 - Teardown was verified independently: the stack destroyed, the image and its
   build log group deleted, the build artifact removed, and
-  `scripts/verify-clean.py` clean of everything the project can name.
+  `tools/verify-clean.py` clean of everything the project can name.
 
 ## 2026-09-18, us-east-1: earlier design
 

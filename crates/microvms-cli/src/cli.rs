@@ -1,0 +1,3344 @@
+// SPDX-License-Identifier: Apache-2.0
+//! The command tree, and the closed sets that make CLI-5 a parser property.
+//!
+//! # CLI-5 is enforced here or nowhere
+//!
+//! "No option permits a value microvms-core rejects." The CLI is where an S1 guard is most
+//! easily downgraded: `--memory 1500` typed as `u32` compiles, parses, and fails at a
+//! library boundary a whole build cycle later. So every parameter whose library counterpart
+//! is a closed type is a [`clap::ValueEnum`] here — [`MemoryMib`] over the five documented
+//! baselines, [`RegionArg`] over the five measured regions — and clap refuses the rest
+//! before any handler runs.
+//!
+//! The domains are **spelled out** rather than generated from
+//! [`microvms_core::SizeClass::ALL`], for the same reason `cli.py:1447` spells its `Literal`:
+//! a domain computed at runtime is invisible to `--help`, to shell completion, and to the
+//! manifest's `choices` field, and the static half of the guarantee is the half worth
+//! having. The cost of writing it twice is that the two can disagree, so
+//! [`tests`] asserts the enum's domain equals the size table — a sixth class that does not
+//! reach this file fails there rather than shipping unreachable.
+//!
+//! # What is deliberately *not* an option
+//!
+//! No `--client-token` on an image build (TRAP-1: a replayed create wedges the image in
+//! `CREATING`, so every create mints a fresh token). The launch commands, `run` and
+//! `agent-up`, do take one: core validates a run token, and retrying a launch with it adopts
+//! the VM the first attempt made. No `--capabilities` (TRAP-3: the intent is `--repair-identity`, and core injects
+//! `["ALL"]` itself). No `--connector` (TRAP-4: the intent is `--egress`). No
+//! `--architecture` (the model's enum has one value, so a flag could only express a rejected
+//! request). Their absence is asserted by
+//! `tests/thinness.rs` and by the manifest cross-check: an option added later that carries a
+//! free-text S1 value shows up as a `choices: null` on a parameter the test names.
+//!
+//! # The escape hatch is a separate flag, not a permissive parser
+//!
+//! [`microvms_core::Region::unlisted`] exists because AWS adds regions faster than a
+//! constant is re-read, and it costs the caller the null-message diagnostic. So it is
+//! `--unlisted-region <NAME>`, conflicting with `--region`, with the cost in its help text —
+//! rather than `--region` accepting a free string and quietly widening. A reader of a command
+//! line can see that someone opted in.
+//!
+//! (cli.py line numbers resolve at `git show 'c4d396e^:clients/python/src/microvms_agentd/cli.py'` — the retired oracle.)
+
+use std::path::PathBuf;
+
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use microvms_core::{Error, Region, SizeClass};
+
+/// `microvm`: a working sandbox in one command, and nothing microvms-core does not do.
+#[derive(Debug, Parser)]
+#[command(
+    name = "microvm",
+    version,
+    propagate_version = true,
+    about = "Build, run, and tear down AWS Lambda MicroVMs. A thin layer over microvms-core.",
+    long_about = "Build, run, and tear down AWS Lambda MicroVMs.\n\nEvery AWS call and every \
+                  trap guard belongs to microvms-core; this binary parses, renders, and exits \
+                  with a code. `microvm manifest` emits the whole surface — commands, option \
+                  domains, exit codes, envelope schema — derived from the command tree rather \
+                  than written down.",
+    // clap's own usage errors conventionally exit 2, which is this catalog's
+    // ERR_INVALID_ARG. The two agree deliberately: `try_parse` maps the failure into an
+    // envelope, and a caller who reads $? sees the same number either way.
+    disable_help_subcommand = true
+)]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Command,
+
+    /// Emit the typed JSON envelope on stdout instead of human output.
+    ///
+    /// Wins over every other format, including an interactive terminal: an agent that asked
+    /// for JSON gets JSON.
+    #[arg(long, global = true)]
+    pub json: bool,
+
+    /// Token-lean output, for a consumer paying per token: tab-separated alone, compact one-line JSON with --json.
+    #[arg(long, global = true)]
+    pub dense: bool,
+
+    /// Suppress progress on stderr. Warnings still print.
+    #[arg(long, global = true)]
+    pub quiet: bool,
+}
+
+/// The twenty-nine commands.
+///
+/// Variant order is the order `microvm --help` and the manifest list them in, which is
+/// lifecycle order rather than alphabetical: a reader meeting this surface for the first time
+/// wants `run` first, not `build`. The *attached* commands — `exec`, `health`, `ack`, `kill`,
+/// `ps`, `stdin`, `cp`, `port-forward` and their siblings — sit together after `build` because
+/// they share the same three identifiers and the same door
+/// ([`crate::seam::CoreSeam::attach_session`]), which is the distinction that
+/// matters when reading the list: everything above them creates or destroys, and everything in
+/// that block addresses a VM that already exists. `history` sits beside `ls` because they are
+/// the same kind of thing: a local read of what this machine's own state directory recorded.
+#[derive(Debug, Subcommand)]
+pub enum Command {
+    /// Build an image, launch a VM, run a command, report the cost, tear it down.
+    ///
+    /// The whole sequence as one command. Tears down by default: a CLI that leaves a
+    /// billable VM running because someone closed a laptop is worse than no CLI. `--keep`
+    /// opts out and prints the identifiers you have just taken responsibility for.
+    Run(Box<RunArgs>), // Boxed: RunArgs alone would size the whole enum (large_enum_variant).
+
+    /// Zero to a live exec: provision the daemon, build, launch, run, report, tear down.
+    ///
+    /// `run` with every decision already made (issue #75): the daemon binary is
+    /// provisioned from this CLI's own release, the exec defaults to a hello-world, and
+    /// nothing survives the invocation. Needs AWS credentials and the three MICROVM_*
+    /// values from the Quick start; everything else is a default a first run should not
+    /// have to choose. Once this works, `run` is the same thing with the knobs exposed.
+    Quickstart(QuickstartArgs),
+
+    /// Build a MicroVM image and wait for it to be usable.
+    ///
+    /// Separate from `run` for the case where one image serves many launches, which is the
+    /// shape that matters once a build is 45 minutes. Nothing is torn down here: an image is
+    /// the durable artifact, and its one-week minimum snapshot retention means deleting it
+    /// early saves nothing.
+    Build(BuildArgs),
+
+    /// Bring up a VM with a coding agent in it: image, launch, model credentials, non-root user.
+    ///
+    /// The L3 helper (`docs/AGENT-VMS.md`): one command that composes `build --reuse`,
+    /// `run --keep --egress --vm-name`, a Bedrock bearer token minted from your own AWS
+    /// credentials, and the file uploads and `chown` the coding-agents example performed by
+    /// hand. Against a name that is already registered it refreshes the credentials instead
+    /// of building or launching, which is how a 12-hour token is renewed on a long-lived VM.
+    /// Tear the VM down with `microvm terminate <NAME>`.
+    #[command(name = "agent-up")]
+    AgentUp(AgentUpArgs),
+
+    /// Hand a coding agent in a running agent VM one task, headless, as the non-root user.
+    ///
+    /// Runs the agent's headless command (`claude -p …` or `codex exec …`) as uid 1000 in
+    /// `/workspace`, sourcing the credentials `agent-up` installed. Without `--agent`, reads
+    /// the marker `agent-up` wrote in the guest and prompts the one agent it names. `--detach`
+    /// starts and returns the exec id for `microvm exec --poll`; the default waits and acks.
+    #[command(name = "agent-prompt")]
+    AgentPrompt(AgentPromptArgs),
+
+    /// Run one command in a MicroVM that is already running.
+    ///
+    /// The loop shape: launch once with `run --keep`, then exec against it. Needs the three
+    /// identifiers `run --keep` printed, because a session holds no server-side state —
+    /// every exec record and the bootstrap token live in the VM, so reattaching is just
+    /// naming it.
+    Exec(ExecArgs),
+
+    /// Ask a running MicroVM's daemon whether it is up, and what its identity repair did.
+    ///
+    /// The one unauthenticated route: the platform forwards no external traffic until the run
+    /// hook returns 200, so reaching this at all implies bootstrapped — but `identityDegraded`
+    /// and `diskUnderPressure` are conditions no other command reports, and both are reasons to
+    /// drain a VM rather than to keep scheduling work onto it.
+    Health(HealthArgs),
+
+    /// Keep a running MicroVM awake while work runs inside it, by polling its health.
+    ///
+    /// The platform counts only inbound requests through the endpoint as activity, so an exec
+    /// working with no client traffic is suspended once `maxIdleDurationSeconds` passes. This
+    /// polls `/v1/health` from outside until `--while-busy` sees no running exec, `--for`
+    /// passes, or ctrl-c. The interval may be at most half the idle window, which is read from
+    /// the control plane (or assumed to be the 60-second minimum when it cannot be read).
+    Keepalive(KeepaliveArgs),
+
+    /// Release a finished exec's buffered output, which starts its collection clock.
+    ///
+    /// `exec` acks for you. This exists for the detached shape — a process that started an exec
+    /// with `--exec-id` and came back later, possibly as a different process — where the ack is
+    /// what hands over the output. A second ack is a 409, because the first one released it and
+    /// answering 200 with an empty body would read as "the command produced no output".
+    Ack(AckArgs),
+
+    /// Stop a running exec: SIGTERM its whole process group, SIGKILL after the daemon's grace.
+    ///
+    /// The stop button `exec --timeout` is not (issue #156): a client-side timeout abandons an
+    /// exec and leaves it running in the guest, while this reaches `POST /v1/exec/{id}/kill` and
+    /// signals the *group* — so a shell that backgrounded a server takes the server down with
+    /// it. The envelope carries the daemon's own `killed` verdict: `false` with exit 0 means the
+    /// group had already exited, which is the outcome a kill was asking for. The VM is addressed
+    /// the way every attached command addresses it — `--name` or the identifier triple — and
+    /// the exec by its id, which `exec --detach`, `exec --exec-id`, and `ps` all print.
+    Kill(KillArgs),
+
+    /// List what is running in a MicroVM: every exec's process group and its live pids.
+    ///
+    /// The daemon reads `/proc` itself (`GET /v1/procs`), so this works against the al2023 base
+    /// image, which ships no `ps` (issue #157). The row worth reading is `childExited: true`
+    /// with a non-empty `pids`: a command that finished while something it backgrounded did
+    /// not — the case `health`'s `busy` cannot show, because busy is about the exec's own
+    /// child. The `execId` on that row is what `kill` takes. Dense output is one TSV row per
+    /// group, exec id first, so `cut -f1` feeds `kill` directly.
+    Ps(PsArgs),
+
+    /// Write to a running exec's stdin, and optionally close it.
+    ///
+    /// Only for an exec started with `exec --stdin`; one started without it has `/dev/null` on
+    /// its stdin and this answers 409. Nothing else closes the pipe: the daemon's copy outlives
+    /// the child's own `wait()`, so a child blocked reading stdin hangs until its timeout unless
+    /// someone sends `--eof`.
+    Stdin(StdinArgs),
+
+    /// Copy a file or a tar archive between here and a running MicroVM.
+    ///
+    /// `cp ./local vm:/remote` writes, `cp vm:/remote ./local` reads. `--tar` moves a whole
+    /// directory tree instead of one file: the `vm:` side is then a directory the daemon packs or
+    /// extracts, and the local side is a `.tar` file — because neither this binary nor
+    /// `microvms-core` carries a tar library, which keeps the daemon's confined extractor the only
+    /// extractor in the system.
+    Cp(CpArgs),
+
+    /// Sync a project directory into a running MicroVM's /workspace, uploading only what changed.
+    ///
+    /// The incremental half of issue #71 (`run <DIR>` is the launch-coupled batch half). The
+    /// first sync uploads the tree and writes a content manifest beside it in the guest; every
+    /// later sync hashes the local tree, diffs it against that manifest, and uploads only the
+    /// members whose bytes actually differ — a second sync of an unchanged tree transfers no
+    /// archive at all. Files deleted locally are removed in the guest. `--watch` keeps the loop
+    /// alive on filesystem events; with `port-forward` in a second terminal, an edit here is a
+    /// reload there.
+    Sync(SyncArgs),
+
+    /// Register a name for a running MicroVM this state directory did not launch.
+    ///
+    /// Cross-machine adoption (issue #66): a kept VM is already addressable by `--name` on
+    /// the machine that launched it, because `run --keep --vm-name` wrote a record there. This
+    /// writes that record here, from either spelling of the same facts — the record file
+    /// another machine's registry holds (`--from`, so `microvm attach --from <(ssh other cat
+    /// ~/.microvm/runs/names/ci.json)` needs no export command), or the triple a `run`
+    /// envelope printed. Nothing is written until the VM has answered one authenticated
+    /// request with the token being registered: an attach authenticates the token, not the
+    /// machine, and the probe is the only proof the triple is live. `--verify-identity` adds
+    /// the same Noise KK handshake `tunnel --verify-identity` runs, against the pinned VM key.
+    Attach(AttachArgs),
+
+    /// Tunnel arbitrary TCP to a guest port, so `psql` or `ssh` here reaches a server in the VM.
+    ///
+    /// Where `port-forward` speaks HTTP, this speaks bytes: each local connection becomes a
+    /// WebSocket carrying raw TCP to the daemon's relay, which dials `127.0.0.1:<port>` inside
+    /// the guest. The endpoint proxy has no CONNECT method, so riding inside binary frames is
+    /// the only way arbitrary TCP crosses it — and that it crosses byte-exact is measured
+    /// rather than assumed (docs/PLATFORM.md, 2026-08-29). One connection per WebSocket, so a
+    /// client that opens five connections opens five tunnels.
+    Tunnel(TunnelArgs),
+
+    /// Serve a guest port on localhost, so a browser here reaches a server in the VM.
+    ///
+    /// Holds a local listener open until Ctrl-C and forwards each connection through the VM's
+    /// endpoint with a port-scoped proxy token minted per hop — which is what carries a tunnel
+    /// across the platform's sixty-minute token ceiling without the caller sequencing anything.
+    /// HTTP and WebSocket, because those are what the endpoint proxy carries; a WebSocket
+    /// upgrade is relayed and then spliced as bytes, so an application subprotocol survives.
+    /// Arbitrary TCP is not this command — it needs a guest-side relay, which is issue #70's
+    /// second layer.
+    PortForward(PortForwardArgs),
+
+    /// Open an interactive root shell in a running MicroVM — a real PTY, with job
+    /// control, signals, and resize.
+    ///
+    /// The VM must have been launched with `run --shell` (the `SHELL_INGRESS` connector
+    /// cannot be added later). The terminal goes raw for the session, so Ctrl-C reaches
+    /// the guest as SIGINT instead of ending this command; leave with `exit` or Ctrl-D.
+    /// The session's raw bytes are this command's output, and the envelope follows them
+    /// — the same stdout exception `exec --stream` documents. There is no exit-status
+    /// channel: this command's exit code is about the transport, and a command's status
+    /// inside the shell is the shell's to answer (`echo $?`).
+    Shell(ShellArgs),
+
+    /// Freeze a MicroVM. It keeps its memory, filesystem, token, and endpoint.
+    ///
+    /// A freeze and restore, not a stop and start — measured, not assumed. A suspended 2 GB
+    /// VM pays snapshot storage of about $0.16 a month against roughly $100 running, which
+    /// is what makes a warm pool viable. `microvm cost --compare` prints the break-even
+    /// hold, because each cycle also pays a snapshot write plus a read.
+    Suspend(SuspendArgs),
+
+    /// Thaw a suspended MicroVM and report its endpoint.
+    ///
+    /// The launch-time `suspendedDurationSeconds` window terminates a suspended VM once it
+    /// passes, so "resume later" silently stops working and the VM is gone rather than slow.
+    Resume(ResumeArgs),
+
+    /// Tear down a MicroVM, and optionally its image and build log group.
+    ///
+    /// Never fails on a teardown failure — it reports the identifier instead. An identifier
+    /// you can read is the only remedy for a resource that would not delete, and an image in
+    /// CREATING cannot be deleted at all.
+    Terminate(TerminateArgs),
+
+    /// List what this CLI created and could not confirm it deleted; `--remote` asks the account too.
+    ///
+    /// Reads the local ledger rather than asking AWS. Deliberately: the question it answers
+    /// is "what did I leave behind", and the resources worth asking about are the ones a
+    /// killed process never got to report — which no ListMicrovms call can attribute back to
+    /// a command that died. That is a different question from "what exists", and the output
+    /// says which one it answered (#159): every envelope carries `source: "local-ledger"`,
+    /// and `--remote` adds the other answer by listing the account's MicroVMs and images
+    /// and marking each ledger entry live or gone.
+    Ls(LsArgs),
+
+    /// Print what was asked of one MicroVM and what the platform reported back.
+    ///
+    /// Reads the local per-VM history — appended by `run`, `exec`, `suspend`, `resume`, and
+    /// `terminate` — rather than asking AWS, and the record survives terminate on purpose: a
+    /// caller attesting over a run needs it precisely after the VM is gone. It shows what the
+    /// daemon and the control plane reported, never what a process inside the guest did
+    /// between execs.
+    History(HistoryArgs),
+
+    /// Name an image's build log group and print the `aws logs tail` command that reads it.
+    ///
+    /// The group is `/aws/lambda-microvms/<image-name>`, derived from the name rather than
+    /// asked for: a build role granted the plausible-but-wrong `/aws/lambda/microvms/*`
+    /// produces builds that write no logs at all, and every failure then reads
+    /// `reason=unknown`. The printed command requires AWS CLI v2 (`aws logs tail` does not
+    /// exist in v1) and an identity granted the Terraform stack's `logs_read_policy_arn`.
+    Logs(LogsArgs),
+
+    /// What a run cost, or what a plan will cost. Every figure labelled.
+    ///
+    /// Dollars are estimates derived from published rates and never an invoice — only Cost
+    /// Explorer knows the bill. Seconds from a real run are labelled measured; `--estimate`
+    /// labels every duration projected. A line item with no published rate reads `unpriced`,
+    /// never `$0.00`.
+    Cost(CostArgs),
+
+    /// Check every prerequisite and say which one is wrong.
+    ///
+    /// The command that saves an hour on a first attempt. Credentials, the region the
+    /// connector ARN is interpolated into, the three Terraform outputs, whether the stack is
+    /// applied, and whether the daemon binary is aarch64 — that last one being the failure
+    /// that otherwise surfaces as a run-hook timeout, 45 minutes into a build, saying
+    /// nothing about architecture.
+    Doctor(DoctorArgs),
+
+    /// Emit the whole command surface, its exit codes, and its envelope schema.
+    ///
+    /// Derived from the registered command tree rather than written down, so it cannot drift
+    /// from what this binary actually accepts. Always JSON: the only consumer that asks
+    /// for a manifest is one that parses it.
+    Manifest,
+
+    /// Emit every service constraint this client believes, for the drift gate.
+    ///
+    /// TRAP-12's second source. `tools/check-model-drift.py` compares this against the pinned
+    /// botocore model, and against its own pinned literals for the two values no model shape
+    /// states — the region list and the sizing table, which is the only check available for a
+    /// value no API answers. (It compared against the Python client's constants too, until that
+    /// client became git history.)
+    Constants(ConstantsArgs),
+
+    /// Print the Dockerfile stanza that wraps any base image with agentd.
+    ///
+    /// The stanza is what `microvm build` bakes when no `--dockerfile` is given, emitted so
+    /// you can append your own layers and hand the result back to `build --dockerfile`. It
+    /// comes from `microvms-core`'s own generator, so it cannot drift from what a default
+    /// build produces — and its comments name the two platform traps a hand-written wrapper
+    /// hits: the FROM must match the managed base's `docker_ref`, and a WORKDIR is required
+    /// when the base declares none. Local: no account is involved.
+    Dockerfile(DockerfileArgs),
+}
+
+// ── the closed sets (CLI-5) ─────────────────────────────────────────────────
+
+/// The five documented size-class baselines, as a set the parser enforces.
+///
+/// `minimumMemoryInMiB` selects a class and does not size a VM (TRAP-10), and
+/// [`microvms_core::SizeClass::from_baseline_mib`] refuses anything off-table with the
+/// finding attached. An option typed `u32` would accept 1500 and reach that refusal a call
+/// later; this one cannot express it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum MemoryMib {
+    #[value(name = "512")]
+    Mib512,
+    #[value(name = "1024")]
+    Mib1024,
+    #[value(name = "2048")]
+    Mib2048,
+    #[value(name = "4096")]
+    Mib4096,
+    #[value(name = "8192")]
+    Mib8192,
+}
+
+impl MemoryMib {
+    /// The core class this baseline selects. Infallible: the mapping is exhaustive.
+    pub fn size_class(self) -> SizeClass {
+        match self {
+            MemoryMib::Mib512 => SizeClass::Mib512,
+            MemoryMib::Mib1024 => SizeClass::Mib1024,
+            MemoryMib::Mib2048 => SizeClass::Mib2048,
+            MemoryMib::Mib4096 => SizeClass::Mib4096,
+            MemoryMib::Mib8192 => SizeClass::Mib8192,
+        }
+    }
+}
+
+/// The variant for a baseline arriving as a number — from `microvm.toml`'s `memory` key —
+/// or `None` when it is off the table.
+///
+/// The file boundary needs the same closed set the parser enforces, and this is the one
+/// mapping from the integer domain into it: a config-side check written as its own list
+/// would be a second place the five baselines are spelled, which is the drift CLI-5's
+/// domain-equality test exists to prevent.
+pub fn memory_from_mib(mib: u32) -> Option<MemoryMib> {
+    match mib {
+        512 => Some(MemoryMib::Mib512),
+        1024 => Some(MemoryMib::Mib1024),
+        2048 => Some(MemoryMib::Mib2048),
+        4096 => Some(MemoryMib::Mib4096),
+        8192 => Some(MemoryMib::Mib8192),
+        _ => None,
+    }
+}
+
+/// The five regions measured to carry MicroVMs.
+///
+/// An unsupported region answers `AccessDeniedException` with a **null message**, which is
+/// indistinguishable from a genuine IAM denial — so the last point where the diagnostic
+/// survives is before the first call, and for a CLI that means the parser. `--unlisted-region`
+/// is the named way out.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum RegionArg {
+    #[value(name = "us-east-1")]
+    UsEast1,
+    #[value(name = "us-east-2")]
+    UsEast2,
+    #[value(name = "us-west-2")]
+    UsWest2,
+    #[value(name = "eu-west-1")]
+    EuWest1,
+    #[value(name = "ap-northeast-1")]
+    ApNortheast1,
+}
+
+impl RegionArg {
+    /// The variant for a region name arriving from `microvm.toml`, or `None` when the name
+    /// is not one of the five listed regions.
+    ///
+    /// The file boundary takes the closed set only — `--unlisted-region` remains the one
+    /// spelled-out opt-in to the null-message diagnostic, and a file must not be a quieter
+    /// second door to it.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "us-east-1" => Some(RegionArg::UsEast1),
+            "us-east-2" => Some(RegionArg::UsEast2),
+            "us-west-2" => Some(RegionArg::UsWest2),
+            "eu-west-1" => Some(RegionArg::EuWest1),
+            "ap-northeast-1" => Some(RegionArg::ApNortheast1),
+            _ => None,
+        }
+    }
+
+    pub fn region(self) -> Region {
+        match self {
+            RegionArg::UsEast1 => Region::UsEast1,
+            RegionArg::UsEast2 => Region::UsEast2,
+            RegionArg::UsWest2 => Region::UsWest2,
+            RegionArg::EuWest1 => Region::EuWest1,
+            RegionArg::ApNortheast1 => Region::ApNortheast1,
+        }
+    }
+}
+
+/// The region flags, flattened into every command that talks to AWS.
+///
+/// One struct rather than two fields per command, so the `conflicts_with` relationship
+/// between the closed set and the escape hatch is declared once and cannot be forgotten on
+/// the twelfth command.
+#[derive(Args, Clone, Debug, Default)]
+pub struct RegionFlags {
+    /// AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1.
+    #[arg(long, value_enum)]
+    pub region: Option<RegionArg>,
+
+    /// Use a region this client has not seen carry MicroVMs. Costs you the diagnostic.
+    ///
+    /// An unsupported region answers AccessDeniedException with a null message, which reads
+    /// as an IAM denial. Use this when AWS has launched MicroVMs somewhere new.
+    #[arg(long, value_name = "NAME", conflicts_with = "region")]
+    pub unlisted_region: Option<String>,
+}
+
+impl RegionFlags {
+    /// The region every ARN in this invocation is derived for.
+    ///
+    /// One method rather than the same three-line unpacking of these flags at every AWS
+    /// command's first line — six copies of one expression is six chances for the flag order
+    /// to drift. The resolution itself, and why its order must agree with the SDK's, lives at
+    /// [`crate::seam::resolve_region`].
+    pub fn resolve(&self, env: &dyn Fn(&str) -> Option<String>) -> Result<Region, Error> {
+        crate::seam::resolve_region(
+            self.region.map(|r| r.region()),
+            self.unlisted_region.as_deref(),
+            env,
+        )
+    }
+}
+
+/// The three identifiers, plus the port, that address a VM this invocation did not launch.
+///
+/// One struct rather than four fields repeated on six commands, and the reason is the same one
+/// [`crate::seam::Attach`] gives for being a struct: three of the four are opaque strings of the
+/// same shape, so `--endpoint`/`--agent-token`/`--microvm-id` written out per command is six
+/// chances to document one as another. Flattened, every attached command's triple is declared
+/// once — and `tests/manifest.rs` sees the same parameter names on all six, which is what makes
+/// "the attached commands take the triple `exec` takes" a checkable claim.
+#[derive(Args, Debug, Default, Clone)]
+pub struct AttachFlags {
+    /// The VM's endpoint, as reported by `run`.
+    #[arg(long, required_unless_present = "name")]
+    pub endpoint: Option<String>,
+
+    /// The agent token delivered to the VM at launch.
+    #[arg(long, required_unless_present = "name")]
+    pub agent_token: Option<String>,
+
+    /// The MicroVM id, needed to mint the endpoint proxy token.
+    #[arg(long, required_unless_present = "name")]
+    pub microvm_id: Option<String>,
+
+    /// The name `run --keep --vm-name` registered, standing in for the whole triple.
+    ///
+    /// Resolved through the local name registry (`--state-dir`, or $MICROVM_STATE_DIR, or
+    /// ~/.microvm/runs) with zero AWS calls: the record carries the endpoint, the agent
+    /// token, the MicroVM id, and the region, so `exec --name ci-runner` is the triple
+    /// without the pasting. A name this directory never registered is ERR_PRECONDITION,
+    /// and a --region that disagrees with the record is ERR_INVALID_ARG. Conflicts with
+    /// the explicit triple: a name *is* the triple, and both are two answers to "which VM".
+    #[arg(long, value_name = "NAME", conflicts_with_all = ["endpoint", "agent_token", "microvm_id"])]
+    pub name: Option<String>,
+
+    /// The daemon's port inside the guest.
+    #[arg(long)]
+    pub port: Option<u16>,
+
+    /// Where the local state lives — the name registry, and exec's per-VM history.
+    /// Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs.
+    ///
+    /// On the shared struct rather than per command, so `--name` resolves against the same
+    /// directory on all five attached commands — a registry only `exec` could point at
+    /// would make `health --name` fail against a name `exec --name` just used.
+    #[arg(long)]
+    pub state_dir: Option<PathBuf>,
+}
+
+/// The project config file's two flags, shared by `run` and `doctor`.
+///
+/// One struct for the same reason [`RegionFlags`] is one: the `conflicts_with`
+/// relationship between naming a file and refusing every file is declared once. `doctor`
+/// carries the pair so `doctor --config ci.toml` validates the same file `run --config
+/// ci.toml` would read — two commands resolving the file differently is two answers to
+/// "which config applies here".
+#[derive(Args, Clone, Debug, Default)]
+pub struct ConfigFlags {
+    /// Read this project config file instead of ./microvm.toml.
+    ///
+    /// Naming a file that does not exist is refused with ERR_CONFIG: a typed path that is
+    /// wrong must not silently become "no config". The implicit ./microvm.toml is the
+    /// opposite — its absence just means flags and built-in defaults apply.
+    #[arg(long, value_name = "PATH", conflicts_with = "no_config")]
+    pub config: Option<PathBuf>,
+
+    /// Ignore any microvm.toml, even a malformed one. Flags and defaults apply.
+    #[arg(long)]
+    pub no_config: bool,
+}
+
+/// Which of `run`'s clap-defaulted knobs the caller actually typed.
+///
+/// The parsed struct cannot answer this: `--memory` and the three policy windows carry
+/// clap defaults, so their fields hold a value either way, and a merge keyed on "differs
+/// from the default" would make `--memory 2048` unable to override a config that says
+/// `4096`. [`Explicit::from_matches`] reads the answer off `ArgMatches::value_source`
+/// instead — which is why `main.rs` parses through `FromArgMatches` rather than
+/// `Parser::parse` — and the dispatcher stores it here, a skipped field the parser never
+/// sees. `--egress` needs no entry: a `SetTrue` flag parsed `true` *is* the evidence it
+/// was typed.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct Explicit {
+    pub memory: bool,
+    pub max_idle_sec: bool,
+    pub suspended_sec: bool,
+    pub max_duration_sec: bool,
+}
+
+impl Explicit {
+    /// Reads "the caller typed it" off the parse for `run`'s defaulted knobs.
+    ///
+    /// `CommandLine` and nothing else: a value from clap's own default is exactly the
+    /// case that must *not* count, and there is no env fallback on any of these four.
+    pub fn from_matches(matches: &clap::ArgMatches) -> Self {
+        let typed =
+            |id: &str| matches.value_source(id) == Some(clap::parser::ValueSource::CommandLine);
+        Self {
+            memory: typed("memory"),
+            max_idle_sec: typed("max_idle_sec"),
+            suspended_sec: typed("suspended_sec"),
+            max_duration_sec: typed("max_duration_sec"),
+        }
+    }
+}
+
+/// The three account-specific values the AWS commands need.
+#[derive(Args, Clone, Debug, Default)]
+pub struct InfraFlags {
+    /// S3 bucket for the build artifact. Defaults to $MICROVM_BUCKET.
+    #[arg(long)]
+    pub bucket: Option<String>,
+
+    /// Build role ARN. Defaults to $MICROVM_BUILD_ROLE_ARN.
+    #[arg(long)]
+    pub build_role_arn: Option<String>,
+
+    /// Execution role ARN. Defaults to $MICROVM_EXECUTION_ROLE_ARN.
+    #[arg(long)]
+    pub execution_role_arn: Option<String>,
+}
+
+/// Where the agent token comes from when `--client-token` makes a launch retry-safe.
+///
+/// Never a flag: a token on the command line lands in shell history and process lists.
+pub const AGENT_TOKEN_ENV: &str = "MICROVM_AGENT_TOKEN";
+
+/// The per-VM launch options `run` and `agent-up` share: idempotency and the VM's own logs.
+#[derive(Args, Clone, Debug, Default)]
+pub struct VmLaunchFlags {
+    /// Idempotency key for this launch: 1-128 printable ASCII characters.
+    ///
+    /// Retrying with the same key and identical flags adopts the VM the first attempt
+    /// launched, resuming it if it idle-suspended, instead of launching a second one.
+    /// Persist the key before the first attempt and never reuse it for a different VM. The
+    /// agent token must be the same on every attempt, so it is read from
+    /// $MICROVM_AGENT_TOKEN rather than minted. Refused with --identity, and on `run`
+    /// without --image: a retried build would launch a different image.
+    #[arg(long, value_name = "KEY")]
+    pub client_token: Option<String>,
+
+    /// CloudWatch log group for the VM's own logs (not the image build's).
+    ///
+    /// Omitted keeps the service's default destination. The execution role must allow
+    /// writing to this group.
+    #[arg(long, value_name = "GROUP", conflicts_with = "no_vm_logs")]
+    pub vm_log_group: Option<String>,
+
+    /// Exact log stream inside --vm-log-group.
+    #[arg(long, value_name = "STREAM", requires = "vm_log_group")]
+    pub vm_log_stream: Option<String>,
+
+    /// Turn the VM's own logging off.
+    #[arg(long)]
+    pub no_vm_logs: bool,
+}
+
+impl VmLaunchFlags {
+    /// The per-VM `logging` these flags ask for.
+    pub fn logging(
+        &self,
+    ) -> Result<Option<microvms_core::control::ops::Logging>, microvms_core::Error> {
+        microvms_core::control::ops::Logging::from_parts(
+            self.vm_log_group.clone(),
+            self.vm_log_stream.clone(),
+            self.no_vm_logs,
+        )
+    }
+
+    /// The `(client_token, agent_token)` pair for a retry-safe launch, or `None` without
+    /// `--client-token`.
+    pub fn stable_launch(
+        &self,
+        env: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<Option<(String, String)>, microvms_core::Error> {
+        let Some(client_token) = self.client_token.clone() else {
+            return Ok(None);
+        };
+        match env(AGENT_TOKEN_ENV).filter(|token| !token.is_empty()) {
+            Some(agent_token) => Ok(Some((client_token, agent_token))),
+            None => Err(microvms_core::Error::new(
+                microvms_core::ErrorKind::Precondition,
+                format!(
+                    "--client-token needs the agent token in ${AGENT_TOKEN_ENV}: a retry adopts \
+                     the first attempt's VM only with an identical launch, token included. \
+                     Generate one, persist it with the key, and export it for every attempt."
+                ),
+            )),
+        }
+    }
+}
+
+// ── per-command arguments ───────────────────────────────────────────────────
+
+#[derive(Args, Clone, Debug)]
+pub struct RunArgs {
+    /// A directory to sync (issue #72), or an agentd binary to bake in.
+    ///
+    /// **Omitted while building** (no --image), the CLI provisions the daemon itself: its
+    /// own version's release asset, verified in-process against the release workflow's
+    /// Sigstore attestation (SHA256SUMS only when GitHub can't be reached for one), cached
+    /// under the state directory; neither `gh` nor `curl` is needed. `microvm run --exec "…"`
+    /// on a fresh machine is the headline spelling: no caller should need a path to the daemon.
+    ///
+    /// A positional that names a *directory* switches run into sync mode: the tree is
+    /// packed (skipping `.git`, symlinks preserved), uploaded to /workspace in the VM,
+    /// the exec runs with /workspace as its working directory, and the members matching
+    /// the config's `artifacts` globs are brought back into the directory afterwards —
+    /// `microvm run . --image <name>` is that spelling. A positional that names a file
+    /// is a daemon binary you built or manage yourself, ignored when --image names an
+    /// image to launch instead of building one. The readings cannot collide: a path is
+    /// a directory or it is not, and $MICROVM_AGENTD covers the file case with no
+    /// positional at all.
+    #[arg(value_name = "BINARY_OR_DIR")]
+    pub binary: Option<PathBuf>,
+
+    /// Launch this existing image instead of building one. Takes an ARN or a name.
+    ///
+    /// The loop shape once a build is 45 minutes: `microvm build` once, then `run --image`
+    /// as often as you like.
+    ///
+    /// A bare name is resolved to its ARN through the account's image listing before the
+    /// launch (exact match, every page read), with a progress line naming the resolved
+    /// ARN; an identifier already shaped like an ARN passes through with zero extra
+    /// calls. A name no image carries fails locally with ERR_PRECONDITION — the service's
+    /// own answer to a bare name is HTTP 400 "Malformed ARN", which says nothing about
+    /// names.
+    #[arg(long, value_name = "IDENTIFIER")]
+    pub image: Option<String>,
+
+    /// Launch this exact image version instead of the image's latest active one.
+    ///
+    /// Omitted takes whatever `latestActiveImageVersion` is at the moment the call lands,
+    /// which is right for the ordinary case and wrong for the two that matter. A canary wants
+    /// the version it just built, not whatever became latest while it was starting. And a
+    /// rollback wants the known-good version, which "latest" cannot name once a bad version is
+    /// the latest one.
+    ///
+    /// A version the control plane has set INACTIVE refuses to launch when named here, which
+    /// is what makes a retire real rather than advisory. `microvm build` prints the version it
+    /// created, and it is on `run --keep`'s envelope as `imageVersion`.
+    ///
+    /// Checked against the model's `Version` shape before any call: empty, over 2048
+    /// characters, or containing whitespace anywhere is refused locally with the reason. A
+    /// version pasted from a terminal carries a trailing newline, which is that case.
+    #[arg(long, value_name = "VERSION")]
+    pub image_version: Option<String>,
+
+    /// Where the build artifact already is, as an s3:// URI.
+    ///
+    /// Nothing is uploaded to it, even with --bucket or $MICROVM_BUCKET set, and no daemon is
+    /// provisioned: the image is built from your object. --dockerfile is refused beside it, as
+    /// it only shapes an artifact the CLI builds; leave this out and pass --bucket for that.
+    #[arg(long, value_name = "S3_URI", conflicts_with = "dockerfile")]
+    pub artifact_uri: Option<String>,
+
+    /// A shell command to run in the VM.
+    ///
+    /// Omitted launches and tears down, which is how you check that an image boots at all.
+    #[arg(long, value_name = "COMMAND")]
+    pub exec: Option<String>,
+
+    /// Image name. Defaults to a per-invocation name, because reusing one is how a
+    /// clientToken replay wedges an image.
+    #[arg(long)]
+    pub name: Option<String>,
+
+    /// Baseline MiB, which selects a documented size class.
+    ///
+    /// Defaults to the platform's own 2 GB rather than the cheapest class: the baseline fixes
+    /// the guest's hard ceiling at 4x, provisioned from the start, and a 0.5 GB baseline's
+    /// 2 GB ceiling OOM-kills a real test suite to save about three cents an hour.
+    #[arg(long, value_enum, default_value = "2048")]
+    pub memory: MemoryMib,
+
+    /// A Dockerfile to use instead of the library's default. Its FROM must match the base.
+    #[arg(long)]
+    pub dockerfile: Option<PathBuf>,
+
+    /// CloudWatch log group for the build's logs, instead of the service-created
+    /// `/aws/lambda-microvms/<image-name>`.
+    ///
+    /// The build role must grant logs on whatever this names; a group outside a granted
+    /// prefix builds with no logs at all, and every failure then reads reason=unknown.
+    /// Letters, digits, and `_ - / . #` only, up to 512 characters.
+    #[arg(long, value_name = "GROUP")]
+    pub log_group: Option<String>,
+
+    /// Log stream name prefix inside --log-group. The client appends `/<16 hex>` per
+    /// build attempt, and the resolved exact name is on the envelope as `logStream`.
+    ///
+    /// A prefix rather than the exact name, because the platform member is an exact
+    /// stream name (prefixes unsupported) and one image build is three VMs writing three
+    /// log streams — a fixed name would collapse every build's logs into one stream. No
+    /// `:` or `*`; up to 495 characters (the platform's 512 minus the suffix). Needs a
+    /// log group — this flag, or `log-group` in microvm.toml — and is refused locally
+    /// without one. Not a clap `requires`, because the group may come from the file.
+    #[arg(long, value_name = "STREAM")]
+    pub log_stream: Option<String>,
+
+    /// Widen the guest so `sethostname` and the boot_id bind mount work.
+    ///
+    /// Root in the guest is not enough for either — the MicroVM drops CAP_SYS_ADMIN.
+    #[arg(long)]
+    pub repair_identity: bool,
+
+    /// Request the managed INTERNET_EGRESS connector.
+    ///
+    /// Omitting this flag does not block outbound traffic. For no egress, use a
+    /// custom VPC connector in a VPC without an internet gateway or NAT gateway.
+    #[arg(long, conflicts_with = "egress_network_connectors")]
+    pub egress: bool,
+
+    /// Existing VPC network connector ARN. Repeat for multiple connectors.
+    ///
+    /// Overrides the egress-network-connectors array in microvm.toml.
+    ///
+    /// The VPC's routes and security rules control outbound access. A connector
+    /// alone does not guarantee isolation; use a VPC without an IGW or NAT gateway.
+    #[arg(long = "egress-network-connector", value_name = "ARN")]
+    pub egress_network_connectors: Vec<String>,
+
+    /// Set proxy environment variables that discourage outbound HTTP requests.
+    ///
+    /// Advisory only: workloads can ignore or override these variables. Use a VPC
+    /// without an internet gateway or NAT gateway when no egress is required.
+    /// Caller-supplied --launch-env values take precedence.
+    #[arg(long, conflicts_with = "egress")]
+    pub deny_egress: bool,
+
+    /// Launch shell-capable, so `microvm shell` can attach later.
+    ///
+    /// Requests the ingress pair `[HTTP_INGRESS, SHELL_INGRESS]` instead of
+    /// `ALL_INGRESS` — the one combination measured to both launch and mint a shell
+    /// token. Shell access cannot be added to a running VM; a VM launched without this
+    /// answers `microvm shell` with a ValidationException naming the connector.
+    #[arg(long)]
+    pub shell: bool,
+
+    /// Set one launch-environment variable for every exec in the VM, as KEY=VALUE.
+    /// Repeatable.
+    ///
+    /// Delivered in the same `runHookPayload` as the agent token, at launch, so it never
+    /// touches the shared image snapshot and never touches disk. The daemon applies it as
+    /// the *base* environment of every exec: `exec --env` on the same key wins, because a
+    /// launch env is a default for the VM and a per-exec flag is the specific thing
+    /// happening now.
+    ///
+    /// The whole payload shares a 4096-byte ceiling with the token, checked locally before
+    /// the launch — an over-budget env fails here with the byte count rather than as an
+    /// AWS `ValidationException` after the call. One bearer token fits with room to spare;
+    /// a set of AWS session credentials does not. Large material belongs on `microvm cp`
+    /// after bootstrap, or on a role the workload assumes.
+    ///
+    /// Same KEY=VALUE parsing as `exec --env`, and the same parser: split at the first
+    /// `=`, an empty VALUE is legal, a missing `=` or an empty KEY is refused at parse
+    /// time.
+    #[arg(long, value_name = "KEY=VALUE", value_parser = parse_env_pair)]
+    pub launch_env: Vec<(String, String)>,
+
+    /// User to run --exec's command as: a name or a numeric uid. Omitted runs as the
+    /// daemon's own user.
+    ///
+    /// Resolved by the daemon against the guest's `/etc/passwd`, the only place the answer
+    /// exists; see `exec --user`.
+    ///
+    /// Meaningless without --exec — there is no command to demote — so that combination is
+    /// refused locally before any billable call.
+    #[arg(long, value_name = "USER", requires = "exec", value_parser = parse_name_or_id)]
+    pub user: Option<microvms_core::protocol::exec::NameOrId>,
+
+    /// Group to run --exec's command as: a name or a numeric gid. Omitted keeps the daemon's
+    /// own group, or a named user's primary group.
+    ///
+    /// Refused without --exec, for the same reason as --user.
+    #[arg(long, value_name = "GROUP", requires = "exec", value_parser = parse_name_or_id)]
+    pub group: Option<microvms_core::protocol::exec::NameOrId>,
+
+    /// Leave the VM and image running. You are then paying for them.
+    #[arg(long)]
+    pub keep: bool,
+
+    /// Generate a per-VM identity, so `tunnel --verify-identity` can prove the far end.
+    ///
+    /// The launch generates two x25519 seeds and delivers the VM's seed plus this host's
+    /// public key in the run-hook payload beside the agent token. What persists is the
+    /// least-privilege pair — this host's secret and the VM's *public* pin — in the name
+    /// registry when `--vm-name` is given, and on the success envelope either way. A later
+    /// `microvm tunnel --name <NAME> --verify-identity 5432` then completes a Noise KK
+    /// handshake with the daemon before relaying a byte: proof the far end is this exact
+    /// VM, independent of the platform proxy, with every frame encrypted end to end.
+    ///
+    /// Costs 137 bytes of the launch payload's measured 4096-byte budget (the same budget
+    /// as --launch-env). Requires --keep for --vm-name's reason: a VM torn down on the way
+    /// out has no identity worth proving.
+    #[arg(long, requires = "keep")]
+    pub identity: bool,
+
+    /// Register a local name for the kept VM, so later commands can say `--name <NAME>`
+    /// instead of pasting the endpoint/agent-token/microvm-id triple.
+    ///
+    /// `--vm-name` rather than `--name`, because `--name` on this command already names the
+    /// *image* and repurposing it would silently change a shipped flag's meaning. The name
+    /// is a purely local fact: it lives in the state directory's registry
+    /// (`<state-dir>/names/<NAME>.json`, owner-only, since the record carries the agent
+    /// token), costs zero AWS calls, and is released when `microvm terminate` is accepted.
+    ///
+    /// Names take ASCII letters, digits, `-` and `_` (the image-name pattern), at most 128
+    /// bytes, and never a MicroVM id prefix (`microvm-`, `mvm-`) — that exclusion is what lets every
+    /// identifier-taking command tell a name from a MicroVM id without guessing. A name
+    /// already registered to a live VM is refused locally with ERR_NAME_TAKEN before any
+    /// billable call; terminate that VM or pick another name. Requires --keep, because a
+    /// VM torn down on the way out has nothing to address later.
+    #[arg(long, value_name = "NAME", requires = "keep")]
+    pub vm_name: Option<String>,
+
+    #[command(flatten)]
+    pub launch: VmLaunchFlags,
+
+    /// How long to wait for the exec, in seconds.
+    #[arg(long, default_value = "300", value_parser = parse_seconds)]
+    pub timeout: std::time::Duration,
+
+    /// Suspend the VM after this much inbound-traffic idleness.
+    #[arg(long, default_value_t = 600)]
+    pub max_idle_sec: u32,
+
+    /// Terminate the VM after this long suspended. A resume past it cannot work.
+    #[arg(long, default_value_t = 600)]
+    pub suspended_sec: u32,
+
+    /// Let the platform resume a suspended VM on an incoming request.
+    #[arg(long)]
+    pub auto_resume: bool,
+
+    /// Hard ceiling on the VM's life. Refused above 28800 (eight hours) before any call.
+    #[arg(long, default_value_t = 3600)]
+    pub max_duration_sec: u32,
+
+    /// The daemon's port inside the guest.
+    #[arg(long)]
+    pub port: Option<u16>,
+
+    /// Where the run ledger is written. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs.
+    #[arg(long)]
+    pub state_dir: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub config: ConfigFlags,
+
+    /// Which defaulted knobs were typed, read off the parse by the dispatcher.
+    ///
+    /// Skipped: the parser has no flag for this — it *is* the parse, carried here so the
+    /// handler's merge can tell `--memory 2048` from the default. See [`Explicit`].
+    #[arg(skip)]
+    pub explicit: Explicit,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+
+    #[command(flatten)]
+    pub infra: InfraFlags,
+}
+
+/// `quickstart`'s three knobs — everything else is deliberately a `run` default.
+///
+/// The struct stays this small on purpose: every flag added here is a decision the first
+/// run was supposed to not need, and the command's doc sends anyone who wants a knob to
+/// `run`, where all of them live.
+#[derive(Args, Debug)]
+pub struct QuickstartArgs {
+    /// The command to run inside the first VM.
+    #[arg(
+        long,
+        value_name = "COMMAND",
+        default_value = "echo hello from a microvm"
+    )]
+    pub exec: String,
+
+    /// Where the run ledger and the provisioned-daemon cache live. Defaults to
+    /// $MICROVM_STATE_DIR or ~/.microvm/runs.
+    #[arg(long)]
+    pub state_dir: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+
+    #[command(flatten)]
+    pub infra: InfraFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct BuildArgs {
+    /// The aarch64 agentd binary to bake in as the image CMD.
+    ///
+    /// Omitted, the CLI provisions its own version's release asset, verified in-process
+    /// against the release workflow's Sigstore attestation (the release's SHA256SUMS only
+    /// when GitHub can't be reached for one), and caches it under the state directory. Pass
+    /// a path for a daemon you built or manage yourself; $MICROVM_AGENTD does the same
+    /// without touching the command line.
+    #[arg(value_name = "BINARY")]
+    pub binary: Option<PathBuf>,
+
+    /// Where the provisioned-daemon cache lives. Defaults to $MICROVM_STATE_DIR or
+    /// ~/.microvm/runs — the same directory `run`'s ledger uses, so the two commands
+    /// share one cache.
+    #[arg(long)]
+    pub state_dir: Option<PathBuf>,
+
+    /// Where the build artifact already is, as an s3:// URI. See `run --artifact-uri`.
+    #[arg(long, value_name = "S3_URI", conflicts_with_all = ["dockerfile", "project"])]
+    pub artifact_uri: Option<String>,
+
+    /// Image name. Defaults to a per-invocation name.
+    #[arg(long)]
+    pub name: Option<String>,
+
+    /// Baseline MiB, selecting a documented size class.
+    #[arg(long, value_enum, default_value = "2048")]
+    pub memory: MemoryMib,
+
+    /// A Dockerfile to use instead of the library's default.
+    #[arg(long)]
+    pub dockerfile: Option<PathBuf>,
+
+    /// A project directory whose dependency files bake an environment layer into the
+    /// image (#74).
+    ///
+    /// Exactly one ecosystem's manifest+lockfile pair must be present in the directory:
+    /// pyproject.toml+uv.lock, package.json+package-lock.json, or Cargo.toml+Cargo.lock.
+    /// The pair is zipped into the build context beside the Dockerfile — nothing else in
+    /// the directory enters the shared image snapshot — and the derived Dockerfile
+    /// installs from the lockfile (`uv sync --locked`, `npm ci`, `cargo fetch`), so
+    /// launches skip dependency installation. With --reuse, the pair joins the content
+    /// hash: two projects with identical dependency files share an image, and a lockfile
+    /// edit builds a fresh one.
+    #[arg(long, value_name = "DIR")]
+    pub project: Option<PathBuf>,
+
+    /// Pin the managed base image to one version instead of taking the service's default.
+    ///
+    /// Without this a build floats. The managed base's version list is not static —
+    /// `al2023-1` carried one version in June and two by July — so two builds of identical
+    /// inputs weeks apart can sit on different bases, and neither recorded which. The build
+    /// succeeds either way; the difference shows up in the guest.
+    ///
+    /// The legal values come from `ListManagedMicrovmImageVersions`, which `microvm doctor`
+    /// prints. They are **bare integers** for a managed base (`0`, `1`) where a custom image's
+    /// versions are `1.0`, and the value `GetMicrovmImageVersion` echoes back as
+    /// `baseImageVersion` is spelled a third way again — so a value from anywhere but that
+    /// listing does not belong here.
+    ///
+    /// Checked against the model's `Version` shape before the artifact is uploaded, because
+    /// the create call happens after the upload and the service's rejection would cost you it.
+    #[arg(long, value_name = "VERSION")]
+    pub base_image_version: Option<String>,
+
+    /// CloudWatch log group for the build's logs, instead of the service-created
+    /// `/aws/lambda-microvms/<image-name>`. See `run --log-group`.
+    #[arg(long, value_name = "GROUP")]
+    pub log_group: Option<String>,
+
+    /// Log stream name prefix inside --log-group. The client appends `/<16 hex>` per
+    /// build attempt and the envelope reports the resolved exact name as `logStream`.
+    /// See `run --log-stream`. Requires --log-group — `build` reads no config file, so
+    /// the flag is the only place a group can come from.
+    #[arg(long, value_name = "STREAM", requires = "log_group")]
+    pub log_stream: Option<String>,
+
+    /// Widen the guest so `sethostname` and the boot_id bind mount work.
+    #[arg(long)]
+    pub repair_identity: bool,
+
+    /// Reuse an existing image whose build inputs match, instead of building.
+    ///
+    /// Computes a sha256 over the build inputs (the daemon binary's bytes and the
+    /// Dockerfile), derives the image name `<name>-<hash12>`, and checks the account's
+    /// image listing for that exact name: a hit skips the build entirely and reports the
+    /// existing image with `reused: true`; a miss builds under the derived name.
+    ///
+    /// Why the hash is in the name: recreating an image under a previously-used fixed
+    /// name can serve a stale snapshot (measured — the same hazard class as the
+    /// clientToken replay in docs/PLATFORM.md). Keying the name to the content hash gives
+    /// both properties at once: unchanged inputs reuse their image, changed inputs get a
+    /// fresh name and therefore a fresh build. The match is on binary+Dockerfile (plus
+    /// the --project pair when given); `--memory` isn't part of it, so a reused image keeps
+    /// its size class. Refused with --artifact-uri: the hash covers only local inputs, and an
+    /// image built from your object under that name would answer a later plain --reuse.
+    #[arg(long, conflicts_with = "artifact_uri")]
+    pub reuse: bool,
+
+    /// The daemon's port inside the guest.
+    #[arg(long)]
+    pub port: Option<u16>,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+
+    #[command(flatten)]
+    pub infra: InfraFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct ExecArgs {
+    /// A shell command to run in the VM. Omitted only with --poll.
+    #[arg(value_name = "COMMAND", required_unless_present = "poll")]
+    pub command: Option<String>,
+
+    /// How long to wait for the command, in seconds.
+    #[arg(long, default_value = "300", value_parser = parse_seconds)]
+    pub timeout: std::time::Duration,
+
+    /// Working directory.
+    ///
+    /// Omitted inherits the image WORKDIR, which is not the same as passing `/` — most
+    /// public ARM64 bases declare none.
+    #[arg(long)]
+    pub cwd: Option<String>,
+
+    /// Set one environment variable for the command, as KEY=VALUE. Repeatable.
+    ///
+    /// These flags, over the launch environment, are the child's *whole* environment: the
+    /// daemon starts every exec from an empty one (`env_clear()`, so the agent token never
+    /// leaks into a child) and applies exactly these maps, plus `HOME`/`USER`/`LOGNAME` for a
+    /// --user with a passwd row. There is no inherited PATH to append to unless
+    /// --inherit-image-env asks for the image's; otherwise a command that needs one must be
+    /// handed one, which is the failure the coding-agents example documents.
+    ///
+    /// Split at the **first** `=`, so a value may itself contain `=` (`--env A=b=c` sets `A`
+    /// to `b=c`). An empty value is legal and explicit (`--env EMPTY=` sets the variable to
+    /// the empty string); a missing `=` and an empty KEY are refused here, before anything is
+    /// sent, because the daemon would accept either and the child would carry a variable no
+    /// shell can read back.
+    #[arg(long, value_name = "KEY=VALUE", value_parser = parse_env_pair)]
+    pub env: Vec<(String, String)>,
+
+    /// User to run the command as: a name or a numeric uid. Omitted runs as the daemon's own
+    /// user.
+    ///
+    /// All digits is sent as an integer uid, anything else as a name (AGENTD-7, AGENTD-16).
+    /// The daemon resolves a name against the guest's `/etc/passwd` before it spawns anything and answers
+    /// `unknown_user` (`ERR_PROTOCOL`) for a name the guest does not have. A user with a
+    /// passwd row gets `HOME`, `USER` and `LOGNAME` from it, beneath `--env`; a named user
+    /// also gets the row's primary group when --group is omitted. Nothing is validated here:
+    /// the guest's accounts are the daemon's to know.
+    #[arg(long, value_name = "USER", value_parser = parse_name_or_id)]
+    pub user: Option<microvms_core::protocol::exec::NameOrId>,
+
+    /// Group to run the command as: a name (resolved against the guest's `/etc/group`) or a
+    /// numeric gid. Omitted keeps the daemon's own group, or a named user's primary group.
+    #[arg(long, value_name = "GROUP", value_parser = parse_name_or_id)]
+    pub group: Option<microvms_core::protocol::exec::NameOrId>,
+
+    /// Run the command under this shell instead of `/bin/sh`, for example `bash` (AGENTD-14).
+    ///
+    /// The daemon resolves the name on the child's `PATH`, the image's `PATH`, `/bin` and
+    /// `/usr/bin` and runs `<shell> -c COMMAND`; a shell the guest does not have answers
+    /// `unknown_shell` (`ERR_PROTOCOL`) before anything is spawned, rather than the exit 127
+    /// a caller cannot tell from the command failing. Omitted runs `/bin/sh -c`, which is
+    /// dash on Debian-family images and rejects `set -o pipefail`.
+    #[arg(long, value_name = "SHELL")]
+    pub shell: Option<String>,
+
+    /// Start the command's environment from the image's `ENV` rather than from nothing
+    /// (AGENTD-11).
+    ///
+    /// The daemon snapshots the environment it inherited as the container `CMD` at startup,
+    /// minus every `AGENTD_*` variable, and uses it as the lowest layer: beneath a demoted
+    /// user's `HOME`/`USER`/`LOGNAME`, the launch environment and `--env`. The agent token is
+    /// never in it. A daemon built before this flag ignores it; `microvm health` reports
+    /// `imageEnvKeys` on one that honours it.
+    #[arg(long)]
+    pub inherit_image_env: bool,
+
+    /// Use this exec id instead of a fresh one, making a retry idempotent.
+    ///
+    /// # This is TRAP-1's shape, inverted, and the inversion is the point
+    ///
+    /// The default is a generated id, and that default is deliberate: `microvm exec` is one shot,
+    /// and an id reused by accident means the second invocation is answered from the first's
+    /// record and the caller reads someone else's output. So the *stable* id is the opt-in.
+    ///
+    /// What it buys is the only thing an idempotency key ever buys: a retry that is safe across
+    /// the caller's own restart. The daemon returns success for a known id **without spawning a
+    /// second child** (`crates/agentd/src/exec.rs:366`, decided under the registry lock), so a harness
+    /// whose process died between sending the start and reading the answer can send the identical
+    /// start again and get the original exec rather than a duplicate.
+    ///
+    /// Note what this is *not*: `--client-token` on a control-plane call, whose replay wedges an
+    /// image permanently and which this CLI therefore does not have at all. This key addresses an
+    /// exec record inside one VM, and the failure it prevents is a double-spawn.
+    #[arg(long, value_name = "ID")]
+    pub exec_id: Option<String>,
+
+    /// Read an existing exec's status and output instead of starting anything.
+    ///
+    /// Read-only server-side, so it is safe to spin on and safe to repeat. A running exec answers
+    /// OK with `phase: running` — polling is not a failure, and an exit code of `null` with that
+    /// phase is the honest report of "not finished yet". Does not ack, so the output stays
+    /// readable; `microvm ack` is what releases it.
+    #[arg(long, value_name = "ID", conflicts_with_all = ["exec_id", "stream", "stdin", "cwd", "detach", "env", "user", "group"])]
+    pub poll: Option<String>,
+
+    /// Start the command and return immediately, without waiting and **without acking**.
+    ///
+    /// # Why this is a separate flag rather than `--timeout 0`
+    ///
+    /// The default shape is start-wait-ack, which is right for one shot: the caller wants output
+    /// and the ack is what releases it. But that ack is also the thing a caller cannot undo — a
+    /// second `microvm ack` is a 409, and a poll afterwards reports `acked` with no output at all,
+    /// because the daemon released it (`crates/agentd/src/exec.rs:429`).
+    ///
+    /// So a caller who wants to own an exec's lifecycle — start now, poll later, ack when ready,
+    /// possibly from a different process — needs a start that stops after starting. `--timeout 0`
+    /// would not do it: that still waits (for zero seconds) and still acks, so it would report a
+    /// timeout on a healthy exec and consume nothing.
+    ///
+    /// Prints the exec id and `phase: running`. Pair it with `--exec-id` to know the id in advance;
+    /// without one the envelope's `execId` is the only place the generated id appears, and a
+    /// detached exec whose id was not captured cannot be polled or acked by anyone.
+    #[arg(long, conflicts_with_all = ["stream", "stdin"])]
+    pub detach: bool,
+
+    /// Stream output as it arrives rather than waiting for the whole thing.
+    ///
+    /// Under `--json` or into a pipe this writes **NDJSON**: one JSON object per event on stdout,
+    /// then the envelope last. That is the one documented exception to the one-envelope rule and
+    /// it is declared in the manifest as `responseType: microvm.exec.stream` — stream chunks are
+    /// *output*, not progress, so they cannot go to stderr, and buffering them to keep stdout a
+    /// single document would defeat the only reason to stream.
+    #[arg(long)]
+    pub stream: bool,
+
+    /// Resume a stream at this byte offset. Only with --stream.
+    ///
+    /// The cursor the daemon replays from. A caller that read to offset N and lost its connection
+    /// passes N and receives exactly what it has not seen — which is what makes an interrupted
+    /// stream resumable rather than a choice between losing the tail and re-reading everything.
+    #[arg(long, value_name = "BYTES", requires = "stream")]
+    pub from_offset: Option<u64>,
+
+    /// Give the command a stdin pipe and feed it this process's stdin, then close it.
+    ///
+    /// Opt-in because a child holding an open stdin pipe nobody will ever write to is a child
+    /// that blocks forever the first time it reads. EOF is sent once local stdin ends, and
+    /// nothing else closes the pipe — the daemon's copy outlives the child's own `wait()`.
+    #[arg(long)]
+    pub stdin: bool,
+
+    /// Signal the command's whole process group once its own child exits.
+    ///
+    /// Off by default, and the default is a contract: a backgrounded grandchild that inherited
+    /// the output pipe keeps running and keeps writing, which is how "the server I started in
+    /// the background keeps logging" works. With this flag the daemon runs the same
+    /// SIGTERM-then-SIGKILL escalation `kill` uses against the group as soon as the child
+    /// exits, so nothing the command left behind outlives it (issue #157). `ps` afterwards
+    /// shows the group empty, and the exec's `writersMayBeAlive` reads false because the
+    /// linger saw EOF rather than a deadline.
+    #[arg(long, conflicts_with = "poll")]
+    pub reap: bool,
+
+    /// On `ERR_TIMEOUT`, stop the exec rather than leaving it running.
+    ///
+    /// A plain `--timeout` is a client-side deadline: it abandons the exec and the command
+    /// keeps running in the guest (issue #156). With this flag the timeout is followed by one
+    /// `POST /v1/exec/{id}/kill`, best-effort, and the failure envelope's `data.killed` carries
+    /// the daemon's verdict. The exit code stays `ERR_TIMEOUT`, because the deadline is still
+    /// what ended the wait. Only meaningful on the wait-and-ack shape: `--detach` never waits,
+    /// `--stream` ends with the stream, and `--poll` starts nothing.
+    #[arg(long, conflicts_with_all = ["poll", "detach", "stream"])]
+    pub kill_on_timeout: bool,
+
+    #[command(flatten)]
+    pub attach: AttachFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct KeepaliveArgs {
+    /// Seconds between health polls. Default: a third of the idle window, at most 20.
+    #[arg(long, value_name = "SECONDS", value_parser = parse_seconds)]
+    pub interval: Option<std::time::Duration>,
+
+    /// Stop once the daemon reports no running exec.
+    #[arg(long)]
+    pub while_busy: bool,
+
+    /// Stop after this many seconds, busy or not.
+    #[arg(long = "for", value_name = "SECONDS", value_parser = parse_seconds)]
+    pub for_sec: Option<std::time::Duration>,
+
+    /// The VM's `maxIdleDurationSeconds`. Read from the control plane when omitted.
+    #[arg(long, value_name = "SECONDS", value_parser = parse_seconds)]
+    pub idle_window: Option<std::time::Duration>,
+
+    #[command(flatten)]
+    pub attach: AttachFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct HealthArgs {
+    #[command(flatten)]
+    pub attach: AttachFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+/// `tunnel`'s arguments, which are `port-forward`'s.
+///
+/// A separate struct rather than a shared one, because clap derives per-field help text and
+/// the two commands need different words for the same field — a `tunnel` user asking what
+/// `LOCAL[:GUEST]` means is asking about a database port, not a dev server. The *shapes* being
+/// identical is asserted in `tests/manifest.rs` instead, which is where a divergence would
+/// matter: the two commands must take the same identifier triple.
+#[derive(Args, Debug)]
+pub struct TunnelArgs {
+    /// The ports, as `LOCAL[:GUEST]`. A single number uses it on both sides.
+    ///
+    /// `5432` means the guest's 5432 on local 5432; `15432:5432` moves it aside when something
+    /// local already holds the well-known port, which for a database is the common case.
+    #[arg(value_name = "LOCAL[:GUEST]")]
+    pub ports: String,
+
+    /// The local address to bind. Loopback by default, deliberately.
+    ///
+    /// The same reasoning `port-forward` gives, and it matters more here: a raw-TCP tunnel into
+    /// a VM running untrusted code is not something to expose on a LAN by accident.
+    #[arg(long, default_value = "127.0.0.1")]
+    pub bind: String,
+
+    /// Stop after this many connections, instead of running until Ctrl-C.
+    ///
+    /// For a scripted check — "does the database answer" — where an unbounded listener hangs a
+    /// CI job. Omitted means serve until interrupted.
+    #[arg(long, value_name = "N")]
+    pub max_connections: Option<u32>,
+
+    /// Prove the far end is the VM this record was created for, before relaying a byte.
+    ///
+    /// Runs a Noise KK handshake against the per-VM key that `run --identity` delivered at
+    /// launch: the daemon proves it holds the VM's seed, this side proves it holds the
+    /// launching host's secret, and every frame after the handshake is encrypted end to
+    /// end — opaque to the endpoint proxy that carries it. Fails closed: a VM launched
+    /// without `--identity` refuses (close code 4401) rather than downgrading, a wrong pin
+    /// or a record replayed from another VM fails the handshake itself (4403 or a pin
+    /// diagnosis), and no guest connection is ever made for a refused caller.
+    ///
+    /// Needs the identity material, so it works with `--name <NAME>` (the registry record
+    /// carries it) or with the two `--identity-*` flags pasted from `run`'s envelope.
+    ///
+    /// What it proves, honestly: that the far end is agentd in the VM you launched. The
+    /// workload in that VM runs as root and could in principle read the daemon's memory, so
+    /// this is "the right VM", not "an uncompromised VM" — docs/TRUST.md carries the full
+    /// statement.
+    #[arg(long)]
+    pub verify_identity: bool,
+
+    /// The launching host's identity secret, base64, from `run --identity`'s envelope.
+    ///
+    /// For the attach-by-triple path; `--name` reads it from the registry instead. Implies
+    /// nothing alone — only read when --verify-identity is set.
+    #[arg(long, value_name = "BASE64", requires = "verify_identity")]
+    pub identity_host_seed: Option<String>,
+
+    /// The VM's public key, base64, from `run --identity`'s envelope. The pin.
+    #[arg(long, value_name = "BASE64", requires = "verify_identity")]
+    pub identity_vm_public_key: Option<String>,
+
+    #[command(flatten)]
+    pub attach: AttachFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+/// `shell`'s arguments: which VM, spelled as a name or as endpoint + id.
+///
+/// Not [`AttachFlags`], deliberately: the shell never talks to the daemon, so demanding
+/// `--agent-token` on the explicit spelling would require a credential this command
+/// never sends. The shell's credential is minted fresh per session from the MicroVM id
+/// (`CreateMicrovmShellAuthToken` via the control plane), which is why `--microvm-id`
+/// and the region are what the explicit spelling needs.
+#[derive(Args, Debug)]
+pub struct ShellArgs {
+    /// The VM's endpoint, as reported by `run`.
+    #[arg(long, required_unless_present = "name")]
+    pub endpoint: Option<String>,
+
+    /// The MicroVM id, needed to mint the shell token.
+    #[arg(long, required_unless_present = "name")]
+    pub microvm_id: Option<String>,
+
+    /// The name `run --keep --vm-name` registered, standing in for endpoint and id.
+    ///
+    /// Resolved through the local name registry with zero AWS calls, exactly as the
+    /// attached commands resolve it. Conflicts with the explicit pair, because a name
+    /// *is* the pair and a caller supplying both is two answers to "which VM".
+    #[arg(long, value_name = "NAME", conflicts_with_all = ["endpoint", "microvm_id"])]
+    pub name: Option<String>,
+
+    /// Where the local state lives — the name registry. Defaults to
+    /// $MICROVM_STATE_DIR or ~/.microvm/runs, the same resolution the attached
+    /// commands use.
+    #[arg(long)]
+    pub state_dir: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct PortForwardArgs {
+    /// The ports, as `LOCAL[:GUEST]`. A single number uses it on both sides.
+    ///
+    /// One positional rather than two, and the `:` spelling rather than a pair of flags, for
+    /// the reason [`microvms_core::session::ForwardSpec`] is a struct: both values are `u16`
+    /// and both are plausible in either position, so two bare positionals is how a tunnel ends
+    /// up pointing at the wrong end. `8080` is the common case and means 8080 to 8080.
+    #[arg(value_name = "LOCAL[:GUEST]")]
+    pub ports: String,
+
+    /// The local address to bind. Loopback by default, deliberately.
+    ///
+    /// A tunnel into a VM running untrusted code is not something to expose on a LAN by
+    /// accident, so widening it is a typed choice rather than the default.
+    #[arg(long, default_value = "127.0.0.1")]
+    pub bind: String,
+
+    /// Stop after serving this many connections, instead of running until Ctrl-C.
+    ///
+    /// For a scripted check — "does the dev server answer" — where an unbounded listener would
+    /// hang a CI job. Omitted means serve until interrupted.
+    #[arg(long, value_name = "N")]
+    pub max_connections: Option<u32>,
+
+    #[command(flatten)]
+    pub attach: AttachFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+/// The two ports a `LOCAL[:GUEST]` argument names.
+///
+/// Parsed here rather than in the handler so the refusals are unit-testable without a seam,
+/// and because a malformed pair must be refused before any AWS call — the ledger read that
+/// resolves `--name` is cheap, but minting a token for a port the caller mistyped is a
+/// billable call that fails at the proxy with a 403 naming the token.
+pub fn parse_port_pair(spec: &str) -> Result<(u16, u16), String> {
+    let (local, guest) = match spec.split_once(':') {
+        Some((local, guest)) => (local, guest),
+        None => (spec, spec),
+    };
+    let parse = |value: &str, side: &str| -> Result<u16, String> {
+        let port: u16 = value
+            .trim()
+            .parse()
+            .map_err(|_| format!("{side} port {value:?} is not a number between 1 and 65535"))?;
+        if port == 0 {
+            return Err(format!(
+                "{side} port 0 is not forwardable: the guest cannot listen on it, and on the \
+                 local side it would bind an OS-chosen port this command could not tell you about"
+            ));
+        }
+        Ok(port)
+    };
+    Ok((parse(local, "the local")?, parse(guest, "the guest")?))
+}
+
+#[derive(Args, Debug)]
+pub struct AckArgs {
+    /// The exec whose output to release.
+    #[arg(value_name = "EXEC_ID")]
+    pub exec_id: String,
+
+    #[command(flatten)]
+    pub attach: AttachFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct KillArgs {
+    /// The exec whose process group to signal.
+    #[arg(value_name = "EXEC_ID")]
+    pub exec_id: String,
+
+    #[command(flatten)]
+    pub attach: AttachFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct PsArgs {
+    #[command(flatten)]
+    pub attach: AttachFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct StdinArgs {
+    /// The exec to write to. Must have been started with `exec --stdin`.
+    #[arg(value_name = "EXEC_ID")]
+    pub exec_id: String,
+
+    /// What to write. `-` reads this process's stdin; omitted writes nothing.
+    ///
+    /// Raw bytes either way — core base64-encodes them for the wire, so a caller never has to,
+    /// and a caller who did would have their encoding double-applied.
+    #[arg(long, value_name = "DATA")]
+    pub data: Option<String>,
+
+    /// Close stdin after any --data is written.
+    ///
+    /// The same request rather than a second one, deliberately: two round trips leave a window
+    /// where the child has the bytes but not the EOF that says the input is complete, and a `cat`
+    /// in that window looks identical to a hung one.
+    #[arg(long)]
+    pub eof: bool,
+
+    #[command(flatten)]
+    pub attach: AttachFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct CpArgs {
+    /// Source. `vm:/path` reads from the VM, anything else is a local path.
+    #[arg(value_name = "SRC")]
+    pub src: String,
+
+    /// Destination. `vm:/path` writes to the VM, anything else is a local path.
+    #[arg(value_name = "DST")]
+    pub dst: String,
+
+    /// Move a whole directory tree, as an uncompressed tar archive.
+    ///
+    /// # The two sides are different kinds of thing, deliberately
+    ///
+    /// The **`vm:`** side is a **directory**. The daemon packs and extracts it: `GET
+    /// /v1/fs/tar` refuses anything but a directory and builds the archive itself, and `PUT
+    /// /v1/fs/tar` extracts into one through the confined extractor. So `cp vm:/workspace
+    /// out.tar --tar` archives a tree, and `cp out.tar vm:/restored --tar` recreates it.
+    ///
+    /// The **local** side is a `.tar` **file**, and that asymmetry is a real limitation rather
+    /// than a choice: `crates/microvms-app/src/session/files.rs:112` declines to add a tar library
+    /// because Rust's standard library has no equivalent of Python tarfile's `data` filter,
+    /// and "an extraction that looked safe and was not is worse than none". This binary
+    /// declines for the same reason plus a stronger one — the daemon's extractor is currently
+    /// the *only* extractor in the system, and a second one here would be a second set of
+    /// member rules to keep in step. Unpack a downloaded archive with your own `tar xf`.
+    ///
+    /// Members are stored relative to the packed directory, so they land flattened under the
+    /// destination: a `link` inside `/workspace` extracts to `<dest>/link`. That is what makes
+    /// a downloaded archive re-uploadable, which is the round trip a harness performs
+    /// constantly.
+    #[arg(long)]
+    pub tar: bool,
+
+    /// Permissions for an uploaded file, octal as a string (`644`, `0755`).
+    ///
+    /// A string because the wire field is one: `"644"` and `"0644"` mean the same mode, and an
+    /// integer would be read as decimal 644 by anything that stringifies it. Only meaningful
+    /// uploading a single file — a tar carries its members' own modes.
+    #[arg(long, value_name = "OCTAL", conflicts_with = "tar")]
+    pub mode: Option<String>,
+
+    #[command(flatten)]
+    pub attach: AttachFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct SyncArgs {
+    /// The project directory to sync. Packed with `run <DIR>`'s rules: `.git`, `target`,
+    /// `node_modules` and `.venv` stay home, symlinks travel as links, and the daemon's
+    /// body and member budgets are enforced during the walk.
+    #[arg(value_name = "DIR")]
+    pub dir: PathBuf,
+
+    /// Keep syncing on filesystem changes until Ctrl-C.
+    ///
+    /// Events only trigger a re-hash; the hash compare against the guest manifest is what
+    /// decides whether any bytes move, so a noisy watcher costs hashing time and never a
+    /// redundant upload. Changes are debounced briefly so one save producing several
+    /// events becomes one sync pass.
+    #[arg(long)]
+    pub watch: bool,
+
+    /// Upload the whole tree even when the guest manifest claims members are unchanged.
+    ///
+    /// The manifest describes what the last sync left in /workspace; a workload that
+    /// edits the workspace behind sync's back makes it stale. This flag is the recovery:
+    /// one full upload, and the manifest is true again.
+    #[arg(long)]
+    pub full: bool,
+
+    /// How long the in-guest deletion of locally-removed paths may take, in seconds.
+    #[arg(long, default_value = "60", value_parser = parse_seconds)]
+    pub timeout: std::time::Duration,
+
+    #[command(flatten)]
+    pub attach: AttachFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+/// `attach`'s arguments: a record file, or the triple plus the name to register it under.
+///
+/// Not [`AttachFlags`], deliberately. There `--name` *resolves* a registered record and so
+/// conflicts with the explicit triple; here `--name` is the name to *register*, and the
+/// explicit spelling needs it beside the triple. Reusing the struct would have made the one
+/// legal explicit invocation a clap conflict.
+#[derive(Args, Debug)]
+pub struct AttachArgs {
+    /// A name record as the registry writes it (`<state-dir>/names/<name>.json`), or `-`
+    /// for stdin.
+    ///
+    /// The file another machine's `run --keep --vm-name` wrote is the export format, so
+    /// there is nothing to convert: `ssh other cat ~/.microvm/runs/names/ci.json | microvm
+    /// attach --from -`. The record's own name is registered unless `--name` renames it on
+    /// the way in. Identity material in the record is kept — the host seed is in the same
+    /// trust domain as the agent token beside it (see `NameRecord`), and the VM pin is what
+    /// a later `tunnel --name --verify-identity` checks against.
+    #[arg(
+        long,
+        value_name = "FILE",
+        conflicts_with_all = ["endpoint", "agent_token", "microvm_id", "identity_host_seed", "identity_vm_public_key"]
+    )]
+    pub from: Option<PathBuf>,
+
+    /// The name to register. Required with the explicit triple; renames a `--from` record.
+    ///
+    /// Validated like `run --vm-name`: ASCII letters, digits, `-`, `_`, never an id prefix.
+    /// A name already registered here to a *different* VM is refused with ERR_NAME_TAKEN —
+    /// a name is a promise about which VM answers, and nothing overwrites one silently.
+    /// The same VM under the same name is an idempotent success that refreshes the record.
+    #[arg(long, value_name = "NAME", required_unless_present = "from")]
+    pub name: Option<String>,
+
+    /// The VM's endpoint, as reported by `run` on the machine that launched it.
+    #[arg(long, required_unless_present = "from")]
+    pub endpoint: Option<String>,
+
+    /// The agent token delivered to the VM at launch. Never echoed in the envelope.
+    #[arg(long, required_unless_present = "from")]
+    pub agent_token: Option<String>,
+
+    /// The MicroVM id, needed to mint the endpoint proxy token.
+    #[arg(long, required_unless_present = "from")]
+    pub microvm_id: Option<String>,
+
+    /// The launching host's identity secret, base64, from `run --identity`'s envelope.
+    ///
+    /// Stored on the record so a later `tunnel --name --verify-identity` can run the
+    /// handshake; the Noise KK pattern proves this side too, so the pin alone is not enough.
+    #[arg(long, value_name = "BASE64", requires = "identity_vm_public_key")]
+    pub identity_host_seed: Option<String>,
+
+    /// The VM's public key, base64, from `run --identity`'s envelope. The pin.
+    #[arg(long, value_name = "BASE64", requires = "identity_host_seed")]
+    pub identity_vm_public_key: Option<String>,
+
+    /// Prove the far end is the VM the record was created for, before writing anything.
+    ///
+    /// Runs `tunnel --verify-identity`'s Noise KK handshake against the record's pinned VM
+    /// key. Refused up front when the record carries no identity material — identity is
+    /// generated at launch and cannot be added to a running VM — and refused, with nothing
+    /// written, when the handshake fails: a VM launched without `--identity` (4401), a
+    /// record replayed from another VM (the reply does not verify against the pin). Without
+    /// the flag the record is adopted on the strength of the token alone and keeps whatever
+    /// pin it carried, so a later `tunnel --name <NAME> --verify-identity` still works.
+    #[arg(long)]
+    pub verify_identity: bool,
+
+    /// The daemon's port inside the guest, for the probe. Not recorded.
+    #[arg(long)]
+    pub port: Option<u16>,
+
+    /// Where the local state lives — the registry this record is written into.
+    /// Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs.
+    #[arg(long)]
+    pub state_dir: Option<PathBuf>,
+
+    /// The region the record stores and the probe mints against. With `--from`, it's the
+    /// record's own region, and a flag that disagrees with it is refused with
+    /// ERR_INVALID_ARG, the answer every `--name` command gives.
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct SuspendArgs {
+    /// The MicroVM to freeze.
+    #[arg(value_name = "MICROVM_ID")]
+    pub microvm_id: String,
+
+    /// How long to wait for the state transition, in seconds.
+    #[arg(long, default_value = "300", value_parser = parse_seconds)]
+    pub timeout: std::time::Duration,
+
+    /// Where the VM's history is appended. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs.
+    #[arg(long)]
+    pub state_dir: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct ResumeArgs {
+    /// The MicroVM to thaw.
+    #[arg(value_name = "MICROVM_ID")]
+    pub microvm_id: String,
+
+    /// How long to wait for RUNNING, in seconds.
+    #[arg(long, default_value = "300", value_parser = parse_seconds)]
+    pub timeout: std::time::Duration,
+
+    /// Where the VM's history is appended. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs.
+    #[arg(long)]
+    pub state_dir: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct TerminateArgs {
+    /// The MicroVM to terminate.
+    #[arg(value_name = "MICROVM_ID")]
+    pub microvm_id: String,
+
+    /// The image to delete, if --delete-image is given. Omitted, the image is read off the
+    /// kept run's ledger record in the state directory.
+    #[arg(long)]
+    pub image_identifier: Option<String>,
+
+    /// The image's name, needed to name its build log group. Omitted, it is read off the
+    /// same ledger record when one names the image.
+    ///
+    /// The service created that group, so `terraform destroy` never removes it.
+    #[arg(long)]
+    pub image_name: Option<String>,
+
+    /// Also delete the image, and name its build log group.
+    ///
+    /// Not a clap `requires` on `image_identifier` (issue #160): `run --keep` records the
+    /// image beside the VM, so demanding it back is asking for what the CLI holds. The
+    /// handler refuses with `ERR_INVALID_ARG` only when neither the flag nor a record
+    /// names an image.
+    #[arg(long)]
+    pub delete_image: bool,
+
+    /// Wait for TERMINATED rather than returning as soon as the call is accepted.
+    #[arg(long)]
+    pub wait: bool,
+
+    /// Where the VM's history is appended. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs.
+    #[arg(long)]
+    pub state_dir: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct LsArgs {
+    /// Where the ledgers live. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs.
+    #[arg(long)]
+    pub state_dir: Option<PathBuf>,
+
+    /// Re-read the ledger on an interval until Ctrl-C, port-forward style (#78).
+    ///
+    /// Snapshots go to stderr as progress; the single success envelope at the end
+    /// summarises the watch. Local file reads only: this loop makes **zero**
+    /// platform calls — in particular it never polls `/v1/health`, which is the
+    /// call that resets a VM's idle timer (measured in `docs/PLATFORM.md`) — so
+    /// watching keeps nothing alive and bills for nothing.
+    #[arg(long)]
+    pub watch: bool,
+
+    /// Seconds between ledger re-reads under `--watch`; default 2.
+    ///
+    /// The default can be this short *because* the loop is ledger-only. A watcher
+    /// that polled `/v1/health` instead would need its interval judged against
+    /// every watched VM's `maxIdleDurationSeconds`, because each poll resets that
+    /// timer and keeps the VM billing.
+    #[arg(long, default_value_t = 2.0, requires = "watch")]
+    pub interval_sec: f64,
+
+    /// Stop after this many snapshots instead of on Ctrl-C.
+    ///
+    /// The bounded form, for scripts and tests — `port-forward
+    /// --max-connections`'s reasoning: an unattended watch should be able to end
+    /// itself.
+    #[arg(long, requires = "watch")]
+    pub max_refreshes: Option<u64>,
+
+    /// Ask the account too: list live MicroVMs and images and mark each ledger entry live, gone, or unjudged.
+    ///
+    /// Through the same control plane every other command uses — one AWS service, no
+    /// second client (#159). Each identifier in an entry's `leaked` list is judged:
+    /// `remote.entries[].status` is `live` when one is still listed alive, `gone` when
+    /// every one is a MicroVM id or image ARN the listings no longer carry, and `unjudged`
+    /// when one is something neither listing can see (a `/aws/lambda-microvms/…` log
+    /// group), or for a record from another region or one this CLI cannot read. Resources
+    /// still alive that no ledger entry names appear under `remote.unknownToLedger`.
+    /// Conflicts with `--watch`, which is ledger-only by contract.
+    #[arg(long, conflicts_with = "watch")]
+    pub remote: bool,
+
+    /// Remove the ledger files of `gone` entries. Requires `--remote`.
+    ///
+    /// Only `gone`: a live record is the one the ledger exists for, and an unjudged one is
+    /// a question this region cannot answer. The removed run ids are `data.pruned`.
+    #[arg(long, requires = "remote")]
+    pub prune: bool,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct HistoryArgs {
+    /// The MicroVM whose history to print.
+    #[arg(value_name = "VM_ID")]
+    pub microvm_id: String,
+
+    /// Where the histories live. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs.
+    #[arg(long)]
+    pub state_dir: Option<PathBuf>,
+}
+
+#[derive(Args, Debug)]
+pub struct LogsArgs {
+    /// The image whose log group to name.
+    #[arg(value_name = "IMAGE_NAME")]
+    pub image_name: String,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct CostArgs {
+    /// Treat the durations as a plan rather than as timings.
+    ///
+    /// Every duration is labelled projected, so an estimate cannot print as a report of
+    /// something that happened.
+    #[arg(long)]
+    pub estimate: bool,
+
+    /// Also print running versus suspended for the same hold, with the break-even.
+    #[arg(long)]
+    pub compare: bool,
+
+    /// Baseline MiB, selecting a documented size class.
+    #[arg(long, value_enum, default_value = "2048")]
+    pub memory: MemoryMib,
+
+    /// Seconds the VM spent, or will spend, RUNNING.
+    ///
+    /// Billed at baseline whether or not anything is executing — there is no free I/O wait,
+    /// which is why suspension rather than idleness is the lever.
+    #[arg(long, default_value_t = 0.0)]
+    pub running_sec: f64,
+
+    /// Seconds spent suspended. Storage only — no compute line at all.
+    #[arg(long, default_value_t = 0.0)]
+    pub suspended_sec: f64,
+
+    /// Seconds the image build took.
+    ///
+    /// Appears as an unpriced line: AWS does not publish whether the server-side build is
+    /// billed as compute.
+    #[arg(long, default_value_t = 0.0)]
+    pub build_sec: f64,
+
+    /// Image size in GB. Adds storage with its one-week minimum retention.
+    #[arg(long)]
+    pub image_gb: Option<f64>,
+
+    /// Suspend/resume cycles, each paying a snapshot write plus a read.
+    #[arg(long, default_value_t = 1)]
+    pub cycles: u32,
+
+    /// The hold to compare running against suspended over, in seconds.
+    #[arg(long, default_value = "3600", value_parser = parse_seconds)]
+    pub hold_sec: std::time::Duration,
+
+    /// A budget in USD the report's total is checked against (#77).
+    ///
+    /// Checked against the *priced* total, which is a lower bound whenever any line
+    /// is unpriced — so a breach means the true cost is at least this far over, by
+    /// an unknown margin. That is why `--on-breach` is required beside this flag
+    /// rather than defaulted: whether a figure that is already known to understate
+    /// should warn or abort is the caller's call, not this CLI's.
+    #[arg(long, value_name = "USD", requires = "on_breach")]
+    pub max_cost: Option<String>,
+
+    /// What a `--max-cost` breach does: warn and exit 0, or abort with
+    /// ERR_PRECONDITION (exit 12).
+    ///
+    /// Required whenever `--max-cost` is given, and deliberately without a default
+    /// (see `--max-cost`). Without `--max-cost` this flag gates nothing; the
+    /// handler says so on stderr rather than silently ignoring it.
+    #[arg(long, value_enum)]
+    pub on_breach: Option<OnBreach>,
+}
+
+/// What a `--max-cost` breach does. A closed set, and deliberately not defaulted.
+///
+/// The totals this budget is compared against are lower bounds whenever a line is
+/// unpriced (COST-4), so a detected breach has already been exceeded by an unknown
+/// margin. Whether that warrants a warning or a non-zero exit depends on what the
+/// caller is gating — a dashboard wants the report either way, a CI budget gate
+/// wants the exit — and a default would quietly make that judgement for them.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum OnBreach {
+    /// Report as usual, with the breach as a warning on stderr. Exit 0.
+    Warn,
+    /// Report as usual, then exit ERR_PRECONDITION (12) — the budget precondition
+    /// the caller set does not hold.
+    Abort,
+}
+
+#[derive(Args, Debug)]
+pub struct DoctorArgs {
+    /// The agentd binary to check the architecture of.
+    #[arg(long)]
+    pub binary: Option<PathBuf>,
+
+    /// The Terraform stack directory. Defaults to ./conformance/infra.
+    #[arg(long)]
+    pub infra_dir: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub config: ConfigFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+
+    #[command(flatten)]
+    pub infra: InfraFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct ConstantsArgs {
+    /// Emit the raw constants object, unwrapped by an envelope.
+    ///
+    /// The one stdout write in this binary that is not an envelope, and the reason is its
+    /// consumer: `tools/check-model-drift.py` compares key-for-key against a pinned service
+    /// model, so an envelope would put every comparison behind `["data"]` for no gain. The
+    /// global --json wraps the same object if you want the envelope instead.
+    #[arg(long)]
+    pub emit_json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct DockerfileArgs {
+    /// The image ref for the FROM line. Defaults to the managed al2023 base's pair.
+    ///
+    /// Only change this when you are also changing `baseImageArn`: the build runs the
+    /// Dockerfile *on top of* the base that ARN names, and microvms-core refuses a
+    /// Dockerfile whose FROM disagrees with it (`require_matching_from`). Passing a ref
+    /// here does not select a base — it only writes the line that has to match one.
+    #[arg(long = "from", value_name = "IMAGE_REF")]
+    pub from: Option<String>,
+
+    /// The port agentd listens on inside the guest.
+    #[arg(long, default_value_t = 9000)]
+    pub port: u16,
+
+    /// A working directory to create and set. Strongly recommended.
+    ///
+    /// Most public ARM64 base images, the managed al2023 base included, declare no
+    /// WorkingDir — so without a WORKDIR every relative path in your commands resolves
+    /// against `/`, and microvms-core refuses `inherit_workdir` when nothing declares one.
+    #[arg(long, value_name = "DIR")]
+    pub workdir: Option<String>,
+}
+
+/// The two coding agents `agent-up` can install. Mirrors `microvms_core::agents::Agent`,
+/// which is the closed set; the mapping is exhaustive so a third agent added to core is a
+/// compile error here rather than a flag value the CLI silently cannot spell.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum AgentArg {
+    #[value(name = "claude-code")]
+    ClaudeCode,
+    #[value(name = "codex")]
+    Codex,
+}
+
+impl AgentArg {
+    /// The core profile this flag value selects.
+    pub fn agent(self) -> microvms_core::agents::Agent {
+        match self {
+            AgentArg::ClaudeCode => microvms_core::agents::Agent::ClaudeCode,
+            AgentArg::Codex => microvms_core::agents::Agent::Codex,
+        }
+    }
+}
+
+#[derive(Args, Clone, Debug)]
+pub struct AgentUpArgs {
+    /// The aarch64 agentd binary to bake in. Omitted provisions this CLI's own release asset.
+    #[arg(value_name = "BINARY")]
+    pub binary: Option<PathBuf>,
+
+    /// The local name to register for the VM, and the handle every later command uses.
+    ///
+    /// Required, because an agent VM is kept by definition: the whole point is to prompt it
+    /// later. Same grammar as `run --vm-name`. A name already registered to a live VM is
+    /// not a collision here: it selects the refresh path, which re-installs credentials.
+    #[arg(long, value_name = "NAME")]
+    pub vm_name: String,
+
+    /// Which agent to install. Repeatable; defaults to `claude-code`.
+    #[arg(long, value_enum, value_name = "AGENT")]
+    pub agent: Vec<AgentArg>,
+
+    /// The Bedrock inference-profile id Claude Code uses. Defaults to the profile's.
+    #[arg(long, value_name = "MODEL_ID")]
+    pub claude_model: Option<String>,
+
+    /// The Bedrock model id Codex uses. Defaults to the profile's.
+    #[arg(long, value_name = "MODEL_ID")]
+    pub codex_model: Option<String>,
+
+    /// Pin the Claude Code npm package to this version. Changes the image's reuse hash.
+    #[arg(long, value_name = "VERSION")]
+    pub claude_version: Option<String>,
+
+    /// Pin the Codex npm package to this version. Changes the image's reuse hash.
+    #[arg(long, value_name = "VERSION")]
+    pub codex_version: Option<String>,
+
+    /// A local directory to upload into /workspace after launch, packed the way `run <DIR>` packs.
+    ///
+    /// Same skip list (`.git`, `target`, `node_modules`, `.venv`), same budgets, packed
+    /// before any AWS call so an unreadable tree costs nothing. Bring results back with
+    /// `microvm cp --tar vm:/workspace <LOCAL> --name <NAME>`.
+    #[arg(long, value_name = "DIR")]
+    pub project: Option<PathBuf>,
+
+    /// Baseline MiB. Default 1024: a 4 GiB always-present ceiling at half the floor cost of
+    /// 2048, which fits peaky agent sessions (see `docs/AGENT-VMS.md`).
+    #[arg(long, value_enum, default_value = "1024")]
+    pub memory: MemoryMib,
+
+    /// How long the Bedrock bearer token lives, in hours. Default and ceiling 12.
+    #[arg(long, default_value_t = 12, value_name = "HOURS")]
+    pub token_ttl_hours: u32,
+
+    /// Suspend the VM after this much inbound-traffic idleness.
+    #[arg(long, default_value_t = 600)]
+    pub max_idle_sec: u32,
+
+    /// Terminate the VM after this long suspended. A resume past it cannot work.
+    #[arg(long, default_value_t = 600)]
+    pub suspended_sec: u32,
+
+    /// Let the platform resume a suspended VM on an incoming request.
+    #[arg(long)]
+    pub auto_resume: bool,
+
+    /// Hard ceiling on the VM's life. Refused above 28800 (eight hours) before any call.
+    #[arg(long, default_value_t = 3600)]
+    pub max_duration_sec: u32,
+
+    /// The daemon's port inside the guest.
+    #[arg(long)]
+    pub port: Option<u16>,
+
+    /// Where the run ledger and name registry live. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs.
+    #[arg(long)]
+    pub state_dir: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub launch: VmLaunchFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+
+    #[command(flatten)]
+    pub infra: InfraFlags,
+}
+
+/// Permission policy for the agent process inside the VM.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+pub enum AgentPermissionModeArg {
+    #[default]
+    AgentDefault,
+    Unrestricted,
+}
+
+impl AgentPermissionModeArg {
+    pub fn mode(self) -> microvms_core::agents::AgentPermissionMode {
+        match self {
+            Self::AgentDefault => microvms_core::agents::AgentPermissionMode::AgentDefault,
+            Self::Unrestricted => microvms_core::agents::AgentPermissionMode::Unrestricted,
+        }
+    }
+}
+
+#[derive(Args, Clone, Debug)]
+pub struct AgentPromptArgs {
+    /// The task, as prose. Passed to the agent's headless command single-quoted for `sh`.
+    #[arg(value_name = "TASK")]
+    pub task: String,
+
+    /// Which installed agent to prompt. Omitted reads the guest marker and takes the one it names.
+    #[arg(long, value_enum, value_name = "AGENT")]
+    pub agent: Option<AgentArg>,
+
+    /// Guest agent permission policy. Unrestricted bypasses agent approvals, still as uid 1000.
+    #[arg(long, value_enum, default_value = "agent-default")]
+    pub permission_mode: AgentPermissionModeArg,
+
+    /// Remote execution deadline in seconds; persists after detach. Must be positive and finite.
+    #[arg(long, value_name = "SECONDS")]
+    pub execution_timeout: Option<f64>,
+
+    /// Terminate residual process-group children when the main agent exits.
+    #[arg(long)]
+    pub reap_group_on_exit: bool,
+
+    /// Caller wait limit in seconds. Does not stop the agent when the wait expires.
+    #[arg(long, default_value = "900", value_parser = parse_seconds)]
+    pub timeout: std::time::Duration,
+
+    /// Start the agent and return immediately, without waiting and without acking.
+    ///
+    /// Prints the exec id; `microvm exec --poll <ID> --name <NAME>` reads it back and
+    /// `microvm ack` releases it, exactly as for `exec --detach`.
+    #[arg(long)]
+    pub detach: bool,
+
+    /// Use this exec id instead of a fresh one, making a retry idempotent.
+    #[arg(long, value_name = "ID")]
+    pub exec_id: Option<String>,
+
+    #[command(flatten)]
+    pub attach: AttachFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+/// The parser for `--user` and `--group`: all digits is an id, sent as a JSON integer, and
+/// anything else a name.
+///
+/// Named explicitly rather than left to clap's inference, which is the bug this exists for:
+/// `NameOrId` implements `From<String>`, and clap's `value_parser!` prefers that over
+/// `FromStr`, so `--user 1000` parsed as the *name* "1000" and went out as a string, which a
+/// daemon that predates names refuses as malformed (AGENTD-16).
+fn parse_name_or_id(
+    raw: &str,
+) -> Result<microvms_core::protocol::exec::NameOrId, std::convert::Infallible> {
+    raw.parse()
+}
+
+/// One `--env KEY=VALUE` pair, split at the first `=`.
+///
+/// A parser rather than a raw `Vec<String>` the handler splits later, for the CLI-5 reason:
+/// the parse failure names the flag and costs nothing, where a handler failure happens after
+/// the session attach — a network round trip spent discovering a typo.
+///
+/// The three decisions, each the opposite of a silent misread:
+///
+/// - **Split at the first `=`**, so `A=b=c` sets `A` to `b=c`. Splitting at the last would
+///   read the same input as `A=b` set to `c`, and connection strings are full of `=`.
+/// - **An empty VALUE is legal** (`EMPTY=`): setting a variable to the empty string is a real
+///   thing callers do (emptying `PYTHONPATH`), and it is not the same as unsetting — the
+///   child's environment starts empty anyway, so *unset* is spelled by omission.
+/// - **A missing `=` and an empty KEY are refused.** The daemon accepts both — `env` is a
+///   free map on the wire — but a variable named `""` is one no shell can read back, and a
+///   bare `--env DEBUG` is more likely a caller who meant `DEBUG=1` than one who meant the
+///   empty string under a key.
+fn parse_env_pair(pair: &str) -> Result<(String, String), String> {
+    let Some((key, value)) = pair.split_once('=') else {
+        return Err(format!(
+            "no `=` in {pair:?}: --env takes KEY=VALUE. To set an empty value write \
+             `--env {pair}=`; the child's environment starts empty, so leaving a variable \
+             unset is spelled by not passing it."
+        ));
+    };
+    if key.is_empty() {
+        return Err(format!(
+            "empty KEY in {pair:?}: a variable named \"\" is one no shell can read back"
+        ));
+    }
+    Ok((key.to_string(), value.to_string()))
+}
+
+/// A flag's seconds, as a duration, refused when they can't be one.
+///
+/// A parser rather than a conversion in the handler, because the refusal has to come before the
+/// work: `exec` converted after the command had started in the VM, `run` after the launch, and
+/// `suspend` and `resume` after the call was sent, so `inf` panicked with a VM running and `NaN`
+/// quietly meant zero (#268). The conversion is core's `duration_of_secs_f64`, the one both
+/// bindings call for their waits, so all three surfaces refuse the same values with the same
+/// message.
+fn parse_seconds(raw: &str) -> Result<std::time::Duration, String> {
+    let seconds: f64 = raw
+        .parse()
+        .map_err(|_| format!("{raw:?} is not a number of seconds"))?;
+    microvms_core::cost::duration_of_secs_f64(seconds).map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    /// **CLI-5's static half.** The `--memory` domain is exactly the documented size table.
+    ///
+    /// Written out in this file and computed here, which is the point: the two can disagree,
+    /// and a sixth class added to `SIZE_CLASSES` that never reaches [`MemoryMib`] would be a
+    /// class the CLI cannot express. Both directions, so an extra variant here that is not a
+    /// class fails too.
+    #[test]
+    fn the_memory_domain_is_exactly_the_documented_size_table() {
+        let from_flag: Vec<u32> = MemoryMib::value_variants()
+            .iter()
+            .map(|variant| variant.size_class().baseline_mib())
+            .collect();
+        let from_core: Vec<u32> = SizeClass::ALL
+            .iter()
+            .map(|class| class.baseline_mib())
+            .collect();
+        assert_eq!(from_flag, from_core);
+
+        // And the *spellings* clap accepts are the baselines as decimal, so `--memory 2048`
+        // is what a caller writes rather than `--memory mib2048`.
+        let spellings: Vec<String> = MemoryMib::value_variants()
+            .iter()
+            .filter_map(|variant| variant.to_possible_value())
+            .map(|value| value.get_name().to_string())
+            .collect();
+        assert_eq!(spellings, ["512", "1024", "2048", "4096", "8192"]);
+    }
+
+    /// The `--region` domain is exactly the five measured regions.
+    ///
+    /// `eu-central-1` is the specific value worth naming: the Python's CLI copy of the list
+    /// had drifted to include it, and measurement shows it does *not* carry MicroVMs — it
+    /// was one of the three that answered the null-message denial.
+    #[test]
+    fn the_region_domain_is_exactly_the_five_measured_regions_and_excludes_eu_central_one() {
+        let from_flag: Vec<String> = RegionArg::value_variants()
+            .iter()
+            .map(|variant| variant.region().as_str().to_string())
+            .collect();
+        let from_core: Vec<String> = microvms_core::region::MICROVM_REGIONS
+            .iter()
+            .map(|region| region.as_str().to_string())
+            .collect();
+        assert_eq!(from_flag, from_core);
+        assert!(!from_flag.contains(&"eu-central-1".to_string()));
+
+        // The parser really refuses it, rather than the domain merely omitting it.
+        // `logs` was chosen when `ls` carried no region flags at all; `ls --remote` gained them
+        // in #159, so either would do now, and the probe stays where it was.
+        let refused = Cli::try_parse_from(["microvm", "logs", "img", "--region", "eu-central-1"]);
+        assert!(refused.is_err(), "eu-central-1 must not parse");
+    }
+
+    /// `ls --prune` needs `--remote`, and `--remote` cannot ride a `--watch` (#159).
+    ///
+    /// The first because a prune is a verdict from a listing, and there is no verdict
+    /// without one. The second because `--watch` is documented as zero platform calls per
+    /// refresh, and a remote watch would make that sentence false on every tick.
+    #[test]
+    fn ls_prune_requires_remote_and_remote_excludes_watch() {
+        let parsed = Cli::try_parse_from([
+            "microvm",
+            "ls",
+            "--remote",
+            "--prune",
+            "--region",
+            "us-east-1",
+        ])
+        .expect("remote with prune parses");
+        let Command::Ls(args) = parsed.command else {
+            panic!("an ls parses as an ls");
+        };
+        assert!(args.remote && args.prune);
+        assert_eq!(args.region.region, Some(RegionArg::UsEast1));
+
+        let plain = Cli::try_parse_from(["microvm", "ls"]).expect("a plain ls parses");
+        let Command::Ls(args) = plain.command else {
+            panic!("an ls parses as an ls");
+        };
+        assert!(!args.remote && !args.prune);
+
+        assert!(
+            Cli::try_parse_from(["microvm", "ls", "--prune"]).is_err(),
+            "a prune without a listing has nothing to judge by"
+        );
+        assert!(
+            Cli::try_parse_from(["microvm", "ls", "--watch", "--remote"]).is_err(),
+            "a watch is ledger-only by contract"
+        );
+    }
+
+    /// An off-table `--memory` is refused by the parser, before any handler.
+    ///
+    /// This is the assertion CLI-5 is: 1500 is the value TRAP-10 was measured with, and the
+    /// difference between refusing it here and refusing it in core is a build cycle.
+    #[test]
+    fn an_off_table_memory_value_never_reaches_a_handler() {
+        let refused = Cli::try_parse_from(["microvm", "cost", "--memory", "1500"])
+            .expect_err("1500 is not a documented baseline");
+        let rendered = refused.render().to_string();
+        assert!(rendered.contains("1500"), "{rendered}");
+        // clap lists the domain in its own error, so the remedy is in the message.
+        assert!(rendered.contains("2048"), "{rendered}");
+        // And a documented one does parse, so the guard is a comparison rather than a
+        // blanket refusal.
+        Cli::try_parse_from(["microvm", "cost", "--memory", "8192"]).expect("8192 is a baseline");
+    }
+
+    /// The escape hatch is a separate flag and cannot be combined with the closed set.
+    ///
+    /// Both together would mean two answers to one question, and the resolution would be
+    /// whichever the code happened to read first.
+    #[test]
+    fn the_unlisted_region_escape_hatch_conflicts_with_the_closed_set() {
+        Cli::try_parse_from([
+            "microvm",
+            "logs",
+            "img",
+            "--unlisted-region",
+            "eu-central-1",
+        ])
+        .expect("the escape hatch parses on its own");
+        let both = Cli::try_parse_from([
+            "microvm",
+            "logs",
+            "img",
+            "--region",
+            "us-east-1",
+            "--unlisted-region",
+            "eu-central-1",
+        ]);
+        assert!(both.is_err(), "two answers to one question must not parse");
+    }
+
+    /// Naming a config file and refusing every config file cannot be combined.
+    ///
+    /// The same shape as the region pair above: `--config ci.toml --no-config` is two
+    /// answers to "which config applies here", and the resolution would be whichever
+    /// branch `config::load` happened to test first.
+    ///
+    /// **Falsification** — drop `conflicts_with = "no_config"` from `ConfigFlags::config`
+    /// and both command rows go red. Done on 2026-08-28; failed as stated; restored.
+    #[test]
+    fn naming_a_config_file_conflicts_with_refusing_every_config_file() {
+        Cli::try_parse_from(["microvm", "run", "--config", "ci.toml"])
+            .expect("--config parses on its own");
+        Cli::try_parse_from(["microvm", "run", "--no-config"])
+            .expect("--no-config parses on its own");
+        for command in ["run", "doctor"] {
+            let both =
+                Cli::try_parse_from(["microvm", command, "--config", "ci.toml", "--no-config"]);
+            assert!(
+                both.is_err(),
+                "{command}: two answers to one question must not parse"
+            );
+        }
+    }
+
+    /// The global flags parse before and after the subcommand.
+    ///
+    /// `global = true` is what makes `microvm --json ls` and `microvm ls --json` the same
+    /// invocation, and an agent will write both.
+    #[test]
+    fn the_global_flags_parse_on_either_side_of_the_subcommand() {
+        for argv in [["microvm", "--json", "ls"], ["microvm", "ls", "--json"]] {
+            let parsed = Cli::try_parse_from(argv).expect("parses");
+            assert!(parsed.json, "{argv:?}");
+        }
+    }
+
+    /// The tree is internally consistent enough for clap to build it.
+    ///
+    /// `debug_assert` runs every one of clap's own structural checks — a duplicated long
+    /// flag, a `conflicts_with` naming an argument that does not exist, a `requires` cycle.
+    /// Those are the failures that otherwise appear as a panic on a user's first run of one
+    /// specific subcommand.
+    #[test]
+    fn the_command_tree_passes_claps_own_structural_checks() {
+        Cli::command().debug_assert();
+    }
+
+    /// **A bare port means both sides; a pair means local-then-guest.**
+    ///
+    /// The order is the assertion worth making, because both values are `u16` and a transposed
+    /// pair produces a tunnel that binds the guest's number locally and asks the proxy for the
+    /// local one — which fails at the proxy with a 403 naming the token rather than the mistake.
+    #[test]
+    fn a_port_pair_reads_local_first_and_a_bare_number_means_both() {
+        assert_eq!(parse_port_pair("8080"), Ok((8080, 8080)));
+        assert_eq!(parse_port_pair("3000:8080"), Ok((3000, 8080)));
+        assert_eq!(parse_port_pair(" 3000 : 8080 "), Ok((3000, 8080)));
+    }
+
+    /// **Port 0 is refused on both sides, and the two refusals say different things.**
+    ///
+    /// A guest cannot listen on 0 at all, and locally it would bind an OS-chosen port this
+    /// command has no way to report — so "it worked" would leave the caller with a tunnel they
+    /// cannot address.
+    #[test]
+    fn port_zero_is_refused_by_name_on_whichever_side_it_appears() {
+        let local = parse_port_pair("0:8080").expect_err("local 0 is refused");
+        assert!(local.contains("local port 0"), "{local}");
+        let guest = parse_port_pair("8080:0").expect_err("guest 0 is refused");
+        assert!(guest.contains("guest port 0"), "{guest}");
+    }
+
+    /// A non-numeric or out-of-range port names the side and the value.
+    #[test]
+    fn an_unparseable_port_names_the_side_and_the_value() {
+        let word = parse_port_pair("http:8080").expect_err("not a number");
+        assert!(word.contains("the local port"), "{word}");
+        assert!(word.contains("\"http\""), "{word}");
+
+        let big = parse_port_pair("8080:70000").expect_err("out of u16 range");
+        assert!(big.contains("the guest port"), "{big}");
+        assert!(big.contains("65535"), "{big}");
+    }
+
+    /// Twenty-nine subcommands, named as the manifest and the response table name them.
+    ///
+    /// The block after `exec` is the attached one — `health`, `keepalive`, `ack`, `kill`, `ps`, `stdin`, `cp`,
+    /// `tunnel`, `port-forward`, and `shell` beside it — and their position is asserted rather than incidental,
+    /// because `--help`'s reading order is the only documentation of which commands need the
+    /// identifier triple (`shell` sits with them because it addresses a running VM, though its
+    /// credential is the minted shell token rather than the agent token). `history` sits beside
+    /// `ls` because both are local reads of this machine's own state directory.
+    #[test]
+    fn the_tree_registers_the_lifecycle_commands_the_attached_block_and_the_local_ones() {
+        let registered: Vec<String> = Cli::command()
+            .get_subcommands()
+            .map(|sub| sub.get_name().to_string())
+            .collect();
+        assert_eq!(
+            registered,
+            [
+                "run",
+                "quickstart",
+                "build",
+                "agent-up",
+                "agent-prompt",
+                "exec",
+                "health",
+                "keepalive",
+                "ack",
+                "kill",
+                "ps",
+                "stdin",
+                "cp",
+                "sync",
+                "attach",
+                "tunnel",
+                "port-forward",
+                "shell",
+                "suspend",
+                "resume",
+                "terminate",
+                "ls",
+                "history",
+                "logs",
+                "cost",
+                "doctor",
+                "manifest",
+                "constants",
+                "dockerfile",
+            ]
+        );
+    }
+
+    /// `history` takes a VM id and a state dir, and nothing that reaches AWS.
+    ///
+    /// The absence half is the point: a `--region` on `history` would imply a remote read,
+    /// and the command's whole claim is that it reads what this machine's state directory
+    /// recorded. `ls` used to share that shape; since #159 it carries `--region` for its
+    /// `--remote` half, and `history` has no remote half to carry one for.
+    #[test]
+    fn history_parses_a_vm_id_and_a_state_dir_and_carries_no_region() {
+        let parsed =
+            Cli::try_parse_from(["microvm", "history", "mvm-1", "--state-dir", "/tmp/state"])
+                .expect("a vm id and a state dir parse");
+        let Command::History(args) = parsed.command else {
+            panic!("a history parses as a history");
+        };
+        assert_eq!(args.microvm_id, "mvm-1");
+        assert_eq!(args.state_dir, Some(PathBuf::from("/tmp/state")));
+
+        assert!(
+            Cli::try_parse_from(["microvm", "history"]).is_err(),
+            "a history with no VM id has nothing to read"
+        );
+        assert!(
+            Cli::try_parse_from(["microvm", "history", "mvm-1", "--region", "us-east-1"]).is_err(),
+            "a local read takes no region"
+        );
+    }
+
+    /// `--vm-name` parses only beside `--keep`, and never collides with the image's `--name`.
+    ///
+    /// The `requires` is the flag's own contract: a VM torn down on the way out has nothing
+    /// to address later, so a name for it is a caller misunderstanding what `--keep` does —
+    /// refused at parse time, where the failure costs nothing.
+    #[test]
+    fn vm_name_requires_keep_and_is_distinct_from_the_image_name() {
+        let parsed = Cli::try_parse_from([
+            "microvm",
+            "run",
+            "--image",
+            "img",
+            "--keep",
+            "--vm-name",
+            "ci-runner",
+        ])
+        .expect("a kept run takes a VM name");
+        let Command::Run(args) = parsed.command else {
+            panic!("a run parses as a run");
+        };
+        assert_eq!(args.vm_name.as_deref(), Some("ci-runner"));
+        assert_eq!(args.name, None, "the image name is a different flag");
+
+        assert!(
+            Cli::try_parse_from(["microvm", "run", "--image", "img", "--vm-name", "x"]).is_err(),
+            "a name without --keep addresses a VM that will not exist"
+        );
+
+        // And both names together, because a caller building an image does use both.
+        let both = Cli::try_parse_from([
+            "microvm",
+            "run",
+            "./agentd",
+            "--keep",
+            "--name",
+            "img",
+            "--vm-name",
+            "vm",
+        ])
+        .expect("the image name and the VM name are different flags");
+        let Command::Run(args) = both.command else {
+            panic!("a run parses as a run");
+        };
+        assert_eq!(args.name.as_deref(), Some("img"));
+        assert_eq!(args.vm_name.as_deref(), Some("vm"));
+    }
+
+    /// `--name` on an attached command replaces the triple, and conflicts with it.
+    ///
+    /// The conflict is the declared kind of refusal: a caller supplying both has given two
+    /// answers to "which VM", and the resolution would be whichever the code read first.
+    #[test]
+    fn an_attached_name_replaces_the_triple_and_conflicts_with_it() {
+        let parsed = Cli::try_parse_from(["microvm", "exec", "true", "--name", "ci-runner"])
+            .expect("a name stands in for the whole triple");
+        let Command::Exec(args) = parsed.command else {
+            panic!("an exec parses as an exec");
+        };
+        assert_eq!(args.attach.name.as_deref(), Some("ci-runner"));
+        assert_eq!(args.attach.endpoint, None);
+
+        assert!(
+            Cli::try_parse_from(["microvm", "exec", "true"]).is_err(),
+            "no name and no triple is no VM at all"
+        );
+        assert!(
+            Cli::try_parse_from([
+                "microvm",
+                "exec",
+                "true",
+                "--name",
+                "ci-runner",
+                "--endpoint",
+                "https://x",
+            ])
+            .is_err(),
+            "a name plus a triple member is two answers to one question"
+        );
+
+        // Every attached command takes it, not just exec — the shared struct is the claim.
+        for command in ["health", "ack", "stdin", "cp"] {
+            let argv: Vec<&str> = match command {
+                "ack" => vec!["microvm", "ack", "x-1", "--name", "ci"],
+                "stdin" => vec!["microvm", "stdin", "x-1", "--eof", "--name", "ci"],
+                "cp" => vec!["microvm", "cp", "./a", "vm:/b", "--name", "ci"],
+                _ => vec!["microvm", command, "--name", "ci"],
+            };
+            Cli::try_parse_from(argv)
+                .unwrap_or_else(|error| panic!("{command} must take --name: {error}"));
+        }
+    }
+
+    /// **The attached triple is one struct, so all six commands publish the same three flags.**
+    ///
+    /// Read off the parser rather than off `AttachFlags`, because the claim is about the
+    /// commands: a seventh attached command that spelled its own `--endpoint` would parse
+    /// identically today and drift the first time one of the three grew a constraint.
+    #[test]
+    fn every_attached_command_takes_the_same_identifier_triple() {
+        let attached = ["exec", "health", "ack", "stdin", "cp"];
+        for name in attached {
+            let sub = Cli::command()
+                .get_subcommands()
+                .find(|sub| sub.get_name() == name)
+                .unwrap_or_else(|| panic!("{name} is registered"))
+                .clone();
+            let longs: Vec<&str> = sub
+                .get_arguments()
+                .filter_map(|arg| arg.get_long())
+                .collect();
+            for flag in ["endpoint", "agent-token", "microvm-id", "port"] {
+                assert!(
+                    longs.contains(&flag),
+                    "{name} does not take --{flag}, so it cannot address a VM it did not launch"
+                );
+            }
+        }
+    }
+
+    /// `--poll` is read-only and therefore cannot be combined with anything that writes.
+    ///
+    /// Declared as a conflict rather than checked in the handler, because the two together are
+    /// two answers to "what should this invocation do" and the resolution would be whichever the
+    /// code read first. `--poll` with no COMMAND parses, which is the whole shape of a read.
+    #[test]
+    fn polling_parses_without_a_command_and_conflicts_with_every_writing_flag() {
+        let attach = [
+            "--endpoint",
+            "https://vm.example",
+            "--agent-token",
+            "t",
+            "--microvm-id",
+            "mvm-1",
+        ];
+        let mut poll = vec!["microvm", "exec", "--poll", "x-1"];
+        poll.extend(attach);
+        Cli::try_parse_from(&poll).expect("a poll needs no command");
+
+        // And a bare `exec` with no command and no --poll is refused: there would be nothing to
+        // run and nothing to read.
+        let mut bare = vec!["microvm", "exec"];
+        bare.extend(attach);
+        assert!(
+            Cli::try_parse_from(&bare).is_err(),
+            "an exec with neither a command nor --poll has nothing to do"
+        );
+
+        for writing in [
+            vec!["--stream"],
+            vec!["--stdin"],
+            vec!["--exec-id", "x-2"],
+            vec!["--cwd", "/tmp"],
+            vec!["--env", "A=1"],
+            vec!["--user", "1000"],
+            vec!["--group", "1000"],
+        ] {
+            let mut argv = vec!["microvm", "exec", "--poll", "x-1"];
+            argv.extend(attach);
+            argv.extend(writing.iter().copied());
+            assert!(
+                Cli::try_parse_from(&argv).is_err(),
+                "--poll must not combine with {writing:?}: a read and a write are two answers to \
+                 one question"
+            );
+        }
+    }
+
+    /// `--detach` cannot be combined with the two shapes that must not return early.
+    ///
+    /// `--stream` and `--stdin` both keep working *after* the start: one reads events until the
+    /// terminal one, the other writes bytes and sends EOF. A `--detach` beside either would return
+    /// before that work happened — leaving a stream nobody read, or worse, a child holding an open
+    /// stdin pipe nothing will ever close, which is the exact hang `stdin: false` is the default to
+    /// prevent. `--timeout` is *not* conflicted: it is simply unused, and refusing a flag that
+    /// merely has no effect would break `microvm exec ... --timeout 60 --detach` in a script that
+    /// sets the timeout once for every invocation.
+    #[test]
+    fn detaching_conflicts_with_the_shapes_that_must_not_return_early() {
+        let attach = [
+            "--endpoint",
+            "https://vm.example",
+            "--agent-token",
+            "t",
+            "--microvm-id",
+            "mvm-1",
+        ];
+        for incompatible in [vec!["--stream"], vec!["--stdin"], vec!["--poll", "x-1"]] {
+            let mut argv = vec!["microvm", "exec", "echo hi", "--detach"];
+            argv.extend(attach);
+            argv.extend(incompatible.iter().copied());
+            assert!(
+                Cli::try_parse_from(&argv).is_err(),
+                "--detach must not combine with {incompatible:?}"
+            );
+        }
+
+        // On its own, and beside the two flags it legitimately pairs with: `--exec-id` (so the
+        // caller knows the id in advance) and `--timeout` (unused here, and harmless).
+        let mut alone = vec![
+            "microvm",
+            "exec",
+            "echo hi",
+            "--detach",
+            "--exec-id",
+            "x-1",
+            "--timeout",
+            "60",
+        ];
+        alone.extend(attach);
+        Cli::try_parse_from(&alone).expect("--detach pairs with --exec-id and tolerates --timeout");
+    }
+
+    /// `run --user`/`--group` require `--exec`: without a command there is nothing to demote.
+    ///
+    /// Refused by the parser rather than the handler, so the mistake costs zero billable
+    /// calls — a `run` that launched a VM and *then* noticed the meaningless flag would have
+    /// spent real money answering a usage error.
+    ///
+    /// **Guard proof.** Drop `requires = "exec"` from `RunArgs::user` and the first half of
+    /// this test goes red (done 2026-08-25, failed as stated, restored).
+    #[test]
+    fn run_demotion_flags_require_an_exec_and_are_refused_before_any_call() {
+        for flag in [vec!["--user", "1000"], vec!["--group", "1000"]] {
+            let mut argv = vec!["microvm", "run", "--image", "img"];
+            argv.extend(flag.iter().copied());
+            assert!(
+                Cli::try_parse_from(&argv).is_err(),
+                "{flag:?} without --exec has nothing to demote and must not parse"
+            );
+        }
+
+        // With --exec, both parse and carry the numbers.
+        let parsed = Cli::try_parse_from([
+            "microvm", "run", "--image", "img", "--exec", "id -u", "--user", "1000", "--group",
+            "2000",
+        ])
+        .expect("demotion beside a command parses");
+        let Command::Run(args) = parsed.command else {
+            panic!("parsed a run");
+        };
+        assert_eq!(args.user, Some(1000.into()));
+        assert_eq!(args.group, Some(2000.into()));
+    }
+
+    /// `--env` splits at the first `=`, keeps an empty VALUE, and refuses the two misreads.
+    ///
+    /// Each failure mode is asserted on its message rather than only on `is_err()`, because the
+    /// message is the flag's whole interface at the moment of the typo: a refusal that does not
+    /// say "no `=`" sends the caller to the docs for a mistake the error could have named.
+    #[test]
+    fn an_env_pair_splits_at_the_first_equals_and_refuses_the_misreads() {
+        // The first `=`, so a value may itself contain `=` — connection strings do.
+        assert_eq!(
+            parse_env_pair("DSN=postgres://u:p@h/db?sslmode=require"),
+            Ok((
+                "DSN".to_string(),
+                "postgres://u:p@h/db?sslmode=require".to_string()
+            ))
+        );
+        assert_eq!(
+            parse_env_pair("PATH=/usr/bin:/bin"),
+            Ok(("PATH".to_string(), "/usr/bin:/bin".to_string()))
+        );
+        // An empty VALUE is legal and explicit: setting to "" is not unsetting, and unset is
+        // spelled by omission because the child's environment starts empty anyway.
+        assert_eq!(
+            parse_env_pair("EMPTY="),
+            Ok(("EMPTY".to_string(), String::new()))
+        );
+
+        // A missing `=` is more likely `DEBUG=1` forgotten than "" wanted under a key.
+        let missing = parse_env_pair("DEBUG").expect_err("a bare word is not a pair");
+        assert!(missing.contains("no `=`"), "{missing}");
+        assert!(
+            missing.contains("--env DEBUG="),
+            "the refusal must show the spelling for an empty value: {missing}"
+        );
+
+        // An empty KEY is a variable no shell can read back.
+        let empty_key = parse_env_pair("=value").expect_err("a nameless variable");
+        assert!(empty_key.contains("empty KEY"), "{empty_key}");
+    }
+
+    /// `--env` is repeatable and each occurrence is validated by the parser, not the handler.
+    ///
+    /// The parse failure costs nothing; a handler failure happens after the session attach — a
+    /// network round trip spent discovering a typo.
+    #[test]
+    fn env_is_repeatable_and_a_bad_pair_fails_at_parse_time() {
+        let attach = [
+            "--endpoint",
+            "https://vm.example",
+            "--agent-token",
+            "t",
+            "--microvm-id",
+            "mvm-1",
+        ];
+        let mut argv = vec![
+            "microvm", "exec", "env", "--env", "A=1", "--env", "B=", "--env", "C=x=y",
+        ];
+        argv.extend(attach);
+        let cli = Cli::try_parse_from(&argv).expect("three pairs parse");
+        let Command::Exec(args) = cli.command else {
+            panic!("an exec parses as an exec");
+        };
+        assert_eq!(
+            args.env,
+            [
+                ("A".to_string(), "1".to_string()),
+                ("B".to_string(), String::new()),
+                ("C".to_string(), "x=y".to_string()),
+            ]
+        );
+
+        let mut bad = vec!["microvm", "exec", "env", "--env", "NOEQUALS"];
+        bad.extend(attach);
+        assert!(
+            Cli::try_parse_from(&bad).is_err(),
+            "a pair with no `=` must fail before any handler runs"
+        );
+    }
+
+    /// `run --launch-env` is repeatable and goes through the **same** parser as
+    /// `exec --env`.
+    ///
+    /// Asserted by exercising the same three inputs that test pins — the first-`=` split,
+    /// the legal empty VALUE, and the refused bare word — because a second parser is the
+    /// thing that goes wrong here: one of the two would gain a rule and the other would
+    /// not, and a caller would learn the difference from a variable the shell cannot read
+    /// back.
+    #[test]
+    fn launch_env_is_repeatable_and_shares_the_exec_env_parser() {
+        let cli = Cli::try_parse_from([
+            "microvm",
+            "run",
+            "/tmp/agentd",
+            "--launch-env",
+            "A=1",
+            "--launch-env",
+            "EMPTY=",
+            "--launch-env",
+            "DSN=postgres://u:p@h/db?sslmode=require",
+        ])
+        .expect("three pairs parse");
+        let Command::Run(args) = cli.command else {
+            panic!("a run parses as a run");
+        };
+        assert_eq!(
+            args.launch_env,
+            [
+                ("A".to_string(), "1".to_string()),
+                ("EMPTY".to_string(), String::new()),
+                (
+                    "DSN".to_string(),
+                    "postgres://u:p@h/db?sslmode=require".to_string()
+                ),
+            ]
+        );
+
+        assert!(
+            Cli::try_parse_from(["microvm", "run", "/tmp/agentd", "--launch-env", "NOEQUALS"])
+                .is_err(),
+            "the shared parser's refusal has to apply here too"
+        );
+        assert!(
+            Cli::try_parse_from(["microvm", "run", "/tmp/agentd", "--launch-env", "=value"])
+                .is_err(),
+            "a nameless variable is refused on this flag as well"
+        );
+
+        // Absent by default, so a caller who never passes it sends the payload this
+        // client always sent.
+        let bare = Cli::try_parse_from(["microvm", "run", "/tmp/agentd"]).expect("parses");
+        let Command::Run(args) = bare.command else {
+            panic!("a run parses as a run");
+        };
+        assert!(args.launch_env.is_empty());
+    }
+
+    /// **`run --image-version` and `build --base-image-version` are free text, and each is on
+    /// exactly one command.**
+    ///
+    /// Free text rather than a closed set, and the asymmetry with `--memory` and `--region` is
+    /// the point: those two have domains this client *knows*, and a version's legal values are
+    /// an account fact only `ListManagedMicrovmImageVersions` can answer. A closed set here
+    /// would refuse a version AWS published this morning, which is the failure mode
+    /// `--unlisted-region` exists to avoid on the other flag. The constraint that *is* knowable
+    /// — the `Version` shape's `min 1 / max 2048 / [^\s]+` — is checked in `microvms-core`
+    /// before any call, so the CLI-5 property holds without a domain: no value this parser
+    /// accepts reaches the wire unchecked.
+    ///
+    /// One command each, deliberately. `run --base-image-version` does not exist because
+    /// `run`'s build is the build-and-throw-away shape whose image is deleted on the way out; a
+    /// pinned base is a property of a durable artifact, and `microvm build` is what makes one.
+    /// `build --image-version` does not exist because a build *creates* a version rather than
+    /// selecting one.
+    #[test]
+    fn the_two_version_flags_are_free_text_and_each_lives_on_one_command() {
+        let run = Cli::try_parse_from([
+            "microvm",
+            "run",
+            "--image",
+            "arn:aws:lambda:us-east-1:1:microvm-image:img",
+            "--image-version",
+            "2.0",
+        ])
+        .expect("run takes --image-version");
+        let Command::Run(args) = run.command else {
+            panic!("a run parses as a run");
+        };
+        assert_eq!(args.image_version.as_deref(), Some("2.0"));
+
+        let build = Cli::try_parse_from([
+            "microvm",
+            "build",
+            "/tmp/agentd",
+            "--base-image-version",
+            "1",
+        ])
+        .expect("build takes --base-image-version");
+        let Command::Build(args) = build.command else {
+            panic!("a build parses as a build");
+        };
+        assert_eq!(args.base_image_version.as_deref(), Some("1"));
+
+        // Absent by default on both, so a caller who never passes either sends what this CLI
+        // always sent.
+        let bare_run =
+            Cli::try_parse_from(["microvm", "run", "--image", "arn:img"]).expect("parses");
+        let Command::Run(args) = bare_run.command else {
+            panic!("a run parses as a run");
+        };
+        assert_eq!(args.image_version, None);
+        let bare_build = Cli::try_parse_from(["microvm", "build", "/tmp/agentd"]).expect("parses");
+        let Command::Build(args) = bare_build.command else {
+            panic!("a build parses as a build");
+        };
+        assert_eq!(args.base_image_version, None);
+
+        // Neither flag exists on the other command: a build creates a version rather than
+        // selecting one, and `run`'s build is thrown away.
+        assert!(
+            Cli::try_parse_from(["microvm", "build", "/tmp/agentd", "--image-version", "2.0"])
+                .is_err(),
+            "a build creates a version; it does not launch one"
+        );
+        assert!(
+            Cli::try_parse_from([
+                "microvm",
+                "run",
+                "--image",
+                "arn:img",
+                "--base-image-version",
+                "1"
+            ])
+            .is_err(),
+            "a pinned base belongs to a durable artifact, which `run`'s throwaway image is not"
+        );
+
+        // Free text, so the parser publishes no domain — and the version whose legality only
+        // the account knows still parses.
+        let odd = Cli::try_parse_from([
+            "microvm",
+            "run",
+            "--image",
+            "arn:img",
+            "--image-version",
+            "a-version-aws-published-this-morning",
+        ])
+        .expect("a version the client has never seen must still be expressible");
+        let Command::Run(args) = odd.command else {
+            panic!("a run parses as a run");
+        };
+        assert_eq!(
+            args.image_version.as_deref(),
+            Some("a-version-aws-published-this-morning")
+        );
+    }
+
+    /// `--user` and `--group` are numeric, because that is the protocol's type.
+    ///
+    /// A name would need an `/etc/passwd` lookup inside a guest whose base image may not have
+    /// one; the daemon's `Command::uid`/`gid` take numbers and so does the wire.
+    #[test]
+    fn user_and_group_digits_parse_as_ids_and_anything_else_as_names() {
+        let attach = [
+            "--endpoint",
+            "https://vm.example",
+            "--agent-token",
+            "t",
+            "--microvm-id",
+            "mvm-1",
+        ];
+        let mut argv = vec!["microvm", "exec", "id", "--user", "1000", "--group", "1000"];
+        argv.extend(attach);
+        let cli = Cli::try_parse_from(&argv).expect("numeric ids parse");
+        let Command::Exec(args) = cli.command else {
+            panic!("an exec parses as an exec");
+        };
+        assert_eq!(args.user, Some(1000.into()));
+        assert_eq!(args.group, Some(1000.into()));
+
+        // A name is a name on the wire (AGENTD-7), resolved by the daemon in the guest; the
+        // digits above stay an integer, which a daemon that predates names still accepts.
+        let mut named = vec![
+            "microvm",
+            "exec",
+            "id",
+            "--user",
+            "nobody",
+            "--group",
+            "nogroup",
+            "--shell",
+            "bash",
+            "--inherit-image-env",
+        ];
+        named.extend(attach);
+        let cli = Cli::try_parse_from(&named).expect("names parse");
+        let Command::Exec(args) = cli.command else {
+            panic!("an exec parses as an exec");
+        };
+        assert_eq!(args.user, Some("nobody".into()));
+        assert_eq!(args.group, Some("nogroup".into()));
+        assert_eq!(args.shell.as_deref(), Some("bash"));
+        assert!(args.inherit_image_env);
+    }
+
+    /// `--from-offset` cannot be asked for without the stream it is a cursor into.
+    ///
+    /// Otherwise it is a number with no meaning, silently accepted — and a caller who passed it
+    /// expecting a resume would get the whole output from zero with no complaint.
+    #[test]
+    fn a_resume_offset_requires_the_stream_it_resumes() {
+        let attach = [
+            "--endpoint",
+            "https://vm.example",
+            "--agent-token",
+            "t",
+            "--microvm-id",
+            "mvm-1",
+        ];
+        let mut without = vec!["microvm", "exec", "echo hi", "--from-offset", "128"];
+        without.extend(attach);
+        assert!(
+            Cli::try_parse_from(&without).is_err(),
+            "--from-offset without --stream is a cursor into nothing"
+        );
+
+        let mut with = vec![
+            "microvm",
+            "exec",
+            "echo hi",
+            "--stream",
+            "--from-offset",
+            "128",
+        ];
+        with.extend(attach);
+        Cli::try_parse_from(&with).expect("with --stream it parses");
+    }
+
+    /// `cp --mode` and `cp --tar` cannot be combined.
+    ///
+    /// A tar's members carry their own modes, so one mode for the whole archive is a request the
+    /// daemon has no field for — refused here rather than silently dropped, because a caller who
+    /// passed it believes the permissions were set.
+    #[test]
+    fn a_tar_copy_cannot_also_name_one_mode() {
+        let attach = [
+            "--endpoint",
+            "https://vm.example",
+            "--agent-token",
+            "t",
+            "--microvm-id",
+            "mvm-1",
+        ];
+        let mut both = vec![
+            "microvm", "cp", "./a.tar", "vm:/dst", "--tar", "--mode", "0644",
+        ];
+        both.extend(attach);
+        assert!(
+            Cli::try_parse_from(&both).is_err(),
+            "a tar's members carry their own modes"
+        );
+
+        let mut mode_only = vec!["microvm", "cp", "./a", "vm:/dst", "--mode", "0644"];
+        mode_only.extend(attach);
+        Cli::try_parse_from(&mode_only).expect("a single file takes a mode");
+    }
+
+    /// **The absence half of CLI-5.** No option carries a capability list, a connector
+    /// name, or an architecture, and only the two launch commands carry a client token.
+    ///
+    /// Asserted over every argument of every subcommand rather than by reading this file,
+    /// because the failure this catches is a *later* edit adding one. A client token on an
+    /// image build replays the create and wedges it (TRAP-1); on a launch, core validates it
+    /// and a retry adopts the first attempt's VM.
+    #[test]
+    fn no_option_carries_a_token_a_capability_a_connector_or_an_architecture() {
+        let launches = ["run", "agent-up"];
+        for sub in Cli::command().get_subcommands() {
+            let has_token = sub
+                .get_arguments()
+                .any(|arg| arg.get_long() == Some("client-token"));
+            assert_eq!(
+                has_token,
+                launches.contains(&sub.get_name()),
+                "{} and --client-token: only a launch may carry one (TRAP-1)",
+                sub.get_name(),
+            );
+        }
+        let forbidden = [
+            "clienttoken",
+            "capabilities",
+            "capability",
+            "connector",
+            "architecture",
+            "arch",
+        ];
+        for sub in Cli::command().get_subcommands() {
+            for arg in sub.get_arguments() {
+                let long = arg.get_long().unwrap_or_default().to_ascii_lowercase();
+                let id = arg.get_id().as_str().to_ascii_lowercase();
+                for name in forbidden {
+                    assert!(
+                        long != name && id.replace('_', "-") != name,
+                        "{}'s --{long} reaches a value microvms-core has no parameter for",
+                        sub.get_name(),
+                    );
+                }
+            }
+        }
+    }
+
+    /// Every S1-typed option reports a closed domain, and the free-text ones are the ones
+    /// whose library counterpart really is a string.
+    ///
+    /// The manifest's `choices` field is derived from exactly this, so this test is what
+    /// makes that field trustworthy rather than decorative.
+    #[test]
+    fn the_two_s1_options_report_closed_domains_everywhere_they_appear() {
+        let mut seen = 0;
+        for sub in Cli::command().get_subcommands() {
+            for arg in sub.get_arguments() {
+                let Some(long) = arg.get_long() else { continue };
+                if long == "memory" || long == "region" {
+                    let choices = arg.get_possible_values();
+                    assert!(
+                        !choices.is_empty(),
+                        "{}'s --{long} has no closed domain, so it accepts a value core rejects",
+                        sub.get_name(),
+                    );
+                    seen += 1;
+                }
+            }
+        }
+        assert!(
+            seen >= 3,
+            "the S1 options must actually appear on several commands, or this passes vacuously"
+        );
+    }
+
+    /// `--delete-image` parses without `--image-identifier`, because the handler can read
+    /// the image off the kept run's ledger record (issue #160).
+    ///
+    /// This used to be a clap `requires`, which refused at parse time information the CLI
+    /// already held. The refusal still exists — `ERR_INVALID_ARG` from the handler when no
+    /// record names an image — and the guard for it is in `guards/history.rs`, where a state
+    /// directory can be staged. Parse-time is too early to know.
+    #[test]
+    fn deleting_an_image_parses_without_the_identifier_the_ledger_can_supply() {
+        let parsed = Cli::try_parse_from(["microvm", "terminate", "mvm-1", "--delete-image"])
+            .expect("the identifier is derivable, so its absence is not a parse error");
+        let Command::Terminate(args) = parsed.command else {
+            panic!("expected terminate");
+        };
+        assert!(args.delete_image);
+        assert_eq!(args.image_identifier, None);
+        Cli::try_parse_from([
+            "microvm",
+            "terminate",
+            "mvm-1",
+            "--delete-image",
+            "--image-identifier",
+            "arn:image",
+        ])
+        .expect("with the identifier it parses");
+    }
+
+    /// The default baseline is the platform's own 2 GB, not the cheapest class.
+    ///
+    /// A 0.5 GB default hands someone a sandbox that OOM-kills a real test suite to save
+    /// about three cents an hour, and guest swap is absent so there is no paging phase to
+    /// absorb it.
+    #[test]
+    fn the_default_baseline_is_the_platforms_own_rather_than_the_cheapest() {
+        let parsed = Cli::try_parse_from(["microvm", "cost"]).expect("parses");
+        let Command::Cost(args) = parsed.command else {
+            panic!("expected cost");
+        };
+        assert_eq!(args.memory.size_class(), SizeClass::DEFAULT);
+        assert_eq!(args.memory.size_class().baseline_mib(), 2048);
+    }
+    #[test]
+    fn vpc_egress_connectors_are_repeatable_and_conflict_with_managed_egress() {
+        let args = [
+            "microvm",
+            "run",
+            "--egress-network-connector",
+            "arn:first",
+            "--egress-network-connector",
+            "arn:second",
+        ];
+        let parsed = Cli::try_parse_from(args).expect("repeatable connectors");
+        let Command::Run(run) = parsed.command else {
+            panic!("expected run")
+        };
+        assert_eq!(run.egress_network_connectors, ["arn:first", "arn:second"]);
+        assert!(Cli::try_parse_from(args.into_iter().chain(["--egress"])).is_err());
+        assert!(Cli::try_parse_from(args.into_iter().chain(["--deny-egress"])).is_ok());
+    }
+
+    /// The `Duration` a seconds flag parsed to, read off the parsed command by flag name.
+    fn parsed_seconds(command: &Command, flag: &str) -> Option<std::time::Duration> {
+        match (command, flag) {
+            (Command::Exec(args), "--timeout") => Some(args.timeout),
+            (Command::Run(args), "--timeout") => Some(args.timeout),
+            (Command::Sync(args), "--timeout") => Some(args.timeout),
+            (Command::Suspend(args), "--timeout") => Some(args.timeout),
+            (Command::Resume(args), "--timeout") => Some(args.timeout),
+            (Command::Cost(args), "--hold-sec") => Some(args.hold_sec),
+            (Command::AgentPrompt(args), "--timeout") => Some(args.timeout),
+            (Command::Keepalive(args), "--interval") => args.interval,
+            (Command::Keepalive(args), "--for") => args.for_sec,
+            (Command::Keepalive(args), "--idle-window") => args.idle_window,
+            _ => None,
+        }
+    }
+
+    /// **#268.** Every flag that takes seconds refuses, at parse time, a value that isn't a
+    /// duration: non-finite, negative, too large for one, or not a number. Zero, a fraction and
+    /// a whole figure parse to exactly that duration, and those rows are also what keep the
+    /// refusals from passing on an argv that fails for some other reason (a missing positional,
+    /// a renamed flag).
+    ///
+    /// **Falsification**: `verify/guards/faults/seconds-flags.toml` entries `cli-seconds-parse-table` (the
+    /// refusal becomes a silent zero, and every refused row but `abc` parses) and
+    /// `cli-seconds-parse-truncates` (a fraction loses its sub-second part, and `0.5` reads 0s).
+    #[test]
+    fn every_seconds_flag_refuses_what_is_not_a_duration() {
+        use std::time::Duration;
+        let attached = ["--endpoint", "https://mvm-1.example", "--agent-token", "t"];
+        let with_id =
+            |rest: &[&'static str]| [&attached[..], &["--microvm-id", "mvm-1"], rest].concat();
+        let flags: [(&str, Vec<&str>, &str); 10] = [
+            ("exec", with_id(&["true"]), "--timeout"),
+            ("run", vec!["--no-config"], "--timeout"),
+            ("sync", with_id(&["."]), "--timeout"),
+            ("suspend", vec!["mvm-1"], "--timeout"),
+            ("resume", vec!["mvm-1"], "--timeout"),
+            ("cost", vec!["--compare"], "--hold-sec"),
+            (
+                "agent-prompt",
+                vec!["--name", "review", "a task"],
+                "--timeout",
+            ),
+            ("keepalive", with_id(&[]), "--interval"),
+            ("keepalive", with_id(&[]), "--for"),
+            ("keepalive", with_id(&[]), "--idle-window"),
+        ];
+        let refused = ["inf", "infinity", "NaN", "-inf", "-5", "1e300", "abc"];
+        let accepted = [
+            ("0", Duration::ZERO),
+            ("0.5", Duration::from_millis(500)),
+            ("1.25", Duration::from_millis(1250)),
+            ("300", Duration::from_secs(300)),
+        ];
+
+        let mut misses = Vec::new();
+        for (command, rest, flag) in &flags {
+            let values = refused.iter().map(|value| (*value, None)).chain(
+                accepted
+                    .iter()
+                    .map(|(value, parsed)| (*value, Some(*parsed))),
+            );
+            for (value, expected) in values {
+                let assignment = format!("{flag}={value}");
+                let argv = ["microvm", command]
+                    .into_iter()
+                    .chain(rest.iter().copied())
+                    .chain([assignment.as_str()]);
+                let label = format!("{command} {assignment}");
+                match (Cli::try_parse_from(argv), expected) {
+                    (Ok(cli), Some(expected)) => {
+                        let parsed = parsed_seconds(&cli.command, flag);
+                        if parsed != Some(expected) {
+                            misses.push(format!("{label} parsed to {parsed:?}, not {expected:?}"));
+                        }
+                    }
+                    (Ok(_), None) => misses.push(format!("{label} parsed")),
+                    (Err(error), Some(_)) => {
+                        misses.push(format!("{label} refused: {}", error.render()));
+                    }
+                    (Err(error), None) => {
+                        let rendering = error.render().to_string();
+                        if error.kind() != clap::error::ErrorKind::ValueValidation
+                            || !rendering.contains(flag)
+                        {
+                            misses.push(format!(
+                                "{label} refused as {:?}: {rendering}",
+                                error.kind()
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(misses.is_empty(), "{}", misses.join("\n"));
+    }
+}

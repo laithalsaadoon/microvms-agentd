@@ -105,7 +105,7 @@ export const BASE_SEGMENT = BASE.replace(/\/$/, "")
  *   laid out by this repository's renderer and the TypeScript one by `typedoc-plugin-markdown`, so
  *   they are two templates rather than one.
  * - the Architecture drift page is the one with `xychart-beta` figures: line charts of the counts in
- *   `ratchet/drift.json`, written by `scripts/reference/drift.mjs`. Its inline SVG is a different
+ *   `verify/ratchet/drift.json`, written by `scripts/reference/drift.mjs`. Its inline SVG is a different
  *   shape from every flowchart's, so the census below refused the sample without it (2026-09-25).
  *
  * `tests/built-site.test.ts` proves the sample is representative for the one property where a small

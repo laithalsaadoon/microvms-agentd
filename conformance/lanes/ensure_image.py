@@ -113,7 +113,7 @@ def ensure_image_checks(
 def drive_ensure_image(binary: Path, aws: Any, results: Results) -> None:
     """`Sandbox::ensure_image` against AWS (#221), through the ignored Rust live test.
 
-    The test (`microvms-core/tests/live_ensure_image.rs`) builds a task image from a task
+    The test (`crates/microvms-core/tests/live_ensure_image.rs`) builds a task image from a task
     directory of its own — a Dockerfile on a non-managed `FROM` ending on `USER nobody`,
     wrapped by `wrap_dockerfile`, with a `.dockerignore`, an ignored file, and a symlink —
     by two sandboxes at once, reuses it from a third call, launches a VM from it, and then

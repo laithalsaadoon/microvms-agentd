@@ -28,18 +28,18 @@ jobs:
     name: build the node addon (${{ matrix.target }})
     strategy:
       fail-fast: false
-      # The triples must match `microvms-js/package.json`'s `napi.targets`, which is the
+      # The triples must match `bindings/microvms-js/package.json`'s `napi.targets`, which is the
       # source of truth for what packages exist on npm — a triple here that is missing there
       # builds an artifact no package wants, and the reverse ships a root package whose
       # `optionalDependencies` names a platform nothing built.
-      # `scripts/check-publishable.py` asserts the two agree, for this file and `release.yml`
+      # `tools/check-publishable.py` asserts the two agree, for this file and `release.yml`
       # together. The runner choice stays here: which machine builds a triple is CI's
       # business, not the package's.
       # `cross` is `--cross-compile` for the glibc targets and empty elsewhere, and it decides
       # whether the addon runs anywhere but this month's runner image. A native build links
       # against the host's glibc: `ubuntu-latest` is Ubuntu 24.04, so the addon requires
       # GLIBC_2.39 and fails to load on every current distribution below that. Measured, see
-      # `scripts/check-addon-glibc.py`.
+      # `tools/check-addon-glibc.py`.
       #
       # `--cross-compile` routes through `cargo-zigbuild`, which yields GLIBC_2.30 on both linux
       # targets. `--use-napi-cross` would give a lower floor still — 2.16 — and cannot be used:
@@ -91,10 +91,10 @@ jobs:
       # `--release` matters: a debug addon is around 250 MB against a few tens of megabytes
       # stripped, and npm would carry that forever at an immutable version.
       - name: napi build
-        working-directory: microvms-js
+        working-directory: bindings/microvms-js
         run: >
           npx -y -p @napi-rs/cli@3 napi build
-          --manifest-path ../Cargo.toml --package microvms-js
+          --manifest-path ../../Cargo.toml --package microvms-js
           --platform --release --target ${{ matrix.target }} ${{ matrix.cross }} --output-dir .
 
       # Only the glibc legs have a floor to assert, which is exactly `cross != ''`.
@@ -104,11 +104,11 @@ jobs:
           enable-cache: false
       - name: the addon does not demand a newer glibc than its oldest supported host
         if: matrix.cross != ''
-        run: ./scripts/check-addon-glibc.py microvms-js
+        run: ./tools/check-addon-glibc.py bindings/microvms-js
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: addon-${{ matrix.target }}
-          path: microvms-js/*.node
+          path: bindings/microvms-js/*.node
           if-no-files-found: error
 
       # The generated loader and type declarations, from ONE leg. Both are
@@ -120,13 +120,13 @@ jobs:
       #
       # The loader is also generated against whatever `name` was in `package.json` at build
       # time, which is why it has to come from a build of THIS commit rather than a developer's
-      # working copy. `scripts/check-npm-loader.py` asserts the two agree.
+      # working copy. `tools/check-npm-loader.py` asserts the two agree.
       - name: upload the generated loader and types
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: binding-js
           path: |
-            microvms-js/index.js
-            microvms-js/index.d.ts
+            bindings/microvms-js/index.js
+            bindings/microvms-js/index.d.ts
           if-no-files-found: error

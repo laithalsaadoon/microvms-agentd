@@ -32,5 +32,5 @@ directory first on its module search path, whatever the working directory:
   live task applies it. Copy the state back once the run has exited.
 - A check's name is its identity: reports diff line for line against earlier runs, so rename
   one only on purpose. Prefix it with the requirement it proves (`BIND-18 ...`).
-- A new live task needs `scripts/check-live-wiring.py` to accept it, and a new AWS behavior
+- A new live task needs `tools/check-live-wiring.py` to accept it, and a new AWS behavior
   needs a check here or an explicit statement that it's unverified against AWS.

@@ -1,7 +1,7 @@
 # Agent VMs: the L3 helpers over the primitives
 
 Status: specified and built 2026-09-10. This document is the specification the code in
-`microvms-app/src/agents/`, `microvms-edges/src/agents/` and the `agent-up` / `agent-prompt`
+`crates/microvms-app/src/agents/`, `crates/microvms-edges/src/agents/` and the `agent-up` / `agent-prompt`
 commands implement, and the record of the scope decision it changed.
 
 ## The three layers, named
@@ -58,7 +58,7 @@ harness's packages and live in its ecosystem. L3 is the layer such a class would
 
 ## Requirements
 
-Written in the EARS shapes the rest of `spec/` uses. `AGENT-n` is the id.
+Written in the EARS shapes the rest of `verify/spec/` uses. `AGENT-n` is the id.
 
 - **AGENT-1.** The `agents` module shall expose exactly two agent profiles,
   `ClaudeCode` and `Codex`, as a closed enum, so a caller cannot name an agent the

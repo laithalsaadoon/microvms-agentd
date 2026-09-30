@@ -288,12 +288,12 @@ Use `Sandbox::new(region).await`, `RunRequest` for launch,
 for cleanup. The async API also includes `agents::AgentVm`, file transfer,
 streaming, suspend/resume, and cost estimates.
 
-[Run the complete Rust example](https://github.com/laithalsaadoon/microvms-agentd/tree/main/microvms-core#run-your-first-command)
+[Run the complete Rust example](https://github.com/laithalsaadoon/microvms-agentd/tree/main/crates/microvms-core#run-your-first-command)
 to launch the same image and execute a command.
 [docs.rs](https://docs.rs/microvms-core) documents the Rust methods and
 request types. [Public API](/reference/public-api/) maps the available
-surfaces. The [Python package guide](https://github.com/laithalsaadoon/microvms-agentd/tree/main/microvms-py)
-and [Node package guide](https://github.com/laithalsaadoon/microvms-agentd/tree/main/microvms-js)
+surfaces. The [Python package guide](https://github.com/laithalsaadoon/microvms-agentd/tree/main/bindings/microvms-py)
+and [Node package guide](https://github.com/laithalsaadoon/microvms-agentd/tree/main/bindings/microvms-js)
 cover supported hosts.
 
 ## Build and operate beyond the quickstart

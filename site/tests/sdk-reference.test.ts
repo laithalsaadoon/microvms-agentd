@@ -29,8 +29,8 @@ const context = { site: new URL(CONFIG.origin), base: CONFIG.base }
 const served = (path: string): string =>
   path.startsWith(segment) ? path.slice(segment.length) : path.replace(/^\/+/, "")
 
-const dts = readFileSync(join(repoRoot, "microvms-js", "index.d.ts"), "utf8")
-const pyi = readFileSync(join(repoRoot, "microvms-py", "microvms.pyi"), "utf8")
+const dts = readFileSync(join(repoRoot, "bindings", "microvms-js", "index.d.ts"), "utf8")
+const pyi = readFileSync(join(repoRoot, "bindings", "microvms-py", "microvms.pyi"), "utf8")
 
 const names = (source: string, pattern: RegExp): ReadonlyArray<string> =>
   [...source.matchAll(pattern)].map((match) => match[1] ?? "").sort()

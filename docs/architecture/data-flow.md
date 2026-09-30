@@ -1,12 +1,12 @@
 # microvms-agentd · Data flow
 
 Two surfaces trigger work in this system and nothing else does: a CLI invocation, dispatched
-through an exhaustive match (`microvms-cli/src/main.rs:383-404`), and a daemon HTTP
+through an exhaustive match (`crates/microvms-cli/src/main.rs:383-404`), and a daemon HTTP
 request, dispatched through a handler table walked from the same list `/v1/schema` publishes
-(`agentd/src/routes.rs:110`). The bindings re-enter the same `microvms-core` surfaces the CLI
+(`crates/agentd/src/routes.rs:110`). The bindings re-enter the same `microvms-core` surfaces the CLI
 uses, so they add no distinct flow, and the daemon's only recurring job is a 30-second
-expired-exec reaper rather than a request lifecycle (`agentd/src/main.rs:61`,
-`agentd/src/exec.rs:951`).
+expired-exec reaper rather than a request lifecycle (`crates/agentd/src/main.rs:61`,
+`crates/agentd/src/exec.rs:951`).
 
 The flows below are ranked by how much of the client-to-daemon boundary each exercises,
 tie-broken by whether it is named after one of the system's core verbs. Flow 1 is the only arm
@@ -23,35 +23,35 @@ control plane together with its endpoint proxy.
 
 1. `commands::lifecycle::run` resolves region, size class, and image name, then requires every
    infra role before anything is created, so a missing role surfaces immediately rather than
-   after a build (`microvms-cli/src/commands/lifecycle.rs:501`, guard at
-   `microvms-cli/src/commands/lifecycle.rs:618-672`).
+   after a build (`crates/microvms-cli/src/commands/lifecycle.rs:501`, guard at
+   `crates/microvms-cli/src/commands/lifecycle.rs:618-672`).
 2. It opens a `Sandbox` through the library seam and races `launch_and_exec` against ctrl-c in a
    `tokio::select!`, with the sandbox owned outside the select so a cancelled launch still holds
-   the identifiers teardown needs (`microvms-cli/src/commands/lifecycle.rs:679-725`,
-   recovery at `microvms-cli/src/commands/lifecycle.rs:740-747`).
+   the identifiers teardown needs (`crates/microvms-cli/src/commands/lifecycle.rs:679-725`,
+   recovery at `crates/microvms-cli/src/commands/lifecycle.rs:740-747`).
 3. `launch_and_exec` preflights the build request, uploads the artifact, then `Sandbox::build_image`
    issues `CreateMicrovmImage` and waits for the image to become usable
-   (`microvms-cli/src/commands/lifecycle.rs:1064-1069`, `microvms-app/src/sandbox.rs:886`).
+   (`crates/microvms-cli/src/commands/lifecycle.rs:1064-1069`, `crates/microvms-app/src/sandbox.rs:886`).
 4. `Sandbox::run` refuses a second bootstrap on the same sandbox, mints the agent token, and
    wraps it with the launch env in a typed `RunHookPayload` that checks its 4096-byte budget
-   before any call (`microvms-app/src/sandbox.rs:1028`, refusal at
-   `microvms-app/src/sandbox.rs:1033`, payload at `microvms-app/src/sandbox.rs:1092`).
+   before any call (`crates/microvms-app/src/sandbox.rs:1028`, refusal at
+   `crates/microvms-app/src/sandbox.rs:1033`, payload at `crates/microvms-app/src/sandbox.rs:1092`).
 5. `ControlPlane::run_microvm` validates the identifier, the duration range, and the role ARN,
    splits ingress and egress connectors by intent, and puts the payload on the wire
-   (`microvms-app/src/control/microvm.rs:356`).
+   (`crates/microvms-app/src/control/microvm.rs:356`).
 6. The platform calls the daemon's run hook over loopback; `run_hook` unwraps the envelope,
    parses the inner payload, and installs the token once — an identical replay is 200 and a
-   different token is 409 (`agentd/src/routes.rs:178`, verdicts at
-   `agentd/src/routes.rs:213-234`).
+   different token is 409 (`crates/agentd/src/routes.rs:178`, verdicts at
+   `crates/agentd/src/routes.rs:213-234`).
 7. `ControlPlane::wait_for_running` polls to RUNNING and fails fast on any terminal state; the
    client then polls unauthenticated `/v1/health` until `bootstrapped`
-   (`microvms-app/src/control/microvm.rs:435`, `microvms-app/src/session/mod.rs:284`). The
+   (`crates/microvms-app/src/control/microvm.rs:435`, `crates/microvms-app/src/session/mod.rs:284`). The
    sandbox marks the token installed only after RUNNING is observed
-   (`microvms-app/src/sandbox.rs:1200-1202`).
+   (`crates/microvms-app/src/sandbox.rs:1200-1202`).
 8. The optional workload runs through `Session::run_sync` — start, wait, ack — and `tear_down`
    plus `attach_cost` then run however the select ended
-   (`microvms-app/src/session/mod.rs:350`, `microvms-cli/src/commands/lifecycle.rs:1253`,
-   `microvms-cli/src/commands/lifecycle.rs:1303`).
+   (`crates/microvms-app/src/session/mod.rs:350`, `crates/microvms-cli/src/commands/lifecycle.rs:1253`,
+   `crates/microvms-cli/src/commands/lifecycle.rs:1303`).
 
 ```mermaid
 sequenceDiagram
@@ -77,35 +77,35 @@ sequenceDiagram
 
 1. `commands::attached::exec` attaches a session from the identifier triple, builds the start
    request under a caller-supplied or minted `exec_id`, starts the command, then branches to
-   `stream_exec` (`microvms-cli/src/commands/attached.rs:136`, branch at
-   `microvms-cli/src/commands/attached.rs:176-178`).
+   `stream_exec` (`crates/microvms-cli/src/commands/attached.rs:136`, branch at
+   `crates/microvms-cli/src/commands/attached.rs:176-178`).
 2. `stream_exec` drives `ExecHandle::for_each_event` with a `FnMut(ExecEvent) -> ControlFlow<()>`
    callback, writes one NDJSON line plus the raw bytes per event, and reports `nextOffset` from
-   core's cursor rather than its own tally (`microvms-cli/src/commands/attached.rs:253`, cursor
-   read at `microvms-cli/src/commands/attached.rs:294`).
+   core's cursor rather than its own tally (`crates/microvms-cli/src/commands/attached.rs:253`, cursor
+   read at `crates/microvms-cli/src/commands/attached.rs:294`).
 3. `for_each_event` delegates to `for_each_event_async`, whose loop steps the `advance` state
    machine, reads the cursor off the machine, and reports `EndReason::Cut` when a body ends with
-   no `exit` event (`microvms-app/src/session/exec.rs:355`, loop at
-   `microvms-app/src/session/exec.rs:427-436`).
+   no `exit` event (`crates/microvms-app/src/session/exec.rs:355`, loop at
+   `crates/microvms-app/src/session/exec.rs:427-436`).
 4. `advance` re-attaches at the last good cursor with a fixed backoff on a retryable failure,
    and errors out past `max_reconnects` instead of looping forever
-   (`microvms-app/src/session/exec.rs:468`, backoff and re-attach at
-   `microvms-app/src/session/exec.rs:495-499`).
+   (`crates/microvms-app/src/session/exec.rs:468`, backoff and re-attach at
+   `crates/microvms-app/src/session/exec.rs:495-499`).
 5. `ExecHandle::attach` issues `GET /v1/exec/{id}/stream?offset=N` with
    `accept: text/event-stream`, building its headers inside the request path so a mid-stream
-   reconnect re-mints an expired token (`microvms-app/src/session/exec.rs:599`, mint at
-   `microvms-app/src/session/exec.rs:608`).
+   reconnect re-mints an expired token (`crates/microvms-app/src/session/exec.rs:599`, mint at
+   `crates/microvms-app/src/session/exec.rs:608`).
 6. `ProxyAuth::headers` serves the cached proxy token, or takes the mint lock and re-checks
    freshness under it so two racing tasks do not burn two control-plane calls
-   (`microvms-app/src/session/proxy.rs:405`, double check at
-   `microvms-app/src/session/proxy.rs:494-503`).
+   (`crates/microvms-app/src/session/proxy.rs:405`, double check at
+   `crates/microvms-app/src/session/proxy.rs:494-503`).
 7. The daemon's `stream` handler snapshots the replay ring, reads the terminal marker after the
    snapshot, and sends the SSE body with a keepalive plus `x-accel-buffering: no` so a buffering
-   proxy cannot batch a live stream into one delivery at exit (`agentd/src/exec.rs:455`,
-   ordering at `agentd/src/exec.rs:474-479`, header at `agentd/src/exec.rs:489-491`).
+   proxy cannot batch a live stream into one delivery at exit (`crates/agentd/src/exec.rs:455`,
+   ordering at `crates/agentd/src/exec.rs:474-479`, header at `crates/agentd/src/exec.rs:489-491`).
 8. `build_stream` emits any `gap` first, drains the replayed backlog, then the live broadcast
    channel, and closes the body one step after the terminal `exit` event
-   (`agentd/src/exec.rs:560`, ending at `agentd/src/exec.rs:604-615`).
+   (`crates/agentd/src/exec.rs:560`, ending at `crates/agentd/src/exec.rs:604-615`).
 
 ```mermaid
 sequenceDiagram
@@ -129,38 +129,38 @@ sequenceDiagram
 
 1. `commands::attached::cp` resolves the direction from the `vm:` prefix before opening
    anything, so two local paths or two remote paths are refused by name rather than guessed at
-   (`microvms-cli/src/commands/attached.rs:821`, resolver at
-   `microvms-cli/src/commands/attached.rs:918`).
+   (`crates/microvms-cli/src/commands/attached.rs:821`, resolver at
+   `crates/microvms-cli/src/commands/attached.rs:918`).
 2. It attaches through the helper every command in that file starts with, which resolves the
    region first because the region is what the proxy-token mint's ARN is derived for
-   (`microvms-cli/src/commands/attached.rs:73`).
+   (`crates/microvms-cli/src/commands/attached.rs:73`).
 3. The upload arm reads the local archive whole and sends it without inspecting it: the daemon's
    extractor is the only one in the system, and a client-side check would be a second set of
    member rules that could disagree with it
-   (`microvms-cli/src/commands/attached.rs:828-851`, stated at
-   `microvms-cli/src/commands/attached.rs:814-820`).
+   (`crates/microvms-cli/src/commands/attached.rs:828-851`, stated at
+   `crates/microvms-cli/src/commands/attached.rs:814-820`).
 4. `Session::upload_tar` delegates to `files::upload_tar`, which builds
    `PUT /v1/fs/tar?path=...` with `content-type: application/x-tar` and the archive bytes as the
-   body (`microvms-app/src/session/mod.rs:386`, `microvms-app/src/session/files.rs:98`).
+   body (`crates/microvms-app/src/session/mod.rs:386`, `crates/microvms-app/src/session/files.rs:98`).
 5. `Transport::request` prepends the proxy headers and the session's bearer token to the
    caller's own headers rather than replacing them, which is what keeps the content type on the
-   request (`microvms-app/src/session/mod.rs:97`, header assembly at
-   `microvms-app/src/session/mod.rs:79`).
+   request (`crates/microvms-app/src/session/mod.rs:97`, header assembly at
+   `crates/microvms-app/src/session/mod.rs:79`).
 6. `auth::require_token` guards the control router before the body is polled, answering 503
    when no token is installed and 401 on a mismatch, then draining a bounded prefix of the
    rejected body so the client sees the status rather than a TCP reset
-   (`agentd/src/auth.rs:62`, verdicts at `agentd/src/auth.rs:69-80`, applied at
-   `agentd/src/routes.rs:66-69`).
+   (`crates/agentd/src/auth.rs:62`, verdicts at `crates/agentd/src/auth.rs:69-80`, applied at
+   `crates/agentd/src/routes.rs:66-69`).
 7. `fs::write_tar` refuses a relative extraction root, preflights free disk against that root
    before the body is spooled, then spools the body under the disk pacer
-   (`agentd/src/fs.rs:1433`, preflight at `agentd/src/fs.rs:1459-1461`, spool at
-   `agentd/src/fs.rs:872`).
+   (`crates/agentd/src/fs.rs:1433`, preflight at `crates/agentd/src/fs.rs:1459-1461`, spool at
+   `crates/agentd/src/fs.rs:872`).
 8. `extract_into` runs under `spawn_blocking` and holds one confined directory handle for the
    whole extraction: ownership and xattrs are dropped, device and fifo members are refused,
    out-of-tree link targets are refused, and directory modes are replayed after all content
-   lands. Success is 204 (`agentd/src/fs.rs:621`, refusals at `agentd/src/fs.rs:702-707` and
-   `agentd/src/fs.rs:742`, deferred modes at `agentd/src/fs.rs:810`, dispatch and status at
-   `agentd/src/fs.rs:1479-1487`).
+   lands. Success is 204 (`crates/agentd/src/fs.rs:621`, refusals at `crates/agentd/src/fs.rs:702-707` and
+   `crates/agentd/src/fs.rs:742`, deferred modes at `crates/agentd/src/fs.rs:810`, dispatch and status at
+   `crates/agentd/src/fs.rs:1479-1487`).
 
 ```mermaid
 sequenceDiagram

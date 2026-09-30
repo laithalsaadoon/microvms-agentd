@@ -35,7 +35,7 @@ def drive_suspend_resume(cli: Cli, launched: Envelope, results: Results) -> None
     print("\n== suspend / resume ==")
     # Detached, so the ticker's exec record is left **unacked** — which makes the
     # pre-suspend-record check below strictly stronger in two ways. An unacked entry has no
-    # collection deadline at all (`agentd/src/exec.rs:214`: "an unacked entry has no deadline
+    # collection deadline at all (`crates/agentd/src/exec.rs:214`: "an unacked entry has no deadline
     # and is never collected"), so its survival across the freeze is the daemon's registry
     # being intact rather than a 15-minute TTL not having elapsed; and its output is still
     # buffered, so the poll can assert the record came back *with* what it captured instead of

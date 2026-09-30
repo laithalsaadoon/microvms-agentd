@@ -2,7 +2,7 @@
 #
 # `## Unreleased` used to be one list in CHANGELOG.md that every product PR appended to, so any
 # two PRs in flight conflicted there. A fragment is a new file named for its issue and type, so
-# two can't. `./scripts/changelog.py` is the one way towncrier runs here (its PEP 723 header
+# two can't. `./tools/changelog.py` is the one way towncrier runs here (its PEP 723 header
 # pins the version): `mise run changelog:check` validates the fragments and holds a branch that
 # changes shipped code to adding one, `changelog:draft` prints the next release's section, and
 # `release:prepare X.Y.Z` writes it into CHANGELOG.md and removes the fragments. The script's

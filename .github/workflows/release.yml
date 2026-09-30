@@ -83,7 +83,7 @@ jobs:
         with:
           enable-cache: false
       - name: publish set, manifest metadata, and tag agreement
-        run: ./scripts/check-publishable.py --tag=${{ github.ref_name }}
+        run: ./tools/check-publishable.py --tag=${{ github.ref_name }}
       # The same dry run `ci.yml` performs on every pull request, repeated here against the
       # exact commit being released. Cheap next to a partial publish, and it is the only
       # place the edges between the published crates resolve the way a consumer will resolve
@@ -92,7 +92,7 @@ jobs:
       # trusted publishing can't create a crate, so a new one needs its first publish by hand
       # (CONTRIBUTING.md, "Releases and reviews").
       - name: every crate still packages and verifies
-        run: ./scripts/check-publishable.py --dry-run --tag=${{ github.ref_name }}
+        run: ./tools/check-publishable.py --dry-run --tag=${{ github.ref_name }}
 
   crates-io:
     name: publish to crates.io
@@ -188,7 +188,7 @@ jobs:
       - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           command: build
-          args: --release -m microvms-py/Cargo.toml --out dist ${{ matrix.zig }}
+          args: --release -m bindings/microvms-py/Cargo.toml --out dist ${{ matrix.zig }}
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux }}
           container: ${{ matrix.container }}
@@ -214,7 +214,7 @@ jobs:
       - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           command: sdist
-          args: -m microvms-py/Cargo.toml --out dist
+          args: -m bindings/microvms-py/Cargo.toml --out dist
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: dist-sdist
@@ -242,7 +242,7 @@ jobs:
       # selects by that tag and trusts it, so an overstated one installs and then fails to
       # import — and the aarch64 wheel is built through zig precisely to keep that claim true.
       - name: every wheel honours its manylinux tag
-        run: ./scripts/check-addon-glibc.py dist
+        run: ./tools/check-addon-glibc.py dist
       # No `password:` and no `user:`. The action performs the OIDC exchange itself, and it
       # generates and uploads PEP 740 attestations by default — so provenance needs no
       # configuration here, only the permission above.
@@ -298,10 +298,10 @@ jobs:
           tar -xJf zig.tar.xz
           echo "$PWD/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
       - name: napi build
-        working-directory: microvms-js
+        working-directory: bindings/microvms-js
         run: >
           npx -y -p @napi-rs/cli@3 napi build
-          --manifest-path ../Cargo.toml --package microvms-js
+          --manifest-path ../../Cargo.toml --package microvms-js
           --platform --release --target ${{ matrix.target }} ${{ matrix.cross }} --output-dir .
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         if: matrix.cross != ''
@@ -309,11 +309,11 @@ jobs:
           enable-cache: false
       - name: the addon does not demand a newer glibc than its oldest supported host
         if: matrix.cross != ''
-        run: ./scripts/check-addon-glibc.py microvms-js
+        run: ./tools/check-addon-glibc.py bindings/microvms-js
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: addon-${{ matrix.target }}
-          path: microvms-js/*.node
+          path: bindings/microvms-js/*.node
           if-no-files-found: error
 
       # See `addons.yml` for why this comes from one leg. Without it the root package ships
@@ -325,8 +325,8 @@ jobs:
         with:
           name: binding-js
           path: |
-            microvms-js/index.js
-            microvms-js/index.d.ts
+            bindings/microvms-js/index.js
+            bindings/microvms-js/index.d.ts
           if-no-files-found: error
 
   npm:
@@ -383,13 +383,13 @@ jobs:
         with:
           pattern: addon-*
           merge-multiple: true
-          path: microvms-js
+          path: bindings/microvms-js
       # The loader and types, which the package cannot be published without: both are
       # gitignored and this job never runs `napi build`.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: binding-js
-          path: microvms-js
+          path: bindings/microvms-js
       # The loader is generated against whatever `name` was in `package.json` at build time and
       # nothing reconciles the two, so a rename ships a package whose `require` fails on every
       # platform while `npm install` succeeds. Measured on
@@ -397,15 +397,15 @@ jobs:
       # was scoped. This also asserts every configured triple has its binary present, which is
       # what `napi artifacts` used to fail on.
       - name: the loader resolves every configured platform
-        run: ./scripts/check-npm-loader.py --all-platforms
+        run: ./tools/check-npm-loader.py --all-platforms
       - name: the addons stay within the glibc ceiling
-        run: ./scripts/check-addon-glibc.py microvms-js
+        run: ./tools/check-addon-glibc.py bindings/microvms-js
       # One publish. OIDC mints the credential and npm generates the provenance attestation
       # automatically, because this is a public package from a public repository — the
       # `--provenance` flag is not needed, and `publishConfig` deliberately does not set it,
       # since that would break a publish from anywhere without an OIDC identity.
       - name: publish
-        working-directory: microvms-js
+        working-directory: bindings/microvms-js
         run: npm publish --access public
 
   # ── the host CLI binaries (issue #76) ─────────────────────────────────────
@@ -413,7 +413,7 @@ jobs:
   # `cargo install microvms-cli` compiles for minutes on a first-time machine;
   # `cargo binstall microvms-cli` resolves these assets and installs in seconds. The
   # asset name is `microvm-<target>` — the *binary's* name, matching the
-  # `[package.metadata.binstall]` template in microvms-cli/Cargo.toml, and the two must
+  # `[package.metadata.binstall]` template in crates/microvms-cli/Cargo.toml, and the two must
   # move together.
   #
   # The linux legs cross-compile through cargo-zigbuild against glibc 2.17 — the same
@@ -577,7 +577,7 @@ jobs:
           path: cli-dist
       # One SHA256SUMS over every binary asset, bare basenames, sha256sum's own format.
       # A client's daemon fetch checks agentd against it when GitHub can't be reached for
-      # the attestation bundle (`verify_sha256` in microvms-app/src/provision.rs looks up
+      # the attestation bundle (`verify_sha256` in crates/microvms-app/src/provision.rs looks up
       # the literal `agentd` entry), and fails closed on a release without it. It exists
       # from v0.5.0 on, the same releases that carry `agentd.sigstore.json`.
       - name: write SHA256SUMS over every asset

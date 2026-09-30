@@ -1,0 +1,168 @@
+# ── client_lifecycle.rs: the client lifecycle model replayed against Sandbox (#296) ──
+
+# `cargo test -p agentd-model` stays green under each of these: the app faults because the model
+# doesn't depend on the app, the model one because no model test names the property it renames.
+
+# A resume that sends the launch's run-hook payload again after its ResumeMicrovm call.
+[[fault]]
+id = "model-conformance-client-resume-resends-payload"
+guard = "every_walked_path_of_the_client_model_replays_against_the_sandbox"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "every_walked_path_of_the_client_model_replays_against_the_sandbox"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/model-conformance/tests/client_lifecycle.rs::every_walked_path_of_the_client_model_replays_against_the_sandbox"
+message = "run-hook payloads: sandbox 2, model 1"
+transform = { file = "crates/microvms-app/src/sandbox.rs", replace = "        self.control.resume(&id).await?;\n", with = "        self.control.resume(&id).await?;\n        let token = self.pending_agent_token.clone().unwrap_or_default();\n        let payload = RunHookPayload::for_launch(&token, &Default::default())?;\n        self.control.run_microvm(RunMicrovmRequest::new(&id, payload)).await?;\n" }
+
+# A suspend that records SUSPENDING only once the wait settles. A wait that times out leaves the
+# sandbox RUNNING while the platform suspends, and the next suspend is issued outside RUNNING.
+# Replay-only: every other test target stays green under it.
+[[fault]]
+id = "model-conformance-client-suspend-skips-suspending"
+guard = "every_walked_path_of_the_client_model_replays_against_the_sandbox"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "every_walked_path_of_the_client_model_replays_against_the_sandbox"]
+expect = "test-failed"
+suite = "rust"
+message = "lifecycle: sandbox Running, model Suspending"
+transform = { file = "crates/microvms-app/src/sandbox.rs", replace = "        self.control.suspend(&id).await?;\n        self.set_lifecycle(Lifecycle::Suspending);\n", with = "        self.control.suspend(&id).await?;\n" }
+
+# The floor: a recorder that records nothing replays nothing and would pass.
+[[fault]]
+id = "model-conformance-client-empty-walk"
+guard = "every_walked_path_of_the_client_model_replays_against_the_sandbox"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "every_walked_path_of_the_client_model_replays_against_the_sandbox"]
+expect = "test-failed"
+suite = "rust"
+message = "the walk recorded no path, so nothing was replayed"
+transform = { file = "crates/model-conformance/tests/client_lifecycle.rs", replace = "accessor().into_iter().map(", with = "accessor().into_iter().filter(|_| false).map(" }
+
+# Without the untaken-step paths, a step into a state a shorter path reached is never replayed.
+[[fault]]
+id = "model-conformance-client-untaken-steps"
+guard = "every_walked_path_of_the_client_model_replays_against_the_sandbox"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "every_walked_path_of_the_client_model_replays_against_the_sandbox"]
+expect = "test-failed"
+suite = "rust"
+message = "of the model's steps untaken, so no path replays them"
+transform = { file = "crates/model-conformance/tests/client_lifecycle.rs", replace = "    walked.extend(untaken.into_iter().map(|path| (path, false)));\n", with = "    drop(untaken);\n" }
+
+# A planner that never pairs a request with its completion skips most paths, and the coverage
+# floor names the calls it no longer makes.
+[[fault]]
+id = "model-conformance-client-uncovered"
+guard = "every_walked_path_of_the_client_model_replays_against_the_sandbox"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "every_walked_path_of_the_client_model_replays_against_the_sandbox"]
+expect = "test-failed"
+suite = "rust"
+message = "the replay never makes"
+transform = { file = "crates/model-conformance/tests/client_lifecycle.rs", replace = "next == wanted && verdict(completed) == Verdict::Issued", with = "next == wanted && verdict(completed) == Verdict::Ignored" }
+
+# The key floor: a model property that loses its key leaves the replay's claim with nothing to
+# back it, and trace:check can't see that while verify/spec/traced/STATE.toml lists no STATE key (#302).
+[[fault]]
+id = "model-conformance-client-unkeyed-property"
+guard = "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/model-conformance/tests/client_lifecycle.rs::the_keys_the_replay_backs_name_safety_properties_of_the_client_model"
+message = "no safety property of the client model is named for [\"STATE-8\"]"
+transform = { file = "crates/model/src/client.rs", replace = "                \"STATE-8 a resume completion drops the proxy token\",\n", with = "                \"a resume completion drops the proxy token\",\n" }
+
+# The key floor's own floor: a model that states no property backs no key, and says so.
+[[fault]]
+id = "model-conformance-client-no-properties"
+guard = "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"]
+expect = "test-failed"
+suite = "rust"
+message = "the client model states no property, so no key can be checked against it"
+transform = { file = "crates/model-conformance/tests/client_lifecycle.rs", replace = "ClientLifecycle::new(Config::guards_held()).properties();\n", with = "ClientLifecycle::new(Config::guards_held()).properties().into_iter().take(0).collect::<Vec<_>>();\n" }
+
+# A test's doc claims a key that no model property backs. The check reads the same doc the
+# claim is written in, not a list beside it.
+[[fault]]
+id = "model-conformance-client-doc-claims-unbacked-key"
+guard = "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"]
+expect = "test-failed"
+suite = "rust"
+message = "no safety property of the client model is named for [\"STATE-12\"]"
+transform = { file = "crates/model-conformance/tests/client_lifecycle.rs", replace = "/// It's the sandbox's side of the model's keyed properties: STATE-3 (", with = "/// It's the sandbox's side of the model's keyed properties: STATE-12, STATE-3 (" }
+
+# The key check on empty input: a source with no tests claims no key, and says so.
+[[fault]]
+id = "model-conformance-client-keys-empty-source"
+guard = "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"]
+expect = "test-failed"
+suite = "rust"
+message = "no test in this file claims a requirement key"
+transform = { file = "crates/model-conformance/tests/client_lifecycle.rs", replace = "syn::parse_file(include_str!(\"client_lifecycle.rs\"))", with = "syn::parse_file(\"\")" }
+
+# The key check with a parser that returns nothing.
+[[fault]]
+id = "model-conformance-client-keys-no-items"
+guard = "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"]
+expect = "test-failed"
+suite = "rust"
+message = "no test in this file claims a requirement key"
+transform = { file = "crates/model-conformance/tests/client_lifecycle.rs", replace = "claims(&source.items, ", with = "claims(&source.items[..0], " }
+
+# Review round 1 (#296b). A planner that skips every path past six calls: each call kind still
+# shows up in some short path, so the coverage floor passed with four fifths of the walk gone.
+[[fault]]
+id = "model-conformance-client-planner-skips-recorded"
+guard = "every_walked_path_of_the_client_model_replays_against_the_sandbox"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "every_walked_path_of_the_client_model_replays_against_the_sandbox"]
+expect = "test-failed"
+suite = "rust"
+message = "a path the recorder kept doesn't plan"
+transform = { file = "crates/model-conformance/tests/client_lifecycle.rs", replace = "    Ok(steps)\n}\n", with = "    if steps.len() > 6 {\n        return Err(\"a completion arrives after another step\");\n    }\n    Ok(steps)\n}\n" }
+
+# The untaken-step paths the planner skips are pinned: a planner that skips another set, here
+# one that stops skipping a closed window that opens again, fails before it replays anything.
+[[fault]]
+id = "model-conformance-client-skips-moved"
+guard = "every_walked_path_of_the_client_model_replays_against_the_sandbox"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "every_walked_path_of_the_client_model_replays_against_the_sandbox"]
+expect = "test-failed"
+suite = "rust"
+message = "the planner skips a different set of untaken-step paths than SKIPPED names"
+transform = { file = "crates/model-conformance/tests/client_lifecycle.rs", replace = "(Action::ResumeRequested { .. }, Verdict::Issued) if window_closed => {", with = "(Action::ResumeRequested { .. }, Verdict::Issued) if false && window_closed => {" }
+
+# A key that moves onto a property stating another rule: STATE-8 still starts some property's
+# name, so the claimed-key check alone passed, and `cargo test -p agentd-model` stays green.
+[[fault]]
+id = "model-conformance-client-key-moved"
+guard = "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"]
+expect = "test-failed"
+suite = "rust"
+message = "the client model's keyed safety properties aren't the ones KEYED names"
+transform = [
+  { file = "crates/model/src/client.rs", replace = "                \"STATE-8 a resume completion drops the proxy token\",\n", with = "                \"a resume completion drops the proxy token\",\n" },
+  { file = "crates/model/src/client.rs", replace = "always(\"the installed token is never replaced\"", with = "always(\"STATE-8 the installed token is never replaced\"" },
+]
+
+# A claim check-trace.py credits and the scan used to miss: a test inside a nested `mod`
+# whose doc names STATE-12, which no property backs.
+[[fault]]
+id = "model-conformance-client-claim-in-nested-mod"
+guard = "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"]
+expect = "test-failed"
+suite = "rust"
+message = "no safety property of the client model is named for [\"STATE-12\"]"
+transform = { file = "crates/model-conformance/tests/client_lifecycle.rs", replace = "/// Every requirement key either spec defines.\n", with = "mod window {\n    /// STATE-12: a resume past the window is refused.\n    #[test]\n    fn a_closed_window_refuses() {}\n}\n\n/// Every requirement key either spec defines.\n" }
+
+# The same, for a name check-trace.py's `ident` pattern reads: `fn test_state_12_...`.
+[[fault]]
+id = "model-conformance-client-claim-by-test-prefix"
+guard = "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"]
+expect = "test-failed"
+suite = "rust"
+message = "no safety property of the client model is named for [\"STATE-12\"]"
+transform = { file = "crates/model-conformance/tests/client_lifecycle.rs", replace = "/// Every requirement key either spec defines.\n", with = "#[test]\nfn test_state_12_a_closed_window_refuses() {}\n\n/// Every requirement key either spec defines.\n" }

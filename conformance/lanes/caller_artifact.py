@@ -19,7 +19,7 @@ from harness.redact import command_for_log
 from harness.results import Results, section_failure_detail
 
 #: What `drive_caller_artifact` names its image and its S3 key prefix, with a fresh nonce per
-#: run. Under `microvm-cli`, one of `scripts/verify-clean.py`'s prefixes, so a leak this
+#: run. Under `microvm-cli`, one of `tools/verify-clean.py`'s prefixes, so a leak this
 #: section's own cleanup misses still shows in `live:verify-clean`.
 CALLER_ARTIFACT_PREFIX = "microvm-cli-caller-artifact"
 CALLER_ARTIFACT_UNTOUCHED = (

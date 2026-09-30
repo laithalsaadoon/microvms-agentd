@@ -1,0 +1,90 @@
+# The driving-adapter contract (AGENTS.md, Architecture), for the calls a dependency set can't
+# see. This crate parses input, converts types, bridges to the host, and renders output. A
+# subprocess or a read of the process environment here is behavior the other surfaces don't
+# get, so it belongs below the adapter. The crate root denies both lints, so a hit fails the
+# build. A recorded exception carries `#[expect(..., reason = "...")]` at the call site, and
+# `AdapterLintTests` in `tools/test_ratchet.py` lists every such site, so a new one (or an
+# `allow` anywhere) fails `ratchet:check` until a reviewer adds it there. A subprocess exception
+# also needs its entry or decision in `verify/ratchet/drift.json`.
+#
+# `microvms_core::env::process` is banned by name as well: it's the production lookup, meant to
+# be handed to core's resolvers once, where the adapter composes them. Calling it is the same
+# direct read as `std::env::var`.
+#
+# `tokio::process::Command` is listed even where this crate's own tokio doesn't declare the
+# `process` feature (a dependency turns it on today): the ban shouldn't depend on which crate
+# enables it.
+#
+# The control plane's transport is banned too (#273): `Call`, its constructors, the two send
+# functions and the port's own `send`, and the two constructors that take a hand-picked
+# transport. Clippy doesn't report a `Call { .. }` literal (a struct expression isn't a type
+# position), so the `send` ban is what stops one leaving the adapter. A wire call made here
+# is one the other surfaces don't make, with retries they don't share. Paths are core's
+# re-exports, and clippy resolves a path to the item it names, so an import alias, a UFCS call
+# or a path through another re-export is refused the same way.
+#
+# `Duration::from_secs_f64` and `from_secs_f32` are banned (#268): they panic on an infinite or
+# too-large figure, and the `.max(0.0)` the CLI wrote in front of them turned `NaN` into zero.
+# Seconds from a caller go through `microvms_core::cost::duration_of_secs_f64`, which refuses
+# a negative, NaN, infinite or too-large figure with `ERR_INVALID_ARG`, the same way on every
+# surface. The ban sees only those two calls: a silent zero spelled another way
+# (`try_from_secs_f64(x.max(0.0)).unwrap_or_default()`) or a `mul_f64` passes it, so every
+# seconds flag also has a row in `cli::tests::every_seconds_flag_refuses_what_is_not_a_duration`.
+#
+# The CLI alone also bans core's doors: every public constructor that resolves credentials and
+# builds a signed plane or session (`ControlPlane::new`, `Sandbox::new`, `adopt_in` and
+# `from_name` on `Sandbox` and `AgentVm`, `Session::connect`, `direct`, `attach`,
+# `Session::builder`, core's `preflight`, and the adapters port's HTTP backend and build
+# services), and the production transport, build services, HTTP backend and adapters by type.
+# Clippy doesn't report a unit struct's value, so `SystemAdapters.build_services(..)` is refused
+# by the method ban, not the type ban. It reaches AWS through `src/seam.rs` and nothing else, so CLI-2's
+# fake seam sees every door a handler opens. The seam's calls are `#[expect]` sites in
+# `LINT_EXCEPTIONS`, and so are the test-only guards that build a plane over a fake transport.
+# The bindings call those doors legitimately, so theirs don't ban them.
+#
+# `agents::bedrock::mint` isn't banned: it resolves credentials and presigns a Bedrock token
+# locally, with no control-plane call, and `agent up` mints through it outside the seam on
+# purpose. A new core function that builds a plane or a session belongs in this list.
+
+disallowed-types = [
+  { path = "std::process::Command", reason = "a subprocess belongs below the adapter: behind a port in microvms-app, implemented in microvms-edges" },
+  { path = "tokio::process::Command", reason = "a subprocess belongs below the adapter: behind a port in microvms-app, implemented in microvms-edges" },
+  { path = "microvms_core::control::transport::Call", reason = "a control-plane call belongs in microvms-app, which names the operation, builds the request and owns retries; call the ControlPlane method that wraps it" },
+  { path = "microvms_core::control::transport::SignedTransport", reason = "the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens" },
+  { path = "microvms_core::control::SignedBuildServices", reason = "the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens" },
+  { path = "microvms_core::session::http::ReqwestBackend", reason = "the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens" },
+  { path = "microvms_core::adapters::SystemAdapters", reason = "the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens" },
+]
+
+disallowed-methods = [
+  { path = "std::env::var", reason = "pass the adapter's environment lookup to a core resolver instead of reading a variable here" },
+  { path = "std::env::var_os", reason = "pass the adapter's environment lookup to a core resolver instead of reading a variable here" },
+  { path = "std::env::vars", reason = "pass the adapter's environment lookup to a core resolver instead of reading the environment here" },
+  { path = "std::env::vars_os", reason = "pass the adapter's environment lookup to a core resolver instead of reading the environment here" },
+  { path = "microvms_core::env::process", reason = "hand this lookup to core's resolvers where the adapter composes them (a listed site in AdapterLintTests); calling it is a direct read" },
+  { path = "microvms_core::control::transport::Call::get", reason = "a control-plane call belongs in microvms-app, which names the operation, builds the request and owns retries; call the ControlPlane method that wraps it" },
+  { path = "microvms_core::control::transport::Call::post_json", reason = "a control-plane call belongs in microvms-app, which names the operation, builds the request and owns retries; call the ControlPlane method that wraps it" },
+  { path = "microvms_core::control::transport::Call::patch_json", reason = "a control-plane call belongs in microvms-app, which names the operation, builds the request and owns retries; call the ControlPlane method that wraps it" },
+  { path = "microvms_core::control::transport::Call::post_empty", reason = "a control-plane call belongs in microvms-app, which names the operation, builds the request and owns retries; call the ControlPlane method that wraps it" },
+  { path = "microvms_core::control::transport::Call::delete", reason = "a control-plane call belongs in microvms-app, which names the operation, builds the request and owns retries; call the ControlPlane method that wraps it" },
+  { path = "microvms_core::control::transport::send_with_retry", reason = "a control-plane call belongs in microvms-app, which names the operation, builds the request and owns retries; call the ControlPlane method that wraps it" },
+  { path = "microvms_core::control::transport::send_accepting", reason = "a control-plane call belongs in microvms-app, which names the operation, builds the request and owns retries; call the ControlPlane method that wraps it" },
+  { path = "microvms_core::control::transport::Transport::send", reason = "a control-plane call belongs in microvms-app, which names the operation, builds the request and owns retries; call the ControlPlane method that wraps it" },
+  { path = "microvms_core::control::ControlPlane::from_ports", reason = "a control plane over a hand-picked transport is a second path to AWS; core's ControlPlane::new wires the signed transport (the CLI gets it through src/seam.rs)" },
+  { path = "microvms_core::prelude::ControlPlaneExt::with_transport", reason = "a control plane over a hand-picked transport is a second path to AWS; core's ControlPlane::new wires the signed transport (the CLI gets it through src/seam.rs)" },
+  { path = "microvms_core::prelude::ControlPlaneExt::new", reason = "the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens" },
+  { path = "microvms_core::prelude::SandboxExt::new", reason = "the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens" },
+  { path = "microvms_core::prelude::SandboxExt::adopt_in", reason = "the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens" },
+  { path = "microvms_core::prelude::SandboxExt::from_name", reason = "the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens" },
+  { path = "microvms_core::prelude::AgentVmExt::adopt_in", reason = "the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens" },
+  { path = "microvms_core::prelude::AgentVmExt::from_name", reason = "the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens" },
+  { path = "microvms_core::prelude::SessionExt::connect", reason = "the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens" },
+  { path = "microvms_core::prelude::SessionExt::direct", reason = "the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens" },
+  { path = "microvms_core::prelude::SessionExt::attach", reason = "the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens" },
+  { path = "microvms_core::session::Session::builder", reason = "the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens" },
+  { path = "microvms_core::preflight::preflight", reason = "the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens" },
+  { path = "microvms_core::adapters::Adapters::http_backend", reason = "the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens" },
+  { path = "microvms_core::adapters::Adapters::build_services", reason = "the CLI reaches AWS through src/seam.rs and nothing else, so CLI-2's fake seam sees every door a handler opens" },
+  { path = "std::time::Duration::from_secs_f64", reason = "seconds from a caller go through microvms_core::cost::duration_of_secs_f64, which refuses a negative, NaN, infinite or too-large figure with ERR_INVALID_ARG; this conversion panics on them (#268)" },
+  { path = "std::time::Duration::from_secs_f32", reason = "seconds from a caller go through microvms_core::cost::duration_of_secs_f64, which refuses a negative, NaN, infinite or too-large figure with ERR_INVALID_ARG; this conversion panics on them (#268)" },
+]

@@ -1,3 +1,0 @@
-# The sentinel's allowed sets, in `arch/placement.toml`'s shape.
-[adapter]
-normal = ["kernel", "root", "serde"]

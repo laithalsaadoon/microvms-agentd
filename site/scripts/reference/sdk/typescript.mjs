@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
- * The TypeScript SDK reference: `microvms-js/index.d.ts`, read by TypeDoc, rendered to Markdown by
+ * The TypeScript SDK reference: `bindings/microvms-js/index.d.ts`, read by TypeDoc, rendered to Markdown by
  * `typedoc-plugin-markdown`, and laid out as pages here.
  *
  * TypeDoc owns the parsing and `typedoc-plugin-markdown` owns the member layout (signatures as
@@ -15,7 +15,7 @@
  *
  * The pages:
  *
- * - `reference/typescript/`: install and quickstart from `microvms-js/README.md`, then one index
+ * - `reference/typescript/`: install and quickstart from `bindings/microvms-js/README.md`, then one index
  *   row per class, interface, function, constant, and enum.
  * - `reference/typescript/classes/<name>/` and `reference/typescript/interfaces/<name>/`.
  * - `reference/typescript/module/`: the functions, constants, and enums.
@@ -53,7 +53,7 @@ const TSCONFIG = join(HERE, "typedoc.tsconfig.json")
 
 /** The npm package name, which is also how a caller imports the module. */
 const readPackageName = (repoRoot) =>
-  JSON.parse(readFileSync(join(repoRoot, "microvms-js", "package.json"), "utf8")).name
+  JSON.parse(readFileSync(join(repoRoot, "bindings", "microvms-js", "package.json"), "utf8")).name
 
 /**
  * The TypeDoc and `typedoc-plugin-markdown` options, in one place so the reasoning sits beside them.

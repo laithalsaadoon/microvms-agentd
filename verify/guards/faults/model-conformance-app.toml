@@ -1,0 +1,177 @@
+# ── model-conformance: the app's tables driven over the model's rows (#296) ─────
+
+# One row of each app policy changed, and one floor per model: a model that returns no rows
+# passes every comparison, so its test fails instead. `cargo test -p agentd-model` stays green
+# under every one of these, since the model doesn't depend on the app.
+
+# An inherited workdir refused even when the caller passed one.
+[[fault]]
+id = "model-conformance-wrap-inherit-ignores-workdir"
+guard = "wrap_dockerfile_answers_every_row_of_the_wrap_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "wrap_dockerfile_answers_every_row_of_the_wrap_model"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/model-conformance/tests/tables.rs::wrap_dockerfile_answers_every_row_of_the_wrap_model"
+message = "inherit_workdir: true } answers Wrapped"
+transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = "    if opts.inherit_workdir && workdir.is_none() && !dockerfile_declares_workdir(task) {\n", with = "    if opts.inherit_workdir && !dockerfile_declares_workdir(task) {\n" }
+
+# A denied launch reported `unsealed`, as if the advisory deny weren't there.
+[[fault]]
+id = "model-conformance-posture-deny-unsealed"
+guard = "egress_posture_for_answers_every_row_of_the_posture_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "egress_posture_for_answers_every_row_of_the_posture_model"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/model-conformance/tests/tables.rs::egress_posture_for_answers_every_row_of_the_posture_model"
+message = "deny=true reports BestEffort"
+transform = { file = "crates/microvms-app/src/control/connector.rs", replace = "    Ok(EgressPosture::for_launch(egress, deny_egress))\n}\n", with = "    Ok(EgressPosture::for_launch(egress, false))\n}\n" }
+
+# The listing sent after the credential chain failed (BIND-16).
+[[fault]]
+id = "model-conformance-preflight-listing-without-credentials"
+guard = "preflight_reports_every_row_of_the_preflight_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "preflight_reports_every_row_of_the_preflight_model"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/model-conformance/tests/tables.rs::preflight_reports_every_row_of_the_preflight_model"
+message = "credentials: false, service: Answers, lines: [Pass, Fatal, NotRun]"
+transform = { file = "crates/microvms-app/src/preflight.rs", replace = "        (Ok(plane), true) => service_check(plane).await,\n", with = "        (Ok(plane), _) => service_check(plane).await,\n" }
+
+# A caller that finds the image deleting creates at once, and the service refuses the create.
+[[fault]]
+id = "model-conformance-plan-deleting-builds"
+guard = "the_ensure_plan_is_every_row_of_the_image_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "the_ensure_plan_is_every_row_of_the_image_model"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/model-conformance/tests/tables.rs::the_ensure_plan_is_every_row_of_the_image_model"
+message = "the image model's row Deleting force=false plans AwaitAbsent"
+transform = { file = "crates/microvms-app/src/control/ensure.rs", replace = "        (Found::Deleting, _) => Plan::AwaitAbsent,\n", with = "        (Found::Deleting, _) => Plan::Build,\n" }
+
+# An exit code wins over the daemon's deadline: a child that traps SIGTERM and exits 0 reads as a success.
+[[fault]]
+id = "model-conformance-exit-code-over-timed-out"
+guard = "posix_exit_code_is_every_row_of_the_run_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "posix_exit_code_is_every_row_of_the_run_model"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/model-conformance/tests/tables.rs::posix_exit_code_is_every_row_of_the_run_model"
+message = "timed_out: true, truncated: false }) None has exit code Some(124)"
+transform = { file = "crates/microvms-app/src/session/exec.rs", replace = "        let outcome = self.outcome.as_ref()?;\n        if outcome.timed_out {\n", with = "        let outcome = self.outcome.as_ref()?;\n        if outcome.timed_out && outcome.exit_code.is_none() {\n" }
+
+# A release that answers it has no bundle falls through to SHA256SUMS: the laundering BIND-18 rules out.
+[[fault]]
+id = "model-conformance-provision-absent-bundle-launders"
+guard = "fetch_release_verifies_every_row_of_the_provision_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "fetch_release_verifies_every_row_of_the_provision_model"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/model-conformance/tests/tables.rs::fetch_release_verifies_every_row_of_the_provision_model"
+message = "never consults SHA256SUMS, and fetch_release did"
+transform = { file = "crates/microvms-app/src/provision.rs", replace = "        Bundles::Absent(reason) => return Err(absent(tag, bytes, &reason)),\n", with = "        Bundles::Absent(reason) => reason,\n" }
+
+# The wrap model's floor: its rows come back empty.
+[[fault]]
+id = "model-conformance-wrap-no-rows"
+guard = "wrap_dockerfile_answers_every_row_of_the_wrap_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "wrap_dockerfile_answers_every_row_of_the_wrap_model"]
+expect = "test-failed"
+suite = "rust"
+message = "the wrap model returned no rows, so nothing was checked"
+transform = { file = "crates/model/src/wrap.rs", replace = "\n    rows\n}\n\n#[cfg(test)]\n", with = "\n    rows.clear();\n    rows\n}\n\n#[cfg(test)]\n" }
+
+# The posture model's floor: its rows come back empty.
+[[fault]]
+id = "model-conformance-posture-no-rows"
+guard = "egress_posture_for_answers_every_row_of_the_posture_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "egress_posture_for_answers_every_row_of_the_posture_model"]
+expect = "test-failed"
+suite = "rust"
+message = "the posture model returned no rows, so nothing was checked"
+transform = { file = "crates/model/src/posture.rs", replace = "\n    rows\n}\n\n#[cfg(test)]\n", with = "\n    rows.clear();\n    rows\n}\n\n#[cfg(test)]\n" }
+
+# The preflight model's floor: its rows come back empty.
+[[fault]]
+id = "model-conformance-preflight-no-rows"
+guard = "preflight_reports_every_row_of_the_preflight_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "preflight_reports_every_row_of_the_preflight_model"]
+expect = "test-failed"
+suite = "rust"
+message = "the preflight model returned no rows, so nothing was checked"
+transform = { file = "crates/model/src/preflight.rs", replace = "        .collect()\n}\n\n#[cfg(test)]\n", with = "        .filter(|_| false)\n        .collect()\n}\n\n#[cfg(test)]\n" }
+
+# The image model's floor: its rows come back empty.
+[[fault]]
+id = "model-conformance-image-no-rows"
+guard = "the_ensure_plan_is_every_row_of_the_image_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "the_ensure_plan_is_every_row_of_the_image_model"]
+expect = "test-failed"
+suite = "rust"
+message = "the image model returned no rows, so nothing was checked"
+transform = { file = "crates/model/src/image.rs", replace = "\n    rows\n}\n\n#[cfg(test)]\n", with = "\n    rows.clear();\n    rows\n}\n\n#[cfg(test)]\n" }
+
+# The run model's floor: its rows come back empty.
+[[fault]]
+id = "model-conformance-run-no-rows"
+guard = "posix_exit_code_is_every_row_of_the_run_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "posix_exit_code_is_every_row_of_the_run_model"]
+expect = "test-failed"
+suite = "rust"
+message = "the run model returned no rows, so nothing was checked"
+transform = { file = "crates/model/src/run.rs", replace = "\n    rows\n}\n\n#[cfg(test)]\n", with = "\n    rows.clear();\n    rows\n}\n\n#[cfg(test)]\n" }
+
+# The provision model's floor: its rows come back empty.
+[[fault]]
+id = "model-conformance-provision-no-rows"
+guard = "fetch_release_verifies_every_row_of_the_provision_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "fetch_release_verifies_every_row_of_the_provision_model"]
+expect = "test-failed"
+suite = "rust"
+message = "the provision model returned no rows, so nothing was checked"
+transform = { file = "crates/model/src/provision.rs", replace = "\n    rows\n}\n\n#[cfg(test)]\n", with = "\n    rows.clear();\n    rows\n}\n\n#[cfg(test)]\n" }
+
+# Review round 1 (#296b). A wrap that leaves the stanza off: the task text and `USER root` are
+# still right, so a comparison of those alone passed.
+[[fault]]
+id = "model-conformance-wrap-drops-stanza"
+guard = "wrap_dockerfile_answers_every_row_of_the_wrap_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "wrap_dockerfile_answers_every_row_of_the_wrap_model"]
+expect = "test-failed"
+suite = "rust"
+message = "ends on the generator's stanza, intact"
+transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = "    wrapped.push_str(&stanza);\n    Ok(wrapped)\n", with = "    let _ = &stanza;\n    Ok(wrapped)\n" }
+
+# A row function that stops ranging over one flag (here the advisory deny) still returns rows,
+# and the rows it keeps all agree with the app. The pinned count is what fails.
+[[fault]]
+id = "model-conformance-posture-rows-shrink"
+guard = "egress_posture_for_answers_every_row_of_the_posture_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "egress_posture_for_answers_every_row_of_the_posture_model"]
+expect = "test-failed"
+suite = "rust"
+message = "the posture model returned 46 rows, not the 92"
+transform = { file = "crates/model/src/posture.rs", replace = "                for deny in [false, true] {\n                    let options = Options {\n", with = "                for deny in [false] {\n                    let options = Options {\n" }
+
+# The posture rows answered at another ceiling than TABLE's: same count, and TABLE's rows are no
+# longer among them, which is what `posture::rows()`'s doc says they are.
+[[fault]]
+id = "model-conformance-posture-table-not-in-rows"
+guard = "egress_posture_for_answers_every_row_of_the_posture_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "egress_posture_for_answers_every_row_of_the_posture_model"]
+expect = "test-failed"
+suite = "rust"
+message = "isn't among the rows it exposes"
+transform = { file = "crates/model/src/posture.rs", replace = "                        deny,\n                        specified(options, WIRE_CEILING),\n", with = "                        deny,\n                        specified(options, WIRE_CEILING - 1),\n" }
+
+# A change to the model the app never followed: a status with both an exit code and a signal
+# reads as the signal death. No model property or model table reads that row, so
+# `cargo test -p agentd-model` stays green, and so does the app's own restated table, which
+# doesn't read the model. Only this test sees the two disagree.
+[[fault]]
+id = "model-conformance-run-model-drift"
+guard = "posix_exit_code_is_every_row_of_the_run_model"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "posix_exit_code_is_every_row_of_the_run_model"]
+expect = "test-failed"
+suite = "rust"
+message = "signal: Some(9), timed_out: false, truncated: false }) None has exit code Some(137)"
+transform = { file = "crates/model/src/run.rs", replace = "    if status.timed_out {\n        return Some(TIMED_OUT);\n    }\n    match (status.exit_code, status.signal) {\n        (Some(code), _) => Some(code),\n", with = "    if status.timed_out {\n        return Some(TIMED_OUT);\n    }\n    match (status.exit_code, status.signal) {\n        (Some(code), None) => Some(code),\n        (Some(_), Some(signal)) => Some(128 + signal),\n" }

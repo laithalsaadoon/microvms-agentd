@@ -1,0 +1,8 @@
+diff --git a/verify/guards/faults.toml b/verify/guards/faults.toml
+new file mode 100644
+--- /dev/null
++++ b/verify/guards/faults.toml
+@@ -0,0 +1,3 @@
++# A branch from before the split kept the single file and registered its guard here.
++[[fault]]
++id = "a-guard-from-before-the-split"
