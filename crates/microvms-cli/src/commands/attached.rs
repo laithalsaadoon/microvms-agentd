@@ -736,7 +736,8 @@ pub async fn keepalive<O: std::io::Write, E: std::io::Write>(
     };
     let mut policy = microvms_core::session::KeepAwake::new(idle_window)
         .while_busy(args.while_busy)
-        .max_duration(args.for_sec);
+        .max_duration(args.for_sec)
+        .tolerated_errors(args.tolerated_errors);
     if let Some(interval) = args.interval {
         policy = policy.interval(interval);
     }

@@ -50,6 +50,9 @@ pub struct KeepAwakeOptions {
     /// The VM's `maxIdleDurationSeconds`. A sandbox-held session knows it; otherwise the
     /// platform minimum of 60 is assumed. The interval may be at most half of it.
     pub idle_window_sec: Option<f64>,
+    /// How many retryable poll failures in a row are retried, a second apart, before the
+    /// keepalive ends with the error. Default: the core's `DEFAULT_TOLERATED_ERRORS`.
+    pub tolerated_errors: Option<u32>,
 }
 
 impl KeepAwakeOptions {
@@ -63,6 +66,9 @@ impl KeepAwakeOptions {
             .max_duration(self.max_duration_sec.map(seconds_async).transpose()?);
         if let Some(interval) = self.interval_sec {
             policy = policy.interval(seconds_async(interval)?);
+        }
+        if let Some(tolerated_errors) = self.tolerated_errors {
+            policy = policy.tolerated_errors(tolerated_errors);
         }
         Ok(policy)
     }
