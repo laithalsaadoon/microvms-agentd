@@ -1195,6 +1195,7 @@
     "microvms_core::sandbox::Sandbox::image": "method",
     "microvms_core::sandbox::Sandbox::image_exists": "method",
     "microvms_core::sandbox::Sandbox::image_version": "method",
+    "microvms_core::sandbox::Sandbox::launch_image_arn": "method",
     "microvms_core::sandbox::Sandbox::lifecycle": "method",
     "microvms_core::sandbox::Sandbox::managed_base_versions": "method",
     "microvms_core::sandbox::Sandbox::microvm": "method",
