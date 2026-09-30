@@ -79,12 +79,11 @@ issue = "#219"
 [BIND-20]
 issue = "#219"
 
-# The tunnel's identity keys, BIND-21 here and AGENTD-17 and AGENTD-18 in AGENTD.toml, share their
-# model and gherkin waivers, so a change to one is a change to all three. #297's handshake model
-# removes the model waiver, and its frame harnesses the fuzz ones.
+# The tunnel's keys, BIND-21, BIND-23 and BIND-24 here and AGENTD-17 to AGENTD-21 in AGENTD.toml,
+# share their gherkin waiver. crates/model/src/tunnel.rs carries their model layer, and #297's
+# frame harnesses remove the fuzz waivers.
 [BIND-21]
 issue = "#297"
-waive.model = "#297 adds a stateright model of the tunnel handshake and its pins; until then the handshake and relay tests hold the key"
 waive.gherkin = "no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate"
 waive.fuzz = "#297 adds a harness over the client's tunnel frame read"
 
@@ -94,10 +93,13 @@ waive.model = "one stream read by one parser has no interleavings to explore; it
 waive.gherkin = "hostile bytes aren't a scenario a caller drives; the parser's tests feed it directly"
 waive.live = "a live daemon sends well-formed events, so a live run can't present hostile bytes"
 
-# The verified tunnel's end of stream, BIND-23 here and AGENTD-19 and AGENTD-20 in AGENTD.toml,
-# share their waivers.
 [BIND-23]
 issue = "#342"
-waive.model = "#297 adds a stateright model of the tunnel handshake and its end of stream; until then the stand-in tests and the daemon-against-client tests hold the key"
 waive.gherkin = "no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate"
 waive.fuzz = "#297 adds a harness over the client's tunnel frame read"
+
+[BIND-24]
+issue = "#297"
+waive.gherkin = "no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate"
+waive.fuzz = "#297 adds a harness over the client's tunnel frame read"
+waive.live = "a live daemon and the endpoint proxy neither replay nor forge a frame, so a live run can't present one; the stand-in tests send both to the client's real relay"
