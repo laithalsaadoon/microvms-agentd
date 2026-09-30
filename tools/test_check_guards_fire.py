@@ -2716,7 +2716,7 @@ HASH = "0123456789abcdef"
 
 
 def fire_module() -> dict:
-    return runpy.run_path(str(SCRIPT), run_name="guards_fire")
+    return runpy.run_path(str(SCRIPT), run_name="tools.check-guards-fire")
 
 
 def fake_target(root: Path, names: list[str]) -> Path:
@@ -4160,7 +4160,7 @@ class FireSharded(unittest.TestCase):
         )
         state = " ".join(f"{n}{i}=ok" for n, _, _, _, size in spec for i in range(size))
         repo = Repo(self, {REGISTRY: registry, "state.txt": state + "\n"})
-        script = runpy.run_path(str(SCRIPT))
+        script = runpy.run_path(str(SCRIPT), run_name="tools.check-guards-fire")
         faults, problems = script["load"](repo.root)
         self.assertEqual(problems, [])
         self.assertEqual(
@@ -4172,7 +4172,7 @@ class FireSharded(unittest.TestCase):
     def test_the_registrys_own_shards_partition_it(self):
         # The split CI makes, on the registry it makes it of: every suite's entries in CI's
         # six shards.
-        script = runpy.run_path(str(SCRIPT))
+        script = runpy.run_path(str(SCRIPT), run_name="tools.check-guards-fire")
         faults, problems = script["load"](HERE.parent)
         self.assertEqual(problems, [])
         selected = [f for f in faults if f.suite in ("rust", "script", "bindings")]
