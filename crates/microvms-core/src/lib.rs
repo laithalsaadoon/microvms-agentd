@@ -90,7 +90,7 @@ pub mod prelude;
 
 // The rules and values live in `microvms-domain`, which can't do I/O (ARCH-6). Re-exported
 // whole, so every `microvms_core::` path they had still resolves (ARCH-1).
-pub use microvms_domain::{constants, cost, error, hooks, region, sizing};
+pub use microvms_domain::{constants, cost, duration, error, hooks, region, sizing};
 
 // Whole modules that live in one crate below.
 pub use microvms_app::sandbox;

@@ -1,0 +1,24 @@
+{
+  "capability": "from-name",
+  "input": {
+    "name": "parity",
+    "region": "us-east-1",
+    "record_text": "{\"name\": \"parity\", \"microvmId\": \"mvm-parity\", \"endpoint\": \"https://mvm-parity.example\", \"agentToken\": \"parity-canary-token\", \"region\": \"us-west-2\", \"at\": 1}",
+    "message_mentions": [
+      "us-west-2",
+      "us-east-1",
+      "parity-canary-token"
+    ]
+  },
+  "expect": {
+    "error": {
+      "code": "ERR_INVALID_ARG",
+      "wire_kind": null
+    },
+    "message_mentions": {
+      "us-west-2": true,
+      "us-east-1": true,
+      "parity-canary-token": false
+    }
+  }
+}

@@ -100,7 +100,7 @@ impl CompletionPlan {
     ) -> Result<Self, Error> {
         let deadline = match request.timeout_sec {
             Some(seconds) => {
-                crate::cost::duration_of_secs_f64(seconds)?.saturating_add(options.client_grace)
+                crate::duration::of_secs_f64(seconds)?.saturating_add(options.client_grace)
             }
             None => NO_TIMEOUT_CEILING,
         };

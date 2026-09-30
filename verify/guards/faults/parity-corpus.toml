@@ -48,7 +48,7 @@ run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "
 expect = "test-failed"
 suite = "rust"
 message = "the core runner has no handler for area \"size-class\""
-transform = { file = "crates/microvms-core/tests/parity_cases.rs", replace = "const AREAS: [&str; 6] = [\n    \"image-name\",\n    \"cost\",\n    \"error\",\n    \"egress\",\n    \"size-class\",\n    \"wrap-dockerfile\",\n];\n", with = "const AREAS: [&str; 5] = [\n    \"image-name\",\n    \"cost\",\n    \"error\",\n    \"egress\",\n    \"wrap-dockerfile\",\n];\n" }
+transform = { file = "crates/microvms-core/tests/parity_cases.rs", replace = "const AREAS: [&str; 7] = [\n    \"image-name\",\n    \"cost\",\n    \"error\",\n    \"egress\",\n    \"names\",\n    \"size-class\",\n    \"wrap-dockerfile\",\n];\n", with = "const AREAS: [&str; 6] = [\n    \"image-name\",\n    \"cost\",\n    \"error\",\n    \"egress\",\n    \"names\",\n    \"wrap-dockerfile\",\n];\n" }
 
 # The case's expected name moved to what the CLI's `build --reuse` answers today, as a #258 fix
 # would leave it: the CLI's marker has to fail until the fixing PR removes it.
@@ -84,7 +84,7 @@ run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact
 expect = "test-failed"
 suite = "rust"
 message = "gives the fakes tier area \"egress\", which it has no handler for"
-transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 2] = [\"cost\", \"egress\"];\npub const CLI_FAKE_AREAS: [&str; 2] = [\"image-name\", \"error\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 1] = [\"cost\"];\npub const CLI_FAKE_AREAS: [&str; 3] = [\"image-name\", \"error\", \"egress\"];\n" }
+transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 2] = [\"cost\", \"egress\"];\npub const CLI_FAKE_AREAS: [&str; 3] = [\"image-name\", \"error\", \"names\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 1] = [\"cost\"];\npub const CLI_FAKE_AREAS: [&str; 4] = [\"image-name\", \"error\", \"names\", \"egress\"];\n" }
 
 [[fault]]
 id = "parity-cli-area-dropped"
@@ -93,7 +93,7 @@ run = ["cargo", "test", "-p", "microvms-cli", "--test", "parity_cases", "--", "-
 expect = "test-failed"
 suite = "rust"
 message = "the cli runner has no handler for area \"egress\""
-transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 2] = [\"cost\", \"egress\"];\npub const CLI_FAKE_AREAS: [&str; 2] = [\"image-name\", \"error\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 1] = [\"cost\"];\npub const CLI_FAKE_AREAS: [&str; 2] = [\"image-name\", \"error\"];\n" }
+transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 2] = [\"cost\", \"egress\"];\npub const CLI_FAKE_AREAS: [&str; 3] = [\"image-name\", \"error\", \"names\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 1] = [\"cost\"];\npub const CLI_FAKE_AREAS: [&str; 3] = [\"image-name\", \"error\", \"names\"];\n" }
 
 [[fault]]
 id = "parity-cli-area-in-both-tiers"
@@ -102,7 +102,7 @@ run = ["cargo", "test", "-p", "microvms-cli", "--test", "parity_cases", "--", "-
 expect = "test-failed"
 suite = "rust"
 message = "area \"egress\" is both this cli runner's and another's"
-transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 2] = [\"cost\", \"egress\"];\npub const CLI_FAKE_AREAS: [&str; 2] = [\"image-name\", \"error\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 2] = [\"cost\", \"egress\"];\npub const CLI_FAKE_AREAS: [&str; 3] = [\"image-name\", \"error\", \"egress\"];\n" }
+transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 2] = [\"cost\", \"egress\"];\npub const CLI_FAKE_AREAS: [&str; 3] = [\"image-name\", \"error\", \"names\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 2] = [\"cost\", \"egress\"];\npub const CLI_FAKE_AREAS: [&str; 4] = [\"image-name\", \"error\", \"names\", \"egress\"];\n" }
 
 # A skip that doesn't name its issue or trace id fails the reader, in every runner.
 
@@ -114,3 +114,35 @@ expect = "test-failed"
 suite = "rust"
 message = "image-name/ensure-image-name: skip.py ends by naming its issue or trace id"
 transform = { file = "verify/parity/cases/image-name/ensure-image-name.json", replace = "so no offline call answers it (IMAGE-12)\",\n", with = "so no offline call answers it\",\n" }
+
+# The `names` area (#338): a record from another region and a torn one, refused before any door.
+# The first breaks core's region rule, which core and the CLI's fakes tier each fail on (the
+# binding entries are in the bindings section); the second reads a torn file as a free name, and
+# the refusal stops naming the file to inspect.
+
+[[fault]]
+id = "parity-core-names-region"
+guard = "core_answers_the_shared_case_corpus"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]
+expect = "test-failed"
+suite = "rust"
+message = "the fake has no answer queued for GetMicrovm"
+transform = { file = "crates/microvms-domain/src/names.rs", replace = "        && expected.as_str() != record.region\n", with = "        && expected.as_str() != record.region\n        && false\n" }
+
+[[fault]]
+id = "parity-cli-names-region"
+guard = "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"]
+expect = "test-failed"
+suite = "rust"
+message = "names/region-mismatch: cli answered"
+transform = { file = "crates/microvms-domain/src/names.rs", replace = "        && expected.as_str() != record.region\n", with = "        && expected.as_str() != record.region\n        && false\n" }
+
+[[fault]]
+id = "parity-core-names-torn-reads-free"
+guard = "core_answers_the_shared_case_corpus"
+run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]
+expect = "test-failed"
+suite = "rust"
+message = "names/torn-record: core answered"
+transform = { file = "crates/microvms-edges/src/names.rs", replace = "        serde_json::from_str(&text).map(Some).map_err(|_| {\n", with = "        serde_json::from_str(&text).map(Some).or(Ok::<_, serde_json::Error>(None)).map_err(|_| {\n" }
