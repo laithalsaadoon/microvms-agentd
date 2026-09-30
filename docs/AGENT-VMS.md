@@ -144,8 +144,9 @@ credentials and a fixed clock; the live conformance check asserts the token is a
 by the real service, because a presign that is one canonical byte off still looks like
 a token.
 
-The token is a `BearerToken` newtype whose `Debug` prints its length only, following
-`.erpaval/solutions/best-practices/credential-structs-never-derive-debug.md`.
+The token is a `BearerToken` newtype whose hand-written `Debug` prints its length only,
+because a derived `Debug` would put the token in every log line that formats it. The
+control plane's `RunHookPayload` and the session's `HttpRequest` redact the same way.
 
 ## The core API
 

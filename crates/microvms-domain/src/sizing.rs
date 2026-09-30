@@ -639,11 +639,9 @@ mod tests {
     proptest! {
         /// The verdict, over the whole `u32` domain plus the band where an off-table
         /// figure is plausible: accepted exactly when the figure is one of the five,
-        /// refused as `ERR_INVALID_ARG` otherwise. Asserting the verdict rather than a
-        /// side effect is the lesson from
-        /// `.erpaval/solutions/test-failures/proptest-and-dst-tiers-need-verdict-assertions.md`
-        /// — a property that only checked "no panic" would pass against a function
-        /// that accepted everything.
+        /// refused as `ERR_INVALID_ARG` otherwise. It asserts the verdict rather than a
+        /// side effect, because a property that only checked "no panic" would pass against
+        /// a function that accepted everything.
         ///
         /// The `Ok` arm's second assertion is the one that catches snapping: a
         /// rounding implementation returns a class whose baseline is *not* the figure

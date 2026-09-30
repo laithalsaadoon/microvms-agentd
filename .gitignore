@@ -4,7 +4,9 @@ target/
 /conformance/evidence/
 /evidence/background-coding-agent/
 Cargo.lock.orig
-.erpaval/sessions/
+# An agent workflow tool's lesson and session store. Nothing in the repository reads it, so a
+# local run's notes stay on the machine that wrote them rather than riding into a commit.
+.erpaval/
 # Terraform working state: the conformance stack is created and destroyed per
 # run, so its state is never worth committing.
 conformance/infra/.terraform/

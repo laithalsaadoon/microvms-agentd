@@ -8,7 +8,7 @@ Copy this whole document into a fresh Claude Code session started in
 Build `microvms-core`: a Rust workspace that replaces the Python client stack for
 AWS Lambda MicroVMs, in this monorepo, as new members of the existing Cargo
 workspace (`Cargo.toml` at the root already declares `members = ["agentd","model"]`
-with resolver 3, edition 2024). Please /erpaval this end to end with the same
+with resolver 3, edition 2024). Please carry this end to end with the same
 verification stack the daemon used: symspec + Z3 for requirements, stateright for
 model checking, proptest for properties, turmoil where transport faults matter,
 and live AWS conformance at the end.
@@ -54,9 +54,10 @@ Five crates, one dependency direction:
 
 ## What "port the traps" means
 
-`.erpaval/specs/001-control-plane-client/spec.md` defines three strengths:
-S1 inexpressible (no parameter to misuse), S2 rejected locally (error before any
-AWS call), S3 documented. Rust upgrades several S2s to S1s — a closed
+Three strengths rank each closure (the ladder is now the "How strongly a trap is
+closed" section of `crates/microvms-core/src/lib.rs`): S1 inexpressible (no
+parameter to misuse), S2 rejected locally (error before any AWS call), S3 correct
+by default and overridable. Rust upgrades several S2s to S1s: a closed
 `Region` enum instead of a runtime check, a `Duration`-with-provenance type whose
 unlabeled construction is a compile error, `EstimatedUsd` without `Into<f64>`.
 Every trap keeps or raises its strength; the spec's per-requirement keys (TRAP-*)
@@ -171,5 +172,5 @@ port its shape from the Python one.
 - Every doc claim you add to PLATFORM.md carries date, region, API version.
 - Commit checkpoints with the story in the message, hooks green, no --no-verify.
 
-Start by reading `verify/spec/core.symspec.json`, `docs/PLATFORM.md`, and
-`.erpaval/specs/001-control-plane-client/spec.md`, then plan the waves.
+Start by reading `verify/spec/core.symspec.json` and `docs/PLATFORM.md`, then plan
+the waves.
