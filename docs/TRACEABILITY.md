@@ -292,7 +292,7 @@ The language bindings layer shall expose on each session the egress posture the 
 - **model:** `model/src/posture.rs`
 - **gherkin:** `microvms-core/tests/features/egress_posture.feature`
 - **fuzz:** `microvms-app/src/control/posture_fuzz.rs`
-- **test:** `microvms-app/src/sandbox.rs`, `microvms-cli/src/guards.rs`, `microvms-core/tests/live_posture.rs`, `microvms-js/__test__/egress_posture.mjs`, `microvms-py/tests/test_egress_posture.py`
+- **test:** `microvms-app/src/sandbox.rs`, `microvms-cli/src/guards/run.rs`, `microvms-core/tests/live_posture.rs`, `microvms-js/__test__/egress_posture.mjs`, `microvms-py/tests/test_egress_posture.py`
 - **impl:** `microvms-app/src/sandbox.rs`, `microvms-app/src/session/mod.rs`, `microvms-cli/src/commands/lifecycle.rs`
 - **live:** `conformance/lanes/posture.py`
 
@@ -325,7 +325,7 @@ When a caller asks for a preflight, the microvms-core shall report whether the r
 - **model:** `model/src/preflight.rs`
 - **gherkin:** `microvms-core/tests/features/request_and_preflight.feature`
 - **fuzz:** waived: the outcome space (3 region x 2 credential x 3 service worlds) is enumerated exhaustively by the Stateright model; there is no input stream to fuzz
-- **test:** `microvms-app/src/preflight.rs`, `microvms-cli/src/guards.rs`, `microvms-core/tests/live_preflight.rs`, `microvms-js/__test__/request_and_preflight.mjs`, `microvms-py/tests/test_request_and_preflight.py`
+- **test:** `microvms-app/src/preflight.rs`, `microvms-cli/src/guards/doctor.rs`, `microvms-core/tests/live_preflight.rs`, `microvms-js/__test__/request_and_preflight.mjs`, `microvms-py/tests/test_request_and_preflight.py`
 - **impl:** `microvms-app/src/control/image.rs`, `microvms-app/src/control/transport.rs`, `microvms-app/src/preflight.rs`, `microvms-domain/src/preflight.rs`, `microvms-js/src/preflight.rs`, `microvms-py/src/preflight.rs`
 - **live:** `conformance/lanes/local.py`
 
@@ -424,7 +424,7 @@ If the reader of stdout or stderr closes after a command has started, then the C
 - **model:** `model/src/output.rs`
 - **gherkin:** `microvms-cli/tests/features/closed_output.feature`
 - **fuzz:** `microvms-cli/src/closed_output_fuzz.rs`
-- **test:** `microvms-cli/src/closed_output_fuzz.rs`, `microvms-cli/src/guards.rs`
+- **test:** `microvms-cli/src/closed_output_fuzz.rs`, `microvms-cli/src/guards/closed_output.rs`
 - **impl:** `microvms-cli/src/closed_output.rs`, `microvms-cli/src/envelope.rs`, `microvms-cli/src/main.rs`
 - **live:** `conformance/lanes/closed_output.py`
 
@@ -435,7 +435,7 @@ If the stdout reader of a streaming command closes, then the CLI crate shall sto
 - **model:** `model/src/output.rs`
 - **gherkin:** `microvms-cli/tests/features/closed_output.feature`
 - **fuzz:** `microvms-cli/src/closed_output_fuzz.rs`
-- **test:** `microvms-cli/src/closed_output_fuzz.rs`, `microvms-cli/src/guards.rs`
+- **test:** `microvms-cli/src/closed_output_fuzz.rs`, `microvms-cli/src/guards/closed_output.rs`
 - **impl:** `microvms-cli/src/closed_output.rs`, `microvms-cli/src/commands/attached.rs`, `microvms-cli/src/envelope.rs`
 - **live:** `conformance/lanes/closed_output.py`
 

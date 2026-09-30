@@ -71,7 +71,8 @@ of it requires `git show`, and nothing in the tree points a reader at that commi
 
 **The densest files are also the most-churned files.** `microvms-domain/src/cost.rs` holds 242
 symbols, the highest in the repository, and 7 commits. `agentd/src/exec.rs` 147, `agentd/src/fs.rs`
-137, `microvms-cli/src/guards.rs` 123 with 13 commits, `microvms-py/src/cost.rs` 117,
+137, `microvms-cli/src/guards.rs` (since split into `microvms-cli/src/guards/`) 123 with 13
+commits, `microvms-py/src/cost.rs` 117,
 `microvms-js/src/cost.rs` 106, `microvms-app/src/sandbox.rs` 105 with 11 commits,
 `microvms-app/src/control/image.rs` 99 with 11, `microvms-app/src/control/ops.rs` 96 with 9,
 `microvms-app/src/session/mod.rs` 94. Six of those ten are in both the churn top-20 and the
@@ -195,7 +196,8 @@ the bullets name the count. Shares are computed with
 - `mise.toml` — sole human author (71% of 17 commits). Bring both symspec gates inside
   `check` behind a pinned, repository-local toolchain so the requirement set is verified by
   the command a fresh clone can run, rather than by a path into one home directory.
-- `microvms-cli/src/guards.rs` — sole human author (85% of 13 commits). At 123 symbols and the
+- `microvms-cli/src/guards.rs`, since split into `microvms-cli/src/guards/` — sole human author
+  (85% of 13 commits). At 123 symbols and the
   highest churn in the CLI crate, this file needs a second reader more than any other; pair a
   review of it with `.erpaval/solutions/test-failures/guards-that-passed-against-broken-code.md`,
   which records four ways its guards passed against broken code.

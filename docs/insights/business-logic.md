@@ -267,7 +267,7 @@ Z3 and `stateright` proofs proofs about *this struct's* reachable states
 | ARCH-2: protocol drift between client and daemon fails compilation | Cargo dependency graph | `microvms-cli/tests/dependency_direction.rs:180` |
 | ARCH-3 / ARCH-4 / BIND-1: `cli -> core -> protocol`, bindings depend only on core, core depends on neither | Test over `cargo_metadata` | `microvms-cli/tests/dependency_direction.rs:69`, `:96`, `:220` |
 | ARCH-5: the CLI exports no library target at all | Test over `cargo_metadata` | `microvms-cli/tests/dependency_direction.rs:127` |
-| CLI-2: the CLI reaches the control plane and the endpoint proxy only through core, and the guard names *which* seam door was entered | Injected refusing seam | `microvms-cli/src/guards.rs:407`, `:491`; door bans in `microvms-cli/clippy.toml` |
+| CLI-2: the CLI reaches the control plane and the endpoint proxy only through core, and the guard names *which* seam door was entered | Injected refusing seam | `microvms-cli/src/guards/thinness.rs:441`, `:534`; door bans in `microvms-cli/clippy.toml` |
 | The CLI's direct dependency set contains none of the denylisted transport and signing crates | Test over `cargo_metadata` | `microvms-cli/tests/thinness.rs:101` |
 | Only the envelope module and named exceptions in `main` write to stdout | Source scan | `microvms-cli/tests/thinness.rs:446` |
 | CLI-4: one JSON envelope per invocation on stdout, on success, on failure, and on a stream that died before its first event | Spawned-binary test | `microvms-cli/tests/exit_codes.rs:154`, `:198`, `:233` |
@@ -276,7 +276,7 @@ Z3 and `stateright` proofs proofs about *this struct's* reachable states
 | `DEAD_STATES` is a strict subset of `TERMINAL_STATES`, and `SUSPENDED` is terminal but not dead | Application, pinned by test | `microvms-domain/src/constants.rs:448`, `:455`, `:878` |
 | The model-backed and tolerated image-ready state sets are disjoint | Application, pinned by test | `microvms-domain/src/constants.rs:431`, `:441`, `:941` |
 | A ledger file is removed only when nothing is outstanding; leaked identifiers are recorded **before** the delete is attempted | Application, on disk | `microvms-cli/src/ledger.rs:1-22` |
-| CLI-3: every failure class exits with its own integer and `ERR_*` string, distinct from `ERR_UNEXPECTED` | Spawned-binary test plus a classification test | `microvms-cli/src/exit.rs:78-101`, `microvms-cli/tests/exit_codes.rs:29`, `microvms-cli/src/guards.rs:2965`, `:3079`; published table cross-checked at `microvms-cli/tests/manifest.rs:161` |
+| CLI-3: every failure class exits with its own integer and `ERR_*` string, distinct from `ERR_UNEXPECTED` | Spawned-binary test plus a classification test | `microvms-cli/src/exit.rs:78-101`, `microvms-cli/tests/exit_codes.rs:29`, `microvms-cli/src/guards/exit_codes.rs:25`, `:139`; published table cross-checked at `microvms-cli/tests/manifest.rs:161` |
 | Retryability is derived from the error kind rather than stored, so the two cannot drift | Application, one `matches!` | `microvms-domain/src/error.rs:111-118`, mapping at `:358-397` |
 
 The lifecycle is deliberately **runtime-checked rather than typestate**
@@ -419,7 +419,7 @@ be March-based, which puts February's variable length last; `719468` is the day 
   function of the request, and `create_image` delegates to it rather than keeping a copy, so the
   two cannot drift. A caller who skips preflight loses only the upload.
   `microvms-app/src/control/image.rs:144-158`, `:210-271`; asserted with a zero-call count at
-  `microvms-cli/src/guards.rs:1484`.
+  `microvms-cli/src/guards/build.rs:366`.
 
 - **Every refusal names its measurement.** A guard's error message cites the `docs/PLATFORM.md`
   section rather than restating the constraint, because the guards exist so a reader can reach the
@@ -558,7 +558,7 @@ be March-based, which puts February's variable length last; `719468` is the day 
   file is how `microvm ls` knows there is something to tell the operator about. For a wedged image
   and a service-created log group the identifier **is** the remedy; there is no second way to find
   them. `microvms-cli/src/ledger.rs:1-22`; CLI-6's teardown-on-interrupt guarded at
-  `microvms-cli/src/guards.rs:828`, `:921`.
+  `microvms-cli/src/guards/interrupt.rs:36`, `:130`.
 
 - **Exec idempotency is opt-in, which deliberately inverts TRAP-1's shape.** The default is a
   generated exec id, because `microvm exec` is one shot and an id reused by accident means the
@@ -566,7 +566,7 @@ be March-based, which puts February's variable length last; `719468` is the day 
   buys is a retry that is safe across the caller's own restart. This differs from a control-plane
   `clientToken`, whose replay wedges an image permanently and which this CLI does not have at all.
   `microvms-cli/src/cli.rs:1173-1191`, `agentd/src/exec.rs:363-377`; both halves guarded at
-  `microvms-cli/src/guards.rs:2020`, `:2061`.
+  `microvms-cli/src/guards/exec.rs:60`, `:101`.
 
 - **Local constants are checked against the pinned service model in the build gate (TRAP-12), and
   the key names are a contract with a script.** `constants::as_json` publishes every hardcoded

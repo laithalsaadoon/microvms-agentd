@@ -1114,7 +1114,7 @@ class AdapterLogicTests(unittest.TestCase):
                 deps='kernel = { path = "../kernel" }',
                 files={
                     "src/lib.rs": ADAPTER_LOGIC_FORMS,
-                    # Test-only by its parent's declaration, like the CLI's guards.rs.
+                    # Test-only by its parent's declaration, like the CLI's guards module.
                     "src/guards.rs": 'fn f() { let _ = "TerminateMicrovm"; }\n',
                 },
             )
@@ -1732,8 +1732,13 @@ LINT_EXCEPTIONS = {
     ("microvms-cli/src/seam.rs", "clippy::disallowed_methods"): 2,
     # The test-only guards: each fake seam builds a plane or session over a scripted transport,
     # and each scripted transport names `Call`. `cfg(test)`, so none of it ships.
-    ("microvms-cli/src/guards.rs", "clippy::disallowed_methods"): 8,
-    ("microvms-cli/src/guards.rs", "clippy::disallowed_types"): 4,
+    ("microvms-cli/src/guards/attach.rs", "clippy::disallowed_methods"): 1,
+    ("microvms-cli/src/guards/closed_output.rs", "clippy::disallowed_methods"): 1,
+    ("microvms-cli/src/guards/doctor.rs", "clippy::disallowed_methods"): 2,
+    ("microvms-cli/src/guards/doctor.rs", "clippy::disallowed_types"): 2,
+    ("microvms-cli/src/guards/history.rs", "clippy::disallowed_methods"): 1,
+    ("microvms-cli/src/guards/support.rs", "clippy::disallowed_methods"): 3,
+    ("microvms-cli/src/guards/support.rs", "clippy::disallowed_types"): 3,
     # `doctor`'s `terraform output`, a subprocess decision.
     ("microvms-cli/src/commands/doctor.rs", "clippy::disallowed_types"): 1,
     # Each binding's name store, the one place it composes core's process lookup.

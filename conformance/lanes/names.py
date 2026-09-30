@@ -304,7 +304,7 @@ def drive_named_vm(
         # The collision: a second launch under the live name must be refused locally,
         # with the appended row, before anything is billed. The refusal arriving at all
         # is the check; the zero-AWS-calls half is the behavioral guard's claim
-        # (`guards.rs`, RefusingSeam) because no live run can see an absent request.
+        # (`guards/names.rs`, RefusingSeam) because no live run can see an absent request.
         try:
             cli.call(
                 "run",

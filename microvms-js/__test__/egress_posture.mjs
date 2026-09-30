@@ -5,7 +5,7 @@
 // `egressPostureFor` is the request-side answer: what `sandbox.run` with the same options will
 // report, or the `ERR_INVALID_ARG` it will throw, with no AWS call. `session.egressPosture()` is
 // the launched session's value, the same string the CLI envelope's `egressPosture` carries. The
-// launch half is asserted in Rust (`microvms-cli/src/guards.rs`) and against AWS in the live
+// launch half is asserted in Rust (`microvms-cli/src/guards/run.rs`) and against AWS in the live
 // suite, because a unit run here has no control plane to launch against.
 //
 // `sealed` needs a VPC egress connector and separately verified VPC routing without an internet

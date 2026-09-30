@@ -17,7 +17,7 @@ Each traced key must appear in six places, and this script reports where:
   fuzz     a harness the key names: the name or the `///` doc of the `#[test]` function
            that calls `bolero::check!`, or the doc above a top-level `fuzz_target!`
   test     a test the key names, in a file under a Rust crate's `tests/`, a source
-           file, `microvms-cli/src/guards.rs`, or a binding test under
+           file, a file under `microvms-cli/src/guards/`, or a binding test under
            `microvms-py/tests/` or `microvms-js/__test__/`. In Rust that's a name that
            starts with the key (`fn image_5_...`) or the `///` doc of a `#[test]` item,
            `proptest!` bodies included; in Python the `def test_image_5_...` name, a
@@ -141,6 +141,8 @@ BINDING_TESTS = (
     ("microvms-py/tests", "*.py"),
     ("microvms-js/__test__", "*.mjs"),
 )
+# The CLI's in-crate guards: test code under `src/`, so none of it counts as production code.
+CLI_GUARDS = Path("microvms-cli/src/guards")
 
 # Listed entries that yield files but no requirement key today, each with the reason.
 # Every other entry must give up at least one key, because a directory that still has
@@ -816,7 +818,11 @@ def collect(patterns: Patterns, root: Path = ROOT) -> dict[str, dict[str, set[st
         for key in named[path].fuzz:
             note(key, "fuzz", path)
         # A fuzz file is test scaffolding, even under `src/`, so it isn't production code.
-        if named[path].fuzz_file or path in rust_tests or path.name == "guards.rs":
+        if (
+            named[path].fuzz_file
+            or path in rust_tests
+            or path.is_relative_to(root / CLI_GUARDS)
+        ):
             continue
         production, _ = split_test_region(path.read_text())
         for key in patterns.key.findall(production):

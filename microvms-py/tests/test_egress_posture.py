@@ -4,7 +4,7 @@
 `egress_posture_for` is the request-side answer: what `Sandbox.run` with the same options will
 report, or the `InvalidArgError` it will raise, with no AWS call. `Session.egress_posture` is
 the launched session's value, the same string the CLI envelope's `egressPosture` carries. The
-launch half is asserted in Rust (`microvms-cli/src/guards.rs` runs the CLI and the core over
+launch half is asserted in Rust (`microvms-cli/src/guards/run.rs` runs the CLI and the core over
 one scripted launch; the live suite repeats it against AWS), because a unit run here has no
 control plane to launch against.
 
