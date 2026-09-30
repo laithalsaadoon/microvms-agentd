@@ -1830,6 +1830,22 @@ mod tests {
         (Sandbox::with_control_plane(plane), recorder, clock)
     }
 
+    /// Suspend, resume and terminate wait five minutes at five-second polls, with no stall
+    /// probe: core's lifecycle wait, not the image build's 45-minute default (#266).
+    #[test]
+    fn the_suspend_resume_and_terminate_waits_are_cores_lifecycle_wait() {
+        let (sandbox, _, _) = planted();
+        let wait = sandbox.lifecycle_wait();
+        assert_eq!(
+            (wait.timeout, wait.poll_interval, wait.stall_grace),
+            (
+                DEFAULT_LIFECYCLE_TIMEOUT,
+                LIFECYCLE_POLL_INTERVAL,
+                Duration::MAX
+            )
+        );
+    }
+
     /// Queues everything a launch to RUNNING needs.
     fn answer_launch(recorder: &FakeControlPlane) {
         recorder
