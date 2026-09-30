@@ -325,8 +325,8 @@ guard = "test_check_ci_parity.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_ci_parity.py", "-k", "CiCommands.test_guards_"]
 expect = "exit-nonzero"
 suite = "script"
-message = "step `the seeded faults a pull request affects fire` passes when"
-transform = { file = ".github/workflows/ci.yml", replace = "        run: mise run ci:guards --target-dir target --affected --base \"$BASE\"\n", with = "        run: mise run ci:guards --target-dir target --affected --base \"$BASE\" || true\n" }
+message = "step `the seeded faults whose recorded verdicts a pull request can't keep fire` passes when"
+transform = { file = ".github/workflows/ci.yml", replace = "        run: mise run ci:guards --target-dir target --reuse \"$RUNNER_TEMP/guards-verdicts\"\n", with = "        run: mise run ci:guards --target-dir target --reuse \"$RUNNER_TEMP/guards-verdicts\" || true\n" }
 
 [[fault]]
 id = "ci-wrapper-guards-push"
@@ -334,8 +334,8 @@ guard = "test_check_ci_parity.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_ci_parity.py", "-k", "CiCommands.test_guards_"]
 expect = "exit-nonzero"
 suite = "script"
-message = "step `every seeded fault fires` passes when"
-transform = { file = ".github/workflows/ci.yml", replace = "        run: mise run ci:guards --target-dir target\n", with = "        run: mise run ci:guards --target-dir target || true\n" }
+message = "step `every seeded fault fires, and its record is written` passes when"
+transform = { file = ".github/workflows/ci.yml", replace = "        run: mise run ci:guards --target-dir target --record \"$RUNNER_TEMP/guards-verdicts\"\n", with = "        run: mise run ci:guards --target-dir target --record \"$RUNNER_TEMP/guards-verdicts\" || true\n" }
 
 [[fault]]
 id = "ci-wrapper-guards-cache"
