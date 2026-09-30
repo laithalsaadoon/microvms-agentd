@@ -181,7 +181,7 @@ ts = "Session.runSync"
 [[capability]]
 id = "run-to-completion"
 core = "microvms_core::session::Session::run_to_completion"
-cli = { exempt = "exec has the parts but not the composition", issue = "#259" }
+cli = "exec --complete"
 py = "Session.run_to_completion"
 ts = "Session.runToCompletion"
 

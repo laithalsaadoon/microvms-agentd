@@ -1124,7 +1124,10 @@
           "exitCode",
           "stdout",
           "stderr",
-          "truncated"
+          "truncated",
+          "posixExitCode",
+          "notes",
+          "synthesized"
         ],
         "responseType": "microvm.agent.prompt",
         "summary": "Hand a coding agent in a running agent VM one task, headless, as the non-root user",
@@ -1161,6 +1164,33 @@
             "default": "300",
             "help": "How long to wait for the command, in seconds",
             "name": "timeout",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "The daemon's deadline for the command, in seconds: `timeout_sec` on the start request",
+            "name": "timeout-sec",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Wait for exactly one result, the way the SDKs' `run_to_completion` does (BIND-8 to BIND-10)",
+            "name": "complete",
+            "positional": false,
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "With --complete, the seconds past --timeout-sec before the kill, and then for its result",
+            "name": "client-grace",
             "positional": false,
             "required": false,
             "type": "string"
@@ -1376,7 +1406,10 @@
           "stdout",
           "stderr",
           "truncated",
-          "phase"
+          "phase",
+          "posixExitCode",
+          "notes",
+          "synthesized"
         ],
         "responseType": "microvm.exec",
         "summary": "Run one command in a MicroVM that is already running",
