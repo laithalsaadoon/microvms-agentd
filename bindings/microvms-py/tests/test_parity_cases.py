@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import re
+import tempfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -375,6 +376,30 @@ def egress(case: Case, _servers: Callable[..., SseServer]) -> dict[str, Any]:
     )
 
 
+def names(case: Case, _servers: Callable[..., SseServer]) -> dict[str, Any]:
+    """The case's record written where the CLI's registry keeps it, then adopted by name."""
+    assert case.capability == "from-name", case.id
+    with tempfile.TemporaryDirectory() as state:
+        registry = microvms.NameRegistry(state)
+        directory = Path(registry.directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / f"{case.input['name']}.json").write_text(case.input["record_text"])
+        try:
+            sandbox = microvms.Sandbox.from_name(
+                microvms.Region.parse(case.input["region"]),
+                case.input["name"],
+                registry,
+            )
+        except microvms.MicrovmError as error:
+            answer = refusal(error)
+            answer["message_mentions"] = {
+                mention: mention in str(error)
+                for mention in case.input["message_mentions"]
+            }
+            return answer
+        return {"adopted": repr(sandbox)}
+
+
 def size_class(case: Case, _servers: Callable[..., SseServer]) -> dict[str, Any]:
     return answered(
         lambda: {
@@ -396,6 +421,7 @@ HANDLERS: dict[str, Callable[[Case, Callable[..., SseServer]], dict[str, Any]]] 
     "cost": cost,
     "error": daemon_status,
     "egress": egress,
+    "names": names,
     "size-class": size_class,
     "wrap-dockerfile": wrap,
 }

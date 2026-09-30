@@ -172,16 +172,21 @@ impl PyKeepAwake {
     }
 }
 
-/// The policy from the binding's keyword arguments.
+/// The policy from the binding's keyword arguments. An argument left out keeps the core's
+/// default.
 pub(crate) fn policy(
     idle_window: Option<Duration>,
     interval: Option<f64>,
     while_busy: bool,
     max_duration: Option<f64>,
+    tolerated_errors: Option<u32>,
 ) -> Result<KeepAwake, Error> {
     let mut policy = KeepAwake::new(idle_window).while_busy(while_busy);
     if let Some(interval) = interval {
         policy = policy.interval(crate::exec::seconds(interval)?);
+    }
+    if let Some(tolerated_errors) = tolerated_errors {
+        policy = policy.tolerated_errors(tolerated_errors);
     }
     let max_duration = max_duration.map(crate::exec::seconds).transpose()?;
     Ok(policy.max_duration(max_duration))

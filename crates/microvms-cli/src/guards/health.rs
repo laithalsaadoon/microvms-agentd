@@ -84,6 +84,7 @@ async fn keepalive_polls_health_until_idle_and_names_the_window_it_assumed() {
         while_busy: true,
         for_sec: None,
         idle_window: None,
+        tolerated_errors: microvms_core::session::keepalive::DEFAULT_TOLERATED_ERRORS,
         attach: attach_flags(),
         region: region_flags(),
     });
@@ -110,6 +111,7 @@ async fn keepalive_refuses_an_interval_that_could_let_the_vm_suspend() {
         while_busy: false,
         for_sec: None,
         idle_window: None,
+        tolerated_errors: microvms_core::session::keepalive::DEFAULT_TOLERATED_ERRORS,
         attach: attach_flags(),
         region: region_flags(),
     });
@@ -141,6 +143,7 @@ async fn keepalive_for_ends_it_even_while_busy() {
         while_busy: true,
         for_sec: Some(Duration::from_millis(2500)),
         idle_window: Some(Duration::from_secs(600)),
+        tolerated_errors: microvms_core::session::keepalive::DEFAULT_TOLERATED_ERRORS,
         attach: attach_flags(),
         region: region_flags(),
     });
@@ -150,6 +153,52 @@ async fn keepalive_for_ends_it_even_while_busy() {
     assert_eq!(rendered.data["polls"], 3);
     assert_eq!(rendered.data["idleWindowSec"], 600.0);
     assert!(!stderr.contains("assuming"), "{stderr}");
+}
+
+/// **`--tolerated-errors` bounds the retries before `keepalive` gives up (#267).** Every poll
+/// answers 503, which is retryable: one tolerated error is one retry, so two polls and the
+/// retryable error, not the core default's four polls.
+///
+/// **Falsification**: drop `.tolerated_errors(args.tolerated_errors)` from `keepalive` and the
+/// core's default retries three times, so four polls go out.
+#[tokio::test(start_paused = true)]
+async fn keepalive_gives_up_after_the_tolerated_errors() {
+    let script = DaemonScript::new();
+    for _ in 0..4 {
+        script.reply(503, "not bootstrapped");
+    }
+    let command = Command::Keepalive(KeepaliveArgs {
+        interval: Some(Duration::from_secs(1)),
+        while_busy: false,
+        for_sec: None,
+        idle_window: None,
+        tolerated_errors: 1,
+        attach: attach_flags(),
+        region: region_flags(),
+    });
+    let (result, _, _) = against_daemon(&script, &command).await;
+    let error = result.expect_err("every poll fails");
+    assert_eq!(error.exit, Exit::Retryable, "{}", error.message);
+    assert_eq!(
+        script.paths(),
+        ["GET /v1/health"; 2],
+        "one tolerated error is one retry"
+    );
+}
+
+/// The flag's default is the core's, read from its constant.
+#[test]
+fn keepalive_tolerated_errors_defaults_to_the_cores() {
+    use clap::Parser as _;
+    let cli =
+        crate::cli::Cli::try_parse_from(["microvm", "keepalive", "--name", "vm"]).expect("parses");
+    let Command::Keepalive(args) = cli.command else {
+        panic!("not keepalive");
+    };
+    assert_eq!(
+        args.tolerated_errors,
+        microvms_core::session::keepalive::DEFAULT_TOLERATED_ERRORS
+    );
 }
 
 /// A daemon that has not bootstrapped is a success envelope with a non-zero code.

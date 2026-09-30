@@ -1,0 +1,20 @@
+{
+  "capability": "from-name",
+  "input": {
+    "name": "parity",
+    "region": "us-east-1",
+    "record_text": "{\"name\": \"parity\", \"micro",
+    "message_mentions": [
+      "parity.json"
+    ]
+  },
+  "expect": {
+    "error": {
+      "code": "ERR_PRECONDITION",
+      "wire_kind": null
+    },
+    "message_mentions": {
+      "parity.json": true
+    }
+  }
+}
