@@ -45,6 +45,16 @@ CLEANUP_POLL_SECONDS = 15
 #: any version suffix.
 IMAGE_ARN_NAME = re.compile(r"microvm-image[:/]([^:/]+)")
 
+#: The race's runtime-stall check (#309). The live test runs on one worker, and a probe task
+#: beside the two ensures records the longest time between two of its 10 ms wakes: an ensure
+#: that hashed and zipped inline held the worker for about a second, and the instance-metadata
+#: credential provider gives a fetch one second. Half that leaves room for the S3 signature's
+#: inline payload hash and a loaded host.
+ENSURE_RACE_UNSTALLED = (
+    "the ensure race never held the caller's runtime for half a second (#309)"
+)
+STALL_LIMIT_MS = 500
+
 
 def ensure_image_checks(
     report: dict[str, Any], prefix: str, bucket: str, key_prefix: str, results: Results
@@ -78,6 +88,12 @@ def ensure_image_checks(
         f"reused={race.get('reused')!r} states={states!r} "
         f"versions={race.get('versions')!r} seconds={race.get('seconds')!r} "
         f"error={error!r}",
+    )
+    stall = race.get("longestStallMs")
+    results.check(
+        ENSURE_RACE_UNSTALLED,
+        type(stall) is int and stall < STALL_LIMIT_MS,
+        f"longestStallMs={stall!r} limit={STALL_LIMIT_MS} error={error!r}",
     )
     results.check(
         "IMAGE-4 a task image on a non-managed FROM built under the derived base",

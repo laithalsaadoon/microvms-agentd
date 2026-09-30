@@ -1120,6 +1120,86 @@ mod tests {
         assert_eq!(services.account_calls.load(Ordering::SeqCst), 1, "IMAGE-8");
     }
 
+    /// The account lookup of the test below: it records whether the other task's timer had
+    /// fired by the time the ensure asked, then refuses, so the ensure goes no further.
+    struct TimedLookup {
+        fired: Arc<std::sync::atomic::AtomicBool>,
+        seen: Mutex<Option<bool>>,
+    }
+
+    impl BuildServices for TimedLookup {
+        fn caller_account(&self) -> futures_util::future::BoxFuture<'_, Result<String, Error>> {
+            *self.seen.lock().expect("not poisoned") = Some(self.fired.load(Ordering::SeqCst));
+            Box::pin(async { Err(Error::new(ErrorKind::Credentials, "the probe's refusal")) })
+        }
+
+        fn put_object<'a>(
+            &'a self,
+            _bucket: &'a str,
+            _key: &'a str,
+            _bytes: Vec<u8>,
+        ) -> futures_util::future::BoxFuture<'a, Result<(), Error>> {
+            Box::pin(async { panic!("the probe refuses before any upload") })
+        }
+    }
+
+    /// **`ensure_image` prepares its artifact off the caller's worker (#309).** On a
+    /// current-thread runtime, a one-millisecond timer another task set before the ensure
+    /// began fires while a daemon-sized artifact is hashed and zipped, before the ensure asks
+    /// for its account.
+    ///
+    /// Inline, `prepare` holds the runtime's only worker from its first line to that lookup,
+    /// so no other task runs in between: a concurrent ensure's credential fetch parked
+    /// behind it is what timed out under instance-role credentials. The daemon here is 2 MiB
+    /// that deflate can't shrink, like the real one, which takes hundreds of milliseconds to
+    /// prepare in a debug build, so the timer has that long to fire.
+    ///
+    /// **Falsification**: call `prepare` inline in `Sandbox::ensure_image` again and the
+    /// lookup finds the timer unfired.
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_artifact_is_prepared_while_the_callers_other_tasks_run() {
+        let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let lookup = Arc::new(TimedLookup {
+            fired: Arc::clone(&fired),
+            seen: Mutex::new(None),
+        });
+        let fake = Arc::new(FakeControlPlane::new());
+        let plane = crate::testing::control_plane(
+            fake.clone(),
+            Region::UsEast1,
+            Arc::new(TestClock::new()),
+        );
+        let mut sandbox = Sandbox::with_control_plane(plane).with_build_services(lookup.clone());
+        let mut request = request();
+        // xorshift64: bytes with no repeats for deflate to find, from no dependency.
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        request.binary = (0..(2 << 20) / 8)
+            .flat_map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                state.to_le_bytes()
+            })
+            .collect();
+
+        let timer = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            fired.store(true, Ordering::SeqCst);
+        });
+        let error = sandbox
+            .ensure_image(request)
+            .await
+            .expect_err("the probe refuses the lookup");
+        assert!(error.to_string().contains("the probe's refusal"), "{error}");
+        assert_eq!(
+            *lookup.seen.lock().expect("not poisoned"),
+            Some(true),
+            "the other task's timer fires while the artifact is prepared, not after"
+        );
+        assert!(fake.calls().is_empty(), "no control-plane call came first");
+        timer.await.expect("the timer task");
+    }
+
     /// Every local refusal costs zero calls — not the account lookup, not a describe, not
     /// the upload.
     #[tokio::test]
