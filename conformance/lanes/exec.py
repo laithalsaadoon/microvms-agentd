@@ -36,6 +36,17 @@ def drive_exec(cli: Cli, launched: Envelope, results: Results) -> None:
 
     first = cli.call("exec", "echo attached", *attach)
     results.eq("exec exited 0 on the attach path", first.data.get("exitCode"), 0)
+    # Core's shell reading of the same result (#259): `$?`'s code, no notes for a clean
+    # result, and nothing synthesized without --complete.
+    results.eq(
+        "exec reports posixExitCode equal to exitCode for a clean exit",
+        first.data.get("posixExitCode"),
+        0,
+    )
+    results.eq("a clean exec carries no notes", first.data.get("notes"), [])
+    results.eq(
+        "a plain exec is never synthesized", first.data.get("synthesized"), False
+    )
     results.check(
         "attached exec captured stdout",
         "attached" in (first.data.get("stdout") or ""),

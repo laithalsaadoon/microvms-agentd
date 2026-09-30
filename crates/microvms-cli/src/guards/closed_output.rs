@@ -295,6 +295,9 @@ async fn a_stream_whose_reader_leaves_stops_detaches_and_exits_interrupted() {
         let command = Command::Exec(ExecArgs {
             command: Some("yes".into()),
             timeout: Duration::from_secs(30),
+            timeout_sec: None,
+            complete: false,
+            client_grace: None,
             cwd: None,
             env: Vec::new(),
             user: None,
