@@ -282,6 +282,7 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 dst: "vm:/tmp/payload".into(),
                 tar: false,
                 mode: None,
+                lines: None,
                 attach: attach_flags(),
                 region: region_flags(),
             }),

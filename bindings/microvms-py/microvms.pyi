@@ -2353,9 +2353,14 @@ class Session:
         control plane's job and it happens inside every request (TRAP-9), so a caller
         handing a token in would be handing in one that expires.
         """
-    def download_file(self, /, path: str) -> bytes:
+    def download_file(self, /, path: str, *, start_line: int |None = None, end_line: int |None = None) -> bytes:
         """
-        Reads one file.
+        Reads one file, or lines `start_line` through `end_line` of it.
+        
+        The range is 1-based and inclusive, and the daemon slices the file, so reading lines
+        40 to 60 of a large log reads those lines alone. Either bound may be `None` (line 1,
+        through EOF), and an `end_line` past the last line reads through EOF. Line 0 and an end
+        before the start raise `InvalidArgError` before any request.
         """
     def download_tar(self, /, remote: str) -> bytes:
         """

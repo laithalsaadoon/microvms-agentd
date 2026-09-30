@@ -429,3 +429,39 @@ def test_the_default_agent_port_is_the_one_a_direct_session_lands_on() -> None:
         microvms.Session.direct("http://127.0.0.1:9000", "t").port
         == microvms.session_constants()["defaultAgentPort"]
     )
+
+
+def test_download_file_sends_a_line_range_as_the_daemons_query_keys(
+    sse_server: object,
+) -> None:
+    """`start_line` and `end_line` reach the daemon as its two query keys, after the path (#265).
+
+    Both absent is the request `download_file` always sent, byte for byte.
+    """
+    server = sse_server([[b"two\nthree\nfour\n"], [b"all"], [b"tail"]])  # type: ignore[operator]
+    session = microvms.Session.direct(server.endpoint, "agent-token")
+
+    assert session.download_file("/tmp/a b", start_line=2, end_line=4) == (
+        b"two\nthree\nfour\n"
+    )
+    session.download_file("/tmp/a b")
+    session.download_file("/tmp/f", start_line=40)
+    assert server.requested_paths == [
+        "/v1/fs/file?path=%2Ftmp%2Fa%20b&start_line=2&end_line=4",
+        "/v1/fs/file?path=%2Ftmp%2Fa%20b",
+        "/v1/fs/file?path=%2Ftmp%2Ff&start_line=40",
+    ]
+
+
+def test_download_file_refuses_a_range_no_file_can_satisfy_before_any_request(
+    sse_server: object,
+) -> None:
+    """Line 0 and an end before the start raise `InvalidArgError` with the daemon's wording."""
+    server = sse_server([])  # type: ignore[operator]
+    session = microvms.Session.direct(server.endpoint, "agent-token")
+
+    with pytest.raises(microvms.InvalidArgError, match="start_line is 1-based"):
+        session.download_file("/tmp/f", start_line=0, end_line=3)
+    with pytest.raises(microvms.InvalidArgError, match="is before start_line 5"):
+        session.download_file("/tmp/f", start_line=5, end_line=2)
+    assert server.requested_paths == []
