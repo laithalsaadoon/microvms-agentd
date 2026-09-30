@@ -172,7 +172,7 @@ run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact
 expect = "test-failed"
 suite = "rust"
 message = "run --exec true --timeout=1e19: no teardown after"
-transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "    let teardown = tear_down(ctx, &mut sandbox, &mut ledger, args.keep).await;\n", with = "    let teardown = tear_down(ctx, &mut sandbox, &mut ledger, true).await;\n" }
+transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "        args.keep,\n        !outcome.image_reused,\n", with = "        true,\n        !outcome.image_reused,\n" }
 
 # The refusal prints the figure as typed, so `1e300` doesn't read as 301 digits.
 

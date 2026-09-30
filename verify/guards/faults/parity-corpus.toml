@@ -50,18 +50,6 @@ suite = "rust"
 message = "the core runner has no handler for area \"size-class\""
 transform = { file = "crates/microvms-core/tests/parity_cases.rs", replace = "const AREAS: [&str; 7] = [\n    \"image-name\",\n    \"cost\",\n    \"error\",\n    \"egress\",\n    \"names\",\n    \"size-class\",\n    \"wrap-dockerfile\",\n];\n", with = "const AREAS: [&str; 6] = [\n    \"image-name\",\n    \"cost\",\n    \"error\",\n    \"egress\",\n    \"names\",\n    \"wrap-dockerfile\",\n];\n" }
 
-# The case's expected name moved to what the CLI's `build --reuse` answers today, as a #258 fix
-# would leave it: the CLI's marker has to fail until the fixing PR removes it.
-
-[[fault]]
-id = "parity-cli-drift-now-agrees"
-guard = "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::parity::the_cli_answers_the_shared_case_corpus_against_its_fakes"]
-expect = "test-failed"
-suite = "rust"
-message = "image-name/ensure-image-name: cli now agrees at name; remove known_drift"
-transform = { file = "verify/parity/cases/image-name/ensure-image-name.json", replace = "\"name\": \"parity-task-17b6047ddff1\"", with = "\"name\": \"parity-task-a893b3c5a12e\"" }
-
 # The issue's regression: `wrap_dockerfile` stops ending the task's last line before the stanza.
 # Core, Python and TypeScript each fail the case (the binding entries are in the bindings section).
 

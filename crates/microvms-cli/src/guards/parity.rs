@@ -16,7 +16,7 @@ use microvms_core::testing::YieldingClock;
 
 use super::support::{
     DaemonScript, RefusingSeam, ScriptedSeam, ScriptedTransport, TempDir, against_daemon,
-    attach_flags, dispatch_with, full_infra, list_images_body, region_flags, sync_command,
+    attach_flags, dispatch_with, full_infra, region_flags, sync_command,
 };
 use crate::cli::{BuildArgs, Cli, Command, CpArgs, HealthArgs, InfraFlags};
 use crate::exit::{CliError, Exit};
@@ -71,8 +71,7 @@ async fn parity_image_name(case: &parity_corpus::Case) -> serde_json::Value {
         .unwrap_or_else(|| panic!("{}: size_mib is a --memory value", case.id));
     let state = TempDir::new("parity-agent-up");
     let command = match case.capability.as_str() {
-        // #258: `build --reuse` is the CLI's own reuse, which the table exempts from
-        // `ensure-image`; the case measures how its name differs.
+        // `build --reuse` is core's `ensure_image` (#258), so its name is the one core gives.
         "ensure-image" => Command::Build(BuildArgs {
             binary: Some(binary.clone()),
             state_dir: None,
@@ -86,6 +85,8 @@ async fn parity_image_name(case: &parity_corpus::Case) -> serde_json::Value {
             log_group: None,
             log_stream: None,
             reuse: true,
+            s3_key_prefix: None,
+            force: false,
             port: None,
             region: region_flags(),
             infra: InfraFlags::default(),
@@ -121,8 +122,10 @@ async fn parity_image_name(case: &parity_corpus::Case) -> serde_json::Value {
         other => panic!("{}: no CLI handler for {other:?} in image-name", case.id),
     };
     let transport = Arc::new(ScriptedTransport::new());
+    // Both builds are ensures (#258): the name is free, so each builds and the create is
+    // where it stops.
     transport
-        .answer("ListMicrovmImages", 200, &list_images_body(&[], None))
+        .answer("GetMicrovmImage", 404, r#"{"message": "Image not found"}"#)
         .answer("CreateMicrovmImage", 400, r#"{"message": "scripted stop"}"#);
     let seam = ScriptedSeam {
         transport: Arc::clone(&transport),

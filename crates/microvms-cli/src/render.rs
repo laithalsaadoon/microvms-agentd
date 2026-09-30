@@ -230,6 +230,10 @@ pub struct RunOutcome {
     /// `egress: false` as a seal downloaded a 242 MB DuckDB extension from a VM they
     /// believed had no network. Defaults to `unsealed` rather than to a claim.
     pub egress_posture: microvms_core::control::EgressPosture,
+    /// Whether the build arm found the content-addressed image already built, and so built
+    /// nothing (#258). A reused image isn't this run's: the teardown leaves it and the ledger
+    /// doesn't list it.
+    pub image_reused: bool,
 }
 
 impl RunOutcome {
@@ -281,6 +285,7 @@ impl RunOutcome {
         // have to infer it from `resolvedConfig.egress`, which answers a different question
         // (what was requested) and reads as a seal when it is not one.
         data.insert("egressPosture".into(), json!(self.egress_posture.as_str()));
+        data.insert("imageReused".into(), json!(self.image_reused));
         data
     }
 

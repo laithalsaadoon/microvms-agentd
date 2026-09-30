@@ -949,18 +949,7 @@ impl Sandbox {
                         format!("preparing the image's artifact did not complete: {joined}"),
                     )
                 })??;
-        let services = match &self.build_services {
-            Some(services) => Arc::clone(services),
-            None => {
-                let built = self
-                    .control
-                    .adapters()
-                    .build_services(self.control.region().clone())
-                    .await?;
-                self.build_services = Some(Arc::clone(&built));
-                built
-            }
-        };
+        let services = self.build_services().await?;
         let account = match &self.account {
             Some(account) => account.clone(),
             None => {
@@ -977,12 +966,39 @@ impl Sandbox {
         Ok(ensured)
     }
 
+    /// The STS and S3 client `ensure_image` and `upload_artifact_for` reach AWS through: the one
+    /// `with_build_services` set, or the plane's adapters' for its region, built once.
+    async fn build_services(&mut self) -> Result<Arc<dyn crate::control::BuildServices>, Error> {
+        if let Some(services) = &self.build_services {
+            return Ok(Arc::clone(services));
+        }
+        let built = self
+            .control
+            .adapters()
+            .build_services(self.control.region().clone())
+            .await?;
+        self.build_services = Some(Arc::clone(&built));
+        Ok(built)
+    }
+
     /// The artifact bytes to upload to the request's `code_artifact_uri`.
     ///
     /// The upload is the caller's on this path; [`Sandbox::ensure_image`] uploads for
     /// itself.
     pub fn build_artifact_for(&self, request: &CreateImageRequest) -> Result<Vec<u8>, Error> {
         self.control.build_artifact_for(request)
+    }
+
+    /// Builds the artifact for `request` and puts it at its `code_artifact_uri`, through the
+    /// build services `ensure_image` uploads with (#258): for a build under a name the caller
+    /// chose, where no ensure derives the key. The URI must be `s3://<bucket>/<key>`.
+    ///
+    /// Run [`Self::preflight`] first: a request this client refuses then costs no upload.
+    pub async fn upload_artifact_for(&mut self, request: &CreateImageRequest) -> Result<(), Error> {
+        let (bucket, key) = crate::control::ensure::s3_location(&request.code_artifact_uri)?;
+        let bytes = self.control.build_artifact_for(request)?;
+        let services = self.build_services().await?;
+        services.put_object(bucket, key, bytes).await
     }
 
     /// Every local guard [`Self::build_image`] runs, callable **before** the artifact upload.

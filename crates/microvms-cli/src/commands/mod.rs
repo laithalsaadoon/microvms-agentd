@@ -132,6 +132,9 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 29] = [
             // because the platform grants it outbound network anyway (docs/PLATFORM.md).
             // Always present, never null, and never `sealed` while that measurement holds.
             "egressPosture",
+            // Whether the build found the content-addressed image built and built nothing
+            // (#258); a reused image is left in place at teardown.
+            "imageReused",
             // What each config-mergeable knob resolved to, as {value, source} with source
             // one of flag/config/default — and which file supplied the config values
             // (null when none did). Issue #73: a caller who stopped passing flags reads
@@ -172,6 +175,9 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 29] = [
             "leaked",
             "cost",
             "egressPosture",
+            // Whether the build found the content-addressed image built and built nothing
+            // (#258); a reused image is left in place at teardown.
+            "imageReused",
             "resolvedConfig",
             "configPath",
             "sync",
@@ -190,9 +196,13 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 29] = [
             // This envelope is the only place the resolved name exists (issue #98).
             "logStream",
             "size",
-            // Always present, `false` for a plain build: `true` means `--reuse` matched
-            // an existing image by content-hash name and nothing was built.
+            // Always present, `false` for a plain build: `true` means `--reuse` found the
+            // content-addressed image built (or joined a build under way) and built nothing.
             "reused",
+            // The artifact the image was built from: `s3://<bucket>/<name>.zip` for a named
+            // build, `s3://<bucket>/[<prefix>/]<name>/artifact.zip` under `--reuse`, or the
+            // caller's `--artifact-uri`.
+            "artifactUri",
             // The same self-provisioning report `run` carries; null when the caller
             // supplied the binary.
             "agentd",

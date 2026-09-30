@@ -18,6 +18,21 @@ from lanes.agents import AGENT_VM_CHECKS, BACKGROUND_AGENT_CHECKS, drive_agent_v
 from lanes.sessions import drive_stable_launch
 
 
+class FakeArtifactBucket:
+    """The S3 calls the agent section makes, over a set of keys."""
+
+    def __init__(self, keys: set[str]) -> None:
+        self.keys = set(keys)
+
+    def list_objects_v2(self, *, Bucket: str, Prefix: str) -> dict[str, Any]:
+        found = sorted(key for key in self.keys if key.startswith(Prefix))
+        return {"Contents": [{"Key": key} for key in found], "KeyCount": len(found)}
+
+    def delete_objects(self, *, Bucket: str, Delete: dict[str, Any]) -> None:
+        for item in Delete["Objects"]:
+            self.keys.discard(item["Key"])
+
+
 def check_log_privacy(cli: Cli, results: Results, state_dir: Path) -> None:
     """Canaries cross real subprocesses and the complete named agent drive paths."""
     import io
@@ -224,6 +239,9 @@ def check_log_privacy(cli: Cli, results: Results, state_dir: Path) -> None:
             cli.binary,
             state_dir,
             SimpleNamespace(delete_log_group=lambda **_: None),
+            FakeArtifactBucket(
+                {"agent-vm-claude-code-codex-0123456789ab/artifact.zip"}
+            ),
             agent_results,
         )
         with patch.object(
