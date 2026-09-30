@@ -45,7 +45,7 @@ dependencies = [
  "snow",
  "stateright",
  "subtle",
- "syn 2.0.119",
+ "syn 3.0.6",
  "tar",
  "tempfile",
  "tokio",
@@ -2993,7 +2993,7 @@ dependencies = [
  "microvms-app",
  "serde_json",
  "stateright",
- "syn 2.0.119",
+ "syn 3.0.6",
  "tokio",
 ]
 
