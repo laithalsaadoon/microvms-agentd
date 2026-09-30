@@ -19,8 +19,8 @@
 # - `timeout + 30.0`, a literal added to a timeout, deadline or grace.
 #
 # A zero never matches (`nonzero-number`). What it can't see: a literal in an attribute
-# (clap's `default_value_t`, PyO3's `signature`), which #300 checks through the generated
-# surfaces; a local `let` holding a literal; a `const` with none of those names and an integer
+# (clap's `default_value_t`, PyO3's `signature`), which `parity:check` holds to core's through
+# the generated surfaces (the table's `[[default]]` rows); a local `let` holding a literal; a `const` with none of those names and an integer
 # type; `Duration::new` under an alias; arithmetic of literals outside a `const`
 # (`Duration::from_secs(5 * 60)`); and a negated literal outside a `const`.
 id: literal-default
