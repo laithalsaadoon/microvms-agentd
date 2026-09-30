@@ -607,17 +607,8 @@ jobs:
       # optional-dependency fallback a consumer depends on.
       - name: the npm loader resolves its platform packages
         run: ./scripts/check-npm-loader.py
-      # The binding entries in guards/faults.toml (#274), here because this job has the Python
-      # and Node toolchains the `guards` job lacks. Each entry rebuilds its extension with the
-      # fault in (`maturin develop` into the venv the first step made, or `napi build`) before
-      # its test runs, in a scratch worktree, so nothing above sees the fault. `--target-dir
-      # target` reuses this job's builds: the script's own default target exists so a
-      # developer's next cargo run can't pick up a scratch build, and nothing runs after this.
-      - name: seeded binding faults fire
-        env:
-          # See the `guards` job's fire steps.
-          CARGO_INCREMENTAL: "1"
-        run: ./scripts/check-guards-fire.py fire --suite bindings --venv .venv-bindings --target-dir target
+      # The bindings entries in guards/faults.toml fire in the `guards` job's shards, each
+      # worker in an environment of its own, not here.
 
   # `mise run guards:fire` (#274): each entry in guards/faults.toml (every one on a push to main,
   # the ones it affects on a pull request) is seeded into a scratch worktree, and its guard must
@@ -638,10 +629,10 @@ jobs:
   # selects every entry. That's most pull requests: 13 of the 20 merges to main up to efaded2
   # changed one of them, and 6 of the 7 that didn't were docs only. The cost is that a fault
   # only a full fire catches shows up on main after the merge instead of on its pull request,
-  # and `mise run guards:fire -- --jobs 4` is the full fire before one. A red `seeded faults
-  # fire` on main is fixed before the next merge, since the next pull request that selects every
-  # entry fails on it too; one that fails an entry it didn't touch reads main's last push run
-  # first.
+  # and `mise run guards:fire -- --jobs 4 --venv-per-worker` is the full fire before one. A red
+  # `seeded faults fire` on main is fixed before the next merge, since the next pull request that
+  # selects every entry fails on it too; one that fails an entry it didn't touch reads main's
+  # last push run first.
   #
   # The job is a matrix of shards (D35, #345). Each leg fires `--shard k/N` of the same
   # selection (whole commands, weighted by their entries' rough CI seconds; the script's
@@ -658,8 +649,14 @@ jobs:
   # grow about threefold. The legs restore the dependency cache the `guards-cache` job saves,
   # which holds what every leg's commands compile, and never save one of their own. Each leg's
   # workers 2 to 4 start from a copy of it, without the workspace's own crates (the script's
-  # docstring has why). `mise run guards:fire -- --affected --shard 1/3` runs one pull request
-  # leg's share locally.
+  # docstring has why). `mise run guards:fire -- --venv-per-worker --affected --shard 1/3` runs
+  # one pull request leg's share locally.
+  #
+  # Every suite fires here, the bindings one included. It used to fire in the bindings job, all
+  # on one worker because its entries shared that job's venv: 10.3 of the job's 12.6 minutes on
+  # main's push at 74e2347 (run 36622110872). `--venv-per-worker` gives each worker a venv of
+  # its own, so those entries spread over the legs and their workers like the rest, on the uv
+  # and Node this job installs anyway.
   guards:
     name: seeded faults fire (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
     runs-on: ubuntu-latest
@@ -687,8 +684,8 @@ jobs:
         with:
           version: "0.12.13" # mise.toml's uv; ci:parity compares them
           enable-cache: false
-      # The parity entries (#271) run TypeDoc through npx: the `rust` job's pin, so they don't
-      # run on whatever Node the runner image ships.
+      # The parity entries (#271) run TypeDoc through npx, and the bindings entries `napi
+      # build`: the `rust` job's pin, so they don't run on whatever Node the runner image ships.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22'
@@ -715,9 +712,12 @@ jobs:
           echo "$RUNNER_TEMP/cargo-mutants" >> "$GITHUB_PATH"
       # A command's own timeout below the job's, so a hung fault prints its name and the
       # tail of its output instead of the runner cutting the log off. `--target-dir target`
-      # for rust-cache, as in the bindings job: nothing here builds after `fire`. `--jobs 4`
-      # runs faults in four scratch worktrees; workers 2 to 4 build in their own targets. The
-      # two steps are one command, and the pull request's adds only the selection;
+      # for rust-cache: the script's own default target exists so a developer's next cargo run
+      # can't pick up a scratch build, and nothing here builds after `fire`. `--jobs 4` runs
+      # faults in four scratch worktrees; workers 2 to 4 build in their own targets.
+      # `--venv-per-worker` makes each worker a venv beside its worktree for the bindings
+      # entries to build into and test from (pytest pinned in the script). The two steps are
+      # one command, and the pull request's adds only the selection;
       # test_check_guards_fire.py runs both as written here.
       #
       # `CARGO_INCREMENTAL` on, in these steps only: dtolnay/rust-toolchain writes 0 into the
@@ -734,13 +734,13 @@ jobs:
           BASE: origin/${{ github.base_ref }}
           SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
           CARGO_INCREMENTAL: "1"
-        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 4 --shard "$SHARD" --affected --base "$BASE"
+        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard "$SHARD" --affected --base "$BASE"
       - name: every seeded fault fires
         if: github.event_name != 'pull_request'
         env:
           SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
           CARGO_INCREMENTAL: "1"
-        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --timeout 900 --target-dir target --jobs 4 --shard "$SHARD"
+        run: ./scripts/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --target-dir target --jobs 4 --shard "$SHARD"
       # The warm workers' copies and the incremental data cost disk: what the fire left, while
       # their size on the runner is still being measured.
       - name: disk left after the fire
@@ -770,13 +770,19 @@ jobs:
         run: '[ "$RESULT" = success ] || { echo "::error::a guards shard ended $RESULT; open the red seeded faults fire (shard k of N) check"; exit 1; }'
 
   # The dependency cache the `guards` legs and `mutants` restore. This job saves
-  # it, on a push to main, after compiling what every rust entry's cargo commands compile
-  # (`check-guards-fire.py build`), so each leg restores every build the registry needs, where
-  # it used to restore the slice one leg's first worker had built. The legs don't save, and no
-  # job saves on a pull request: the repo's caches are capped at 10 GB, and pull requests'
-  # copies of each job's cache had pushed it past that, which evicts main's. It builds only
-  # when the key missed: an exact hit is main's whole cache for this lockfile and toolchain
-  # already, and rust-cache wouldn't overwrite it.
+  # it, on a push to main, after compiling what every rust entry's cargo commands compile and
+  # every bindings entry's extension builds (`check-guards-fire.py build`), so each leg restores
+  # every build the registry needs, where it used to restore the slice one leg's first worker
+  # had built. The legs don't save, and no job saves on a pull request: the repo's caches are
+  # capped at 10 GB, and pull requests' copies of each job's cache had pushed it past that,
+  # which evicts main's. It builds only when the key missed: an exact hit is main's whole cache
+  # for this lockfile and toolchain already, and rust-cache wouldn't overwrite it.
+  #
+  # The bindings suite is here because a worker's first `napi build` compiled 235 crates
+  # without its builds, 90.8 s against 45.3 s with them on four pinned cores at 18645c2 plus
+  # this change; it needs Node for npx, and uv is here already. A build `build` starts
+  # compiling reaches the cache with the next lockfile or toolchain change, since an exact hit
+  # is never saved over: main's Cargo.lock changed 37 times from 2026-09-01 to f3d88bb.
   guards-cache:
     name: seeded faults' dependency cache
     if: github.event_name == 'push'
@@ -798,9 +804,13 @@ jobs:
         with:
           version: "0.12.13" # mise.toml's uv; ci:parity compares them
           enable-cache: false
+      # The `guards` legs' Node, for `napi build`.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
       - name: build what the seeded faults compile
         if: steps.cache.outputs.cache-hit != 'true'
-        run: ./scripts/check-guards-fire.py build --suite rust --target-dir target
+        run: ./scripts/check-guards-fire.py build --suite rust --suite bindings --target-dir target
 
   # `mise run mutants` (#275), in shards: cargo-mutants changes the Rust a pull request
   # touches, one mutant at a time (a return value, an operator, a deleted `!`), and the job
