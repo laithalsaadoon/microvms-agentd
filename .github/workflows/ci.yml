@@ -597,7 +597,10 @@ jobs:
       # with `tsc --strict`. The diff above can't see a declaration the generator leaves out, and
       # `ExecStream` once had no `[Symbol.asyncIterator]()`, so the `for await` its docs show didn't
       # type-check (#262). Here rather than in the `rust` job because this is the job that just
-      # rebuilt and diffed the file. `mise run dts:check` runs it locally.
+      # rebuilt and diffed the file. `mise run dts:check` runs it locally. Its unit tests first:
+      # the tsc locate holds the npx cache's lock and refuses a tsc npx didn't install (#348).
+      - name: typed consumer unit tests
+        run: uv run python -m unittest discover -s tools -p 'test_check_dts_consumer.py'
       - name: typed consumer checks against the declarations
         run: ./tools/check-dts-consumer.py
       # The generated loader against the package name it will be published under. This is the

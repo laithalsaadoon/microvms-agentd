@@ -19,7 +19,10 @@ import, and the file `--dts` names is the one checked. `skipLibCheck` is off, un
 docs site's TypeDoc config, so the declaration file itself is checked too.
 
 TypeScript and `@types/node` run through npx at the versions `site/package.json` pins, the pins
-`tools/check-parity.py` holds to the same file, so the version lives in one place.
+`tools/check-parity.py` holds to the same file, so the version lives in one place. npx installs
+them into npm's cache, which every caller on the host shares, so the locate that installs runs
+under the lock `tools/npx_cache.py` holds beside it, the one check-parity.py's TypeDoc install
+takes (#348).
 
 POSIX only, like `check-parity.py`'s TypeDoc run: npx runs `command -v tsc` in a POSIX shell, and
 the `--listFiles` parse reads absolute paths as starting with `/`. CI runs it on ubuntu.
@@ -36,6 +39,9 @@ The check fails when:
 - a probe says `@ts-nocheck` anywhere, directive or prose. The pragma drops every diagnostic in
   the file, the control's TS2578 included, so one line would turn the gate off. Refusing any
   mention is stricter than `tsc`'s rule on purpose: the false red it can cost names itself;
+- npx locates a `tsc` outside npm's `<cache>/_npx/`: `command -v` found another one on PATH,
+  which it does when an install left none in npx's tree (#347's racing callers printed mise's
+  tsc), so the pinned compiler isn't the one that would run;
 - `tsc` exits non-zero (its diagnostics print as they are);
 - `tsc --listFiles` doesn't list the declarations and every probe, so a probe that silently
   resolved the package name somewhere else, or a listing this script can't read, fails by name.
@@ -51,6 +57,8 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+import npx_cache
 
 ROOT = Path(__file__).resolve().parent.parent
 DTS = ROOT / "bindings" / "microvms-js" / "index.d.ts"
@@ -131,25 +139,40 @@ def locate_tsc(versions: dict[str, str]) -> Path:
     argv = ["npx", "-y"]
     for name, version in versions.items():
         argv += ["-p", f"{name}@{version}"]
-    try:
-        done = subprocess.run(
-            [*argv, "-c", "command -v tsc"],
-            capture_output=True,
-            text=True,
-            env=clean_env(),
-            cwd=ROOT,
-            check=False,
-        )
-    except FileNotFoundError as error:
-        raise ConsumerError(
-            "npx isn't on PATH (`mise install` provides node)"
-        ) from error
+    # the locate installs; once it returns the tree is whole, so tsc runs unlocked
+    with npx_cache.held("dts-consumer", ConsumerError) as cache:
+        try:
+            done = subprocess.run(
+                [*argv, "-c", "command -v tsc"],
+                capture_output=True,
+                text=True,
+                env=clean_env(),
+                cwd=ROOT,
+                check=False,
+            )
+        except FileNotFoundError as error:
+            raise ConsumerError(
+                "npx isn't on PATH (`mise install` provides node)"
+            ) from error
     where = done.stdout.strip()
     if done.returncode != 0 or not where:
         raise ConsumerError(
             f"npx locating tsc exited {done.returncode}:\n{done.stdout}{done.stderr}"
         )
-    return Path(where)
+    tsc = Path(where)
+    # npx puts the set's .bin first on PATH, and `command -v` falls through to any other tsc
+    # when that tree has none. Measured for #347: racing callers exited 0 printing mise's
+    # global tsc. That compiler isn't the pinned one, and the typeRoots derived from its path
+    # would name another tree, so it fails here by name rather than in tsc.
+    npx_dir = cache / "_npx"
+    if not tsc.resolve().is_relative_to(npx_dir.resolve()):
+        raise ConsumerError(
+            f"npx located tsc at {tsc}, outside npm's npx cache {npx_dir}: `command -v`"
+            f" found another tsc on PATH, not the typescript@{versions['typescript']} npx"
+            " installs. An install that lost a race leaves a directory under it with no"
+            " node_modules/.bin/tsc; delete that one and rerun."
+        )
+    return tsc
 
 
 def listed(output: str) -> set[Path]:
