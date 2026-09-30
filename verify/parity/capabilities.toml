@@ -840,7 +840,7 @@ exempt_members.ts = { create = "the async factory idiom; Python constructs with 
 
 [[type]]
 name = "ControlPlane"
-exempt_members.ts = { create = "the async factory idiom; Python constructs with ControlPlane(...)", region = { exempt = "Python's ControlPlane doesn't expose its region", issue = "#267" } }
+exempt_members.ts = { create = "the async factory idiom; Python constructs with ControlPlane(...)" }
 
 [[type]]
 name = "ExecHandle"
