@@ -116,15 +116,15 @@ ts = "Sandbox.session"
 id = "managed-base-versions"
 core = "microvms_core::sandbox::Sandbox::managed_base_versions"
 cli = "doctor"
-py = { exempt = "not bound", issue = "#264" }
-ts = { exempt = "not bound", issue = "#264" }
+py = "Sandbox.managed_base_versions"
+ts = "Sandbox.managedBaseVersions"
 
 [[capability]]
 id = "build-preflight"
 core = "microvms_core::sandbox::Sandbox::preflight"
 cli = { exempt = "runs inside `build`" }
-py = { exempt = "not bound", issue = "#264" }
-ts = { exempt = "not bound", issue = "#264" }
+py = "Sandbox.preflight"
+ts = "Sandbox.preflight"
 
 [[capability]]
 id = "egress-posture-for"

@@ -42,6 +42,11 @@ The Node binding is the same pair: `wrapDockerfile(task, { workdir })` and
 baseImage, … })`. Both are pure functions in
 `crates/microvms-app/src/control/artifact.rs` and make no AWS call.
 
+`build_image` runs its local guards before the create call, which comes after your
+upload. `sandbox.preflight(...)` takes the same keywords and runs those guards
+alone, with no AWS call, so the upload is only paid for a request the build will
+accept: call it, then `build_artifact` and your upload, then `build_image`.
+
 `wrap_dockerfile` keeps the task text verbatim and appends the stanza the
 default `microvm build` bakes, rendered by the same function, so the two cannot
 drift: `wrap_dockerfile("FROM x\n")` *is* the default Dockerfile for a base
