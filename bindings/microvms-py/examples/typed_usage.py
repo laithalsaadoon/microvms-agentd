@@ -31,6 +31,8 @@ nothing to annotate.
 
 from __future__ import annotations
 
+from typing import assert_type
+
 from microvms import (
     AgentSpec,
     AgentVm,
@@ -41,7 +43,10 @@ from microvms import (
     Duration,
     EnsuredImage,
     EstimatedUsd,
+    ExecHandle,
     ExecResult,
+    Exit,
+    Gap,
     IdlePolicy,
     Microvm,
     MicrovmError,
@@ -356,6 +361,26 @@ def harness_run_to_completion(
         stderr if not synthesized else "\n".join(notes),
         code if code is not None else 1,
     )
+
+
+def collect_stream(handle: ExecHandle) -> tuple[bytes, int | None]:
+    """An exec's stream, each event narrowed by its class (#337). Written for the checker.
+
+    `assert_type` is the control. The stub once typed `__next__` as `Any | None`, and an `Any`
+    event passes every branch below, so only the assertion would have failed. Each branch
+    reads a getter its class alone has, so a union that lost a class fails there too.
+    """
+    output = b""
+    exit_code: int | None = None
+    for event in handle.stream():
+        assert_type(event, OutputChunk | Gap | Exit)
+        if isinstance(event, OutputChunk):
+            output += event.data
+        elif isinstance(event, Gap):
+            output += b"[%d bytes lost]" % (event.end - event.start)
+        else:
+            exit_code = event.exit_code
+    return output, exit_code
 
 
 def main() -> None:

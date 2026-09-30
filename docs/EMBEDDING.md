@@ -114,6 +114,13 @@ upload, so `build_artifact`, `build_image` and `ensure_image` raise
 cache entry is served only while it still matches the digest recorded when it
 was verified.
 
+On a machine that can't reach GitHub, download the release's assets once
+(`gh release download vX.Y.Z --dir <dir>/vX.Y.Z`) and set `$MICROVM_RELEASE_DIR`
+to `<dir>`. The fetch then reads the asset and its `agentd.sigstore.json` from
+there and verifies the attestation the same way, and a directory without that
+bundle is refused rather than checked against its `SHA256SUMS`. The release
+workflow's live gate reads a draft release's assets this way.
+
 The worked example is
 [`examples/coding-agents-on-bedrock/Dockerfile`](../examples/coding-agents-on-bedrock/Dockerfile):
 the stanza's lines, plus `dnf install` and `npm install -g` layers that put the Claude Code

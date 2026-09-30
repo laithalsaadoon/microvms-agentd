@@ -2,16 +2,18 @@
 # layers below them that have a set: the domain (#282), the app and core (#283). Dev dependencies
 # are out of scope: they never ship.
 #
-# Every adapter name is a parsing, rendering, or host-bridge crate, or the one edge onto core. A
-# direct dependency outside its crate's set is placement drift: `mise run ratchet:check` reports
-# it, and `verify/ratchet/drift.json` records it with the issue that removes it. A set can shrink, but
-# the check refuses a crate added to a set the base branch already has, since that would clear a
-# finding without a reason: move the work to the layer whose job it is, or record a decision with its
-# reason. A new table for a crate the base has no set for is fine.
+# Every adapter name is a parsing, rendering, or host-bridge crate, or the one edge onto core.
+# `crates/microvms-cli/tests/dependency_direction.rs` holds each crate here to exactly its set plus
+# its placement records in `verify/ratchet/drift.json`: an entry is drift with the issue that
+# removes it, and a decision is a permanent exception with its reason. A direct dependency outside
+# both fails there, and so does a listed crate the crate no longer uses. A set can shrink, but
+# `mise run ratchet:check` refuses a crate added to a set the base branch already has, and an entry
+# the base doesn't have, since either would clear a finding without a reason: move the work to the
+# layer whose job it is, or record a decision with its reason. A new table is fine for a crate the
+# base has no set for, once the test holds that crate: it refuses a table for any other.
 #
-# A layer's set is every crate it may use, and it never carries drift or a decision.
-# `crates/microvms-cli/tests/dependency_direction.rs` asserts each one exactly, and the domain's and the
-# app's declared features too.
+# A layer's set is every crate it may use, and it never carries drift or a decision. The test
+# asserts the domain's and the app's declared features too.
 #
 # - The domain's crates compute or encode: no network, files, subprocess, environment, clock, or
 #   entropy (ARCH-6).

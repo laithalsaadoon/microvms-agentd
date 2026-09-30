@@ -124,10 +124,13 @@ In network simulation tests, coordinate child processes through stdin rather
 than wall-clock sleeps: child processes and the simulator use different clocks.
 
 `mise run ratchet:check` holds `verify/ratchet/drift.json` equal to the drift its
-collectors find, such as an adapter dependency outside `verify/arch/placement.toml`, a
-subprocess in a shipping crate, or a spec requirement no file in `verify/spec/traced/`
-lists. A new finding fails, and so does a fix the file still lists: run
-`mise run ratchet:update` and commit the file. The check refuses an entry the
+collectors find, such as a subprocess in a shipping crate or a spec requirement no file
+in `verify/spec/traced/` lists. A new finding fails, and so does a fix the file still
+lists: run `mise run ratchet:update` and commit the file. Placement, a direct
+dependency outside its crate's set in `verify/arch/placement.toml`, is computed by
+`crates/microvms-cli/tests/dependency_direction.rs` instead, which holds each crate to
+its set plus its placement records in the file: a new dependency fails there, and so
+does a fixed one whose entry you haven't deleted. The check refuses an entry the
 base branch doesn't have, and a crate added to a set the base already has, so
 new drift moves to the layer whose job it is or goes under `decisions` with its
 reason. An untraced requirement can't be a decision: it gets an entry in its
@@ -255,10 +258,12 @@ without an IGW or NAT gateway and with no alternative internet route.
 
 ## Live verification
 
-Changes to AWS behavior need a live exercise of the changed path and a named
-regression check in `conformance/run_rs.py`. State explicitly when live
-verification was not performed. Documentation and other local-only changes
-do not need a billable run.
+Changes to AWS behavior need a named regression check in the live suite
+(`conformance/lanes/`, driven by `conformance/run_rs.py`). The live exercise of
+the changed path happens once per wave on main, one live run at a time because
+the Terraform state is single, rather than on each pull request; until that run,
+the pull request states that the change is verified offline only. Documentation
+and other local-only changes do not need a billable run.
 
 ```bash
 mise run live                # builds binaries, provisions infrastructure, tests AWS
@@ -328,9 +333,10 @@ runs it.
 
 ```bash
 mise run publish:check
+mise run release:check          # every publishing job in release.yml waits on the live gate
 mise run publish:dry-run        # registry access and a committed tree required
 mise run release:prepare X.Y.Z  # writes changelog.d/ into CHANGELOG.md as X.Y.Z; in the release PR
-mise run release:tag vX.Y.Z     # creates/pushes a release tag; publishes artifacts
+mise run release:tag vX.Y.Z     # creates/pushes a release tag; builds and drafts the release
 ```
 
 A release starts with a pull request that synchronizes the Cargo, Python, and
@@ -344,6 +350,34 @@ and check the tag with `./tools/check-publishable.py --tag=vX.Y.Z`. Once that
 pull request merges, tag main's tip with `mise run release:tag vX.Y.Z`. Use the
 release task rather than manually pushing an old tag. Registry versions are
 immutable.
+
+A release needs a green live run on its tag, so the tag publishes nothing by
+itself. `release.yml` builds and attests every artifact, creates the GitHub
+release as a draft, and stops at its gate, `live-gate`, which waits for a
+reviewer in the `release` environment. Then:
+
+1. Dispatch the live suite on the tag: `gh workflow run live-conformance.yml
+   --ref vX.Y.Z`, and approve it in the `live-aws` environment. On a tag it
+   tests the draft's own `agentd` and Linux CLI rather than a build, and its
+   quickstart section reads the draft's assets through `$MICROVM_RELEASE_DIR`,
+   verifying their attestation the way a client does. When every step passes,
+   it uploads a `live-verified` marker carrying the draft's `SHA256SUMS`.
+2. Once that run is green, approve `live-gate`. It checks the run for itself
+   (`tools/release-gate.py verify`): live-conformance.yml, dispatched on the
+   tag, at the tagged commit, a success, and a marker naming this draft. An
+   approval given before that fails the job, and re-running the job once the
+   live run has passed is the fix.
+3. Approve the four publishing jobs, which wait in the same environment:
+   `github-release` checks that the draft still holds what the live run tested
+   and publishes it, and `crates-io`, `pypi` and `npm` publish the packages.
+
+The live workflow needs the `live-aws` environment, with a required reviewer and
+`v*` tags allowed, and the `LIVE_CONFORMANCE_ROLE_ARN` secret its OIDC role
+comes from. A red live run publishes nothing, so the version isn't spent:
+delete the draft and its tag (`gh release delete vX.Y.Z --cleanup-tag`, then
+`git tag -d vX.Y.Z`), land the fix, and tag again. The draft job refuses a tag
+that already has a release, draft or published, so rerunning the whole workflow
+after a failed draft needs the stale draft deleted first.
 
 PRs should explain the problem, the resulting behavior, validation, and any
 remaining uncertainty. Keep scheduling and pooling in consumer applications;

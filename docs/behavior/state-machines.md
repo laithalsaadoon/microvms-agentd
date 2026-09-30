@@ -66,7 +66,7 @@ Mirrors:
   (`verify/spec/agentd.symspec.json:21`), reject a differing token (`verify/spec/agentd.symspec.json:72`), and
   reject a control request while the token is not installed (`verify/spec/agentd.symspec.json:56`).
 
-These `always` properties hold over the whole reachable space: `bootstrap is one-shot`
+These `always` properties hold over the whole reachable space: `AGENTD-3 bootstrap is one-shot`
 (`token_replacements == 0`, `crates/model/src/lib.rs:454-456`) and `AGENTD-1 control API is closed
 before bootstrap` (`crates/model/src/lib.rs:466-474`). `attacker never authorized`
 (`crates/model/src/lib.rs:451-453`) is stated unconditionally rather than consulting the config it

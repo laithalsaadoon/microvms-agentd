@@ -123,13 +123,15 @@ fix the code, or record a permanent exception in `decisions` with its reason.
 An untraced requirement takes no decision: list it in its group's file under
 `verify/spec/traced/` (`verify/spec/traced/TRAP.toml` for a TRAP key) and waive there any
 layer it can't carry, with its reason. The edges
-between the workspace's crates are checked by
-`crates/microvms-cli/tests/dependency_direction.rs`. Each adapter's allowed
-dependencies (`verify/arch/placement.toml`) are checked by the ratchet, and
-`dependency_direction.rs` asserts them exactly for each adapter the ratchet
-holds no placement drift for (the CLI joins when #260 clears its entries). The
-domain's, the app's and core's sets are there too, asserted exactly, and they
-never carry drift. The ratchet's port-impl collector reads the app and core as
+between the workspace's crates, and each adapter's and layer's direct
+dependencies against its set in `verify/arch/placement.toml`, are computed in one
+place: `crates/microvms-cli/tests/dependency_direction.rs`. It holds each crate
+to exactly its set plus its placement entries and decisions in the drift file,
+so a new dependency and a fixed one fail there, and a fix deletes its entry by
+hand. The CLI's entries are #260's; the domain's, the app's and core's sets never
+carry drift. For placement the ratchet reads no manifest: it counts the entries
+and refuses one the base doesn't have, and a crate added to a set the base has.
+The ratchet's port-impl collector reads the app and core as
 well as the adapters, so a port implemented anywhere but the edges is drift or
 a recorded decision. Forbidden calls are refused by each adapter's
 `clippy.toml`, and `tools/test_ratchet.py` lists every site that turns those
@@ -177,9 +179,15 @@ capabilities, or `verify/parity/capabilities.toml` says why one doesn't.
   through metadata, so use least privilege even with VPC isolation.
 - Preserve the image bootstrap invariant: `agentd` is `CMD`, and workloads
   start only after readiness. Root workloads are not isolated from the daemon.
-- AWS changes need a live exercise and a persistent conformance check, or an
-  explicit statement that they remain unverified against AWS. Guards follow
-  "Checks that can fail" below.
+- AWS changes need a persistent conformance check in `conformance/`, or an
+  explicit statement that they remain unverified against AWS. Their live
+  exercise happens once per wave on main, in one live run at a time, since the
+  Terraform state is single; until that run, the pull request says it's verified
+  offline only. Guards follow "Checks that can fail" below.
+- A release needs a green live run on its tag. `release.yml` drafts the GitHub
+  release, and its gate, `live-gate`, opens only for a `live-conformance.yml`
+  run dispatched on the tag that passed on that draft's assets. Every publishing
+  job needs the gate, which `release:check` in `check` holds.
 - Rebuild the release CLI before targeted live checks. Verify cleanup of VMs,
   images, and service-created log groups independently.
 - `spec:core` references a local symspec checkout; formal requirements are

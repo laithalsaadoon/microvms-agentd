@@ -133,3 +133,56 @@ expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_tsc_outside_the_npx_cache_is_refused ("
 transform = { file = "tools/check-dts-consumer.py", replace = "    if not tsc.resolve().is_relative_to(npx_dir.resolve()):\n", with = "    if False:\n" }
+
+# Not registered: site/tests/sdk-reference.test.ts's "writes a symbol-keyed member as the
+# declarations do, not as a property" (#337), which holds `withSymbolKeys` in
+# site/scripts/reference/sdk/typescript.mjs. The registry's suites are rust, script and bindings,
+# and a scratch worktree has no site/node_modules, so a vitest entry needs a site suite first, as
+# parity-wiring.toml says of the drift page's cases. #337 broke it by hand: with the generator's
+# rewrite reverted, the site builds and the case fails. `docs:check` runs it.
+#
+# #337: `__test__/types/hooks.ts` holds the `tsc` claims in `src/hooks.rs` and `src/lib.rs`. The two
+# hook-timeout classes differ only in their `maxSecs` literal types, since `tsc` compares classes by
+# structure: widen one back to `number` and a build-family timeout type-checks as a run-family one.
+# An `EstimatedUsd` shaped as a plain number field accepts the object literal lib.rs names. The
+# source-side entry drops the attribute and rebuilds; the last moves core's ceiling under the
+# literal, which the binding's const assertion refuses at build time.
+[[fault]]
+id = "dts-consumer-hook-timeouts-structural"
+guard = "tools/check-dts-consumer.py"
+run = ["./tools/check-dts-consumer.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "hooks.ts(22,3): error TS2578"
+transform = { file = "bindings/microvms-js/index.d.ts", replace = "  get maxSecs(): 60\n", with = "  get maxSecs(): number\n" }
+
+[[fault]]
+id = "dts-consumer-usd-object-literal"
+guard = "tools/check-dts-consumer.py"
+run = ["./tools/check-dts-consumer.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "hooks.ts(32,3): error TS2578"
+transform = { file = "bindings/microvms-js/index.d.ts", replace = "  get amount(): string\n  /** The figure at display precision: two places at a dollar or more, six below. */\n  get displayAmount(): string\n", with = "  amount: number\n" }
+
+[[fault]]
+id = "dts-consumer-hook-timeout-attribute"
+guard = "tools/check-dts-consumer.py"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["./tools/check-dts-consumer.py"],
+]
+expect = "exit-nonzero"
+suite = "bindings"
+message = "hooks.ts(22,3): error TS2578"
+transform = { file = "bindings/microvms-js/src/hooks.rs", replace = "    #[napi(getter, ts_return_type = \"60\")]\n", with = "    #[napi(getter)]\n" }
+
+[[fault]]
+id = "js-hook-ceiling-moved"
+guard = "bindings/microvms-js/src/hooks.rs: the maxSecs literals equal core's ceilings"
+run = ["cargo", "build", "-p", "microvms-js"]
+expect = "compile-error"
+code = "E0080"
+suite = "rust"
+message = "a hook ceiling moved"
+transform = { file = "crates/microvms-domain/src/constants.rs", replace = "pub const MAX_MICROVM_HOOK_TIMEOUT_SEC: u32 = 60;\n", with = "pub const MAX_MICROVM_HOOK_TIMEOUT_SEC: u32 = 90;\n" }
