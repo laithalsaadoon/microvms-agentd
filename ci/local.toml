@@ -42,6 +42,7 @@ workflows = ["ci.yml", "fuzz.yml"]
 "matrix.shard" = "0"
 "strategy.job-total" = "1"
 "github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^'" = "origin/main"
+"always()" = "true"
 
 [actions]
 "actions/checkout" = "ci-local.py clones the snapshot at the depth this step asks for"
@@ -148,12 +149,20 @@ steps = [
   "install cargo-mutants (pinned, checksummed)",
   "the seeded faults a pull request affects fire",
   "every seeded fault fires",
+  "disk left after the fire",
 ]
 
 [job."ci.yml".guards.local."install cargo-mutants (pinned, checksummed)"]
 run = "cargo install --locked cargo-mutants@27.1.0"
 env = { CARGO_INSTALL_ROOT = "{tools}" }
 reason = "the release binary needs glibc 2.39, newer than some Linux hosts have (AL2023 has 2.34), so the same version is built from source into ci:local's tool directory"
+
+[job."ci.yml".guards.local."disk left after the fire"]
+skip = "a runner diagnostic: it reads the runner's disk and `$RUNNER_TEMP`, which a local run has neither of"
+
+[job."ci.yml".guards-cache]
+skip = "it runs on a push to main only, to fill the dependency cache the guards legs restore; a local fire builds what it needs in its own persistent target, and `./scripts/check-guards-fire.py build` runs the same build"
+steps = ["build what the seeded faults compile"]
 
 [job."ci.yml".guards-result]
 skip = "it runs no command of its own: it reports the guards shards' combined result under the required check's name, and ci:guards fires the whole selection as shard 0 of 1"
