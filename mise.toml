@@ -810,10 +810,10 @@ depends = [
 run = "./scripts/ci-local.py summary"
 
 [tasks."guards:list"]
-description = "Every seeded fault in guards/faults.toml still applies, and every Falsification note has an entry or is listed. No builds"
+description = "Every seeded fault in guards/faults/*.toml still applies, and every Falsification note has an entry or is listed. No builds"
 # The cheap half of #274, and the half that runs on every push: it reads the registry, checks
 # each transform anchor and patch against the tree, and holds the Falsification notes in the
-# tests to guards/faults.toml or guards/unregistered.txt, which only shrinks from the merge
+# tests to guards/faults/*.toml or guards/unregistered.txt, which only shrinks from the merge
 # base with origin/main (CI passes the PR's base, as for the ratchet). The script's docstring
 # has the rules. ast-grep from `[tools]` reads the Rust and JS tests, stdlib `ast` the Python
 # ones, and the base is a local ref, so it's offline.

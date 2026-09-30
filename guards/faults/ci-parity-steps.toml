@@ -1,0 +1,152 @@
+# ── ci:parity's step coverage and the ci:local runner (#315) ─────────────────
+
+# A new ci.yml `run:` step with no ci/local.toml entry: ci:local would skip it silently.
+[[fault]]
+id = "ci-parity-step-uncovered"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml job `drift` step `echo uncovered` has no entry in ci/local.toml"
+transform = { file = ".github/workflows/ci.yml", replace = "      - run: uvx ruff@0.15.22 format --check .\n", with = "      - run: uvx ruff@0.15.22 format --check .\n      - run: echo uncovered\n" }
+
+[[fault]]
+id = "ci-parity-step-stale"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml job `drift` lists `a step that isn't there`, which names no step there"
+transform = { file = "ci/local.toml", replace = "  \"uvx ruff@0.15.22 format --check .\",\n]\n", with = "  \"uvx ruff@0.15.22 format --check .\",\n  \"a step that isn't there\",\n]\n" }
+
+[[fault]]
+id = "ci-parity-skip-no-reason"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml job `sbom` is skipped and gives no reason"
+transform = { file = "ci/local.toml", replace = "skip = \"its installs `sudo mv` binaries into /usr/local/bin, and its scanners read vulnerability databases that change daily, so a local pass says nothing about the next CI run. `mise run sbom` and `mise run vuln` are the local forms\"\n", with = "skip = \"\"\n" }
+
+# The same rule for one step of a job ci:local runs: the background example's, in the `rust` job.
+[[fault]]
+id = "ci-parity-step-skip-no-reason"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml job `rust` step `background coding example` is skipped and gives no reason"
+transform = { file = "ci/local.toml", replace = "skip = \"`mise run background:check` runs the same commands, and it's in `check`\"\n", with = "skip = \"\"\n" }
+
+[[fault]]
+id = "ci-parity-change-no-reason"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml job `build` step `build` runs differently here and gives no reason"
+transform = { file = "ci/local.toml", replace = "reason = \"that linker is the gcc the skipped step installs; without it, .cargo/config.toml's rust-lld links the same static target\"\n", with = "" }
+
+[[fault]]
+id = "ci-parity-expression-missing"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "uses `${{ matrix.os }}`, which has no value in ci/local.toml [expressions]"
+transform = { file = "ci/local.toml", replace = "\"matrix.os\" = \"ubuntu-latest\"\n", with = "" }
+
+[[fault]]
+id = "ci-parity-local-unparseable"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "doesn't parse as TOML"
+transform = { file = "ci/local.toml", replace = "\n[expressions]\n", with = "\n[expressions\n" }
+
+# An empty plan: /dev/null reads as an empty file on the Linux runners and here.
+[[fault]]
+id = "ci-parity-local-empty"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci/local.toml: /dev/null is empty"
+argv_fault = ["--local", "/dev/null"]
+
+# The step reader finding nothing: every job would pass as covered without the floor.
+[[fault]]
+id = "ci-parity-steps-sentinel"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml: found no `run:` steps, so there's nothing to cover"
+transform = { file = "scripts/check-ci-parity.py", replace = "    return \"run\" in step\n", with = "    return \"runs\" in step\n" }
+
+[[fault]]
+id = "ci-parity-task-missing"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`ci:local` doesn't depend on `ci:fuzz`"
+transform = { file = "mise.toml", replace = "  \"ci:fuzz\",\n]\nrun = \"./scripts/ci-local.py summary\"\n", with = "]\nrun = \"./scripts/ci-local.py summary\"\n" }
+
+[[fault]]
+id = "ci-parity-check-runs-ci-local"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "`check` depends on `ci:local`"
+transform = { file = "mise.toml", replace = "  \"ci:parity\",\n]\n", with = "  \"ci:parity\",\n  \"ci:local\",\n]\n" }
+
+# The unit suite catching a coverage rule that stopped comparing.
+[[fault]]
+id = "ci-parity-unit-step-uncovered"
+guard = "test_check_ci_parity.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_ci_parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_run_step_with_no_entry_fails ("
+transform = { file = "scripts/check-ci-parity.py", replace = "        if is_run(step) and label not in listed:\n", with = "        if False:\n" }
+
+# The runner's own suite (#315): the checkout depth, the caller's index, the scrubbed env,
+# and the refusal to run an uncovered plan.
+[[fault]]
+id = "ci-local-unit-depth"
+guard = "test_ci_local.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ci_local.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_shallow_job_gets_one_commit_and_no_remote ("
+transform = { file = "scripts/ci-local.py", replace = "        fetch += [\"--depth\", \"1\", commit]\n", with = "        fetch += [commit]\n" }
+
+[[fault]]
+id = "ci-local-unit-index"
+guard = "test_ci_local.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ci_local.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_run_leaves_the_source_repo_as_it_was ("
+transform = { file = "scripts/ci-local.py", replace = "    scratch = env | {\"GIT_INDEX_FILE\": str(index)}\n", with = "    scratch = env\n" }
+
+[[fault]]
+id = "ci-local-unit-env"
+guard = "test_ci_local.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ci_local.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_step_gets_the_workflow_job_and_step_env_and_not_the_callers ("
+transform = { file = "scripts/ci-local.py", replace = "    for key in mise_only_keys(root, jobs):\n", with = "    for key in []:\n" }
+
+[[fault]]
+id = "ci-local-unit-refuse"
+guard = "test_ci_local.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_ci_local.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_uncovered_step_refuses_to_run ("
+transform = { file = "scripts/ci-local.py", replace = "    jobs = PARITY[\"plan\"](root, local, problems)\n    if problems:\n", with = "    jobs = PARITY[\"plan\"](root, local, problems)\n    if False:\n" }

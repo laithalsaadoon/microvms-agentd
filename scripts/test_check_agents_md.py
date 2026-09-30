@@ -113,13 +113,15 @@ mise run guards:fire   # every seeded fault
 
 ## Checks that can fail
 
-- Every guard ships with a seeded fault in `guards/faults.toml`. The CI `guards` job runs
+- Every guard ships with a seeded fault in `guards/faults/fs.toml`. The CI `guards` job runs
   `mise run guards:fire`, and `guards:list` in `check` fails on a note with no entry.
 - The CI `mutants` job fails on a surviving mutant.
 - `Results.eq` in `conformance/run_rs.py` fails on an absent value, and `Results.absent`
   is the one way to assert absence. `parity:check` holds the table.
 """
 
+# The fixture's registry file, one owner's, which check-guards-fire.py's loader reads.
+REGISTRY = "guards/faults/fs.toml"
 FAULTS = """\
 [[fault]]
 id = "fs-pop"
@@ -142,7 +144,7 @@ pre-commit:
     - name: headers
       root: crate/
       run: ../scripts/check-agents-md.py src/lib.rs
-      glob: "{*.rs,guards/*.toml}"
+      glob: "{*.rs,guards/faults/*.toml}"
 """
 
 # A second workflow: a path filter, a job's default working directory, and a step that names
@@ -153,7 +155,7 @@ on:
   pull_request:
     paths:
       - 'crate/src/**'
-      - 'guards/faults.toml'
+      - 'guards/faults/*.toml'
 jobs:
   fuzz:
     runs-on: ubuntu-latest
@@ -186,17 +188,17 @@ GATE = """\
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-REGISTRY = "guards/faults.toml"
+REGISTRY_DIR = "guards/faults"
 CRATE = ROOT / "crate" / "Cargo.toml"
 """
 
 HEALTHY = {
     "mise.toml": MISE,
     ".github/workflows/ci.yml": CI,
-    ".github/PULL_REQUEST_TEMPLATE.md": "## Guards\n\nName the `guards/faults.toml` entry.\n",
+    ".github/PULL_REQUEST_TEMPLATE.md": "## Guards\n\nName the `guards/faults/fs.toml` entry.\n",
     "conformance/run_rs.py": "from lanes.suite import run_suite\n",
     "conformance/harness/results.py": RESULTS,
-    "guards/faults.toml": FAULTS,
+    REGISTRY: FAULTS,
     "AGENTS.md": AGENTS,
     "CONTRIBUTING.md": CONTRIBUTING,
     "crate/Cargo.toml": "",
@@ -210,7 +212,7 @@ HEALTHY = {
     # `src/lib.rs` is the crate's own, resolved from the doc's directory; the second path is
     # the repo's, resolved from the root.
     "crate/AGENTS.md": (
-        "The crate docs in `src/lib.rs`. The registry is `guards/faults.toml`.\n"
+        "The crate docs in `src/lib.rs`. The registry is `guards/faults/fs.toml`.\n"
         "CodeQL's `rust/hard-coded-cryptographic-value` isn't a path. cargo-mutants writes\n"
         "`missed.txt` and `timeout.txt` into `mutants.out`.\n"
     ),
@@ -323,11 +325,13 @@ class AgentsMdTests(unittest.TestCase):
         self.healthy(
             **{
                 "AGENTS.md": AGENTS.replace(
-                    "`guards/faults.toml`", "`guards/fault.toml`"
+                    "`guards/faults/fs.toml`", "`guards/faults/f.toml`"
                 )
             }
         )
-        self.assert_fails_with("AGENTS.md:10:", "`guards/fault.toml`", "no such path")
+        self.assert_fails_with(
+            "AGENTS.md:10:", "`guards/faults/f.toml`", "no such path"
+        )
 
     def test_a_dangling_crate_relative_path_fails(self):
         self.healthy(**{"crate/AGENTS.md": "The crate docs in `src/main.rs`.\n"})
@@ -335,8 +339,8 @@ class AgentsMdTests(unittest.TestCase):
 
     def test_a_path_deleted_from_the_tree_but_still_in_the_index_fails(self):
         self.healthy()
-        (self.repo / "guards/faults.toml").unlink()
-        self.assert_fails_with("`guards/faults.toml`")
+        (self.repo / REGISTRY).unlink()
+        self.assert_fails_with(f"`{REGISTRY}`")
 
     def test_a_new_untracked_file_resolves(self):
         # An uncommitted worktree: the doc and the file it names are both new.
@@ -409,7 +413,7 @@ class AgentsMdTests(unittest.TestCase):
         self.assert_fails_with("CONTRIBUTING.md:4:", "`guards:fire` isn't in `check`")
 
     def test_a_dangling_fault_id_fails(self):
-        self.healthy(**{"guards/faults.toml": FAULTS.replace('"fs-pop"', '"fs-pop-2"')})
+        self.healthy(**{REGISTRY: FAULTS.replace('"fs-pop"', '"fs-pop-2"')})
         self.assert_fails_with("CONTRIBUTING.md:1:", "`fs-pop` is no fault id")
 
     def test_a_placeholder_fault_id_is_not_a_reference(self):
@@ -426,9 +430,7 @@ class AgentsMdTests(unittest.TestCase):
         self.healthy(
             **{
                 "crate/src/lib.rs": "fn fs_pop_refused() {}\n",
-                "guards/faults.toml": FAULTS.replace(
-                    "fs_pop_is_refused", "fs_pop_refused"
-                ),
+                REGISTRY: FAULTS.replace("fs_pop_is_refused", "fs_pop_refused"),
             }
         )
         self.assert_fails_with("CONTRIBUTING.md:2:", "`fs_pop_is_refused`")
@@ -438,7 +440,7 @@ class AgentsMdTests(unittest.TestCase):
         prose = {
             "crate/src/lib.rs": "// fs_pop_is_refused\nfn other() {}\n",
             "scripts/tool.py": '"""An example: fs_pop_is_refused."""\n# fs_pop_is_refused\n',
-            "guards/faults.toml": FAULTS.replace(
+            REGISTRY: FAULTS.replace(
                 'with = "fn fs_pop_seeded_name"', 'with = "fs_pop_is_refused"'
             ).replace("fs::tests::fs_pop_is_refused", "fs::tests::other"),
             "notes.md": "fs_pop_is_refused\n",
@@ -449,7 +451,7 @@ class AgentsMdTests(unittest.TestCase):
     def test_a_name_in_a_python_string_or_a_registry_guard_resolves(self):
         cases = {
             "scripts/tool.py": 'TEST = "fs::tests::fs_pop_is_refused"\n',
-            "guards/faults.toml": FAULTS,
+            REGISTRY: FAULTS,
         }
         for relative, text in cases.items():
             with self.subTest(file=relative):
@@ -566,7 +568,7 @@ class AgentsMdTests(unittest.TestCase):
             .replace("`parity:check`", "it")
             .replace("`guards:list`", "the list"),
             "member": AGENTS.replace(" in `check`", ""),
-            "path": AGENTS.replace("`guards/faults.toml`", "the registry").replace(
+            "path": AGENTS.replace("`guards/faults/fs.toml`", "the registry").replace(
                 "`conformance/run_rs.py`", "the suite"
             ),
             "job": AGENTS.replace("`guards` job", "guards job").replace(
@@ -586,8 +588,38 @@ class AgentsMdTests(unittest.TestCase):
         self.assert_fails_with("AGENTS.md yields no references")
 
     def test_a_fault_registry_with_no_ids_fails_naming_the_parser(self):
-        self.healthy(**{"guards/faults.toml": ""})
-        self.assert_fails_with("found no fault ids in guards/faults.toml")
+        self.healthy(**{REGISTRY: ""})
+        self.assert_fails_with("found no fault ids in guards/faults/*.toml")
+
+    def test_fault_ids_come_from_every_registry_file_through_the_shared_loader(self):
+        # The id the docs name moves to another owner's file and still resolves; left in the
+        # single file the registry used to be, which the loader doesn't read, it doesn't.
+        other = FAULTS.replace('"fs-pop"', '"fs-other"')
+        self.healthy(**{REGISTRY: other, "guards/faults/another.toml": FAULTS})
+        result = self.run_check()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        git(self.repo, "rm", "-q", "-f", "guards/faults/another.toml")
+        self.write("guards/faults.toml", FAULTS)
+        self.assert_fails_with("CONTRIBUTING.md:1:", "`fs-pop` is no fault id")
+
+    def test_a_seeded_transform_in_any_registry_file_is_not_the_name_existing(self):
+        # check-guards-fire.py's loader says which files are the registry, so a `transform` in
+        # a second owner's file is prose here as it is in the first.
+        seeded = (
+            FAULTS.replace('"fs-pop"', '"fs-other"')
+            .replace('with = "fn fs_pop_seeded_name"', 'with = "fs_pop_is_refused"')
+            .replace("fs::tests::fs_pop_is_refused", "fs::tests::other")
+        )
+        self.healthy(
+            **{
+                "crate/src/lib.rs": "fn other() {}\n",
+                REGISTRY: FAULTS.replace(
+                    "fs::tests::fs_pop_is_refused", "fs::tests::other"
+                ),
+                "guards/faults/another.toml": seeded,
+            }
+        )
+        self.assert_fails_with("`fs_pop_is_refused` isn't spelled in any code")
 
     def test_a_check_task_with_no_dependencies_fails_naming_it(self):
         self.healthy(
@@ -621,10 +653,10 @@ class AgentsMdTests(unittest.TestCase):
     def test_a_stale_lefthook_glob_alternative_fails_naming_its_line(self):
         # The move this guards: a hook's glob keeps a path that left, and the hook stops
         # running on it without a word.
-        text = LEFTHOOK.replace("guards/*.toml}", "verify/guards/*.toml}")
+        text = LEFTHOOK.replace("guards/faults/*.toml}", "verify/faults/*.toml}")
         self.healthy(**{"lefthook.yml": text})
         self.assert_fails_with(
-            "lefthook.yml:9:", "`verify/guards/*.toml` matches no tracked file"
+            "lefthook.yml:9:", "`verify/faults/*.toml` matches no tracked file"
         )
 
     def test_a_lefthook_glob_is_matched_the_way_lefthook_matches_it(self):
@@ -860,8 +892,8 @@ class AgentsMdTests(unittest.TestCase):
     def test_a_stale_path_constant_fails_naming_its_line(self):
         cases = {
             "a string": (
-                GATE.replace('"guards/faults.toml"', '"verify/faults.toml"'),
-                "scripts/check-agents-md.py:4: `verify/faults.toml` is no such path",
+                GATE.replace('"guards/faults"', '"verify/faults"'),
+                "scripts/check-agents-md.py:4: `verify/faults` is no such path",
             ),
             "a join": (
                 GATE.replace('ROOT / "crate"', 'ROOT / "crates"'),

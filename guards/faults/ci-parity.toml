@@ -1,0 +1,177 @@
+# ── ci:parity: ci.yml's env and tool versions match mise.toml's (#315) ───────────
+
+[[fault]]
+id = "ci-parity-env-missing"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "and mise.toml [env] has no CARGO_TERM_COLOR"
+transform = { file = "mise.toml", replace = "CARGO_TERM_COLOR = \"always\"\n", with = "" }
+
+[[fault]]
+id = "ci-parity-env-value"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "and mise.toml [env] sets CARGO_TERM_COLOR=always"
+transform = { file = ".github/workflows/ci.yml", replace = "  CARGO_TERM_COLOR: always\n", with = "  CARGO_TERM_COLOR: never\n" }
+
+[[fault]]
+id = "ci-parity-env-empty"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml has no top-level env block"
+transform = { file = ".github/workflows/ci.yml", replace = "env:\n  CARGO_TERM_COLOR: always\n", with = "env: {}\n" }
+
+[[fault]]
+id = "ci-parity-ruff-ci-side"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ruff: ci.yml job `drift` step `uvx ruff@0.15.21 check .` runs 0.15.21, and mise.toml pins"
+transform = { file = ".github/workflows/ci.yml", replace = "      - run: uvx ruff@0.15.22 check .\n", with = "      - run: uvx ruff@0.15.21 check .\n" }
+
+[[fault]]
+id = "ci-parity-semgrep-mise-side"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "and mise.toml pins 1.177.0"
+transform = { file = "mise.toml", replace = "semgrep = \"1.176.1\"\n", with = "semgrep = \"1.177.0\"\n" }
+
+[[fault]]
+id = "ci-parity-maturin-stub-side"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "and scripts/generate-py-stubs.py pins 1.14.2"
+transform = { file = "scripts/generate-py-stubs.py", replace = "MATURIN = \"maturin@1.14.1\"\n", with = "MATURIN = \"maturin@1.14.2\"\n" }
+
+[[fault]]
+id = "ci-parity-node-major"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "runs Node 24, and mise.toml pins 22 (majors compared)"
+transform = { file = ".github/workflows/ci.yml", replace = "          enable-cache: false\n      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7\n        with:\n          node-version: '22'\n", with = "          enable-cache: false\n      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7\n        with:\n          node-version: '24'\n" }
+
+[[fault]]
+id = "ci-parity-actionlint-unpinned"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "has no `version` input, so it runs the latest release"
+transform = { file = ".github/workflows/ci.yml", replace = "          version: 1.7.12\n", with = "" }
+
+[[fault]]
+id = "ci-parity-download-ci-side"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "betterleaks: ci.yml job `security` step `betterleaks over full history (pinned, checksummed)` runs 1.7.4, and mise.toml pins"
+transform = { file = ".github/workflows/ci.yml", replace = "betterleaks/releases/download/v1.7.3/betterleaks_1.7.3_", with = "betterleaks/releases/download/v1.7.4/betterleaks_1.7.4_" }
+
+[[fault]]
+id = "ci-parity-download-hash"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "syft: ci.yml job `sbom` step `install syft and grype (pinned, checksummed)` checks sha256 0f7b29"
+transform = { file = ".github/workflows/ci.yml", replace = "\"bf7b29ff57f06da30918266a0e1c2885a8f99784798d1bdb1628886aa015d788  syft.tgz\"", with = "\"0f7b29ff57f06da30918266a0e1c2885a8f99784798d1bdb1628886aa015d788  syft.tgz\"" }
+
+[[fault]]
+id = "ci-parity-uvx-unpinned"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "runs `uvx semgrep`, which names no exact version"
+transform = { file = ".github/workflows/ci.yml", replace = "uvx semgrep@1.176.1 scan", with = "uvx semgrep scan" }
+
+[[fault]]
+id = "ci-parity-mise-latest"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "mise.toml [tools] pins `lefthook` to latest"
+transform = { file = "mise.toml", replace = "lefthook = \"2.1.10\"\n", with = "lefthook = \"latest\"\n" }
+
+[[fault]]
+id = "ci-parity-ci-unparseable"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "doesn't parse as YAML"
+transform = { file = ".github/workflows/ci.yml", replace = "  CARGO_TERM_COLOR: always\n", with = "  CARGO_TERM_COLOR: [always\n" }
+
+# An empty file: /dev/null reads as one on the Linux runners and here.
+[[fault]]
+id = "ci-parity-ci-empty"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml: /dev/null is empty"
+argv_fault = ["--ci", "/dev/null"]
+
+[[fault]]
+id = "ci-parity-mise-empty"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "mise.toml: /dev/null is empty"
+argv_fault = ["--mise", "/dev/null"]
+
+[[fault]]
+id = "ci-parity-root-empty"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "can't read"
+argv_fault = ["--root", "{empty_dir}"]
+
+# The release pattern reading nothing: every checksummed tool is then missing by name.
+[[fault]]
+id = "ci-parity-release-sentinel"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ast-grep: found nowhere in ci.yml"
+transform = { file = "scripts/check-ci-parity.py", replace = "r\"https://github\\.com/([\\w.-]+/[\\w.-]+)/releases/download/v?([^/\\s]+)/\"", with = "r\"https://github\\.com/([\\w.-]+/[\\w.-]+)/release/download/v?([^/\\s]+)/\"" }
+
+# The unit suite catching a rule that stopped comparing values.
+[[fault]]
+id = "ci-parity-unit-env-value"
+guard = "test_check_ci_parity.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_ci_parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_differing_env_value_fails ("
+transform = { file = "scripts/check-ci-parity.py", replace = "        elif scalar(mise_env[key]) != want:\n", with = "        elif False:\n" }
+
+# The registry read through check-guards-fire.py's loader, with what it refuses ignored: the
+# single file the registry was before the split would go uncompared.
+[[fault]]
+id = "ci-parity-unit-registry-refused"
+guard = "test_check_ci_parity.py"
+run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_ci_parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_former_single_registry_file_is_unreadable ("
+transform = { file = "scripts/check-ci-parity.py", replace = "    if problems:\n        raise Unreadable(\n            f\"{GUARDS['REGISTRY']}", with = "    if False:\n        raise Unreadable(\n            f\"{GUARDS['REGISTRY']}" }

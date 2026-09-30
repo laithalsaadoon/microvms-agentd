@@ -625,8 +625,8 @@ fn the_dense_cost_path_is_cuttable_and_marks_unpriced_lines() {
 /// in-process; this one asks whether it survives into `$?`. `inf` goes first so a panicking
 /// parser stops on the exit code before any envelope is read.
 ///
-/// **Falsification**: `guards/faults.toml` entry `cli-seconds-exit-code` restores the old
-/// `from_secs_f64(seconds.max(0.0))` inside `cli::parse_seconds`, and the `inf` row exits 101.
+/// **Falsification**: `guards/faults/seconds-flags.toml` entry `cli-seconds-exit-code` restores the
+/// old `from_secs_f64(seconds.max(0.0))` inside `cli::parse_seconds`, and the `inf` row exits 101.
 #[test]
 fn a_seconds_flag_that_is_not_a_duration_exits_with_the_argument_error() {
     for value in ["inf", "NaN", "-5", "1e300"] {

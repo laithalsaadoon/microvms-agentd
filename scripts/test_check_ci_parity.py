@@ -270,7 +270,7 @@ class ParityTests(unittest.TestCase):
             "mise.lock": lock,
             "rust-toolchain.toml": toolchain,
             "scripts/generate-py-stubs.py": stubs,
-            "guards/faults.toml": registry,
+            "guards/faults/bindings.toml": registry,
             "ci/local.toml": local,
             **(extra or {}),
         }
@@ -373,7 +373,26 @@ class ParityTests(unittest.TestCase):
     def test_maturin_in_a_registry_run_is_compared(self):
         registry = edit(REGISTRY, "maturin@1.14.1", "maturin@1.14.0")
         self.assertFails(
-            "guards/faults.toml entry `py-entry` runs 1.14.0", registry=registry
+            "guards/faults/bindings.toml entry `py-entry` runs 1.14.0",
+            registry=registry,
+        )
+
+    def test_every_registry_file_is_compared(self):
+        # The registry is read through check-guards-fire.py's loader, so a pin in a second
+        # owner's file is held too.
+        other = edit(REGISTRY, '"py-entry"', '"js-entry"').replace(
+            "maturin@1.14.1", "maturin@1.14.0"
+        )
+        self.assertFails(
+            "guards/faults/other.toml entry `js-entry` runs 1.14.0",
+            extra={"guards/faults/other.toml": other},
+        )
+
+    def test_the_former_single_registry_file_is_unreadable(self):
+        # Nothing reads it, so its pins would go uncompared: the check refuses the tree.
+        self.assertFails(
+            "guards/faults.toml is the single file the registry was before it was split",
+            extra={"guards/faults.toml": REGISTRY},
         )
 
     def test_a_stub_generator_without_a_maturin_pin_fails(self):
@@ -1071,7 +1090,7 @@ class ParityTests(unittest.TestCase):
                 self.assertFails("can't read", **{name: None})
 
     def test_an_explicit_empty_ci_path_fails(self):
-        """`--ci /dev/null` is how guards/faults.toml seeds an empty ci.yml."""
+        """`--ci /dev/null` is how a seeded fault hands the check an empty ci.yml."""
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         empty = Path(tmp.name) / "ci.yml"

@@ -30,6 +30,11 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 SCRIPT = HERE / "check-guards-fire.py"
 MARKER = "**" + "Falsification" + "**"
+# The fixture repos' registry: one owner's file.
+REGISTRY = "guards/faults/fixture.toml"
+# An id the real registry always has: the daemon's first entry, and the schema example in the
+# script's docstring.
+SENTINEL = "agentd-fs-pop"
 
 # The pointers a git hook exports; see check-guards-fire.py's `GIT_ENV_LEAKS`. The fixture
 # repos below are written with `git add` and `git commit`, which an inherited GIT_DIR would
@@ -314,7 +319,7 @@ class Repo:
 def fire_repo(
     test: unittest.TestCase, *entries: str, state: str = "the_guard=ok\n"
 ) -> Repo:
-    return Repo(test, {"guards/faults.toml": "".join(entries), "state.txt": state})
+    return Repo(test, {REGISTRY: "".join(entries), "state.txt": state})
 
 
 class FireVerdicts(unittest.TestCase):
@@ -480,7 +485,7 @@ class FireVerdicts(unittest.TestCase):
         self.assertEqual(out.returncode, 1)
         self.assertIn("never says 'the named reason'", out.stdout)
         repo.write(
-            "guards/faults.toml",
+            REGISTRY,
             entry(
                 expect="exit-nonzero", run=gate, fault=fault, message="the wrong reason"
             ),
@@ -623,7 +628,7 @@ class FireVerdicts(unittest.TestCase):
         repo = Repo(
             self,
             {
-                "guards/faults.toml": entry(fault='patch = "guards/faults/one.patch"'),
+                REGISTRY: entry(fault='patch = "guards/faults/one.patch"'),
                 "guards/faults/one.patch": patch,
                 "state.txt": "the_guard=ok\n",
             },
@@ -656,7 +661,7 @@ class FireVerdicts(unittest.TestCase):
         self.assertIn("already red: one", out.stdout)
         # And an untracked entry is read from the working tree.
         repo.write("state.txt", "the_guard=ok\n")
-        repo.write("guards/faults.toml", entry(fid="new-one"))
+        repo.write(REGISTRY, entry(fid="new-one"))
         out = repo.run("fire", "--only", "new-one")
         self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
         self.assertIn("fired: new-one", out.stdout)
@@ -711,7 +716,7 @@ def notes_repo(
         {
             **base,
             **files,
-            "guards/faults.toml": registry,
+            REGISTRY: registry,
             "guards/unregistered.txt": unregistered,
         },
     )
@@ -1016,7 +1021,7 @@ class UnregisteredOnlyShrinks(unittest.TestCase):
     def test_registering_one_note_does_not_make_room_for_another(self):
         repo = self.repo()
         repo.write("src/lib.rs", TWO_NOTES)
-        repo.write("guards/faults.toml", entry(note="src/lib.rs::the_guard"))
+        repo.write(REGISTRY, entry(note="src/lib.rs::the_guard"))
         repo.write("guards/unregistered.txt", "src/lib.rs::second\n")
         out = repo.run("list")
         self.assertEqual(out.returncode, 1)
@@ -1184,6 +1189,100 @@ class RegistryShape(unittest.TestCase):
                 "uv.txt": "uv=0.12.13\n",
                 "guards/faults/by-patch.patch": patch,
             },
+        )
+
+
+class RegistryFiles(unittest.TestCase):
+    """The loader: which files are the registry, in what order it reads them, and what it
+    refuses. `-k RegistryFiles` runs this class alone for the registry's own entries."""
+
+    def repo(self, files: dict[str, str]) -> Repo:
+        return Repo(self, {"state.txt": "the_guard=ok\n", **files})
+
+    def fails(self, files: dict[str, str], message: str) -> None:
+        repo = self.repo(files)
+        for command in ("list", "fire"):
+            out = repo.run(command)
+            self.assertEqual(out.returncode, 1, f"{command}: {out.stdout}")
+            self.assertIn(message, out.stderr, command)
+
+    def test_no_registry_file_is_the_floor(self):
+        # The patches beside the files aren't registry files, so a directory of only them
+        # is empty too.
+        for files in ({}, {"guards/faults/one.patch": "--- a/x\n+++ b/x\n"}):
+            with self.subTest(files=sorted(files)):
+                self.fails(files, "no file matches guards/faults/*.toml")
+
+    def test_every_file_loads_in_sorted_order_and_nothing_else_is_read(self):
+        # A patch and a file in a subdirectory aren't registry files; the verdicts follow the
+        # files' sorted order, then each file's own.
+        repo = self.repo(
+            {
+                "guards/faults/b.toml": entry(fid="b-one") + entry(fid="b-two"),
+                "guards/faults/a.toml": entry(fid="a-one"),
+                "guards/faults/c.patch": "not toml",
+                "guards/faults/sub/d.toml": entry(fid="in-a-subdirectory"),
+            }
+        )
+        faults, problems = fire_module()["load"](repo.root)
+        self.assertEqual(problems, [])
+        self.assertEqual(
+            [(f.id, f.file) for f in faults],
+            [
+                ("a-one", "guards/faults/a.toml"),
+                ("b-one", "guards/faults/b.toml"),
+                ("b-two", "guards/faults/b.toml"),
+            ],
+        )
+        out = repo.run("fire")
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(fired_ids(out.stdout), ["a-one", "b-one", "b-two"])
+
+    def test_an_id_in_two_files_fails_naming_both(self):
+        self.fails(
+            {
+                "guards/faults/a.toml": entry(fid="twice"),
+                "guards/faults/b.toml": entry(fid="twice"),
+            },
+            "guards/faults/b.toml entry 'twice': the id is used twice, here and in "
+            "guards/faults/a.toml",
+        )
+
+    def test_the_former_single_file_fails_and_says_where_its_entries_go(self):
+        files = {REGISTRY: entry(), "guards/faults.toml": entry(fid="left-behind")}
+        self.fails(
+            files,
+            "guards/faults.toml is the single file the registry was before it was split by "
+            "owner, and nothing reads it: move its entries into their owners' files in "
+            "guards/faults/ and delete it",
+        )
+        faults, _ = fire_module()["load"](self.repo(files).root)
+        self.assertEqual([f.id for f in faults], ["one"])
+
+    def test_a_file_with_no_entry_fails_by_name_and_the_others_still_load(self):
+        files = {
+            REGISTRY: entry(),
+            "guards/faults/empty.toml": "# an owner, no entry\n",
+        }
+        self.fails(files, "guards/faults/empty.toml has no [[fault]] entry")
+        faults, _ = fire_module()["load"](self.repo(files).root)
+        self.assertEqual([f.id for f in faults], ["one"])
+
+    def test_a_file_that_does_not_parse_fails_by_name(self):
+        self.fails(
+            {REGISTRY: entry(), "guards/faults/broken.toml": "[[fault]\n"},
+            "guards/faults/broken.toml doesn't parse",
+        )
+
+    def test_the_registry_loads_its_sentinel(self):
+        # The real registry through the real loader. One that reads some of the files and
+        # not the rest passes the floor, and a known id is what it loses.
+        loaded, problems = fire_module()["load"](HERE.parent)
+        self.assertEqual(problems, [])
+        self.assertIn(
+            SENTINEL,
+            {f.id for f in loaded},
+            f"the sentinel {SENTINEL} didn't load from the registry",
         )
 
 
@@ -1697,7 +1796,7 @@ def lint(
 def lint_repo(test: unittest.TestCase, *entries: str, state: str = "") -> Repo:
     return Repo(
         test,
-        {"guards/faults.toml": "".join(entries), "src/lib.rs": LIB, "state.txt": state},
+        {REGISTRY: "".join(entries), "src/lib.rs": LIB, "state.txt": state},
     )
 
 
@@ -2041,7 +2140,7 @@ class FireRestoredByBuild(unittest.TestCase):
             self,
             {
                 ".gitignore": "junk.log\n",
-                "guards/faults.toml": entry(fault=fault),
+                REGISTRY: entry(fault=fault),
                 "state.txt": "the_guard=ok absent=junk.log\n",
             },
         )
@@ -2144,7 +2243,7 @@ def affected_repo(test: unittest.TestCase, extra: str = "") -> Repo:
     repo = Repo(
         test,
         {
-            "guards/faults.toml": registry,
+            REGISTRY: registry,
             "guards/faults/p.patch": patch,
             "state-a.txt": "ga=ok\n",
             "state-p.txt": "pp=ok\nkeep=ok\n",
@@ -2564,25 +2663,55 @@ class FireAffected(unittest.TestCase):
         self.assertIn("nothing to fire", out)
 
     def test_a_changed_or_new_entry_is_affected(self):
+        # The reason names the entry's own file: a new one in a new owner's file here.
         repo = affected_repo(self)
-        text = (repo.root / "guards/faults.toml").read_text()
+        text = (repo.root / REGISTRY).read_text()
         text = text.replace('guard = "ga"', 'guard = "ga"\nmessage = "FAILED"', 1)
-        text += entry(
-            fid="new",
-            guard="nn",
-            run=["cargo", "test", "--", "--exact", "nn"],
-            fault='transform = { file = "state-a.txt", replace = "ga=ok", with = "ga=ok nn=fail" }',
+        repo.write(REGISTRY, text)
+        repo.write(
+            "guards/faults/new-owner.toml",
+            entry(
+                fid="new",
+                guard="nn",
+                run=["cargo", "test", "--", "--exact", "nn"],
+                fault='transform = { file = "state-a.txt", replace = "ga=ok", with = "ga=ok nn=fail" }',
+            ),
         )
-        repo.write("guards/faults.toml", text)
         out = repo.run("fire", "--affected")
         self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
         self.assertEqual(selection(out.stdout), {"a", "new"}, out.stdout)
+        self.assertIn(f"affected: a: the entry changed in {REGISTRY}", out.stdout)
         self.assertIn(
-            "affected: a: the entry changed in guards/faults.toml", out.stdout
+            "affected: new: the entry is new in guards/faults/new-owner.toml",
+            out.stdout,
         )
-        self.assertIn(
-            "affected: new: the entry is new in guards/faults.toml", out.stdout
+
+    def test_an_entry_moved_to_another_file_unchanged_is_not_affected(self):
+        # Entries compare by their tables, not their place: one owner's entries split out
+        # into a file of their own select nothing.
+        repo = affected_repo(self)
+        first, *rest = (repo.root / REGISTRY).read_text().split("[[fault]]\n")[1:]
+        repo.write(REGISTRY, "".join("[[fault]]\n" + e for e in rest))
+        # A name that sorts first keeps the fixture's registry order.
+        repo.write("guards/faults/a-owner.toml", "[[fault]]\n" + first)
+        out = self.check(repo, set())
+        self.assertIn("nothing to fire", out)
+
+    def test_a_base_with_the_former_single_file_compares_entry_by_entry(self):
+        # A base from before the split has its registry in guards/faults.toml. The same
+        # entries in the directory select only the one that changed on the way, so the first
+        # pull request after the split, and one based before it, select what they changed.
+        repo = affected_repo(self)
+        text = (repo.root / REGISTRY).read_text()
+        git(repo.root, "mv", REGISTRY, "guards/faults.toml")
+        repo.commit("the base, before the split")
+        git(repo.root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        git(repo.root, "rm", "-q", "guards/faults.toml")
+        repo.write(
+            REGISTRY,
+            text.replace('guard = "ga"', 'guard = "ga"\nmessage = "FAILED"', 1),
         )
+        self.check(repo, {"a"}, f"affected: a: the entry changed in {REGISTRY}")
 
     def test_a_change_committed_on_the_branch_still_counts(self):
         repo = affected_repo(self)
@@ -2637,7 +2766,7 @@ class FireAffected(unittest.TestCase):
         repo = Repo(
             self,
             {
-                "guards/faults.toml": entry(
+                REGISTRY: entry(
                     fid="suite",
                     guard="test_gate_y.py",
                     run=[*run, "-p", "test_gate_y.py"],
@@ -2746,7 +2875,7 @@ class FireAffected(unittest.TestCase):
         repo = Repo(
             self,
             {
-                "guards/faults.toml": entry(
+                REGISTRY: entry(
                     fid="suite",
                     guard="test_gate_y.py",
                     run=[*run, "-p", "test_gate_y.py"],
@@ -2891,7 +3020,7 @@ def commands_repo(
     return Repo(
         test,
         {
-            "guards/faults.toml": commands_registry(spec) + extra,
+            REGISTRY: commands_registry(spec) + extra,
             "state.txt": " ".join(state) + "\n",
             **files,
         },
@@ -3164,7 +3293,7 @@ class FireSharded(unittest.TestCase):
             ]
             repo = commands_repo(holder, spec)
             noted = frozenset(["a1", "a2", "a3", "d"])
-            repo.write("guards/faults.toml", commands_registry(spec, noted))
+            repo.write(REGISTRY, commands_registry(spec, noted))
             repo.commit()
             return {
                 k: repo.run("fire", "--affected", "--shard", f"{k}/2") for k in (0, 1)
@@ -3258,7 +3387,7 @@ class FireSharded(unittest.TestCase):
             for i in range(size)
         )
         state = " ".join(f"{n}{i}=ok" for n, _, _, size in spec for i in range(size))
-        repo = Repo(self, {"guards/faults.toml": registry, "state.txt": state + "\n"})
+        repo = Repo(self, {REGISTRY: registry, "state.txt": state + "\n"})
         script = runpy.run_path(str(SCRIPT))
         faults, problems = script["load"](repo.root)
         self.assertEqual(problems, [])

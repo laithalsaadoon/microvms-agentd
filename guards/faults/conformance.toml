@@ -1,0 +1,37 @@
+# ── the live suite's own helpers (#277), against a stub CLI ──────────────────
+
+[[fault]]
+id = "conformance-eq-refuses-none"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/suite.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  eq() fails when either side is None"
+transform = { file = "conformance/harness/results.py", replace = "        if actual is None or expected is None:\n", with = "        if False:\n" }
+
+[[fault]]
+id = "conformance-eq-positive-controls"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/suite.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  eq() still compares empty strings"
+transform = { file = "conformance/harness/results.py", replace = "        if actual is None or expected is None:\n", with = "        if not actual or not expected:\n" }
+
+[[fault]]
+id = "conformance-absent"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/suite.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  absent() fails on any value that isn't None"
+transform = { file = "conformance/harness/results.py", replace = "return self.check(name, value is None, f\"expected nothing, got {value!r}\")", with = "return self.check(name, True, f\"expected nothing, got {value!r}\")" }
+
+[[fault]]
+id = "conformance-bind19-record"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/suite.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  the digest record check refuses a proof absent from both sides"
+transform = { file = "conformance/lanes/quickstart.py", replace = "        and record.get(\"verification\") is not None\n", with = "" }

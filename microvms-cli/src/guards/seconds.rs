@@ -143,9 +143,9 @@ fn seconds_sync_daemon(tree: &std::path::Path) -> Arc<DaemonScript> {
 /// other reason, such as a renamed subcommand. The `1e300` row's twin is `0`, since zero stays
 /// legal.
 ///
-/// **Falsification**: `guards/faults.toml` entries `cli-seconds-flag-panics` (restore the old
-/// `from_secs_f64(seconds.max(0.0))` inside `cli::parse_seconds`, so each bad row panics) and
-/// `cli-seconds-flag-clamps` (turn the refusal into a silent zero, so each bad row is
+/// **Falsification**: `guards/faults/seconds-flags.toml` entries `cli-seconds-flag-panics` (restore
+/// the old `from_secs_f64(seconds.max(0.0))` inside `cli::parse_seconds`, so each bad row panics)
+/// and `cli-seconds-flag-clamps` (turn the refusal into a silent zero, so each bad row is
 /// dispatched and answers after its calls).
 #[test]
 fn a_seconds_flag_that_is_not_a_duration_is_refused_before_any_call() {
@@ -373,7 +373,7 @@ fn a_seconds_flag_that_is_not_a_duration_is_refused_before_any_call() {
 /// used to panic after the exec, the `rm` or `run`'s launch had started. `run` then has to tear
 /// its VM down.
 ///
-/// **Falsification**: `guards/faults.toml` entries `cli-huge-timeout-panics` and
+/// **Falsification**: `guards/faults/seconds-flags.toml` entries `cli-huge-timeout-panics` and
 /// `cli-huge-run-timeout-panics` (restore the unchecked add in `deadline_after`; the exec and
 /// `run` rows panic), `cli-sync-rm-deadline-dropped` (send no `timeout_sec`) and
 /// `cli-sync-rm-deadline-truncated` (send whole seconds).

@@ -1,4 +1,4 @@
-# Tests whose doc carries a Falsification note and that have no entry in guards/faults.toml
+# Tests whose doc carries a Falsification note and that have no entry in guards/faults/*.toml
 # yet. `mise run guards:list` fails on a key here that has an entry now, on one that no
 # longer names a note, on a new note that's in neither file, and on a key the base branch's
 # copy doesn't have (a renamed or moved test keeps its place), so this list only shrinks.

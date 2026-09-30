@@ -28,10 +28,11 @@ It fails when:
 - a checksummed download has no `sha256sum -c` in its step, or checks a hash other than the
   linux-x64 checksum mise.lock records for that tool and version, so the version, the hash and
   the lock move together.
-- any `uvx` or `uv tool run` call in ci.yml, or in a guards/faults.toml `run` (CI's bindings
-  job runs those), names no exact version, or can't be read. Each call is split like a shell
-  word list: options before the tool are skipped (with their values), `--from <spec>` names
-  the package, and `tool@X.Y.Z` or `tool==X.Y.Z` is the version.
+- any `uvx` or `uv tool run` call in ci.yml, or in a seeded fault's `run` (CI's bindings
+  job runs those; the registry is read by check-guards-fire.py's loader), names no exact
+  version, or can't be read. Each call is split like a shell word list: options before the
+  tool are skipped (with their values), `--from <spec>` names the package, and `tool@X.Y.Z`
+  or `tool==X.Y.Z` is the version.
 - a mise.toml tool, in `[tools]` or in a task's `tools`, is `latest`. mise.lock records the
   exact version behind a fuzzy pin such as `node = "22"`.
 - a compared tool isn't found in ci.yml at all, so a pattern that stops matching fails by name
@@ -73,6 +74,7 @@ import argparse
 import ast
 import math
 import re
+import runpy
 import shlex
 import sys
 import tomllib
@@ -87,7 +89,9 @@ MISE = "mise.toml"
 LOCK = "mise.lock"
 TOOLCHAIN = "rust-toolchain.toml"
 STUBS = "scripts/generate-py-stubs.py"
-REGISTRY = "guards/faults.toml"
+# The seeded-fault registry's reader is check-guards-fire.py's, so this reads the entries
+# `guards:list` and `fire` do.
+GUARDS = runpy.run_path(str(Path(__file__).with_name("check-guards-fire.py")))
 LOCAL = "ci/local.toml"
 WORKFLOWS = ".github/workflows"
 
@@ -400,11 +404,26 @@ def read_ci(ci: dict, problems: list[str]) -> Observed:
     return seen
 
 
-def read_registry(registry: dict, seen: Observed, problems: list[str]) -> None:
-    for fault in registry.get("fault", []):
+def load_registry(root: Path) -> list:
+    """The registry's tables. A file the loader can't read (none at all, one that doesn't
+    parse or holds no entry, the former single file) is unreadable here too: its pins would
+    go uncompared."""
+    tables, problems = GUARDS["registry_tables"](root)
+    if problems:
+        raise Unreadable(
+            f"{GUARDS['REGISTRY']}: can't read the fault registry: {'; '.join(problems)}"
+        )
+    return tables
+
+
+def read_registry(tables: list, seen: Observed, problems: list[str]) -> None:
+    for table in tables:
+        fault = table.data
+        if not isinstance(fault, dict):
+            continue
         run = fault.get("run", [])
         argvs = run if run and isinstance(run[0], list) else [run]
-        where = f"{REGISTRY} entry `{fault.get('id', '?')}`"
+        where = f"{table.file} entry `{fault.get('id', '?')}`"
         for argv in argvs:
             for tool, version in uvx_pins(" ".join(map(str, argv)), where, problems):
                 seen.add(tool, version, where)
@@ -983,7 +1002,7 @@ def check(
         mise = load_toml(mise_path, "mise.toml")
         lock = load_toml(root / LOCK, LOCK)
         toolchain = load_toml(root / TOOLCHAIN, TOOLCHAIN)
-        registry = load_toml(root / REGISTRY, REGISTRY)
+        registry = load_registry(root)
         stubs = read_text(root / STUBS, STUBS)
         local = load_toml(local_path, LOCAL)
     except Unreadable as error:

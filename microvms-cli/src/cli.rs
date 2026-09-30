@@ -3267,8 +3267,8 @@ mod tests {
     /// refusals from passing on an argv that fails for some other reason (a missing positional,
     /// a renamed flag).
     ///
-    /// **Falsification**: `guards/faults.toml` entries `cli-seconds-parse-table` (the refusal
-    /// becomes a silent zero, and every refused row but `abc` parses) and
+    /// **Falsification**: `guards/faults/seconds-flags.toml` entries `cli-seconds-parse-table` (the
+    /// refusal becomes a silent zero, and every refused row but `abc` parses) and
     /// `cli-seconds-parse-truncates` (a fraction loses its sub-second part, and `0.5` reads 0s).
     #[test]
     fn every_seconds_flag_refuses_what_is_not_a_duration() {

@@ -1083,9 +1083,10 @@ mod tests {
     /// A spin interval and a zero-refresh watch are refused before the loop, with
     /// the flag named — ERR_INVALID_ARG, the local-refusal row.
     ///
-    /// **Falsification**: `guards/faults.toml` entries `cli-ls-interval-too-large` (clamp a
-    /// finite interval to 60 s before core's conversion, and the `1e300` row is accepted) and
-    /// `cli-ls-interval-message-as-typed` (print the figure with `Display`, and `0.0` reads `0`).
+    /// **Falsification**: `guards/faults/seconds-flags.toml` entries `cli-ls-interval-too-large`
+    /// (clamp a finite interval to 60 s before core's conversion, and the `1e300` row is accepted)
+    /// and `cli-ls-interval-message-as-typed` (print the figure with `Display`, and `0.0` reads
+    /// `0`).
     #[tokio::test]
     async fn a_spin_interval_or_an_empty_watch_is_refused() {
         let dir = tempfile::tempdir().expect("a temp dir");

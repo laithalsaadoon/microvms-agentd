@@ -209,15 +209,15 @@ dated measurement that names the commit it was taken at.
 A check that passes on broken code gives a false answer. Each rule here names the
 check that holds it, or says that review does.
 
-- Every new guard, gate or scanner ships with a seeded fault in
-  `guards/faults.toml` that makes it fail. A scanner's floor (an empty input)
-  and its sentinel get a fault each. Review holds that a new check has its
-  entries; CI holds that every entry fires. The `guards` job seeds the Rust and
-  script faults and the `bindings` job seeds the binding ones, as
-  `mise run guards:fire` does locally, and each fails when a fault doesn't
-  fire. `guards:list` in `check` fails on an entry that no longer applies to
-  the tree, and on a new Falsification note that has no entry and no line in
-  `guards/unregistered.txt`.
+- Every new guard, gate or scanner ships with a seeded fault that makes it
+  fail, in its owner's file in `guards/faults/` (a new owner starts a file).
+  A scanner's floor (an empty input) and its sentinel get a fault each. Review
+  holds that a new check has its entries; CI holds that every entry fires.
+  The `guards` job seeds the Rust and script faults and the `bindings` job
+  seeds the binding ones, as `mise run guards:fire` does locally, and each
+  fails when a fault doesn't fire. `guards:list` in `check` fails on an entry
+  that no longer applies to the tree, and on a new Falsification note that has
+  no entry and no line in `guards/unregistered.txt`.
 - Tests assert the verdict, not only that something ran or stayed contained.
   CI's `mutants` job fails on a mutant of the changed Rust that no test
   catches, which is what a test that only checks "it returned" leaves behind.

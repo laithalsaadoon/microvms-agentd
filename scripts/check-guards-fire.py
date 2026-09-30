@@ -9,14 +9,15 @@
 The repo asks every new guard to be shown able to fail. Until this script, the proof was a
 sentence in a PR or a Falsification note in a doc comment, and nothing ran it again: a later
 change could leave a test that no longer reaches the code it names, or a scanner whose input
-quietly emptied, and every gate would stay green. `guards/faults.toml` records each proof as a
-fault this script can seed, and `guards/unregistered.txt` lists the notes that don't have one
-yet.
+quietly emptied, and every gate would stay green. The registry, the `*.toml` files in
+`guards/faults/`, records each proof as a fault this script can seed, and
+`guards/unregistered.txt` lists the notes that don't have one yet.
 
 Three subcommands:
 
   `list`  (in `mise run check`; no builds) reads the registry and holds it to the tree:
-          - every entry is well formed (the schema below);
+          - the registry's files load (the loader below): every entry is well formed (the
+            schema below), and no id is in two entries;
           - every transform anchor matches its file exactly once, and every patch passes
             `git apply --check`, so an entry whose target moved fails here instead of
             seeding nothing;
@@ -116,10 +117,13 @@ Three subcommands:
           leave anything behind for a command already restored. The restored line's seconds
           are what the restored pass adds after the last fault's verdict.
 
-          `--affected` selects the entries whose own files changed: the registry text of the
-          entry changed or is new, or a file it names changed between the merge base of HEAD
-          and `--base` (origin/main by default) and the working tree, untracked files and both
-          sides of a rename included. The files are the ones it seeds (transform files, the
+          `--affected` selects the entries whose own files changed: the entry changed or is
+          new against the base's registry, or a file it names changed between the merge base of
+          HEAD and `--base` (origin/main by default) and the working tree, untracked files and
+          both sides of a rename included. The base's registry is read in either layout, its
+          files in `guards/faults/` or the single `guards/faults.toml` it was before the split,
+          and an entry is compared by its table, not by where it sits: one moved to another
+          file unchanged isn't selected. The files are the ones it seeds (transform files, the
           patch and what it touches) and its guard's (the `note`'s path, a path in `guard` or
           in an argv, the script a unit suite tests, the sibling scripts a named script loads
           or imports, the `-p` crate's file that defines a cargo test, the crate's clippy.toml
@@ -212,7 +216,19 @@ What counts as fired, by `expect`:
                  name: the crate's `#![deny(...)]` note prints every name it lists, whichever
                  one fired. The entries on one clippy command fire in a batch (`fire`).
 
-An entry, in `guards/faults.toml`:
+The registry is every `guards/faults/*.toml`, one owner's entries in each (a gate's, a crate's,
+or one issue's guards), and each file starts with a `# ── owner ──` line that says whose.
+The loader reads the files in sorted order and each file's entries in its own order, which is
+the registry order the output and the shards follow. It fails the registry when no file matches
+(the floor), when a file doesn't parse or holds no `[[fault]]`, when two entries share an id,
+in one file or in two (the message names both), and when `guards/faults.toml` exists: that's
+the single file the registry was before it was split by owner, which nothing reads, so an entry
+left there would stop firing without a word. check-agents-md.py and check-ci-parity.py read
+the registry through the same loader (`registry_tables`). A new guard gets its entry in the
+PR that adds it, in its owner's file (a new owner gets a new file), and `fire --only <id>`
+must print `fired` for it. An entry goes when its guard is deleted on purpose, in the same PR.
+
+An entry, in `guards/faults/<owner>.toml`:
 
   [[fault]]
   id = "agentd-fs-pop"          # stable, [a-z0-9-]; `fire --only <id>`
@@ -283,7 +299,14 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-REGISTRY = "guards/faults.toml"
+# The registry: each owner's entries in a `*.toml` file of their own here, and the patches they
+# seed beside them. A PR that adds a guard edits its owner's file, so it doesn't collide with
+# every other open PR that adds one.
+REGISTRY_DIR = "guards/faults"
+REGISTRY = f"{REGISTRY_DIR}/*.toml"
+# The single file the registry was before it was split by owner. Nothing reads it, so an entry
+# a branch from before the split leaves there would stop firing silently: the loader refuses it.
+FORMER_REGISTRY = f"{REGISTRY_DIR}.toml"
 # What every build or command reads: a change to one can move any entry's verdict.
 BUILD_INPUTS = {
     "Cargo.lock",
@@ -398,6 +421,17 @@ class Fault:
     transforms: list[dict] = field(default_factory=list)
     patch: str | None = None
     argv_fault: list[str] | None = None
+    # The registry file the entry is in.
+    file: str | None = None
+
+
+@dataclass(frozen=True)
+class Table:
+    """One `[[fault]]` table as its registry file holds it, before its shape is checked."""
+
+    file: str
+    number: int
+    data: object
 
 
 def runner(argv: list[str]) -> str | None:
@@ -411,36 +445,75 @@ def runner(argv: list[str]) -> str | None:
     return None
 
 
-def load(root: Path) -> tuple[list[Fault], list[str]]:
-    """The registry's entries, and what's wrong with its shape."""
-    path = root / REGISTRY
-    if not path.is_file():
-        return [], [f"{REGISTRY} doesn't exist"]
-    try:
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError as error:
-        return [], [f"{REGISTRY} doesn't parse: {error}"]
-    raw = data.get("fault")
-    if not isinstance(raw, list) or not raw:
-        return [], [f"{REGISTRY} has no [[fault]] entry"]
-    faults: list[Fault] = []
+def registry_file(path: str) -> bool:
+    """Whether a repo-relative path is one of the registry's files."""
+    return path.rpartition("/")[0] == REGISTRY_DIR and path.endswith(".toml")
+
+
+def parse_registry(texts: dict[str, str]) -> tuple[list[Table], list[str]]:
+    """The `[[fault]]` tables of the registry files in `texts` (path to text), in sorted file
+    order, and what's wrong with the files: none at all (the floor), one that doesn't parse,
+    and one that holds no entry."""
+    if not texts:
+        return [], [f"no file matches {REGISTRY}, so the registry has no entry"]
+    tables: list[Table] = []
     problems: list[str] = []
-    seen: set[str] = set()
-    for index, entry in enumerate(raw):
-        where = f"{REGISTRY} entry {index + 1}"
+    for name in sorted(texts):
+        try:
+            data = tomllib.loads(texts[name])
+        except tomllib.TOMLDecodeError as error:
+            problems.append(f"{name} doesn't parse: {error}")
+            continue
+        raw = data.get("fault")
+        if not isinstance(raw, list) or not raw:
+            problems.append(f"{name} has no [[fault]] entry")
+            continue
+        tables += [Table(name, number, entry) for number, entry in enumerate(raw, 1)]
+    return tables, problems
+
+
+def registry_tables(root: Path) -> tuple[list[Table], list[str]]:
+    """The registry's tables in the tree at `root`, and what's wrong with its files, the
+    former single file among them. check-agents-md.py and check-ci-parity.py read the
+    registry through this, so no reader sees other entries than `list` and `fire` do."""
+    texts = {
+        path.relative_to(root).as_posix(): path.read_text(encoding="utf-8")
+        for path in sorted(root.glob(REGISTRY))
+        if path.is_file()
+    }
+    tables, problems = parse_registry(texts)
+    if (root / FORMER_REGISTRY).exists():
+        problems.insert(
+            0,
+            f"{FORMER_REGISTRY} is the single file the registry was before it was split by "
+            f"owner, and nothing reads it: move its entries into their owners' files in "
+            f"{REGISTRY_DIR}/ and delete it",
+        )
+    return tables, problems
+
+
+def load(root: Path) -> tuple[list[Fault], list[str]]:
+    """The registry's entries, and what's wrong with its files and its entries' shapes."""
+    tables, problems = registry_tables(root)
+    faults: list[Fault] = []
+    # Each id's file: an id is unique across the files, not only within one.
+    seen: dict[str, str] = {}
+    for table in tables:
+        entry = table.data
+        where = f"{table.file} entry {table.number}"
         if not isinstance(entry, dict):
             problems.append(f"{where} isn't a table")
             continue
         fid = entry.get("id")
         if isinstance(fid, str):
-            where = f"{REGISTRY} entry {fid!r}"
+            where = f"{table.file} entry {fid!r}"
         bad = [f"{where}: {m}" for m in shape(entry, root)]
         if not bad and fid in seen:
-            bad.append(f"{where}: the id is used twice")
+            bad.append(f"{where}: the id is used twice, here and in {seen[fid]}")
         if bad:
             problems += bad
             continue
-        seen.add(fid)
+        seen[fid] = table.file
         run = entry["run"]
         transform = entry.get("transform")
         faults.append(
@@ -462,6 +535,7 @@ def load(root: Path) -> tuple[list[Fault], list[str]]:
                 ),
                 patch=entry.get("patch"),
                 argv_fault=entry.get("argv_fault"),
+                file=table.file,
             )
         )
     return faults, problems
@@ -997,7 +1071,8 @@ def cmd_list(root: Path, base_ref: str | None) -> int:
         if key not in registered and key not in listed:
             problems.append(
                 f"{key} ({where}) carries a {MARKER} note with no entry in {REGISTRY}; "
-                "register its fault there. New notes can't join the unregistered list"
+                "register its fault in its owner's file there. New notes can't join the "
+                "unregistered list"
             )
     ref = base_ref or default_base(root)
     label = base_ref or ref[:12]
@@ -1842,18 +1917,21 @@ def changed_since(root: Path, ref: str) -> tuple[set[str], str]:
 
 
 def base_entries(root: Path, commit: str) -> dict[str, dict]:
-    """The registry's entries at `commit`, by id. Empty when it has no registry."""
-    spec = f"{commit}:{REGISTRY}"
-    if git(root, "cat-file", "-e", spec, check=False).returncode != 0:
-        return {}
-    try:
-        data = tomllib.loads(git(root, "show", spec).stdout)
-    except tomllib.TOMLDecodeError:
-        return {}
+    """The registry's entries at `commit`, by id, in either layout: its files in REGISTRY_DIR,
+    or FORMER_REGISTRY, the single file it was before the split. A base on either side of the
+    split compares the same way, so the first PR after it doesn't read every entry as new.
+    Empty when `commit` has no registry; a file that doesn't parse gives up no entry."""
+    listed = git(root, "ls-tree", "-z", "--name-only", commit, "--", f"{REGISTRY_DIR}/")
+    names = [n for n in listed.stdout.split("\0") if registry_file(n)]
+    former = git(root, "cat-file", "-e", f"{commit}:{FORMER_REGISTRY}", check=False)
+    if former.returncode == 0:
+        names.append(FORMER_REGISTRY)
+    texts = {n: git(root, "show", f"{commit}:{n}").stdout for n in names}
+    tables, _ = parse_registry(texts)
     return {
-        e["id"]: e
-        for e in data.get("fault", [])
-        if isinstance(e, dict) and isinstance(e.get("id"), str)
+        t.data["id"]: t.data
+        for t in tables
+        if isinstance(t.data, dict) and isinstance(t.data.get("id"), str)
     }
 
 
@@ -2011,8 +2089,8 @@ def affected(
     files = set(git(root, "ls-files", "-z").stdout.split("\0")) | changed
     files.discard("")
     crates = crate_dirs(root, files)
-    current = tomllib.loads((root / REGISTRY).read_text(encoding="utf-8"))["fault"]
-    raw = {e["id"]: e for e in current}
+    tables, _ = registry_tables(root)
+    raw = {t.data["id"]: t.data for t in tables if isinstance(t.data, dict)}
     reasons: dict[str, str] = {}
     this = "scripts/check-guards-fire.py"
     inputs = sorted(
@@ -2032,9 +2110,9 @@ def affected(
                 "and CI runs every command under them"
             )
         elif fault.id not in before:
-            reasons[fault.id] = f"the entry is new in {REGISTRY}"
+            reasons[fault.id] = f"the entry is new in {fault.file}"
         elif before[fault.id] != raw[fault.id]:
-            reasons[fault.id] = f"the entry changed in {REGISTRY}"
+            reasons[fault.id] = f"the entry changed in {fault.file}"
         else:
             hit = sorted(fault_files(root, fault, files, crates) & changed)
             if hit:
