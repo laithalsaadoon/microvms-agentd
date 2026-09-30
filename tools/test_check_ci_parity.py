@@ -576,7 +576,7 @@ class ParityTests(unittest.TestCase):
             '[tasks.lint]\ntools = { ruff = "0.1.0" }\nrun = "ruff check"\n\n[tasks.check]\n',
         )
         self.assertFails(
-            "ruff: mise.toml [tasks.'lint'] tools pins `ruff` = '0.1.0', and [tools] pins "
+            "ruff: mise.toml [tasks.lint] tools pins `ruff` = '0.1.0', and [tools] pins "
             "0.15.22",
             mise=mise,
         )
@@ -607,7 +607,7 @@ class ParityTests(unittest.TestCase):
             '"aqua:lycheeverse/lychee" = "latest"',
         )
         self.assertFails(
-            "[tasks.'docs:links'] tools pins `aqua:lycheeverse/lychee` to latest",
+            'mise.toml [tasks."docs:links"] tools pins `aqua:lycheeverse/lychee` to latest',
             mise=mise,
         )
 
@@ -948,17 +948,50 @@ class ParityTests(unittest.TestCase):
             extra={".github/workflows/other.yml": other},
         )
 
+    def test_the_tasks_in_an_included_file_are_read(self):
+        """mise.toml keeps `[tools]` and `[env]`; every task is in the file it includes."""
+        head, tasks = MISE.split('[tasks."docs:links"]\n', 1)
+        mise = head + '[task_config]\nincludes = ["tasks/*.toml"]\n'
+        included = ('[tasks."docs:links"]\n' + tasks).replace("[tasks.", "[")
+        code, out = self.run_pair(mise=mise, extra={"tasks/all.toml": included})
+        self.assertEqual(code, 0, out)
+        self.assertIn("ci:local runs ci:bindings, ci:drift, ci:rust, ci:security", out)
+        pinned = edit(included, "tools = { ", 'tools = { ruff = "0.1.0", ')
+        self.assertFails(
+            "ruff: tasks/all.toml [\"docs:links\"] tools pins `ruff` = '0.1.0', and [tools]"
+            " pins 0.15.22",
+            mise=mise,
+            extra={"tasks/all.toml": pinned},
+        )
+        dropped = edit(
+            included, '["ci:drift"]\nrun = "./tools/ci-local.py drift"\n', ""
+        )
+        self.assertFails(
+            "no mise task `ci:drift` runs `./tools/ci-local.py drift`",
+            mise=mise,
+            extra={"tasks/all.toml": dropped},
+        )
+
+    def test_a_config_the_task_loader_refuses_is_unreadable(self):
+        mise = MISE + '\n[task_config]\nincludes = ["tasks/*.toml"]\n'
+        self.assertFails("the include `tasks/*.toml` matches no file", mise=mise)
+        self.assertFails(
+            "tasks/a.toml:1: task `check` is also defined at mise.toml:",
+            mise=mise,
+            extra={"tasks/a.toml": "[check]\ndepends = []\n"},
+        )
+
     def test_a_missing_ci_task_fails(self):
         mise = edit(MISE, '[tasks."ci:drift"]\nrun = "./tools/ci-local.py drift"\n', "")
         self.assertFails(
-            "mise.toml has no `ci:drift` task running `./tools/ci-local.py drift`",
+            "no mise task `ci:drift` runs `./tools/ci-local.py drift`",
             mise=mise,
         )
 
     def test_a_ci_task_that_runs_something_else_fails(self):
         mise = edit(MISE, 'run = "./tools/ci-local.py rust"', 'run = "cargo test"')
         self.assertFails(
-            "no `ci:rust` task running `./tools/ci-local.py rust`", mise=mise
+            "no mise task `ci:rust` runs `./tools/ci-local.py rust`", mise=mise
         )
 
     def test_ci_local_missing_a_dependency_fails(self):

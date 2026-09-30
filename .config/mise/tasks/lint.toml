@@ -1,0 +1,71 @@
+# Formatting and lint, for the repository and for the background coding example.
+
+[fmt]
+description = "Format everything (writes)"
+# `ruff format .` rather than a path list, and the whole repo rather than four named
+# directories, because `ruff.toml` now carries the discovery. See `lint` below for the
+# trap that made the list necessary and the `.py` rename that retired it — this line has to
+# stay the same shape as the `--check` one there, or `fmt` would leave work for `lint` to
+# find.
+run = [
+  "cargo fmt --all",
+  "ruff format .",
+  "terraform -chdir=conformance/infra fmt",
+  "terraform -chdir=examples/background-coding-agent/infra fmt -recursive",
+]
+
+[lint]
+description = "Format check + clippy + ruff, no writes"
+# `ruff check .` and `ruff format --check .`, one path each, because the file selection now
+# lives in `ruff.toml` where a config can be reasoned about — and because this line spent its
+# whole life not linting most of the repo.
+#
+# ruff discovers files by **extension** when it walks a directory, and every gate in
+# `tools/` *used to be* an extensionless PEP 723 script. So `ruff check scripts` reported
+# "No Python files found under the given path(s)" as a *warning* and exited 0: measured, the
+# two ruff lines here were reading `conformance/run_rs.py` and nothing else, for as long as
+# they had existed. That is a gate passing over an empty set, which is the failure mode
+# `check-model-drift`'s own header warns about, and it was hiding real findings — naming one
+# script explicitly surfaced F401s in it immediately.
+#
+# Two fixes were tried, and the second is why this comment is shorter than it was. Naming each
+# script here worked for exactly the files someone remembered. `ruff.toml`'s
+# `extend-include = ["tools/*"]` was structural but taught only ruff — the same blindness
+# then turned up in `check-license-headers.py`, which at the time enumerated only
+# `git ls-files "*.rs" "*.py"` (it covers six extensions now)
+# and so had never seen the scripts either (issue #32). The gates are now named
+# `tools/*.py`, which every extension-based enumerator in this repo already understands, and
+# `extend-include` is gone. They keep their shebangs and their executable bit, so
+# `./tools/check-model-drift.py` is still a direct invocation.
+#
+# `./tools/check-lint-coverage.py` is the guard over that, and it is a separate gate on
+# purpose: `ruff check .` would still print "All checks passed!" over nothing. It compares
+# ruff's own `--show-files` answer against every tracked file that is Python by extension
+# **or by shebang**, and names any shortfall. That shebang half is what enforces the rename
+# rather than merely recommending it: a new extensionless script under `tools/` is reported
+# by name as unlinted, measured. Offline, free, milliseconds. Proven able to fail by pointing
+# it at an empty directory, which is the original defect reproduced deliberately.
+run = [
+  "cargo fmt --all -- --check",
+  "cargo clippy --all-targets -- -D warnings",
+  "./tools/check-lint-coverage.py",
+  "ruff check .",
+  "ruff format --check .",
+  "terraform -chdir=conformance/infra fmt -check",
+  "terraform -chdir=examples/background-coding-agent/infra fmt -check -recursive",
+]
+
+["background:check"]
+description = "Check the background coding example"
+run = [
+  "ruff check examples/background-coding-agent",
+  "ruff format --check examples/background-coding-agent",
+  "terraform -chdir=examples/background-coding-agent/infra fmt -check",
+  "terraform -chdir=examples/background-coding-agent/infra init -backend=false -input=false",
+  "terraform -chdir=examples/background-coding-agent/infra validate",
+  "uv run --project examples/background-coding-agent --frozen pytest examples/background-coding-agent/tests",
+]
+
+["background:fmt"]
+description = "Format the background example's Terraform and Python"
+run = ["ruff check --fix examples/background-coding-agent", "ruff format examples/background-coding-agent", "terraform -chdir=examples/background-coding-agent/infra fmt"]

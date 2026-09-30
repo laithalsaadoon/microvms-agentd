@@ -1,0 +1,42 @@
+# ── a daemon 507 is InsufficientStorage, ERR_PLATFORM and not retryable (#256) 
+#
+# Each guard's first fault deletes the 507 arm of `WireKind::from_status`, so a 507 falls back to
+# a retryable `ServerError`. The CLI's second keys its `diskUnderPressure` marker on another kind.
+
+[[fault]]
+id = "wire-507-domain"
+guard = "error::tests::a_disk_pressure_507_is_insufficient_storage_and_not_retryable"
+run = ["cargo", "test", "-p", "microvms-domain", "--lib", "--", "--exact", "error::tests::a_disk_pressure_507_is_insufficient_storage_and_not_retryable"]
+expect = "test-failed"
+suite = "rust"
+message = "507 resolves to Some(ServerError)"
+note = "crates/microvms-domain/src/error.rs::a_disk_pressure_507_is_insufficient_storage_and_not_retryable"
+transform = { file = "crates/microvms-domain/src/error.rs", replace = "            507 => Some(WireKind::InsufficientStorage),\n", with = "" }
+
+[[fault]]
+id = "wire-507-upload"
+guard = "session::files::tests::a_disk_pressure_507_upload_is_insufficient_storage_and_not_retryable"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::files::tests::a_disk_pressure_507_upload_is_insufficient_storage_and_not_retryable"]
+expect = "test-failed"
+suite = "rust"
+message = "right: Some(InsufficientStorage)"
+transform = { file = "crates/microvms-domain/src/error.rs", replace = "            507 => Some(WireKind::InsufficientStorage),\n", with = "" }
+
+[[fault]]
+id = "wire-507-cli"
+guard = "guards::files::a_disk_pressure_507_is_platform_with_the_remedy_not_retryable"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::files::a_disk_pressure_507_is_platform_with_the_remedy_not_retryable"]
+expect = "test-failed"
+suite = "rust"
+message = "cp: a full disk is not retryable-unchanged"
+note = "crates/microvms-cli/src/guards/files.rs::a_disk_pressure_507_is_platform_with_the_remedy_not_retryable"
+transform = { file = "crates/microvms-domain/src/error.rs", replace = "            507 => Some(WireKind::InsufficientStorage),\n", with = "" }
+
+[[fault]]
+id = "wire-507-cli-marker"
+guard = "guards::files::a_disk_pressure_507_is_platform_with_the_remedy_not_retryable"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::files::a_disk_pressure_507_is_platform_with_the_remedy_not_retryable"]
+expect = "test-failed"
+suite = "rust"
+message = "cp: data.diskUnderPressure marks the refusal"
+transform = { file = "crates/microvms-cli/src/exit.rs", replace = "    if error.wire_kind() == Some(WireKind::InsufficientStorage) {\n", with = "    if error.wire_kind() == Some(WireKind::ServerError) {\n" }

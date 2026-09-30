@@ -1,0 +1,49 @@
+# The Rust tiers, the live suite's offline self-test, and mutation testing.
+
+[test]
+description = "All six Rust tiers: unit, model, proptest, turmoil, panic, schema"
+run = "cargo test --all"
+
+# `test:python` was here: 83 client-library tests against a fake daemon over a real
+# loopback socket. The Python tier moved to git history after the Rust port went
+# live-green — both suites passed against real AWS on the same commit (Python oracle
+# 56/56, Rust CLI 38/38), which is what made the oracle's job finished rather than
+# merely duplicated. The Python left in the tree is tooling and binding tests, not a client:
+# `conformance/run_rs.py` drives the Rust CLI, the six `tools/` gates read botocore's model,
+# the Pricing API, the account, and the pyo3 surface, and `bindings/microvms-py/tests` covers the
+# bindings (run in CI against a built wheel, not here — it needs `maturin develop`).
+#
+# Every one of them is linted by `fmt` and `lint`, which is newly true rather than restated:
+# eighteen files are what `ruff.toml` reaches now, against the one file the two ruff lines
+# used to see. `./tools/check-lint-coverage.py` prints the count on every run, which is what
+# keeps this number from drifting the way the live-suite counts above did.
+
+["conformance:self-test"]
+description = "The live suite's own helpers and their negative twins, against a stub CLI. Offline"
+# In `check` for `live:check`'s reason: the helpers decide what a live run reports, and a live
+# run is the one tier nobody runs every time. A twin such as "eq(None, None) must fail" only
+# guards anything if something runs it, and before this task nothing did. uv supplies the
+# script's own pinned dependencies; it makes no AWS call.
+run = "uv run --script conformance/run_rs.py --self-test"
+
+["mutants:check"]
+description = "The mutants wrapper's unit tests, and the skip sites and exclusions it hands cargo-mutants. No builds"
+# The cheap half of `mutants`, in `check` and in CI's `security` job. A fake cargo stands in for
+# cargo-mutants, and the CI job's own steps run from ci.yml over a throwaway repo, so a broken
+# wrapper or step fails here rather than as a green shard that mutated nothing.
+run = "{{vars.pytest}} --with 'pyyaml==6.0.3' pytest -n auto -q -p no:cacheprovider tools/test_check_mutants.py"
+
+[mutants]
+description = "Mutation-test the Rust this branch changes against origin/main; fails on a mutant its tests miss"
+# CI's `mutants` job, unsharded (#275). The wrapper's docstring says what it runs, and
+# `.cargo/mutants.toml` holds the settings and the exclusions. Not in `check` or any hook: each
+# mutant is a build and a test run, and #283's diff took 7 minutes at `-j 4` on a 16-core
+# devbox (67a13cb, 2026-09-28). Arguments after `--` go to the wrapper, and after a second `--` to cargo-mutants:
+# `mise run mutants -- -- --shard 1/4 -j 3`. Uncommitted edits to tracked files are in the
+# diff it mutates; a new file needs `git add` first.
+#
+# A per-task tool, for the lychee task's reason: nothing else needs it on a fresh clone. mise
+# builds it from source (mise.toml's `[settings]` says why), about three minutes the first
+# time. CI installs the same version's release binary by checksum.
+tools = { "cargo:cargo-mutants" = "27.1.0" }
+run = "./tools/check-mutants.py"

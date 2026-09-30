@@ -146,3 +146,78 @@ expect = "test-failed"
 suite = "rust"
 message = "the end of stream came before the close"
 transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "    if let Ok(Some(end)) = seal(noise, &[], scratch) {\n        let _ = socket.send(Message::Binary(end.into())).await;\n    }\n", with = "    let _ = (&noise, &scratch);\n" }
+
+# ── the tunnel model's defenses, each switched off in the model (#297) ─────────────
+
+# The daemon's pin accepts any caller key: the token holder completes a handshake. Under KK no
+# one-sided change in the daemon does this, so the model is where the pin's fault can be seeded.
+[[fault]]
+id = "model-tunnel-daemon-pin-off"
+guard = "tunnel::tests::agentd_17_a_token_holder_without_the_host_key_is_refused_before_any_dial"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "tunnel::tests::agentd_17_a_token_holder_without_the_host_key_is_refused_before_any_dial"]
+expect = "test-failed"
+suite = "rust"
+message = "breaks \"AGENTD-17"
+transform = { file = "crates/model/src/tunnel.rs", replace = "to == VmKey::Pinned && (from == HostKey::Launcher || variant == Variant::DaemonPinOff)", with = "to == VmKey::Pinned && (from == HostKey::Launcher || variant != Variant::DaemonPinOff)" }
+
+# The client's pin accepts a reply from any key: an impostor reads the upload.
+[[fault]]
+id = "model-tunnel-client-pin-off"
+guard = "tunnel::tests::bind_21_an_impostor_far_end_gets_no_local_byte_and_writes_none"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "tunnel::tests::bind_21_an_impostor_far_end_gets_no_local_byte_and_writes_none"]
+expect = "test-failed"
+suite = "rust"
+message = "breaks \"BIND-21"
+transform = { file = "crates/model/src/tunnel.rs", replace = "if from == VmKey::Pinned || variant == Variant::ClientPinOff {", with = "if from == VmKey::Pinned || variant != Variant::ClientPinOff {" }
+
+# A frame opens at any later position: a dropped frame goes unnoticed.
+[[fault]]
+id = "model-tunnel-frames-open-past-their-position"
+guard = "tunnel::tests::the_specified_tunnel_holds_every_property_against_a_path_attacker"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "tunnel::tests::the_specified_tunnel_holds_every_property_against_a_path_attacker"]
+expect = "test-failed"
+suite = "rust"
+message = "breaks \"BIND-24"
+transform = { file = "crates/model/src/tunnel.rs", replace = "&& (seq == client.next_in || variant == Variant::NoNonce);", with = "&& (seq >= client.next_in || variant == Variant::NoNonce);" }
+
+# The client reads a close without the daemon's end of stream as a clean end, as before #342.
+[[fault]]
+id = "model-tunnel-unproven-close-read-as-clean"
+guard = "tunnel::tests::the_specified_tunnel_holds_every_property_against_a_path_attacker"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "tunnel::tests::the_specified_tunnel_holds_every_property_against_a_path_attacker"]
+expect = "test-failed"
+suite = "rust"
+message = "breaks \"BIND-23"
+transform = { file = "crates/model/src/tunnel.rs", replace = "} else if client.far_offered {\n            End::Truncated", with = "} else if client.far_offered {\n            End::Closed" }
+
+# The daemon closes the guest's connection on a caller end nothing proves, as before #342.
+[[fault]]
+id = "model-tunnel-cut-upload-closes-the-guest"
+guard = "tunnel::tests::the_specified_tunnel_holds_every_property_against_a_path_attacker"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "tunnel::tests::the_specified_tunnel_holds_every_property_against_a_path_attacker"]
+expect = "test-failed"
+suite = "rust"
+message = "breaks \"AGENTD-20"
+transform = { file = "crates/model/src/tunnel.rs", replace = "        {\n            GuestRead::Reset\n        } else {", with = "        {\n            GuestRead::Eof\n        } else {" }
+
+# ── frames that don't authenticate at their position (#297) ──────────────────
+
+# The daemon skips a frame that doesn't authenticate instead of ending the tunnel.
+[[fault]]
+id = "agentd21-bad-frame-skipped"
+guard = "agentd_21_a_replayed_frame_ends_the_tunnel_unrelayed"
+run = ["cargo", "test", "-p", "agentd", "--test", "tunnel_relay", "--", "--exact", "agentd_21_a_replayed_frame_ends_the_tunnel_unrelayed"]
+expect = "test-failed"
+suite = "rust"
+message = "the daemon ends the guest connection"
+transform = { file = "crates/agentd/src/tunnel.rs", replace = "                Err(error) => {\n                    Inbound::Failed(format!(\"a tunnel frame did not authenticate: {error}\"))\n                }", with = "                Err(_) => Inbound::Bytes(Vec::new())," }
+
+# The client skips a frame that doesn't authenticate instead of failing the tunnel.
+[[fault]]
+id = "bind24-bad-frame-skipped"
+guard = "bind_24_a_replayed_frame_fails_the_tunnel_unwritten"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "tunnel_end_of_stream", "--", "--exact", "bind_24_a_replayed_frame_fails_the_tunnel_unwritten"]
+expect = "test-failed"
+suite = "rust"
+message = "the relay ends the local connection"
+transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "                            })?;\n                            // The daemon's end of stream", with = "                            }).unwrap_or(usize::MAX);\n                            if count == usize::MAX {\n                                continue;\n                            }\n                            // The daemon's end of stream" }

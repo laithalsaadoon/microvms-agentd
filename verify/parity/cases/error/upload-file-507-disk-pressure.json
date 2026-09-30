@@ -7,17 +7,9 @@
   },
   "expect": {
     "error": {
-      "code": "ERR_RETRYABLE",
-      "wire_kind": "ServerError",
-      "retryable": true
-    }
-  },
-  "known_drift": {
-    "ts": {
-      "issue": "#256",
-      "keys": [
-        "error.retryable"
-      ]
+      "code": "ERR_PLATFORM",
+      "wire_kind": "InsufficientStorage",
+      "retryable": false
     }
   }
 }

@@ -351,7 +351,8 @@ pub struct AgentImageOptions {
 #[derive(Default)]
 #[napi(object)]
 pub struct AgentLaunchOptions {
-    /// The image ARN from `findImage` or `buildImage`.
+    /// The image ARN from `findImage` or `buildImage`, or a bare image name, which the core
+    /// resolves with one `ListMicrovmImages` read.
     pub image_identifier: String,
     /// The execution role. Optional in the model; every real launch needs one.
     pub execution_role_arn: Option<String>,
