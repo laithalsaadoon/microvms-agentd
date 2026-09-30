@@ -57,7 +57,8 @@ from local test results.
 - `crates/model/`, `verify/spec/`, `conformance/`: portable model tests, formal requirements,
   and live AWS checks.
 - `crates/model-conformance/`: unpublished, tests only; drives the app's policies and
-  `Sandbox` over the models' rows and paths.
+  `Sandbox` over the models' rows and paths, and the daemon's tunnel route against the
+  client's, the one place both halves meet.
 - `verify/arch/placement.toml`, `verify/ratchet/`: each crate's allowed dependencies and the
   drift count (see Architecture).
 
@@ -135,8 +136,8 @@ domain's, the app's and core's sets never carry drift. For placement the ratchet
 reads no manifest: it reads each tree's drift tables, and refuses drift the base
 doesn't have and a crate added to a set the base has.
 The ratchet's port-impl collector reads the app and core as
-well as the adapters, so a port implemented anywhere but the edges is drift or
-a recorded decision. Forbidden calls are refused by each adapter's
+well as the adapters, and the category is enforced, so a port implemented
+anywhere but the edges fails `ratchet:check` unless a decision records why. Forbidden calls are refused by each adapter's
 `clippy.toml`, and `tools/test_ratchet.py` lists every site that turns those
 lints off. The CLI's `clippy.toml` also refuses core's transport calls and its
 production constructors outside `crates/microvms-cli/src/seam.rs`, and the bindings refuse the

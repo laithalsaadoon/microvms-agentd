@@ -17,8 +17,9 @@ directory first on its module search path, whatever the working directory:
   has them, are in the `selftest/` module of the same name.
 
 - Offline first: `./conformance/run_rs.py --self-test` exercises the suite's own helpers and
-  their negative twins, and `mise run live:check` checks the live tier's wiring in `mise.toml`.
-  Both are free, and `mise run check` runs both (the first as `conformance:self-test`).
+  their negative twins, and `mise run live:check` checks the live tier's wiring in
+  `.config/mise/tasks/live.toml`. Both are free, and `mise run check` runs both (the first as
+  `conformance:self-test`).
 - `results.eq` fails when either side is `None`, because that's what a missing key reads as
   through `.get()`. A check that expects nothing on purpose uses `results.absent`.
 - Live runs: `mise run live` for everything, or `mise run live:conformance-rs` for this suite.

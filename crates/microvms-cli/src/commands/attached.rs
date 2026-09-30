@@ -1517,35 +1517,6 @@ fn sync_failure(error: crate::sync::SyncError) -> CliError {
         .suggest("the failure is on this machine's filesystem; the platform was not involved")
 }
 
-/// Re-classifies the daemon's disk-pressure refusal; everything else converts as usual.
-///
-/// The daemon answers 507 when a write would take the target filesystem under its
-/// configured reserve, and its own rationale (`crates/agentd/src/fs.rs`) says why the default
-/// classification is wrong for it: a 507 arrives as a 5xx, 5xx maps to `ERR_RETRYABLE`,
-/// and retrying an identical upload against a full disk is "correct for a defect and
-/// actively harmful for a full disk". So the one status whose remedy is *free space, then
-/// retry* is surfaced as `ERR_PLATFORM` — the row for a platform-side condition — with the
-/// daemon's own byte counts kept in the message and the remedy attached. No new exit code:
-/// the vocabulary already has the right row, the default mapping just cannot know this
-/// body means "not until space is freed".
-fn classify_upload(error: microvms_core::Error) -> CliError {
-    let pressure = error.wire_kind() == Some(microvms_core::WireKind::ServerError)
-        && error.to_string().contains("-> 507");
-    if !pressure {
-        return error.into();
-    }
-    CliError::new(
-        Exit::Platform,
-        format!(
-            "the VM's disk is under pressure: {error}. diskUnderPressure means a write \
-             would be refused right now; the sync was not applied."
-        ),
-    )
-    .suggest("free space in the VM: `microvm exec --name <vm> -- rm -rf /workspace/<big-dir>`")
-    .suggest("`microvm health` reports diskAvailableBytes and diskUnderPressure")
-    .with_data("diskUnderPressure", json!(true))
-}
-
 /// What one sync pass did, for the envelope and the watch loop's running totals.
 struct SyncPass {
     uploaded_bytes: usize,
@@ -1646,8 +1617,7 @@ async fn sync_pass<O: std::io::Write, E: std::io::Write>(
         ));
         session
             .upload_tar(crate::sync::REMOTE_WORKDIR, &packed.archive)
-            .await
-            .map_err(classify_upload)?;
+            .await?;
         uploaded_bytes = packed.archive.len();
         uploaded_members = packed.members;
     }
@@ -1719,8 +1689,7 @@ async fn sync_pass<O: std::io::Write, E: std::io::Write>(
     })?;
     session
         .upload_file(crate::sync::MANIFEST_PATH, &body, None)
-        .await
-        .map_err(classify_upload)?;
+        .await?;
 
     Ok(SyncPass {
         uploaded_bytes,
@@ -2700,6 +2669,8 @@ pub async fn tunnel<O: std::io::Write, E: std::io::Write>(
     // task and the envelope is written after the loop.
     let served = Arc::new(AtomicU32::new(0));
     let refused = Arc::new(AtomicU32::new(0));
+    let truncated = Arc::new(AtomicU32::new(0));
+    let unproven = Arc::new(AtomicU32::new(0));
     let mut refusals: Vec<String> = Vec::new();
     let mut interrupted = false;
     let mut interrupt = interrupt;
@@ -2739,6 +2710,8 @@ pub async fn tunnel<O: std::io::Write, E: std::io::Write>(
         let token = Arc::clone(&agent_token);
         let auth = Arc::clone(&auth);
         let refused = Arc::clone(&refused);
+        let truncated = Arc::clone(&truncated);
+        let unproven = Arc::clone(&unproven);
         let identity = identity.clone();
         tasks.push(tokio::spawn(async move {
             let outcome = match &identity {
@@ -2754,6 +2727,16 @@ pub async fn tunnel<O: std::io::Write, E: std::io::Write>(
             };
             match outcome {
                 Ok(core_tunnel::TunnelEnd::Closed) => None,
+                // Warned about once after the loop rather than per connection: it's the daemon
+                // in the image, the same for every connection.
+                Ok(core_tunnel::TunnelEnd::ClosedUnproven) => {
+                    unproven.fetch_add(1, Ordering::SeqCst);
+                    None
+                }
+                Ok(core_tunnel::TunnelEnd::Truncated { code }) => {
+                    truncated.fetch_add(1, Ordering::SeqCst);
+                    Some(truncated_warning(peer, code))
+                }
                 Ok(core_tunnel::TunnelEnd::Refused { code, reason }) => {
                     refused.fetch_add(1, Ordering::SeqCst);
                     // The relay's own sentence when it sent one, and core's explanation of the
@@ -2784,6 +2767,11 @@ pub async fn tunnel<O: std::io::Write, E: std::io::Write>(
     for detail in &refusals {
         ctx.out.warn(detail);
     }
+    let truncated = truncated.load(Ordering::SeqCst);
+    let unproven = unproven.load(Ordering::SeqCst);
+    if let Some(warning) = unproven_warning(unproven) {
+        ctx.out.warn(&warning);
+    }
 
     let served = served.load(Ordering::SeqCst);
     let refused = refused.load(Ordering::SeqCst);
@@ -2796,6 +2784,9 @@ pub async fn tunnel<O: std::io::Write, E: std::io::Write>(
     data.insert("guestPort".into(), json!(guest_port));
     data.insert("connectionsServed".into(), json!(served));
     data.insert("connectionsRefused".into(), json!(refused));
+    // Verified connections only: a plain tunnel has no end of stream to miss.
+    data.insert("connectionsTruncated".into(), json!(truncated));
+    data.insert("connectionsUnproven".into(), json!(unproven));
     // The same observable `port-forward` publishes, and for the same reason: a token cached
     // forever and one refreshed on schedule produce identical successful tunnels.
     data.insert("proxyTokenMints".into(), json!(mints));
@@ -2803,7 +2794,8 @@ pub async fn tunnel<O: std::io::Write, E: std::io::Write>(
 
     let text = format!(
         "tunnelled localhost:{} -> {microvm_id} tcp/{guest_port}\n\
-         connections: {served} served, {refused} refused\n\
+         connections: {served} served, {refused} refused, {truncated} cut short, {unproven} \
+         unproven\n\
          proxy tokens minted: {mints}\n\
          stopped: {}",
         bound.port(),
@@ -2814,12 +2806,38 @@ pub async fn tunnel<O: std::io::Write, E: std::io::Write>(
         }
     );
     let dense = format!(
-        "tunnel {}->{guest_port} served={served} refused={refused} mints={mints}",
+        "tunnel {}->{guest_port} served={served} refused={refused} truncated={truncated} \
+         unproven={unproven} mints={mints}",
         bound.port()
     );
 
     let (kind, _) = response_type("tunnel");
     Ok(Rendered::ok(kind, data, text, dense))
+}
+
+/// The warning for one verified connection that ended `Truncated`, naming how it ended.
+fn truncated_warning(peer: std::net::SocketAddr, code: Option<u16>) -> String {
+    let how = code.map_or_else(
+        || "the connection dropped".to_string(),
+        |code| format!("a close frame with code {code} arrived"),
+    );
+    format!(
+        "the verified tunnel from {peer} ended without the daemon's end of stream ({how}), so \
+         what it relayed may have been cut short on the path. Every byte that arrived was \
+         authenticated; check the transfer's length or digest before relying on it."
+    )
+}
+
+/// The one warning for a run's `ClosedUnproven` connections, or `None` when there were none.
+fn unproven_warning(unproven: u32) -> Option<String> {
+    (unproven > 0).then(|| {
+        format!(
+            "{unproven} verified connection(s) ended without proof that the stream finished: \
+             the daemon in this VM's image predates the tunnel's end of stream, so a stream cut \
+             short on the path would have looked the same. An image built with a current \
+             daemon proves each end."
+        )
+    })
 }
 
 // ── shell ───────────────────────────────────────────────────────────────────
@@ -3032,6 +3050,25 @@ fn sync_client_wait(budget: Duration) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A cut-short connection's warning names the peer and how it ended, and the unproven one
+    /// appears once there's a connection to report and never before (#342).
+    #[test]
+    fn the_end_of_stream_warnings_name_what_happened() {
+        let peer: std::net::SocketAddr = "127.0.0.1:50000".parse().expect("an address");
+        let closed = truncated_warning(peer, Some(1000));
+        assert!(closed.contains("127.0.0.1:50000"), "{closed}");
+        assert!(closed.contains("code 1000"), "{closed}");
+        assert!(closed.contains("cut short"), "{closed}");
+        let dropped = truncated_warning(peer, None);
+        assert!(dropped.contains("the connection dropped"), "{dropped}");
+
+        assert_eq!(unproven_warning(0), None);
+        let one = unproven_warning(1).expect("one connection is worth a warning");
+        assert!(one.starts_with("1 verified connection(s)"), "{one}");
+        assert!(one.contains("predates"), "{one}");
+        assert!(unproven_warning(3).is_some_and(|text| text.starts_with("3 ")));
+    }
 
     /// **The direction grammar, including both ways it can be wrong.**
     ///

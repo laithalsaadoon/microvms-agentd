@@ -1144,7 +1144,10 @@ export interface AgentImageOptions {
 
 /** Everything a launch takes beyond what the layer fixes (egress on, the image). */
 export interface AgentLaunchOptions {
-  /** The image ARN from `findImage` or `buildImage`. */
+  /**
+   * The image ARN from `findImage` or `buildImage`, or a bare image name, which the core
+   * resolves with one `ListMicrovmImages` read.
+   */
   imageIdentifier: string
   /** The execution role. Optional in the model; every real launch needs one. */
   executionRoleArn?: string
@@ -1718,6 +1721,18 @@ export declare function installAgentAccess(session: Session, agents: Array<Agent
  */
 export declare function installedAgents(session: Session): Promise<Array<AgentSpec>>
 
+/**
+ * Whether retrying the identical call could plausibly succeed, for an error this library raised.
+ *
+ * The TypeScript spelling of Python's `.retryable`, read off the chain every error here
+ * carries: `err.cause.message` is the `ERR_*` code, and core answers for its kind. A
+ * transient condition (a refused connection, a mint failure, a daemon not yet bootstrapped)
+ * is `true`; a full disk, a credential, or a refused argument is `false`. Anything that
+ * isn't a library error (no cause, or a cause whose message is no `ERR_*` code) is `false`,
+ * because nothing says a retry would land differently.
+ */
+export declare function isRetryable(error: unknown): boolean
+
 /** The options bag for `keepAwake`. */
 export interface KeepAwakeOptions {
   /** Seconds between polls. Default: a third of the idle window, at most 20. */
@@ -2011,7 +2026,12 @@ export interface ProvisionOptions {
 
 /** Everything a launch needs. */
 export interface RunOptions {
-  /** The image to launch, or omitted for the one `buildImage` built. */
+  /**
+   * The image to launch, as an ARN or a bare image name, or omitted for the one
+   * `buildImage` built. The core resolves a name to its ARN with one `ListMicrovmImages`
+   * read, and a name no image carries is refused with `ERR_PRECONDITION` before anything
+   * launches.
+   */
   imageIdentifier?: string
   /**
    * `imageVersion`, or omitted for the image's own latest active version.

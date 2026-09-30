@@ -61,18 +61,34 @@ issue = "#226"
 [AGENTD-16]
 issue = "#224"
 
-# The tunnel's identity keys, AGENTD-17 and AGENTD-18 here and BIND-21 in BIND.toml, share their
-# model and gherkin waivers, so a change to one is a change to all three. #297's handshake model
-# removes the model waiver, and its frame harnesses the fuzz ones.
+# The tunnel's keys, AGENTD-17 to AGENTD-21 here and BIND-21, BIND-23 and BIND-24 in BIND.toml,
+# share their gherkin waiver, so a change to one is a change to all of them. crates/model/src/
+# tunnel.rs carries their model layer, and #297's frame harnesses remove the fuzz waivers.
 [AGENTD-17]
 issue = "#297"
-waive.model = "#297 adds a stateright model of the tunnel handshake and its pins; until then the handshake and relay tests hold the key"
 waive.gherkin = "no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate"
 waive.fuzz = "#297 adds a harness over the daemon's tunnel frame read"
 waive.live = "no live check presents another host key: that needs a second host identity for one VM, and the relay tests drive the daemon's real route with one"
 
 [AGENTD-18]
 issue = "#297"
-waive.model = "#297 adds a stateright model of the tunnel handshake and its pins; until then the handshake and relay tests hold the key"
 waive.gherkin = "no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate"
 waive.fuzz = "#297 adds a harness over the daemon's tunnel frame read"
+
+[AGENTD-19]
+issue = "#342"
+waive.gherkin = "no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate"
+waive.fuzz = "#297 adds a harness over the daemon's tunnel frame read"
+waive.live = "the live suite's BIND-23 check observes it: the client reads Closed through the real proxy only when this end of stream crossed it"
+
+[AGENTD-20]
+issue = "#342"
+waive.gherkin = "no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate"
+waive.fuzz = "#297 adds a harness over the daemon's tunnel frame read"
+waive.live = "a live run can't cut the endpoint proxy's connection mid-stream or withhold one frame, so no live check presents a caller end without its end of stream; the relay tests drive the daemon's real route"
+
+[AGENTD-21]
+issue = "#297"
+waive.gherkin = "no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate"
+waive.fuzz = "#297 adds a harness over the daemon's tunnel frame read"
+waive.live = "a live daemon and the endpoint proxy neither replay nor forge a frame, so a live run can't present one; the relay tests send both to the daemon's real route"

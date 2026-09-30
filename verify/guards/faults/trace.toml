@@ -180,7 +180,7 @@ run = ["./tools/check-trace.py", "--check"]
 expect = "exit-nonzero"
 suite = "script"
 message = "drop it from KEYLESS"
-transform = { file = "crates/microvms-edges/tests/release_bundle.rs", replace = "#[test]\nfn the_release_bundle_verifies_under_the_embedded_trusted_root() {", with = "/// CLI-7\n#[test]\nfn the_release_bundle_verifies_under_the_embedded_trusted_root() {" }
+transform = { file = "crates/agentd/fuzz/fuzz_targets/tar_extract.rs", replace = "fuzz_target!(|data: &[u8]| {", with = "/// CLI-7\nfuzz_target!(|data: &[u8]| {" }
 
 # The unit suite's own breaks, one per rule branch #276 added (its report's B rows).
 [[fault]]

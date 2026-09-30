@@ -680,7 +680,7 @@ def drive_token_rotation(cli: Cli, launched: Envelope, results: Results) -> None
     watch a token expire would cost more than every other section combined and would test
     AWS's clock, not this contract — so what is exercised is the *mechanism* the survival
     rests on: a fresh attach mints a fresh proxy token (`CoreSeam::attach_session` builds a
-    new `PlaneMinter` per invocation, so every `microvm` process here is a new token), and
+    new `ControlPlaneMinter` per invocation, so every `microvm` process here is a new token), and
     the reattach carries **no client state at all** beyond the three identifiers a harness
     would have persisted. If the daemon's ack-before-TTL property held only for the process
     that started the exec, this is the section that would say so.

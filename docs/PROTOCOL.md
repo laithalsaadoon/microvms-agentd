@@ -25,7 +25,7 @@ never gets bootstrapped.
 | `POST /v1/exec/{id}/ack` | bearer | release output, enter TTL collection |
 | `POST /v1/exec/{id}/kill` | bearer | signal escalation to the process group |
 | `GET /v1/procs` | bearer | process accounting: every exec's group and its live pids, read from `/proc` |
-| `GET /v1/tcp?port=&identity=` | bearer | WebSocket relay to `127.0.0.1:<port>` in the guest; close codes carry the outcome |
+| `GET /v1/tcp?port=&identity=` | bearer | WebSocket relay to `127.0.0.1:<port>` in the guest; close codes carry the outcome, and a verified tunnel's clean end is its [end of stream](#the-verified-tunnels-end-of-stream) |
 | `PUT /v1/fs/tar` | bearer | streaming tar upload and confined extraction |
 | `GET /v1/fs/tar?path=` | bearer | streaming tar download |
 | `PUT /v1/fs/file` | bearer | write one file |
@@ -521,6 +521,54 @@ and `proxy_mint_count()` is the observable that says so.
 **A caller debugging a failed WebSocket should retry the same port over HTTPS with
 `connect_headers`.** Every handshake failure is 1006 and none of them says why; the HTTPS
 request distinguishes 403 (wrong scope) from 502 (right scope, nothing listening).
+
+## The verified tunnel's end of stream
+
+A tunnel opened with `identity=true` runs a Noise KK handshake before it relays anything
+(`crates/protocol/src/identity.rs`), and each relayed chunk after it is one Noise transport
+message in one binary frame. The close frame that ends a tunnel is plaintext, because it has to
+reach a caller whose handshake failed, so anything on the path can send one or drop the
+connection. Before #342 both ends read either as a finished stream, so a transfer cut short
+looked complete. The end of a verified stream is now a message inside the session:
+
+- **The end of stream is a transport message with an empty plaintext.** Neither side relays an
+  empty read, so it can't be a chunk. It decrypts only at its own position in the stream (the
+  nonce is a counter), so it also proves every message before it arrived, in order, with none
+  added, which is why it carries no byte counts.
+- **The daemon sends it when the guest's side reaches EOF**, after the last byte the guest sent
+  and before its close frame (code 1000). A failed dial, a failed guest read and a guest that
+  stops accepting bytes end without one.
+- **The client sends it when its local side ends**, at EOF or when the local client goes away,
+  before its close frame. A WebSocket close is a whole close: the tunnel ends at the first
+  side's end, and bytes the other side still had in flight aren't relayed.
+- **Each side offers it in its handshake message's payload**, a flags byte of `0x01`
+  (`protocol::identity::HANDSHAKE_PAYLOAD`), and holds the other side to it only when the other
+  side offered it. The payloads are inside the handshake's encryption and its hash, so an
+  on-path party can't strip the offer the way it could strip a query flag.
+
+What each side does when the tunnel ends without the end of stream of a peer that offered it:
+
+| Side | The tunnel ends with | Outcome |
+| --- | --- | --- |
+| Client | a close frame with code 1000 or no code, a transport error, or a hangup | `TunnelEnd::Truncated`, a failure |
+| Client | a close frame with one of the daemon's failure codes | `TunnelEnd::Refused` with the code, as before |
+| Daemon | a close frame, a transport error, a hangup, or a frame that doesn't authenticate | the guest connection is reset rather than closed, so a guest reading to its EOF sees a broken stream |
+
+**Older peers.** A release from before the end of stream writes an empty handshake payload and
+never sends one, and it reads the other side's end of stream as a message with nothing in it. A
+current client ends a clean-looking tunnel into an older daemon as `TunnelEnd::ClosedUnproven`,
+which `microvm tunnel` warns about and counts as `connectionsUnproven`, rather than failing it; a
+current daemon takes an older client's close as its end, as it always did. The rule stays that
+way: daemons ship in images, so requiring the end of stream would fail every verified tunnel
+into an image built before it. `PROTOCOL_VERSION` stays `1`, and `docs/schema.json` doesn't
+change, because the route, its query and its close codes are what they were.
+
+A plain tunnel (no `identity`) has no end of stream. None of its frames are authenticated, so its
+close is its end.
+
+The model in `crates/model/src/tunnel.rs` checks these rules, the two pins, and the frames'
+positions over every interleaving with a path that drops, replays, swaps or forges frames and
+hangs up (AGENTD-17 to AGENTD-21, BIND-21, BIND-23 and BIND-24).
 
 ## Trust boundary
 

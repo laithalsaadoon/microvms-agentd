@@ -114,7 +114,7 @@ impl Error {
     /// five retryable daemon conditions all map to [`ErrorKind::Retryable`], which
     /// is what makes this one comparison instead of a second table.
     pub fn retryable(&self) -> bool {
-        matches!(self.kind, ErrorKind::Retryable)
+        self.kind.retryable()
     }
 }
 
@@ -178,6 +178,15 @@ impl ErrorKind {
         ErrorKind::Precondition,
         ErrorKind::ExecFailed,
     ];
+
+    /// Whether a failure of this kind could plausibly succeed on an identical retry.
+    ///
+    /// The one answer [`Error::retryable`] reads, public so a binding that carries only
+    /// the code across its boundary (the TypeScript one) asks this rather than keeping a
+    /// list of retryable codes of its own.
+    pub fn retryable(self) -> bool {
+        matches!(self, ErrorKind::Retryable)
+    }
 
     /// The `ERR_*` string, byte-identical to `cli.py`'s `Code` member.
     ///
@@ -246,8 +255,15 @@ pub enum WireKind {
     /// Not 404 and not a dropped connection. Retry: the platform is about to
     /// deliver the token.
     NotBootstrapped,
-    /// 5xx other than 503: spawn failure, io failure, a panicking task.
+    /// 5xx other than 503 and 507: spawn failure, io failure, a panicking task.
     ServerError,
+    /// 507: a write would take the target filesystem under the daemon's disk reserve.
+    ///
+    /// Not retryable, and that's why the daemon answers 507 rather than 500
+    /// (`crates/agentd/src/fs.rs`): an identical retry against a full disk fails the
+    /// same way, and a retry loop keyed on a 5xx would repeat it. The body names the
+    /// free and reserved bytes. The remedy is freeing space, then retrying.
+    InsufficientStorage,
     /// The request never produced a status: connection refused, reset, timeout.
     ///
     /// Retryable because it says nothing about the daemon's state. A VM that has
@@ -269,7 +285,7 @@ pub enum WireKind {
 
 impl WireKind {
     /// Every variant, so a test can assert the mapping is total.
-    pub const ALL: [WireKind; 13] = [
+    pub const ALL: [WireKind; 14] = [
         WireKind::Unauthorized,
         WireKind::ProtocolError,
         WireKind::NotFound,
@@ -279,6 +295,7 @@ impl WireKind {
         WireKind::RequestTimeout,
         WireKind::NotBootstrapped,
         WireKind::ServerError,
+        WireKind::InsufficientStorage,
         WireKind::Transport,
         WireKind::AuthTokenMint,
         WireKind::ExecTimeout,
@@ -300,6 +317,7 @@ impl WireKind {
             WireKind::RequestTimeout => "RequestTimeout",
             WireKind::NotBootstrapped => "NotBootstrapped",
             WireKind::ServerError => "ServerError",
+            WireKind::InsufficientStorage => "InsufficientStorage",
             WireKind::Transport => "Transport",
             WireKind::AuthTokenMint => "AuthTokenMint",
             WireKind::ExecTimeout => "ExecTimeout",
@@ -307,7 +325,7 @@ impl WireKind {
         }
     }
 
-    /// The status that produces this variant, for the nine that come from one.
+    /// The status that produces this variant, for the ones that come from one.
     ///
     /// `None` for the four that have no status: two never got a response
     /// ([`WireKind::Transport`], [`WireKind::AuthTokenMint`]) and two are client-side
@@ -323,6 +341,7 @@ impl WireKind {
             WireKind::TooLarge => Some(413),
             WireKind::ServerError => Some(500),
             WireKind::NotBootstrapped => Some(503),
+            WireKind::InsufficientStorage => Some(507),
             WireKind::Transport
             | WireKind::AuthTokenMint
             | WireKind::ExecTimeout
@@ -339,7 +358,8 @@ impl WireKind {
     /// phantom-missing-file defect that hid in the Python client for a review
     /// round. 5xx does fall back — to [`WireKind::ServerError`], which is what
     /// `errors.py` does — because every 5xx means the same thing to a caller:
-    /// the daemon broke, try again.
+    /// the daemon broke, try again. The two the daemon chooses on purpose keep their
+    /// own variants: 503 is "come back in a moment", and 507 is "free space first".
     pub fn from_status(status: u16) -> Option<WireKind> {
         match status {
             400 => Some(WireKind::ProtocolError),
@@ -350,6 +370,8 @@ impl WireKind {
             410 => Some(WireKind::StdinClosed),
             413 => Some(WireKind::TooLarge),
             503 => Some(WireKind::NotBootstrapped),
+            // Before the 5xx fallback, which would make a full disk retryable.
+            507 => Some(WireKind::InsufficientStorage),
             s if s >= 500 => Some(WireKind::ServerError),
             _ => None,
         }
@@ -393,6 +415,9 @@ impl WireKind {
             // daemon refusing the request, and not retryable — the bytes are gone.
             // `cli.py` reaches ERR_PLATFORM for it too, and this one is right.
             WireKind::OutputGap => ErrorKind::Platform,
+            // A condition of the VM rather than of the request, and not retryable
+            // until space is freed: the row the CLI's `sync` already reported it on.
+            WireKind::InsufficientStorage => ErrorKind::Platform,
         }
     }
 
@@ -530,13 +555,64 @@ mod tests {
 
     /// 5xx *does* fall back, because every 5xx means the same thing to a caller.
     /// 503 is the exception and keeps its own variant: "come back in a moment" is
-    /// not "the daemon broke".
+    /// not "the daemon broke". 507 is the other one, below.
     #[test]
     fn five_hundreds_fall_back_to_server_error_except_the_bootstrap_one() {
         assert_eq!(WireKind::from_status(500), Some(WireKind::ServerError));
         assert_eq!(WireKind::from_status(502), Some(WireKind::ServerError));
+        assert_eq!(WireKind::from_status(506), Some(WireKind::ServerError));
+        assert_eq!(WireKind::from_status(508), Some(WireKind::ServerError));
         assert_eq!(WireKind::from_status(599), Some(WireKind::ServerError));
         assert_eq!(WireKind::from_status(503), Some(WireKind::NotBootstrapped));
+    }
+
+    /// A 507 is `InsufficientStorage`, `ERR_PLATFORM`, and not retryable (#256).
+    ///
+    /// The daemon answers 507 when a write would take the filesystem under its disk
+    /// reserve, and it chose 507 over 500 because a client retries a 500: right for a
+    /// defect, harmful for a full disk. The 5xx fallback would have made it
+    /// `ServerError`, one of the retryable five, on every surface at once.
+    ///
+    /// **Falsification**: delete the 507 arm from `from_status` and this is red, since
+    /// 507 then resolves to `ServerError` and its error is `ERR_RETRYABLE`.
+    #[test]
+    fn a_disk_pressure_507_is_insufficient_storage_and_not_retryable() {
+        let wire = WireKind::from_status(507);
+        assert_eq!(
+            wire,
+            Some(WireKind::InsufficientStorage),
+            "507 resolves to {wire:?}"
+        );
+        let err = Error::wire(
+            wire.expect("507 is mapped"),
+            "PUT /v1/fs/file?path=%2Fw -> 507: 4096 bytes available, below the reserve",
+        );
+        assert_eq!(err.kind(), ErrorKind::Platform);
+        assert_eq!(err.code(), "ERR_PLATFORM");
+        assert!(!err.retryable(), "a full disk is not retryable unchanged");
+        assert_eq!(WireKind::InsufficientStorage.status(), Some(507));
+        assert_eq!(
+            WireKind::InsufficientStorage.as_str(),
+            "InsufficientStorage"
+        );
+    }
+
+    /// `Error::retryable` is its kind's answer, for every kind, so a binding that asks
+    /// the kind (it carries only the code) gets the answer a Rust caller gets.
+    #[test]
+    fn an_errors_retryability_is_its_kinds() {
+        for kind in ErrorKind::ALL {
+            assert_eq!(
+                Error::new(kind, "detail").retryable(),
+                kind.retryable(),
+                "{kind}"
+            );
+        }
+        let retryable: Vec<ErrorKind> = ErrorKind::ALL
+            .into_iter()
+            .filter(|kind| kind.retryable())
+            .collect();
+        assert_eq!(retryable, [ErrorKind::Retryable]);
     }
 
     /// Every status in the table round-trips: the status a variant reports is the

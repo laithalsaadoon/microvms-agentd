@@ -331,3 +331,65 @@ def drive_identity_per_vm(cli: Cli, launched: Envelope, results: Results) -> Non
             gone.data.get("microvmId") == second_id and not gone.data.get("leaked"),
             f"leaked={gone.data.get('leaked')}",
         )
+
+
+def drive_launch_by_name(cli: Cli, launched: Envelope, results: Results) -> None:
+    """`run --image <bare name>` launches the suite's image (#253).
+
+    `RunMicrovm` answers a bare name with HTTP 400 "Malformed ARN", and every other launch in
+    this suite passes the ARN. Core's `Sandbox::run` resolves a name through the image listing
+    for the CLI and both bindings alike, so this one launch covers the three: the envelope
+    reports the ARN the launch sent, and the service's own listing names the image the VM runs.
+    """
+    print("\n-- launch by bare image name --")
+    arn = str(launched.data["imageIdentifier"])
+    name = str(launched.data["imageName"])
+    by_name = cli.call(
+        "run",
+        "--image",
+        name,
+        "--name",
+        f"microvm-cli-conformance-by-name-{secrets.token_hex(4)}",
+        "--memory",
+        str(BASELINE_MEMORY_MIB),
+        "--keep",
+        "--region",
+        cli.region,
+        "--max-idle-sec",
+        "600",
+        "--suspended-sec",
+        "600",
+        "--max-duration-sec",
+        "1800",
+    )
+    vm_id = str(by_name.data["microvmId"])
+    try:
+        results.eq(
+            "a launch by bare image name sends the suite image's ARN",
+            by_name.data.get("imageIdentifier"),
+            arn,
+        )
+        results.eq(
+            "a launch by bare image name reports the image's own name",
+            by_name.data.get("imageName"),
+            name,
+        )
+        listed = cli.call("ls", "--remote", "--region", cli.region)
+        remote = listed.data.get("remote") or {}
+        image_arns = [
+            vm.get("imageArn")
+            for vm in remote.get("microvms") or []
+            if vm.get("microvmId") == vm_id
+        ]
+        results.eq(
+            "the VM a bare image name launched runs the suite image",
+            image_arns[0] if len(image_arns) == 1 else None,
+            arn,
+        )
+    finally:
+        gone = cli.call("terminate", vm_id, "--wait", "--region", cli.region)
+        results.check(
+            "the by-name VM tore down clean",
+            gone.data.get("microvmId") == vm_id and not gone.data.get("leaked"),
+            f"leaked={gone.data.get('leaked')}",
+        )
