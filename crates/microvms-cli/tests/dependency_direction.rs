@@ -108,6 +108,11 @@ fn the_cli_depends_on_core_and_core_depends_on_neither_the_cli_nor_a_binding() {
 /// calls: those pass against a crate with an empty dependency list, which is exactly the state the
 /// bindings are in until their own task lands.
 ///
+/// The last assertion is the rest of BIND-1: below core, a binding's only crate of ours is
+/// `microvms-protocol`, for the wire types core's signatures return. The first two look only at
+/// the four crates in [`IN_QUESTION`], and a binding that also depended on the app or the domain
+/// would pass them while reaching past the composition root.
+///
 /// The bindings are another task's (T-W3-8), so this test is *expected* to be the thing that tells
 /// that task it is not finished — and the message says so, rather than reading as a failure of
 /// this one.
@@ -128,6 +133,12 @@ fn each_binding_depends_on_core_and_never_on_the_cli() {
             "{binding} must depend on microvms-core (and on no other crate of ours). If this is \
              failing with an empty set, the binding is still T-W1-1's dependency-free stub and \
              T-W3-8 has not landed — which is what this assertion is here to say."
+        );
+        assert_eq!(
+            edges_among_members(&metadata, binding),
+            set(&["microvms-core", "microvms-protocol"]),
+            "{binding}'s crates of ours must be microvms-core and, below it, microvms-protocol \
+             alone (BIND-1). A layer core composes is reached through core."
         );
     }
 }
@@ -482,8 +493,12 @@ fn exact_adapters() -> Vec<String> {
         .collect()
 }
 
-/// **The driving-adapter contract.** Each adapter the ratchet holds no placement drift for
-/// depends directly on exactly its allowed set, normal and build.
+/// **The driving-adapter contract, and BIND-3 and BIND-4.** Each adapter the ratchet holds no
+/// placement drift for depends directly on exactly its allowed set, normal and build.
+///
+/// For the bindings that set is the thin wrapper BIND-3 and BIND-4 describe: core and the wire
+/// types it returns, PyO3 or napi-rs to bridge to the host, serde_json and tokio to convert
+/// values and drive core's futures, and no crate that does work of its own.
 ///
 /// Exact both ways, like the edge assertions above: a crate added to a binding's manifest
 /// fails, and so does a listed crate the binding no longer uses, since a stale entry is a set

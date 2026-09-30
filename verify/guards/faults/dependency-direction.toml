@@ -10,6 +10,29 @@ note = "crates/microvms-cli/tests/dependency_direction.rs::each_exact_adapter_de
 message = "Outside the set: [\"globset\"]"
 transform = { file = "bindings/microvms-py/Cargo.toml", replace = "[dependencies]\n", with = "[dependencies]\nglobset = \"0.4\"\n" }
 
+# The binding keys these tests trace (#306). BIND-1: a binding that depends on a layer below
+# core reaches past the composition root. The edges among the four crates in `IN_QUESTION` don't
+# see it; the test's member-edge assertion does.
+[[fault]]
+id = "deps-js-onto-domain"
+guard = "each_binding_depends_on_core_and_never_on_the_cli"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_binding_depends_on_core_and_never_on_the_cli"]
+expect = "test-failed"
+suite = "rust"
+message = "microvms-js's crates of ours must be microvms-core"
+transform = { file = "bindings/microvms-js/Cargo.toml", replace = "[dependencies]\n", with = "[dependencies]\nmicrovms-domain = { path = \"../../crates/microvms-domain\" }\n" }
+
+# BIND-4: the Node binding's set is the thin wrapper, so a crate that does work of its own fails
+# it. `deps-py-globset` above is BIND-3's.
+[[fault]]
+id = "deps-js-globset"
+guard = "each_exact_adapter_depends_on_exactly_its_allowed_set"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_exact_adapter_depends_on_exactly_its_allowed_set"]
+expect = "test-failed"
+suite = "rust"
+message = "microvms-js's direct normal dependencies differ from its set"
+transform = { file = "bindings/microvms-js/Cargo.toml", replace = "[dependencies]\n", with = "[dependencies]\nglobset = \"0.4\"\n" }
+
 [[fault]]
 id = "deps-domain-tokio"
 guard = "each_layer_depends_on_exactly_its_allowed_set"

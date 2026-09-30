@@ -1,5 +1,34 @@
 # The BIND group's traced requirements. The format and the rules are in tools/check-trace.py.
 
+# BIND-5 waits on #255 and #266, which rewrite the cost tests that would name it.
+[BIND-1]
+issue = "#306"
+waive.model = "a property of the workspace's dependency graph, not of a state"
+waive.gherkin = "no behavior to script: cargo metadata's resolved graph is the evidence, and dependency_direction.rs reads it"
+waive.fuzz = "there is no input stream; the rule is over manifests"
+waive.live = "a dependency edge makes no AWS call"
+
+[BIND-2]
+issue = "#306"
+waive.model = "a property of each binding's parameter surface, not of a state"
+waive.gherkin = "no Gherkin tier drives the bindings; their own suites call each surface and assert the refusal comes from core"
+waive.fuzz = "the surface is a fixed set of signatures, not an input stream; the closures it must not reopen live in core, whose tests and harnesses exercise them"
+waive.live = "the live suite drives the CLI, and a binding makes no AWS call core doesn't make; the closures it must not bypass are core's, checked offline"
+
+[BIND-3]
+issue = "#306"
+waive.model = "a property of the crate's dependencies and surface, not of a state"
+waive.gherkin = "no behavior to script: the dependency set and the adapter-logic ratchet check it over manifests and source"
+waive.fuzz = "there is no input stream; the rule is over manifests and source"
+waive.live = "the wrapper makes no AWS call of its own; core's calls are the live tier's"
+
+[BIND-4]
+issue = "#306"
+waive.model = "a property of the crate's dependencies and surface, not of a state"
+waive.gherkin = "no behavior to script: the dependency set and the adapter-logic ratchet check it over manifests and source"
+waive.fuzz = "there is no input stream; the rule is over manifests and source"
+waive.live = "the wrapper makes no AWS call of its own; core's calls are the live tier's"
+
 [BIND-6]
 issue = "#222"
 
