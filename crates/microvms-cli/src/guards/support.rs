@@ -840,6 +840,9 @@ pub(super) fn exec_command(shape: impl FnOnce(&mut ExecArgs)) -> Command {
     let mut args = ExecArgs {
         command: Some("true".into()),
         timeout: Duration::from_secs(30),
+        timeout_sec: None,
+        complete: false,
+        client_grace: None,
         cwd: None,
         env: Vec::new(),
         user: None,

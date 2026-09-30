@@ -57,7 +57,7 @@ expect = "test-failed"
 suite = "rust"
 note = "crates/model-conformance/tests/tables.rs::posix_exit_code_is_every_row_of_the_run_model"
 message = "timed_out: true, truncated: false }) None has exit code Some(124)"
-transform = { file = "crates/microvms-app/src/session/exec.rs", replace = "        let outcome = self.outcome.as_ref()?;\n        if outcome.timed_out {\n", with = "        let outcome = self.outcome.as_ref()?;\n        if outcome.timed_out && outcome.exit_code.is_none() {\n" }
+transform = { file = "crates/microvms-app/src/session/exec.rs", replace = "                .is_some_and(|outcome| outcome.timed_out)\n", with = "                .is_some_and(|outcome| outcome.timed_out && outcome.exit_code.is_none())\n" }
 
 # A release that answers it has no bundle falls through to SHA256SUMS: the laundering BIND-18 rules out.
 [[fault]]

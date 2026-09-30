@@ -959,3 +959,144 @@ fn script_ack_path(script: &Arc<DaemonScript>) -> String {
         .find(|path| path.contains("/ack"))
         .unwrap_or_default()
 }
+
+/// **`exec --timeout-sec 5` puts `timeout_sec: 5` on the start body, and its absence puts none
+/// (#259).**
+///
+/// The daemon's deadline is the one a caller sees in the result (`timedOut`, `posixExitCode`
+/// 124). `--timeout` is this process's wait and must stay off the wire, so the control case is
+/// what proves the default is still no daemon deadline.
+///
+/// **Falsification**: drop `.with_timeout_sec(..)` from `exec`'s start request and the first
+/// row reads `null`.
+#[tokio::test]
+async fn exec_timeout_sec_puts_the_daemons_deadline_on_the_start_body() {
+    for (timeout_sec, expected) in [
+        (Some(Duration::from_secs(5)), serde_json::json!(5.0)),
+        (None, serde_json::Value::Null),
+    ] {
+        let script = DaemonScript::new();
+        script
+            .reply(200, STARTED_BODY)
+            .reply(200, &poll_body("exited", "0", "", false))
+            .reply(200, &poll_body("acked", "0", "", false));
+        let command = exec_command(|args| {
+            args.command = Some("sleep 60".into());
+            args.timeout_sec = timeout_sec;
+        });
+        let (result, _, _) = against_daemon(&script, &command).await;
+        result.expect("the exec completes");
+        let start = script
+            .requests()
+            .into_iter()
+            .find(|request| request.path == "/v1/exec/start")
+            .expect("a start went out");
+        let body: serde_json::Value = serde_json::from_slice(&start.body).expect("JSON");
+        assert_eq!(
+            body["timeout_sec"], expected,
+            "--timeout-sec={timeout_sec:?} must reach the wire as the daemon's own key: {body}"
+        );
+    }
+}
+
+/// **`exec --complete` reports a result synthesized after the client deadline: 124,
+/// `synthesized`, a note naming both failures, and `ERR_TIMEOUT` (#259, BIND-10).**
+///
+/// The exec never exits: every poll answers `running`. The client deadline (`--timeout-sec`
+/// plus `--client-grace`, both zero here) passes, the kill goes out and is answered, and the
+/// post-kill wait fails too, so nothing real comes back. That's the one case core synthesizes,
+/// and the envelope has to say so rather than report a running exec as a pass or an
+/// `ERR_EXEC_FAILED`.
+///
+/// **Falsification**: key the exec's deadline exit on `timed_out` alone, as it was, and the exit
+/// is `None`, not `Some(Timeout)`.
+#[tokio::test]
+async fn exec_complete_synthesizes_124_with_a_note_when_the_kill_and_the_ack_both_fail() {
+    let script = DaemonScript::new();
+    script
+        .reply(200, STARTED_BODY)
+        .reply(200, r#"{"exec_id": "x-1", "phase": "running"}"#)
+        .reply(200, r#"{"exec_id": "x-1", "killed": true}"#)
+        .reply(503, "the daemon went away")
+        .reply(503, "the daemon went away");
+    let command = exec_command(|args| {
+        args.command = Some("sleep 60".into());
+        args.exec_id = Some("x-1".into());
+        args.complete = true;
+        args.timeout_sec = Some(Duration::ZERO);
+        args.client_grace = Some(Duration::ZERO);
+    });
+    let (result, _, _) = against_daemon(&script, &command).await;
+    let rendered = result.expect("a synthesized result is a result, not an error");
+
+    assert_eq!(rendered.data["posixExitCode"], 124, "{:?}", rendered.data);
+    assert_eq!(rendered.data["synthesized"], true, "{:?}", rendered.data);
+    assert_eq!(rendered.data["exitCode"], serde_json::Value::Null);
+    let notes = rendered.data["notes"].as_array().expect("notes is a list");
+    assert!(
+        notes.iter().any(|note| {
+            let note = note.as_str().unwrap_or_default();
+            note.contains("killed") && note.contains("synthesized")
+        }),
+        "one note names the kill and the failed ack: {notes:?}"
+    );
+    assert_eq!(
+        rendered.already_reported,
+        Some(Exit::Timeout),
+        "a deadline ended the command, so the exit says so"
+    );
+    // The human rendering says there's no result, not that the exec is still running.
+    assert!(
+        rendered
+            .text
+            .contains("has no result: exit code 124, synthesized"),
+        "{}",
+        rendered.text
+    );
+    assert!(!rendered.text.contains("is running"), "{}", rendered.text);
+    assert!(
+        script
+            .paths()
+            .iter()
+            .any(|path| path == "POST /v1/exec/x-1/kill"),
+        "the client deadline sends a kill: {:?}",
+        script.paths()
+    );
+}
+
+/// **The plain exec envelope carries `posixExitCode`, `notes` and `synthesized` (#259).**
+///
+/// `exitCode` for a clean exit, `128 + n` for a signal death with a null `exitCode`, no notes
+/// for a clean result, and never synthesized without `--complete`.
+#[tokio::test]
+async fn the_exec_envelope_carries_the_posix_exit_code_and_the_notes() {
+    let signalled = r#"{"exec_id": "x-1", "phase": "exited", "exit_code": null, "signal": 9,
+        "stdout": "", "stderr": "", "truncated": false, "writers_may_be_alive": false}"#;
+    for (poll, acked, posix, exit_code) in [
+        (
+            poll_body("exited", "3", "out", false),
+            poll_body("acked", "3", "out", false),
+            serde_json::json!(3),
+            serde_json::json!(3),
+        ),
+        (
+            signalled.to_string(),
+            signalled.replace("\"exited\"", "\"acked\""),
+            serde_json::json!(137),
+            serde_json::Value::Null,
+        ),
+    ] {
+        let script = DaemonScript::new();
+        script
+            .reply(200, STARTED_BODY)
+            .reply(200, &poll)
+            .reply(200, &acked);
+        let (result, _, _) = against_daemon(&script, &exec_command(|_| {})).await;
+        let rendered = result.expect("the exec completes");
+        assert_eq!(rendered.data["exitCode"], exit_code, "{:?}", rendered.data);
+        assert_eq!(rendered.data["posixExitCode"], posix, "{:?}", rendered.data);
+        assert_eq!(rendered.data["notes"], serde_json::json!([]));
+        assert_eq!(rendered.data["synthesized"], false);
+        assert_eq!(rendered.already_reported, Some(Exit::ExecFailed));
+    }
+}
