@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Node bindings over `microvms-core`: a thin wrapper that cannot reopen a trap.
+//! Node bindings over `microvms-core`: a thin wrapper that cannot reopen a trap, through napi-rs
+//! (BIND-4). Among the workspace's crates it depends on core and on `microvms-protocol`, whose
+//! wire types core's signatures return, and never on the CLI (BIND-1).
 //!
 //! # What this crate is, and what it deliberately is not
 //!

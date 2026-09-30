@@ -18,9 +18,10 @@ use microvms_core::testing::YieldingClock;
 use microvms_core::{Error, ErrorKind, Region};
 
 use super::support::{
-    ScriptedTransport, dispatch_with, dispatch_with_env, full_infra, no_config, region_flags,
+    ConfigFile, ScriptedTransport, dispatch_with, dispatch_with_env, full_infra, no_config,
+    region_flags,
 };
-use crate::cli::{Command, DoctorArgs, InfraFlags, RegionFlags};
+use crate::cli::{Command, ConfigFlags, DoctorArgs, InfraFlags, RegionArg, RegionFlags};
 use crate::commands::Rendered;
 use crate::seam::futures_util_shim::BoxFuture;
 use crate::seam::{Attach, CoreSeam};
@@ -199,10 +200,14 @@ impl CoreSeam for RegionRecordingSeam {
 }
 
 fn doctor_in(region: RegionFlags) -> Command {
+    doctor_with(region, no_config())
+}
+
+fn doctor_with(region: RegionFlags, config: ConfigFlags) -> Command {
     Command::Doctor(DoctorArgs {
         binary: None,
         infra_dir: Some(std::path::PathBuf::from("/definitely/not/a/stack")),
-        config: no_config(),
+        config,
         region,
         infra: InfraFlags::default(),
     })
@@ -291,6 +296,115 @@ async fn doctor_asks_every_check_about_the_region_its_flag_names() {
             let versions = doctor_line(&rendered, "base-image-versions");
             assert_eq!(versions["ok"], true, "{case}: {versions}");
         }
+    }
+}
+
+/// **#336: every line of `doctor` is about the region `run` would launch in.** `run` resolves
+/// the flags, then a `microvm.toml` `region`, then the environment, then us-east-1. With a
+/// file pinning us-west-2, and with no region in the environment or `AWS_REGION` naming
+/// eu-west-1, the credentials check and both managed-base reads ask the seam for us-west-2, and
+/// the region line says the file set it. A flag still wins over the file, and with no file the
+/// environment and then the built-in decide; the region line names whichever did.
+///
+/// **Falsification**: `verify/guards/faults/cli-thinness.toml` entry
+/// `doctor-region-ignores-config` resolves the region from the flags and the environment
+/// again, and the pinned case records `us-east-1`. Entry `doctor-region-names-no-source`
+/// drops the source from the region line.
+#[tokio::test]
+async fn doctor_asks_every_check_about_the_region_run_would_launch_in() {
+    let file = ConfigFile::new("doctor-region", "region = \"us-west-2\"\n");
+    let path = file.0.display().to_string();
+    let pinned = || ConfigFlags {
+        config: Some(file.0.clone()),
+        no_config: false,
+    };
+    let eu = Some(("AWS_REGION", "eu-west-1"));
+    let cases = [
+        (
+            RegionFlags::default(),
+            pinned(),
+            None,
+            "us-west-2",
+            path.as_str(),
+        ),
+        (
+            RegionFlags::default(),
+            pinned(),
+            eu,
+            "us-west-2",
+            path.as_str(),
+        ),
+        (
+            RegionFlags {
+                region: Some(RegionArg::ApNortheast1),
+                unlisted_region: None,
+            },
+            pinned(),
+            eu,
+            "ap-northeast-1",
+            "--region",
+        ),
+        (
+            RegionFlags {
+                region: None,
+                unlisted_region: Some("ca-central-1".to_string()),
+            },
+            pinned(),
+            eu,
+            "ca-central-1",
+            "--unlisted-region",
+        ),
+        (
+            RegionFlags::default(),
+            no_config(),
+            eu,
+            "eu-west-1",
+            "$AWS_REGION or $AWS_DEFAULT_REGION",
+        ),
+        (
+            RegionFlags::default(),
+            no_config(),
+            None,
+            "us-east-1",
+            "the built-in default",
+        ),
+    ];
+    for (flags, config, env, named, set_by) in cases {
+        let seam = RegionRecordingSeam::publishing_in(named);
+        let command = doctor_with(flags, config);
+        let (result, _) = match env {
+            None => dispatch_with(&seam, &command, full_infra()).await,
+            Some(var) => dispatch_with_env(&seam, &command, full_infra(), var).await,
+        };
+        let rendered = result.expect("doctor reports rather than raises");
+        let case = format!("{named} set by {set_by}, env {env:?}");
+        assert_eq!(
+            seam.regions(),
+            [named, named],
+            "{case}: the credentials check and the managed-base reads each ask for a plane"
+        );
+        let region = doctor_line(&rendered, "region");
+        assert!(
+            region["detail"]
+                .as_str()
+                .is_some_and(|detail| detail.starts_with(&format!("{named} "))
+                    && detail.ends_with(&format!("; set by {set_by}"))),
+            "{case}: {region}"
+        );
+        let credentials = doctor_line(&rendered, "credentials");
+        assert!(
+            credentials["detail"]
+                .as_str()
+                .is_some_and(|detail| detail.ends_with(&format!("for {named}"))),
+            "{case}: {credentials}"
+        );
+        let bases = doctor_line(&rendered, "managed-bases");
+        assert!(
+            bases["detail"]
+                .as_str()
+                .is_some_and(|detail| detail.contains(&format!("in {named}"))),
+            "{case}: {bases}"
+        );
     }
 }
 

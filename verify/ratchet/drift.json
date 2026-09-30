@@ -108,10 +108,6 @@
     { "category": "untraced", "key": "AGENTD-4", "issue": 305 },
     { "category": "untraced", "key": "AGENTD-5", "issue": 305 },
     { "category": "untraced", "key": "AGENTD-6", "issue": 305 },
-    { "category": "untraced", "key": "BIND-1", "issue": 306 },
-    { "category": "untraced", "key": "BIND-2", "issue": 306 },
-    { "category": "untraced", "key": "BIND-3", "issue": 306 },
-    { "category": "untraced", "key": "BIND-4", "issue": 306 },
     { "category": "untraced", "key": "BIND-5", "issue": 306 },
     { "category": "untraced", "key": "ARCH-5", "issue": 307 }
   ],

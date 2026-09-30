@@ -966,12 +966,13 @@
       "priority": "critical",
       "refines": [],
       "satisfies": [],
-      "sentence": "The language bindings layer shall depend only on microvms-core, with no dependency edge to the CLI crate.",
+      "sentence": "The language bindings layer shall depend on microvms-core and, among the crates below it, only on microvms-protocol, with no dependency edge to the CLI crate.",
       "status": "approved",
       "systemName": "language bindings layer",
-      "systemResponse": "depend only on microvms-core, with no dependency edge to the CLI crate",
-      "updatedAt": "2026-08-08T02:16:57.564Z",
+      "systemResponse": "depend on microvms-core and, among the crates below it, only on microvms-protocol, with no dependency edge to the CLI crate",
+      "updatedAt": "2026-09-30T12:00:00.000Z",
       "verificationMethod": "analysis",
+      "verificationNote": "amended 2026-09-30 (#306): the sentence said microvms-core only, but both bindings have depended on microvms-protocol for the wire types core's signatures return since they were written, which naming the crate keeps from being re-declared (ARCH-2). crates/microvms-cli/tests/dependency_direction.rs asserts each binding's edges among the workspace's crates exactly, and that no workspace crate depends on the CLI",
       "verifies": []
     },
     "98bd23f4-fe46-435d-bc22-214cd265048f": {

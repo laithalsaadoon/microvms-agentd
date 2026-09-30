@@ -209,7 +209,8 @@ def drive_doctor_region(cli: Cli, results: Results) -> None:
 
     One `doctor` call with `--region` set to the suite's region and `AWS_REGION` set to
     another, so the flag and the environment disagree. The credentials line and the two
-    managed-base reads must follow the flag. Live because the scripted seam in `guards/doctor.rs`
+    managed-base reads must follow the flag. A second call pins the suite's region in a
+    `microvm.toml` instead, and they must follow the file (#336). Live because the scripted seam in `guards/doctor.rs`
     only records which region was asked for; this is where the listing is signed for and
     sent to that region, and where AWS answers it. The flag is the suite's region because
     the account is known to answer there, so the check needs no access anywhere else. It
@@ -222,6 +223,18 @@ def drive_doctor_region(cli: Cli, results: Results) -> None:
     ok, detail = doctor_region_lines(report.data.get("checks", []), cli.region, other)
     results.check(
         "doctor --region names the flag's region on every line, whatever AWS_REGION says",
+        ok,
+        detail,
+    )
+    # #336: a `microvm.toml` `region` sits above the environment for `doctor` as it does for
+    # `run`, so a project that pins the suite's region is checked there, not in `other`.
+    with tempfile.TemporaryDirectory() as scratch:
+        config = Path(scratch) / "microvm.toml"
+        config.write_text(f'region = "{cli.region}"\n')
+        report = cli.call("doctor", "--config", str(config), env=env)
+    ok, detail = doctor_region_lines(report.data.get("checks", []), cli.region, other)
+    results.check(
+        "doctor names a microvm.toml region on every line, whatever AWS_REGION says",
         ok,
         detail,
     )
