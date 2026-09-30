@@ -2114,6 +2114,15 @@
           {
             "choices": null,
             "default": null,
+            "help": "Read only lines START through END of a file in the VM, 1-based and inclusive",
+            "name": "lines",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
             "help": "The VM's endpoint, as reported by `run`",
             "name": "endpoint",
             "positional": false,

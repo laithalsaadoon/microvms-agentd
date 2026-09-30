@@ -43,6 +43,19 @@ fn file_path(path: &str, mode: Option<&str>) -> String {
     }
 }
 
+/// `GET /v1/fs/file` for `query`: the path, then each line bound that's set, and nothing else,
+/// so a read with no range is [`file_path`]'s URL byte for byte.
+fn file_read_path(query: &protocol::fs::FileReadQuery) -> String {
+    let mut url = file_path(&query.path, None);
+    if let Some(start) = query.start_line {
+        url.push_str(&format!("&start_line={start}"));
+    }
+    if let Some(end) = query.end_line {
+        url.push_str(&format!("&end_line={end}"));
+    }
+    url
+}
+
 /// `/v1/fs/tar` with a path.
 fn tar_path(path: &str) -> String {
     format!("/v1/fs/tar?path={}", encode(path))
@@ -68,6 +81,32 @@ pub(crate) async fn upload_file(
 pub(crate) async fn download_file(transport: &Transport, path: &str) -> Result<Vec<u8>, Error> {
     let response = transport
         .send(HttpRequest::new("GET", file_path(path, None)))
+        .await?;
+    Ok(response.body)
+}
+
+/// Reads lines `start_line` through `end_line` of one file, 1-based and inclusive.
+///
+/// The daemon slices the file (`GET /v1/fs/file` has taken the two bounds since v0.1.0), so a
+/// caller wanting lines 40 to 60 of a large log reads 21 lines rather than the whole file.
+/// `start_line` absent is 1 and `end_line` absent is through EOF, and an `end_line` past the
+/// last line reads through EOF. A range no file can satisfy (line 0, an end before the start)
+/// is refused here with `ERR_INVALID_ARG` and the daemon's own wording, before any request:
+/// the rule is `FileReadQuery::line_window`, which the daemon reads too.
+pub(crate) async fn download_file_lines(
+    transport: &Transport,
+    path: &str,
+    start_line: Option<u64>,
+    end_line: Option<u64>,
+) -> Result<Vec<u8>, Error> {
+    let query = protocol::fs::FileReadQuery {
+        path: path.to_string(),
+        start_line,
+        end_line,
+    };
+    query.line_window().map_err(Error::invalid_arg)?;
+    let response = transport
+        .send(HttpRequest::new("GET", file_read_path(&query)))
         .await?;
     Ok(response.body)
 }
@@ -276,6 +315,76 @@ mod tests {
             assert!(!err.retryable(), "a full disk is not retryable: {err}");
             assert!(err.to_string().contains("4096 bytes available"), "{err}");
         }
+    }
+
+    /// **A line range reaches the daemon as `start_line` and `end_line` after the encoded
+    /// path, and no range sends `download_file`'s URL (#265).**
+    ///
+    /// **Falsification**: leave `end_line` off the query and the ranged URL is short one key.
+    #[tokio::test]
+    async fn a_line_range_is_sent_as_the_daemons_two_query_keys() {
+        let recorder = Recorder::with([
+            Reply::Body(200, b"two\nthree\nfour\n".to_vec()),
+            Reply::Body(200, b"all".to_vec()),
+            Reply::Body(200, b"all".to_vec()),
+            Reply::Body(200, b"tail".to_vec()),
+        ]);
+        let (session, _, _) = session_with(Arc::clone(&recorder));
+
+        let lines = session
+            .download_file_lines("/tmp/a b", Some(2), Some(4))
+            .await
+            .expect("reads");
+        assert_eq!(lines, b"two\nthree\nfour\n");
+        assert_eq!(
+            recorder.last().path,
+            "/v1/fs/file?path=%2Ftmp%2Fa%20b&start_line=2&end_line=4"
+        );
+
+        session
+            .download_file_lines("/tmp/a b", None, None)
+            .await
+            .expect("reads");
+        let unranged = recorder.last().path;
+        session.download_file("/tmp/a b").await.expect("reads");
+        assert_eq!(
+            unranged,
+            recorder.last().path,
+            "no range is today's request"
+        );
+
+        session
+            .download_file_lines("/tmp/f", Some(40), None)
+            .await
+            .expect("reads");
+        assert_eq!(
+            recorder.last().path,
+            "/v1/fs/file?path=%2Ftmp%2Ff&start_line=40"
+        );
+    }
+
+    /// Line 0 and an inverted range are refused before any request, with the daemon's words.
+    #[tokio::test]
+    async fn a_range_no_file_can_satisfy_is_refused_before_any_request() {
+        let recorder = Recorder::with([]);
+        let (session, _, _) = session_with(Arc::clone(&recorder));
+
+        for (start, end, wording) in [
+            (Some(0), Some(3), "start_line is 1-based"),
+            (Some(5), Some(2), "end_line 2 is before start_line 5"),
+        ] {
+            let err = session
+                .download_file_lines("/tmp/f", start, end)
+                .await
+                .expect_err("refused");
+            assert_eq!(err.code(), "ERR_INVALID_ARG", "{err}");
+            assert_eq!(err.wire_kind(), None, "nothing reached the daemon: {err}");
+            assert!(err.to_string().contains(wording), "{err}");
+        }
+        assert!(
+            recorder.requests().is_empty(),
+            "a refused range cost a request"
+        );
     }
 
     /// The encoder leaves unreserved characters alone, so an ordinary path stays

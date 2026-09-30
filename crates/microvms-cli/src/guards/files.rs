@@ -52,6 +52,7 @@ async fn a_tar_upload_sends_the_archive_bytes_unexamined_including_a_hostile_one
         dst: "vm:/tmp/hostile".into(),
         tar: true,
         mode: None,
+        lines: None,
         attach: attach_flags(),
         region: region_flags(),
     });
@@ -97,6 +98,7 @@ async fn a_single_file_upload_uses_the_file_route_and_carries_its_octal_mode() {
         dst: "vm:/tmp/live.txt".into(),
         tar: false,
         mode: Some("0644".into()),
+        lines: None,
         attach: attach_flags(),
         region: region_flags(),
     });
@@ -143,6 +145,7 @@ async fn a_download_writes_the_raw_bytes_to_the_local_path() {
         dst: local.to_string_lossy().to_string(),
         tar: false,
         mode: None,
+        lines: None,
         attach: attach_flags(),
         region: region_flags(),
     });
@@ -417,6 +420,7 @@ async fn a_disk_pressure_507_is_platform_with_the_remedy_not_retryable() {
         dst: "vm:/workspace/big.bin".into(),
         tar: false,
         mode: None,
+        lines: None,
         attach: attach_flags(),
         region: region_flags(),
     });
@@ -458,6 +462,101 @@ async fn a_disk_pressure_507_is_platform_with_the_remedy_not_retryable() {
             failure.suggestions
         );
     }
+}
+
+/// **`cp vm:/path ./local --lines 3:5` asks the daemon for lines 3 to 5 and writes what it
+/// sends (#265).**
+///
+/// The daemon slices the file, so the window is the whole transfer. The verdict is the recorded
+/// query: a `cp` that read the whole file and cut it locally would write the same bytes here.
+///
+/// **Falsification**: read the whole file whatever `--lines` says (`download_file` in the
+/// ranged arm), and the request carries no range.
+#[tokio::test]
+async fn cp_lines_asks_the_daemon_for_the_window_and_writes_it() {
+    let dir = TempDir::new("cp-lines");
+    let local = dir.0.join("window.txt");
+    let script = DaemonScript::new();
+    script.reply(200, "three\nfour\nfive\n");
+    let command = Command::Cp(CpArgs {
+        src: "vm:/var/log/app.log".into(),
+        dst: local.to_string_lossy().to_string(),
+        tar: false,
+        mode: None,
+        lines: Some(crate::cli::LineRange {
+            start: Some(3),
+            end: Some(5),
+        }),
+        attach: attach_flags(),
+        region: region_flags(),
+    });
+    let (result, _, _) = against_daemon(&script, &command).await;
+    result.expect("the ranged copy succeeds");
+
+    assert_eq!(
+        script.paths(),
+        ["GET /v1/fs/file?path=%2Fvar%2Flog%2Fapp.log&start_line=3&end_line=5"],
+        "the window must reach the daemon as its two query keys"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&local).expect("written"),
+        "three\nfour\nfive\n"
+    );
+}
+
+/// **`--lines` is refused beside `--tar` by the parser, and on an upload before any request.**
+///
+/// A tar is a tree and an upload writes the whole local file, so a window means nothing on
+/// either, and a caller who passed one has a command that can't do what it says.
+///
+/// **Falsification**: drop `"tar"` from `--lines`'s `conflicts_with_all` and the parse
+/// succeeds.
+#[tokio::test]
+async fn cp_lines_is_refused_with_tar_and_on_an_upload() {
+    use clap::Parser as _;
+    let parsed = crate::cli::Cli::try_parse_from([
+        "microvm",
+        "cp",
+        "vm:/workspace",
+        "out.tar",
+        "--tar",
+        "--lines",
+        "1:2",
+        "--endpoint",
+        "https://mvm-1.example",
+        "--agent-token",
+        "t",
+        "--microvm-id",
+        "mvm-1",
+    ]);
+    let refused = parsed.expect_err("--lines with --tar must not parse");
+    assert_eq!(
+        refused.kind(),
+        clap::error::ErrorKind::ArgumentConflict,
+        "{}",
+        refused.render()
+    );
+
+    let dir = TempDir::new("cp-lines-upload");
+    let local = dir.0.join("f.txt");
+    std::fs::write(&local, "a\nb\n").expect("writes");
+    let script = DaemonScript::new();
+    let command = Command::Cp(CpArgs {
+        src: local.to_string_lossy().to_string(),
+        dst: "vm:/tmp/f.txt".into(),
+        tar: false,
+        mode: None,
+        lines: Some(crate::cli::LineRange {
+            start: Some(1),
+            end: None,
+        }),
+        attach: attach_flags(),
+        region: region_flags(),
+    });
+    let (result, _, _) = against_daemon(&script, &command).await;
+    let failure = result.expect_err("an upload has no window");
+    assert_eq!(failure.exit, Exit::InvalidArg, "{}", failure.message);
+    assert!(script.paths().is_empty(), "{:?}", script.paths());
 }
 
 /// **`sync --watch` re-syncs on a real filesystem event and reports the passes.**

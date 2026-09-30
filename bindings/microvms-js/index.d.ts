@@ -1042,8 +1042,15 @@ export declare class Session {
    * the daemon's shape — a number here would be ambiguous between 0o755 and 755.
    */
   uploadFile(path: string, data: Uint8Array, mode?: string | undefined | null): Promise<void>
-  /** Reads one file. */
-  downloadFile(path: string): Promise<Buffer>
+  /**
+   * Reads one file, or lines `startLine` through `endLine` of it.
+   *
+   * The range is 1-based and inclusive, and the daemon slices the file, so reading lines 40
+   * to 60 of a large log reads those lines alone. Either bound may be left out (line 1,
+   * through EOF), and an `endLine` past the last line reads through EOF. Line 0 and an end
+   * before the start reject with `ERR_INVALID_ARG` before any request.
+   */
+  downloadFile(path: string, options?: DownloadFileOptions | undefined | null): Promise<Buffer>
   /** Whether a path exists, distinguishing absence from every other refusal. */
   fileExists(path: string): Promise<boolean>
   /**
@@ -1434,6 +1441,14 @@ export interface DetachedObject {
   region: string
   port: number
   agentToken: string
+}
+
+/** The line range `downloadFile` reads, 1-based and inclusive. Both absent reads the file. */
+export interface DownloadFileOptions {
+  /** The first line to read. Absent means line 1. */
+  startLine?: number
+  /** The last line to read. Absent, or past the last line, means through EOF. */
+  endLine?: number
 }
 
 /**
