@@ -59,6 +59,7 @@ from lanes.sessions import (
     drive_find_by_name,
     drive_lifecycle_by_id,
     drive_run_to_completion,
+    drive_serve,
     drive_stable_launch,
 )
 from lanes.skew import drive_version_skew
@@ -295,6 +296,7 @@ def run_suite(args: argparse.Namespace) -> int:
                 launched,
                 results,
             )
+            run_section(results, "serve", drive_serve, cli, launched, results)
             run_section(
                 results,
                 "file_transfer",

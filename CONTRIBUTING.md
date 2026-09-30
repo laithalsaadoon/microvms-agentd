@@ -10,7 +10,7 @@ behavior and [Trust](docs/TRUST.md) before changing authentication or execution.
 ```bash
 mise install
 mise run install       # install git hooks
-mise run check         # code, security, tests, schema, stubs and declarations, surface parity, API drift, packaging, build, traceability, the drift ratchet, seeded-fault registry, doc references and config paths, changelog fragments, the pull request template's sections
+mise run check         # code, security, tests, schema, stubs and declarations, surface parity, API drift, packaging, build, traceability, the drift ratchet, seeded-fault registry, doc references and config paths, changelog fragments, the pull request template's sections, fixes' FAIL_TO_PASS entries
 mise run ci:local      # CI's Linux jobs, each in a clone shaped like its checkout; before a push
 mise tasks             # all available tasks
 ```
@@ -56,7 +56,29 @@ Use `-p microvms-protocol` for the protocol package; its Rust import is
 Python builds with maturin and tests under `bindings/microvms-py/tests/`. Node builds
 with `npm run build` and tests with `npm test` in `bindings/microvms-js/`.
 
-For a new invariant guard, register the fault that proves it catches its
+A fix's regression test is proven by FAIL_TO_PASS rather than by a fault you
+write: it fails on the merge base, where the fix isn't, and passes with the fix.
+A fix is a branch that adds or changes a `changelog.d/` fragment of type `fixed`
+or `security`. `mise run fail-to-pass -- --emit <owner>` finds the tests the
+branch adds or changes (Rust `#[test]` functions, pytest functions under
+`bindings/microvms-py/tests/`, `node --test` titles under
+`bindings/microvms-js/__test__/`), builds a patch that takes the fix's hunks in
+product source out of the head, leaving a `#[cfg(test)]` module's hunks in, and
+fires each test with that patch through `guards:fire`'s script: the test has to
+pass on the head and be reported failing with the patch seeded, and a build that
+breaks doesn't count. Each test it proves becomes an entry in
+`verify/guards/faults/<owner>.toml` with that patch, so every later fire proves it
+again; commit it with the fix, and paste the `fired:` lines it printed. A test
+the merge base can't compile, because it calls what the fix adds, can't be proven
+this way: register a fault by hand that takes the fix out where the test still
+compiles, and name the test as its guard. `fail-to-pass:check` in `check`, and
+CI's `security` job on a pull request, fail a fix whose new or changed tests have
+no entry the branch adds, and CI's `guards` job fires that entry. When a later
+change moves the fix's code, `guards:list` fails on the entry's patch as it does
+on a stale anchor; rewrite the patch against the tree, or turn it into a
+transform. `tools/fail-to-pass.py`'s docstring has the rules.
+
+For a new gate, scanner or script check, register the fault that proves it catches its
 failure in its owner's file in `verify/guards/faults/` (a gate's, a crate's, or one
 issue's guards; a new owner starts a file), and show
 `mise run guards:fire -- --only <id>` printing `fired` for it. The registry is
@@ -76,7 +98,7 @@ Locally, `mise run guards:fire -- --jobs 4` seeds faults in four scratch worktre
 once and reports what a serial run reports, in the same order; add `--venv-per-worker`
 to fire the binding entries too. On each push to main, CI's `guards` job fires every
 entry under strace and records what each one's runs read (`--record`). A pull request
-restores main's latest record and keeps each recorded `fired` verdict whose inputs are
+restores main's latest records (every leg's, from one push) and keeps each recorded `fired` verdict whose inputs are
 all unchanged since the recorded commit (`--reuse`): it fires an entry whose registry
 entry, a file or directory its runs read, a tool they ran, the environment or
 tools/check-guards-fire.py changed, and one whose command reads the git history or

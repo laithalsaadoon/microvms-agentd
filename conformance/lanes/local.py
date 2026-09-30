@@ -18,6 +18,27 @@ from harness.redact import command_for_log
 from harness.results import Results
 
 
+def check_estimate_cost(planned: dict[str, Any], results: Results) -> None:
+    """COST-10 on `cost --estimate`'s report: a plan estimate projects every duration, so its
+    report can't pass for a measured one. A function of the report, for the self-test's twins."""
+    results.eq(
+        "COST-10 an estimate is labelled so, and every duration on it is projected",
+        (
+            planned.get("label"),
+            planned.get("fullyMeasured"),
+            sorted(
+                {
+                    str((item.get("duration") or {}).get("provenance"))
+                    for item in planned.get("items") or []
+                    if item.get("duration")
+                }
+            )
+            or None,
+        ),
+        ("estimate", False, ["projected"]),
+    )
+
+
 def drive_local_commands(cli: Cli, results: Results) -> None:
     """The commands that reach no account. Free, and they check the CLI's own contract.
 
@@ -46,6 +67,7 @@ def drive_local_commands(cli: Cli, results: Results) -> None:
         str(BASELINE_MEMORY_MIB),
     )
     size = estimate.data["report"]["size"]
+    check_estimate_cost(estimate.data["report"], results)
     # The documented row for 1024 MiB: peak 4096. Written as a literal pair rather
     # than derived, for the same reason the core's table is data.
     results.check(

@@ -462,6 +462,14 @@ impl PyControlPlane {
         })
     }
 
+    /// The region this plane addresses.
+    #[getter]
+    fn region(&self) -> PyRegion {
+        PyRegion {
+            inner: self.inner.region().clone(),
+        }
+    }
+
     /// `GetMicrovm`.
     fn get(&self, py: Python<'_>, microvm_id: String) -> PyCoreResult<PyMicrovm> {
         let plane = Arc::clone(&self.inner);

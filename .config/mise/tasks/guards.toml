@@ -69,3 +69,28 @@ description = "Seed each registered fault in a scratch worktree and require its 
 # cargo-mutants is here for the `fuzz_extract` exclusion's entry, at the `mutants` task's pin.
 tools = { "cargo:cargo-mutants" = "{{vars.cargo_mutants}}" }
 run = "./tools/check-guards-fire.py fire"
+
+# ── FAIL_TO_PASS: a fix's tests, proven by failing with the fix taken out ────
+
+["fail-to-pass:check"]
+description = "A fix's new or changed tests have a registry entry the branch adds, which the guards fire proves fails with the fix taken out. No builds"
+# In `check` for `changelog:check`'s reason: it reads the working tree against its
+# merge base with origin/main, so a fix learns it needs its entry before a push. CI's `security`
+# job runs it with `PR_BASE`; a push to main changes nothing against its own merge base. The
+# entry it asks for is the proof: CI's `guards` job fires each entry no recorded verdict covers,
+# a new one among them, so the fix's reverse patch is seeded and its test has to be reported
+# failing. The script's docstring has what a fix, its tests and its hunks are. The unit tests
+# run first: they build throwaway repos and drive `prove` through the real fire with a fake
+# cargo. ast-grep from `[tools]` reads the Rust and JavaScript tests.
+run = [
+  "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_fail_to_pass.py",
+  './tools/fail-to-pass.py check ${PR_BASE:+--base "$PR_BASE"}',
+]
+
+["fail-to-pass"]
+description = "Prove a fix's new or changed tests fail with the fix taken out and pass with it in, and emit their registry entries with `-- --emit <owner>`"
+# Not in `check`: each test's command runs twice, clean and with the fix's reverse patch seeded,
+# through `guards:fire`'s script in a scratch worktree, building in target/guards-fire as that
+# task does. Extra arguments pass through (`-- --emit <owner> --jobs 2`); the script's docstring
+# has them.
+run = "./tools/fail-to-pass.py prove"

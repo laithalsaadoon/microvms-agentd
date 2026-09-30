@@ -1,0 +1,32 @@
+# ── the serving loops behind `tunnel`, `port-forward` and the SDKs' handles (#263) ──
+
+# The issue's deliberate break: the loop ends when the first connection does, so a refused
+# connection ends the tunnel instead of being reported.
+[[fault]]
+id = "serve-loop-ends-on-a-connection"
+guard = "a_refused_connection_is_reported_and_the_tunnel_keeps_serving"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "serve", "--", "--exact", "a_refused_connection_is_reported_and_the_tunnel_keeps_serving"]
+expect = "test-failed"
+suite = "rust"
+message = "the second connection is served after the first was refused"
+transform = { file = "crates/microvms-edges/src/session/serve.rs", replace = "            Some(joined) = tasks.join_next_with_id(), if !tasks.is_empty() => finish(&mut peers, joined),", with = "            Some(joined) = tasks.join_next_with_id(), if !tasks.is_empty() => {\n                finish(&mut peers, joined);\n                break StopReason::Requested;\n            }" }
+
+# The same break, caught by the forward's own keep-serving case.
+[[fault]]
+id = "serve-forward-loop-ends-on-a-connection"
+guard = "a_refusal_is_counted_and_the_forward_keeps_serving"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "serve", "--", "--exact", "a_refusal_is_counted_and_the_forward_keeps_serving"]
+expect = "test-failed"
+suite = "rust"
+message = "the next request is served"
+transform = { file = "crates/microvms-edges/src/session/serve.rs", replace = "            Some(joined) = tasks.join_next_with_id(), if !tasks.is_empty() => finish(&mut peers, joined),", with = "            Some(joined) = tasks.join_next_with_id(), if !tasks.is_empty() => {\n                finish(&mut peers, joined);\n                break StopReason::Requested;\n            }" }
+
+# The loop waits for each connection before accepting the next, as the CLI's port-forward did.
+[[fault]]
+id = "serve-one-connection-at-a-time"
+guard = "a_forward_serves_two_slow_requests_at_once"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "serve", "--", "--exact", "a_forward_serves_two_slow_requests_at_once"]
+expect = "test-failed"
+suite = "rust"
+message = "both slow requests must be in flight at once"
+transform = { file = "crates/microvms-edges/src/session/serve.rs", replace = "                    let handle = tasks.spawn(spawn(stream, peer));\n                    peers.insert(handle.id(), peer);", with = "                    let handle = tasks.spawn(spawn(stream, peer));\n                    peers.insert(handle.id(), peer);\n                    if let Some(joined) = tasks.join_next_with_id().await {\n                        finish(&mut peers, joined);\n                    }" }

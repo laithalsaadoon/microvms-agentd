@@ -82,6 +82,7 @@ run = [
   { task = "ratchet:check" },
   { task = "trace:check" },
   { task = "guards:list" },
+  { task = "fail-to-pass:check" },
   { task = "mutants:check" },
   { task = "publish:check" },
   { task = "live:check" },
