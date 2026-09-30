@@ -113,6 +113,12 @@ class AgentVm:
         The Dockerfile `build_image` will send: the client's agentd stanza plus the agent
         layers. Read it to see what the image will contain; nothing in it is a secret.
         """
+    def ensure_image(self, /, *, binary: Sequence[int], build_role_arn: str, s3_bucket: str, size: SizeClass |None = None, s3_key_prefix: str |None = None) -> EnsuredImage:
+        """
+        Builds or reuses this VM's image, named per `image_name`: returned at once when ready,
+        waited on while building, deleted and rebuilt when failed, and uploaded to
+        `s3://<s3_bucket>/<s3_key_prefix>/<name>/artifact.zip` only when a build is needed.
+        """
     def find_image(self, /, *, binary: Sequence[int], build_role_arn: str, size: SizeClass |None = None) -> str |None:
         """
         The ARN of an existing image named per `image_name`, or `None` when there is none.
@@ -126,8 +132,8 @@ class AgentVm:
         """
         The image name for these specs and this daemon binary: `agent-vm-<agents>-<hash12>`.
         
-        Content-addressed, so an unchanged binary and spec set name the image a previous
-        run built; `find_image` looks it up.
+        Content-addressed, so an unchanged binary, spec set and size name the image a previous
+        run built; `find_image` looks it up, and `ensure_image` builds or reuses it.
         """
     def install_access(self, /, *, token: BearerToken |None = None, ttl_seconds: float |None = None) -> BearerToken:
         """

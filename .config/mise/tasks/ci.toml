@@ -101,11 +101,11 @@ description = "CI's `drift` job: the hardcoded service constraints against the b
 run = [{ task = "model:check" }]
 
 ["ci:bindings"]
-description = "CI's `bindings` job: both bindings built and tested, their committed declarations against the surfaces, and the typed consumers"
+description = "CI's `bindings` job: both bindings built and tested, their committed declarations against the surfaces, the typed consumers, and the npm package as it packs"
 # `cargo test --workspace` runs none of the binding suites (BIND-2 and BIND-5 live there), so
 # this job is the one that does. `dts:check` runs before `bindings:js`, which rebuilds
 # `index.d.ts` in place: after that build, its diff would compare the file with itself.
-# `npm:loader` needs that in-place build's `index.js`.
+# `npm:loader` needs that in-place build's `index.js`, and `npm:package` packs it with the addon.
 run = [
   { task = "bindings:py" },
   { task = "stubs:check" },
@@ -113,6 +113,7 @@ run = [
   { task = "dts:check" },
   { task = "bindings:js" },
   { task = "npm:loader" },
+  { task = "npm:package" },
 ]
 
 ["ci:guards"]
@@ -213,7 +214,9 @@ exit "$status"
 ["ci:fuzz-daemon-edges-app"]
 description = "fuzz.yml's `daemon-edges-app` job: the cargo-fuzz tar target and the daemon's, the edges' and the app's harnesses under libFuzzer, side by side. Needs a nightly toolchain"
 # `ci:fuzz-cli-core` says how the harnesses build and fuzz. `cargo fuzz` runs from the directory
-# that holds `fuzz/`. Four two-minute harnesses, then the four provisioning parsers.
+# that holds `fuzz/`. Four two-minute harnesses, then the four provisioning parsers, then the
+# verified tunnel's four (#297), a minute each. The tunnel harnesses build with their crates'
+# harnesses above, so they add no build line.
 tools = { "cargo:cargo-fuzz" = "{{vars.cargo_fuzz}}", "cargo:cargo-bolero" = "{{vars.cargo_bolero}}" }
 env = { CARGO_UNSTABLE_FEATURE_UNIFICATION = "true", CARGO_RESOLVER_FEATURE_UNIFICATION = "workspace" }
 shell = "bash -e -c"
@@ -245,6 +248,11 @@ finish
 for target in version sums record elf; do
   start "provision-$target" cargo +nightly bolero test "provision_fuzz::$target" -p microvms-edges -T 30s
 done
+finish
+start tunnel-hello cargo +nightly bolero test tunnel_fuzz::a_handshake_opens_only_from_the_launching_host -p agentd -T 60s
+start tunnel-frames cargo +nightly bolero test tunnel_fuzz::frames_open_in_order_and_the_callers_end_only_after_every_chunk -p agentd -T 60s
+start tunnel-reply cargo +nightly bolero test session::tunnel_fuzz::a_reply_opens_only_from_the_pinned_vm -p microvms-edges -T 60s
+start tunnel-client-frames cargo +nightly bolero test session::tunnel_fuzz::frames_open_in_order_and_the_daemons_end_only_after_every_chunk -p microvms-edges -T 60s
 finish
 exit "$status"
 ''',

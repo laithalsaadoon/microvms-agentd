@@ -749,3 +749,111 @@ async fn an_illegal_name_gets_cores_answer_and_a_free_one_the_not_found_answer()
         );
     }
 }
+
+/// A record for the `names` guards, with both secrets set to a canary.
+fn canaried(name: &str, microvm_id: &str) -> crate::ledger::NameRecord {
+    crate::ledger::NameRecord {
+        name: name.into(),
+        microvm_id: microvm_id.into(),
+        endpoint: format!("https://{microvm_id}.example"),
+        agent_token: "tok-CANARY".into(),
+        region: "us-east-1".into(),
+        at: 1,
+        identity_host_seed: Some("seed-CANARY".into()),
+        identity_vm_public_key: Some("pin".into()),
+        egress_posture: None,
+    }
+}
+
+/// **`microvm names` lists the registry without its secrets (#267).** Local only: the seam
+/// refuses every door, and none is entered.
+///
+/// **Falsification**: list each record's `to_json` instead of `redacted_json` and the token
+/// and the seed are in the envelope.
+#[tokio::test]
+async fn names_lists_the_registry_without_its_secrets() {
+    let dir = TempDir::new("names-list");
+    let registry = crate::ledger::Names::new(&dir.0);
+    for (name, id) in [("beta", "mvm-2"), ("alpha", "mvm-1")] {
+        registry.register(&canaried(name, id)).expect("registers");
+    }
+    let seam = RefusingSeam::new();
+    let command = Command::Names(crate::cli::NamesArgs {
+        delete: Vec::new(),
+        state_dir: Some(dir.0.clone()),
+    });
+    let (result, _) = dispatch_with(&seam, &command, full_infra()).await;
+    let rendered = result.expect("a local read");
+    assert_eq!(rendered.kind, "microvm.names");
+    let listed: Vec<&str> = rendered.data["names"]
+        .as_array()
+        .expect("an array")
+        .iter()
+        .filter_map(|record| record["name"].as_str())
+        .collect();
+    assert_eq!(listed, ["alpha", "beta"], "sorted by name");
+    assert_eq!(rendered.data["names"][0]["microvmId"], "mvm-1");
+    let everything = format!(
+        "{} {} {}",
+        serde_json::Value::Object(rendered.data.clone()),
+        rendered.text,
+        rendered.dense_text
+    );
+    assert!(
+        !everything.contains("CANARY"),
+        "a listing printed a secret: {everything}"
+    );
+    assert!(seam.doors().is_empty(), "entered {:?}", seam.doors());
+}
+
+/// **`names --delete` removes a name whose VM is gone, and refuses one it doesn't hold
+/// (#267).** The refusal comes before any delete, so the good name in the same call survives
+/// it.
+///
+/// **Falsification**: skip the `registry.delete` call and `alpha` is still listed, its file
+/// still on disk.
+#[tokio::test]
+async fn names_delete_removes_a_held_name_and_refuses_an_unknown_one() {
+    let dir = TempDir::new("names-delete");
+    let registry = crate::ledger::Names::new(&dir.0);
+    for (name, id) in [("alpha", "mvm-1"), ("beta", "mvm-2")] {
+        registry.register(&canaried(name, id)).expect("registers");
+    }
+    let seam = RefusingSeam::new();
+    let names = |delete: &[&str]| {
+        Command::Names(crate::cli::NamesArgs {
+            delete: delete.iter().map(|name| name.to_string()).collect(),
+            state_dir: Some(dir.0.clone()),
+        })
+    };
+
+    let (result, _) = dispatch_with(&seam, &names(&["alpha", "nobody"]), full_infra()).await;
+    let error = result.expect_err("nobody holds that name");
+    assert_eq!(error.exit, Exit::Precondition, "{}", error.message);
+    assert!(error.message.contains("\"nobody\""), "{}", error.message);
+    let looked_in = dir.0.join("names").display().to_string();
+    assert!(
+        error.message.contains(&looked_in),
+        "the refusal names the registry it read, {looked_in}: {}",
+        error.message
+    );
+    assert!(
+        registry.lookup("alpha").is_some(),
+        "a refused call deleted nothing"
+    );
+
+    let (result, _) = dispatch_with(&seam, &names(&["alpha"]), full_infra()).await;
+    let rendered = result.expect("alpha is held");
+    assert_eq!(rendered.data["deleted"], serde_json::json!(["alpha"]));
+    assert_eq!(rendered.data["names"][0]["name"], "beta");
+    assert_eq!(rendered.data["names"].as_array().map(Vec::len), Some(1));
+    assert!(registry.lookup("alpha").is_none(), "the record is gone");
+    assert!(!registry.path_of("alpha").exists());
+
+    let (result, _) = dispatch_with(&seam, &names(&["../x"]), full_infra()).await;
+    assert_eq!(
+        result.expect_err("not a name").exit,
+        Exit::InvalidArg,
+        "an illegal name is the grammar's refusal"
+    );
+}
