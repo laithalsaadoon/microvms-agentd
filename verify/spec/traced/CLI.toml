@@ -1,5 +1,45 @@
 # The CLI group's traced requirements. The format and the rules are in tools/check-trace.py.
 
+[CLI-1]
+issue = "#304"
+waive.model = "a rendering choice, not a state"
+waive.gherkin = "the TUI draws only when stdout is a terminal, and the Gherkin tier runs the binary on pipes"
+waive.fuzz = "a frame is drawn from rows the command has already rendered as text; there is no input stream"
+waive.live = "the live suite runs the CLI with --json on a pipe, where the TUI never draws"
+
+[CLI-2]
+issue = "#304"
+waive.model = "a property of the crate's dependencies and of its one door to core, not of a state"
+waive.gherkin = "the behavioral guard already drives every AWS-touching command through a seam that refuses, which a scenario would restate"
+waive.fuzz = "there is no input stream; the rule is over the dependency set and the source"
+waive.live = "a live run can't show that a call didn't bypass core; the dependency denylist, the clippy bans and the refusing seam can"
+
+[CLI-3]
+issue = "#304"
+waive.model = "a fixed table from failure class to code, not a state machine"
+waive.gherkin = "the table-driven test asserts every row, and tests/exit_codes.rs reads each class's code at the process boundary; a scenario per row would restate the table"
+waive.fuzz = "the input is a closed enum of failure kinds, which the table-driven test walks exhaustively"
+
+[CLI-4]
+issue = "#304"
+waive.model = "one envelope per invocation follows from main's single write, not from a state; crates/model/src/output.rs models the closed-pipe rules, CLI-7 to CLI-9"
+waive.gherkin = "tests/exit_codes.rs parses stdout as one document at the process boundary, and the live harness does on every call"
+waive.fuzz = "the envelope's count isn't input-driven: one call in main writes it, and the closed-output harness fuzzes what happens around it (CLI-9)"
+
+[CLI-5]
+issue = "#304"
+waive.model = "a property of the parser's closed domains, not of a state"
+waive.gherkin = "the parser tests enumerate each closed domain and round-trip the manifest's published values; a scenario per value would restate them"
+waive.fuzz = "the domains are closed sets the tests enumerate exactly, so there is no open input space to search"
+waive.live = "a value the parser refuses never leaves the process, so the service never sees it"
+
+[CLI-6]
+issue = "#304"
+waive.model = "one interrupt in one window of one launch; the guard places it there against a scripted control plane"
+waive.gherkin = "the guard is the scenario: it scripts the control plane, interrupts at RunMicrovm and asserts the exit code, the terminate call, the envelope and the ledger"
+waive.fuzz = "there is no input stream; the window that matters is the one between the launch and RUNNING"
+waive.live = "an interrupt has to land between a billable launch and RUNNING, which a live run can't place deterministically; the guard places it at RunMicrovm"
+
 [CLI-7]
 issue = "#216"
 
