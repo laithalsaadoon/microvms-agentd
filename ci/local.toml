@@ -37,6 +37,7 @@ workflows = ["ci.yml", "fuzz.yml"]
 "matrix.os" = "ubuntu-latest"
 "matrix.os == 'ubuntu-latest'" = "true"
 "github.base_ref" = "main"
+"github.event.pull_request.user.login" = "contributor"
 "github.event_name == 'pull_request'" = "true"
 "github.event_name != 'pull_request'" = "false"
 "matrix.shard" = "0"
@@ -85,6 +86,8 @@ steps = [
   "conformance self-test",
   "agents check unit tests",
   "agents check",
+  "changelog unit tests",
+  "changelog fragments",
   "license consistency",
   "cargo-deny (dependency licenses, yanked crates, sources)",
   "actionlint",
