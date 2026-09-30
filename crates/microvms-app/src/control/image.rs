@@ -334,7 +334,18 @@ impl ControlPlane {
         super::require_valid_role_arn("buildRoleArn", &request.build_role_arn)?;
         super::require_non_blank("codeArtifact.uri", &request.code_artifact_uri)?;
         super::require_non_blank("baseImageArn", &request.base_image.arn(&self.region))?;
-        super::require_valid_tags(&request.tags)
+        super::require_valid_tags(&request.tags)?;
+
+        // The daemon, when the request carries one (#257). A wrong-architecture daemon builds
+        // cleanly and fails as a run-hook timeout, so this is the one guard here whose
+        // failure AWS would report last rather than first. No bytes means the caller's
+        // `codeArtifact.uri` already holds the daemon (`--artifact-uri`, #249) and nothing of
+        // this request enters an artifact; the bytes that do are refused where they enter one
+        // (`artifact::build_artifact_with_context`).
+        if request.binary.is_empty() {
+            return Ok(());
+        }
+        microvms_domain::provision::require_aarch64(&request.binary)
     }
 
     /// The artifact bytes to upload to [`CreateImageRequest::code_artifact_uri`].
@@ -1292,7 +1303,7 @@ mod tests {
     fn a_request() -> CreateImageRequest {
         CreateImageRequest::new(
             "agentd-conformance",
-            b"\x7fELF fake daemon".to_vec(),
+            crate::testing::aarch64_daemon(b"fake daemon"),
             "s3://bucket/agentd-conformance.zip",
             "arn:aws:iam::123456789012:role/build",
         )
@@ -1740,6 +1751,44 @@ mod tests {
             .expect_err("dots are refused");
         assert_eq!(error.kind(), ErrorKind::InvalidArg);
         assert_eq!(fake.calls().len(), 0, "nothing reached the control plane");
+    }
+
+    /// **BIND-20 at the build (#257).** `preflight` refuses a request whose daemon is an x86_64 ELF or
+    /// no ELF at all, as a precondition naming what the bytes are, and `create_image` refuses
+    /// it before any call. A request with no bytes passes: its `codeArtifact.uri` already
+    /// holds the daemon (`--artifact-uri`, #249), and nothing of it enters an artifact.
+    ///
+    /// **Falsification**: drop the `require_aarch64` call from `preflight` and both requests
+    /// pass it, and the create reaches the fake.
+    #[tokio::test]
+    async fn preflight_refuses_a_daemon_that_is_not_an_aarch64_elf() {
+        for (binary, why) in [
+            (
+                crate::testing::elf_daemon(0x3E, b"x86"),
+                "ELF machine 0x3e, not aarch64",
+            ),
+            (b"#!/bin/sh\n".to_vec(), "not an ELF binary at all"),
+        ] {
+            let (plane, fake, _) = planted();
+            fake.answer(
+                "CreateMicrovmImage",
+                Answer::created(fake::create_image_response("agentd-conformance")),
+            );
+            let mut request = a_request();
+            request.binary = binary;
+            let error = plane.preflight(&request).expect_err(why);
+            assert_eq!(error.kind(), ErrorKind::Precondition, "{error}");
+            assert!(error.to_string().contains(why), "{error}");
+            let error = plane.create_image(request).await.expect_err(why);
+            assert_eq!(error.kind(), ErrorKind::Precondition, "{error}");
+            assert!(fake.calls().is_empty(), "{why}: nothing reached the plane");
+        }
+        let (plane, _, _) = planted();
+        let mut request = a_request();
+        request.binary = Vec::new();
+        plane
+            .preflight(&request)
+            .expect("no bytes: the caller's artifact carries the daemon");
     }
 
     /// A Dockerfile disagreeing with the base image is refused locally too — same reason,

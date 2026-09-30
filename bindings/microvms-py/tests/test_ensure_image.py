@@ -33,7 +33,8 @@ def sandbox() -> microvms.Sandbox:
 def ensure(**overrides: object) -> microvms.EnsuredImage:
     arguments: dict[str, object] = {
         "name_prefix": "task",
-        "binary": b"\x7fELF",
+        # An aarch64 ELF header, so each case below is refused for its own cause.
+        "binary": b"\x7fELF\x02\x01" + bytes(12) + b"\xb7\x00",
         "dockerfile": microvms.wrap_dockerfile("FROM python:3.12-slim\n"),
         "s3_bucket": BUCKET,
         "build_role_arn": ROLE,

@@ -1918,7 +1918,7 @@ mod tests {
         .expect("a wrappable Dockerfile");
         let request = crate::control::EnsureImageRequest::new(
             "task",
-            b"daemon".to_vec(),
+            crate::testing::aarch64_daemon(b"daemon"),
             dockerfile,
             "artifact-bucket",
             "arn:aws:iam::123456789012:role/build",
@@ -3705,7 +3705,7 @@ mod tests {
         sandbox
             .build_image(CreateImageRequest::new(
                 "agentd-conformance",
-                b"binary".to_vec(),
+                crate::testing::aarch64_daemon(b"binary"),
                 "s3://bucket/img.zip",
                 "arn:aws:iam::123456789012:role/build",
             ))
@@ -3795,7 +3795,7 @@ mod tests {
         sandbox
             .build_image(CreateImageRequest::new(
                 "img",
-                b"binary".to_vec(),
+                crate::testing::aarch64_daemon(b"binary"),
                 "s3://bucket/img.zip",
                 "arn:aws:iam::123456789012:role/build",
             ))

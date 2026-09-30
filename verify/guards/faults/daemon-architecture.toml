@@ -1,0 +1,69 @@
+# ── a build's daemon is an aarch64 ELF (#257, BIND-20) ────────────────────────
+#
+# Two refusals: `ControlPlane::preflight` when the request carries bytes, and
+# `build_artifact_with_context` wherever bytes enter an artifact. Each unit test is seeded with
+# its own refusal taken out; the CLI and binding tests are seeded with both, since either one
+# alone still stops the upload.
+
+[[fault]]
+id = "app-preflight-accepts-any-daemon"
+guard = "control::image::tests::preflight_refuses_a_daemon_that_is_not_an_aarch64_elf"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::image::tests::preflight_refuses_a_daemon_that_is_not_an_aarch64_elf"]
+expect = "test-failed"
+suite = "rust"
+message = "ELF machine 0x3e, not aarch64"
+note = "crates/microvms-app/src/control/image.rs::preflight_refuses_a_daemon_that_is_not_an_aarch64_elf"
+transform = { file = "crates/microvms-app/src/control/image.rs", replace = "        microvms_domain::provision::require_aarch64(&request.binary)\n    }\n", with = "        Ok(())\n    }\n" }
+
+[[fault]]
+id = "app-artifact-accepts-any-daemon"
+guard = "control::artifact::tests::an_artifact_refuses_a_daemon_that_is_not_an_aarch64_elf"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::artifact::tests::an_artifact_refuses_a_daemon_that_is_not_an_aarch64_elf"]
+expect = "test-failed"
+suite = "rust"
+message = "ELF machine 0x3e"
+note = "crates/microvms-app/src/control/artifact.rs::an_artifact_refuses_a_daemon_that_is_not_an_aarch64_elf"
+transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = "    microvms_domain::provision::require_aarch64(binary)?;\n", with = "" }
+
+[[fault]]
+id = "cli-build-uploads-any-daemon"
+guard = "guards::build::a_daemon_that_is_not_an_aarch64_elf_costs_no_upload_and_no_call"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::build::a_daemon_that_is_not_an_aarch64_elf_costs_no_upload_and_no_call"]
+expect = "test-failed"
+suite = "rust"
+# The upload goes through, and the create after it is a call the scripted transport has no
+# answer for.
+message = "the fake has no answer for CreateMicrovmImage"
+note = "crates/microvms-cli/src/guards/build.rs::a_daemon_that_is_not_an_aarch64_elf_costs_no_upload_and_no_call"
+transform = [
+  { file = "crates/microvms-app/src/control/image.rs", replace = "        microvms_domain::provision::require_aarch64(&request.binary)\n    }\n", with = "        Ok(())\n    }\n" },
+  { file = "crates/microvms-app/src/control/artifact.rs", replace = "    microvms_domain::provision::require_aarch64(binary)?;\n", with = "" },
+]
+
+[[fault]]
+id = "py-build-accepts-any-daemon"
+guard = "bindings/microvms-py/tests/test_image_daemon.py::test_bind20_build_artifact_refuses_a_daemon_that_is_not_aarch64[x86_64]"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_image_daemon.py"],
+]
+expect = "test-failed"
+suite = "bindings"
+transform = [
+  { file = "crates/microvms-app/src/control/image.rs", replace = "        microvms_domain::provision::require_aarch64(&request.binary)\n    }\n", with = "        Ok(())\n    }\n" },
+  { file = "crates/microvms-app/src/control/artifact.rs", replace = "    microvms_domain::provision::require_aarch64(binary)?;\n", with = "" },
+]
+
+[[fault]]
+id = "js-build-accepts-any-daemon"
+guard = "BIND-20: buildArtifact refuses an x86_64 ELF as the daemon"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/image_daemon.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+transform = [
+  { file = "crates/microvms-app/src/control/image.rs", replace = "        microvms_domain::provision::require_aarch64(&request.binary)\n    }\n", with = "        Ok(())\n    }\n" },
+  { file = "crates/microvms-app/src/control/artifact.rs", replace = "    microvms_domain::provision::require_aarch64(binary)?;\n", with = "" },
+]
