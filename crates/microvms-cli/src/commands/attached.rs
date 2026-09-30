@@ -1517,35 +1517,6 @@ fn sync_failure(error: crate::sync::SyncError) -> CliError {
         .suggest("the failure is on this machine's filesystem; the platform was not involved")
 }
 
-/// Re-classifies the daemon's disk-pressure refusal; everything else converts as usual.
-///
-/// The daemon answers 507 when a write would take the target filesystem under its
-/// configured reserve, and its own rationale (`crates/agentd/src/fs.rs`) says why the default
-/// classification is wrong for it: a 507 arrives as a 5xx, 5xx maps to `ERR_RETRYABLE`,
-/// and retrying an identical upload against a full disk is "correct for a defect and
-/// actively harmful for a full disk". So the one status whose remedy is *free space, then
-/// retry* is surfaced as `ERR_PLATFORM` — the row for a platform-side condition — with the
-/// daemon's own byte counts kept in the message and the remedy attached. No new exit code:
-/// the vocabulary already has the right row, the default mapping just cannot know this
-/// body means "not until space is freed".
-fn classify_upload(error: microvms_core::Error) -> CliError {
-    let pressure = error.wire_kind() == Some(microvms_core::WireKind::ServerError)
-        && error.to_string().contains("-> 507");
-    if !pressure {
-        return error.into();
-    }
-    CliError::new(
-        Exit::Platform,
-        format!(
-            "the VM's disk is under pressure: {error}. diskUnderPressure means a write \
-             would be refused right now; the sync was not applied."
-        ),
-    )
-    .suggest("free space in the VM: `microvm exec --name <vm> -- rm -rf /workspace/<big-dir>`")
-    .suggest("`microvm health` reports diskAvailableBytes and diskUnderPressure")
-    .with_data("diskUnderPressure", json!(true))
-}
-
 /// What one sync pass did, for the envelope and the watch loop's running totals.
 struct SyncPass {
     uploaded_bytes: usize,
@@ -1646,8 +1617,7 @@ async fn sync_pass<O: std::io::Write, E: std::io::Write>(
         ));
         session
             .upload_tar(crate::sync::REMOTE_WORKDIR, &packed.archive)
-            .await
-            .map_err(classify_upload)?;
+            .await?;
         uploaded_bytes = packed.archive.len();
         uploaded_members = packed.members;
     }
@@ -1719,8 +1689,7 @@ async fn sync_pass<O: std::io::Write, E: std::io::Write>(
     })?;
     session
         .upload_file(crate::sync::MANIFEST_PATH, &body, None)
-        .await
-        .map_err(classify_upload)?;
+        .await?;
 
     Ok(SyncPass {
         uploaded_bytes,

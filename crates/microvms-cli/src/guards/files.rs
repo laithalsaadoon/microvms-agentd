@@ -387,54 +387,77 @@ async fn a_hostile_guest_manifest_cannot_order_deletions_outside_the_workspace()
 }
 
 /// **The daemon's disk-pressure 507 surfaces as `ERR_PLATFORM` with the remedy, never as
-/// `ERR_RETRYABLE`.**
+/// `ERR_RETRYABLE`, from `sync` and from `cp` alike (#256).**
 ///
-/// The default wire mapping sends every 5xx to `ERR_RETRYABLE`, and `crates/agentd/src/fs.rs`
+/// The 5xx fallback sent every 5xx to `ERR_RETRYABLE`, and `crates/agentd/src/fs.rs`
 /// documents why that is exactly wrong for this one: a retry against a full disk is
-/// "actively harmful", and 507 exists to be distinguishable from a defect. The command
-/// re-classifies it onto the existing `ERR_PLATFORM` row (no new exit code), keeps the
-/// daemon's byte counts in the message, marks `data.diskUnderPressure`, and suggests the
-/// path that actually helps — freeing space.
+/// "actively harmful", and 507 exists to be distinguishable from a defect. Core reads a 507
+/// as `InsufficientStorage`, on the existing `ERR_PLATFORM` row (no new exit code), and the
+/// CLI keeps the daemon's byte counts in the message, marks `data.diskUnderPressure`, and
+/// suggests the path that actually helps: freeing space. `sync` used to get there by matching
+/// `-> 507` in the message, and `cp`, which went through the same core uploads without that
+/// match, reported a full disk as `ERR_RETRYABLE`.
 ///
-/// **Falsification** — drop `classify_upload` from the tar upload (plain `?`) and both
-/// assertions go red: the exit arrives as `Exit::Retryable` and the marker is absent.
-/// Done on 2026-09-01; failed as stated (left: Retryable, right: Platform); restored.
+/// **Falsification**: delete the 507 arm from `WireKind::from_status` and both commands go
+/// red, since the exit arrives as `Exit::Retryable` and the marker is absent.
 #[tokio::test]
 async fn a_disk_pressure_507_is_platform_with_the_remedy_not_retryable() {
+    // The daemon's own body shape (`crates/agentd/src/fs.rs::insufficient_storage`).
+    let body = "refusing to write /workspace: 4096 bytes available on the target filesystem, \
+                below the 1048576 byte reserve";
     let dir = TempDir::new("sync-507");
     std::fs::write(dir.0.join("big.bin"), vec![0u8; 1024]).expect("writes");
 
-    let script = DaemonScript::new();
-    script.reply(404, "no such file").reply(
-        // The daemon's own body shape (`crates/agentd/src/fs.rs::insufficient_storage`).
-        507,
-        "refusing to write /workspace: 4096 bytes available on the target filesystem, \
-         below the 1048576 byte reserve",
-    );
+    let sync = DaemonScript::new();
+    sync.reply(404, "no such file").reply(507, body);
+    let cp = DaemonScript::new();
+    cp.reply(507, body);
+    let cp_command = Command::Cp(CpArgs {
+        src: dir.0.join("big.bin").to_string_lossy().to_string(),
+        dst: "vm:/workspace/big.bin".into(),
+        tar: false,
+        mode: None,
+        attach: attach_flags(),
+        region: region_flags(),
+    });
 
-    let (result, _, _) = against_daemon(&script, &sync_command(&dir.0, |_| {})).await;
-    let failure = result.expect_err("a 507 refuses the sync");
+    for (name, script, command) in [
+        ("cp", &cp, cp_command),
+        ("sync", &sync, sync_command(&dir.0, |_| {})),
+    ] {
+        let (result, _, _) = against_daemon(script, &command).await;
+        let failure = result.expect_err("a 507 refuses the write");
 
-    assert_eq!(
-        failure.exit,
-        Exit::Platform,
-        "a full disk is not retryable-unchanged: {}",
-        failure.message
-    );
-    assert_eq!(failure.data["diskUnderPressure"], true);
-    assert!(
-        failure.message.contains("bytes available"),
-        "the daemon's byte counts survive into the message: {}",
-        failure.message
-    );
-    assert!(
-        failure
-            .suggestions
-            .iter()
-            .any(|suggestion| suggestion.contains("free space")),
-        "{:?}",
-        failure.suggestions
-    );
+        assert_eq!(
+            failure.exit,
+            Exit::Platform,
+            "{name}: a full disk is not retryable-unchanged: {}",
+            failure.message
+        );
+        assert_eq!(
+            failure.wire_kind.map(|kind| kind.as_str()),
+            Some("InsufficientStorage"),
+            "{name}: data.kind names the daemon's status class"
+        );
+        assert_eq!(
+            failure.data.get("diskUnderPressure"),
+            Some(&serde_json::Value::Bool(true)),
+            "{name}: data.diskUnderPressure marks the refusal"
+        );
+        assert!(
+            failure.message.contains("bytes available"),
+            "{name}: the daemon's byte counts survive into the message: {}",
+            failure.message
+        );
+        assert!(
+            failure
+                .suggestions
+                .iter()
+                .any(|suggestion| suggestion.contains("free space")),
+            "{name}: {:?}",
+            failure.suggestions
+        );
+    }
 }
 
 /// **`sync --watch` re-syncs on a real filesystem event and reports the passes.**
