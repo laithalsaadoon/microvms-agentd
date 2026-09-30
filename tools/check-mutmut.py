@@ -50,16 +50,17 @@ What it does:
      `setup.cfg` names them and their suites. Each run mutates only the changed functions
      (`mutmut run <module>.<function>__mutmut_*`), so a change pays for what it touched.
   6. Reads each function's verdicts from mutmut's results (`mutants/<script>.meta`) and counts
-     the mutants that survived, timed out or ended some way other than a failing test. One no
-     test reached in-process (`no tests`) is listed, not counted: a suite that runs the script
-     as a subprocess tests it, and mutmut can't see that. Fails when a changed function has more
+     the mutants whose tests passed or ran out of time. A test run a signal ended, other than the
+     one mutmut's timeout sends, is caught: its tests didn't pass. One no test reached in-process
+     (`no tests`) is listed, not counted: a suite that runs the script as a subprocess tests it,
+     and mutmut can't see that. Fails when a changed function has more
      counted mutants than on the base, with each one's diff (`mutmut show`). A function the
      base's suites didn't measure has no base count, and isn't held to one.
 
 It fails rather than read a count from nothing: mutmut exiting non-zero while a changed function
 has mutants, a results file that's missing or names no mutant of its script, a mutant left
-without a verdict, and a function hash that isn't the one mutmut recorded, which would mean the
-functions read as changed aren't the ones mutmut sees.
+without a verdict or with an exit code mutmut doesn't name, and a function hash that isn't the
+one mutmut recorded, which would mean the functions read as changed aren't the ones mutmut sees.
 
 `--detect` stops after step 1 and prints `python=true` or `python=false`, for CI's first step to
 append to `$GITHUB_OUTPUT` before it installs anything. It needs nothing but git, so the runner's
@@ -98,8 +99,12 @@ PATHSPEC = ("--", SCRIPTS)
 SUITE = re.compile(r"^tools/test_[^/]*\.py$")
 MUTMUT = ["uv", "run", "--locked", "--project", str(HOME), "mutmut"]
 
-# mutmut 3.8.0's names for its exit codes (`status_by_exit_code` in `mutmut/stats.py`). A code
-# missing here is its "suspicious", and None is a mutant it never ran.
+# mutmut 3.8.0's names for its exit codes (`status_by_exit_code` in `mutmut/stats.py`), less
+# its 35, "suspicious", which nothing in 3.8.0 assigns. mutmut calls any code its table lacks
+# "suspicious" too, which is how a test run SIGTERM ended reads there (-15): measured on
+# 2026-09-30, a suite whose test signals itself under a mutant recorded -15, and #452's CI once
+# counted such a mutant as a survivor, depending on which of its tests mutmut ran first. None is
+# a mutant it never ran.
 STATUS = {
     0: "survived",
     1: "killed",
@@ -108,7 +113,6 @@ STATUS = {
     5: "no tests",
     33: "no tests",
     34: "skipped",
-    35: "suspicious",
     36: "timeout",
     37: "caught by type check",
     24: "timeout",
@@ -124,6 +128,8 @@ CAUGHT = {"killed", "caught by type check", "segfault", "skipped"}
 UNREACHED = "no tests"
 # The run ended before the mutant's tests did, so the count can't be read.
 UNREAD = {None, 2}
+# A test run a signal ended exits with the signal's number, negated.
+SIGNALS = frozenset(s.value for s in signal.Signals)
 
 # The pointers a git hook exports, and the `uv run --script` environment this runs in, which
 # isn't the one mutmut runs in. Inherited, the first would aim git at the caller's index.
@@ -407,8 +413,14 @@ def tally(data: dict, path: str, key: str) -> Tally:
             raise Failure(
                 f"{name} has no verdict, so no count for {shown(key)} in {path} can be read"
             )
+        if code not in STATUS and -code not in SIGNALS:
+            raise Failure(
+                f"{name} ended with exit {code}, which is neither a status mutmut 3.8.0 names nor"
+                f" a signal, so no count for {shown(key)} in {path} can be read"
+            )
         out.total += 1
-        status = STATUS.get(code, "suspicious")
+        # A signal the table doesn't name ended the test run, so its tests didn't pass.
+        status = STATUS.get(code, "killed")
         if status == UNREACHED:
             out.unreached += 1
         elif status not in CAUGHT:

@@ -74,3 +74,13 @@ expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_suite_that_stops_naming_its_script_fails ("
 transform = { file = "tools/check-mutmut.py", replace = "        elif script.base_suites:\n", with = "        elif False:\n" }
+
+# An exit code mutmut doesn't name reads as a caught mutant instead of a count that can't be read.
+[[fault]]
+id = "mutmut-unnamed-code-caught"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_exit_code_mutmut_doesnt_name_fails ("
+transform = { file = "tools/check-mutmut.py", replace = "        if code not in STATUS and -code not in SIGNALS:\n", with = "        if False:\n" }

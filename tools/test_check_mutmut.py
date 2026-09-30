@@ -309,21 +309,38 @@ class RatchetTests(unittest.TestCase):
             out,
         )
 
-    def test_a_timeout_and_an_unknown_ending_count_and_the_caught_ones_dont(self):
+    def test_a_timeout_counts_and_a_failing_test_or_a_signal_doesnt(self):
+        # -15 is a test run SIGTERM ended, which mutmut's own table calls "suspicious".
         repo = self.repo("1 1 1 1 1 1 1 1 1")
         repo.commit(
-            {"tools/calc.py": calc("1 3 37 -9 -11 34 36 99 24", "return b + a")}
+            {"tools/calc.py": calc("1 3 37 -9 -11 34 36 -15 24", "return b + a")}
         )
         code, out, err = repo.run()
         self.assertEqual(code, 1, out + err)
-        self.assertIn("    add: 3 of 9 survive (0 on the base): MORE\n", out)
+        self.assertIn("    add: 2 of 9 survive (0 on the base): MORE\n", out)
         self.assertIn("tools.calc.x_add__mutmut_7: timeout\n", err)
-        self.assertIn("tools.calc.x_add__mutmut_8: suspicious\n", err)
         self.assertIn("tools.calc.x_add__mutmut_9: timeout\n", err)
+        self.assertNotIn("mutmut_8", err)
+
+    def test_an_exit_code_mutmut_doesnt_name_fails(self):
+        for unnamed in ("35", "99", "-99"):
+            with self.subTest(code=unnamed):
+                repo = self.repo()
+                repo.commit({"tools/calc.py": calc(f"1 {unnamed}", "return b + a")})
+                code, out, err = repo.run()
+                self.assertEqual(code, 1, out + err)
+                self.assertTrue(
+                    err.endswith(
+                        f"check-mutmut: tools.calc.x_add__mutmut_2 ended with exit {unnamed},"
+                        " which is neither a status mutmut 3.8.0 names nor a signal, so no"
+                        " count for add in tools/calc.py can be read\n"
+                    ),
+                    err,
+                )
 
     def test_every_status_mutmut_names_is_read_as_it_means(self):
-        counted = {"survived", "timeout", "suspicious"}
-        for code, status in GATE["STATUS"].items():
+        counted = {"survived", "timeout"}
+        for code, status in [*GATE["STATUS"].items(), (-15, "killed"), (-6, "killed")]:
             data = {"exit_code_by_key": {"tools.calc.x_add__mutmut_1": code}}
             with self.subTest(code=code, status=status):
                 if code in GATE["UNREAD"]:
@@ -769,12 +786,23 @@ class ScratchTests(unittest.TestCase):
         self.assertIs(signal.getsignal(signal.SIGTERM), before)
 
     def test_sigterm_ends_the_run_with_143_and_removes_the_worktrees(self):
+        # A handler of this test's own, so a gate that installs none meets it here instead of
+        # the signal ending the test process, which mutmut would read as no verdict at all.
+        class Unhandled(Exception):
+            pass
+
+        def unhandled(*_):
+            raise Unhandled
+
+        before = signal.signal(signal.SIGTERM, unhandled)
+        self.addCleanup(signal.signal, signal.SIGTERM, before)
         repo = Repo(self, {"tools/calc.py": calc(), "tools/test_calc.py": SUITE})
         repo.commit({"tools/calc.py": calc("1 0 1", "return b + a")})
         started = time.monotonic()
         with self.assertRaises(SystemExit) as caught:
             repo.run(env={"FAKE_MUTMUT_TERM": "1"})
         self.assertEqual(caught.exception.code, 143)
+        self.assertIs(signal.getsignal(signal.SIGTERM), unhandled)
         self.assertLess(
             time.monotonic() - started, 9, "the fake mutmut ran out its sleep"
         )
