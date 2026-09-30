@@ -26,8 +26,9 @@ in six places, and this script reports where:
            `.skip`, `.todo` or `{ skip: true }`
   impl     a mention in production Rust source of the CLI, core, the domain, the app,
            the edges, the daemon, protocol, or either binding
-  live     a live conformance check whose name starts with the key
-           (`conformance/run_rs.py`, run against AWS by `mise run live`)
+  live     a live conformance check whose name starts with the key, in any module of the
+           suite under `conformance/` (`conformance/run_rs.py` and the packages it imports,
+           run against AWS by `mise run live`)
 
 A `//` or `//!` comment, a module docstring, a header comment and an assertion message don't
 count for the test or fuzz layer: a file that mentioned a key and tested nothing would score
@@ -85,7 +86,10 @@ THREAT_COLUMNS = ("Threat", "Requirement", "Guard", "Status")
 # A row the threat table always carries, for SENTINEL's reason: a parser that kept only some rows
 # (the first, or only the gaps) would leave the floor satisfied and the rest of the table unread.
 THREAT_SENTINEL = "BIND-18"
+# The live suite's entry point, and the directory whose modules are the suite: the entry and
+# the packages beside it that it imports. A check counts in whichever module its call is in.
 LIVE = ROOT / "conformance" / "run_rs.py"
+LIVE_SUITE = ROOT / "conformance"
 
 # The fuzz waiver the ensure_image decisions share: their input space is interleavings.
 INTERLEAVINGS = (
@@ -595,6 +599,11 @@ def rel(path: Path, root: Path = ROOT) -> str:
     return path.relative_to(root).as_posix()
 
 
+def live_files(root: Path = ROOT) -> list[Path]:
+    """The live suite's Python modules: its entry point and every module beside it."""
+    return sorted((root / LIVE_SUITE.relative_to(ROOT)).rglob("*.py"))
+
+
 def rust_files(*directories: str, root: Path = ROOT) -> list[Path]:
     files: list[Path] = []
     for directory in directories:
@@ -897,8 +906,7 @@ def collect(patterns: Patterns, root: Path = ROOT) -> dict[str, dict[str, set[st
         for key in keys:
             note(key, "test", path)
 
-    live = root / LIVE.relative_to(ROOT)
-    if live.is_file():
+    for live in live_files(root):
         for key in patterns.live.findall(live.read_text()):
             note(key, "live", live)
     return found

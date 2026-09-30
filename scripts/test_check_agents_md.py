@@ -94,7 +94,7 @@ jobs:
       - run: "true"
 """
 
-RUN_RS = """\
+RESULTS = """\
 class Results:
     def eq(self, name, actual, expected):
         return actual is not None and actual == expected
@@ -194,7 +194,8 @@ HEALTHY = {
     "mise.toml": MISE,
     ".github/workflows/ci.yml": CI,
     ".github/PULL_REQUEST_TEMPLATE.md": "## Guards\n\nName the `guards/faults.toml` entry.\n",
-    "conformance/run_rs.py": RUN_RS,
+    "conformance/run_rs.py": "from lanes.suite import run_suite\n",
+    "conformance/harness/results.py": RESULTS,
     "guards/faults.toml": FAULTS,
     "AGENTS.md": AGENTS,
     "CONTRIBUTING.md": CONTRIBUTING,
@@ -378,15 +379,15 @@ class AgentsMdTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_a_missing_results_absent_fails(self):
-        without = RUN_RS.replace("def absent(", "def missing(")
-        self.healthy(**{"conformance/run_rs.py": without})
+        without = RESULTS.replace("def absent(", "def missing(")
+        self.healthy(**{"conformance/harness/results.py": without})
         self.assert_fails_with(
-            "AGENTS.md:13:", "`Results.absent`", "conformance/run_rs.py"
+            "AGENTS.md:13:", "`Results.absent`", "conformance/harness/results.py"
         )
 
     def test_a_missing_results_eq_fails(self):
-        without = RUN_RS.replace("def eq(", "def equal(")
-        self.healthy(**{"conformance/run_rs.py": without})
+        without = RESULTS.replace("def eq(", "def equal(")
+        self.healthy(**{"conformance/harness/results.py": without})
         self.assert_fails_with("AGENTS.md:13:", "`Results.eq`")
 
     def test_an_instance_spelling_of_a_symbol_is_checked_too(self):
@@ -607,8 +608,8 @@ class AgentsMdTests(unittest.TestCase):
         self.assert_fails_with("found no tasks in mise.toml")
 
     def test_a_suite_with_no_results_class_fails_naming_it(self):
-        self.healthy(**{"conformance/run_rs.py": "def main():\n    pass\n"})
-        self.assert_fails_with("no class Results in conformance/run_rs.py")
+        self.healthy(**{"conformance/harness/results.py": "def main():\n    pass\n"})
+        self.assert_fails_with("no class Results in conformance/harness/results.py")
 
     # ── the path census: hooks, tasks, workflows, dependabot, script constants ─
 
