@@ -283,9 +283,13 @@ pub struct Microvm {
 }
 
 /// Epoch seconds from a `Timestamp` member, or `None` for an absent or unrepresentable one.
+///
+/// The checked conversion refuses a negative, NaN, infinite or too-large figure. The unchecked
+/// one, behind a filter for the first three, panicked on a figure past what a `Duration` holds
+/// before `checked_add` could refuse it (#335).
 fn epoch(seconds: Option<f64>) -> Option<std::time::SystemTime> {
-    let seconds = seconds.filter(|value| value.is_finite() && *value >= 0.0)?;
-    std::time::UNIX_EPOCH.checked_add(std::time::Duration::from_secs_f64(seconds))
+    let since = std::time::Duration::try_from_secs_f64(seconds?).ok()?;
+    std::time::UNIX_EPOCH.checked_add(since)
 }
 
 /// The optional filters `ListMicrovms` accepts.
@@ -2660,6 +2664,34 @@ mod tests {
             Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_754_524_800))
         );
         assert_eq!(vm.terminated_at, None);
+    }
+
+    /// A timestamp past what a `Duration` holds reads as absent, as a negative one does, and
+    /// the rest of the reply still parses. The conversion ran before the checked add, so such
+    /// a reply panicked the parser instead (#335). The negative figure is last, so the fault
+    /// below panics on an out-of-range one first.
+    ///
+    /// **Falsification**: `verify/guards/faults/seconds-flags.toml` entry
+    /// `app-epoch-past-a-duration-panics` restores `Duration::from_secs_f64` in `epoch`, and
+    /// the `1e300` reply panics.
+    #[tokio::test]
+    async fn an_out_of_range_timestamp_reads_as_absent() {
+        for seconds in ["2e19", "1e300", "1.7976931348623157e308", "-1"] {
+            let (plane, fake, _) = planted();
+            let body = fake::microvm_response("TERMINATED", None).replace(
+                r#""startedAt": 1754524800"#,
+                &format!(r#""startedAt": {seconds}, "terminatedAt": {seconds}"#),
+            );
+            fake.answer("GetMicrovm", Answer::ok(body));
+            let vm = plane
+                .get_microvm("mvm-abc123")
+                .await
+                .unwrap_or_else(|error| panic!("{seconds}: {error}"));
+            assert_eq!(vm.state, "TERMINATED", "{seconds}");
+            assert_eq!(vm.maximum_duration_seconds, Some(3600), "{seconds}");
+            assert_eq!(vm.started_at, None, "{seconds}");
+            assert_eq!(vm.terminated_at, None, "{seconds}");
+        }
     }
 
     /// The list filters reach the query string in SigV4's sorted order, ARN colons escaped.

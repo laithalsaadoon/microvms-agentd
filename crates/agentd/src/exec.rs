@@ -1165,7 +1165,9 @@ fn live_pgrp(stat: &str) -> Option<u32> {
 /// Rejects a timeout that cannot describe a real budget.
 ///
 /// `f64` from JSON admits NaN and infinity through some encoders, and both turn
-/// into a `Duration` conversion panic or an effectively infinite wait.
+/// into a `Duration` conversion panic or an effectively infinite wait. So does a
+/// finite figure past what a `Duration` holds (about 1.8e19 seconds), which is why
+/// the conversion is the checked one (#335).
 fn validate_timeout(raw: Option<f64>) -> Result<Option<Duration>, String> {
     let Some(secs) = raw else { return Ok(None) };
     if !secs.is_finite() || secs <= 0.0 {
@@ -1173,7 +1175,9 @@ fn validate_timeout(raw: Option<f64>) -> Result<Option<Duration>, String> {
             "timeout_sec must be a positive finite number, got {secs}"
         ));
     }
-    Ok(Some(Duration::from_secs_f64(secs)))
+    Duration::try_from_secs_f64(secs)
+        .map(Some)
+        .map_err(|_| format!("timeout_sec is more seconds than a duration holds, got {secs:?}"))
 }
 
 /// Assembles the child command: resolution first (`exec_start::plan`), then the spawn
@@ -1409,7 +1413,12 @@ async fn super_wait(
     let mut err_reader = Capped::new(stderr, cap, StreamKind::Stderr);
 
     let mut status = None;
-    let deadline = timeout.map(|budget| Instant::now() + budget);
+    // `Instant + Duration` panics past the monotonic clock's range, about 9.2e18
+    // seconds on Linux, and `validate_timeout` admits up to what a `Duration` holds.
+    // A deadline the clock can't represent is past any VM's life, so it's no
+    // deadline, rather than a panic here in the waiter task that left the exec
+    // with no result (#335).
+    let deadline = timeout.and_then(|budget| Instant::now().checked_add(budget));
     let mut timed_out = false;
 
     // Phase one: the direct child is alive. Read both pipes and the exit status
@@ -2798,10 +2807,16 @@ mod tests {
 
     /// A bad timeout is rejected before anything spawns. The predecessor raised
     /// inside the waiter thread, by which point the child was running with
-    /// nobody left to reap it.
+    /// nobody left to reap it. A finite figure past what a `Duration` holds is
+    /// as bad as an infinite one: the conversion panicked in the handler, which
+    /// `CatchPanicLayer` answered with a retryable 500 (#335).
+    ///
+    /// **Falsification**: `verify/guards/faults/seconds-flags.toml` entry
+    /// `agentd-timeout-past-a-duration-panics` restores `Duration::from_secs_f64` in
+    /// `validate_timeout`, and the `1e300` request panics.
     #[tokio::test]
     async fn a_bad_timeout_is_rejected_before_the_child_spawns() {
-        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY, 1e300, f64::MAX] {
             let state = state();
             let mut request = req("badtimeout", &["/bin/sh", "-c", "sleep 30"]);
             request.timeout_sec = Some(bad);
@@ -2812,10 +2827,39 @@ mod tests {
                 StatusCode::BAD_REQUEST,
                 "timeout_sec {bad} was accepted"
             );
+            assert_eq!(
+                body_json(response).await["error"],
+                ERROR_MALFORMED_REQUEST,
+                "timeout_sec {bad}"
+            );
             assert!(
                 state.with_execs(|execs| execs.is_empty()),
                 "timeout_sec {bad} spawned an orphan before validation"
             );
+        }
+    }
+
+    /// A budget a `Duration` holds but the monotonic clock can't add to now (about
+    /// 9.2e18 seconds on Linux) is no deadline at all. The unchecked add panicked in
+    /// the waiter task after the child had started, so the exec never published a
+    /// result and a wait on it hung (#335).
+    ///
+    /// **Falsification**: `verify/guards/faults/seconds-flags.toml` entry
+    /// `agentd-timeout-past-the-clock-panics` restores the unchecked
+    /// `Instant::now() + budget`, and the exec never finishes.
+    #[tokio::test]
+    async fn a_timeout_past_what_the_clock_can_hold_still_finishes() {
+        for huge in [1e19, 1.8e19] {
+            let state = state();
+            let mut request = req("hugetimeout", &["/bin/sh", "-c", "echo done"]);
+            request.timeout_sec = Some(huge);
+
+            let response = start(State(state.clone()), Ok(Json(request))).await;
+            assert_eq!(response.status(), StatusCode::OK, "timeout_sec {huge}");
+            let outcome = await_result(&state, "hugetimeout").await;
+            assert_eq!(outcome.exit_code, Some(0), "timeout_sec {huge}");
+            assert!(!outcome.timed_out, "timeout_sec {huge} timed out");
+            assert_eq!(outcome.stdout.trim(), "done", "timeout_sec {huge}");
         }
     }
 
