@@ -25,7 +25,7 @@ from harness.results import Results
 def drive_file_transfer(
     cli: Cli, launched: Envelope, results: Results, workdir: Path
 ) -> None:
-    """`microvm cp` and `cp --tar`: thirteen checks, including the four hostile archives.
+    """`microvm cp`, `cp --lines` and `cp --tar`, including the four hostile archives.
 
     The symlink pair is the one worth naming: harnesses pack symlinks deliberately, and a
     daemon that refused links would break real uploads — so an in-tree link has to survive
@@ -69,6 +69,18 @@ def drive_file_transfer(
         "read of an absent file is 404",
         "NotFound",
         lambda: cli.call("cp", "vm:/tmp/absent", str(workdir / "absent.txt"), *attach),
+    )
+
+    # A line window, sliced by the daemon (#265): lines 2 to 4 of a five-line file.
+    lines = workdir / "lines.txt"
+    lines.write_bytes(b"one\ntwo\nthree\nfour\nfive\n")
+    cli.call("cp", str(lines), "vm:/tmp/lines.txt", *attach)
+    window = workdir / "window.txt"
+    cli.call("cp", "vm:/tmp/lines.txt", str(window), "--lines", "2:4", *attach)
+    results.eq(
+        "cp --lines 2:4 reads lines 2 to 4 of a five-line file",
+        window.read_bytes(),
+        b"two\nthree\nfour\n",
     )
 
     # The tree, built in the guest. A symlink packed deliberately, because that is the

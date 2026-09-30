@@ -34,10 +34,16 @@ product code, add a line that opens `Size:` and says why this is one change
 
 ## Guards
 
-<!-- If this adds a guard, register the deliberate break that proves it fires. Add its
-entry to its owner's file in `verify/guards/faults/` (the schema is in `tools/check-guards-fire.py`)
-and paste the line `mise run guards:fire -- --only <id>` printed for it. A test that passes
-either way gives a false answer.
+<!-- A fix's regression test is proven by FAIL_TO_PASS: run `mise run fail-to-pass -- --emit
+<owner>`, commit the entry it writes into `verify/guards/faults/<owner>.toml` with its patch,
+and paste the `fired:` lines it printed. A test the merge base can't compile gets a
+hand-written fault instead, as below.
+
+A new gate, scanner or script check, or a test FAIL_TO_PASS can't prove: register the
+deliberate break that proves it fires. Add its entry to its owner's file in
+`verify/guards/faults/` (the schema is in `tools/check-guards-fire.py`) and paste the line
+`mise run guards:fire -- --only <id>` printed for it. A test that passes either way gives a
+false answer.
 
 For a guard no fault can be seeded for mechanically, such as a live check: what you broke,
 that the check failed, and that it passed again after you restored the code.

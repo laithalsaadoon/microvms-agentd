@@ -1,0 +1,31 @@
+# ── line-range file reads (#265) ─────────────────────────────────────────────
+
+[[fault]]
+id = "range-end-line-dropped"
+guard = "session::files::tests::a_line_range_is_sent_as_the_daemons_two_query_keys"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::files::tests::a_line_range_is_sent_as_the_daemons_two_query_keys"]
+expect = "test-failed"
+suite = "rust"
+message = "right: \"/v1/fs/file?path=%2Ftmp%2Fa%20b&start_line=2&end_line=4\""
+note = "crates/microvms-app/src/session/files.rs::a_line_range_is_sent_as_the_daemons_two_query_keys"
+transform = { file = "crates/microvms-app/src/session/files.rs", replace = "    if let Some(end) = query.end_line {\n        url.push_str(&format!(\"&end_line={end}\"));\n    }\n", with = "" }
+
+[[fault]]
+id = "cli-cp-lines-reads-the-whole-file"
+guard = "guards::files::cp_lines_asks_the_daemon_for_the_window_and_writes_it"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::files::cp_lines_asks_the_daemon_for_the_window_and_writes_it"]
+expect = "test-failed"
+suite = "rust"
+message = "the window must reach the daemon as its two query keys"
+note = "crates/microvms-cli/src/guards/files.rs::cp_lines_asks_the_daemon_for_the_window_and_writes_it"
+transform = { file = "crates/microvms-cli/src/commands/attached.rs", replace = "                (false, Some(range)) => {\n                    session\n                        .download_file_lines(&remote, range.start, range.end)\n                        .await?\n                }\n", with = "                (false, Some(_)) => session.download_file(&remote).await?,\n" }
+
+[[fault]]
+id = "cli-cp-lines-with-tar-parses"
+guard = "guards::files::cp_lines_is_refused_with_tar_and_on_an_upload"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::files::cp_lines_is_refused_with_tar_and_on_an_upload"]
+expect = "test-failed"
+suite = "rust"
+message = "--lines with --tar must not parse"
+note = "crates/microvms-cli/src/guards/files.rs::cp_lines_is_refused_with_tar_and_on_an_upload"
+transform = { file = "crates/microvms-cli/src/cli.rs", replace = "conflicts_with_all = [\"tar\", \"mode\"])]", with = "conflicts_with_all = [\"mode\"])]" }

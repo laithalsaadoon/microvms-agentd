@@ -253,10 +253,20 @@ dated measurement that names the commit it was taken at.
 A check that passes on broken code gives a false answer. Each rule here names the
 check that holds it, or says that review does.
 
-- Every new guard, gate or scanner ships with a seeded fault that makes it
-  fail, in its owner's file in `verify/guards/faults/` (a new owner starts a file).
-  A scanner's floor (an empty input) and its sentinel get a fault each. Review
-  holds that a new check has its entries; CI holds that every entry fires.
+- A fix's regression test is proven by FAIL_TO_PASS, with its emitted entry:
+  it fails on the merge base, where the fix isn't, and passes with the fix.
+  `mise run fail-to-pass -- --emit <owner>` fires each new or changed test of a
+  branch that adds a `fixed` or `security` changelog fragment, with the reverse
+  of the fix's product hunks seeded, and writes each test it proves as an entry
+  in `verify/guards/faults/`, whose patch every later fire seeds again. A build
+  that breaks never counts as the test failing, so a test the merge base can't
+  compile gets a hand-written entry instead. `fail-to-pass:check` in `check`
+  fails a fix whose new or changed tests have no entry the branch adds.
+- The hand-written registry stays for gates, scanners and scripts: each new one
+  ships with a seeded fault that makes it fail, in its owner's file in
+  `verify/guards/faults/` (a new owner starts a file). A scanner's floor (an
+  empty input) and its sentinel get a fault each. Review holds that a new check
+  has its entries; CI holds that every entry fires.
   The `guards` job seeds the Rust, script and binding faults (each worker with
   its own Python environment, `--venv-per-worker`), as `mise run guards:fire`
   does locally, and it fails when a fault doesn't fire. `guards:list` in `check` fails on an entry
