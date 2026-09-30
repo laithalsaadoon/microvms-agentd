@@ -1200,11 +1200,7 @@ impl Sandbox {
                 self.lifecycle,
             )));
         }
-        let opts = WaitOpts {
-            timeout,
-            poll_interval: LIFECYCLE_POLL_INTERVAL,
-            stall_grace: Duration::MAX,
-        };
+        let opts = WaitOpts::for_lifecycle(timeout);
         let running = if self.launch_adoptable {
             self.control.wait_for_launch(&id, opts).await?
         } else {
@@ -1682,11 +1678,7 @@ impl Sandbox {
             if report.terminate_accepted
                 && let Some(timeout) = opts.wait_for_terminated
             {
-                let wait = WaitOpts {
-                    timeout,
-                    poll_interval: LIFECYCLE_POLL_INTERVAL,
-                    stall_grace: Duration::MAX,
-                };
+                let wait = WaitOpts::for_lifecycle(timeout);
                 match self
                     .control
                     .wait_for_state(&id, &["TERMINATED"], &[], wait)
@@ -1764,11 +1756,7 @@ impl Sandbox {
 
     /// Five minutes at five-second polls, for suspend, resume, and terminate.
     fn lifecycle_wait(&self) -> WaitOpts {
-        WaitOpts {
-            timeout: DEFAULT_LIFECYCLE_TIMEOUT,
-            poll_interval: LIFECYCLE_POLL_INTERVAL,
-            stall_grace: Duration::MAX,
-        }
+        WaitOpts::for_lifecycle(DEFAULT_LIFECYCLE_TIMEOUT)
     }
 }
 
