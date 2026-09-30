@@ -3,6 +3,25 @@
   "docVersion": 3,
   "glossary": [],
   "requirements": {
+    "00a8b6b2-0d6f-4614-a1a8-7e05a5e876ef": {
+      "createdAt": "2026-09-30T14:00:00.000Z",
+      "derives": [],
+      "id": "00a8b6b2-0d6f-4614-a1a8-7e05a5e876ef",
+      "key": "BIND-24",
+      "negated": false,
+      "patternType": "unwanted-behavior",
+      "priority": "critical",
+      "refines": [],
+      "satisfies": [],
+      "sentence": "If a frame of an identity-verified tunnel does not authenticate at the frame's position in the daemon's stream, then the microvms-core shall fail the tunnel without writing the frame to the local connection.",
+      "status": "draft",
+      "systemName": "microvms-core",
+      "systemResponse": "fail the tunnel without writing the frame to the local connection",
+      "trigger": "a frame of an identity-verified tunnel does not authenticate at the frame's position in the daemon's stream",
+      "updatedAt": "2026-09-30T14:00:00.000Z",
+      "verificationMethod": "test",
+      "verifies": []
+    },
     "03435820-cd62-4ca4-ba9b-a10e2e28c72c": {
       "createdAt": "2026-09-24T23:00:00.000Z",
       "derives": [],

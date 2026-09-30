@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-//! The client's half of the verified tunnel's end of stream (#342), against a stand-in daemon.
+//! The client's half of the verified tunnel's end of stream (#342) and of its frame checks
+//! (#297), against a stand-in daemon.
 //!
 //! The stand-in plays the daemon and the guest behind it in one task, and can play one from
 //! before the end of stream too, which the real daemon no longer can.
@@ -54,6 +55,10 @@ enum Plays {
     Streams,
     /// No handshake: a plain tunnel's bytes, then a close frame with no code.
     Plain,
+    /// A current daemon that sends one chunk and then the same ciphertext again (BIND-24).
+    Replays,
+    /// A current daemon that sends one chunk and then bytes no key holder sealed (BIND-24).
+    Forges,
 }
 
 /// What the stand-in saw of the client.
@@ -133,6 +138,22 @@ async fn stand_in(plays: Plays) -> (std::net::SocketAddr, Arc<Mutex<Seen>>) {
         let mut noise = respond(&mut socket, plays, &record).await;
         match plays {
             Plays::Listens => listen(&mut socket, &mut noise, &record).await,
+            Plays::Replays | Plays::Forges => {
+                let chunk = sealed(&mut noise, b"once");
+                let _ = socket.send(chunk.clone()).await;
+                let second = match plays {
+                    Plays::Replays => chunk,
+                    _ => Message::Binary(
+                        (0_u8..36)
+                            .map(|byte| byte.wrapping_mul(29) ^ 0x3c)
+                            .collect::<Vec<u8>>()
+                            .into(),
+                    ),
+                };
+                let _ = socket.send(second).await;
+                // Held open, so the client's own check is the only thing that can end it.
+                let _ = socket.next().await;
+            }
             Plays::Streams => {
                 // One chunk out, then the client's frames: a client that stopped reading ends
                 // the tunnel as soon as its write of that chunk fails.
@@ -485,4 +506,57 @@ async fn wait_for_close(seen: &Mutex<Seen>) {
     })
     .await
     .expect("the client's close reaches the stand-in");
+}
+
+/// A verified relay from a local pipe through a stand-in playing `plays`: what the local side
+/// read, and the relay's error.
+async fn refused_download(plays: Plays) -> (Vec<u8>, String) {
+    let (daemon, _) = stand_in(plays).await;
+    let (mut local, relayed) = tokio::io::duplex(64 * 1024);
+    let endpoint = format!("http://{daemon}");
+    let relay = tokio::spawn(async move {
+        let auth = auth();
+        relay_connection_verified(relayed, &endpoint, 8080, TOKEN, &auth, &identity()).await
+    });
+    let mut received = Vec::new();
+    tokio::time::timeout(BOUND, local.read_to_end(&mut received))
+        .await
+        .expect("the relay ends the local connection")
+        .expect("the local read");
+    let ended = tokio::time::timeout(BOUND, relay)
+        .await
+        .expect("the relay ends")
+        .expect("the relay task joins");
+    let error = match ended {
+        Err(error) => error.to_string(),
+        Ok(end) => {
+            panic!("a frame that doesn't authenticate must fail the tunnel, not end {end:?}")
+        }
+    };
+    (received, error)
+}
+
+/// **A replayed frame fails the tunnel and never reaches the local connection** (BIND-24).
+///
+/// The same ciphertext twice: it opened at position 0 and can't at position 1. Writing it would
+/// hand the local application the chunk twice, on the path that promised it wouldn't.
+#[tokio::test]
+async fn bind_24_a_replayed_frame_fails_the_tunnel_unwritten() {
+    let (received, error) = refused_download(Plays::Replays).await;
+    assert_eq!(
+        received, b"once",
+        "the replay must never reach the local connection"
+    );
+    assert!(error.contains("did not authenticate"), "{error}");
+}
+
+/// **A forged frame fails the tunnel and never reaches the local connection** (BIND-24).
+#[tokio::test]
+async fn bind_24_a_forged_frame_fails_the_tunnel_unwritten() {
+    let (received, error) = refused_download(Plays::Forges).await;
+    assert_eq!(
+        received, b"once",
+        "the forgery must never reach the local connection"
+    );
+    assert!(error.contains("did not authenticate"), "{error}");
 }

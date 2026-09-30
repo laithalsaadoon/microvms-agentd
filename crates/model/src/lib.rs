@@ -41,6 +41,7 @@ pub mod posture;
 pub mod preflight;
 pub mod provision;
 pub mod run;
+pub mod tunnel;
 pub mod wrap;
 
 use stateright::{Model, Property};

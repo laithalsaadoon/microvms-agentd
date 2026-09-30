@@ -210,7 +210,7 @@ suite = "script"
 message = "[untraced] TRAP-14 can't be a decision: a requirement that can't carry a layer waives that layer in its group's file"
 transform = [
   { file = "verify/spec/core.symspec.json", replace = "    \"5fc0dbf7-83f6-4d1d-96ea-902bfacee0b1\": {\n", with = "    \"seeded-trap-14\": { \"key\": \"TRAP-14\", \"sentence\": \"A seeded requirement.\" },\n    \"5fc0dbf7-83f6-4d1d-96ea-902bfacee0b1\": {\n" },
-  { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"adapter-logic\"]\n", with = "enforced = [\"adapter-logic\"]\n\n[[decision]]\ncategory = \"untraced\"\nkey = \"TRAP-14\"\nreason = \"not worth a test\"\n" },
+  { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"port-impl\", \"adapter-logic\"]\n", with = "enforced = [\"port-impl\", \"adapter-logic\"]\n\n[[decision]]\ncategory = \"untraced\"\nkey = \"TRAP-14\"\nreason = \"not worth a test\"\n" },
 ]
 
 [[fault]]

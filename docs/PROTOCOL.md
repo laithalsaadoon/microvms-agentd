@@ -566,6 +566,10 @@ change, because the route, its query and its close codes are what they were.
 A plain tunnel (no `identity`) has no end of stream. None of its frames are authenticated, so its
 close is its end.
 
+The model in `crates/model/src/tunnel.rs` checks these rules, the two pins, and the frames'
+positions over every interleaving with a path that drops, replays, swaps or forges frames and
+hangs up (AGENTD-17 to AGENTD-21, BIND-21, BIND-23 and BIND-24).
+
 ## Trust boundary
 
 The platform's `/run` hook arrives from `127.0.0.1` and is indistinguishable at
