@@ -105,6 +105,25 @@
       "verificationMethod": "test",
       "verifies": []
     },
+    "40a61c70-6084-4c77-b5dd-b71400cf3c5c": {
+      "createdAt": "2026-09-30T14:00:00.000Z",
+      "derives": [],
+      "id": "40a61c70-6084-4c77-b5dd-b71400cf3c5c",
+      "key": "AGENTD-21",
+      "negated": false,
+      "patternType": "unwanted-behavior",
+      "priority": "critical",
+      "refines": [],
+      "satisfies": [],
+      "sentence": "If a frame of an identity-verified tunnel does not authenticate at the frame's position in the caller's stream, then the agentd shall end the tunnel without relaying the frame to the guest.",
+      "status": "draft",
+      "systemName": "agentd",
+      "systemResponse": "end the tunnel without relaying the frame to the guest",
+      "trigger": "a frame of an identity-verified tunnel does not authenticate at the frame's position in the caller's stream",
+      "updatedAt": "2026-09-30T14:00:00.000Z",
+      "verificationMethod": "test",
+      "verifies": []
+    },
     "460cd93a-573a-4a96-952f-d2998a97a389": {
       "createdAt": "2026-09-30T12:00:00.000Z",
       "derives": [],
