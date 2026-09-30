@@ -8,6 +8,7 @@ the scratch worktree included. The census cases run the real ast-grep, so run th
 `mise run guards:list`.
 """
 
+import dataclasses
 import json
 import os
 import re
@@ -77,10 +78,12 @@ GIT_ENV_LEAKS = (
 FAKE_RUNNER = """\
 #!{python}
 import atexit
+import dataclasses
 import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -114,8 +117,41 @@ if tool == "cargo" and "clippy" in sys.argv[1:]:
 seeded = bool(marks) or any(
     v not in ("ok", "no")
     for k, v in state.items()
-    if k not in ("slow", "flaky", "absent", "mark", "await")
+    if k not in ("slow", "flaky", "absent", "mark", "await") and "." not in k
 )
+if os.environ.get("FAKE_TRACE"):
+    here = os.getcwd()
+    wanted = {{a for a in sys.argv[1:] if not a.startswith("-")}}
+    lines = []
+    for path in sorted(pathlib.Path(".").glob("state*.txt")):
+        keys = {{w.split("=", 1)[0].split(".", 1)[0] for w in path.read_text().split()}}
+        if path.name == "state.txt" or keys & wanted:
+            lines.append(f'openat(AT_FDCWD<{{here}}>, "{{path}}", O_RDONLY|O_CLOEXEC) = 3<{{here}}/{{path}}>')
+    child = os.getpid() + 1000000
+    for name in sorted(wanted):
+        for kind in ("reads", "lists", "stats", "probes", "git", "runs"):
+            for value in filter(None, state.get(f"{{name}}.{{kind}}", "").split(":")):
+                there = pathlib.Path(value).exists()
+                gone = "-1 ENOENT (No such file or directory)"
+                if kind == "reads":
+                    lines.append(f'openat(AT_FDCWD<{{here}}>, "{{value}}", O_RDONLY) = ' + (f"3<{{here}}/{{value}}>" if there else gone))
+                elif kind == "lists":
+                    lines.append(f'openat(AT_FDCWD<{{here}}>, "{{value}}", O_RDONLY|O_CLOEXEC|O_DIRECTORY) = 3<{{here}}/{{value}}>')
+                elif kind in ("stats", "probes"):
+                    lines.append(f'newfstatat(AT_FDCWD<{{here}}>, "{{value}}", 0x7ffc, 0) = ' + ("0" if there else gone))
+                else:
+                    child += 1
+                    lines.append(f"clone3({{{{flags=CLONE_VM|CLONE_VFORK}}}}, 88) = {{child}}")
+                    words = ["git", value] if kind == "git" else value.split("+")
+                    program = shutil.which(words[0]) or words[0]
+                    listed = ", ".join(json.dumps(w) for w in words)
+                    lines.append((child, f'execve("{{program}}", [{{listed}}], 0x7ffd /* 3 vars */) = 0'))
+                    if kind == "git":
+                        lines.append((child, f'openat(AT_FDCWD<{{here}}>, ".git/HEAD", O_RDONLY) = 3<{{here}}/.git/HEAD>'))
+    with open(os.environ["FAKE_TRACE"], "a") as log:
+        for line in lines:
+            pid, call = line if isinstance(line, tuple) else (os.getpid(), line)
+            log.write(f"{{pid}} {{call}}\\n")
 if os.environ.get("FAKE_SPANS"):
     def span(edge):
         with open(os.environ["FAKE_SPANS"], "a") as log:
@@ -220,6 +256,35 @@ for number, name in enumerate(names, 1):
 sys.exit(1 if failed else 0)
 """
 
+# A stand-in for strace, for `fire --record`: it writes the traced command's own `execve` line
+# to the file after `-o`, then becomes the command with FAKE_TRACE naming that file, where the
+# fake runner above adds a line for each file it reads. FAKE_STRACE=silent writes nothing, which
+# is what a trace that lost its command looks like.
+FAKE_STRACE = """\
+#!{python}
+import dataclasses
+import json
+import os
+import shutil
+import sys
+
+args = sys.argv[1:]
+out = None
+while args and args[0].startswith("-"):
+    flag = args.pop(0)
+    if flag in ("-s", "-e", "-o"):
+        value = args.pop(0)
+        if flag == "-o":
+            out = value
+program = shutil.which(args[0]) or args[0]
+if out and os.environ.get("FAKE_STRACE") != "silent":
+    with open(out, "a") as log:
+        listed = ", ".join(json.dumps(a) for a in args)
+        log.write(f'{{os.getpid()}} execve("{{os.path.abspath(program)}}", [{{listed}}], 0x7ffd /* 3 vars */) = 0\\n')
+    os.environ["FAKE_TRACE"] = out
+os.execv(program, args)
+"""
+
 CARGO = ["cargo", "test", "--", "--exact", "the_guard"]
 
 
@@ -286,9 +351,10 @@ class Repo:
         self.root = Path(directory.name) / "repo"
         self.bin = Path(directory.name) / "bin"
         self.bin.mkdir()
-        for tool in ("cargo", "pytest", "node", "uv", "npx"):
+        for tool in ("cargo", "pytest", "node", "uv", "npx", "strace"):
             path = self.bin / tool
-            path.write_text(FAKE_RUNNER.format(python=sys.executable))
+            fake = FAKE_STRACE if tool == "strace" else FAKE_RUNNER
+            path.write_text(fake.format(python=sys.executable))
             path.chmod(path.stat().st_mode | stat.S_IXUSR)
         files = {"verify/guards/unregistered.txt": "", **files}
         for path, text in files.items():
@@ -314,7 +380,9 @@ class Repo:
         target.write_text(textwrap.dedent(text))
 
     def run(self, *args: str, **env: str) -> subprocess.CompletedProcess[str]:
-        path = os.pathsep.join([str(self.bin), os.environ.get("PATH", "")])
+        path = env.pop("PATH", None) or os.pathsep.join(
+            [str(self.bin), os.environ.get("PATH", "")]
+        )
         # The fake runner writes where cargo would build; never into a real target.
         env.setdefault("CARGO_TARGET_DIR", str(self.target))
         env.setdefault("TMPDIR", str(self.tmp))
@@ -2221,7 +2289,7 @@ def alive(pid: int) -> bool:
 CRATE_TOML = '[package]\nname = "fixture"\nversion = "0.0.0"\n'
 
 
-def affected_repo(test: unittest.TestCase, extra: str = "") -> Repo:
+def kinds_repo(test: unittest.TestCase, extra: str = "") -> Repo:
     """Entries each reached through one kind of file: a transform file, a patch, a gate
     script in the argv, a pytest node id, a cargo test in a `-p` crate, a lint whose guard is
     the crate's clippy.toml."""
@@ -2315,8 +2383,6 @@ def affected_repo(test: unittest.TestCase, extra: str = "") -> Repo:
 
 
 ORDER = ["a", "p", "gate", "py", "crate", "lint"]
-ALL = set(ORDER)
-OWED = "the full fire runs on every push to main, or here without --affected"
 
 
 HASH = "0123456789abcdef"
@@ -2677,436 +2743,679 @@ class BuildCommand(unittest.TestCase):
         self.assertEqual([p for p in repo.tmp.iterdir() if p != target], [])
 
 
-def selection(stdout: str) -> set[str]:
-    return set(re.findall(r"^affected: ([a-z0-9-]+): ", stdout, re.MULTILINE))
+# ── the verdict cache: --record and --reuse ─────────────────────────────────
 
 
-class FireAffected(unittest.TestCase):
-    def check(self, repo: Repo, want: set[str], *reasons: str) -> str:
-        out = repo.run("fire", "--affected")
-        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
-        self.assertEqual(selection(out.stdout), want, out.stdout)
-        skipped = sorted(ALL - want, key=ORDER.index)
-        self.assertIn(
-            f"selects {len(want)} and skips {len(skipped)} entries"
-            + (f": {', '.join(skipped)}" if skipped else ""),
-            out.stdout,
-        )
-        # A run that skipped anything says it isn't the full fire; one that skipped nothing
-        # has nothing to add.
-        (self.assertIn if skipped else self.assertNotIn)(OWED, out.stdout)
-        for reason in reasons:
-            self.assertIn(reason, out.stdout)
-        return out.stdout
+def reused(stdout: str) -> list[str]:
+    return re.findall(
+        r"^reused: ([a-z0-9-]+) \(fired at [0-9a-f]{12}\)$", stdout, re.MULTILINE
+    )
 
-    def test_a_changed_seeded_file_selects_only_its_entries(self):
-        repo = affected_repo(self)
-        repo.write("state-a.txt", "ga=ok extra=ok\n")
-        repo.write("state-p.txt", "pp=ok\nkeep=ok\nextra=ok\n")
-        self.check(repo, {"a", "p"}, "affected: a: state-a.txt changed")
 
-    def test_a_changed_guard_file_selects_its_entry(self):
-        repo = affected_repo(self)
-        repo.write("gate.py", (repo.root / "gate.py").read_text() + "# a comment\n")
-        repo.write("tests/test_e.py", "def test_e():\n    assert True\n")
-        repo.write(
-            "crates/fixture/src/lib.rs", "mod tests {\n    fn the_d_guard() { () }\n}\n"
-        )
-        self.check(
-            repo,
-            {"gate", "py", "crate"},
-            "affected: gate: gate.py changed",
-            "affected: crate: crates/fixture/src/lib.rs changed",
-        )
+def firing(stdout: str) -> dict[str, str]:
+    return dict(re.findall(r"^fires: ([a-z0-9-]+): (.+)$", stdout, re.MULTILINE))
 
-    def test_another_file_in_the_crate_selects_nothing(self):
-        repo = affected_repo(self)
-        repo.write("crates/fixture/src/other.rs", "fn unrelated() { () }\n")
-        out = self.check(repo, set())
-        self.assertIn("nothing to fire", out)
 
-    def test_a_changed_or_new_entry_is_affected(self):
-        # The reason names the entry's own file: a new one in a new owner's file here.
-        repo = affected_repo(self)
-        text = (repo.root / REGISTRY).read_text()
-        text = text.replace('guard = "ga"', 'guard = "ga"\nmessage = "FAILED"', 1)
-        repo.write(REGISTRY, text)
-        repo.write(
-            "verify/guards/faults/new-owner.toml",
+# Three commands, each reading its own state file under the fake strace: `a` (two entries), `b`
+# and `c`, and `p`, whose patch no command reads. `extra` goes into each state file (a trace
+# key such as `gb.lists=docs`), so the record is made with it.
+def cache_repo(
+    test: unittest.TestCase, a: str = "", b: str = "", c: str = "", **files: str
+) -> Repo:
+    patch = textwrap.dedent(
+        """\
+        --- a/state-p.txt
+        +++ b/state-p.txt
+        @@ -1 +1 @@
+        -gp=ok
+        +gp=fail
+        """
+    )
+    registry = "".join(
+        [
             entry(
-                fid="new",
-                guard="nn",
-                run=["cargo", "test", "--", "--exact", "nn"],
-                fault='transform = { file = "state-a.txt", replace = "ga=ok", with = "ga=ok nn=fail" }',
+                fid="a1",
+                guard="ga",
+                run=["cargo", "test", "--", "--exact", "ga"],
+                fault='transform = { file = "state-a.txt", replace = "w1=ok", with = "w1=ok ga=fail" }',
             ),
-        )
-        out = repo.run("fire", "--affected")
+            entry(
+                fid="a2",
+                guard="ga",
+                run=["cargo", "test", "--", "--exact", "ga"],
+                fault='transform = { file = "state-a.txt", replace = "w2=ok", with = "w2=ok ga=fail" }',
+            ),
+            entry(
+                fid="b",
+                guard="gb",
+                run=["cargo", "test", "--", "--exact", "gb"],
+                fault='transform = { file = "state-b.txt", replace = "gb=ok", with = "gb=fail" }',
+            ),
+            entry(
+                fid="c",
+                guard="gc",
+                run=["pytest", "-rA", "gc"],
+                fault='transform = { file = "state-c.txt", replace = "gc=ok", with = "gc=fail" }',
+            ),
+            entry(
+                fid="p",
+                guard="gp",
+                run=["cargo", "test", "--", "--exact", "gp"],
+                fault='patch = "verify/guards/faults/p.patch"',
+            ),
+        ]
+    )
+    return Repo(
+        test,
+        {
+            REGISTRY: registry,
+            "verify/guards/faults/p.patch": patch,
+            "state-a.txt": f"ga=ok w1=ok w2=ok {a}\n",
+            "state-b.txt": f"gb=ok {b}\n",
+            "state-c.txt": f"gc=ok {c}\n",
+            "state-p.txt": "gp=ok\n",
+            "docs/one.md": "one\n",
+            # This script's path in the fixture: a change there moves every verdict.
+            "tools/check-guards-fire.py": "# the fire script\n",
+            **files,
+        },
+    )
+
+
+CACHE = ["a1", "a2", "b", "c", "p"]
+
+
+class VerdictCache(unittest.TestCase):
+    """`fire --record` traces each run and writes what each entry's verdict read; `fire --reuse`
+    keeps a recorded `fired` verdict only while nothing it read differs from the record's commit,
+    and fires every entry it can't say that of. Each invalidation reason is one case here."""
+
+    def record(self, repo: Repo, *extra: str, **env: str) -> Path:
+        where = repo.tmp.parent / "records"
+        out = repo.run("fire", "--record", str(where), *extra, **env)
         self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
-        self.assertEqual(selection(out.stdout), {"a", "new"}, out.stdout)
-        self.assertIn(f"affected: a: the entry changed in {REGISTRY}", out.stdout)
+        self.assertRegex(
+            out.stdout, r"guards: recorded \d+ verdicts of \d+ commands in "
+        )
+        return where
+
+    def reuse(
+        self, repo: Repo, where: Path, *extra: str, **env: str
+    ) -> subprocess.CompletedProcess[str]:
+        out = repo.run("fire", "--reuse", str(where), *extra, **env)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        return out
+
+    def edit(self, where: Path, change) -> None:
+        """Rewrite the record in `where` through `change`, which edits it in place."""
+        (path,) = where.glob("*.json")
+        data = json.loads(path.read_text())
+        change(data)
+        path.write_text(json.dumps(data))
+
+    def fires(
+        self, out: subprocess.CompletedProcess[str], want: dict[str, str]
+    ) -> None:
+        """Exactly the entries in `want` fire, each for a reason that contains its value, and
+        every other one keeps its verdict."""
+        got = firing(out.stdout)
+        self.assertEqual(sorted(got), sorted(want), out.stdout)
+        for fid, reason in want.items():
+            self.assertIn(reason, got[fid], out.stdout)
+        self.assertEqual(
+            sorted(reused(out.stdout)), sorted(set(CACHE) - set(want)), out.stdout
+        )
+        self.assertEqual(sorted(fired_ids(out.stdout)), sorted(want), out.stdout)
+
+    def test_a_record_keeps_every_fired_verdict_while_nothing_it_read_changed(self):
+        repo = cache_repo(self)
+        where = self.record(repo)
+        out = self.reuse(repo, where)
+        self.fires(out, {})
         self.assertIn(
-            "affected: new: the entry is new in verify/guards/faults/new-owner.toml",
+            f"keeps {len(CACHE)} of {len(CACHE)} entries' fired verdicts", out.stdout
+        )
+        self.assertIn(
+            "every selected entry keeps its recorded verdict, so nothing to fire",
             out.stdout,
         )
+        self.assertEqual(repo.worktrees(), 1)
 
-    def test_an_entry_moved_to_another_file_unchanged_is_not_affected(self):
-        # Entries compare by their tables, not their place: one owner's entries split out
-        # into a file of their own select nothing.
-        repo = affected_repo(self)
-        first, *rest = (repo.root / REGISTRY).read_text().split("[[fault]]\n")[1:]
-        repo.write(REGISTRY, "".join("[[fault]]\n" + e for e in rest))
-        # A name that sorts first keeps the fixture's registry order.
-        repo.write("verify/guards/faults/a-owner.toml", "[[fault]]\n" + first)
-        out = self.check(repo, set())
-        self.assertIn("nothing to fire", out)
+    def test_a_changed_file_its_command_read_fires_its_entries_alone(self):
+        repo = cache_repo(self)
+        where = self.record(repo)
+        repo.write("state-b.txt", "gb=ok extra=ok\n")
+        repo.commit()
+        self.fires(self.reuse(repo, where), {"b": "state-b.txt changed since"})
 
-    def test_a_base_with_the_former_single_file_compares_entry_by_entry(self):
-        # A base from before the split has its registry in verify/guards/faults.toml. The same
-        # entries in the directory select only the one that changed on the way, so the first
-        # pull request after the split, and one based before it, select what they changed.
-        repo = affected_repo(self)
+    def test_an_uncommitted_change_counts_as_the_tree(self):
+        repo = cache_repo(self)
+        where = self.record(repo)
+        repo.write("state-c.txt", "gc=ok extra=ok\n")
+        self.fires(self.reuse(repo, where), {"c": "state-c.txt changed since"})
+
+    def test_a_changed_patch_fires_its_entry_though_no_command_reads_it(self):
+        repo = cache_repo(self)
+        where = self.record(repo)
+        repo.write(
+            "verify/guards/faults/p.patch",
+            (repo.root / "verify/guards/faults/p.patch").read_text() + "\n",
+        )
+        repo.commit()
+        self.fires(
+            self.reuse(repo, where), {"p": "verify/guards/faults/p.patch changed since"}
+        )
+
+    def test_a_changed_registry_entry_fires(self):
+        repo = cache_repo(self)
+        where = self.record(repo)
         text = (repo.root / REGISTRY).read_text()
-        git(repo.root, "mv", REGISTRY, "verify/guards/faults.toml")
-        repo.commit("the base, before the split")
-        git(repo.root, "update-ref", "refs/remotes/origin/main", "HEAD")
-        git(repo.root, "rm", "-q", "verify/guards/faults.toml")
         repo.write(
             REGISTRY,
-            text.replace('guard = "ga"', 'guard = "ga"\nmessage = "FAILED"', 1),
+            text.replace('guard = "gb"', 'guard = "gb"\nmessage = "FAILED"', 1),
         )
-        self.check(repo, {"a"}, f"affected: a: the entry changed in {REGISTRY}")
-
-    def test_a_change_committed_on_the_branch_still_counts(self):
-        repo = affected_repo(self)
-        repo.write("state-a.txt", "ga=ok extra=ok\n")
         repo.commit()
-        self.check(repo, {"a"})
-
-    def test_a_change_to_this_script_selects_every_entry(self):
-        repo = affected_repo(self)
-        repo.write("tools/check-guards-fire.py", "# stands in for this script\n")
-        repo.commit("base with the script")
-        git(repo.root, "update-ref", "refs/remotes/origin/main", "HEAD")
-        repo.write("tools/check-guards-fire.py", "# changed\n")
-        self.check(repo, ALL, "tools/check-guards-fire.py changed")
-
-    def test_affected_reports_the_serial_verdicts_for_what_it_selects(self):
-        # And a fault that doesn't fire is still reported so: `misses` seeds a word the
-        # guard never reads.
-        misses = entry(
-            fid="misses",
-            guard="ga",
-            run=["cargo", "test", "--", "--exact", "ga"],
-            fault='transform = { file = "state-a.txt", replace = "ga=ok", with = "ga=ok other=fail" }',
+        self.fires(
+            self.reuse(repo, where),
+            {"b": "its entry in verify/guards/faults/fixture.toml changed"},
         )
-        repo = affected_repo(self, extra=misses)
-        repo.write("state-a.txt", "ga=ok extra=ok\n")
-        chosen = repo.run("fire", "--affected", "--jobs", "2")
-        self.assertEqual(chosen.returncode, 1, chosen.stdout + chosen.stderr)
-        self.assertEqual(selection(chosen.stdout), {"a", "misses"})
-        self.assertIn("DID NOT FIRE: misses: the command passed", chosen.stdout)
-        serial = repo.run("fire", "--only", "a", "--only", "misses")
-        self.assertEqual(serial.returncode, 1)
-        picked = [
-            line
-            for line in verdicts(chosen.stdout)
-            if not line.startswith(("affected: ", "guards: --affected "))
-        ]
-        self.assertEqual(picked, verdicts(serial.stdout))
 
-    def test_a_changed_script_selects_the_unit_suite_that_tests_it(self):
-        suite = textwrap.dedent(
-            """\
-            import unittest
+    def test_a_changed_tool_fires_the_commands_that_ran_it(self):
+        repo = cache_repo(self)
+        where = self.record(repo)
+        pytest = repo.bin / "pytest"
+        pytest.write_text(pytest.read_text() + "# another build of the tool\n")
+        self.fires(self.reuse(repo, where), {"c": "differs from the one"})
 
-
-            class T(unittest.TestCase):
-                def test_y(self):
-                    self.assertNotIn("y=bad", open("state-y.txt").read())
-            """
+    def test_a_new_entry_in_a_listed_directory_fires_and_a_changed_one_does_not(self):
+        repo = cache_repo(self, b="gb.lists=docs")
+        where = self.record(repo)
+        repo.write("docs/one.md", "changed\n")
+        repo.commit()
+        self.fires(self.reuse(repo, where), {})
+        repo.write("docs/two.md", "two\n")
+        repo.commit()
+        self.fires(
+            self.reuse(repo, where), {"b": "docs/ gained or lost an entry since"}
         )
-        run = [sys.executable, "-m", "unittest", "discover", "-s", "tools"]
-        repo = Repo(
+
+    def test_a_new_file_where_a_command_looked_and_found_none_fires(self):
+        repo = cache_repo(self, c="gc.probes=extra.toml")
+        where = self.record(repo)
+        repo.write("extra.toml", "x = 1\n")
+        repo.commit()
+        self.fires(self.reuse(repo, where), {"c": "extra.toml is new since"})
+
+    def test_a_path_a_command_found_there_that_is_gone_fires(self):
+        repo = cache_repo(self, a="ga.stats=docs")
+        where = self.record(repo)
+        (repo.root / "docs/one.md").unlink()
+        repo.commit()
+        self.fires(
+            self.reuse(repo, where),
+            {"a1": "docs is gone since", "a2": "docs is gone since"},
+        )
+
+    def test_a_command_that_reads_the_git_history_always_fires(self):
+        repo = cache_repo(self, b="gb.git=log")
+        where = self.record(repo)
+        self.fires(self.reuse(repo, where), {"b": "its command reads the git history"})
+
+    def test_a_command_that_lists_the_tracked_files_fires_when_a_path_is_added(self):
+        repo = cache_repo(self, b="gb.git=ls-files")
+        where = self.record(repo)
+        repo.write("docs/one.md", "changed\n")
+        repo.commit()
+        self.fires(self.reuse(repo, where), {})
+        repo.write("elsewhere.txt", "new\n")
+        repo.commit()
+        self.fires(
+            self.reuse(repo, where), {"b": "its command lists the tracked files"}
+        )
+
+    def test_a_command_that_downloads_by_a_range_always_fires(self):
+        # uv resolves `boto3>=1.40` to whatever is newest when it runs; an exact pin is the
+        # same download on every run.
+        repo = cache_repo(
             self,
-            {
-                REGISTRY: entry(
-                    fid="suite",
-                    guard="test_gate_y.py",
-                    run=[*run, "-p", "test_gate_y.py"],
-                    expect="exit-nonzero",
-                    message="FAIL: test_y",
-                    fault='transform = { file = "state-y.txt", replace = "y=ok", with = "y=bad" }',
-                ),
-                "tools/test_gate_y.py": suite,
-                "tools/check-gate-y.py": "# the script the suite tests\n",
-                "tools/other.py": "# tested by no suite\n",
-                "state-y.txt": "y=ok\n",
-            },
+            b="gb.runs=uv+run+--with+pyyaml==6.0.3",
+            c="gc.runs=uv+run+--with+boto3>=1.40",
         )
-        repo.write("tools/other.py", "# changed\n")
-        out = repo.run("fire", "--affected")
-        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
-        self.assertEqual(selection(out.stdout), set(), out.stdout)
-        repo.write("tools/check-gate-y.py", "# changed\n")
-        out = repo.run("fire", "--affected")
-        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
-        self.assertIn("affected: suite: tools/check-gate-y.py changed", out.stdout)
-        self.assertIn("fired: suite", out.stdout)
+        where = self.record(repo)
+        self.fires(self.reuse(repo, where), {"c": "its command downloads boto3>=1.40"})
 
-    def test_a_changed_clippy_toml_selects_its_lint_entries(self):
-        repo = affected_repo(self)
-        repo.write(
-            "crates/fixture/clippy.toml", 'disallowed-methods = ["the_lint", "more"]\n'
+    def test_a_cargo_lock_change_fires_a_build_that_compiles_a_changed_package_only(
+        self,
+    ):
+        lock = '[[package]]\nname = "dep"\nversion = "1.0.0"\n\n[[package]]\nname = "other"\nversion = "2.0.0"\n'
+        repo = cache_repo(self, **{"Cargo.lock": lock})
+        where = self.record(repo)
+
+        def compiles_dep(data: dict) -> None:
+            for command in data["commands"]:
+                if command["run"] == [["cargo", "test", "--", "--exact", "gb"]]:
+                    command["closure"]["locked"] = ["dep 1.0.0"]
+
+        self.edit(where, compiles_dep)
+        repo.write("Cargo.lock", lock.replace("2.0.0", "2.0.1"))
+        repo.commit()
+        self.fires(self.reuse(repo, where), {})
+        repo.write("Cargo.lock", lock.replace("1.0.0", "1.0.1"))
+        repo.commit()
+        self.fires(self.reuse(repo, where), {"b": "Cargo.lock changed dep 1.0.0 since"})
+
+    def test_a_change_to_the_fire_script_fires_every_entry(self):
+        repo = cache_repo(self)
+        where = self.record(repo)
+        repo.write("tools/check-guards-fire.py", "# the fire script, changed\n")
+        repo.commit()
+        reason = "tools/check-guards-fire.py changed since"
+        self.fires(self.reuse(repo, where), dict.fromkeys(CACHE, reason))
+
+    def test_a_different_environment_or_timeout_fires_every_entry(self):
+        repo = cache_repo(self)
+        where = self.record(repo, CARGO_FIXTURE="1")
+        out = self.reuse(repo, where, CARGO_FIXTURE="2")
+        self.fires(out, dict.fromkeys(CACHE, "the environment differs from"))
+        self.assertIn("in CARGO_FIXTURE", out.stdout)
+        out = self.reuse(repo, where, "--timeout", "60", CARGO_FIXTURE="1")
+        self.fires(out, dict.fromkeys(CACHE, "in --timeout"))
+        # A credential is never written down, so it moves nothing.
+        self.fires(
+            self.reuse(repo, where, CARGO_FIXTURE="1", CARGO_REGISTRY_TOKEN="x"), {}
         )
-        self.check(repo, {"lint"}, "affected: lint: crates/fixture/clippy.toml changed")
+        self.assertNotIn("CARGO_REGISTRY_TOKEN", (where / "all.json").read_text())
 
-    def test_an_untracked_file_counts(self):
-        # Agents here never commit, so every new file is untracked while --affected runs.
-        # The guard moves to a new file: only that file names it now.
-        repo = affected_repo(self)
-        repo.write("crates/fixture/src/lib.rs", "mod tests;\n")
-        repo.write("crates/fixture/src/tests.rs", "fn the_d_guard() {}\n")
-        self.check(
-            repo, {"crate"}, "affected: crate: crates/fixture/src/tests.rs changed"
+    def test_no_record_or_no_trace_or_no_verdict_fires(self):
+        repo = cache_repo(self)
+        empty = repo.tmp.parent / "none"
+        empty.mkdir()
+        self.fires(
+            self.reuse(repo, empty), dict.fromkeys(CACHE, "no record has its command")
+        )
+        where = self.record(repo, FAKE_STRACE="silent")
+        self.fires(
+            self.reuse(repo, where), dict.fromkeys(CACHE, "has no trace of its command")
         )
 
-    def test_a_changed_patch_selects_its_entry(self):
-        # The patch seeds something else now; neither the registry text nor the file it
-        # touches changed.
-        repo = affected_repo(self)
-        text = (repo.root / "verify/guards/faults/p.patch").read_text()
-        repo.write(
-            "verify/guards/faults/p.patch", text.replace("+pp=fail", "+pp=fail x=1")
+    def test_a_record_without_the_entry_or_from_another_clone_fires(self):
+        repo = cache_repo(self)
+        where = self.record(repo)
+
+        def forget_c(data: dict) -> None:
+            for command in data["commands"]:
+                command["entries"].pop("c", None)
+
+        self.edit(where, forget_c)
+        self.fires(self.reuse(repo, where), {"c": "has no verdict for it"})
+        self.edit(where, lambda data: data.update(commit="0" * 40))
+        gone = dict.fromkeys(CACHE, "isn't in this clone")
+        self.fires(self.reuse(repo, where), {**gone, "c": "has no verdict for it"})
+
+    def test_an_entry_the_record_says_did_not_fire_fires_again(self):
+        repo = cache_repo(self)
+        text = (repo.root / REGISTRY).read_text()
+        repo.write(REGISTRY, text.replace('with = "gb=fail"', 'with = "gb=ok more=ok"'))
+        repo.commit()
+        where = repo.tmp.parent / "records"
+        out = repo.run("fire", "--record", str(where))
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertIn("DID NOT FIRE: b", out.stdout)
+        out = repo.run("fire", "--reuse", str(where))
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        got = firing(out.stdout)
+        self.assertEqual(sorted(got), ["b"], out.stdout)
+        self.assertIn("says did not fire", got["b"])
+
+    def test_each_legs_record_answers_for_its_own_commands(self):
+        # CI's legs each record their shard; a pull request reads them from one directory.
+        repo = cache_repo(self)
+        where = self.record(repo, "--shard", "0/2")
+        self.record(repo, "--shard", "1/2")
+        self.assertEqual(
+            sorted(p.name for p in where.glob("*.json")),
+            ["shard-0-of-2.json", "shard-1-of-2.json"],
         )
-        self.check(repo, {"p"}, "affected: p: verify/guards/faults/p.patch changed")
+        self.fires(self.reuse(repo, where), {})
 
-    def test_a_renamed_file_selects_by_its_old_name(self):
-        # An entry that seeds the old name is a stale anchor now, and has to be selected
-        # to say so.
-        repo = affected_repo(self)
-        git(repo.root, "mv", "state-a.txt", "state-a2.txt")
-        repo.commit("rename")
-        out = repo.run("fire", "--affected")
-        self.assertEqual(selection(out.stdout), {"a"}, out.stdout)
-        self.assertIn("affected: a: state-a.txt changed", out.stdout)
-        self.assertIn("stale anchor: a:", out.stdout)
-
-    def test_a_build_input_selects_every_entry(self):
-        for path, text in (
-            ("Cargo.lock", "version = 4\n"),
-            ("crates/fixture/Cargo.toml", CRATE_TOML + 'edition = "2024"\n'),
-            ("mise.toml", '[env]\nX = "1"\n'),
-        ):
-            with self.subTest(path=path):
-                repo = affected_repo(self)
-                repo.write(path, text)
-                self.check(
-                    repo, ALL, f"{path} changed, and every build or command reads it"
+    def test_a_shard_keeps_its_slice_whatever_record_it_reads(self):
+        # The slice is cut before --reuse, so a leg that restored another record, or none,
+        # still fires within its own slice and never another's.
+        repo = cache_repo(self)
+        where = self.record(repo)
+        empty = repo.tmp.parent / "none"
+        empty.mkdir()
+        for k in (0, 1):
+            with self.subTest(k=k):
+                kept = self.reuse(repo, where, "--shard", f"{k}/2")
+                cold = self.reuse(repo, empty, "--shard", f"{k}/2")
+                slice_ = BANNER.findall(kept.stdout)
+                self.assertEqual(slice_, BANNER.findall(cold.stdout))
+                self.assertEqual(
+                    sorted(reused(kept.stdout)), sorted(fired_ids(cold.stdout))
                 )
 
-    def test_an_affected_selection_the_missing_venv_empties_exits_like_nothing_affected(
+    def test_record_needs_a_committed_tree_and_strace(self):
+        repo = cache_repo(self)
+        repo.write("state-a.txt", "ga=ok w1=ok w2=ok changed=ok\n")
+        out = repo.run("fire", "--record", str(repo.tmp.parent / "r"))
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertIn("--record needs a committed tree", out.stderr)
+        self.assertEqual(repo.worktrees(), 1)
+        repo.commit()
+        (repo.bin / "strace").unlink()
+        # git and nothing else from the host, which has a strace of its own.
+        host = repo.tmp.parent / "host"
+        host.mkdir()
+        (host / "git").symlink_to(shutil.which("git"))
+        out = repo.run(
+            "fire", "--record", str(repo.tmp.parent / "r"), PATH=f"{repo.bin}:{host}"
+        )
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertIn("strace, which isn't on PATH", out.stderr)
+        out = repo.run("fire", "--record", "x", "--reuse", "y")
+        self.assertEqual(out.returncode, 2, out.stdout + out.stderr)
+
+
+# Lines as strace 6.x writes them under `STRACE`'s flags, from a run of check-agents-md.py and a
+# cargo test, with the tree's path as {tree} and the git directory's as {git}.
+TRACE = """\
+100 execve("./tools/gate.py", ["./tools/gate.py"], 0x7ffd /* 60 vars */) = 0
+100 execve("/usr/bin/env-stand-in", ["uv", "run"], 0x7ffd /* 60 vars */ <unfinished ...>
+101 openat(AT_FDCWD</elsewhere>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+100 <... execve resumed>)           = 0
+100 openat(AT_FDCWD<{tree}>, "docs/a.md", O_RDONLY|O_CLOEXEC) = 3<{tree}/docs/a.md>
+100 newfstatat(AT_FDCWD<{tree}>, "tools/yaml.py", 0x7ffc, 0) = -1 ENOENT (No such file or directory)
+100 openat(AT_FDCWD<{tree}>, "docs", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 4<{tree}/docs>
+100 stat("{tree}/crates", {{st_mode=S_IFDIR|0755, st_size=4096, ...}}) = 0
+100 clone3({{flags=CLONE_VM|CLONE_VFORK|CLONE_CLEAR_SIGHAND, exit_signal=SIGCHLD, stack=0x7f, stack_size=0x9000}}, 88 <unfinished ...>
+102 chdir("docs") = 0
+102 openat(AT_FDCWD, "b.md", O_RDONLY) = 3<{tree}/docs/b.md>
+102 execve("/usr/bin/git", ["git", "ls-files", "--cached", "--others", "--exclude-standard", "--", "*.md"], 0x7ffd /* 60 vars */) = 0
+102 openat(AT_FDCWD<{tree}/docs>, "{git}/index", O_RDONLY) = 3<{git}/index>
+102 openat(AT_FDCWD<{tree}/docs>, "{git}/info/exclude", O_RDONLY) = 3<{git}/info/exclude>
+100 <... clone3 resumed>)           = 102
+103 fchdir(3<{tree}/docs>) = 0
+103 stat("c.md", 0x7ffc) = -1 ENOENT (No such file or directory)
+100 openat(5, "d.md", O_RDONLY) = 6
+"""
+
+
+def traced() -> bool:
+    """Whether a tracer is attached to this process (`TracerPid` in /proc)."""
+    try:
+        status = Path("/proc/self/status").read_text()
+    except OSError:
+        return False
+    match = re.search(r"^TracerPid:\s+(\d+)$", status, re.MULTILINE)
+    return bool(match and match.group(1) != "0")
+
+
+class TraceReading(unittest.TestCase):
+    """`read_trace` over real strace lines: which paths are the tree's, what each call says about
+    one, and what makes a trace say nothing."""
+
+    def setUp(self):
+        self.module = fire_module()
+        self.tree = "/work/tree"
+        self.git = "/work/repo/.git/worktrees/tree"
+        files = frozenset(
+            [
+                "docs/a.md",
+                "docs/b.md",
+                "tools/gate.py",
+                "crates/x/src/lib.rs",
+                "crates/x/Cargo.toml",
+                "crates/y/src/lib.rs",
+                "crates/y/Cargo.toml",
+                "Cargo.lock",
+            ]
+        )
+        self.view = self.module["View"](
+            trees=(self.tree,),
+            root=("/work/repo",),
+            git_dirs=(self.git,),
+            skip=("/work/target",),
+            files=files,
+            dirs=self.module["ancestors"](files),
+            graph=None,
+        )
+
+    def read(self, text: str, view=None) -> object:
+        path = Path(tempfile.mkdtemp()) / "trace.0"
+        self.addCleanup(shutil.rmtree, path.parent)
+        path.write_text(text.format(tree=self.tree, git=self.git))
+        return self.module["read_trace"]([path], view or self.view)
+
+    def test_each_call_places_its_path_and_says_what_it_read(self):
+        out = self.read(TRACE.replace('100 openat(5, "d.md", O_RDONLY) = 6\n', ""))
+        self.assertTrue(out.traced)
+        # Read through AT_FDCWD's path, after a chdir, and a script the command ran.
+        self.assertEqual(out.content, {"docs/a.md", "docs/b.md", "tools/gate.py"})
+        # Looked for and not found, one through a relative stat after fchdir.
+        self.assertEqual(out.absent, {"tools/yaml.py", "docs/c.md"})
+        self.assertEqual(out.listed, {"docs"})
+        self.assertEqual(out.present, {"crates"})
+        # git ls-files read the index, which is the tree's list of paths; info/exclude is the
+        # clone's setting.
+        self.assertEqual(out.git, "tree")
+        self.assertEqual(out.tools, {"/usr/bin/env-stand-in", "/usr/bin/git"})
+
+    def test_a_path_against_a_directory_strace_couldnt_name_says_nothing(self):
+        self.assertFalse(self.read(TRACE).traced)
+
+    def test_a_trace_that_never_shows_its_command_starting_says_nothing(self):
+        self.assertFalse(
+            self.read(
+                TRACE.split("\n", 1)[1].replace(
+                    "100 <... execve resumed>)           = 0\n", ""
+                )
+            ).traced
+        )
+        self.assertFalse(self.module["read_trace"]([], self.view).traced)
+
+    def test_a_git_command_that_reads_the_history_or_a_non_git_reader_is_history(self):
+        head = '100 execve("/usr/bin/git", ["git", "show", "HEAD:x"], 0x7ffd /* 1 vars */) = 0\n'
+        self.assertEqual(
+            self.read(
+                head + '100 openat(AT_FDCWD<{tree}>, "{git}/HEAD", O_RDONLY) = 3\n'
+            ).git,
+            "history",
+        )
+        tool = '100 execve("/usr/bin/python3", ["python3"], 0x7ffd /* 1 vars */) = 0\n'
+        self.assertEqual(
+            self.read(
+                tool + '100 openat(AT_FDCWD<{tree}>, ".git/HEAD", O_RDONLY) = 3\n'
+            ).git,
+            "history",
+        )
+        # cargo lists a package's files through libgit2; only `package` and `publish` read the
+        # commit.
+        for command, want in (("doc", "tree"), ("package", "history")):
+            cargo = f'100 execve("/usr/bin/cargo", ["cargo", "{command}", "-p", "x"], 0x7ffd /* 1 vars */) = 0\n'
+            head = '100 openat(AT_FDCWD<{tree}>, "{git}/HEAD", O_RDONLY) = 3\n'
+            self.assertEqual(self.read(cargo + head).git, want, command)
+        # Looking at `.git` is finding the repo, not reading it, and the ignore rules a clone
+        # keeps there are the same in every clone.
+        self.assertIsNone(
+            self.read(
+                tool + '100 newfstatat(AT_FDCWD<{tree}>, ".git", 0x7ffc, 0) = 0\n'
+            ).git
+        )
+        self.assertIsNone(
+            self.read(
+                tool
+                + '100 openat(AT_FDCWD<{tree}>, "{git}/info/exclude", O_RDONLY) = 3\n'
+            ).git
+        )
+        self.assertIsNone(
+            self.read(tool + '100 openat(AT_FDCWD<{tree}>, ".git", O_RDONLY) = 3\n').git
+        )
+        git_reads = self.module["git_reads"]
+        for argv, want in (
+            (["git", "ls-files", "-z"], "tree"),
+            (["git", "ls-files", "-s"], "history"),
+            (["git", "-C", "x", "ls-files", "--cached", "--", "a"], "tree"),
+            (["git", "grep", "--untracked", "-n", "pattern", "--", "."], "tree"),
+            (["git", "grep", "-e", "a", "-e", "b", "--", "."], "tree"),
+            (["git", "grep", "pattern", "HEAD"], "history"),
+            (["git", "grep", "-e", "a", "HEAD", "--", "."], "history"),
+            (["git", "grep", "--cached", "pattern"], "history"),
+            (["git", "grep", "--no-such-flag", "pattern"], "history"),
+            (["git", "rev-parse", "--show-toplevel"], "tree"),
+            (["git", "rev-parse", "HEAD"], "history"),
+            (["git", "diff", "HEAD"], "history"),
+            (["git"], "history"),
+        ):
+            with self.subTest(argv=argv):
+                self.assertEqual(git_reads(argv), want)
+
+    def test_a_download_by_a_range_is_floating_and_one_by_an_exact_version_is_not(self):
+        downloads, floating = self.module["downloads"], self.module["floating"]
+        with tempfile.TemporaryDirectory() as tree:
+            Path(tree, "gate.py").write_text(
+                '# /// script\n# dependencies = ["boto3>=1.40", "pyyaml==6.0.3"]\n# ///\n'
+            )
+            for argv, want in (
+                (["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "x"], []),
+                (["uv", "run", "--with=boto3>=1.40", "python"], ["boto3>=1.40"]),
+                (["uv", "run", "--script", "gate.py"], ["boto3>=1.40"]),
+                (["uvx", "maturin@1.14.1", "develop"], []),
+                (["uvx", "ruff", "check"], ["ruff"]),
+                (
+                    ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build"],
+                    ["@napi-rs/cli@3"],
+                ),
+                (["npx", "--package", "typedoc@0.28.14", "--", "typedoc"], []),
+                (["uv", "run", "-p", "3.12", "python"], []),
+                (["python3", "--with", "boto3>=1.40"], []),
+                (
+                    [
+                        "uv",
+                        "pip",
+                        "install",
+                        "-q",
+                        "--python",
+                        "v/bin/python",
+                        "out/w.whl",
+                    ],
+                    [],
+                ),
+                (["uv", "pip", "install", "pytest==9.1.1", "mypy"], ["mypy"]),
+                (
+                    ["uv", "pip", "install", "-r", "req.txt"],
+                    ["the requirements in req.txt"],
+                ),
+            ):
+                with self.subTest(argv=argv):
+                    got = [d for d in downloads(argv, tree, tree) if floating(d)]
+                    self.assertEqual(got, want)
+
+    def test_a_cargo_process_reads_a_member_outside_its_build_for_its_manifest_alone(
         self,
     ):
-        binding = entry(
-            fid="js",
-            guard="t",
-            run=["node", "--test", "--test-reporter=tap", "t.mjs"],
-            suite="bindings",
-            fault='transform = { file = "state-js.txt", replace = "t=ok", with = "t=fail" }',
-        )
-        repo = affected_repo(self, extra=binding)
-        repo.write("state-js.txt", "t=ok x=ok\n")
-        out = repo.run("fire", "--affected")
-        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
-        self.assertEqual(selection(out.stdout), {"js"}, out.stdout)
-        self.assertIn(
-            "no affected entry runs without --venv, so nothing to fire", out.stdout
-        )
-
-    def test_a_script_a_tested_script_loads_selects_the_suite(self):
-        # ci-local.py reads the workflows through check-ci-parity.py, so test_ci_local.py's
-        # verdict moves when check-ci-parity.py changes.
-        suite = textwrap.dedent(
-            """\
-            import unittest
-
-
-            class T(unittest.TestCase):
-                def test_y(self):
-                    self.assertNotIn("y=bad", open("state-y.txt").read())
-            """
-        )
-        run = [sys.executable, "-m", "unittest", "discover", "-s", "tools"]
-        repo = Repo(
-            self,
-            {
-                REGISTRY: entry(
-                    fid="suite",
-                    guard="test_gate_y.py",
-                    run=[*run, "-p", "test_gate_y.py"],
-                    expect="exit-nonzero",
-                    message="FAIL: test_y",
-                    fault='transform = { file = "state-y.txt", replace = "y=ok", with = "y=bad" }',
-                ),
-                "tools/test_gate_y.py": suite,
-                "tools/gate-y.py": "import runpy\nfrom pathlib import Path\n"
-                'PLAN = runpy.run_path(str(Path(__file__).with_name("plan-y.py")))\n',
-                "tools/plan-y.py": "import helper_y\n",
-                "tools/helper_y.py": "# imported by plan-y.py\n",
-                "tools/other.py": "# loaded by nothing\n",
-                "state-y.txt": "y=ok\n",
+        graph = self.module["Graph"](
+            members={"x": "crates/x", "y": "crates/y"},
+            names={"x": "x", "y": "y"},
+            deps={
+                "x": [("dep", False), ("devdep", True)],
+                "y": [],
+                "dep": [("devdep2", True)],
+            },
+            locked={
+                "x": "x 0.1.0",
+                "y": "y 0.1.0",
+                "dep": "dep 1.0.0",
+                "devdep": "devdep 1.0.0",
+                "devdep2": "devdep2 1.0.0",
             },
         )
-        repo.write("tools/other.py", "# changed\n")
-        out = repo.run("fire", "--affected")
-        self.assertEqual(selection(out.stdout), set(), out.stdout)
-        for path in ("tools/plan-y.py", "tools/helper_y.py"):
-            with self.subTest(path=path):
-                git(repo.root, "checkout", "--", ".")
-                repo.write(path, "# changed\n")
-                out = repo.run("fire", "--affected")
-                self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
-                self.assertIn(f"affected: suite: {path} changed", out.stdout)
+        view = dataclasses.replace(self.view, graph=graph)
+        cargo = '100 execve("/usr/bin/cargo", ["cargo", "test", "-p", "x"], 0x7ffd /* 1 vars */) = 0\n'
+        calls = "".join(
+            f"100 {call}\n"
+            for call in (
+                'openat(AT_FDCWD<{tree}>, "crates/y/Cargo.toml", O_RDONLY) = 3',
+                'statx(AT_FDCWD<{tree}>, "crates/y/src/lib.rs", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffc) = 0',
+                'statx(AT_FDCWD<{tree}>, "crates/y/tests", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffc) = -1 ENOENT (No such file or directory)',
+                'statx(AT_FDCWD<{tree}>, "crates/x/src/lib.rs", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffc) = 0',
+                'statx(AT_FDCWD<{tree}>, "crates/x/tests", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffc) = -1 ENOENT (No such file or directory)',
+                'openat(AT_FDCWD<{tree}>, "Cargo.lock", O_RDONLY) = 3',
+            )
+        )
+        out = self.read(cargo + calls, view)
+        self.assertEqual(out.content, {"crates/y/Cargo.toml", "crates/x/src/lib.rs"})
+        self.assertEqual(out.present, {"crates/y/src/lib.rs"})
+        self.assertEqual(out.absent, {"crates/x/tests"})
+        # A dev-dependency counts for the package the command selects, not for one it reaches.
+        self.assertEqual(out.locked, {"x 0.1.0", "dep 1.0.0", "devdep 1.0.0"})
+        self.assertIn("rustc -vV", out.tools)
+        # A build the graph can't name counts every file cargo touched, the lockfile's text too.
+        unknown = self.read(cargo.replace('"-p", "x"', '"-p", "z"') + calls, view)
+        self.assertLessEqual({"crates/y/src/lib.rs", "Cargo.lock"}, unknown.content)
+        self.assertEqual(unknown.locked, set())
 
-    def test_no_merge_base_fails_and_base_needs_affected(self):
-        repo = affected_repo(self)
-        git(repo.root, "update-ref", "-d", "refs/remotes/origin/main")
-        out = repo.run("fire", "--affected")
-        self.assertEqual(out.returncode, 1)
-        self.assertIn("no merge base of HEAD and origin/main", out.stderr)
-        out = repo.run("fire", "--affected", "--base", "HEAD")
-        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
-        out = repo.run("fire", "--base", "HEAD")
-        self.assertEqual(out.returncode, 1)
-        self.assertIn("--base is for --affected", out.stderr)
-
-    # CI's side of mise.toml (#323): the `guards` job's own steps and the workflow's `env`.
-
-    def workflow_repo(self) -> Repo:
-        repo = affected_repo(self)
-        repo.write(WORKFLOW, FIXTURE_WORKFLOW)
-        repo.commit("the workflow")
-        git(repo.root, "update-ref", "refs/remotes/origin/main", "HEAD")
-        return repo
-
-    def test_a_change_to_the_guards_jobs_steps_or_the_workflow_env_selects_every_entry(
+    def test_a_program_under_the_temp_directory_is_the_commands_own_and_a_script_brings_its_interpreter(
         self,
     ):
-        # A pull request that drops clippy from the job would otherwise skip every clippy
-        # entry, pass, and turn main red.
-        for old, new in (
-            ("components: clippy, rustfmt", "components: rustfmt"),
-            ("CARGO_TERM_COLOR: always", "CARGO_TERM_COLOR: never"),
-        ):
-            with self.subTest(change=new):
-                repo = self.workflow_repo()
-                repo.write(WORKFLOW, FIXTURE_WORKFLOW.replace(old, new))
-                self.check(repo, ALL, f"affected: a: {WORKFLOW_REASON}")
-
-    def test_a_deleted_or_emptied_workflow_selects_every_entry(self):
-        for emptied in (False, True):
-            with self.subTest(emptied=emptied):
-                repo = self.workflow_repo()
-                if emptied:
-                    repo.write(WORKFLOW, "")
-                else:
-                    (repo.root / WORKFLOW).unlink()
-                self.check(repo, ALL, f"affected: a: {WORKFLOW_REASON}")
-
-    # The task those steps run (`ci:guards`): its command and `env` are the job's too.
-
-    def task_repo(self) -> Repo:
-        repo = affected_repo(self)
-        repo.write(TASK_FILE, FIXTURE_TASKS)
-        repo.commit("the tasks")
-        git(repo.root, "update-ref", "refs/remotes/origin/main", "HEAD")
-        return repo
-
-    def test_a_change_to_the_guards_task_selects_every_entry(self):
-        # A pull request that turns incremental builds off or drops a suite from the fire
-        # changes how every entry the job fires runs.
-        for old, new in (
-            ('CARGO_INCREMENTAL = "1"', 'CARGO_INCREMENTAL = "0"'),
-            ("--suite rust", "--suite script"),
-        ):
-            with self.subTest(change=new):
-                repo = self.task_repo()
-                repo.write(TASK_FILE, FIXTURE_TASKS.replace(old, new))
-                self.check(repo, ALL, f"affected: a: {TASK_REASON}")
-
-    def test_a_deleted_task_file_or_a_moved_task_selects_every_entry(self):
-        for moved in (False, True):
-            with self.subTest(moved=moved):
-                repo = self.task_repo()
-                if moved:
-                    repo.write(
-                        TASK_FILE, FIXTURE_TASKS.replace('["ci:guards"]', '["ci:fire"]')
-                    )
-                else:
-                    (repo.root / TASK_FILE).unlink()
-                self.check(repo, ALL, f"affected: a: {TASK_REASON}")
-
-    def test_another_task_or_a_comment_in_the_task_file_selects_nothing(self):
-        repo = self.task_repo()
-        repo.write(
-            TASK_FILE,
-            FIXTURE_TASKS.replace("echo other", "echo changed").replace(
-                "# The fire's command.", "# The fire's own command."
-            ),
+        scratch = Path(tempfile.gettempdir()) / "a-fake-tool"
+        body = f'100 execve("{scratch}", ["t"], 0x7ffd /* 1 vars */) = 0\n'
+        self.assertEqual(self.read(body).tools, set())
+        fake = Path(tempfile.gettempdir()) / "bin" / "npx"
+        body = f'100 execve("{fake}", ["npx", "-p", "@x/cli@3", "x"], 0x7ffd /* 1 vars */) = 0\n'
+        self.assertEqual(self.read(body).floating, set())
+        with tempfile.TemporaryDirectory() as directory:
+            tree = Path(directory, "tree")
+            (tree / "tools").mkdir(parents=True)
+            (tree / "tools" / "gate.py").write_text("#!/usr/bin/env python3\n")
+            view = dataclasses.replace(self.view, trees=(str(tree),))
+            path = Path(directory, "trace.0")
+            path.write_text(
+                f'100 execve("{tree}/tools/gate.py", ["gate"], 0x7ffd /* 1 vars */) = 0\n'
+            )
+            out = self.module["read_trace"]([path], view)
+        self.assertEqual(out.content, {"tools/gate.py"})
+        self.assertEqual(out.tools, {os.path.realpath("/usr/bin/env")})
+        # A tool uvx or npx fetched into its cache is a download: the pin answers for it.
+        cache = "/home/runner/.cache/uv"
+        view = dataclasses.replace(self.view, downloads=(cache,))
+        fetched = f'100 execve("{cache}/archive-v0/x/bin/maturin", ["maturin"], 0x7ffd /* 1 vars */) = 0\n'
+        self.assertEqual(self.read(fetched, view).tools, set())
+        self.assertEqual(
+            self.read(fetched).tools, {f"{cache}/archive-v0/x/bin/maturin"}
         )
-        self.check(repo, set())
 
-    def test_another_job_or_a_comment_in_the_workflow_selects_nothing(self):
-        repo = self.workflow_repo()
-        repo.write(
-            WORKFLOW,
-            FIXTURE_WORKFLOW.replace("echo other", "echo changed").replace(
-                "# The toolchain", "# Its toolchain"
-            ),
-        )
-        self.check(repo, set())
-
-
-TASK_FILE = ".config/mise/tasks/ci.toml"
-TASK_REASON = (
-    f"the `ci:guards` task in {TASK_FILE} changed, and CI runs every command under it"
-)
-FIXTURE_TASKS = """\
-# CI's tasks.
-
-["ci:guards"]
-# The fire's command.
-env = { CARGO_INCREMENTAL = "1" }
-run = "./tools/check-guards-fire.py fire --suite rust"
-
-["ci:other"]
-run = "echo other"
-"""
-WORKFLOW = ".github/workflows/ci.yml"
-WORKFLOW_REASON = (
-    f"the `guards` job or the top-level `env` in {WORKFLOW} changed, and CI runs every "
-    "command under them"
-)
-FIXTURE_WORKFLOW = """\
-name: ci
-on:
-  pull_request:
-env:
-  CARGO_TERM_COLOR: always
-jobs:
-  guards:
-    runs-on: ubuntu-latest
-    steps:
-      # The toolchain every command runs under.
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - run: ./tools/check-guards-fire.py fire --affected
-  other:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo other
-"""
+    @unittest.skipUnless(shutil.which("strace"), "needs strace")
+    @unittest.skipIf(traced(), "already traced, as every run under `fire --record` is")
+    def test_the_real_strace_names_what_a_command_read(self):
+        # The flags `--record` runs strace with, over a command that reads one file, lists one
+        # directory and looks for one it doesn't find. A traced process can't trace another,
+        # so this case runs where the suite runs plain: a pull request's legs, `check`.
+        with tempfile.TemporaryDirectory() as directory:
+            tree = Path(directory, "tree")
+            (tree / "docs").mkdir(parents=True)
+            (tree / "docs" / "a.md").write_text("a\n")
+            code = "import os; open('docs/a.md').read(); os.listdir('docs'); os.path.exists('gone.txt')"
+            trace = Path(directory, "trace")
+            done = subprocess.run(
+                [*self.module["STRACE"], f"{trace}.0", sys.executable, "-c", code],
+                cwd=tree,
+            )
+            self.assertEqual(done.returncode, 0)
+            files = frozenset(["docs/a.md"])
+            view = dataclasses.replace(
+                self.view,
+                trees=(str(tree), os.path.realpath(tree)),
+                files=files,
+                dirs=self.module["ancestors"](files),
+            )
+            out = self.module["read_trace"]([Path(f"{trace}.0")], view)
+        self.assertTrue(out.traced)
+        self.assertEqual(out.content, {"docs/a.md"})
+        # Python lists the directory it imports from, the tree's root here, as well.
+        self.assertIn("docs", out.listed)
+        self.assertIn("gone.txt", out.absent)
+        self.assertIn(os.path.realpath(sys.executable), out.tools)
 
 
 # ── --shard (#345) ───────────────────────────────────────────────────────────
@@ -3402,48 +3711,6 @@ class FireSharded(unittest.TestCase):
                     len(big), 1, f"shard {k} of 3 doesn't hold one heavy command: {big}"
                 )
 
-    @classmethod
-    def affected_runs(cls) -> dict[int, subprocess.CompletedProcess[str]]:
-        """A (three entries), B (two), C and D (one each); the branch changes A's and D's
-        registry entries, so `--affected` selects A and D."""
-
-        def run(holder: object) -> dict[int, subprocess.CompletedProcess[str]]:
-            spec = [
-                ("ga", ["a1", "a2", "a3"]),
-                ("gb", ["b1", "b2"]),
-                ("gc", ["c"]),
-                ("gd", ["d"]),
-            ]
-            repo = commands_repo(holder, spec)
-            noted = frozenset(["a1", "a2", "a3", "d"])
-            repo.write(REGISTRY, commands_registry(spec, noted))
-            repo.commit()
-            return {
-                k: repo.run("fire", "--affected", "--shard", f"{k}/2") for k in (0, 1)
-            }
-
-        return cls.once("affected", run)
-
-    def test_the_banner_counts_the_affected_selection(self):
-        # Sliced before `--affected`, the banner would count the whole registry's seven.
-        for k, out in self.affected_runs().items():
-            with self.subTest(k=k):
-                self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
-                self.assertEqual(
-                    [(int(m[3]), int(m[5])) for m in BANNER.findall(out.stdout)],
-                    [(4, 2)],
-                    f"shard {k} of 2 doesn't count the affected selection\n{out.stdout}",
-                )
-
-    def test_each_shard_fires_its_share_of_the_affected_entries(self):
-        # The registry's own slices would put A and D both in shard 0 and leave shard 1 idle.
-        runs = self.affected_runs()
-        self.assertEqual(
-            [fired_ids(runs[k].stdout) for k in (0, 1)],
-            [["a1", "a2", "a3"], ["d"]],
-            "the shards don't split the affected entries",
-        )
-
     def test_an_empty_slice_passes_and_says_so(self):
         repo = self.shared()
         out = repo.run("fire", "--only", "h", "--shard", "1/2")
@@ -3559,10 +3826,12 @@ CI = HERE.parent / ".github/workflows/ci.yml"
 # The two conditions the job's fire steps may carry; any other fails the case by name.
 ON_PULL_REQUEST = "github.event_name == 'pull_request'"
 ON_PUSH = "github.event_name != 'pull_request'"
-# What a pull request gives the steps' `${{ }}`s. The fixture's base is `release`, not main, and
-# it has no origin/main, so a step that ignores `github.base_ref` (a hard-coded origin/main, or
-# a `$BASE` that's unset and falls back to it) finds no merge base and fails.
-EXPRESSIONS = {"github.base_ref": "release"}
+# What a pull request gives the steps' `${{ }}`s beyond the leg's own.
+EXPRESSIONS: dict[str, str] = {}
+# Where the fire steps keep the record, which the cache steps save and restore.
+VERDICTS = "$RUNNER_TEMP/guards-verdicts"
+VERDICTS_PATH = "${{ runner.temp }}/guards-verdicts"
+VERDICTS_KEY = "guards-verdicts-${{ matrix.shard }}-of-${{ strategy.job-total }}-"
 EXPRESSION = re.compile(r"\$\{\{\s*(.+?)\s*\}\}")
 MISE_RUN = re.compile(r"(?<![\w./-])mise\s+run\s+(\S+)([^\n]*)")
 # The action each job installs mise and its tools through.
@@ -3641,9 +3910,10 @@ def fired(stdout: str) -> list[str]:
 
 
 class GuardsJob(unittest.TestCase):
-    """Pull requests fire the entries their diff affects, and every push to main fires every
-    entry (D31), each as a matrix of shards whose combined result is the required check (D35,
-    #345). The steps run as ci.yml writes them, once per shard, against a fixture repository."""
+    """Every push to main fires every entry and records what each verdict read, and a pull
+    request fires the entries whose recorded verdicts it can't keep (D31), each as a matrix of
+    shards whose combined result is the required check (D35, #345). The steps run as ci.yml
+    writes them, once per shard, against a fixture repository."""
 
     def legs(self) -> list:
         legs = ((guards_job().get("strategy") or {}).get("matrix") or {}).get("shard")
@@ -3679,7 +3949,12 @@ class GuardsJob(unittest.TestCase):
         return chosen
 
     def run_step(
-        self, repo: Repo, step: dict, shard: int = 0, total: int = 1
+        self,
+        repo: Repo,
+        step: dict,
+        shard: int = 0,
+        total: int = 1,
+        temp: Path | None = None,
     ) -> subprocess.CompletedProcess[str]:
         answers = {
             **EXPRESSIONS,
@@ -3703,27 +3978,29 @@ class GuardsJob(unittest.TestCase):
             f"{shlex.quote(sys.executable)} {shlex.quote(str(SCRIPT))} --root {shlex.quote(str(repo.root))}",
         )
         path = os.pathsep.join([str(repo.bin), os.environ.get("PATH", "")])
+        temp = temp or repo.tmp.parent / "runner-temp"
+        temp.mkdir(parents=True, exist_ok=True)
         return subprocess.run(
             ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", run],
             cwd=repo.root,
             capture_output=True,
             text=True,
-            env=clean_env(PATH=path, TMPDIR=str(repo.tmp), **env),
+            env=clean_env(
+                PATH=path, TMPDIR=str(repo.tmp), RUNNER_TEMP=str(temp), **env
+            ),
         )
 
-    def test_a_pull_request_fires_the_entries_it_affects_and_a_push_fires_every_entry(
+    def test_a_push_records_every_entry_and_a_pull_request_fires_what_it_cant_keep(
         self,
     ):
         # One entry of each other suite beside the fixture's rust ones: this job fires all
         # three, each worker's bindings entries in an environment of its own.
         script = entry(
             fid="sc",
-            guard="sgate.py",
-            run=[sys.executable, "sgate.py"],
-            expect="exit-nonzero",
+            guard="tests/test_s.py::test_s",
+            run=["pytest", "-rA", "tests/test_s.py::test_s"],
             suite="script",
-            message="sgate says no",
-            fault='transform = { file = "state-s.txt", replace = "s=ok", with = "s=bad" }',
+            fault='transform = { file = "state-s.txt", replace = "tests/test_s.py::test_s=ok", with = "tests/test_s.py::test_s=fail" }',
         )
         binding = entry(
             fid="bi",
@@ -3732,50 +4009,56 @@ class GuardsJob(unittest.TestCase):
             suite="bindings",
             fault='transform = { file = "state-js.txt", replace = "t=ok", with = "t=fail" }',
         )
-        repo = affected_repo(self, extra=script + binding)
+        repo = kinds_repo(self, extra=script + binding)
         # The step's `--target-dir target` is inside the checkout, as on the runner.
         repo.write(".gitignore", "target/\n")
-        repo.write("state-s.txt", "s=ok\n")
-        repo.write(
-            "sgate.py",
-            "import sys\nbad = 's=bad' in open('state-s.txt').read()\n"
-            "bad and print('sgate says no')\nsys.exit(1 if bad else 0)\n",
-        )
+        repo.write("state-s.txt", "tests/test_s.py::test_s=ok\n")
         repo.write("state-js.txt", "t=ok\n")
-        repo.commit("the fixture's base")
-        git(repo.root, "update-ref", "refs/remotes/origin/release", "HEAD")
-        git(repo.root, "update-ref", "-d", "refs/remotes/origin/main")
-        # HEAD plays the pull request's merge commit: one rust, one script and one bindings
-        # entry's files change.
-        for path in ("state-a.txt", "state-s.txt", "state-js.txt"):
-            repo.write(path, (repo.root / path).read_text() + "extra=ok\n")
-        repo.commit()
-
+        repo.commit("main")
         legs = self.legs()
 
-        def each_shard(
-            event: str, step: dict, selected: set[str], want: set[str]
-        ) -> None:
+        def each_leg(event: str, step: dict, temp) -> list[str]:
             ids: list[str] = []
             for shard in legs:
-                out = self.run_step(repo, step, shard, len(legs))
+                out = self.run_step(repo, step, shard, len(legs), temp(shard))
                 self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
-                self.assertEqual(selection(out.stdout), selected, out.stdout)
                 ids += fired_ids(out.stdout)
             self.assertEqual(
                 len(ids), len(set(ids)), f"{event}: an entry fires in two shards: {ids}"
             )
-            self.assertEqual(set(ids), want, f"{event}: the shards together")
-
-        (pr,) = self.fire_steps("pull_request")
-        each_shard("pull_request", pr, {"a", "sc", "bi"}, {"a", "sc", "bi"})
+            return ids
 
         (push,) = self.fire_steps("push")
-        self.assertNotIn("--affected", task_command(push)[1])
-        self.assertNotIn("--only", task_command(push)[1])
-        each_shard("push", push, set(), {*ORDER, "sc", "bi"})
+        main = repo.tmp.parent / "main-temp"
+        fired = each_leg("push", push, lambda shard: main)
+        self.assertEqual(set(fired), {*ORDER, "sc", "bi"}, "push: the shards together")
+        records = main / "guards-verdicts"
+        self.assertEqual(
+            sorted(p.name for p in records.glob("*.json")),
+            sorted(f"shard-{k}-of-{len(legs)}.json" for k in legs),
+            "push: each leg writes its own record",
+        )
+        # HEAD plays the pull request's merge commit: one rust, one script and one bindings
+        # entry's files change, and each leg restores its own leg's record from main.
+        for path in ("state-a.txt", "state-s.txt", "state-js.txt"):
+            repo.write(path, (repo.root / path).read_text() + "extra=ok\n")
+        repo.commit()
 
-    def test_the_pull_request_step_is_the_push_step_plus_the_selection(self):
+        def restored(shard: int) -> Path:
+            temp = repo.tmp.parent / f"pr-temp-{shard}"
+            (temp / "guards-verdicts").mkdir(parents=True, exist_ok=True)
+            shutil.copy(
+                records / f"shard-{shard}-of-{len(legs)}.json", temp / "guards-verdicts"
+            )
+            return temp
+
+        (pr,) = self.fire_steps("pull_request")
+        fired = each_leg("pull_request", pr, restored)
+        self.assertEqual(
+            set(fired), {"a", "sc", "bi"}, "pull_request: the shards together"
+        )
+
+    def test_the_pull_request_step_is_the_push_step_reusing_what_it_records(self):
         # So the two legs can't drift apart in a flag (a lost suite, or bindings entries with
         # no environment to build into, which `fire` skips), and neither can leave the worker
         # count and per-command timeout the budgets were measured with: four workers on the
@@ -3797,7 +4080,53 @@ class GuardsJob(unittest.TestCase):
             ("--target-dir", "target"),
         ):
             self.assertEqual(options.get(flag), want, f"the push step's {flag}")
-        self.assertEqual(pr_argv, [*push_argv, "--affected", "--base", "$BASE"])
+        self.assertEqual(push_argv[-2:], ["--record", VERDICTS])
+        self.assertEqual(pr_argv, [*push_argv[:-2], "--reuse", VERDICTS])
+
+    def test_each_leg_reads_the_record_its_leg_saves_on_main(self):
+        # The pull request's leg restores under the key main's same leg saves, by its prefix,
+        # into the directory both fire steps name, after strace is there; main never restores
+        # one, a pull request never saves one, and nothing else in the workflow caches it.
+        steps = guards_job().get("steps") or []
+
+        def only(action: str) -> dict:
+            found = [
+                s for s in steps if str(s.get("uses", "")).startswith(action + "@")
+            ]
+            self.assertEqual(
+                len(found), 1, f"the guards job has {len(found)} {action} steps"
+            )
+            return found[0]
+
+        restore, save = only("actions/cache/restore"), only("actions/cache/save")
+        self.assertEqual(restore.get("if"), ON_PULL_REQUEST)
+        self.assertEqual(save.get("if"), ON_PUSH)
+        for step in (restore, save):
+            self.assertEqual((step.get("with") or {}).get("path"), VERDICTS_PATH)
+        self.assertEqual(save["with"].get("key"), VERDICTS_KEY + "${{ github.sha }}")
+        self.assertEqual(
+            restore["with"].get("key"),
+            VERDICTS_KEY + "${{ github.event.pull_request.base.sha }}",
+        )
+        self.assertEqual(restore["with"].get("restore-keys"), VERDICTS_KEY)
+        (strace,) = [
+            s for s in steps if "apt-get install -y strace" in s.get("run", "")
+        ]
+        self.assertNotIn("if", strace, "strace is installed on both legs")
+        (pr,) = self.fire_steps("pull_request")
+        (push,) = self.fire_steps("push")
+        at = steps.index
+        self.assertLess(at(strace), at(restore))
+        self.assertLess(at(restore), at(pr))
+        self.assertLess(at(push), at(save))
+        caches = [
+            (name, s.get("uses"))
+            for name, job in workflow_jobs().items()
+            for s in job.get("steps") or []
+            if str(s.get("uses", "")).startswith("actions/cache")
+            and "guards-verdicts" in json.dumps(s.get("with") or {})
+        ]
+        self.assertEqual([name for name, _ in caches], ["guards", "guards"], caches)
 
     def test_ci_local_answers_the_guards_job_as_a_pull_request(self):
         # ci:local runs one leg, the pull request's, as one run of its whole selection. Its
@@ -3961,7 +4290,13 @@ class GuardsJob(unittest.TestCase):
                             "guards-cache",
                         ):
                             self.assertNotEqual(given.get("tools-cache"), "exact", name)
-                        if str(step.get("uses", "")).startswith("actions/cache/save@"):
+                        # The guards legs' record of each verdict is main's too, and
+                        # test_each_leg_reads_the_record_its_leg_saves_on_main holds its key.
+                        record = str(given.get("key", "")).startswith(VERDICTS_KEY)
+                        if (
+                            str(step.get("uses", "")).startswith("actions/cache/save@")
+                            and not record
+                        ):
                             self.assertEqual(
                                 (path, name), (CI, "guards-cache"), "another job saves"
                             )
@@ -4126,7 +4461,7 @@ class GuardsJob(unittest.TestCase):
                     "an aggregator step sets a key that can hide a red shard",
                 )
 
-    def test_the_checkout_has_the_base_branch_the_merge_base_needs(self):
+    def test_the_checkout_has_the_history_the_records_commit_needs(self):
         checkout = [
             s
             for s in guards_job().get("steps") or []
