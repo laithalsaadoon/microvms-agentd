@@ -36,6 +36,18 @@ concurrency:
 # The `release` environment gates all three. It requires a human approval and is restricted
 # to `v*` tags, so a compromised push to a branch cannot reach a registry even with this
 # file's permissions.
+#
+# ── gated on a live run ───────────────────────────────────────────────────
+#
+# A tag builds and attests every artifact and creates the GitHub release as a DRAFT, which only
+# an account that can push can see. Nothing public happens until `live-gate` passes: it waits in
+# the `release` environment for a reviewer, then requires a run of `live-conformance.yml`,
+# dispatched on this tag, that passed on this draft's own `agentd` and Linux CLI. The four jobs
+# that publish (the GitHub release, crates.io, PyPI, npm) each need it and wait for a second
+# approval in the same environment. The split exists because the live quickstart fetches the
+# daemon of the CLI's own version: when this file published on the tag push, a live run on the
+# release commit could only fail until the release it was meant to gate was already out.
+# `tools/release-gate.py graph` holds the job graph to that rule, in `check` and in `guard`.
 
 jobs:
   # Runs first and gates everything, because the cheapest failure is the one before any
@@ -84,6 +96,10 @@ jobs:
           enable-cache: false
       - name: publish set, manifest metadata, and tag agreement
         run: ./tools/check-publishable.py --tag=${{ github.ref_name }}
+      # The same check `mise run check` runs, against the file this run is: a publishing job
+      # that stopped waiting on `live-gate` fails here, before anything is built.
+      - name: every publishing job waits on the live gate
+        run: ./tools/release-gate.py graph
       # The same dry run `ci.yml` performs on every pull request, repeated here against the
       # exact commit being released. Cheap next to a partial publish, and it is the only
       # place the edges between the published crates resolve the way a consumer will resolve
@@ -103,8 +119,9 @@ jobs:
     #
     # Nothing here makes a release atomic — crates.io, PyPI and npm are three separate
     # irreversible acts. What this does is move every *buildable* failure ahead of the first
-    # one, so a broken artifact costs a re-tag rather than a burnt version number.
-    needs: [guard, wheels, sdist, addons, cli]
+    # one, so a broken artifact costs a re-tag rather than a burnt version number. `live-gate`
+    # moves the live run's failures ahead of it too.
+    needs: [guard, wheels, sdist, addons, cli, live-gate]
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -223,7 +240,7 @@ jobs:
 
   pypi:
     name: publish to PyPI
-    needs: [wheels, sdist]
+    needs: [wheels, sdist, live-gate]
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -331,7 +348,7 @@ jobs:
 
   npm:
     name: publish to npm
-    needs: addons
+    needs: [addons, live-gate]
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -502,12 +519,15 @@ jobs:
   # release is its distribution channel. The attestation is also how the crates.io half of
   # this workflow gets provenance at all: PyPI produces PEP 740 attestations and npm produces
   # SLSA provenance, both automatically, and crates.io supports neither.
-  github-release:
-    name: attest and publish the release assets
+  #
+  # This job drafts the release; `github-release` publishes it once `live-gate` passes. A draft
+  # can be deleted and made again, so nothing here needs the gate.
+  draft:
+    name: attest the release assets and draft the release
     needs: [guard, cli]
     runs-on: ubuntu-latest
     permissions:
-      contents: write # creates the release and uploads the asset
+      contents: write # creates the draft release and uploads its assets
       id-token: write # signs the provenance attestation
       attestations: write
     steps:
@@ -559,11 +579,10 @@ jobs:
       # because that CLI fetches exactly this release's daemon and nothing
       # refreshes its root. A refusal here (a Rekor shard or key the pinned
       # `sigstore-trust-root` predates) means bumping that pin and tagging
-      # again, never skipping this step. It stops the GitHub release only:
-      # the registry jobs don't wait for this one, so a refusal here after
-      # they've run still leaves that version's registry packages without a
-      # daemon to fetch. Absolute paths, because cargo runs the test from the
-      # crate's directory.
+      # again, never skipping this step. Every publishing job waits on
+      # `live-gate`, which waits on this job, so a refusal here publishes
+      # nothing. Absolute paths, because cargo runs the test from the crate's
+      # directory.
       - name: verify the bundle the way every client will
         env:
           MICROVM_RELEASE_ASSET: ${{ github.workspace }}/target/aarch64-unknown-linux-musl/release/agentd
@@ -579,7 +598,9 @@ jobs:
       # A client's daemon fetch checks agentd against it when GitHub can't be reached for
       # the attestation bundle (`verify_sha256` in crates/microvms-app/src/provision.rs looks up
       # the literal `agentd` entry), and fails closed on a release without it. It exists
-      # from v0.5.0 on, the same releases that carry `agentd.sigstore.json`.
+      # from v0.5.0 on, the same releases that carry `agentd.sigstore.json`. It's also what
+      # ties a live run to this draft: the run's marker carries the SHA256SUMS it tested, and
+      # `live-gate` compares that with this file.
       - name: write SHA256SUMS over every asset
         run: |
           set -euo pipefail
@@ -588,11 +609,28 @@ jobs:
           cp cli-dist/microvm-*.tar.gz cli-dist/microvm-*.zip staging/
           (cd staging && sha256sum ./* | sed 's|\./||') > SHA256SUMS
           cat SHA256SUMS
-      - name: publish the release
+      # A second draft of the same tag would leave the live run, the gate and the publish each
+      # to pick one. A re-run of this job finds its earlier draft here: delete that draft (it
+      # was never public, and `gh release delete` keeps the tag) and run it again.
+      - name: no release exists for the tag yet
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # `gh release list` includes drafts for an account that can push.
+          existing=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName,isDraft \
+            --jq '.[] | select(.tagName == env.TAG) | "draft: \(.isDraft)"')
+          if [ -n "$existing" ]; then
+            echo "::error::a release for $TAG already exists ($existing). A published version is final; a stale draft can go with 'gh release delete $TAG', which keeps the tag."
+            exit 1
+          fi
+      - name: draft the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
           gh release create ${{ github.ref_name }}
+          --draft
           --title ${{ github.ref_name }}
           --generate-notes
           --verify-tag
@@ -601,3 +639,70 @@ jobs:
           agentd.intoto.jsonl
           SHA256SUMS
           cli-dist/*
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-sums
+          path: SHA256SUMS
+          if-no-files-found: error
+
+  # ── the live gate ─────────────────────────────────────────────────────────
+  #
+  # Waits for every artifact and the draft, then for a reviewer in the `release` environment.
+  # Approve it once a `live-conformance.yml` run dispatched on this tag has passed; the job then
+  # checks that for itself (`tools/release-gate.py verify`, whose docstring has the rule) and
+  # fails when no such run exists, so an approval given too early costs a re-run of this job,
+  # not a release. Every publishing job needs it, and `tools/release-gate.py graph` fails a job
+  # graph where one doesn't.
+  live-gate:
+    name: a live run passed on this tag's draft
+    needs: [guard, wheels, sdist, addons, cli, draft]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      actions: read # lists live-conformance.yml's runs and downloads their marker
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-sums
+          path: release-sums
+      - name: a live-conformance run passed on this draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: ./tools/release-gate.py verify --tag "$TAG" --commit "$GITHUB_SHA" --sums release-sums/SHA256SUMS
+
+  # Publishes the draft `live-gate` passed, with the registry jobs and in the same environment,
+  # so one approval releases all four.
+  github-release:
+    name: publish the GitHub release
+    needs: [draft, live-gate]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write # a draft is visible only with push access, and publishing edits it
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-sums
+          path: release-sums
+      # The draft can be edited by anyone who can push while it waits for the gate, so what
+      # goes public is checked against what the live run tested, asset by asset.
+      - name: the draft still holds what the live run tested
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir draft
+          cmp draft/SHA256SUMS release-sums/SHA256SUMS
+          (cd draft && sha256sum -c SHA256SUMS)
+      - name: publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false

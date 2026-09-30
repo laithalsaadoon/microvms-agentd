@@ -11,10 +11,15 @@
 //! Two `number` fields would give that away, and worse than in Python: they can be
 //! *transposed*, which is the specific mistake the two types exist to prevent and the one a
 //! numeric parameter cannot see. So both are `#[napi]` classes. napi v3 generates real
-//! TypeScript classes, so `tsc` rejects one where the other is wanted, and at runtime napi's
-//! argument conversion rejects a non-instance before any Rust runs — including the
-//! structurally identical `{ seconds: 30 }`, which is what a `#[napi(object)]` would have
-//! accepted.
+//! TypeScript classes, and at runtime napi's argument conversion rejects a non-instance before
+//! any Rust runs, the structurally identical `{ seconds: 30 }` included, which is what a
+//! `#[napi(object)]` would have accepted.
+//!
+//! `tsc` compares classes by structure, not by name, and the two classes have the same
+//! members. So each declares its ceiling as a literal type, `maxSecs: 60` and `maxSecs: 3600`,
+//! the one member whose type differs, and that's what makes `tsc` reject one where the other is
+//! wanted. With `number` there it accepted either for both (#337). `__test__/types/hooks.ts`
+//! holds that claim, and the assertion below holds each literal to core's constant.
 //!
 //! The range check inside each constructor is the core's `try_new`, message and all: each
 //! refusal names **both** ceilings, because the caller who hits it is nearly always someone
@@ -24,6 +29,14 @@ use microvms_core::{BuildHookTimeout as CoreBuild, RunHookTimeout as CoreRun};
 use napi_derive::napi;
 
 use crate::errors::js;
+
+// The `maxSecs` literal types below are core's two ceilings, written out because an attribute
+// can't name a constant. A ceiling core moves fails this build rather than leaving the
+// declarations promising the old one.
+const _: () = assert!(
+    CoreRun::MAX_SECS == 60 && CoreBuild::MAX_SECS == 3600,
+    "a hook ceiling moved: update the `maxSecs` ts_return_type literals in hooks.rs"
+);
 
 /// A timeout for the `run`, `resume`, `suspend`, or `terminate` hook: 1..=60 seconds.
 ///
@@ -46,7 +59,7 @@ impl RunHookTimeout {
     }
 
     /// The service ceiling for this family: 60.
-    #[napi(getter)]
+    #[napi(getter, ts_return_type = "60")]
     pub fn max_secs(&self) -> u32 {
         CoreRun::MAX_SECS
     }
@@ -81,7 +94,7 @@ impl BuildHookTimeout {
     }
 
     /// The service ceiling for this family: 3600.
-    #[napi(getter)]
+    #[napi(getter, ts_return_type = "3600")]
     pub fn max_secs(&self) -> u32 {
         CoreBuild::MAX_SECS
     }

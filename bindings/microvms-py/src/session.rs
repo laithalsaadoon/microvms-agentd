@@ -891,7 +891,7 @@ impl PySession {
                 // The drive runs on this thread with the GIL released (`RUNTIME.block_on`),
                 // so the callback reattaches for the one call.
                 let delivered = Python::attach(|py| {
-                    let chunk = crate::exec::event_to_py(py, event)?;
+                    let chunk = crate::exec::StreamEvent::from(event);
                     callback.call1(py, (chunk,)).map(drop)
                 });
                 let flow = match delivered {

@@ -1089,6 +1089,7 @@
     "microvms_core::provision::ProvisionError::kind": "method",
     "microvms_core::provision::Provisioned": "struct",
     "microvms_core::provision::Provisioned::verification": "method",
+    "microvms_core::provision::RELEASE_DIR_VARIABLE": "constant",
     "microvms_core::provision::RELEASE_REPO": "constant",
     "microvms_core::provision::REQUIRED_ELF_MACHINE": "constant",
     "microvms_core::provision::ReleaseSource": "trait",

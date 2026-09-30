@@ -598,6 +598,19 @@ description = "The publish set is the intended one and every manifest can upload
 # flips either one has to say so.
 run = "./tools/check-publishable.py"
 
+[tasks."release:check"]
+description = "Every job in release.yml that publishes waits on the live gate and the release environment. Offline"
+# A release is gated on a live run of its tag's draft (`tools/release-gate.py`'s docstring has
+# the flow and the rules), and the gate holds only while every publishing job needs it. A job
+# that drops it publishes on the tag push again, which nothing else here would notice before a
+# tag did. In `check` for `live:check`'s reason: it reads one file, so it costs the same as a
+# lint. release.yml's `guard` job runs the same graph check against the tagged commit. The unit
+# tests run first, for `trace:check`'s reason.
+run = [
+  "{{vars.pytest}} --with 'pyyaml==6.0.3' pytest -n auto -q -p no:cacheprovider tools/test_release_gate.py",
+  "./tools/release-gate.py graph",
+]
+
 [tasks."release:tag"]
 description = "Create and push a release tag, refusing a reused or stale one. THE way to release"
 # `git tag` is not idempotent and its failure is not fatal to a shell sequence: a leftover local
@@ -735,6 +748,7 @@ depends = [
   "dts:check",
   "model:check",
   "publish:check",
+  "release:check",
   "live:check",
   "conformance:self-test",
   "agents:check",
