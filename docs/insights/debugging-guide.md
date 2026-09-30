@@ -25,10 +25,10 @@ defended against rather than narration. The sources above are the history.
 Two operational facts before you start. `mise run check` is the free offline gate — lint,
 security, every Rust tier, schema, manifest, Python stub and TypeScript declaration
 freshness, model drift, publishability, live wiring, the release cross-compile, the background
-example, and the requirement traceability matrix (`mise.toml:440-456`). `mise run live` is
+example, and the requirement traceability matrix (`.config/mise/tasks/check.toml:4-32`). `mise run live` is
 BILLABLE, takes about fifteen minutes against real AWS, and is never a first debugging step
-(`mise.toml:615-616`); after any live run, teardown is verified separately by
-`mise run live:verify-clean` (`mise.toml:603-613`), because the service creates log groups
+(`.config/mise/tasks/live.toml:153-154`); after any live run, teardown is verified separately by
+`mise run live:verify-clean` (`.config/mise/tasks/live.toml:141-151`), because the service creates log groups
 under `/aws/lambda-microvms/` that outlive `terraform destroy` (`docs/PLATFORM.md:100-105`).
 
 ## Failure-mode index
@@ -85,7 +85,7 @@ under `/aws/lambda-microvms/` that outlive `terraform destroy` (`docs/PLATFORM.m
 | Run ledger on disk | One JSON file per invocation under `$MICROVM_STATE_DIR`, else `~/.microvm/runs`. Written **before** each delete is attempted, and its file is refused deletion while `leaked` is non-empty | `leaked` — the operator's to-do list. For a `CREATING` image and a service-created log group the identifier *is* the remedy, because there is no second way to find them. A write failure is swallowed, so an unwritable state dir costs the `ls` entry and nothing else | `crates/microvms-cli/src/ledger.rs:1-22`, `crates/microvms-cli/src/ledger.rs:37-49`, `crates/microvms-cli/src/seam.rs:474-483` |
 | `microvm ls` | stdout. Rows marked as alarms plus a trailing count | "N run(s), M with something still billing" | `crates/microvms-cli/src/main.rs:210-248` |
 | `microvm doctor` | A **success** envelope with `ok: false` plus exit `ERR_PRECONDITION`, because the check succeeded — it found what was wrong | `checks[]` per named check. Advisory checks do not fail the run; the fatal ones do | `crates/microvms-cli/src/commands/doctor.rs:70-91` |
-| `mise run live:verify-clean` | stdout, exit 0 clean and 1 leaked | Three outcomes, not two: **leak** (still billing and nothing intends to keep it), **standing** (the Terraform stack, possibly on purpose), **pending** (a delete in flight — re-run in a minute) | `tools/verify-clean.py:7-28`, `mise.toml:603-613` |
+| `mise run live:verify-clean` | stdout, exit 0 clean and 1 leaked | Three outcomes, not two: **leak** (still billing and nothing intends to keep it), **standing** (the Terraform stack, possibly on purpose), **pending** (a delete in flight — re-run in a minute) | `tools/verify-clean.py:7-28`, `.config/mise/tasks/live.toml:141-151` |
 | Guest OOM counters | In-guest, readable with no extra privileges | `dmesg`, and `/sys/fs/cgroup/memory.events` → `oom`, `oom_kill`, `oom_group_kill`. Poll these rather than discovering a kill after the fact | `docs/PLATFORM.md:185-191` |
 
 ## First-checks ladder
@@ -128,7 +128,7 @@ money.
    `background:check`, and `trace:check`. A drifted generated artifact — the served schema,
    the CLI manifest, the Python stub, the TypeScript declarations, the traceability matrix, a
    hardcoded API constraint against botocore's model — fails here rather than in production.
-   `mise.toml:440-456`
+   `.config/mise/tasks/check.toml:4-32`
 7. **If the VM is reachable: `GET /v1/health`.** One call answers several questions.
    `bootstrapped` false plus 503s everywhere means the run hook has not landed;
    `disk.under_pressure` means writes are about to be refused with 507; `identity_degraded`
@@ -151,7 +151,7 @@ money.
     fake more forgiving than the real daemon. Teardown reporting success and the account being
     clean are different questions, so the leak check runs independently of the code that did
     the cleanup, and expect to run `--delete` more than once because an image refuses deletion
-    while its VM is still terminating. `mise.toml:615-616`, `tools/verify-clean.py:7-28`
+    while its VM is still terminating. `.config/mise/tasks/live.toml:153-154`, `tools/verify-clean.py:7-28`
 
 ## Known incident patterns
 

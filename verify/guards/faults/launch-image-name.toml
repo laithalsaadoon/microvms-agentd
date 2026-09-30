@@ -1,0 +1,45 @@
+# ── a launch by bare image name, resolved in core's `Sandbox::run` (#253) ──────
+
+# The resolution dropped: the name goes to `RunMicrovm` verbatim, the way the SDKs sent it.
+[[fault]]
+id = "app-run-sends-a-bare-name"
+guard = "sandbox::tests::a_launch_by_bare_image_name_sends_the_listed_arn"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "sandbox::tests::a_launch_by_bare_image_name_sends_the_listed_arn"]
+expect = "test-failed"
+suite = "rust"
+message = "the name is resolved, once, before the launch"
+note = "crates/microvms-app/src/sandbox.rs::a_launch_by_bare_image_name_sends_the_listed_arn"
+transform = { file = "crates/microvms-app/src/sandbox.rs", replace = "        wire.image_identifier = self\n            .control\n            .resolve_image_arn(&wire.image_identifier)\n            .await?;\n", with = "" }
+
+# The ARN not recorded: a refused launch can't say which image it asked for.
+[[fault]]
+id = "app-run-records-no-launch-image"
+guard = "sandbox::tests::a_refused_launch_by_name_still_records_the_resolved_arn"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "sandbox::tests::a_refused_launch_by_name_still_records_the_resolved_arn"]
+expect = "test-failed"
+suite = "rust"
+message = "the ARN the refused launch asked for"
+note = "crates/microvms-app/src/sandbox.rs::a_refused_launch_by_name_still_records_the_resolved_arn"
+transform = { file = "crates/microvms-app/src/sandbox.rs", replace = "        self.launch_image_arn = Some(wire.image_identifier.clone());\n", with = "" }
+
+# The local refusals no longer asked first: a launch `run_microvm` refuses costs the listing.
+[[fault]]
+id = "app-run-lists-before-local-refusals"
+guard = "sandbox::tests::a_launch_refused_locally_makes_no_listing_call_for_a_name"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "sandbox::tests::a_launch_refused_locally_makes_no_listing_call_for_a_name"]
+expect = "test-failed"
+suite = "rust"
+message = "the refusal came after a call"
+note = "crates/microvms-app/src/sandbox.rs::a_launch_refused_locally_makes_no_listing_call_for_a_name"
+transform = { file = "crates/microvms-app/src/sandbox.rs", replace = "        self.control.launch_connectors(&wire)?;\n", with = "" }
+
+# The CLI's envelope stops reading the ARN core recorded.
+[[fault]]
+id = "cli-run-envelope-reads-no-launch-image"
+guard = "guards::run::a_refused_launch_by_name_reports_the_resolved_image"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::run::a_refused_launch_by_name_reports_the_resolved_image"]
+expect = "test-failed"
+suite = "rust"
+message = "the envelope names the ARN the launch asked for"
+note = "crates/microvms-cli/src/guards/run.rs::a_refused_launch_by_name_reports_the_resolved_image"
+transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "        outcome.image_identifier = Some(arn.to_string());\n        outcome.image_name = Some(image_name_of(arn));\n", with = "        let _ = arn;\n" }
