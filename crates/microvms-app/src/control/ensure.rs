@@ -165,6 +165,20 @@ pub fn ensured_image_name(prefix: &str, identity_hash: &str) -> Result<String, E
 ///
 /// Length-prefixed and tagged, so no two field boundaries can collide.
 pub fn image_identity_hash(artifact_hash: &str, base: &BaseImage, size: SizeClass) -> String {
+    pinned_identity_hash(artifact_hash, base, None, size)
+}
+
+/// [`image_identity_hash`] with the base version a build pins (#258): a pinned base builds
+/// on that version whatever the service's default later becomes, so the pin is identity.
+///
+/// `None` is [`image_identity_hash`]'s stream exactly, so an unpinned image keeps the name it
+/// always had; a pin adds one tagged, length-prefixed field after the size.
+pub fn pinned_identity_hash(
+    artifact_hash: &str,
+    base: &BaseImage,
+    base_version: Option<&str>,
+    size: SizeClass,
+) -> String {
     use sha2::{Digest as _, Sha256};
 
     let mut hasher = Sha256::new();
@@ -177,6 +191,12 @@ pub fn image_identity_hash(artifact_hash: &str, base: &BaseImage, size: SizeClas
         hasher.update(field);
     }
     hasher.update(size.baseline_mib().to_be_bytes());
+    if let Some(version) = base_version {
+        for field in [b"baseImageVersion".as_slice(), version.as_bytes()] {
+            hasher.update((field.len() as u64).to_be_bytes());
+            hasher.update(field);
+        }
+    }
     const_hex::encode(hasher.finalize())
 }
 
@@ -265,11 +285,31 @@ pub struct EnsureImageRequest {
     pub tags: BTreeMap<String, String>,
     /// The build wait's deadline, or `None` for [`DEFAULT_BUILD_TIMEOUT`].
     pub wait_timeout: Option<Duration>,
+    /// A project's manifest and lockfile, baked as an environment layer (#74). Part of the
+    /// name: they enter the artifact.
+    pub project_files: Option<super::artifact::ProjectFiles>,
+    /// `baseImageVersion`, or `None` for the service's default. Part of the name when set.
+    pub base_image_version: Option<String>,
+    /// `logging.cloudWatch.logGroup` for a created image. Not part of the name: logging
+    /// doesn't change what is built, and a reused image keeps its own.
+    pub log_group: Option<String>,
+    /// The log-stream prefix for a created image; see [`CreateImageRequest::log_stream`].
+    pub log_stream: Option<String>,
+    /// [`CreateImageRequest::repair_guest_identity`] for a created image. Not part of the
+    /// name, as `build --reuse`'s name never held it: a reused image keeps its own.
+    pub repair_guest_identity: bool,
+    /// [`CreateImageRequest::inherit_workdir`] for a created image.
+    pub inherit_workdir: bool,
+    /// The run-family hook timeouts for a created image.
+    pub run_hook_timeout: crate::hooks::RunHookTimeout,
+    /// The build-family hook timeouts for a created image.
+    pub build_hook_timeout: crate::hooks::BuildHookTimeout,
 }
 
 impl EnsureImageRequest {
     /// A request with the defaults: no context, no key prefix, the default size class, the
-    /// base derived from the Dockerfile, no force, no tags, the default wait.
+    /// base derived from the Dockerfile, no force, no tags, the default wait, and the create
+    /// request's own defaults for everything a created image carries.
     pub fn new(
         name_prefix: impl Into<String>,
         binary: Vec<u8>,
@@ -277,6 +317,9 @@ impl EnsureImageRequest {
         s3_bucket: impl Into<String>,
         build_role_arn: impl Into<String>,
     ) -> Self {
+        // The create request's defaults, read off it rather than restated, so a created
+        // image carries what `build_image` would have given it.
+        let defaults = CreateImageRequest::new("", Vec::new(), "", "");
         Self {
             name_prefix: name_prefix.into(),
             binary,
@@ -290,7 +333,46 @@ impl EnsureImageRequest {
             force: false,
             tags: BTreeMap::new(),
             wait_timeout: None,
+            project_files: None,
+            base_image_version: None,
+            log_group: None,
+            log_stream: None,
+            repair_guest_identity: defaults.repair_guest_identity,
+            inherit_workdir: defaults.inherit_workdir,
+            run_hook_timeout: defaults.run_hook_timeout,
+            build_hook_timeout: defaults.build_hook_timeout,
         }
+    }
+
+    /// The ensure request for a create request's inputs (#258): its name becomes the prefix
+    /// and every field it carries a created image carries too. `dockerfile` is the text the
+    /// build takes, which a caller with no Dockerfile of its own gets from
+    /// [`ControlPlane::dockerfile_for`]. The artifact URI and token label are dropped: the
+    /// ensure derives both from the name it computes.
+    pub fn from_create(
+        create: CreateImageRequest,
+        dockerfile: String,
+        s3_bucket: impl Into<String>,
+    ) -> Self {
+        let mut request = Self::new(
+            create.name,
+            create.binary,
+            dockerfile,
+            s3_bucket,
+            create.build_role_arn,
+        );
+        request.size = create.size;
+        request.base_image = Some(create.base_image);
+        request.tags = create.tags;
+        request.project_files = create.project_files;
+        request.base_image_version = create.base_image_version;
+        request.log_group = create.log_group;
+        request.log_stream = create.log_stream;
+        request.repair_guest_identity = create.repair_guest_identity;
+        request.inherit_workdir = create.inherit_workdir;
+        request.run_hook_timeout = create.run_hook_timeout;
+        request.build_hook_timeout = create.build_hook_timeout;
+        request
     }
 }
 
@@ -345,12 +427,17 @@ pub fn prepare(control: &ControlPlane, request: EnsureImageRequest) -> Result<Pr
     let artifact_hash = artifact_content_hash_with_context(
         &request.binary,
         &request.dockerfile,
-        None,
+        request.project_files.as_ref(),
         request.context.as_ref(),
     );
     let name = ensured_image_name(
         &request.name_prefix,
-        &image_identity_hash(&artifact_hash, &base, request.size),
+        &pinned_identity_hash(
+            &artifact_hash,
+            &base,
+            request.base_image_version.as_deref(),
+            request.size,
+        ),
     )?;
     require_valid_key_prefix(request.s3_key_prefix.as_deref(), &name)?;
     let key = artifact_key(request.s3_key_prefix.as_deref(), &name);
@@ -366,12 +453,20 @@ pub fn prepare(control: &ControlPlane, request: EnsureImageRequest) -> Result<Pr
     create.size = request.size;
     create.tags = request.tags;
     create.token_scope = Some(name.clone());
+    create.project_files = request.project_files;
+    create.base_image_version = request.base_image_version;
+    create.log_group = request.log_group;
+    create.log_stream = request.log_stream;
+    create.repair_guest_identity = request.repair_guest_identity;
+    create.inherit_workdir = request.inherit_workdir;
+    create.run_hook_timeout = request.run_hook_timeout;
+    create.build_hook_timeout = request.build_hook_timeout;
     control.preflight(&create)?;
 
     let artifact = build_artifact_with_context(
         &create.binary,
         create.dockerfile.as_deref().unwrap_or_default(),
-        None,
+        create.project_files.as_ref(),
         request.context.as_ref(),
     )?;
     Ok(Prepared {
@@ -851,6 +946,120 @@ mod tests {
         assert_ne!(
             identity,
             image_identity_hash(&"b".repeat(64), &base, SizeClass::DEFAULT)
+        );
+    }
+
+    /// **IMAGE-6 with a pinned base (#258).** An unpinned identity is the historical one
+    /// exactly, so every ensured image keeps its name; a pin is identity, and two pins differ.
+    #[test]
+    fn a_pinned_base_version_is_part_of_the_identity() {
+        let hash = "a".repeat(64);
+        let base = BaseImage::al2023();
+        let unpinned = image_identity_hash(&hash, &base, SizeClass::DEFAULT);
+        assert_eq!(
+            pinned_identity_hash(&hash, &base, None, SizeClass::DEFAULT),
+            unpinned,
+            "no pin, the name every ensured image already has"
+        );
+        let one = pinned_identity_hash(&hash, &base, Some("1"), SizeClass::DEFAULT);
+        assert_ne!(one, unpinned);
+        assert_ne!(
+            one,
+            pinned_identity_hash(&hash, &base, Some("0"), SizeClass::DEFAULT)
+        );
+    }
+
+    /// **The create fields an ensure carries (#258).** Project files and a pinned base name a
+    /// different image; logging, identity repair, `inherit_workdir` and the hook timeouts
+    /// don't, and all of them reach the create request a build sends.
+    #[test]
+    fn a_created_image_carries_every_field_of_the_request() {
+        use crate::control::artifact::{Ecosystem, ProjectFiles};
+
+        let plane = crate::testing::control_plane(
+            Arc::new(FakeControlPlane::new()),
+            Region::UsEast1,
+            Arc::new(TestClock::new()),
+        );
+        let plain = prepare(&plane, request()).expect("prepares");
+
+        let mut with_project = request();
+        with_project.project_files = Some(ProjectFiles {
+            ecosystem: Ecosystem::Uv,
+            manifest: b"[project]\nname = \"demo\"\n".to_vec(),
+            lockfile: b"version = 1\n".to_vec(),
+        });
+        // The wrapped Dockerfile doesn't COPY the pair, which core refuses (#74), so the
+        // project's own default stanza stands in.
+        with_project.dockerfile = crate::control::artifact::default_dockerfile(
+            crate::control::DEFAULT_AGENT_PORT,
+            None,
+            &BaseImage::al2023(),
+            Some(Ecosystem::Uv),
+        );
+        with_project.base_image = Some(BaseImage::al2023());
+        let mut without_project = with_project.clone();
+        without_project.project_files = None;
+        let project = prepare(&plane, with_project).expect("prepares");
+        assert!(project.create.project_files.is_some());
+        assert_ne!(
+            project.name,
+            prepare(&plane, without_project).expect("prepares").name,
+            "the project files enter the artifact, so they name a different image"
+        );
+
+        let mut pinned = request();
+        pinned.base_image_version = Some("1".to_string());
+        let pinned = prepare(&plane, pinned).expect("prepares");
+        assert_ne!(pinned.name, plain.name, "a pin names a different image");
+        assert_eq!(pinned.create.base_image_version.as_deref(), Some("1"));
+
+        let mut configured = request();
+        configured.log_group = Some("/team/builds".to_string());
+        configured.log_stream = Some("task".to_string());
+        configured.repair_guest_identity = true;
+        configured.inherit_workdir = true;
+        configured.run_hook_timeout =
+            crate::hooks::RunHookTimeout::try_new(7).expect("a legal timeout");
+        let configured = prepare(&plane, configured).expect("prepares");
+        assert_eq!(configured.name, plain.name, "configuration isn't identity");
+        assert_eq!(configured.create.log_group.as_deref(), Some("/team/builds"));
+        assert_eq!(configured.create.log_stream.as_deref(), Some("task"));
+        assert!(configured.create.repair_guest_identity);
+        assert!(configured.create.inherit_workdir);
+        assert_eq!(configured.create.run_hook_timeout.as_secs(), 7);
+    }
+
+    /// `from_create` hands an ensure every field a create request carries, and names the
+    /// image the way an ensure of the same inputs would.
+    #[test]
+    fn an_ensure_from_a_create_request_keeps_its_fields() {
+        let mut create = CreateImageRequest::new("task", aarch64_daemon(b"daemon"), "", ROLE);
+        create.dockerfile = Some(dockerfile());
+        create.base_image = BaseImage::from_dockerfile(&dockerfile()).expect("a FROM");
+        create.base_image_version = Some("1".to_string());
+        create.log_group = Some("/g".to_string());
+        create.repair_guest_identity = true;
+        create.tags.insert("team".to_string(), "x".to_string());
+        let from = EnsureImageRequest::from_create(create, dockerfile(), BUCKET);
+        assert_eq!(from.name_prefix, "task");
+        assert_eq!(from.s3_bucket, BUCKET);
+        assert_eq!(from.base_image_version.as_deref(), Some("1"));
+        assert_eq!(from.log_group.as_deref(), Some("/g"));
+        assert!(from.repair_guest_identity);
+        assert_eq!(from.tags.get("team").map(String::as_str), Some("x"));
+
+        let mut direct = request();
+        direct.base_image_version = Some("1".to_string());
+        direct.s3_key_prefix = None;
+        let plane = crate::testing::control_plane(
+            Arc::new(FakeControlPlane::new()),
+            Region::UsEast1,
+            Arc::new(TestClock::new()),
+        );
+        assert_eq!(
+            prepare(&plane, from).expect("prepares").name,
+            prepare(&plane, direct).expect("prepares").name
         );
     }
 
