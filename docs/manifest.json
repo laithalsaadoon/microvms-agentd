@@ -3,6 +3,55 @@
   "data": {
     "apiVersion": "1",
     "cli": "microvm",
+    "clientDefaults": {
+      "agentPort": 9000,
+      "agentSizeMib": 1024,
+      "bedrockTokenTtlHours": 12,
+      "clientGraceSeconds": 60.0,
+      "exec": {
+        "inheritImageEnv": false,
+        "reapGroupOnExit": false,
+        "shell": false,
+        "stdin": false
+      },
+      "execWaitSeconds": 300.0,
+      "image": {
+        "force": false,
+        "inheritWorkdir": false,
+        "repairGuestIdentity": false
+      },
+      "keepAwakeToleratedErrors": 3,
+      "launch": {
+        "autoResume": false,
+        "denyEgress": false,
+        "egress": false,
+        "loggingDisabled": false,
+        "maxDurationSeconds": 3600,
+        "maxIdleSeconds": 600,
+        "shell": false,
+        "suspendedSeconds": 600,
+        "wait": true
+      },
+      "launchTimeoutSeconds": 300.0,
+      "lifecyclePollIntervalSeconds": 5.0,
+      "lifecycleTimeoutSeconds": 300.0,
+      "prompt": {
+        "reapGroupOnExit": false
+      },
+      "promptTimeoutSeconds": 900.0,
+      "readyTimeoutSeconds": 120.0,
+      "residencyCycles": 1,
+      "sizeMib": 2048,
+      "stream": {
+        "errorOnGap": false,
+        "reconnect": true
+      },
+      "teardown": {
+        "deleteImage": false,
+        "deleteLogGroup": false,
+        "waitForTerminated": false
+      }
+    },
     "commands": [
       {
         "alternateResponse": null,

@@ -30,7 +30,7 @@ from pathlib import Path
 from unittest import mock
 
 SCRIPT = Path(__file__).with_name("check-parity.py")
-PARITY = runpy.run_path(str(SCRIPT))
+PARITY = runpy.run_path(str(SCRIPT), run_name="tools.check-parity")
 
 TABLE = """
 [flag_groups]
@@ -95,15 +95,37 @@ exempt_members.ts = { create = "the async factory idiom", region = { exempt = "P
 
 [exempt_names]
 ts = { __napiBindingTarget = "a napi-rs build artifact" }
+
+[[default]]
+id = "exec-wait"
+sentinel = true
+core = "execWaitSeconds"
+cli = "run --timeout"
+py = ["Session.health(timeout)", "Session.attach(retries)"]
+
+[[default]]
+id = "launch-wait"
+core = "launch.wait"
+py = "Sandbox.run(wait)"
+
+[[default]]
+id = "watch-interval"
+exempt = "a terminal affordance"
+cli = "ls --interval-sec"
 """
 
 
-def function(name):
+def function(name, **defaults):
+    """A Griffe function record; `defaults` are its parameters' defaults as the stub spells them."""
     return {
         "kind": "function",
         "name": name,
         "labels": [],
         "special": name.startswith("__"),
+        "parameters": [
+            {"name": "self", "default": None},
+            *({"name": key, "default": value} for key, value in defaults.items()),
+        ],
     }
 
 
@@ -120,17 +142,20 @@ GRIFFE = {
     "module": "microvms",
     "members": [
         pyclass(
-            "Sandbox", function("__new__"), function("run"), attribute("microvm_id")
+            "Sandbox",
+            function("__new__"),
+            function("run", wait="True", image=None),
+            attribute("microvm_id"),
         ),
         pyclass(
             "Session",
             function("__repr__"),
-            function("health"),
-            function("kill"),
-            function("attach"),
+            function("health", timeout="300.0"),
+            function("kill", offset="0"),
+            function("attach", retries="..."),
             function("file_exists"),
         ),
-        function("run_report"),
+        function("run_report", label='"run"'),
         attribute("__version__", ["module-attribute"]),
     ],
 }
@@ -182,8 +207,13 @@ TYPEDOC = {
 }
 
 
-def command(name, *flags, positional=()):
-    parameters = [{"name": flag, "positional": False} for flag in flags]
+def command(name, *flags, positional=(), defaults=None):
+    """A manifest command; `defaults` maps a flag to the string the manifest prints for it."""
+    defaults = defaults or {}
+    parameters = [
+        {"name": flag, "positional": False, "default": defaults.get(flag)}
+        for flag in flags
+    ]
     parameters += [{"name": arg, "positional": True} for arg in positional]
     return {"name": name, "parameters": parameters}
 
@@ -193,13 +223,26 @@ MANIFEST = {
     "type": "microvm.manifest",
     "data": {
         "commands": [
-            command("run", "remote", positional=["binary"]),
+            command(
+                "run",
+                "remote",
+                "timeout",
+                positional=["binary"],
+                defaults={"timeout": "300"},
+            ),
             command("health", "endpoint", "name"),
             command("kill", "endpoint", "name", positional=["exec_id"]),
-            command("cost", "estimate"),
-            command("ls", "remote"),
+            command("cost", "estimate", "running-sec", defaults={"running-sec": "0"}),
+            command(
+                "ls",
+                "remote",
+                "interval-sec",
+                "format",
+                defaults={"interval-sec": "2", "format": "table"},
+            ),
         ],
         "globalFlags": [{"name": "json", "positional": False}],
+        "clientDefaults": {"execWaitSeconds": 300.0, "launch": {"wait": True}},
     },
 }
 
@@ -215,8 +258,8 @@ CORE = {
 }
 
 
-class RuleTests(unittest.TestCase):
-    """The rules over fixture surfaces, each case breaking one thing the baseline has."""
+class FixtureCase(unittest.TestCase):
+    """The fixture surfaces and table, and the checker over them."""
 
     def setUp(self):
         self.table = TABLE
@@ -241,6 +284,10 @@ class RuleTests(unittest.TestCase):
             any(fragment in problem for problem in problems),
             f"no problem mentions {fragment!r}; the check reported {problems}",
         )
+
+
+class RuleTests(FixtureCase):
+    """The rules over fixture surfaces, each case breaking one thing the baseline has."""
 
     def test_the_baseline_fixture_passes(self):
         self.assertEqual(self.problems(), [])
@@ -454,6 +501,157 @@ class RuleTests(unittest.TestCase):
         self.assertProblem("attach: the id is used by more than one row")
 
 
+class DefaultTests(FixtureCase):
+    """The `[[default]]` rules (#300) over the same fixtures, which state defaults the rows hold."""
+
+    def flag(self, command, name):
+        return next(
+            parameter
+            for entry in self.manifest["data"]["commands"]
+            if entry["name"] == command
+            for parameter in entry["parameters"]
+            if parameter["name"] == name
+        )
+
+    def parameter(self, cls, method, name):
+        owner = next(item for item in self.griffe["members"] if item["name"] == cls)
+        function = next(item for item in owner["members"] if item["name"] == method)
+        return next(item for item in function["parameters"] if item["name"] == name)
+
+    def test_the_baseline_states_defaults_and_holds_them(self):
+        cli = PARITY["cli_surface"](self.manifest)
+        self.assertEqual(cli.defaults["run --timeout"], "300")
+        py = PARITY["py_surface"](self.griffe)
+        self.assertEqual(py.defaults["Session.health(timeout)"], "300.0")
+        self.assertEqual(py.defaults["Session.attach(retries)"], "...")
+        self.assertEqual(self.problems(), [])
+
+    def test_a_cli_default_no_row_holds_fails(self):
+        self.manifest["data"]["commands"][1]["parameters"].append(
+            {"name": "wait", "positional": False, "default": "120"}
+        )
+        self.assertProblem("cli: health --wait = 120 belongs to no [[default]] row")
+
+    def test_a_python_default_no_row_holds_fails(self):
+        self.parameter("Session", "kill", "offset")["default"] = "False"
+        self.assertProblem(
+            "py: Session.kill(offset) = False belongs to no [[default]] row"
+        )
+
+    def test_a_zero_none_or_string_default_needs_no_row(self):
+        # cost --running-sec 0, Sandbox.run(image=None), ls --format table and run_report's label
+        # are in the baseline with no row, and it passes.
+        self.assertEqual(self.problems(), [])
+
+    def test_a_cli_default_that_differs_from_cores_fails(self):
+        self.flag("run", "timeout")["default"] = "301"
+        self.assertProblem(
+            "default exec-wait: cli: run --timeout defaults to 301, but "
+            "clientDefaults.execWaitSeconds is 300.0"
+        )
+
+    def test_a_changed_core_value_fails_every_restatement(self):
+        self.manifest["data"]["clientDefaults"]["execWaitSeconds"] = 301.0
+        problems = self.problems()
+        self.assertIn(
+            "default exec-wait: cli: run --timeout defaults to 300, but "
+            "clientDefaults.execWaitSeconds is 301.0",
+            problems,
+        )
+        self.assertIn(
+            "default exec-wait: py: Session.health(timeout) defaults to 300.0, but "
+            "clientDefaults.execWaitSeconds is 301.0",
+            problems,
+        )
+
+    def test_a_boolean_default_is_compared_as_a_boolean(self):
+        self.parameter("Sandbox", "run", "wait")["default"] = "False"
+        self.assertProblem(
+            "default launch-wait: py: Sandbox.run(wait) defaults to False, but "
+            "clientDefaults.launch.wait is true"
+        )
+        self.parameter("Sandbox", "run", "wait")["default"] = "1"
+        self.assertProblem("Sandbox.run(wait) defaults to 1")
+
+    def test_a_named_constant_default_is_declared_not_compared(self):
+        # `...` is what the stub prints for a default named for a constant: its row is the check.
+        self.manifest["data"]["clientDefaults"]["execWaitSeconds"] = 300.0
+        problems = self.problems()
+        self.assertFalse([problem for problem in problems if "attach" in problem])
+
+    def test_a_row_naming_a_default_the_surface_does_not_state_fails(self):
+        self.flag("run", "timeout")["default"] = None
+        self.assertProblem("default exec-wait: cli: run --timeout states no default")
+
+    def test_a_default_two_rows_name_fails(self):
+        self.table = self.table.replace(
+            'cli = "ls --interval-sec"', 'cli = ["ls --interval-sec", "run --timeout"]'
+        )
+        self.assertProblem(
+            "default watch-interval: cli: run --timeout is also in default exec-wait"
+        )
+
+    def test_a_core_key_client_defaults_lacks_fails(self):
+        self.table = self.table.replace('core = "launch.wait"', 'core = "launch.wiat"')
+        self.assertProblem("default launch-wait: clientDefaults has no launch.wiat")
+
+    def test_a_manifest_without_client_defaults_fails(self):
+        del self.manifest["data"]["clientDefaults"]
+        self.assertProblem(
+            "cli: the manifest carries no clientDefaults to compare with"
+        )
+
+    def test_a_row_with_both_a_core_key_and_an_exemption_fails(self):
+        self.table = self.table.replace(
+            'exempt = "a terminal affordance"',
+            'exempt = "a terminal affordance"\ncore = "execWaitSeconds"',
+        )
+        self.assertProblem(
+            "default watch-interval: a row has a core key or an exemption, not both"
+        )
+
+    def test_an_exempt_default_with_an_empty_reason_fails(self):
+        self.table = self.table.replace(
+            'exempt = "a terminal affordance"', 'exempt = " "'
+        )
+        self.assertProblem("default watch-interval: the exemption has an empty reason")
+
+    def test_a_typescript_cell_is_refused(self):
+        self.table = self.table.replace(
+            'py = "Sandbox.run(wait)"',
+            'py = "Sandbox.run(wait)"\nts = "Sandbox.run(wait)"',
+        )
+        self.assertProblem(
+            "default launch-wait: ts: index.d.ts states defaults only in prose"
+        )
+
+    def test_a_surface_stating_no_default_fails_the_floor(self):
+        for entry in self.manifest["data"]["commands"]:
+            for parameter in entry["parameters"]:
+                parameter["default"] = None
+        self.assertProblem("cli: the surface states no default the rows hold")
+
+    def test_a_table_with_no_sentinel_default_fails(self):
+        self.table = self.table.replace(
+            'id = "exec-wait"\nsentinel = true', 'id = "exec-wait"'
+        )
+        self.assertProblem("the table marks no sentinel [[default]] row")
+
+    def test_a_sentinel_whose_defaults_are_not_compared_fails(self):
+        # a reader that stopped returning values would leave the sentinel's defaults uncompared
+        self.flag("run", "timeout")["default"] = None
+        self.parameter("Session", "health", "timeout")["default"] = "..."
+        self.assertProblem(
+            "sentinel default exec-wait: no stated default was compared with core's"
+        )
+
+    def test_an_unknown_default_key_fails(self):
+        self.table = self.table.replace(
+            'core = "launch.wait"', 'core = "launch.wait"\nnote = "x"'
+        )
+        self.assertProblem("default launch-wait: unknown key note")
+
+
 class ExemptionRecordTests(unittest.TestCase):
     """`--json`'s exemption records, the contract the ratchet's parity-gap category reads."""
 
@@ -544,7 +742,7 @@ class Session:
     def __repr__(self, /) -> str: ...
     @property
     def endpoint(self, /) -> str: ...
-    def health(self, /) -> bool: ...
+    def health(self, /, timeout: float = 300.0, wait: bool = ..., label: str | None = None) -> bool: ...
     @staticmethod
     def attach(endpoint: str) -> Session: ...
 
@@ -581,6 +779,19 @@ class ReaderTests(unittest.TestCase):
         self.assertEqual(surface.classes["Session"].methods, {"health", "attach"})
         self.assertEqual(
             surface.classes["Session"].members, {"health", "attach", "endpoint"}
+        )
+        # Defaults as the stub spells them, `...` for a named constant; `None` is read but not
+        # held.
+        self.assertEqual(
+            surface.defaults,
+            {
+                "Session.health(timeout)": "300.0",
+                "Session.health(wait)": "...",
+                "Session.health(label)": "None",
+            },
+        )
+        self.assertFalse(
+            PARITY["held"]("py", surface.defaults["Session.health(label)"])
         )
 
     def test_the_typescript_reader_over_typedoc(self):

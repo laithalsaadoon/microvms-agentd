@@ -28,6 +28,8 @@ dev = [
   # test_model_drift.py loads botocore's bundled model through the same loader the drift gate
   # uses; the gate itself resolves the newest boto3 in its own PEP 723 environment.
   "boto3>=1.40",
+  # tools/check-mutmut.py runs it over the scripts a change touches, beside these suites.
+  "mutmut==3.8.0",
 ]
 
 [tool.uv]

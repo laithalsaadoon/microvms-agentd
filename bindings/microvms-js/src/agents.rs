@@ -699,14 +699,13 @@ impl AgentVm {
             request.max_duration_sec =
                 crate::numbers::u32_number(ceiling, "maxDurationSec").map_err(js_async)?;
         }
-        {
-            let mut guard = self.sandbox.lock().await;
-            let session = guard.run(request).await.map_err(js_async)?;
-            session
-                .wait_until_ready(microvms_core::session::DEFAULT_READY_TIMEOUT)
-                .await
-                .map_err(js_async)?;
-        }
+        // The core's launch waits for RUNNING and then for the daemon to answer (#254).
+        self.sandbox
+            .lock()
+            .await
+            .run(request)
+            .await
+            .map_err(js_async)?;
         Ok(Session::in_sandbox(Arc::clone(&self.sandbox)))
     }
 

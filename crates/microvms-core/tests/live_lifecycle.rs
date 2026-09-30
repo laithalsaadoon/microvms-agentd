@@ -180,3 +180,61 @@ async fn a_vm_is_managed_by_id_through_the_control_plane() {
     }
     assert!(failures.is_empty(), "{}", failures.join("; "));
 }
+
+/// **#254.** The first exec after `Sandbox::run` returns succeeds with no retry around it.
+/// RUNNING says the run hook answered, and the endpoint's proxy path can still refuse a
+/// connection or two just after; `run` now returns once one health poll through the session
+/// has answered, so the first request a caller sends doesn't meet that window.
+#[tokio::test]
+#[ignore = "needs an explicit conformance image and AWS credentials; launches a bounded VM"]
+async fn the_first_exec_after_run_needs_no_retry() {
+    let image = env("MICROVM_BACKGROUND_TEST_IMAGE");
+    let role = env("MICROVM_EXECUTION_ROLE_ARN");
+    let mut sandbox = Sandbox::new(region()).await.expect("credentials");
+    let mut request = RunRequest::new().with_image(&image);
+    request.execution_role_arn = Some(role);
+    request.max_duration_sec = 600;
+    let launched = sandbox.run(request).await.map(|_| ());
+    let id = sandbox.microvm().map(|vm| vm.id.clone());
+    let mut failures = Vec::new();
+
+    match &launched {
+        Ok(()) => {
+            eprintln!("launched microvmId={id:?}");
+            let first = microvms_core::protocol::exec::StartRequest::new(
+                microvms_core::session::mint_exec_id(),
+                vec!["echo first-exec".to_string()],
+            )
+            .with_shell(true);
+            let session = sandbox.session().expect("run built a session");
+            match session.run_sync(first, Duration::from_secs(60)).await {
+                Ok(result)
+                    if result.exit_code() == Some(0) && result.stdout().contains("first-exec") =>
+                {
+                    eprintln!("the first exec answered at once");
+                }
+                Ok(result) => failures.push(format!(
+                    "the first exec exited {:?} with stdout {:?}",
+                    result.exit_code(),
+                    result.stdout()
+                )),
+                Err(error) => failures.push(format!("the first exec failed: {error}")),
+            }
+        }
+        Err(error) => failures.push(format!("the launch failed: {error}")),
+    }
+
+    // Cleanup before any assertion, observed through the control plane.
+    let _ = sandbox.terminate(TeardownOpts::default()).await;
+    if let Some(id) = &id {
+        let plane = ControlPlane::new(region()).await.expect("credentials");
+        match plane
+            .wait_for_state(id, &["TERMINATED"], &[], opts(120))
+            .await
+        {
+            Ok(vm) => eprintln!("cleanup microvmId={} state={}", vm.id, vm.state),
+            Err(error) => failures.push(format!("cleanup unverified for {id}: {error}")),
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("; "));
+}

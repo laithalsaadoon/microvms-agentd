@@ -19,7 +19,9 @@ from unittest import mock
 SCRIPT = Path(__file__).with_name("changelog.py")
 REPO = SCRIPT.parent.parent
 # The script's own constants (its `main` doesn't run under runpy), so the fixture follows the
-# shipped set rather than a copy of it.
+# shipped set rather than a copy of it. Under runpy's own module name, not `tools.changelog`: every
+# case runs the script through `uv run --script`, whose environment has no mutmut to import, so
+# tools/check-mutmut.py leaves the script unmutated rather than failing each case here.
 CONSTANTS = runpy.run_path(str(SCRIPT))
 SHIPPED = CONSTANTS["SHIPPED"]
 DEPENDABOT = CONSTANTS["DEPENDABOT"]
