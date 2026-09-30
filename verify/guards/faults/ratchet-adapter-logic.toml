@@ -1,4 +1,4 @@
-# ── ratchet:check: the adapter-logic collector and rule 3's bootstrap (#273) ─
+# ── ratchet:check: the adapter-logic collector, and the COLLECTED the history reads (#273) ─
 
 # #273's two ast-grep rules: each fault deletes one pattern alternative, and the fixture test
 # named after that shape fails. The exact-set test catches an alternative that over-matches.
@@ -202,25 +202,8 @@ suite = "script"
 message = "FAIL: test_the_fixture_reports_exactly_its_ruleid_lines ("
 transform = { file = "tools/ratchet.py", replace = "elif match[\"ruleId\"] in ADAPTER_LOGIC and under(match, found.adapters.values()):", with = "elif match[\"ruleId\"] in ADAPTER_LOGIC and under(match, found.shipping.values()):" }
 
-# Rule 3's bootstrap for a category the base's ratchet.py doesn't collect (#273).
-[[fault]]
-id = "ratchet-bootstrap-not-skipped"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "RuleTests"]
-expect = "exit-nonzero"
-suite = "script"
-message = "FAIL: test_rule_3_is_skipped_for_a_category_the_base_does_not_collect ("
-transform = { file = "tools/ratchet.py", replace = "if base_collected is None or entry[\"category\"] in base_collected", with = "if True" }
-
-[[fault]]
-id = "ratchet-bootstrap-too-wide"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "RuleTests"]
-expect = "exit-nonzero"
-suite = "script"
-message = "FAIL: test_rule_3_still_applies_to_a_category_the_base_collects ("
-transform = { file = "tools/ratchet.py", replace = "if base_collected is None or entry[\"category\"] in base_collected", with = "if base_collected is None" }
-
+# The COLLECTED each commit's ratchet.py lists, which the history reads to tell a category that
+# commit didn't count from a zero.
 [[fault]]
 id = "ratchet-bootstrap-empty-parse"
 guard = "test_ratchet.py"
@@ -238,15 +221,6 @@ expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_the_base_collected_categories_are_read_from_its_script ("
 transform = { file = "tools/ratchet.py", replace = "                return value\n", with = "                return value[:1]\n" }
-
-[[fault]]
-id = "ratchet-bootstrap-summary-new"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "FileTests"]
-expect = "exit-nonzero"
-suite = "script"
-message = "FAIL: test_the_summary_says_new_for_a_category_the_base_does_not_collect ("
-transform = { file = "tools/ratchet.py", replace = "            or (base_collected is not None and category not in base_collected)\n", with = "" }
 
 # The adapter-logic collector against the checked-in sentinel, and on an empty input.
 [[fault]]
