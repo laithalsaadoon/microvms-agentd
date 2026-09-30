@@ -32,12 +32,16 @@
 //!
 //! # Each crate's allowed set
 //!
-//! The last tests go past the edges between our crates to every direct dependency of a driving
-//! adapter and of each layer with a set, against its set in `verify/arch/placement.toml` (#285). They
-//! read the ratchet's files rather than a copy of them. The adapter test covers each adapter the
-//! ratchet holds no placement drift for; a layer can't hold any. The domain's and the app's
-//! dependencies' declared features are asserted too, since a feature can add I/O to a crate the
-//! set already allows: tokio's `net`, `fs` and `process` are the edges' and never the app's.
+//! The last tests go past the edges between our crates to every direct dependency of each crate
+//! with a set in `verify/arch/placement.toml` (#285): the driving adapters and the layers below
+//! them. This file is the one place those edges are computed. Each such crate depends on exactly
+//! its set plus the placement records `verify/ratchet/drift.json` holds for it: an entry is
+//! drift with the issue that removes it, and a decision is a permanent exception with its
+//! reason. A layer holds no record. The ratchet counts the entries and holds both files to the
+//! base branch's copies, so a PR can't add an entry or grow a set the base has; it doesn't read
+//! the manifests itself. The domain's and the app's dependencies' declared features are asserted
+//! too, since a feature can add I/O to a crate the set already allows: tokio's `net`, `fs` and
+//! `process` are the edges' and never the app's.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -398,22 +402,16 @@ fn repo_file(path: &str) -> String {
     std::fs::read_to_string(&full).unwrap_or_else(|error| panic!("{}: {error}", full.display()))
 }
 
-/// What a crate with a set in `verify/arch/placement.toml` may depend on directly, for one kind
-/// (`normal` or `build`).
-///
-/// Its set in `verify/arch/placement.toml`, plus each crate a placement decision in
-/// `verify/ratchet/drift.json` records for it. Both files are the ratchet's, read here rather than
-/// copied, so the two checks can't disagree about what's allowed. A decision is the only way
-/// a crate joins an existing set: the ratchet refuses a set that grows.
-fn allowed(crate_name: &str, kind: &str) -> BTreeSet<String> {
-    let sets: toml::Table = repo_file("verify/arch/placement.toml")
+/// Each crate's table in `verify/arch/placement.toml`, by crate name.
+fn placement_sets() -> toml::Table {
+    repo_file("verify/arch/placement.toml")
         .parse()
-        .expect("verify/arch/placement.toml is TOML");
-    let table = sets
-        .get(crate_name)
-        .and_then(toml::Value::as_table)
-        .unwrap_or_else(|| panic!("verify/arch/placement.toml has no [{crate_name}] table"));
-    let mut allowed: BTreeSet<String> = table
+        .expect("verify/arch/placement.toml is TOML")
+}
+
+/// The names a `verify/arch/placement.toml` table lists for one kind (`normal` or `build`).
+fn listed(table: &toml::Value, kind: &str) -> BTreeSet<String> {
+    table
         .get(kind)
         .and_then(toml::Value::as_array)
         .map(|names| {
@@ -422,19 +420,31 @@ fn allowed(crate_name: &str, kind: &str) -> BTreeSet<String> {
                 .map(|name| name.as_str().expect("a crate name").to_string())
                 .collect()
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
 
-    // The ratchet keys a build dependency with a suffix, so a normal decision never covers a
-    // build edge or the other way round.
-    let suffix = if kind == "build" { " (build)" } else { "" };
-    let prefix = format!("{crate_name} -> ");
-    for decision in placement_records("decisions") {
-        if let Some(dependency) = decision
-            .strip_prefix(&prefix)
-            .and_then(|rest| rest.strip_suffix(suffix))
-            .filter(|dependency| !dependency.contains(' '))
-        {
-            allowed.insert(dependency.to_string());
+/// What a crate with a set in `verify/arch/placement.toml` may depend on directly, for one kind
+/// (`normal` or `build`).
+///
+/// Its set in `verify/arch/placement.toml`, plus each crate a placement record in
+/// `verify/ratchet/drift.json` allows it: an entry, which is drift with the issue that removes
+/// it, or a decision, which is a permanent exception with its reason. Both files are read here
+/// rather than copied, so this test and the ratchet's base rule read one record. The ratchet
+/// refuses an entry the base branch doesn't have and a crate added to a set the base has, so a
+/// decision is the one way a crate joins what a PR's base allows.
+fn allowed(crate_name: &str, kind: &str) -> BTreeSet<String> {
+    let sets = placement_sets();
+    let table = sets
+        .get(crate_name)
+        .unwrap_or_else(|| panic!("verify/arch/placement.toml has no [{crate_name}] table"));
+    let mut allowed = listed(table, kind);
+    for key in placement_records("entries")
+        .into_iter()
+        .chain(placement_records("decisions"))
+    {
+        let (from, onto, record_kind) = edge_of(&key);
+        if from == crate_name && record_kind == kind {
+            allowed.insert(onto);
         }
     }
     allowed
@@ -453,69 +463,74 @@ fn placement_records(list: &str) -> Vec<String> {
         .collect()
 }
 
-/// The driving adapters. `verify/arch/placement.toml` also holds the domain's set, which isn't an
-/// adapter's.
-const ADAPTERS: [&str; 3] = ["microvms-cli", "microvms-py", "microvms-js"];
-
-/// The driving adapters the ratchet holds no placement drift for. Their sets are exact.
+/// A placement key, `<crate> -> <dependency>`, as the crate, the dependency and its kind.
 ///
-/// Read from the drift file rather than listed, so an adapter joins the moment its last entry
-/// is fixed and `mise run ratchet:update` removes it: `microvms-cli` joins when #260 moves
-/// directory sync (`tar`, `globset`, `sha2`, `const-hex`) into core. Until then the ratchet
-/// asserts the CLI's surplus, entry by entry.
-fn exact_adapters() -> Vec<String> {
-    let sets: toml::Table = repo_file("verify/arch/placement.toml")
-        .parse()
-        .expect("verify/arch/placement.toml is TOML");
-    let drifting: BTreeSet<String> = placement_records("entries")
-        .iter()
-        .filter_map(|key| key.split(" -> ").next().map(str::to_string))
-        .collect();
-    for adapter in ADAPTERS {
-        assert!(
-            sets.contains_key(adapter),
-            "verify/arch/placement.toml has no [{adapter}] table"
-        );
+/// The ratchet's keys write ` (build)` after a build dependency, so a record for a normal edge
+/// never allows a build edge or the other way round. A key of any other shape panics naming it,
+/// since it would allow nothing while the ratchet still counted it.
+fn edge_of(key: &str) -> (String, String, &'static str) {
+    let (edge, kind) = match key.strip_suffix(" (build)") {
+        Some(edge) => (edge, "build"),
+        None => (key, "normal"),
+    };
+    let named = |name: &str| !name.is_empty() && !name.contains(char::is_whitespace);
+    match edge.split_once(" -> ") {
+        Some((from, onto)) if named(from) && named(onto) => {
+            (from.to_string(), onto.to_string(), kind)
+        }
+        _ => panic!(
+            "verify/ratchet/drift.json has the placement key {key:?}, which isn't `<crate> -> \
+             <dependency>`, with ` (build)` after a build dependency, so it allows nothing"
+        ),
     }
-    ADAPTERS
-        .iter()
-        .filter(|name| !drifting.contains(**name))
-        .map(|name| (*name).to_string())
-        .collect()
 }
 
-/// **The driving-adapter contract.** Each adapter the ratchet holds no placement drift for
-/// depends directly on exactly its allowed set, normal and build.
+/// The dependency kinds a set lists, by their name in `verify/arch/placement.toml`. Dev
+/// dependencies are out: they never ship.
+const KINDS: [(&str, cargo_metadata::DependencyKind); 2] = [
+    ("normal", cargo_metadata::DependencyKind::Normal),
+    ("build", cargo_metadata::DependencyKind::Build),
+];
+
+/// The driving adapters. `verify/arch/placement.toml` also holds the layers' sets, which aren't
+/// adapters'.
+const ADAPTERS: [&str; 3] = ["microvms-cli", "microvms-py", "microvms-js"];
+
+/// **The driving-adapter contract.** Each adapter depends directly on exactly what it may use,
+/// normal and build: its set in `verify/arch/placement.toml` and its placement records in
+/// `verify/ratchet/drift.json`.
 ///
-/// Exact both ways, like the edge assertions above: a crate added to a binding's manifest
-/// fails, and so does a listed crate the binding no longer uses, since a stale entry is a set
-/// that allows more than the crate needs. Dev dependencies are out: they never ship.
+/// Exact both ways, like the edge assertions above: a crate added to an adapter's manifest
+/// fails, and so does a listed crate the adapter no longer uses, since a stale set entry or
+/// drift entry allows more than the crate needs. The CLI's entries are directory sync's crates,
+/// which #260 moves into core; the change that drops one from the manifest deletes its entry.
+/// The bindings hold no entry.
 ///
-/// This is stricter than the ratchet, which it doesn't replace. The ratchet still collects all
-/// three adapters, and only it can hold the CLI's remaining drift as entries; this test covers
-/// an adapter once that drift is gone, and it's the one that says a set has gone stale.
+/// This is the only check that reads the adapters' manifests for the ratchet's placement
+/// category. The ratchet counts the entries and refuses one its base doesn't have; this test
+/// holds them to the tree, which is how it finds new drift and a fix the file still lists.
 ///
 /// **Falsification**: add `globset = "0.4"` to `bindings/microvms-py/Cargo.toml` and this goes red
-/// naming it (the ratchet fails too, as new placement drift). Delete `napi-build` from
-/// `microvms-js`'s build dependencies and it goes red on the stale set entry.
+/// naming it, and so does `reqwest` added to the CLI's `[dependencies]`. Delete `napi-build`
+/// from `microvms-js`'s build dependencies and it goes red on the stale set entry.
 #[test]
-fn each_exact_adapter_depends_on_exactly_its_allowed_set() {
-    let exact = exact_adapters();
+fn each_adapter_depends_on_exactly_its_allowed_set() {
     for binding in ["microvms-py", "microvms-js"] {
+        let entries: Vec<String> = placement_records("entries")
+            .into_iter()
+            .filter(|key| edge_of(key).0 == binding)
+            .collect();
         assert!(
-            exact.contains(&binding.to_string()),
-            "{binding} has placement entries in verify/ratchet/drift.json, so its set isn't asserted \
-             exactly. The bindings' sets have been exact since #285, and the ratchet refuses a new \
-             entry, so the file was edited around the check. Fix the dependency instead."
+            entries.is_empty(),
+            "{binding} has placement entries in verify/ratchet/drift.json: {entries:?}. The \
+             bindings' sets have been exact since #285, and the ratchet refuses a new entry, so \
+             the file was edited around the check. Fix the dependency instead."
         );
     }
 
     let metadata = metadata();
-    for adapter in &exact {
-        for (kind, cargo_kind) in [
-            ("normal", cargo_metadata::DependencyKind::Normal),
-            ("build", cargo_metadata::DependencyKind::Build),
-        ] {
+    for adapter in ADAPTERS {
+        for (kind, cargo_kind) in KINDS {
             let actual = direct(&metadata, adapter, cargo_kind);
             let allowed = allowed(adapter, kind);
             let added: Vec<&String> = actual.difference(&allowed).collect();
@@ -523,13 +538,79 @@ fn each_exact_adapter_depends_on_exactly_its_allowed_set() {
             assert!(
                 added.is_empty() && stale.is_empty(),
                 "{adapter}'s direct {kind} dependencies differ from its set in \
-                 verify/arch/placement.toml. Outside the set: {added:?}. Listed but unused: {stale:?}. \
-                 An adapter parses input, converts types, bridges to the host, and renders \
-                 output (AGENTS.md, Architecture); a crate doing other work belongs in a lower \
-                 layer. A crate listed but unused comes out of the set, or out of \
-                 verify/ratchet/drift.json when a placement decision allows it."
+                 verify/arch/placement.toml and its placement records in \
+                 verify/ratchet/drift.json. Outside the set: {added:?}. Listed but unused: \
+                 {stale:?}. An adapter parses input, converts types, bridges to the host, and \
+                 renders output (AGENTS.md, Architecture); a crate doing other work belongs in a \
+                 lower layer, or takes a placement decision with its reason, since the ratchet \
+                 refuses a new entry. A crate listed but unused comes out of the set, or its \
+                 entry or decision comes out of verify/ratchet/drift.json."
             );
         }
+    }
+}
+
+/// Every set in `verify/arch/placement.toml` belongs to a crate the tests here hold exactly,
+/// and every placement record in `verify/ratchet/drift.json` allows one edge of such a crate.
+///
+/// The adapter and layer tests hold [`ADAPTERS`] and [`LAYERS`] and nothing else, so a set for
+/// another crate would be one no check reads. A record for a crate without a set, one naming a
+/// crate its set already lists, and one listed twice would each allow nothing while the ratchet
+/// counted it as drift. A table takes only the two lists those tests read.
+///
+/// **Falsification**: add a placement entry keyed `microvms-edges -> reqwest` to
+/// `verify/ratchet/drift.json` and this goes red naming `microvms-edges`.
+#[test]
+fn every_set_and_placement_record_belongs_to_a_crate_held_here() {
+    let sets = placement_sets();
+    let held: BTreeSet<String> = ADAPTERS
+        .iter()
+        .chain(&LAYERS)
+        .map(|name| (*name).to_string())
+        .collect();
+    let tabled: BTreeSet<String> = sets.keys().cloned().collect();
+    assert_eq!(
+        tabled, held,
+        "verify/arch/placement.toml's tables are exactly the driving adapters' and the layers': \
+         the tests here hold those crates to their sets and no other. A crate without a set \
+         (microvms-edges, where the I/O crates belong) has no table."
+    );
+    for (crate_name, table) in &sets {
+        let lists: Vec<&String> = table
+            .as_table()
+            .unwrap_or_else(|| panic!("[{crate_name}] in verify/arch/placement.toml is a table"))
+            .keys()
+            .filter(|list| !matches!(list.as_str(), "normal" | "build"))
+            .collect();
+        assert!(
+            lists.is_empty(),
+            "[{crate_name}] in verify/arch/placement.toml takes only normal and build lists, not \
+             {lists:?}"
+        );
+    }
+
+    let mut seen = BTreeSet::new();
+    for key in placement_records("entries")
+        .into_iter()
+        .chain(placement_records("decisions"))
+    {
+        assert!(
+            seen.insert(key.clone()),
+            "verify/ratchet/drift.json records the placement key {key:?} twice, and one edge is one \
+             record"
+        );
+        let (from, onto, kind) = edge_of(&key);
+        let table = sets.get(&from).unwrap_or_else(|| {
+            panic!(
+                "verify/ratchet/drift.json has the placement record {key:?}, which names {from}, a \
+                 crate with no set in verify/arch/placement.toml, so no check holds it to the tree"
+            )
+        });
+        assert!(
+            !listed(table, kind).contains(&onto),
+            "verify/ratchet/drift.json has the placement record {key:?}, but [{from}] {kind} in \
+             verify/arch/placement.toml already lists {onto}, so the record allows nothing"
+        );
     }
 }
 
@@ -544,8 +625,8 @@ const LAYERS: [&str; 3] = ["microvms-domain", "microvms-app", "microvms-core"];
 /// The set is how a layer's I/O ban reaches past `std`: tokio's `net`, getrandom and reqwest
 /// can't be named in a clippy.toml one method at a time, and they don't need to be when they
 /// can't be dependencies. Exact both ways, like the adapters' sets: a crate added fails, and so
-/// does a listed crate the layer no longer uses. The ratchet reads the same table, so a crate
-/// added here is new placement drift there too, but a layer gets no entry and no decision.
+/// does a listed crate the layer no longer uses. The ratchet reads the same table and refuses a
+/// crate added to it, and a layer gets no entry and no decision.
 ///
 /// **Falsification**: add `tokio = "1"` to the domain's `[dependencies]` and this goes red
 /// naming it. Delete `jiff` from `verify/arch/placement.toml`'s domain set and it goes red on the crate
@@ -570,10 +651,7 @@ fn each_layer_depends_on_exactly_its_allowed_set() {
 
     let metadata = metadata();
     for layer in LAYERS {
-        for (kind, cargo_kind) in [
-            ("normal", cargo_metadata::DependencyKind::Normal),
-            ("build", cargo_metadata::DependencyKind::Build),
-        ] {
+        for (kind, cargo_kind) in KINDS {
             let actual = direct(&metadata, layer, cargo_kind);
             let allowed = allowed(layer, kind);
             let added: Vec<&String> = actual.difference(&allowed).collect();

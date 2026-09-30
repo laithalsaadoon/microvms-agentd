@@ -85,11 +85,12 @@ BASELINE_FOUND = found(*((c, k) for c, k, _ in BASELINE))
 class Workspace:
     """A throwaway cargo workspace: one directory per crate, named after the crate."""
 
-    def __init__(self, test: unittest.TestCase):
+    def __init__(self, test: unittest.TestCase, adapters=("adapter",)):
         self._dir = tempfile.TemporaryDirectory()
         test.addCleanup(self._dir.cleanup)
         self.root = Path(self._dir.name)
         self.crates: list[str] = []
+        self.adapters = tuple(adapters)
 
     def crate(self, name, deps="", build="", dev="", files=None):
         self.crates.append(name)
@@ -115,28 +116,20 @@ class Workspace:
             self.write(f"{name}/{path}", textwrap.dedent(text))
         return self
 
-    def placement(self, text):
-        self.write("placement.toml", textwrap.dedent(text))
-        return self
-
     def write(self, path, text):
         target = self.root / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text)
 
     def scope(self, adapters=None, non_shipping=(), composed=(), composition_root=None):
-        """The workspace as a scope. By default every crate with a set is an adapter."""
+        """The workspace as a scope. By default the adapters are the ones it was made with."""
         members = ", ".join(f'"{name}"' for name in self.crates)
         self.write(
             "Cargo.toml", f'[workspace]\nmembers = [{members}]\nresolver = "3"\n'
         )
-        placement = self.root / "placement.toml"
-        if adapters is None:
-            adapters = tuple(sets_from(placement.read_text(), "test"))
         return Scope(
             root=self.root,
-            placement=placement,
-            adapters=tuple(adapters),
+            adapters=tuple(self.adapters if adapters is None else adapters),
             non_shipping=frozenset(non_shipping),
             composed=tuple(composed),
             composition_root=composition_root,
@@ -158,13 +151,15 @@ class RuleTests(unittest.TestCase):
         )
 
     def test_rule_1_new_drift_fails(self):
-        now = BASELINE_FOUND + found(("placement", "microvms-cli -> globset"))
+        now = BASELINE_FOUND + found(
+            ("subprocess", 'bindings/microvms-py/src/exec.rs: Command::new("aws")')
+        )
         self.assertEqual(
             compare(now, ratchet(BASELINE), ratchet(BASELINE), "main"),
             [
-                "new drift: [placement] microvms-cli -> globset. Move the work to the layer "
-                "whose job it is (I/O belongs in microvms-edges, behind a port in "
-                "microvms-app), or add a decision with its reason."
+                'new drift: [subprocess] bindings/microvms-py/src/exec.rs: Command::new("aws"). '
+                "Move the work to the layer whose job it is (I/O belongs in microvms-edges, "
+                "behind a port in microvms-app), or add a decision with its reason."
             ],
         )
 
@@ -212,14 +207,39 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(compare(now, file, ratchet(BASELINE), "main"), [])
 
     def test_rule_2_an_unrecorded_fix_fails(self):
-        now = BASELINE_FOUND - found(("placement", "microvms-cli -> tar"))
+        fixed = (
+            "subprocess",
+            'crates/microvms-cli/src/upload.rs: Command::new("aws")',
+            258,
+        )
+        file = ratchet([*BASELINE, fixed])
         self.assertEqual(
-            compare(now, ratchet(BASELINE), ratchet(BASELINE), "main"),
+            compare(BASELINE_FOUND, file, file, "main"),
             [
-                "fixed: [placement] microvms-cli -> tar. Run `mise run ratchet:update` "
-                "and commit the file."
+                'fixed: [subprocess] crates/microvms-cli/src/upload.rs: Command::new("aws"). '
+                "Run `mise run ratchet:update` and commit the file."
             ],
         )
+
+    def test_rules_1_and_2_leave_a_held_category_to_its_check(self):
+        # dependency_direction.rs computes placement and holds the file's records to the tree.
+        # Nothing here collects it, so a record with no finding isn't a fix, and a finding a
+        # caller passed in isn't new drift.
+        self.assertEqual(
+            RATCHET["HELD"],
+            {"placement": "crates/microvms-cli/tests/dependency_direction.rs"},
+        )
+        file = ratchet(BASELINE)
+        unrecorded = BASELINE_FOUND + found(("placement", "microvms-cli -> reqwest"))
+        self.assertEqual(compare(unrecorded, file, ratchet(BASELINE), "main"), [])
+        uncollected = BASELINE_FOUND - found(BASELINE[0][:2])
+        self.assertEqual(compare(uncollected, file, ratchet(BASELINE), "main"), [])
+
+    def test_rule_4_holds_a_held_category_too(self):
+        entries = [e for e in BASELINE if e[0] != "placement"]
+        now = found(*((c, k) for c, k, _ in entries))
+        failures = compare(now, ratchet(entries), ratchet(BASELINE), "main")
+        self.assertEqual([f.split(":")[0] for f in failures], ["promote placement"])
 
     def test_rule_2_a_stale_decision_fails_too(self):
         file = ratchet(
@@ -495,15 +515,24 @@ class FileTests(unittest.TestCase):
             ratchet(BASELINE, [(*BASELINE[0][:2], "why not")])
 
     def test_update_deletes_fixed_entries_and_never_adds_one(self):
-        fixed = ("placement", "microvms-cli -> tar")
-        new = ("placement", "microvms-cli -> globset")
+        fixed = BASELINE[1][:2]
+        new = ("subprocess", 'bindings/microvms-py/src/exec.rs: Command::new("aws")')
         now = BASELINE_FOUND - found(fixed) + found(new)
         data, removed = updated(ratchet(BASELINE), now)
-        self.assertEqual(removed, ["[placement] microvms-cli -> tar"])
+        self.assertEqual(removed, [f"[subprocess] {fixed[1]}"])
         after = {(e["category"], e["key"]) for e in data["entries"]}
         self.assertNotIn(fixed, after)
         self.assertNotIn(new, after)
         self.assertEqual(len(data["entries"]), len(BASELINE) - 1)
+
+    def test_update_leaves_a_held_category_alone(self):
+        # No collector here finds placement, so every placement record would read as fixed.
+        # dependency_direction.rs names the one a fix leaves behind.
+        decision = ("placement", "microvms-cli -> notify", "the watch loop")
+        file = ratchet(BASELINE, [decision])
+        data, removed = updated(file, BASELINE_FOUND - found(BASELINE[0][:2]))
+        self.assertEqual(removed, [])
+        self.assertEqual(data, file)
 
     def test_update_removes_only_the_surplus_copy_of_a_duplicate(self):
         data, removed = updated(ratchet([*BASELINE, BASELINE[1]]), BASELINE_FOUND)
@@ -596,52 +625,24 @@ class LayoutTests(unittest.TestCase):
         now = Counter(
             (e["category"], e["key"]) for e in file["entries"] + file["decisions"]
         )
-        gone = (file["entries"][0]["category"], file["entries"][0]["key"])
+        # The first entry `update` can remove: a held category's stay.
+        index, entry = next(
+            (i, e)
+            for i, e in enumerate(file["entries"])
+            if e["category"] not in RATCHET["HELD"]
+        )
+        gone = (entry["category"], entry["key"])
         data, _ = updated(file, now - Counter([gone]))
         before, after = text.splitlines(), dump(data).splitlines()
         self.assertEqual(len(before) - len(after), 1)
-        self.assertEqual([line for line in before if line not in after], [before[4]])
+        # The file's first four lines open it: the brace, version, enforced and "entries": [.
+        self.assertEqual(
+            [line for line in before if line not in after], [before[4 + index]]
+        )
 
     def test_empty_lists_round_trip(self):
         data = ratchet()
         self.assertEqual(parse(json.loads(dump(data)), "test"), data)
-
-
-class PlacementTests(unittest.TestCase):
-    def test_direct_normal_and_build_dependencies_outside_the_set_are_reported(self):
-        ws = (
-            Workspace(self)
-            .crate(
-                "adapter",
-                deps='serde = "1"\ntar = "0.4"\n\n[target.\'cfg(unix)\'.dependencies]\ntar = "0.4"',
-                build='cc = "1"',
-                dev='tempfile = "3"',
-            )
-            .placement('[adapter]\nnormal = ["serde"]\n')
-        )
-        now = collect(ws.scope())
-        # Dev dependencies are out of scope, a target-specific repeat is one key, and a build
-        # dependency is keyed apart from a normal one of the same name.
-        self.assertEqual(
-            keys(now, "placement"), ["adapter -> cc (build)", "adapter -> tar"]
-        )
-
-    def test_a_renamed_dependency_is_keyed_by_its_package_name(self):
-        ws = (
-            Workspace(self)
-            .crate("adapter", deps='wire = { package = "serde_json", version = "1" }')
-            .placement('[adapter]\nnormal = ["serde_json"]\n')
-        )
-        self.assertEqual(keys(collect(ws.scope()), "placement"), [])
-
-    def test_a_set_for_a_crate_that_does_not_exist_is_refused(self):
-        ws = (
-            Workspace(self)
-            .crate("adapter")
-            .placement('[adaptor]\nnormal = ["serde"]\n')
-        )
-        with self.assertRaisesRegex(SystemExit, "adaptor"):
-            collect(ws.scope())
 
 
 RUST_TEST_FORMS = """\
@@ -751,7 +752,6 @@ class RustCollectorTests(unittest.TestCase):
                     """,
                 },
             )
-            .placement('[adapter]\nnormal = ["microvms-core"]\n')
         )
 
     def test_test_code_is_not_reported_as_a_subprocess(self):
@@ -821,18 +821,14 @@ class RustCollectorTests(unittest.TestCase):
         )
 
     def test_two_identical_calls_in_one_file_count_twice(self):
-        ws = (
-            Workspace(self)
-            .crate(
-                "adapter",
-                files={
-                    "src/lib.rs": """\
+        ws = Workspace(self).crate(
+            "adapter",
+            files={
+                "src/lib.rs": """\
                         fn a() { Command::new("aws"); }
                         fn b() { Command::new("aws"); }
                     """
-                },
-            )
-            .placement("[adapter]\nnormal = []\n")
+            },
         )
         self.assertEqual(
             collect(ws.scope())[
@@ -847,7 +843,7 @@ class ScopeTests(unittest.TestCase):
 
     def workspace(self):
         return (
-            Workspace(self)
+            Workspace(self, adapters=("microvms-cli",))
             .crate(
                 "microvms-core",
                 deps='microvms-app = { path = "../microvms-app" }',
@@ -866,7 +862,6 @@ class ScopeTests(unittest.TestCase):
                     """
                 },
             )
-            .placement('[microvms-cli]\nnormal = ["microvms-core"]\n')
         )
 
     def test_a_crate_nobody_listed_is_scanned(self):
@@ -894,10 +889,10 @@ class ScopeTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "harnes"):
             collect(self.workspace().scope(non_shipping=["harnes"]))
 
-    def test_an_adapter_without_a_set_is_refused(self):
+    def test_an_adapter_that_is_not_a_shipping_member_is_refused(self):
         ws = self.workspace()
-        with self.assertRaisesRegex(SystemExit, "adapter guest has no set"):
-            collect(ws.scope(adapters=["microvms-cli", "guest"]))
+        with self.assertRaisesRegex(SystemExit, "adapter microvms-py isn't a shipping"):
+            collect(ws.scope(adapters=["microvms-cli", "microvms-py"]))
 
     def test_ports_are_the_public_traits_of_every_crate_below_an_adapter(self):
         # TokenMinter lives two hops down, in a crate core depends on; `guest` isn't below the
@@ -945,10 +940,9 @@ class ScopeTests(unittest.TestCase):
 
     def test_a_tree_with_no_ports_below_the_adapters_is_refused(self):
         ws = (
-            Workspace(self)
+            Workspace(self, adapters=("microvms-cli",))
             .crate("microvms-core")
             .crate("microvms-cli", deps='microvms-core = { path = "../microvms-core" }')
-            .placement('[microvms-cli]\nnormal = ["microvms-core"]\n')
         )
         with self.assertRaisesRegex(SystemExit, "no public trait"):
             collect(ws.scope(), require_ports=True)
@@ -958,11 +952,7 @@ class MacroTests(unittest.TestCase):
     """A `Command::new` in a macro's arguments, which tree-sitter leaves unparsed."""
 
     def collect_lib(self, text):
-        ws = (
-            Workspace(self)
-            .crate("adapter", files={"src/lib.rs": text})
-            .placement("[adapter]\nnormal = []\n")
-        )
+        ws = Workspace(self).crate("adapter", files={"src/lib.rs": text})
         return keys(collect(ws.scope()), "subprocess")
 
     def test_a_call_inside_a_macro_is_keyed_like_a_plain_one(self):
@@ -1127,7 +1117,6 @@ class AdapterLogicTests(unittest.TestCase):
                     "src/guards.rs": 'fn f() { let _ = "TerminateMicrovm"; }\n',
                 },
             )
-            .placement('[adapter]\nnormal = ["kernel"]\n')
         )
         cls.found = keys(collect(ws.scope()), "adapter-logic")
 
@@ -1318,7 +1307,7 @@ class ParityGapTests(unittest.TestCase):
 
     def test_a_scope_without_a_table_has_no_gaps(self):
         # The throwaway workspaces the other collector tests build have no table.
-        ws = Workspace(self).crate("adapter").placement("[adapter]\nnormal = []\n")
+        ws = Workspace(self).crate("adapter")
         self.assertEqual(RATCHET["parity_gaps"](ws.scope()), Counter())
 
     def test_the_repo_scope_reads_the_real_table(self):
@@ -1343,7 +1332,6 @@ class UntracedTests(unittest.TestCase):
         shutil.copytree(RATCHET["SENTINEL"].root, root)
         scope = RATCHET["SENTINEL"]._replace(
             root=root,
-            placement=root / "placement.toml",
             parity_table=root / "parity" / "capabilities.toml",
             specs=tuple(
                 root / spec.relative_to(RATCHET["SENTINEL"].root)
@@ -1513,7 +1501,7 @@ class UntracedTests(unittest.TestCase):
 
     def test_a_scope_without_specs_has_no_untraced_keys(self):
         # The throwaway workspaces the other collector tests build have no spec.
-        ws = Workspace(self).crate("adapter").placement("[adapter]\nnormal = []\n")
+        ws = Workspace(self).crate("adapter")
         self.assertEqual(RATCHET["untraced"](ws.scope()), Counter())
 
     def test_the_repo_scope_reads_every_spec_check_trace_reads(self):
@@ -1540,11 +1528,10 @@ class SentinelTests(unittest.TestCase):
         self.assertEqual(sentinel(RATCHET["SENTINEL"]), [])
 
     def test_a_collector_that_finds_nothing_fails(self):
-        ws = Workspace(self).crate("adapter").placement("[adapter]\nnormal = []\n")
+        ws = Workspace(self).crate("adapter")
         empty = ws.scope()
         failures = sentinel(empty)
         for category in (
-            "placement",
             "subprocess",
             "port-impl",
             "adapter-logic",
@@ -1558,6 +1545,17 @@ class SentinelTests(unittest.TestCase):
                 ),
                 failures,
             )
+        # Placement has no collector here to prove: dependency_direction.rs computes it.
+        self.assertFalse(any("placement" in f for f in failures), failures)
+
+    def test_the_sentinel_expects_no_held_category(self):
+        expected = json.loads(
+            (RATCHET["SENTINEL"].root / "expected.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            sorted(expected),
+            sorted(c for c in RATCHET["COLLECTED"] if c not in RATCHET["HELD"]),
+        )
 
     def test_a_sentinel_that_reports_a_test_only_case_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1567,99 +1565,17 @@ class SentinelTests(unittest.TestCase):
             lib.write_text(
                 lib.read_text().replace("#[cfg(test)]\nmod tests", "mod tests")
             )
-            failures = sentinel(
-                RATCHET["SENTINEL"]._replace(
-                    root=copy, placement=copy / "placement.toml"
-                )
-            )
+            failures = sentinel(RATCHET["SENTINEL"]._replace(root=copy))
             self.assertTrue(any("unexpected" in f for f in failures), failures)
 
 
 class SeededFaultTests(unittest.TestCase):
-    """The faults #281 and #285 name. Each also fired once by hand in the real tree (see the PR)."""
-
-    def real_placement(self, ws):
-        # The real file has sets for the layers below the adapters (#282, #283), and the ratchet
-        # refuses a set for a crate the workspace doesn't have. An empty layer uses nothing
-        # outside its set.
-        placement = ROOT / "verify" / "arch" / "placement.toml"
-        shutil.copy(placement, ws.root / "placement.toml")
-        for crate in sets_from(placement.read_text(), str(placement)):
-            if crate not in ws.crates:
-                ws.crate(crate)
-        return ws
-
-    def test_a_reqwest_in_microvms_py_fails_with_a_placement_key(self):
-        ws = self.real_placement(
-            Workspace(self)
-            .crate(
-                "microvms-py",
-                deps='microvms-core = { path = "../microvms-core" }\nreqwest = "0.12"',
-            )
-            .crate("microvms-core")
-            .crate("microvms-cli")
-            .crate("microvms-js")
-        )
-        now = collect(ws.scope())
-        self.assertEqual(keys(now, "placement"), ["microvms-py -> reqwest"])
-        failures = compare(now, ratchet(), None, "main")
-        self.assertIn(
-            "new drift: [placement] microvms-py -> reqwest. Move the work to the layer "
-            "whose job it is (I/O belongs in microvms-edges, behind a port in "
-            "microvms-app), or add a decision with its reason.",
-            failures,
-        )
-
-    def test_a_reqwest_in_microvms_app_fails_with_a_placement_key(self):
-        # #283's fault: the use cases dialing the network themselves. The app's exact-set test
-        # in `dependency_direction.rs` fails on it too; this is the ratchet's half.
-        ws = self.real_placement(
-            Workspace(self)
-            .crate(
-                "microvms-app",
-                deps='microvms-domain = { path = "../microvms-domain" }\nreqwest = "0.12"',
-            )
-            .crate("microvms-domain")
-            .crate("microvms-core")
-            .crate("microvms-cli")
-            .crate("microvms-py")
-            .crate("microvms-js")
-        )
-        now = collect(ws.scope())
-        self.assertEqual(keys(now, "placement"), ["microvms-app -> reqwest"])
-        failures = compare(now, ratchet(), None, "main")
-        self.assertIn(
-            "new drift: [placement] microvms-app -> reqwest. Move the work to the layer "
-            "whose job it is (I/O belongs in microvms-edges, behind a port in "
-            "microvms-app), or add a decision with its reason.",
-            failures,
-        )
-
-    def test_a_globset_in_microvms_py_fails_with_a_placement_key(self):
-        # #285's fault. The binding's exact-set test in `dependency_direction.rs` fails on it
-        # too; this is the ratchet's half.
-        ws = self.real_placement(
-            Workspace(self)
-            .crate(
-                "microvms-py",
-                deps='microvms-core = { path = "../microvms-core" }\nglobset = "0.4"',
-            )
-            .crate("microvms-core")
-            .crate("microvms-cli")
-            .crate("microvms-js")
-        )
-        now = collect(ws.scope())
-        self.assertEqual(keys(now, "placement"), ["microvms-py -> globset"])
-        self.assertIn(
-            "new drift: [placement] microvms-py -> globset. Move the work to the layer "
-            "whose job it is (I/O belongs in microvms-edges, behind a port in "
-            "microvms-app), or add a decision with its reason.",
-            compare(now, ratchet(), None, "main"),
-        )
+    """The faults #281 names. Each also fired once by hand in the real tree (see the PR). #285's
+    placement faults are `dependency_direction.rs`'s now, in the registry."""
 
     def test_an_aws_subprocess_in_microvms_js_fails_with_a_subprocess_key(self):
-        ws = self.real_placement(
-            Workspace(self)
+        ws = (
+            Workspace(self, adapters=("microvms-cli", "microvms-py", "microvms-js"))
             .crate(
                 "microvms-js",
                 files={
@@ -1689,11 +1605,11 @@ class SeededFaultTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         copy = Path(tmp.name) / "sentinel"
         shutil.copytree(RATCHET["SENTINEL"].root, copy)
-        scope = RATCHET["SENTINEL"]._replace(
-            root=copy, placement=copy / "placement.toml"
-        )
+        scope = RATCHET["SENTINEL"]._replace(root=copy)
         expected = json.loads((copy / "expected.json").read_text())
-        entries = [(c, k, 1) for c, ks in expected.items() for k in ks]
+        # The sentinel has no placement to find, since dependency_direction.rs computes it;
+        # the real file's CLI entry keeps rule 4 quiet about it.
+        entries = [(c, k, 1) for c, ks in expected.items() for k in ks] + [BASELINE[0]]
         return scope, entries
 
     def test_an_entry_deleted_without_a_fix_fails_rule_1(self):

@@ -1,0 +1,51 @@
+# ── ratchet:check: the rules over a category another check holds, and placement's base rule ─
+
+# Placement is `HELD`: dependency_direction.rs computes it and holds the file's records to the
+# tree, so this script applies only rules 3 and 4 to it. Rules 1 and 2 over it would call every
+# record a fix, `update` would delete them all, and the sentinel would call its collector empty.
+[[fault]]
+id = "ratchet-held-rules-1-and-2"
+guard = "tools/ratchet.py"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "fixed: [placement] microvms-cli -> const-hex."
+transform = { file = "tools/ratchet.py", replace = "compared = () if category in HELD else sorted(found.keys() | listed.keys())", with = "compared = sorted(found.keys() | listed.keys())" }
+
+[[fault]]
+id = "ratchet-held-update"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "FileTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_update_leaves_a_held_category_alone ("
+transform = { file = "tools/ratchet.py", replace = "            if item[\"category\"] in HELD:\n                kept.append(item)\n            elif budget[finding] > 0:\n", with = "            if budget[finding] > 0:\n" }
+
+[[fault]]
+id = "ratchet-held-sentinel"
+guard = "tools/ratchet.py"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "sentinel: the placement collector found nothing"
+transform = { file = "tools/ratchet.py", replace = "        if category in HELD:\n            continue\n", with = "" }
+
+# What the ratchet still holds placement to: the base. On the real tree, a crate added to a set
+# the base has and an entry the base doesn't have both fail, with no collector reading a manifest.
+[[fault]]
+id = "ratchet-placement-set-grew"
+guard = "verify/arch/placement.toml"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "set grew: verify/arch/placement.toml adds reqwest to [microvms-py] normal"
+transform = { file = "verify/arch/placement.toml", replace = "normal = [\"microvms-core\", \"microvms-protocol\", \"serde_json\", \"pyo3\", \"tokio\"]", with = "normal = [\"microvms-core\", \"microvms-protocol\", \"serde_json\", \"pyo3\", \"tokio\", \"reqwest\"]" }
+
+[[fault]]
+id = "ratchet-placement-entry-not-in-base"
+guard = "verify/ratchet/drift.json"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "not in the base: [placement] microvms-cli -> reqwest is an entry here"
+transform = { file = "verify/ratchet/drift.json", replace = "    { \"category\": \"placement\", \"key\": \"microvms-cli -> tar\", \"issue\": 260 },\n", with = "    { \"category\": \"placement\", \"key\": \"microvms-cli -> tar\", \"issue\": 260 },\n    { \"category\": \"placement\", \"key\": \"microvms-cli -> reqwest\", \"issue\": 260 },\n" }
