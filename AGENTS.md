@@ -238,3 +238,12 @@ check that holds it, or says that review does.
   that doesn't exist, or says a task is in `check` when `check` doesn't run it.
   Its docstring says what it reads as a name. A name outside backticks isn't
   read, so write the ones a rule depends on in backticks.
+- A stale path in a file that runs things turns a gate off without failing, so
+  `agents:check` also fails on a path or glob that matches nothing in the
+  tree when `lefthook.yml` names it, a mise task names it (its `run`, `dir`,
+  `sources` or `outputs`), a workflow names it (its `paths` filters,
+  `working-directory` or steps), `.github/dependabot.yml` names it, or a gate
+  script binds it to a module-level constant. A path that names nothing here
+  on purpose, such as a directory a job creates, goes in the script's
+  `CENSUS_NOT_PATHS` with what it is. A decision id cited in a comment, such
+  as `D14`, needs its table in `docs/decisions.toml`.
