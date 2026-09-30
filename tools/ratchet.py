@@ -37,6 +37,10 @@ thinness guard pushed an upload into an `aws s3 cp` subprocess it couldn't see.
 
 1. A finding with no entry or decision: new drift.
 2. An entry or decision with no finding: a fix the file doesn't record yet. `update` removes it.
+
+   Rules 1 and 2 hold a category this script collects. A category in `HELD` is collected by
+   the check it names, which holds the file's records to the tree the same way, so here it
+   takes only rules 3 and 4, and `update` leaves its records alone.
 3. An entry absent from the base branch's copy of the file, or a crate added to an allowed set
    the base's `verify/arch/placement.toml` already has. This is what makes the count a ratchet: a PR
    can delete entries but not add them, and it can't widen a set to make a finding disappear.
@@ -59,8 +63,12 @@ thinness guard pushed an upload into an `aws s3 cp` subprocess it couldn't see.
 
 # The collectors
 
-- placement: `cargo metadata --no-deps`, each crate's direct normal and build dependencies
-  against its set in `verify/arch/placement.toml`.
+- placement (`HELD`): `crates/microvms-cli/tests/dependency_direction.rs`, not this script.
+  It computes each direct normal and build dependency of every crate with a set in
+  `verify/arch/placement.toml` from `cargo metadata`, and holds it to exactly that set and the
+  crate's placement entries and decisions here, so a new dependency and a fixed one both fail
+  there. This script reads no manifest for it: it counts the entries and holds them and the sets
+  to the base (rule 3).
 - subprocess: every `Command::new` in the `src/` of every shipping crate, including one inside
   a macro invocation such as `tokio::select!` or `vec![...]`. The shipping crates are the
   workspace's members minus the ones `Scope.non_shipping` names, so a crate added to the
@@ -112,7 +120,8 @@ That's visible in the key, not silent.
 
 Each collector first runs against `verify/ratchet/fixtures/sentinel/`, which must produce exactly the
 findings its `expected.json` lists. A collector that finds nothing there fails the check, so a
-broken tool invocation can't report zero drift.
+broken tool invocation can't report zero drift. A `HELD` category has no collector here, so the
+sentinel has nothing to prove for it: its check's own tests do that.
 
 Usage, from anywhere:
 
@@ -155,10 +164,8 @@ class Scope(NamedTuple):
     """
 
     root: Path
-    #: The allowed dependency sets, one table per crate.
-    placement: Path
-    #: The driving adapters, by package name. Each needs a set in `placement`, and the
-    #: port-impl collector reads their code.
+    #: The driving adapters, by package name. The port-impl and adapter-logic collectors read
+    #: their code.
     adapters: tuple[str, ...]
     #: Workspace members that never ship, by package name. Every other member is scanned.
     non_shipping: frozenset[str] = frozenset()
@@ -182,7 +189,6 @@ class Scope(NamedTuple):
 
 REPO = Scope(
     root=ROOT,
-    placement=ROOT / PLACEMENT,
     adapters=("microvms-cli", "microvms-py", "microvms-js"),
     # `crates/model/` is a proof harness, and `crates/model-conformance/` holds only tests that drive the app
     # over the model's rows. Only tests depend on either, and neither is ever published.
@@ -202,7 +208,6 @@ REPO = Scope(
 SENTINEL_ROOT = ROOT / "verify" / "ratchet" / "fixtures" / "sentinel"
 SENTINEL = Scope(
     root=SENTINEL_ROOT,
-    placement=SENTINEL_ROOT / "placement.toml",
     adapters=("adapter",),
     composed=("kernel",),
     composition_root="root",
@@ -223,6 +228,13 @@ COLLECTED = (
     "untraced",
 )
 
+#: Collected categories whose findings another check computes, by the check. That check holds
+#: the file's records for the category to the tree (rules 1 and 2), so this script has no
+#: collector for it: it counts the entries and applies rules 3 and 4. Placement is
+#: `dependency_direction.rs`'s, which computes the edges from `cargo metadata` for every crate
+#: with a set, so the edges are computed in one place.
+HELD = {"placement": "crates/microvms-cli/tests/dependency_direction.rs"}
+
 #: Categories defined before their collector exists. The summary says so rather than printing
 #: zero, because a zero would read as a measurement. Empty since #271 collected parity-gap.
 NOT_COLLECTED: dict[str, str] = {}
@@ -234,7 +246,9 @@ CATEGORIES = (*COLLECTED, *NOT_COLLECTED)
 
 #: Where each category's rule goes once the category is empty (rule 4).
 PROMOTE = {
-    "placement": "crates/microvms-cli/tests/dependency_direction.rs as an exact set per adapter (#285)",
+    # dependency_direction.rs already holds every set exactly, the CLI's drift entries
+    # included, so once #260 clears them the promotion is only listing the category.
+    "placement": "crates/microvms-cli/tests/dependency_direction.rs, which holds every set exactly (#260)",
     "subprocess": "each crate's clippy.toml as a disallowed type (#285)",
     # These two stay in the ratchet's own ast-grep rules: once enforced, the collector is the
     # hard gate, since a finding without a decision fails rule 1. Not semgrep: #281 measured
@@ -632,7 +646,10 @@ def compare(
     for category in COLLECTED:
         found = {k: n for (c, k), n in current.items() if c == category}
         listed = {k: n for (c, k), n in recorded.items() if c == category}
-        for key in sorted(found.keys() | listed.keys()):
+        # A held category's records meet the tree in the check `HELD` names. Nothing here reads
+        # the tree for it, so rule 2 would call every record a fix.
+        compared = () if category in HELD else sorted(found.keys() | listed.keys())
+        for key in compared:
             if found.get(key, 0) > listed.get(key, 0):
                 failures.append(
                     f"new drift: {describe(category, key)}. "
@@ -662,7 +679,11 @@ def compare(
 
 
 def updated(file: dict, current: Counter) -> tuple[dict, list[str]]:
-    """The file with every entry and decision the tree no longer has removed. Adds nothing."""
+    """The file with every entry and decision the tree no longer has removed. Adds nothing.
+
+    A `HELD` category's records stay: no collector here finds them, and the check that does
+    names the record a fix leaves behind.
+    """
     budget = Counter(current)
     removed: list[str] = []
 
@@ -670,7 +691,9 @@ def updated(file: dict, current: Counter) -> tuple[dict, list[str]]:
         kept = []
         for item in items:
             finding = (item["category"], item["key"])
-            if budget[finding] > 0:
+            if item["category"] in HELD:
+                kept.append(item)
+            elif budget[finding] > 0:
                 budget[finding] -= 1
                 kept.append(item)
             else:
@@ -789,6 +812,7 @@ def cargo_metadata(scope: Scope) -> dict:
 
 
 def sets_from(text: str, where: str) -> dict[str, dict[str, set[str]]]:
+    """The allowed sets in a `verify/arch/placement.toml`'s text, for rule 3's set half."""
     sets = tomllib.loads(text)
     for crate, table in sets.items():
         if not isinstance(table, dict) or not set(table) <= {"normal", "build"}:
@@ -797,10 +821,6 @@ def sets_from(text: str, where: str) -> dict[str, dict[str, set[str]]]:
         crate: {kind: set(table.get(kind, [])) for kind in ("normal", "build")}
         for crate, table in sets.items()
     }
-
-
-def load_sets(scope: Scope) -> dict[str, dict[str, set[str]]]:
-    return sets_from(scope.placement.read_text(encoding="utf-8"), str(scope.placement))
 
 
 class Crates(NamedTuple):
@@ -816,7 +836,7 @@ class Crates(NamedTuple):
     below: dict[str, str]
 
 
-def crates(scope: Scope, metadata: dict, sets: dict) -> Crates:
+def crates(scope: Scope, metadata: dict) -> Crates:
     ids = set(metadata["workspace_members"])
     members = {p["name"]: p for p in metadata["packages"] if p["id"] in ids}
     root = scope.root.resolve()
@@ -824,19 +844,12 @@ def crates(scope: Scope, metadata: dict, sets: dict) -> Crates:
         name: Path(p["manifest_path"]).resolve().parent.relative_to(root).as_posix()
         for name, p in members.items()
     }
-    for crate in sorted(sets):
-        if crate not in members:
-            raise SystemExit(
-                f"{scope.placement} names [{crate}], which isn't a package in {scope.root}"
-            )
     if stale := sorted(scope.non_shipping - members.keys()):
         raise SystemExit(f"non-shipping crates that aren't workspace members: {stale}")
     shipping = {n: d for n, d in dirs.items() if n not in scope.non_shipping}
     for crate in scope.adapters:
         if crate not in shipping:
             raise SystemExit(f"adapter {crate} isn't a shipping workspace member")
-        if crate not in sets:
-            raise SystemExit(f"adapter {crate} has no set in {scope.placement}")
 
     # Path dependencies between members, followed from the adapters.
     reached: set[str] = set()
@@ -862,24 +875,6 @@ def crates(scope: Scope, metadata: dict, sets: dict) -> Crates:
         readers={n: shipping[n] for n in [*scope.adapters, *inner]},
         below=below,
     )
-
-
-def placement(metadata: dict, sets: dict) -> Counter:
-    # A set, then a Counter: a dependency repeated per target is one edge.
-    edges = set()
-    for package in metadata["packages"]:
-        allowed = sets.get(package["name"])
-        if allowed is None:
-            continue
-        for dependency in package["dependencies"]:
-            kind = dependency["kind"] or "normal"
-            if kind == "dev" or dependency["name"] in allowed[kind]:
-                continue
-            suffix = " (build)" if kind == "build" else ""
-            edges.add(
-                ("placement", f"{package['name']} -> {dependency['name']}{suffix}")
-            )
-    return Counter(edges)
 
 
 def ast_grep(scope: Scope, shipping: dict[str, str]) -> list[dict]:
@@ -1134,16 +1129,9 @@ def untraced(scope: Scope) -> Counter:
 
 
 def collect(scope: Scope, require_ports: bool = False) -> Counter:
-    """Every finding in `scope`, as a count per `(category, key)`."""
-    metadata = cargo_metadata(scope)
-    sets = load_sets(scope)
-    found = crates(scope, metadata, sets)
-    return (
-        placement(metadata, sets)
-        + rust(scope, found, require_ports)
-        + parity_gaps(scope)
-        + untraced(scope)
-    )
+    """Every finding in `scope`, as a count per `(category, key)`. None is in a `HELD` category."""
+    found = crates(scope, cargo_metadata(scope))
+    return rust(scope, found, require_ports) + parity_gaps(scope) + untraced(scope)
 
 
 def sentinel(scope: Scope) -> list[str]:
@@ -1154,6 +1142,8 @@ def sentinel(scope: Scope) -> list[str]:
     found = collect(scope)
     failures = []
     for category in COLLECTED:
+        if category in HELD:
+            continue
         got = Counter({k: n for (c, k), n in found.items() if c == category})
         want = Counter(expected.get(category, []))
         if not got:
@@ -1198,7 +1188,8 @@ def main(argv: list[str]) -> int:
     base_label = args.base or ref[:12]
     base = read_base(ROOT, ref)
     base_collected = None if base is None else read_base_collected(ROOT, ref)
-    grown = grown_sets(load_sets(REPO), read_base_sets(ROOT, ref), base_label)
+    sets = sets_from((ROOT / PLACEMENT).read_text(encoding="utf-8"), PLACEMENT)
+    grown = grown_sets(sets, read_base_sets(ROOT, ref), base_label)
 
     if args.command == "update":
         data, removed = updated(file, current)

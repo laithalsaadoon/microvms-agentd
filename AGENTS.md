@@ -123,13 +123,15 @@ fix the code, or record a permanent exception in `decisions` with its reason.
 An untraced requirement takes no decision: list it in its group's file under
 `verify/spec/traced/` (`verify/spec/traced/TRAP.toml` for a TRAP key) and waive there any
 layer it can't carry, with its reason. The edges
-between the workspace's crates are checked by
-`crates/microvms-cli/tests/dependency_direction.rs`. Each adapter's allowed
-dependencies (`verify/arch/placement.toml`) are checked by the ratchet, and
-`dependency_direction.rs` asserts them exactly for each adapter the ratchet
-holds no placement drift for (the CLI joins when #260 clears its entries). The
-domain's, the app's and core's sets are there too, asserted exactly, and they
-never carry drift. The ratchet's port-impl collector reads the app and core as
+between the workspace's crates, and each adapter's and layer's direct
+dependencies against its set in `verify/arch/placement.toml`, are computed in one
+place: `crates/microvms-cli/tests/dependency_direction.rs`. It holds each crate
+to exactly its set plus its placement entries and decisions in the drift file,
+so a new dependency and a fixed one fail there, and a fix deletes its entry by
+hand. The CLI's entries are #260's; the domain's, the app's and core's sets never
+carry drift. For placement the ratchet reads no manifest: it counts the entries
+and refuses one the base doesn't have, and a crate added to a set the base has.
+The ratchet's port-impl collector reads the app and core as
 well as the adapters, so a port implemented anywhere but the edges is drift or
 a recorded decision. Forbidden calls are refused by each adapter's
 `clippy.toml`, and `tools/test_ratchet.py` lists every site that turns those
