@@ -80,7 +80,7 @@ Feature: What a harness checks before it queues work
       And the service check was not run
       And no AWS call was made
 
-    @BIND-15 @BIND-16
+    @BIND-15 @BIND-16 @TRAP-6
     Scenario: an environment region the client refuses stops the preflight before any call
       Given the environment names the region eu-central-1
       When the harness runs a preflight with no region

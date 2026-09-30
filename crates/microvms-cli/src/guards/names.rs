@@ -168,6 +168,7 @@ async fn a_name_resolves_on_the_lifecycle_wire_and_a_terminate_by_id_frees_it() 
         image_name: None,
         delete_image: false,
         wait: false,
+        wait_sec: None,
         state_dir: Some(dir.0.clone()),
         region: region_flags(),
     });

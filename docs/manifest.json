@@ -2959,6 +2959,15 @@
           {
             "choices": null,
             "default": null,
+            "help": "Wait for TERMINATED for at most this many seconds. Implies --wait",
+            "name": "wait-sec",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
             "help": "Where the VM's history is appended. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
             "name": "state-dir",
             "positional": false,
