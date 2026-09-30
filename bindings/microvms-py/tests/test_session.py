@@ -385,6 +385,19 @@ def test_both_proxy_headers_are_published_because_one_without_the_other_is_rejec
     assert constants["proxyAuthHeader"] != constants["proxyPortHeader"]
 
 
+def test_the_launch_and_exec_waits_are_published_as_the_core_sets_them() -> None:
+    """The three default waits, published so a harness reads them rather than restating them (#254).
+
+    `Sandbox.run` waits `defaultRunningTimeoutSeconds` for RUNNING and then
+    `defaultBootstrapTimeoutSeconds` for the daemon, which is also `wait_until_ready`'s default;
+    `run_sync` waits `defaultExecWaitSeconds`. The values are the core's figures.
+    """
+    constants = microvms.session_constants()
+    assert constants["defaultRunningTimeoutSeconds"] == 300
+    assert constants["defaultBootstrapTimeoutSeconds"] == 120
+    assert constants["defaultExecWaitSeconds"] == 300
+
+
 def test_the_refresh_window_is_inside_the_token_lifetime_with_room_to_spare() -> None:
     """A long run crosses the sixty-minute ceiling mid-flight, so the refresh has to precede it.
 

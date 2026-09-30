@@ -508,6 +508,17 @@ test('both proxy headers are published, because one without the other is rejecte
   assert.notEqual(constants.proxyAuthHeader, constants.proxyPortHeader);
 });
 
+test('the launch and exec waits are published as the core sets them', () => {
+  // The three default waits, published so a harness reads them rather than restating them:
+  // `run` waits `defaultRunningTimeoutSeconds` for RUNNING and then
+  // `defaultBootstrapTimeoutSeconds` for the daemon, which is also `waitUntilReady`'s default,
+  // and `runSync` waits `defaultExecWaitSeconds`. The values are the core's figures.
+  const constants = JSON.parse(sessionConstants());
+  assert.equal(constants.defaultRunningTimeoutSeconds, 300);
+  assert.equal(constants.defaultBootstrapTimeoutSeconds, 120);
+  assert.equal(constants.defaultExecWaitSeconds, 300);
+});
+
 test('the refresh window is inside the token lifetime with room to spare', () => {
   // A long run crosses the sixty-minute ceiling mid-flight, so the refresh has to precede it. A
   // window at or past the lifetime would mint a replacement only after the old token had already

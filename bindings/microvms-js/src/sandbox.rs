@@ -566,12 +566,14 @@ pub struct RunOptions {
     pub suspended_sec: Option<f64>,
     pub auto_resume: Option<bool>,
     pub max_duration_sec: Option<f64>,
-    /// How long to wait for RUNNING.
+    /// How long to wait for RUNNING. The wait for the daemon after it is the core's
+    /// `defaultBootstrapTimeoutSeconds`.
     pub ready_timeout: Option<f64>,
     /// A label for the run token. Never the token.
     pub token_scope: Option<String>,
-    /// Whether `run` waits for RUNNING (default `true`). `false` resolves once the launch
-    /// is accepted, with the lifecycle PENDING; `waitUntilRunning` finishes it.
+    /// Whether `run` waits for RUNNING and for the daemon to answer (default `true`).
+    /// `false` resolves once the launch is accepted, with the lifecycle PENDING;
+    /// `waitUntilRunning` finishes both waits.
     pub wait: Option<bool>,
     /// Per-VM CloudWatch log group. Omitted keeps the service's default destination.
     pub log_group: Option<String>,
@@ -966,7 +968,12 @@ impl Sandbox {
             .collect())
     }
 
-    /// Launches a MicroVM, waits for RUNNING, and resolves with its session.
+    /// Launches a MicroVM, waits for RUNNING and for its daemon to answer, and resolves with
+    /// its session.
+    ///
+    /// `readyTimeout` bounds the wait for RUNNING; the wait for the daemon after it is
+    /// `sessionConstants().defaultBootstrapTimeoutSeconds`, and a daemon that never answers
+    /// rejects with `ERR_TIMEOUT` with the VM left RUNNING.
     ///
     /// # What the core refuses here, and this file does not
     ///
@@ -1033,7 +1040,9 @@ impl Sandbox {
         Ok(Session::in_sandbox(Arc::clone(&self.inner)))
     }
 
-    /// Finishes a `run({ wait: false })`: waits for RUNNING and resolves with the session.
+    /// Finishes a `run({ wait: false })`: waits for RUNNING and for the daemon to answer, and
+    /// resolves with the session. `timeout` bounds the wait for RUNNING, as `readyTimeout`
+    /// does.
     ///
     /// A launch whose `clientToken` adopted an existing, idle-suspended VM resumes it; a
     /// fresh launch that reaches a terminal state first rejects with the service's

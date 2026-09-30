@@ -1125,7 +1125,13 @@ impl PySandbox {
         Ok(PyBytes::new(py, &bytes.map_err(crate::errors::CoreError)?))
     }
 
-    /// Launches a MicroVM, waits for RUNNING, and returns its session.
+    /// Launches a MicroVM, waits for RUNNING and for its daemon to answer, and returns its
+    /// session.
+    ///
+    /// `ready_timeout` bounds the wait for RUNNING (default
+    /// `session_constants()["defaultRunningTimeoutSeconds"]`); the wait for the daemon after it
+    /// is `defaultBootstrapTimeoutSeconds`, and a daemon that never answers raises
+    /// `TimeoutError` with the VM left RUNNING.
     ///
     /// `image_identifier` is an image ARN or a bare image name, or omitted for the image
     /// `build_image` built. The core resolves a name to its ARN with one `ListMicrovmImages`
@@ -1210,7 +1216,7 @@ impl PySandbox {
         ready_timeout: Option<f64>,
         token_scope: Option<String>,
         // `wait=False` returns once `RunMicrovm` is accepted, with the lifecycle PENDING;
-        // `wait_until_running` finishes it. Not a doc comment: a doc comment on a function
+        // `wait_until_running` finishes both waits. Not a doc comment: a doc comment on a function
         // parameter is a compile error.
         wait: bool,
         // Per-VM CloudWatch logging: a group, optionally an exact stream inside it, or
@@ -1262,7 +1268,8 @@ impl PySandbox {
         Ok(PySession::in_sandbox(Arc::clone(&self.inner)))
     }
 
-    /// Finishes a `run(wait=False)`: waits for RUNNING and returns the session.
+    /// Finishes a `run(wait=False)`: waits for RUNNING and for the daemon to answer, and
+    /// returns the session. `timeout` bounds the wait for RUNNING, as `ready_timeout` does.
     ///
     /// A launch whose `client_token` adopted an existing, idle-suspended VM resumes it;
     /// a fresh launch that reaches a terminal state first raises `LaunchDiedError` with

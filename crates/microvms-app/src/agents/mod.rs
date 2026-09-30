@@ -787,13 +787,9 @@ impl AgentVm {
         launch_request_for(&self.specs, image_identifier, execution_role_arn)
     }
 
-    /// Launches and waits for the daemon to answer.
+    /// Launches and waits for the daemon to answer, which [`Sandbox::run`] does.
     pub async fn launch(&mut self, request: RunRequest) -> Result<&Session, Error> {
-        let session = self.sandbox.run(request).await?;
-        session
-            .wait_until_ready(crate::session::DEFAULT_READY_TIMEOUT)
-            .await?;
-        Ok(session)
+        self.sandbox.run(request).await.map(|session| &*session)
     }
 
     fn require_session(&self) -> Result<&Session, Error> {

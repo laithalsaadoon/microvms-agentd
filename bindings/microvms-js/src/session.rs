@@ -45,7 +45,8 @@ use crate::process::{ExecProcess, GapPolicy};
 use crate::region::Region;
 
 /// How long to wait for a daemon to report bootstrapped: the core's default.
-const DEFAULT_READY_TIMEOUT: f64 = microvms_core::session::DEFAULT_READY_TIMEOUT.as_secs_f64();
+const DEFAULT_BOOTSTRAP_TIMEOUT: f64 =
+    microvms_core::session::DEFAULT_BOOTSTRAP_TIMEOUT.as_secs_f64();
 
 /// The default one-shot `runSync` deadline: the core's exec wait, since `runSync` waits the
 /// same way.
@@ -648,7 +649,7 @@ impl Session {
     /// is the mistake the retryable split exists to prevent.
     #[napi]
     pub async fn wait_until_ready(&self, timeout: Option<f64>) -> Result<Health, AsyncError> {
-        let timeout = seconds_async(timeout.unwrap_or(DEFAULT_READY_TIMEOUT))?;
+        let timeout = seconds_async(timeout.unwrap_or(DEFAULT_BOOTSTRAP_TIMEOUT))?;
         let live = self.live().await;
         let session = live.session().map_err(js_async)?;
         Ok(Health::wrap(
@@ -1017,6 +1018,10 @@ pub fn session_constants() -> String {
         concat!(
             r#"{{"defaultAgentPort":{},"proxyAuthHeader":"{}","proxyPortHeader":"{}","#,
             r#""maxTokenLifetimeSeconds":{},"defaultRefreshAfterSeconds":{},"#,
+            // The three waits a launch and an exec take by default, published so a harness
+            // sizing its own deadlines reads the core's figures rather than restating them.
+            r#""defaultRunningTimeoutSeconds":{},"defaultBootstrapTimeoutSeconds":{},"#,
+            r#""defaultExecWaitSeconds":{},"#,
             // The WebSocket handshake's three values, from the core's constants rather than
             // spelled here: the platform matches them by exact string, so a test that
             // asserted its own copy would assert that the copy is self-consistent.
@@ -1029,6 +1034,9 @@ pub fn session_constants() -> String {
         microvms_core::session::PROXY_PORT_HEADER,
         microvms_core::session::MAX_TOKEN_LIFETIME.as_secs(),
         microvms_core::session::DEFAULT_REFRESH_AFTER.as_secs(),
+        microvms_core::sandbox::DEFAULT_RUNNING_TIMEOUT.as_secs(),
+        microvms_core::session::DEFAULT_BOOTSTRAP_TIMEOUT.as_secs(),
+        microvms_core::session::DEFAULT_EXEC_WAIT.as_secs(),
         microvms_core::session::WS_SUBPROTOCOL,
         microvms_core::session::WS_AUTH_SUBPROTOCOL_PREFIX,
         microvms_core::session::WS_PORT_SUBPROTOCOL_PREFIX,
