@@ -3128,6 +3128,37 @@
       },
       {
         "alternateResponse": null,
+        "name": "names",
+        "parameters": [
+          {
+            "choices": null,
+            "default": null,
+            "help": "Delete this name's record first; repeat for more. A name the registry doesn't hold is refused, and then nothing is deleted",
+            "name": "delete",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Where the registry lives. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs",
+            "name": "state-dir",
+            "positional": false,
+            "required": false,
+            "type": "path"
+          }
+        ],
+        "responseKeys": [
+          "names",
+          "deleted"
+        ],
+        "responseType": "microvm.names",
+        "summary": "List the names this machine's registry holds, or delete one whose VM is gone",
+        "supportsJson": true
+      },
+      {
+        "alternateResponse": null,
         "name": "logs",
         "parameters": [
           {

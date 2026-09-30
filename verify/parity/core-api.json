@@ -902,6 +902,7 @@
     "microvms_core::names::NameRecord::from_json": "method",
     "microvms_core::names::NameRecord::new": "method via microvms_core::prelude::NameRecordExt",
     "microvms_core::names::NameRecord::new_at": "method",
+    "microvms_core::names::NameRecord::redacted_json": "method",
     "microvms_core::names::NameRecord::region": "method",
     "microvms_core::names::NameRecord::to_json": "method",
     "microvms_core::names::NameStore": "trait",

@@ -626,7 +626,7 @@ ts = ["NameRegistry.register", "NameRegistry.get", "NameRegistry.put"]
 [[capability]]
 id = "list-and-delete-names"
 core = "microvms_core::names::NameStore"
-cli = { exempt = "names are only released at terminate", issue = "#267" }
+cli = ["names", "names --delete"]
 py = ["NameRegistry.list", "NameRegistry.delete"]
 ts = ["NameRegistry.list", "NameRegistry.delete"]
 

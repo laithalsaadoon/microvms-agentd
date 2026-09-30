@@ -15,7 +15,7 @@
 
 use serde_json::{Map, Value, json};
 
-use crate::cli::{DockerfileArgs, HistoryArgs, LogsArgs, LsArgs};
+use crate::cli::{DockerfileArgs, HistoryArgs, LogsArgs, LsArgs, NamesArgs};
 use crate::commands::{Ctx, Rendered, response_type};
 use crate::exit::CliError;
 use crate::seam::state_dir;
@@ -620,6 +620,79 @@ pub fn history<O: std::io::Write, E: std::io::Write>(
             .join("\n")
     };
     Ok(Rendered::ok(kind, data, text, dense))
+}
+
+/// Lists this machine's name registry, after deleting the names `--delete` gives.
+///
+/// Every delete is checked before any runs, so a mistyped name deletes nothing: an illegal
+/// name is core's `ERR_INVALID_ARG`, and a name with no record is `ERR_PRECONDITION`. A record
+/// the store can't read counts as held, as it does for `run --vm-name`'s collision check, so
+/// a torn file can be cleared too. The listing is each record's redacted form
+/// (`NameRecord::redacted_json`): the agent token and the identity seed are credentials, and
+/// this output goes to terminals and logs.
+pub fn names<O: std::io::Write, E: std::io::Write>(
+    ctx: &mut Ctx<'_, O, E>,
+    args: &NamesArgs,
+) -> Result<Rendered, CliError> {
+    let registry = ledger::Names::new(&state_dir(args.state_dir.clone(), ctx.env));
+    for name in &args.delete {
+        ledger::validate_name(name).map_err(microvms_core::Error::invalid_arg)?;
+        if registry.lookup(name).is_none() {
+            return Err(microvms_core::Error::new(
+                microvms_core::ErrorKind::Precondition,
+                format!(
+                    "no VM is named {name:?} in {}; `microvm names` lists what it holds, and \
+                     nothing was deleted",
+                    registry.describe()
+                ),
+            )
+            .into());
+        }
+    }
+    let mut deleted = Vec::new();
+    for name in &args.delete {
+        if registry.delete(name)? {
+            deleted.push(name.clone());
+        }
+    }
+    let records = registry.list()?;
+
+    let mut data = Map::new();
+    data.insert(
+        "names".into(),
+        Value::Array(
+            records
+                .iter()
+                .map(ledger::NameRecord::redacted_json)
+                .collect(),
+        ),
+    );
+    data.insert("deleted".into(), json!(deleted));
+    let (kind, _) = response_type("names");
+
+    let line_of = |record: &ledger::NameRecord, separator: &str| {
+        [
+            record.name.as_str(),
+            &record.microvm_id,
+            &record.region,
+            &record.endpoint,
+        ]
+        .join(separator)
+    };
+    let mut text: Vec<String> = deleted
+        .iter()
+        .map(|name| format!("deleted {name}"))
+        .collect();
+    if records.is_empty() {
+        text.push(format!("no names registered in {}", registry.describe()));
+    }
+    text.extend(records.iter().map(|record| line_of(record, "  ")));
+    let dense: Vec<String> = deleted
+        .iter()
+        .map(|name| format!("deleted\t{name}"))
+        .chain(records.iter().map(|record| line_of(record, "\t")))
+        .collect();
+    Ok(Rendered::ok(kind, data, text.join("\n"), dense.join("\n")))
 }
 
 /// A JSON array of strings as a comma-separated list.

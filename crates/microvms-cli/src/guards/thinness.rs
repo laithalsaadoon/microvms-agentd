@@ -390,7 +390,7 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
 ///
 /// Listed with a reason rather than skipped by a naming rule, so a *new* AWS-touching command is
 /// covered by the guard by default and can only leave the net by someone writing its name here.
-const LOCAL_ONLY: [(&str, &str); 7] = [
+const LOCAL_ONLY: [(&str, &str); 8] = [
     (
         "ls",
         "reads the local ledger; the whole point is that AWS cannot attribute a dead run",
@@ -399,6 +399,11 @@ const LOCAL_ONLY: [(&str, &str); 7] = [
         "history",
         "reads the local per-VM history; the record's value is that it survives the VM, and \
          no GetMicrovm can answer about an id the platform has already forgotten",
+    ),
+    (
+        "names",
+        "reads and deletes this machine's name registry, one local file per name; a name \
+         is a pointer the CLI keeps, and the account knows nothing of it",
     ),
     (
         "logs",
