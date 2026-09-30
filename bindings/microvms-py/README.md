@@ -132,6 +132,7 @@ For a `Sandbox` named `vm` and its `session`:
 | Need | API |
 | --- | --- |
 | Start a task and poll or stream later | `session.run(argv)` → `ExecHandle` |
+| Read stdout and stderr as separate bytes | `session.spawn(argv)` → `ExecProcess` |
 | Wait for and release saved output | `handle.wait_and_ack(timeout=60)` |
 | Keep the VM awake while an exec runs | `with session.keep_awake(while_busy=True): ...` |
 | Upload input or download results | `session.upload_file(path, bytes)`, `session.download_file(path)` |
