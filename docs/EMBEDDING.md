@@ -108,8 +108,11 @@ reached for one, the release's `SHA256SUMS`, so it needs neither `gh` nor `curl`
 that cannot be verified raises `PreconditionError` rather than warning. Every binary it
 returns, including one you supplied, is checked for an aarch64 ELF header
 first, because a wrong-architecture daemon fails 45 minutes later as a run-hook
-timeout. A cache entry is served only while it still matches the digest
-recorded when it was verified.
+timeout. The build calls check the bytes they're handed the same way before any
+upload, so `build_artifact`, `build_image` and `ensure_image` raise
+`PreconditionError` for a daemon that didn't come from here and isn't aarch64. A
+cache entry is served only while it still matches the digest recorded when it
+was verified.
 
 The worked example is
 [`examples/coding-agents-on-bedrock/Dockerfile`](../examples/coding-agents-on-bedrock/Dockerfile):

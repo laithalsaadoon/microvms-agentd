@@ -43,7 +43,7 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | BIND-17 | 1 | 1 | 1 | 2 | 4 | 1 |
 | BIND-18 | 1 | 1 | 1 | 4 | 3 | 1 |
 | BIND-19 | 1 | 1 | 1 | 2 | 1 | 1 |
-| BIND-20 | 1 | 1 | 1 | 2 | 3 | 1 |
+| BIND-20 | 1 | 1 | 1 | 6 | 4 | 1 |
 | BIND-21 | waived | waived | waived | 1 | 1 | 1 |
 | BIND-22 | waived | waived | 1 | 1 | 1 | waived |
 | CLI-1 | waived | waived | waived | 1 | 2 | waived |
@@ -482,8 +482,8 @@ If a caller-supplied or fetched agentd binary is not an aarch64 ELF executable, 
 - **model:** `crates/model/src/provision.rs`
 - **gherkin:** `crates/microvms-core/tests/features/provision.feature`
 - **fuzz:** `crates/microvms-edges/src/provision_fuzz.rs`
-- **test:** `bindings/microvms-js/__test__/provision.mjs`, `crates/microvms-edges/src/provision.rs`
-- **impl:** `bindings/microvms-js/src/provision.rs`, `bindings/microvms-py/src/provision.rs`, `crates/microvms-edges/src/provision.rs`
+- **test:** `bindings/microvms-js/__test__/image_daemon.mjs`, `bindings/microvms-js/__test__/provision.mjs`, `crates/microvms-app/src/control/artifact.rs`, `crates/microvms-app/src/control/image.rs`, `crates/microvms-cli/src/guards/build.rs`, `crates/microvms-edges/src/provision.rs`
+- **impl:** `bindings/microvms-js/src/provision.rs`, `bindings/microvms-py/src/provision.rs`, `crates/microvms-domain/src/provision.rs`, `crates/microvms-edges/src/provision.rs`
 - **live:** `conformance/lanes/quickstart.py`
 
 ## BIND-21

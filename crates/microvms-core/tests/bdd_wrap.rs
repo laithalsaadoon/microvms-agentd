@@ -61,7 +61,7 @@ fn preflight(dockerfile: &str, base: BaseImage) -> Result<(), Error> {
     );
     let mut request = CreateImageRequest::new(
         "bdd-wrap",
-        b"\x7fELF".to_vec(),
+        microvms_app::testing::aarch64_daemon(b""),
         "s3://bucket/key.zip",
         "arn:aws:iam::123456789012:role/build",
     );
