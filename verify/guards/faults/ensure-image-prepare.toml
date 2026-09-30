@@ -1,0 +1,34 @@
+# ── ensure_image's artifact, prepared off the caller's worker (#309) ──────────
+
+# `prepare` called inline again: on a current-thread runtime no other task runs while the
+# artifact is hashed and zipped, so the other task's timer is still unfired at the lookup.
+[[fault]]
+id = "app-ensure-image-prepares-inline"
+guard = "control::ensure::tests::the_artifact_is_prepared_while_the_callers_other_tasks_run"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::ensure::tests::the_artifact_is_prepared_while_the_callers_other_tasks_run"]
+expect = "test-failed"
+suite = "rust"
+message = "the other task's timer fires while the artifact is prepared, not after"
+note = "crates/microvms-app/src/control/ensure.rs::the_artifact_is_prepared_while_the_callers_other_tasks_run"
+transform = { file = "crates/microvms-app/src/sandbox.rs", replace = "            tokio::task::spawn_blocking(move || crate::control::ensure::prepare(&control, request))\n", with = "            std::future::ready(Ok::<_, tokio::task::JoinError>(crate::control::ensure::prepare(&control, request)))\n" }
+
+# The live race's stall check, through the self-test's gapped reports: a check that stops
+# reading the probe passes a stalled race, and one that reads an absent stall as zero passes a
+# report the probe never wrote.
+[[fault]]
+id = "conformance-ensure-race-stall-unread"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/ensure_image.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  each ensure-image check fails on the one gap it is about"
+transform = { file = "conformance/lanes/ensure_image.py", replace = "        type(stall) is int and stall < STALL_LIMIT_MS,\n", with = "        True,\n" }
+
+[[fault]]
+id = "conformance-ensure-race-stall-absent"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/ensure_image.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  each ensure-image check fails on the one gap it is about"
+transform = { file = "conformance/lanes/ensure_image.py", replace = "        type(stall) is int and stall < STALL_LIMIT_MS,\n", with = "        (stall or 0) < STALL_LIMIT_MS,\n" }
