@@ -51,28 +51,6 @@ env:
 # with no Node runtime at all, and `Swatinem/rust-cache@v2` is already Node 24.
 
 jobs:
-  background-example:
-    name: background coding example
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # No Rust toolchain: the example installs the published microvms wheel.
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          version: "0.12.13" # mise.toml's uv; ci:parity compares them
-          enable-cache: false
-      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
-        with:
-          terraform_wrapper: false
-      - name: Check example
-        run: |
-          uvx ruff@0.15.22 check examples/background-coding-agent
-          uvx ruff@0.15.22 format --check examples/background-coding-agent
-          terraform -chdir=examples/background-coding-agent/infra fmt -check
-          terraform -chdir=examples/background-coding-agent/infra init -backend=false
-          terraform -chdir=examples/background-coding-agent/infra validate
-          uv run --project examples/background-coding-agent --frozen pytest examples/background-coding-agent/tests
-
   rust:
     name: lint, model, and test tiers (${{ matrix.os }})
     # The daemon ships to Linux only (a MicroVM guest), but the CLI, the library,
@@ -212,6 +190,26 @@ jobs:
       - name: every publishable crate can actually publish
         if: matrix.os == 'ubuntu-latest'
         run: ./scripts/check-publishable.py --dry-run
+
+      # The background coding example's lint, Terraform validation and tests, with the uv the
+      # setup-uv step above installs. A job of its own held one of the account's concurrent job
+      # slots on every run for under a minute of work; on this leg, which isn't a pull request's
+      # slowest, it costs that minute and no slot. It builds nothing from this tree: the example
+      # installs the published microvms wheel. Last, so a failure here can't hide one in the
+      # Rust tiers. `mise run background:check` is the local form.
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          terraform_wrapper: false
+      - name: background coding example
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          uvx ruff@0.15.22 check examples/background-coding-agent
+          uvx ruff@0.15.22 format --check examples/background-coding-agent
+          terraform -chdir=examples/background-coding-agent/infra fmt -check
+          terraform -chdir=examples/background-coding-agent/infra init -backend=false
+          terraform -chdir=examples/background-coding-agent/infra validate
+          uv run --project examples/background-coding-agent --frozen pytest examples/background-coding-agent/tests
 
   security:
     name: semgrep, secret history, licenses, workflow lint
