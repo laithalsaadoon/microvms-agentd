@@ -501,6 +501,7 @@ async fn handle<O: std::io::Write, E: std::io::Write>(
         Command::Ls(args) if args.watch => commands::local::watch(ctx, args, interrupt).await,
         Command::Ls(args) => commands::local::ls(ctx, args).await,
         Command::History(args) => commands::local::history(ctx, args),
+        Command::Names(args) => commands::local::names(ctx, args),
         Command::Logs(args) => commands::local::logs(ctx, args),
         Command::Cost(args) => commands::cost::cost(ctx, args),
         Command::Doctor(args) => commands::doctor::doctor(ctx, args).await,

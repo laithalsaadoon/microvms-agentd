@@ -56,6 +56,45 @@ pub struct FileReadQuery {
     pub end_line: Option<u64>,
 }
 
+impl FileReadQuery {
+    /// The requested window as `(start_line, end_line)`, `None` when no range was asked for,
+    /// or why no file could satisfy it.
+    ///
+    /// The one statement of the range rule, read by the daemon before it opens the file and by
+    /// the client before it sends the request, so a range the daemon would refuse costs the
+    /// client no call and the two can't disagree on it or on its wording. `None` must stay
+    /// distinguishable from a range that covers the whole file: with no range the daemon
+    /// answers the un-sliced stream it always has, byte for byte.
+    ///
+    /// `start_line` absent is 1 and `end_line` absent is through EOF, the harness contract's
+    /// defaults. Refused: a `start_line` of 0, since lines are 1-based, and an `end_line` before
+    /// `start_line`. An `end_line` past the last line is not refused; it reads through EOF.
+    pub fn line_window(&self) -> Result<Option<(u64, Option<u64>)>, String> {
+        if self.start_line.is_none() && self.end_line.is_none() {
+            return Ok(None);
+        }
+        let start = self.start_line.unwrap_or(1);
+        if start == 0 {
+            return Err(
+                "start_line is 1-based, so 0 is not a line. Line 1 is the first line; a caller \
+                 working from 0-based offsets wants start_line=1."
+                    .to_string(),
+            );
+        }
+        if let Some(end) = self.end_line
+            && end < start
+        {
+            return Err(format!(
+                "end_line {end} is before start_line {start}. Both bounds are 1-based and \
+                 inclusive, so end_line must be at least start_line. An end_line past the last \
+                 line is fine and reads through EOF; this refusal is for an inverted range, \
+                 which no file can satisfy."
+            ));
+        }
+        Ok(Some((start, self.end_line)))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,5 +127,49 @@ mod tests {
                 .expect("deserializes");
         assert_eq!(ranged.start_line, Some(3));
         assert_eq!(ranged.end_line, Some(9));
+    }
+
+    fn window(
+        start_line: Option<u64>,
+        end_line: Option<u64>,
+    ) -> Result<Option<(u64, Option<u64>)>, String> {
+        FileReadQuery {
+            path: "/tmp/f".into(),
+            start_line,
+            end_line,
+        }
+        .line_window()
+    }
+
+    /// No range is `None`, a one-sided range takes the contract's default for the other side,
+    /// and an `end_line` past any file is still a window.
+    #[test]
+    fn a_line_window_defaults_each_absent_bound() {
+        assert_eq!(window(None, None), Ok(None));
+        assert_eq!(window(Some(4), None), Ok(Some((4, None))));
+        assert_eq!(window(None, Some(2)), Ok(Some((1, Some(2)))));
+        assert_eq!(window(Some(2), Some(4)), Ok(Some((2, Some(4)))));
+        assert_eq!(window(Some(3), Some(3)), Ok(Some((3, Some(3)))));
+        assert_eq!(
+            window(Some(1), Some(u64::MAX)),
+            Ok(Some((1, Some(u64::MAX))))
+        );
+    }
+
+    /// Line 0 and an inverted range are refused, each naming the bound that's wrong.
+    #[test]
+    fn a_line_window_refuses_line_zero_and_an_inverted_range() {
+        let zero = window(Some(0), Some(4)).expect_err("line 0");
+        assert!(zero.contains("start_line is 1-based"), "{zero}");
+        let inverted = window(Some(5), Some(2)).expect_err("inverted");
+        assert!(
+            inverted.contains("end_line 2 is before start_line 5"),
+            "{inverted}"
+        );
+        let implied = window(None, Some(0)).expect_err("end before the default start");
+        assert!(
+            implied.contains("end_line 0 is before start_line 1"),
+            "{implied}"
+        );
     }
 }

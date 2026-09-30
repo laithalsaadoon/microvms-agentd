@@ -223,10 +223,10 @@ ts = "Session.downloadFile"
 
 [[capability]]
 id = "download-file-range"
-core = { exempt = "the daemon serves start_line and end_line; no client asks for them", issue = "#265" }
-cli = { exempt = "no client asks for a line range", issue = "#265" }
-py = { exempt = "no client asks for a line range", issue = "#265" }
-ts = { exempt = "no client asks for a line range", issue = "#265" }
+core = "microvms_core::session::Session::download_file_lines"
+cli = "cp --lines"
+py = "Session.download_file"
+ts = "Session.downloadFile"
 
 [[capability]]
 id = "file-exists"
@@ -636,7 +636,7 @@ ts = ["NameRegistry.register", "NameRegistry.get", "NameRegistry.put"]
 [[capability]]
 id = "list-and-delete-names"
 core = "microvms_core::names::NameStore"
-cli = { exempt = "names are only released at terminate", issue = "#267" }
+cli = ["names", "names --delete"]
 py = ["NameRegistry.list", "NameRegistry.delete"]
 ts = ["NameRegistry.list", "NameRegistry.delete"]
 

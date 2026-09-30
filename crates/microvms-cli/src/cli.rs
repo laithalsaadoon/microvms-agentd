@@ -308,6 +308,14 @@ pub enum Command {
     /// between execs.
     History(HistoryArgs),
 
+    /// List the names this machine's registry holds, or delete one whose VM is gone.
+    ///
+    /// A local read of the registry `run --keep --vm-name` writes, one file per name under
+    /// the state directory. The listing leaves out each record's agent token and identity
+    /// seed. A name is released when a terminate of its VM is accepted; `--delete` clears one
+    /// whose VM ended some other way, which would otherwise refuse the name's reuse.
+    Names(NamesArgs),
+
     /// Name an image's build log group and print the `aws logs tail` command that reads it.
     ///
     /// The group is `/aws/lambda-microvms/<image-name>`, derived from the name rather than
@@ -1620,6 +1628,16 @@ pub struct CpArgs {
     #[arg(long, value_name = "OCTAL", conflicts_with = "tar")]
     pub mode: Option<String>,
 
+    /// Read only lines START through END of a file in the VM, 1-based and inclusive.
+    ///
+    /// Either side may be empty: `--lines 40:` reads from line 40 through EOF, and `--lines
+    /// :20` reads the first twenty. The daemon slices the file, so a window of a large log
+    /// costs the window rather than the file, and an END past the last line reads through EOF.
+    /// Line 0 and an END before START are refused before any request. Only for reading one
+    /// file: a tar is a tree, and an upload writes the whole local file.
+    #[arg(long, value_name = "START:END", value_parser = parse_line_range, conflicts_with_all = ["tar", "mode"])]
+    pub lines: Option<LineRange>,
+
     #[command(flatten)]
     pub attach: AttachFlags,
 
@@ -1890,6 +1908,18 @@ pub struct HistoryArgs {
     pub microvm_id: String,
 
     /// Where the histories live. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs.
+    #[arg(long)]
+    pub state_dir: Option<PathBuf>,
+}
+
+#[derive(Args, Debug)]
+pub struct NamesArgs {
+    /// Delete this name's record first; repeat for more. A name the registry doesn't hold is
+    /// refused, and then nothing is deleted.
+    #[arg(long = "delete", value_name = "NAME")]
+    pub delete: Vec<String>,
+
+    /// Where the registry lives. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs.
     #[arg(long)]
     pub state_dir: Option<PathBuf>,
 }
@@ -2243,6 +2273,39 @@ pub struct AgentPromptArgs {
 /// `NameOrId` implements `From<String>`, and clap's `value_parser!` prefers that over
 /// `FromStr`, so `--user 1000` parsed as the *name* "1000" and went out as a string, which a
 /// daemon that predates names refuses as malformed (AGENTD-16).
+/// A `cp --lines` window: each bound as given, `None` where the side was left empty.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LineRange {
+    pub start: Option<u64>,
+    pub end: Option<u64>,
+}
+
+/// `START:END`, with either side empty.
+///
+/// Only the syntax is checked here. Whether the window is one a file could have (not line 0,
+/// not an END before START) is core's rule, the daemon's own (`FileReadQuery::line_window`),
+/// and `download_file_lines` applies it before any request.
+fn parse_line_range(raw: &str) -> Result<LineRange, String> {
+    let Some((start, end)) = raw.split_once(':') else {
+        return Err(format!(
+            "no `:` in {raw:?}: --lines takes START:END, and either side may be empty \
+             (`40:` reads from line 40 on, `:20` reads the first twenty)"
+        ));
+    };
+    let bound = |side: &str, name: &str| -> Result<Option<u64>, String> {
+        if side.is_empty() {
+            return Ok(None);
+        }
+        side.parse()
+            .map(Some)
+            .map_err(|_| format!("{name} {side:?} in --lines {raw:?} is not a line number"))
+    };
+    Ok(LineRange {
+        start: bound(start, "START")?,
+        end: bound(end, "END")?,
+    })
+}
+
 fn parse_name_or_id(
     raw: &str,
 ) -> Result<microvms_core::protocol::exec::NameOrId, std::convert::Infallible> {
@@ -2530,14 +2593,14 @@ mod tests {
         assert!(big.contains("65535"), "{big}");
     }
 
-    /// Twenty-nine subcommands, named as the manifest and the response table name them.
+    /// The subcommands, named as the manifest and the response table name them.
     ///
     /// The block after `exec` is the attached one — `health`, `keepalive`, `ack`, `kill`, `ps`, `stdin`, `cp`,
     /// `tunnel`, `port-forward`, and `shell` beside it — and their position is asserted rather than incidental,
     /// because `--help`'s reading order is the only documentation of which commands need the
     /// identifier triple (`shell` sits with them because it addresses a running VM, though its
-    /// credential is the minted shell token rather than the agent token). `history` sits beside
-    /// `ls` because both are local reads of this machine's own state directory.
+    /// credential is the minted shell token rather than the agent token). `history` and `names`
+    /// sit beside `ls` because all three are local reads of this machine's own state directory.
     #[test]
     fn the_tree_registers_the_lifecycle_commands_the_attached_block_and_the_local_ones() {
         let registered: Vec<String> = Cli::command()
@@ -2570,6 +2633,7 @@ mod tests {
                 "terminate",
                 "ls",
                 "history",
+                "names",
                 "logs",
                 "cost",
                 "doctor",
@@ -3326,6 +3390,22 @@ mod tests {
         assert_eq!(run.egress_network_connectors, ["arn:first", "arn:second"]);
         assert!(Cli::try_parse_from(args.into_iter().chain(["--egress"])).is_err());
         assert!(Cli::try_parse_from(args.into_iter().chain(["--deny-egress"])).is_ok());
+    }
+
+    /// `--lines` takes `START:END` with either side empty, and nothing else. Only the syntax is
+    /// the parser's: line 0 and an inverted window parse, and core refuses them.
+    #[test]
+    fn a_line_range_is_start_colon_end_with_either_side_empty() {
+        let range = |start, end| LineRange { start, end };
+        assert_eq!(parse_line_range("3:5"), Ok(range(Some(3), Some(5))));
+        assert_eq!(parse_line_range("40:"), Ok(range(Some(40), None)));
+        assert_eq!(parse_line_range(":20"), Ok(range(None, Some(20))));
+        assert_eq!(parse_line_range(":"), Ok(range(None, None)));
+        assert_eq!(parse_line_range("0:1"), Ok(range(Some(0), Some(1))));
+        assert_eq!(parse_line_range("9:2"), Ok(range(Some(9), Some(2))));
+        for refused in ["3", "a:5", "3:b", "-1:2", "1:2:3", "1.5:2"] {
+            assert!(parse_line_range(refused).is_err(), "{refused} parsed");
+        }
     }
 
     /// The `Duration` a seconds flag parsed to, read off the parsed command by flag name.

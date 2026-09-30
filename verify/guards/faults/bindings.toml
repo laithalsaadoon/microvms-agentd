@@ -10,7 +10,8 @@ run = [
 expect = "test-failed"
 suite = "bindings"
 note = "bindings/microvms-py/tests/test_smoke.py::test_an_unpriced_line_omits_the_usd_key_entirely"
-transform = { file = "bindings/microvms-py/src/cost.rs", replace = "        (None, Some(reason)) => amount.set_item(\"reason\", reason)?,\n", with = "        (None, Some(reason)) => {\n            amount.set_item(\"usd\", py.None())?;\n            amount.set_item(\"reason\", reason)?\n        }\n" }
+# The dict is core's JSON since #255, so the seeded null is core's, seen through the binding.
+transform = { file = "crates/microvms-domain/src/cost.rs", replace = "                \"kind\": \"unpriced\",\n                \"reason\": reason,\n", with = "                \"kind\": \"unpriced\",\n                \"usd\": null,\n                \"reason\": reason,\n" }
 
 [[fault]]
 id = "py-stub-stale"
@@ -139,8 +140,7 @@ note = "bindings/microvms-js/__test__/process.mjs::a stderr reader gets the driv
 transform = { file = "crates/microvms-app/src/session/split.rs", replace = "    let _ = tokio::join!(out_tx.send(Err(error)), err_tx.send(Err(copy)));\n", with = "    let _ = out_tx.send(Err(error)).await;\n    let _ = err_tx.send(Err(copy)).await;\n" }
 
 # The shared case corpus's binding runners (#272). The two wrap entries are core's regression
-# seen through each binding; the label entries fix a #255 drift without removing its marker;
-# the rest are each runner's floor and handler rule.
+# seen through each binding; the rest are each runner's floor and handler rule.
 
 [[fault]]
 id = "parity-py-wrap-newline"
@@ -165,42 +165,6 @@ expect = "test-failed"
 suite = "bindings"
 message = "pip install pytestCOPY agentd"
 transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = "    wrapped.push_str(task);\n    if !task.ends_with('\\n') {\n        wrapped.push('\\n');\n    }\n", with = "    wrapped.push_str(task);\n" }
-
-[[fault]]
-id = "parity-py-cost-marker-removed"
-guard = "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[cost/estimate-suspended-only]"
-run = [
-  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
-  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[cost/estimate-suspended-only]"],
-]
-expect = "test-failed"
-suite = "bindings"
-message = "\"label\": \"plan\""
-transform = { file = "verify/parity/cases/cost/estimate-suspended-only.json", replace = "  \"known_drift\": {\n    \"py\": {\n      \"issue\": \"#255\",\n      \"keys\": [\n        \"label\",\n        \"size.headroomMib\",\n        \"items\",\n        \"total\"\n      ]\n    },\n    \"ts\"", with = "  \"known_drift\": {\n    \"ts\"" }
-
-[[fault]]
-id = "parity-py-label-now-agrees"
-guard = "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[cost/estimate-suspended-only]"
-run = [
-  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
-  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[cost/estimate-suspended-only]"],
-]
-expect = "test-failed"
-suite = "bindings"
-message = "py now agrees at label; remove known_drift"
-transform = { file = "bindings/microvms-py/src/cost.rs", replace = "    label=\"plan\",\n", with = "    label=\"estimate\",\n" }
-
-[[fault]]
-id = "parity-ts-label-now-agrees"
-guard = "cost/estimate-suspended-only"
-run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
-  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
-]
-expect = "test-failed"
-suite = "bindings"
-message = "ts now agrees at label; remove known_drift"
-transform = { file = "bindings/microvms-js/src/cost.rs", replace = "options.label.unwrap_or_else(|| \"plan\".to_string()),", with = "options.label.unwrap_or_else(|| \"estimate\".to_string())," }
 
 [[fault]]
 id = "parity-py-empty-corpus"
@@ -460,3 +424,54 @@ expect = "test-failed"
 suite = "bindings"
 message = "credit on the report"
 transform = { file = "bindings/microvms-js/src/exec.rs", replace = "    microvms_core::duration::of_secs_f64(value).map_err(js_async)\n", with = "    microvms_core::cost::duration_of_secs_f64(value).map_err(js_async)\n" }
+
+# The cost report's defaults are core's (#255): each entry puts a binding's old default back, and
+# the corpus case that holds it goes red. There's no marker left to agree with.
+
+[[fault]]
+id = "parity-py-estimate-label-plan"
+guard = "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[cost/estimate-with-running-time]"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[cost/estimate-with-running-time]"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "\"label\": \"plan\""
+transform = { file = "bindings/microvms-py/src/cost.rs", replace = "        label.unwrap_or(cost::DEFAULT_ESTIMATE_LABEL),\n", with = "        label.unwrap_or(\"plan\"),\n" }
+
+[[fault]]
+id = "parity-ts-estimate-label-plan"
+guard = "cost/estimate-with-running-time"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "\"label\":\"plan\""
+transform = { file = "bindings/microvms-js/src/cost.rs", replace = "                .unwrap_or(cost::DEFAULT_ESTIMATE_LABEL),\n", with = "                .unwrap_or(\"plan\"),\n" }
+
+[[fault]]
+id = "parity-py-estimate-launched-true"
+guard = "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[cost/estimate-suspended-only]"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[cost/estimate-suspended-only]"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "\"phase\": \"launch\""
+transform = { file = "bindings/microvms-py/src/cost.rs", replace = "    plan.launched = launched.unwrap_or_else(|| plan.infer_launched());\n", with = "    plan.launched = launched.unwrap_or(true);\n" }
+
+[[fault]]
+id = "parity-ts-estimate-launched-true"
+guard = "cost/estimate-suspended-only"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "\"phase\":\"launch\""
+transform = { file = "bindings/microvms-js/src/cost.rs", replace = "    plan.launched = options.launched.unwrap_or_else(|| plan.infer_launched());\n", with = "    plan.launched = options.launched.unwrap_or(true);\n" }

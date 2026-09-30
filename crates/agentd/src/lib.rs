@@ -49,6 +49,8 @@ pub mod schema;
 pub mod serve;
 pub mod state;
 pub mod tunnel;
+#[cfg(test)]
+mod tunnel_fuzz;
 pub mod tunnel_identity;
 
 pub use config::Config;

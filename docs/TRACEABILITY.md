@@ -22,11 +22,11 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | AGENTD-14 | 1 | 1 | 1 | 4 | 3 | 1 |
 | AGENTD-15 | 1 | 1 | 1 | 2 | 2 | 1 |
 | AGENTD-16 | 1 | 1 | 1 | 4 | 4 | 1 |
-| AGENTD-17 | 1 | waived | waived | 2 | 1 | waived |
+| AGENTD-17 | 1 | waived | 1 | 2 | 1 | waived |
 | AGENTD-18 | 1 | waived | waived | 1 | 1 | 1 |
 | AGENTD-19 | 1 | waived | waived | 1 | 1 | waived |
-| AGENTD-20 | 1 | waived | waived | 2 | 1 | waived |
-| AGENTD-21 | 1 | waived | waived | 1 | 1 | waived |
+| AGENTD-20 | 1 | waived | 1 | 2 | 1 | waived |
+| AGENTD-21 | 1 | waived | 1 | 1 | 1 | waived |
 | ARCH-1 | waived | waived | waived | 1 | 2 | waived |
 | ARCH-2 | waived | waived | waived | 1 | 4 | waived |
 | ARCH-3 | waived | waived | waived | 1 | 1 | waived |
@@ -53,10 +53,10 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | BIND-18 | 1 | 1 | 1 | 4 | 3 | 1 |
 | BIND-19 | 1 | 1 | 1 | 2 | 1 | 1 |
 | BIND-20 | 1 | 1 | 1 | 6 | 4 | 1 |
-| BIND-21 | 1 | waived | waived | 1 | 1 | 1 |
+| BIND-21 | 1 | waived | 1 | 1 | 1 | 1 |
 | BIND-22 | waived | waived | 1 | 1 | 1 | waived |
-| BIND-23 | 1 | waived | waived | 1 | 1 | 1 |
-| BIND-24 | 1 | waived | waived | 1 | 1 | waived |
+| BIND-23 | 1 | waived | 1 | 1 | 1 | 1 |
+| BIND-24 | 1 | waived | 1 | 1 | 1 | waived |
 | CLI-1 | waived | waived | waived | 1 | 2 | waived |
 | CLI-2 | waived | waived | waived | 1 | 5 | waived |
 | CLI-3 | waived | waived | waived | 2 | 1 | 2 |
@@ -66,6 +66,16 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | CLI-7 | 1 | 1 | 1 | 3 | 8 | 1 |
 | CLI-8 | 1 | 1 | 1 | 2 | 3 | 1 |
 | CLI-9 | 1 | 1 | 1 | 2 | 3 | 1 |
+| COST-1 | waived | waived | waived | 1 | 3 | 1 |
+| COST-2 | waived | waived | waived | 2 | 3 | waived |
+| COST-3 | waived | waived | waived | 1 | 3 | 1 |
+| COST-4 | waived | waived | waived | 3 | 5 | 1 |
+| COST-5 | waived | waived | waived | 3 | 2 | waived |
+| COST-6 | waived | waived | waived | 1 | 1 | waived |
+| COST-7 | waived | waived | waived | 1 | 1 | waived |
+| COST-8 | waived | waived | waived | 1 | 1 | waived |
+| COST-9 | waived | waived | waived | 3 | 4 | waived |
+| COST-10 | waived | waived | waived | 4 | 3 | 1 |
 | IMAGE-1 | 1 | 1 | 1 | 1 | 1 | waived |
 | IMAGE-2 | 1 | 1 | 1 | 1 | 2 | 1 |
 | IMAGE-3 | 1 | 1 | 1 | 1 | 2 | waived |
@@ -274,7 +284,7 @@ If the handshake of an identity-verified tunnel is not made with the host key th
 
 - **model:** `crates/model/src/tunnel.rs`
 - **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
-- **fuzz:** waived: #297 adds a harness over the daemon's tunnel frame read
+- **fuzz:** `crates/agentd/src/tunnel_fuzz.rs`
 - **test:** `crates/agentd/src/tunnel_identity.rs`, `crates/agentd/tests/tunnel_relay.rs`
 - **impl:** `crates/agentd/src/tunnel_identity.rs`
 - **live:** waived: no live check presents another host key: that needs a second host identity for one VM, and the relay tests drive the daemon's real route with one
@@ -285,7 +295,7 @@ While the handshake of an identity-verified tunnel has not completed, the agentd
 
 - **model:** `crates/model/src/tunnel.rs`
 - **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
-- **fuzz:** waived: #297 adds a harness over the daemon's tunnel frame read
+- **fuzz:** waived: when the daemon dials is an order of steps, not a function of bytes; the tunnel model checks it over every interleaving and the relay tests against the daemon's real route
 - **test:** `crates/agentd/tests/tunnel_relay.rs`
 - **impl:** `crates/agentd/src/tunnel.rs`
 - **live:** `conformance/lanes/tunnel.py`
@@ -296,7 +306,7 @@ When the guest side of an identity-verified tunnel reaches the end of the guest 
 
 - **model:** `crates/model/src/tunnel.rs`
 - **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
-- **fuzz:** waived: #297 adds a harness over the daemon's tunnel frame read
+- **fuzz:** waived: what the daemon sends at a guest EOF doesn't depend on any byte it read; the tunnel model checks that the end precedes the close, and the client's frame harness that it opens only after every chunk
 - **test:** `crates/agentd/tests/tunnel_relay.rs`
 - **impl:** `crates/agentd/src/tunnel.rs`
 - **live:** waived: the live suite's BIND-23 check observes it: the client reads Closed through the real proxy only when this end of stream crossed it
@@ -307,7 +317,7 @@ If an identity-verified tunnel whose caller offered the end of stream ends witho
 
 - **model:** `crates/model/src/tunnel.rs`
 - **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
-- **fuzz:** waived: #297 adds a harness over the daemon's tunnel frame read
+- **fuzz:** `crates/agentd/src/tunnel_fuzz.rs`
 - **test:** `crates/agentd/tests/tunnel_relay.rs`, `crates/microvms-edges/tests/tunnel_end_of_stream.rs`
 - **impl:** `crates/agentd/src/tunnel.rs`
 - **live:** waived: a live run can't cut the endpoint proxy's connection mid-stream or withhold one frame, so no live check presents a caller end without its end of stream; the relay tests drive the daemon's real route
@@ -318,7 +328,7 @@ If a frame of an identity-verified tunnel does not authenticate at the frame's p
 
 - **model:** `crates/model/src/tunnel.rs`
 - **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
-- **fuzz:** waived: #297 adds a harness over the daemon's tunnel frame read
+- **fuzz:** `crates/agentd/src/tunnel_fuzz.rs`
 - **test:** `crates/agentd/tests/tunnel_relay.rs`
 - **impl:** `crates/agentd/src/tunnel.rs`
 - **live:** waived: a live daemon and the endpoint proxy neither replay nor forge a frame, so a live run can't present one; the relay tests send both to the daemon's real route
@@ -615,7 +625,7 @@ If the far end of an identity-verified tunnel does not complete the handshake ag
 
 - **model:** `crates/model/src/tunnel.rs`
 - **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
-- **fuzz:** waived: #297 adds a harness over the client's tunnel frame read
+- **fuzz:** `crates/microvms-edges/src/session/tunnel_fuzz.rs`
 - **test:** `crates/microvms-core/tests/tunnel_end_to_end.rs`
 - **impl:** `crates/microvms-edges/src/session/tunnel.rs`
 - **live:** `conformance/lanes/tunnel.py`
@@ -637,7 +647,7 @@ If the far end of an identity-verified tunnel whose daemon offered the end of st
 
 - **model:** `crates/model/src/tunnel.rs`
 - **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
-- **fuzz:** waived: #297 adds a harness over the client's tunnel frame read
+- **fuzz:** `crates/microvms-edges/src/session/tunnel_fuzz.rs`
 - **test:** `crates/microvms-edges/tests/tunnel_end_of_stream.rs`
 - **impl:** `crates/microvms-edges/src/session/tunnel.rs`
 - **live:** `conformance/lanes/tunnel.py`
@@ -648,7 +658,7 @@ If a frame of an identity-verified tunnel does not authenticate at the frame's p
 
 - **model:** `crates/model/src/tunnel.rs`
 - **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
-- **fuzz:** waived: #297 adds a harness over the client's tunnel frame read
+- **fuzz:** `crates/microvms-edges/src/session/tunnel_fuzz.rs`
 - **test:** `crates/microvms-edges/tests/tunnel_end_of_stream.rs`
 - **impl:** `crates/microvms-edges/src/session/tunnel.rs`
 - **live:** waived: a live daemon and the endpoint proxy neither replay nor forge a frame, so a live run can't present one; the stand-in tests send both to the client's real relay
@@ -751,6 +761,116 @@ If the stdout reader of a streaming command closes, then the CLI crate shall sto
 - **test:** `crates/microvms-cli/src/closed_output_fuzz.rs`, `crates/microvms-cli/src/guards/closed_output.rs`
 - **impl:** `crates/microvms-cli/src/closed_output.rs`, `crates/microvms-cli/src/commands/attached.rs`, `crates/microvms-cli/src/envelope.rs`
 - **live:** `conformance/lanes/closed_output.py`
+
+## COST-1
+
+The cost engine shall carry a provenance label of measured or projected on each duration, with no unlabelled constructor.
+
+- **model:** waived: a rule over values and one pure function of a usage and a pinned rate table, not a state
+- **gherkin:** waived: no behavior to script: a duration has no unlabelled constructor, and the tests build each label
+- **fuzz:** waived: the input is a choice of two labels and a number, which the tests enumerate at the boundaries
+- **test:** `crates/microvms-domain/src/cost.rs`
+- **impl:** `bindings/microvms-js/src/cost.rs`, `bindings/microvms-py/src/cost.rs`, `crates/microvms-domain/src/cost.rs`
+- **live:** `conformance/lanes/lifecycle.py`
+
+## COST-2
+
+The cost engine shall not expose an implicit coercion from an estimated dollar amount to a bare float.
+
+- **model:** waived: a rule over values and one pure function of a usage and a pinned rate table, not a state
+- **gherkin:** waived: no behavior to script: a property of the types' constructors and trait impls, which the compiler holds and a doctest shows failing to compile
+- **fuzz:** waived: there is no input stream; the rule is over the type's impls
+- **test:** `bindings/microvms-py/tests/test_smoke.py`, `crates/microvms-domain/src/cost.rs`
+- **impl:** `bindings/microvms-js/src/cost.rs`, `bindings/microvms-py/src/cost.rs`, `crates/microvms-domain/src/cost.rs`
+- **live:** waived: a coercion that doesn't compile can't show up at runtime; the live suite reads dollar figures only as strings
+
+## COST-3
+
+The cost engine shall represent an unpriced quantity as a distinct Unpriced variant carrying the reason, rather than as zero dollars.
+
+- **model:** waived: a rule over values and one pure function of a usage and a pinned rate table, not a state
+- **gherkin:** waived: no behavior to script: the tests build every unpriced line and assert it carries its reason and no figure
+- **fuzz:** waived: the unpriced lines are a fixed set the tests enumerate, and the COST-4 property test mixes them with priced ones
+- **test:** `crates/microvms-domain/src/cost.rs`
+- **impl:** `bindings/microvms-js/src/cost.rs`, `bindings/microvms-py/src/cost.rs`, `crates/microvms-domain/src/cost.rs`
+- **live:** `conformance/lanes/lifecycle.py`
+
+## COST-4
+
+If an Unpriced amount is summed with an estimated amount, then the cost engine shall produce a lower-bound total that names its unpriced line items rather than a plain sum.
+
+- **model:** waived: a rule over values and one pure function of a usage and a pinned rate table, not a state
+- **gherkin:** waived: no behavior to script: the proptest over every mix of priced and unpriced lines is the specification
+- **fuzz:** waived: the proptest `a_total_is_a_lower_bound_exactly_when_something_is_unpriced` searches that space; a coverage-guided harness would search the same one
+- **test:** `bindings/microvms-py/tests/test_cost.py`, `bindings/microvms-py/tests/test_smoke.py`, `crates/microvms-domain/src/cost.rs`
+- **impl:** `bindings/microvms-js/src/cost.rs`, `bindings/microvms-py/src/cost.rs`, `crates/microvms-cli/src/cli.rs`, `crates/microvms-cli/src/commands/cost.rs`, `crates/microvms-domain/src/cost.rs`
+- **live:** `conformance/lanes/lifecycle.py`
+
+## COST-5
+
+The cost engine shall compute each compute line item from the size class baseline rather than from the peak the guest reports.
+
+- **model:** waived: a rule over values and one pure function of a usage and a pinned rate table, not a state
+- **gherkin:** waived: no behavior to script: the tests price every size class from its baseline and compare with the peak
+- **fuzz:** waived: the size classes are a closed table the tests walk row by row
+- **test:** `bindings/microvms-py/tests/test_cost.py`, `bindings/microvms-py/tests/test_smoke.py`, `crates/microvms-domain/src/cost.rs`
+- **impl:** `crates/microvms-domain/src/cost.rs`, `crates/microvms-domain/src/sizing.rs`
+- **live:** waived: a pure function of the usage and the pinned rate table; it makes no AWS call, and the unit tests cover it
+
+## COST-6
+
+The cost engine shall perform money arithmetic in decimal representation, converting each float exactly once at the boundary.
+
+- **model:** waived: a rule over values and one pure function of a usage and a pinned rate table, not a state
+- **gherkin:** waived: no behavior to script: the float boundaries are two functions the tests call directly
+- **fuzz:** waived: the proptest `compute_figures_are_exactly_the_decimal_reference` drives the whole arithmetic over generated quantities and checks every figure exactly
+- **test:** `crates/microvms-domain/src/cost.rs`
+- **impl:** `crates/microvms-domain/src/cost.rs`
+- **live:** waived: a pure function of the usage and the pinned rate table; it makes no AWS call, and the unit tests cover it
+
+## COST-7
+
+While the pinned rate table is older than the staleness window, the cost engine shall attach a staleness warning to each report computed from the stale table.
+
+- **model:** waived: a rule over values and one pure function of a usage and a pinned rate table, not a state
+- **gherkin:** waived: no behavior to script: staleness is a date comparison the tests make on each side of the window
+- **fuzz:** waived: the proptest `staleness_is_the_ninety_day_verdict_and_carries_the_age` covers every age; the window is one threshold
+- **test:** `crates/microvms-domain/src/cost.rs`
+- **impl:** `crates/microvms-domain/src/cost.rs`
+- **live:** waived: the pinned table's age is today minus a committed date, which a live run can't move; the tests pass `today` in
+
+## COST-8
+
+The cost engine shall apply the one-week minimum retention floor to each snapshot storage line item.
+
+- **model:** waived: a rule over values and one pure function of a usage and a pinned rate table, not a state
+- **gherkin:** waived: no behavior to script: the tests price snapshot storage below, at and above the one-week floor
+- **fuzz:** waived: the proptest `storage_bills_the_greater_of_the_hold_and_the_retention_floor` covers every hold; the floor is one threshold
+- **test:** `crates/microvms-domain/src/cost.rs`
+- **impl:** `crates/microvms-domain/src/cost.rs`
+- **live:** waived: a pure function of the usage and the pinned rate table; it makes no AWS call, and the unit tests cover it
+
+## COST-9
+
+The cost engine shall price compute from the ARM rate only, rejecting a catalog whose ARM line is missing rather than substituting the x86 rate.
+
+- **model:** waived: a rule over values and one pure function of a usage and a pinned rate table, not a state
+- **gherkin:** waived: no behavior to script: the tests parse catalogs with and without the ARM line and assert the refusal
+- **fuzz:** waived: a catalog is a fixed set of named lines, and the tests drop each one the parser needs
+- **test:** `bindings/microvms-py/tests/test_cost.py`, `bindings/microvms-py/tests/test_smoke.py`, `crates/microvms-domain/src/cost.rs`
+- **impl:** `bindings/microvms-js/src/cost.rs`, `bindings/microvms-py/src/cost.rs`, `crates/microvms-domain/src/constants.rs`, `crates/microvms-domain/src/cost.rs`
+- **live:** waived: the rate table is pinned and parsed offline; the Pricing API is never called at runtime
+
+## COST-10
+
+The cost engine shall mark each duration in a plan estimate as projected, so that the resulting report is distinguishable from a measured report.
+
+- **model:** waived: a rule over values and one pure function of a usage and a pinned rate table, not a state
+- **gherkin:** waived: no behavior to script: the tests build a plan and assert every duration on its report is projected
+- **fuzz:** waived: the proptest `every_duration_in_a_plan_is_projected` generates the plans; a coverage-guided harness would search the same space
+- **test:** `bindings/microvms-py/tests/test_cost.py`, `bindings/microvms-py/tests/test_smoke.py`, `crates/microvms-cli/src/commands/cost.rs`, `crates/microvms-domain/src/cost.rs`
+- **impl:** `bindings/microvms-js/src/cost.rs`, `bindings/microvms-py/src/cost.rs`, `crates/microvms-domain/src/cost.rs`
+- **live:** `conformance/lanes/local.py`
 
 ## IMAGE-1
 
@@ -1024,7 +1144,7 @@ The sizing model shall read baseline and peak from the documented five-row table
 - **gherkin:** waived: no behavior to script: the tests read each of the five rows
 - **fuzz:** waived: the table has five rows, which the tests read exhaustively
 - **test:** `crates/microvms-domain/src/sizing.rs`
-- **impl:** `crates/microvms-cli/src/render.rs`, `crates/microvms-core/src/lib.rs`, `crates/microvms-domain/src/sizing.rs`
+- **impl:** `crates/microvms-core/src/lib.rs`, `crates/microvms-domain/src/cost.rs`, `crates/microvms-domain/src/sizing.rs`
 - **live:** `conformance/lanes/local.py`
 
 ## Threats
@@ -1038,7 +1158,7 @@ trace it.
 | A caller holding the agent token but not the host key opens a verified tunnel | AGENTD-17 | `crates/agentd/src/tunnel_identity.rs::only_the_pinned_host_key_completes_a_handshake`, `crates/agentd/tests/tunnel_relay.rs::a_valid_token_with_the_wrong_host_key_is_refused`, `crates/model/src/tunnel.rs::agentd_17_a_token_holder_without_the_host_key_is_refused_before_any_dial` | guarded; under KK no one-sided change turns the pin off, so its seeded fault turns it off in the tunnel model |
 | A verified tunnel's handshake fails, or the VM has no key, and the guest service is reached anyway | AGENTD-18 | `crates/agentd/tests/tunnel_relay.rs::a_refused_caller_never_causes_a_guest_connection`, `crates/agentd/tests/tunnel_relay.rs::identity_against_a_seedless_vm_is_refused_not_downgraded` | guarded |
 | A guest answers a verified tunnel's handshake with a key other than the pinned VM key | BIND-21 | `crates/microvms-core/tests/tunnel_end_to_end.rs::a_wrong_pin_fails_closed_with_a_diagnosis`, `crates/microvms-core/tests/tunnel_end_to_end.rs::a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel` | guarded |
-| A guest or the path replays, reorders or forges tunnel frames after the handshake | AGENTD-21, BIND-24 | `crates/agentd/tests/tunnel_relay.rs::agentd_21_a_replayed_frame_ends_the_tunnel_unrelayed`, `crates/agentd/tests/tunnel_relay.rs::agentd_21_a_forged_frame_ends_the_tunnel_unrelayed`, `crates/microvms-edges/tests/tunnel_end_of_stream.rs::bind_24_a_replayed_frame_fails_the_tunnel_unwritten`, `crates/microvms-edges/tests/tunnel_end_of_stream.rs::bind_24_a_forged_frame_fails_the_tunnel_unwritten`, `crates/model/src/tunnel.rs::bind_24_the_model_finds_a_replay_when_frames_carry_no_position` | guarded; each frame read has no fuzz harness yet (#297) |
+| A guest or the path replays, reorders or forges tunnel frames after the handshake | AGENTD-21, BIND-24 | `crates/agentd/tests/tunnel_relay.rs::agentd_21_a_replayed_frame_ends_the_tunnel_unrelayed`, `crates/agentd/tests/tunnel_relay.rs::agentd_21_a_forged_frame_ends_the_tunnel_unrelayed`, `crates/microvms-edges/tests/tunnel_end_of_stream.rs::bind_24_a_replayed_frame_fails_the_tunnel_unwritten`, `crates/microvms-edges/tests/tunnel_end_of_stream.rs::bind_24_a_forged_frame_fails_the_tunnel_unwritten`, `crates/model/src/tunnel.rs::bind_24_the_model_finds_a_replay_when_frames_carry_no_position`, `crates/agentd/src/tunnel_fuzz.rs::frames_open_in_order_and_the_callers_end_only_after_every_chunk`, `crates/microvms-edges/src/session/tunnel_fuzz.rs::frames_open_in_order_and_the_daemons_end_only_after_every_chunk` | guarded |
 | A guest streams hostile server-sent events to the client | BIND-22 | `crates/microvms-app/src/session/sse.rs::an_unterminated_stream_is_refused_at_the_pending_ceiling`, `crates/microvms-app/src/session/sse.rs::an_unrecognized_or_unparseable_frame_is_dropped_rather_than_raised`, `crates/microvms-app/src/session/sse_fuzz.rs::hostile_stream_bytes_stay_bounded_and_every_event_round_trips` | guarded |
 | A replaced or tampered daemon release asset | BIND-18 | `crates/microvms-edges/src/provision/release.rs::another_signer_identity_is_refused`, `crates/microvms-edges/src/provision/release.rs::one_flipped_byte_in_the_asset_is_refused` | guarded |
 | A release directory (`$MICROVM_RELEASE_DIR`) holding an asset and a matching `SHA256SUMS` but no bundle, or another release's files under the requested tag | BIND-18 | `crates/microvms-edges/src/provision/release.rs::a_release_directory_without_its_bundle_is_refused_despite_a_matching_checksum`, `crates/microvms-edges/src/provision/release.rs::another_releases_files_under_the_requested_tag_are_refused` | guarded |

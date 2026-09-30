@@ -182,7 +182,7 @@ pub async fn relay_connection<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    relay_connection_inner(local, endpoint, guest_port, agent_token, auth, None).await
+    relay_connection_inner(local, endpoint, guest_port, agent_token, Some(auth), None).await
 }
 
 /// [`relay_connection`], first proving the far end is the VM `identity` was minted for.
@@ -209,7 +209,7 @@ where
         endpoint,
         guest_port,
         agent_token,
-        auth,
+        Some(auth),
         Some(identity),
     )
     .await
@@ -235,7 +235,15 @@ pub async fn verify_identity(
     identity: &microvms_app::identity::TunnelIdentity,
 ) -> Result<TunnelEnd, Error> {
     let guest_port = auth.port();
-    match open(endpoint, guest_port, agent_token, auth, Some(identity)).await? {
+    match open(
+        endpoint,
+        guest_port,
+        agent_token,
+        Some(auth),
+        Some(identity),
+    )
+    .await?
+    {
         Opened::Refused(end) => Ok(end),
         Opened::Ready(ready) => {
             let Ready {
@@ -268,9 +276,9 @@ struct Ready {
 
 /// A verified tunnel's session: the keyed transport, and whether the daemon offered the end of
 /// stream in its handshake reply.
-struct Verified {
+pub(crate) struct Verified {
     transport: snow::TransportState,
-    daemon_proves_end: bool,
+    pub(crate) daemon_proves_end: bool,
 }
 
 type TunnelSocket =
@@ -285,7 +293,7 @@ async fn open(
     endpoint: &str,
     guest_port: u16,
     agent_token: &str,
-    auth: &Arc<ProxyAuth>,
+    auth: Option<&Arc<ProxyAuth>>,
     identity: Option<&microvms_app::identity::TunnelIdentity>,
 ) -> Result<Opened, Error> {
     // **The token is scoped to the DAEMON's port, not to `guest_port`, and that inversion is
@@ -300,7 +308,13 @@ async fn open(
     // cost a live debugging session on 2026-08-29.
     //
     // `guest_port` still travels, in the query string, where the daemon reads it.
-    let offered = auth.subprotocols(auth.port()).await?;
+    //
+    // A direct session has no proxy to cross, so it offers nothing: the daemon answers a
+    // handshake that offered no subprotocol with none, and its own bearer check is the gate.
+    let offered = match auth {
+        Some(auth) => Some(auth.subprotocols(auth.port()).await?),
+        None => None,
+    };
     let url = tunnel_url_with_identity(endpoint, guest_port, identity.is_some());
 
     let mut request = url.as_str().into_client_request().map_err(|err| {
@@ -313,15 +327,17 @@ async fn open(
         let headers = request.headers_mut();
         // The three platform values, offered as one comma-separated list. The proxy consumes
         // all of them and forwards none (measured), so the daemon sees an ordinary handshake.
-        headers.insert(
-            "sec-websocket-protocol",
-            offered.join(", ").parse().map_err(|err| {
-                Error::new(
-                    ErrorKind::Unexpected,
-                    format!("the minted subprotocols are not a legal header value: {err}"),
-                )
-            })?,
-        );
+        if let Some(offered) = offered {
+            headers.insert(
+                "sec-websocket-protocol",
+                offered.join(", ").parse().map_err(|err| {
+                    Error::new(
+                        ErrorKind::Unexpected,
+                        format!("the minted subprotocols are not a legal header value: {err}"),
+                    )
+                })?,
+            );
+        }
         // The daemon's own bearer check runs on the upgrade request, so the agent token has
         // to be here too — the proxy credential authorizes reaching the port, and this
         // authorizes the daemon's control route behind it. Two credentials, two purposes.
@@ -366,12 +382,17 @@ async fn open(
     Ok(Opened::Ready(Box::new(Ready { socket, noise })))
 }
 
-async fn relay_connection_inner<S>(
+/// [`relay_connection`] and [`relay_connection_verified`] over an optional proxy credential.
+///
+/// `None` is a direct session's: the daemon is reached without the endpoint proxy, so there
+/// is no port-scoped token to present, and the daemon's bearer check is the gate. The serving
+/// loop (`super::serve`) takes whichever the session has.
+pub(crate) async fn relay_connection_inner<S>(
     mut local: S,
     endpoint: &str,
     guest_port: u16,
     agent_token: &str,
-    auth: &Arc<ProxyAuth>,
+    auth: Option<&Arc<ProxyAuth>>,
     identity: Option<&microvms_app::identity::TunnelIdentity>,
 ) -> Result<TunnelEnd, Error>
 where
@@ -426,27 +447,16 @@ where
                 Some(Ok(Message::Binary(bytes))) => {
                     let plain: &[u8] = match noise.as_mut() {
                         None => &bytes,
-                        Some(verified) => {
-                            let count = verified.transport.read_message(&bytes, &mut scratch).map_err(|err| {
-                                // Failing rather than skipping, because a frame that does not
-                                // authenticate on a verified tunnel is a forged, replayed or
-                                // reordered frame (the nonce is its position), and writing it to
-                                // the local client would hand the application attacker-controlled
-                                // bytes on the one path that promised otherwise (BIND-24).
-                                Error::new(
-                                    ErrorKind::Unexpected,
-                                    format!("a tunnel frame did not authenticate: {err}"),
-                                )
-                            })?;
+                        Some(verified) => match open_frame(verified, &bytes, &mut scratch)? {
+                            Frame::Chunk(count) => &scratch[..count],
                             // The daemon's end of stream: the guest reached EOF and every byte
-                            // it sent came before this, in order, or this wouldn't decrypt.
-                            if protocol::identity::is_end_of_stream(&scratch[..count]) {
+                            // it sent came before this, in order, or this wouldn't open.
+                            Frame::End => {
                                 let _ = local.flush().await;
                                 let _ = socket.send(Message::Close(None)).await;
                                 return Ok(TunnelEnd::Closed);
                             }
-                            &scratch[..count]
-                        }
+                        },
                     };
                     if local.write_all(plain).await.is_err() {
                         // The local client went away, which ends the tunnel from this side.
@@ -585,34 +595,8 @@ async fn initiate(
     loop {
         match socket.next().await {
             Some(Ok(Message::Binary(reply))) => {
-                let offer = initiator.read_message(&reply, &mut scratch).map_err(|_| {
-                    // *Our* verification failed on the daemon's reply: the far end is not the
-                    // VM the pin was minted for. This is the diagnosis the daemon cannot make
-                    // — it does not know which key we pinned — and the one the caller most
-                    // needs, because the likely cause is a record replayed from another VM.
-                    Error::new(
-                        ErrorKind::Unexpected,
-                        format!(
-                            "the identity handshake reply did not verify against the pinned \
-                             key for this VM. The far end holds a different seed than the \
-                             one this record was created with — a record copied from another \
-                             VM, or a VM relaunched with a fresh seed, would both do this. \
-                             (guest port {guest_port})"
-                        ),
-                    )
-                })?;
-                // An empty payload is a daemon from before the end of stream (#342).
-                let daemon_proves_end = protocol::identity::offers_end_of_stream(&scratch[..offer]);
-                let transport = initiator.into_transport_mode().map_err(|err| {
-                    Error::new(
-                        ErrorKind::Unexpected,
-                        format!("entering transport mode failed: {err}"),
-                    )
-                })?;
-                return Ok(Initiated::Transport(Verified {
-                    transport,
-                    daemon_proves_end,
-                }));
+                return read_reply(initiator, &reply, &mut scratch, guest_port)
+                    .map(Initiated::Transport);
             }
             Some(Ok(Message::Close(frame))) => {
                 return Ok(Initiated::Refused(classify_close(frame.as_ref())));
@@ -632,6 +616,82 @@ async fn initiate(
             }
         }
     }
+}
+
+/// Reads the daemon's handshake reply into the session it keys (BIND-21).
+///
+/// Apart from the socket so that `tunnel_fuzz` can hand it any bytes. A reply that doesn't
+/// verify is the wrong-VM case as this side sees it, and the error names the pin.
+pub(crate) fn read_reply(
+    mut initiator: snow::HandshakeState,
+    reply: &[u8],
+    scratch: &mut [u8],
+    guest_port: u16,
+) -> Result<Verified, Error> {
+    let offer = initiator.read_message(reply, scratch).map_err(|_| {
+        // *Our* verification failed on the daemon's reply: the far end is not the VM the pin
+        // was minted for. This is the diagnosis the daemon cannot make, since it does not know
+        // which key we pinned, and the one the caller most needs, because the likely cause is
+        // a record replayed from another VM.
+        Error::new(
+            ErrorKind::Unexpected,
+            format!(
+                "the identity handshake reply did not verify against the pinned key for this \
+                 VM. The far end holds a different seed than the one this record was created \
+                 with: a record copied from another VM, or a VM relaunched with a fresh seed, \
+                 would both do this. (guest port {guest_port})"
+            ),
+        )
+    })?;
+    // An empty payload is a daemon from before the end of stream (#342).
+    let daemon_proves_end = protocol::identity::offers_end_of_stream(&scratch[..offer]);
+    let transport = initiator.into_transport_mode().map_err(|err| {
+        Error::new(
+            ErrorKind::Unexpected,
+            format!("entering transport mode failed: {err}"),
+        )
+    })?;
+    Ok(Verified {
+        transport,
+        daemon_proves_end,
+    })
+}
+
+/// What one frame from the daemon opened to.
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum Frame {
+    /// A chunk of this many bytes, at the front of the scratch buffer.
+    Chunk(usize),
+    /// The daemon's end of stream.
+    End,
+}
+
+/// Opens one frame the daemon sent after the handshake.
+///
+/// Apart from the socket so that `tunnel_fuzz` can hand it any bytes on any path.
+pub(crate) fn open_frame(
+    verified: &mut Verified,
+    frame: &[u8],
+    scratch: &mut [u8],
+) -> Result<Frame, Error> {
+    let count = verified
+        .transport
+        .read_message(frame, scratch)
+        .map_err(|err| {
+            // Failing rather than skipping, because a frame that does not authenticate on a
+            // verified tunnel is a forged, replayed or reordered frame (the nonce is its position),
+            // and writing it to the local client would hand the application attacker-controlled
+            // bytes on the one path that promised otherwise (BIND-24).
+            Error::new(
+                ErrorKind::Unexpected,
+                format!("a tunnel frame did not authenticate: {err}"),
+            )
+        })?;
+    Ok(if protocol::identity::is_end_of_stream(&scratch[..count]) {
+        Frame::End
+    } else {
+        Frame::Chunk(count)
+    })
 }
 
 /// Reads a close frame into a [`TunnelEnd`].

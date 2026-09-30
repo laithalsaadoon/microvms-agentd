@@ -245,3 +245,41 @@ expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_every_spelling_of_the_bolero_call_is_a_harness ("
 transform = { file = "tools/check-trace.py", replace = "r\"^(?:(?:::\\s*)?bolero\\s*::\\s*)?check$\"", with = "r\"^bolero\\s*::\\s*check$\"" }
+
+# A refused traced file fails the run without hiding the rest: each part of that, reverted, fails
+# its test.
+[[fault]]
+id = "trace-refusal-drops-every-file"
+guard = "test_check_trace.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_trace.py", "-k", "ReadPastRefusals"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_file_that_doesnt_parse_leaves_the_other_files_entries ("
+transform = { file = "tools/check-trace.py", replace = "    return {key: kept[key] for key in sorted(kept, key=order)}, problems\n", with = "    return ({} if problems else {key: kept[key] for key in sorted(kept, key=order)}), problems\n" }
+
+[[fault]]
+id = "trace-refusal-ends-the-run"
+guard = "test_check_trace.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_trace.py", "-k", "ReadPastRefusals"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_refused_file_prints_first_and_the_other_entries_are_still_held ("
+transform = { file = "tools/check-trace.py", replace = "    found = collect(patterns)\n    problems = enumerator_floors()", with = "    if refused:\n        return 1\n    found = collect(patterns)\n    problems = enumerator_floors()" }
+
+[[fault]]
+id = "trace-stale-only-when-clean"
+guard = "test_check_trace.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_trace.py", "-k", "ReadPastRefusals"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_stale_doc_is_reported_beside_another_problem ("
+transform = { file = "tools/check-trace.py", replace = "    if args.check and rendered and (not DOC.exists()", with = "    if args.check and rendered and not problems and (not DOC.exists()" }
+
+[[fault]]
+id = "trace-sentinel-over-a-partial-load"
+guard = "test_check_trace.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_trace.py", "-k", "ReadPastRefusals"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_sentinel_waits_for_a_whole_load ("
+transform = { file = "tools/check-trace.py", replace = "    if whole and SENTINEL not in traced:\n", with = "    if SENTINEL not in traced:\n" }

@@ -258,7 +258,8 @@ export declare class CostReport {
   /** Plain text, leading with what the dollars are rather than with the dollars. */
   render(): string
   /**
-   * The `cli.py:688 report_to_dict` shape as a JSON **string**.
+   * Core's JSON shape for a report, as a JSON **string**: the one `microvm cost --json`
+   * and Python's `to_dict` emit (#255).
    *
    * A string for the same reason [`LineItem::to_json`] is: the unpriced line item omits
    * its `usd` key, which no typed return shape can express.
@@ -521,7 +522,7 @@ export declare class LineItem {
   get duration(): Duration | null
   get note(): string
   /**
-   * The `cli.py` `_line_to_dict` shape as a JSON **string**.
+   * Core's JSON shape for a line item, as a JSON **string**.
    *
    * A string rather than an object because the unpriced case must **omit** the `usd` key
    * entirely, and a `#[napi(object)]` return type cannot express an absent key — an
@@ -1041,8 +1042,15 @@ export declare class Session {
    * the daemon's shape — a number here would be ambiguous between 0o755 and 755.
    */
   uploadFile(path: string, data: Uint8Array, mode?: string | undefined | null): Promise<void>
-  /** Reads one file. */
-  downloadFile(path: string): Promise<Buffer>
+  /**
+   * Reads one file, or lines `startLine` through `endLine` of it.
+   *
+   * The range is 1-based and inclusive, and the daemon slices the file, so reading lines 40
+   * to 60 of a large log reads those lines alone. Either bound may be left out (line 1,
+   * through EOF), and an `endLine` past the last line reads through EOF. Line 0 and an end
+   * before the start reject with `ERR_INVALID_ARG` before any request.
+   */
+  downloadFile(path: string, options?: DownloadFileOptions | undefined | null): Promise<Buffer>
   /** Whether a path exists, distinguishing absence from every other refusal. */
   fileExists(path: string): Promise<boolean>
   /**
@@ -1433,6 +1441,14 @@ export interface DetachedObject {
   region: string
   port: number
   agentToken: string
+}
+
+/** The line range `downloadFile` reads, 1-based and inclusive. Both absent reads the file. */
+export interface DownloadFileOptions {
+  /** The first line to read. Absent means line 1. */
+  startLine?: number
+  /** The last line to read. Absent, or past the last line, means through EOF. */
+  endLine?: number
 }
 
 /**
@@ -2069,7 +2085,15 @@ export interface PlanUsageOptions {
   imageRetainedSeconds?: number
   suspendResumeCycles?: number
   snapshotGb?: number
+  /**
+   * Whether the plan launches, which reads a snapshot. Left out, the core infers it: running
+   * time, or an image of non-zero size, so suspended time alone reads no launch snapshot.
+   */
   launched?: boolean
+  /**
+   * What the report is of. Left out, `"estimate"`: the core's label, the one
+   * `microvm cost --estimate` uses for the same plan (#255).
+   */
   label?: string
 }
 
@@ -2357,8 +2381,12 @@ export interface RunUsageOptions {
   suspendResumeCycles?: number
   /** The suspend snapshot's size. Defaults to the baseline memory footprint. */
   snapshotGb?: number
-  /** Whether a launch happened. A launch reads a snapshot. */
+  /**
+   * Whether a launch happened. A launch reads a snapshot. Left out, the core infers it:
+   * running time, or an image of non-zero size.
+   */
   launched?: boolean
+  /** What the report is of. Left out, `"run"`: the core's label, the one `microvm cost` uses. */
   label?: string
 }
 

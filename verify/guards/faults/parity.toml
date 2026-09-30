@@ -168,3 +168,23 @@ expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_an_empty_griffe_dump_fails_on_the_sentinels ("
 transform = { file = "tools/check-parity.py", replace = "                        f\"sentinel {row_id}: {key}: {why}\"\n", with = "                        f\"{row_id}: {key}: {why}\"\n" }
+
+# A surface that can't be read is reported and skipped, and the others are still checked: each
+# part of that, reverted, fails its test.
+[[fault]]
+id = "parity-refused-surface-ends-the-check"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "RuleTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_unreadable_surface_is_reported_first_and_the_rest_still_checked ("
+transform = { file = "tools/check-parity.py", replace = "    problems = pin_problems() + check(table, surfaces, frozenset(refused))\n", with = "    problems = [] if refused else pin_problems() + check(table, surfaces)\n" }
+
+[[fault]]
+id = "parity-unread-surface-resolved"
+guard = "test_check_parity.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_parity.py", "-k", "RuleTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_unread_surface_draws_nothing_and_the_others_are_still_held ("
+transform = { file = "tools/check-parity.py", replace = "                if key in unread or (key in empty and not sentinel):\n", with = "                if key in empty and not sentinel:\n" }
