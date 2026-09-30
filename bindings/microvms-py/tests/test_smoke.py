@@ -213,8 +213,9 @@ def test_an_unpriced_line_omits_the_usd_key_entirely() -> None:
     `cli.py`'s own rule, and the one arithmetic the cost module exists to not enable: a null
     is summed as zero by anything permissive.
 
-    **Falsification** — change `line_to_dict` to `set_item("usd", None)` for the unpriced arm
-    and this test goes red on the `not in`.
+    **Falsification**: `verify/guards/faults/bindings.toml` entry `py-unpriced-usd` gives
+    core's `LineItem::to_json`, which `to_dict` reads back since #255, a `"usd": null` for the
+    unpriced arm, and this test goes red on the `not in`.
     """
     build = [item for item in report().items if item.phase == "image-build"][0]
     amount = build.to_dict()["amount"]
@@ -242,7 +243,8 @@ def test_a_total_over_an_unpriced_line_is_a_lower_bound_carrying_its_reasons() -
 
 
 def test_the_report_json_shape_is_the_python_clients() -> None:
-    """The `cli.py` `report_to_dict` keys, so the two clients are diffable."""
+    """The `cli.py` `report_to_dict` keys plus `size.headroomMib`: core's shape, the one
+    `microvm cost --json` emits, so the surfaces' reports are diffable (#255)."""
     rendered = report().to_dict()
     assert rendered["estimated"] is True
     assert set(rendered) == {
@@ -261,6 +263,7 @@ def test_the_report_json_shape_is_the_python_clients() -> None:
         "baselineVcpu",
         "peakMib",
         "peakVcpu",
+        "headroomMib",
         "describe",
     }
     assert set(rendered["rates"]) == {"region", "retrieved", "sourceUrl"}

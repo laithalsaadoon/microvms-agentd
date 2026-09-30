@@ -13,8 +13,8 @@
 //! field a `Measured` value could be written into.
 
 use microvms_core::cost::{
-    CalendarDate, DurationP, EstimatedUsd, PlanUsage, RunUsage, compare_residency, estimate_run,
-    pinned_rates, run_report,
+    CalendarDate, DEFAULT_ESTIMATE_LABEL, DEFAULT_RUN_LABEL, DurationP, EstimatedUsd, PlanUsage,
+    RunUsage, compare_residency, estimate_run, pinned_rates, run_report,
 };
 use microvms_core::prelude::*;
 use serde_json::{Map, Value};
@@ -22,7 +22,7 @@ use serde_json::{Map, Value};
 use crate::cli::CostArgs;
 use crate::commands::{Ctx, Rendered, response_type};
 use crate::exit::CliError;
-use crate::render::{comparison_to_json, report_dense, report_to_json};
+use crate::render::report_dense;
 
 /// Computes and renders a cost report, optionally beside the residency comparison.
 pub fn cost<O: std::io::Write, E: std::io::Write>(
@@ -65,33 +65,19 @@ pub fn cost<O: std::io::Write, E: std::io::Write>(
         }
     }
 
-    // A launch happened if there is running time or an image, matching `cli.py:2168`'s
-    // `bool(running_sec or image_gb)`. Both halves are falsy at zero there, so `--image-gb 0`
-    // does *not* launch — an `is_some()` here would have made a zero-sized image claim a
-    // snapshot read the plan never pays for. A launch reads a snapshot, so claiming one that
-    // did not happen adds a transfer line.
-    //
-    // (cli.py line numbers resolve at `git show 'c4d396e^:clients/python/src/microvms_agentd/cli.py'` — the retired oracle.)
-    let launched = args.running_sec > 0.0 || args.image_gb.is_some_and(|gb| gb != 0.0);
-
     let report = if args.estimate {
-        estimate_run(
-            size,
-            &PlanUsage {
-                running_seconds: args.running_sec,
-                suspended_seconds: args.suspended_sec,
-                image_gb: args.image_gb,
-                image_retained_seconds: None,
-                suspend_resume_cycles: args.cycles,
-                snapshot_gb: None,
-                launched,
-            },
-            &rates,
-            today,
-            // `cli.py:646`'s default. Not "plan": the label is the report's own name for
-            // itself and the two clients' reports have to be substitutable.
-            "estimate",
-        )?
+        let mut plan = PlanUsage {
+            running_seconds: args.running_sec,
+            suspended_seconds: args.suspended_sec,
+            image_gb: args.image_gb,
+            image_retained_seconds: None,
+            suspend_resume_cycles: args.cycles,
+            snapshot_gb: None,
+            launched: false,
+        };
+        // Core's rule, the one both bindings apply when their caller leaves `launched` out.
+        plan.launched = plan.infer_launched();
+        estimate_run(size, &plan, &rates, today, DEFAULT_ESTIMATE_LABEL)?
     } else {
         // Zero means "this phase did not happen", not "a phase that cost nothing": a
         // zero-length line on a report claims a measurement nobody took. Exactly zero,
@@ -103,22 +89,18 @@ pub fn cost<O: std::io::Write, E: std::io::Write>(
             }
             Ok(Some(DurationP::measured_secs_f64(seconds)?))
         };
-        run_report(
-            size,
-            &RunUsage {
-                running: measured(args.running_sec)?,
-                suspended: measured(args.suspended_sec)?,
-                image_build: measured(args.build_sec)?,
-                image_gb: args.image_gb,
-                image_retained: None,
-                suspend_resume_cycles: args.cycles,
-                snapshot_gb: None,
-                launched,
-            },
-            &rates,
-            today,
-            "run",
-        )?
+        let mut usage = RunUsage {
+            running: measured(args.running_sec)?,
+            suspended: measured(args.suspended_sec)?,
+            image_build: measured(args.build_sec)?,
+            image_gb: args.image_gb,
+            image_retained: None,
+            suspend_resume_cycles: args.cycles,
+            snapshot_gb: None,
+            launched: false,
+        };
+        usage.launched = usage.infer_launched();
+        run_report(size, &usage, &rates, today, DEFAULT_RUN_LABEL)?
     };
 
     // Not suppressed by `--quiet`: a figure copied into a budget is worse than no figure when
@@ -132,7 +114,7 @@ pub fn cost<O: std::io::Write, E: std::io::Write>(
     if args.compare {
         let comparison = compare_residency(size, args.hold_sec, args.cycles, &rates, today)?;
         comparison_text = comparison.render()?;
-        comparison_json = comparison_to_json(&comparison)?;
+        comparison_json = comparison.to_json()?;
     }
 
     // ── the budget gate (#77) ─────────────────────────────────────────────
@@ -253,7 +235,7 @@ pub fn cost<O: std::io::Write, E: std::io::Write>(
     }
 
     let mut data = Map::new();
-    data.insert("report".into(), report_to_json(&report));
+    data.insert("report".into(), report.to_json());
     data.insert("comparison".into(), comparison_json);
     data.insert("budget".into(), budget_json);
 

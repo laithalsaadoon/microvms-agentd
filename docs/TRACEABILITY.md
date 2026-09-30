@@ -1024,7 +1024,7 @@ The sizing model shall read baseline and peak from the documented five-row table
 - **gherkin:** waived: no behavior to script: the tests read each of the five rows
 - **fuzz:** waived: the table has five rows, which the tests read exhaustively
 - **test:** `crates/microvms-domain/src/sizing.rs`
-- **impl:** `crates/microvms-cli/src/render.rs`, `crates/microvms-core/src/lib.rs`, `crates/microvms-domain/src/sizing.rs`
+- **impl:** `crates/microvms-core/src/lib.rs`, `crates/microvms-domain/src/cost.rs`, `crates/microvms-domain/src/sizing.rs`
 - **live:** `conformance/lanes/local.py`
 
 ## Threats
