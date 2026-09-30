@@ -278,7 +278,7 @@ suite = "script"
 message = "FAIL: test_a_root_guide_missing_a_kind_its_rules_use_fails_naming_it ("
 transform = { file = "scripts/check-agents-md.py", replace = "ROOT_KINDS = (\"task\", \"member\", \"path\", \"job\", \"symbol\")", with = "ROOT_KINDS = (\"task\", \"path\", \"job\", \"symbol\")" }
 
-# The path census: what lefthook.yml, the mise tasks, the workflows, dependabot.yml and the gate
+# The path census: what .config/lefthook.yml, the mise tasks, the workflows, dependabot.yml and the gate
 # scripts' constants name must exist, and each decision id the tree cites must be defined. Its
 # floor (every source reads as empty), a source's sentinel, and a stale path of each kind.
 [[fault]]
@@ -287,7 +287,7 @@ guard = "scripts/check-agents-md.py"
 run = ["./scripts/check-agents-md.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "the census read no paths from lefthook.yml"
+message = "the census read no paths from .config/lefthook.yml"
 transform = { file = "scripts/check-agents-md.py", replace = "            found, refused = readers[source]()", with = "            found, refused = [], []" }
 
 # The workflows still yield their filters and working directories, but no step's `run`.
@@ -300,16 +300,16 @@ suite = "script"
 message = "the census sentinel `scripts/check-agents-md.py` isn't among the paths .github/workflows/*.yml names"
 transform = { file = "scripts/check-agents-md.py", replace = "                if isinstance(run := step.get(\"run\"), Scalar):", with = "                if isinstance(run := step.get(\"runs\"), Scalar):" }
 
-# The move this guards against: deny.toml goes under .cargo/ and the hook's glob keeps naming a
-# file that's gone, so the license hook would stop running on it.
+# The move this guards against: a config the hook's glob names moves (deny.toml went under
+# .cargo/) and the glob keeps naming the old place, so the license hook would stop running on it.
 [[fault]]
 id = "agents-md-census-lefthook-glob-stale"
 guard = "scripts/check-agents-md.py"
 run = ["./scripts/check-agents-md.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "`.cargo/deny.toml` is no such path in this tree"
-transform = { file = "lefthook.yml", replace = "*/Cargo.toml,deny.toml}", with = "*/Cargo.toml,.cargo/deny.toml}" }
+message = "`deny.toml` is no such path in this tree"
+transform = { file = ".config/lefthook.yml", replace = "*/Cargo.toml,.cargo/deny.toml}", with = "*/Cargo.toml,deny.toml}" }
 
 [[fault]]
 id = "agents-md-census-mise-run-stale"
@@ -372,7 +372,7 @@ run = ["./scripts/check-agents-md.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "a value that starts with `&`, which the census's YAML reader doesn't take"
-transform = { file = "lefthook.yml", replace = "pre-commit:\n  parallel: true\n", with = "pre-commit: &commit\n  parallel: true\n" }
+transform = { file = ".config/lefthook.yml", replace = "pre-commit:\n  parallel: true\n", with = "pre-commit: &commit\n  parallel: true\n" }
 
 # A decision loses its table while the tree still cites it. The new name spells no id, since
 # this file is read for citations too.

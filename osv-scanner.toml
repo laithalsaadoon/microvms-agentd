@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Accepted findings, each with its reason (same rule as .trivyignore.yaml: an
+# Accepted findings, each with its reason (same rule as .config/trivyignore.yaml: an
 # ignore without a reason is a finding someone silenced).
 #
 # osv-scanner cannot consume VEX documents, so this file exists as a mirror:

@@ -241,7 +241,7 @@ check that holds it, or says that review does.
   read, so write the ones a rule depends on in backticks.
 - A stale path in a file that runs things turns a gate off without failing, so
   `agents:check` also fails on a path or glob that matches nothing in the
-  tree when `lefthook.yml` names it, a mise task names it (its `run`, `dir`,
+  tree when `.config/lefthook.yml` names it, a mise task names it (its `run`, `dir`,
   `sources` or `outputs`), a workflow names it (its `paths` filters,
   `working-directory` or steps), `.github/dependabot.yml` names it, or a gate
   script binds it to a module-level constant. A path that names nothing here

@@ -2410,6 +2410,18 @@ class WarmWorkers(unittest.TestCase):
         self.assertEqual(copied.read_text(), "uncommitted\n")
         self.assertGreater(copied.stat().st_mtime, day_old + 3600)
 
+    def test_a_staged_move_leaves_nothing_at_its_old_path(self):
+        # The caller's `git mv`, staged: the scratch tree has the file at its new path only.
+        repo = fire_repo(self, keyed("a", "g1", "g1"), state="g1=ok\n")
+        repo.write("old.txt", "moved\n")
+        git(repo.root, "add", "old.txt")
+        git(repo.root, "commit", "-q", "-m", "old")
+        git(repo.root, "mv", "old.txt", "new.txt")
+        tree = self.m["Tree"].make(repo.root)
+        self.addCleanup(tree.remove)
+        self.assertEqual((tree.path / "new.txt").read_text(), "moved\n")
+        self.assertFalse((tree.path / "old.txt").exists())
+
     def test_local_packages_names_members_their_targets_and_path_dependencies(self):
         root = self.tmp / "ws"
         files = {

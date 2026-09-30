@@ -35,7 +35,7 @@ and language-protocol members → **1** after hand-dropping a trait associated t
 `impl AsyncGenerator for ExecStream`) that the automated filter missed because it matched
 trait methods but not associated types. No dead-code analyzer is integrated in this repo
 (no `cargo-udeps`, `cargo-machete`, `vulture`, or `knip` in `mise.toml`, `Cargo.toml`,
-`deny.toml`, or `.github/workflows/`), so the index is the analyzer.
+`.cargo/deny.toml`, or `.github/workflows/`), so the index is the analyzer.
 
 ## Unreferenced exports
 

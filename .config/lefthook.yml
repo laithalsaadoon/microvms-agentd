@@ -48,13 +48,13 @@ pre-commit:
       glob: "**/*.{rs,py,pyi,mjs,sh,tf}"
 
     - name: dependency licenses
-      # deny.toml's allowlist against the resolved graph. Only when the graph
+      # .cargo/deny.toml's allowlist against the resolved graph. Only when the graph
       # can change: a commit that touches no manifest cannot alter a license.
       # Through `mise exec` like everything else here — a hook's PATH has no
       # cargo, which is the exact failure this file's header warns about, and
       # this hook demonstrated it on its own first run.
       run: mise exec -- cargo deny check licenses bans sources
-      glob: "{Cargo.lock,**/Cargo.toml,deny.toml}"
+      glob: "{Cargo.lock,**/Cargo.toml,.cargo/deny.toml}"
 
     - name: workflow lint
       run: mise exec -- actionlint

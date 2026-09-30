@@ -13,7 +13,7 @@ source = "Cited first by #316 (91c3272, 2026-09-28), whose pull request says \"D
 status = "Laith approved reversing it on 2026-09-30: CI may install mise through a SHA-pinned jdx/mise-action with a locked install from mise.lock. A later pull request makes that change and updates this entry; until it lands, CI works as the decision says."
 
 [D18]
-decision = "The tests that hold microvms-app to agentd-model's rows live in their own unpublished workspace crate, model-conformance. microvms-app is published, so it can't take a versioned dev-dependency on the unpublished agentd-model, and deny.toml refuses a path dependency without a version (#296)."
+decision = "The tests that hold microvms-app to agentd-model's rows live in their own unpublished workspace crate, model-conformance. microvms-app is published, so it can't take a versioned dev-dependency on the unpublished agentd-model, and .cargo/deny.toml refuses a path dependency without a version (#296)."
 source = "#343 (8234794, 2026-09-29)."
 
 [D26]
