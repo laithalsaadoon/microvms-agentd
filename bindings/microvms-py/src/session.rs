@@ -1073,10 +1073,22 @@ impl PySession {
         Ok(())
     }
 
-    /// Reads one file.
-    fn download_file<'py>(&self, py: Python<'py>, path: &str) -> PyCoreResult<Bound<'py, PyBytes>> {
+    /// Reads one file, or lines `start_line` through `end_line` of it.
+    ///
+    /// The range is 1-based and inclusive, and the daemon slices the file, so reading lines
+    /// 40 to 60 of a large log reads those lines alone. Either bound may be `None` (line 1,
+    /// through EOF), and an `end_line` past the last line reads through EOF. Line 0 and an end
+    /// before the start raise `InvalidArgError` before any request.
+    #[pyo3(signature = (path, *, start_line=None, end_line=None))]
+    fn download_file<'py>(
+        &self,
+        py: Python<'py>,
+        path: &str,
+        start_line: Option<u64>,
+        end_line: Option<u64>,
+    ) -> PyCoreResult<Bound<'py, PyBytes>> {
         let bytes = self.detached(py, |session| {
-            runtime::block_on_detached(session.download_file(path))
+            runtime::block_on_detached(session.download_file_lines(path, start_line, end_line))
         })?;
         Ok(PyBytes::new(py, &bytes))
     }

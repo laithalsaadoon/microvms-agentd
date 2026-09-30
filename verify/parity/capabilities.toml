@@ -223,10 +223,10 @@ ts = "Session.downloadFile"
 
 [[capability]]
 id = "download-file-range"
-core = { exempt = "the daemon serves start_line and end_line; no client asks for them", issue = "#265" }
-cli = { exempt = "no client asks for a line range", issue = "#265" }
-py = { exempt = "no client asks for a line range", issue = "#265" }
-ts = { exempt = "no client asks for a line range", issue = "#265" }
+core = "microvms_core::session::Session::download_file_lines"
+cli = "cp --lines"
+py = "Session.download_file"
+ts = "Session.downloadFile"
 
 [[capability]]
 id = "file-exists"
@@ -840,7 +840,7 @@ exempt_members.ts = { create = "the async factory idiom; Python constructs with 
 
 [[type]]
 name = "ControlPlane"
-exempt_members.ts = { create = "the async factory idiom; Python constructs with ControlPlane(...)", region = { exempt = "Python's ControlPlane doesn't expose its region", issue = "#267" } }
+exempt_members.ts = { create = "the async factory idiom; Python constructs with ControlPlane(...)" }
 
 [[type]]
 name = "ExecHandle"

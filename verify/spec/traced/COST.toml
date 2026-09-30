@@ -1,1 +1,67 @@
 # The COST group's traced requirements. The format and the rules are in tools/check-trace.py.
+
+[COST-1]
+issue = "#303"
+waive.model = "a rule over values and one pure function of a usage and a pinned rate table, not a state"
+waive.gherkin = "no behavior to script: a duration has no unlabelled constructor, and the tests build each label"
+waive.fuzz = "the input is a choice of two labels and a number, which the tests enumerate at the boundaries"
+
+[COST-2]
+issue = "#303"
+waive.model = "a rule over values and one pure function of a usage and a pinned rate table, not a state"
+waive.gherkin = "no behavior to script: a property of the types' constructors and trait impls, which the compiler holds and a doctest shows failing to compile"
+waive.fuzz = "there is no input stream; the rule is over the type's impls"
+waive.live = "a coercion that doesn't compile can't show up at runtime; the live suite reads dollar figures only as strings"
+
+[COST-3]
+issue = "#303"
+waive.model = "a rule over values and one pure function of a usage and a pinned rate table, not a state"
+waive.gherkin = "no behavior to script: the tests build every unpriced line and assert it carries its reason and no figure"
+waive.fuzz = "the unpriced lines are a fixed set the tests enumerate, and the COST-4 property test mixes them with priced ones"
+
+[COST-4]
+issue = "#303"
+waive.model = "a rule over values and one pure function of a usage and a pinned rate table, not a state"
+waive.gherkin = "no behavior to script: the proptest over every mix of priced and unpriced lines is the specification"
+waive.fuzz = "the proptest `a_total_is_a_lower_bound_exactly_when_something_is_unpriced` searches that space; a coverage-guided harness would search the same one"
+
+[COST-5]
+issue = "#303"
+waive.model = "a rule over values and one pure function of a usage and a pinned rate table, not a state"
+waive.gherkin = "no behavior to script: the tests price every size class from its baseline and compare with the peak"
+waive.fuzz = "the size classes are a closed table the tests walk row by row"
+waive.live = "a pure function of the usage and the pinned rate table; it makes no AWS call, and the unit tests cover it"
+
+[COST-6]
+issue = "#303"
+waive.model = "a rule over values and one pure function of a usage and a pinned rate table, not a state"
+waive.gherkin = "no behavior to script: the float boundaries are two functions the tests call directly"
+waive.fuzz = "the proptest `compute_figures_are_exactly_the_decimal_reference` drives the whole arithmetic over generated quantities and checks every figure exactly"
+waive.live = "a pure function of the usage and the pinned rate table; it makes no AWS call, and the unit tests cover it"
+
+[COST-7]
+issue = "#303"
+waive.model = "a rule over values and one pure function of a usage and a pinned rate table, not a state"
+waive.gherkin = "no behavior to script: staleness is a date comparison the tests make on each side of the window"
+waive.fuzz = "the proptest `staleness_is_the_ninety_day_verdict_and_carries_the_age` covers every age; the window is one threshold"
+waive.live = "the pinned table's age is today minus a committed date, which a live run can't move; the tests pass `today` in"
+
+[COST-8]
+issue = "#303"
+waive.model = "a rule over values and one pure function of a usage and a pinned rate table, not a state"
+waive.gherkin = "no behavior to script: the tests price snapshot storage below, at and above the one-week floor"
+waive.fuzz = "the proptest `storage_bills_the_greater_of_the_hold_and_the_retention_floor` covers every hold; the floor is one threshold"
+waive.live = "a pure function of the usage and the pinned rate table; it makes no AWS call, and the unit tests cover it"
+
+[COST-9]
+issue = "#303"
+waive.model = "a rule over values and one pure function of a usage and a pinned rate table, not a state"
+waive.gherkin = "no behavior to script: the tests parse catalogs with and without the ARM line and assert the refusal"
+waive.fuzz = "a catalog is a fixed set of named lines, and the tests drop each one the parser needs"
+waive.live = "the rate table is pinned and parsed offline; the Pricing API is never called at runtime"
+
+[COST-10]
+issue = "#303"
+waive.model = "a rule over values and one pure function of a usage and a pinned rate table, not a state"
+waive.gherkin = "no behavior to script: the tests build a plan and assert every duration on its report is projected"
+waive.fuzz = "the proptest `every_duration_in_a_plan_is_projected` generates the plans; a coverage-guided harness would search the same space"
