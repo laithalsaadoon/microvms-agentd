@@ -2212,7 +2212,7 @@ class Session:
         """
         Unauthenticated liveness.
         """
-    def keep_awake(self, /, interval: float |None = None, *, while_busy: bool = False, max_duration: float |None = None, idle_window: float |None = None) -> KeepAwake:
+    def keep_awake(self, /, interval: float |None = None, *, while_busy: bool = False, max_duration: float |None = None, idle_window: float |None = None, tolerated_errors: int |None = None) -> KeepAwake:
         """
         Keeps the VM awake by polling health from this process until stopped.
         
@@ -2223,6 +2223,9 @@ class Session:
         running; `max_duration` ends it after that many seconds. `idle_window` is the VM's
         `maxIdleDurationSeconds`: a sandbox-held session knows it, an attached one assumes
         the platform minimum of 60, and `interval` may be at most half of it.
+        `tolerated_errors` is how many retryable poll failures in a row it retries, a second
+        apart, before it ends with the error; omitted, it's the core's
+        `DEFAULT_TOLERATED_ERRORS`.
         
         On a sandbox-held session a suspend or terminate through the sandbox ends the
         keepalive before its next poll. Stop it before suspending through anything else,

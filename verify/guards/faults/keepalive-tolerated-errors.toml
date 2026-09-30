@@ -1,0 +1,37 @@
+# ── keepalive's tolerated errors on every surface (#267) ────────────────────────
+
+# Each surface drops the value on its way to the core's `KeepAwake`, so the core's default
+# retries three times and four polls go out where the test allows one retry.
+[[fault]]
+id = "cli-keepalive-drops-tolerated-errors"
+guard = "guards::health::keepalive_gives_up_after_the_tolerated_errors"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::health::keepalive_gives_up_after_the_tolerated_errors"]
+expect = "test-failed"
+suite = "rust"
+message = "one tolerated error is one retry"
+note = "crates/microvms-cli/src/guards/health.rs::keepalive_gives_up_after_the_tolerated_errors"
+transform = { file = "crates/microvms-cli/src/commands/attached.rs", replace = "        .max_duration(args.for_sec)\n        .tolerated_errors(args.tolerated_errors);\n", with = "        .max_duration(args.for_sec);\n" }
+
+[[fault]]
+id = "py-keepalive-drops-tolerated-errors"
+guard = "bindings/microvms-py/tests/test_keepalive.py::test_one_tolerated_error_is_one_retry_before_it_raises"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_keepalive.py::test_one_tolerated_error_is_one_retry_before_it_raises"],
+]
+expect = "test-failed"
+suite = "bindings"
+note = "bindings/microvms-py/tests/test_keepalive.py::test_one_tolerated_error_is_one_retry_before_it_raises"
+transform = { file = "bindings/microvms-py/src/keepalive.rs", replace = "    if let Some(tolerated_errors) = tolerated_errors {\n        policy = policy.tolerated_errors(tolerated_errors);\n    }\n", with = "    let _ = tolerated_errors;\n" }
+
+[[fault]]
+id = "js-keepalive-drops-tolerated-errors"
+guard = "one tolerated error is one retry before the keepalive rejects"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/keepalive.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+note = "bindings/microvms-js/__test__/keepalive.mjs::one tolerated error is one retry before the keepalive rejects"
+transform = { file = "bindings/microvms-js/src/keepalive.rs", replace = "        if let Some(tolerated_errors) = self.tolerated_errors {\n            policy = policy.tolerated_errors(tolerated_errors);\n        }\n", with = "" }

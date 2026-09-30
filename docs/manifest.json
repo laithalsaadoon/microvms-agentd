@@ -1524,6 +1524,15 @@
           },
           {
             "choices": null,
+            "default": "3",
+            "help": "Retryable poll failures in a row to retry, a second apart, before giving up",
+            "name": "tolerated-errors",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
             "default": null,
             "help": "The VM's endpoint, as reported by `run`",
             "name": "endpoint",
