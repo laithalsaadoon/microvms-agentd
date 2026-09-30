@@ -62,6 +62,9 @@ node = "22"
 "aqua:ast-grep/ast-grep" = "0.43.0"
 # `vex:check`'s reader of the OpenVEX document.
 jq = "1.8.1"
+# `semver:check`'s, the release binary by the checksum mise.lock records. In `[tools]` rather than
+# a task's own because the guards job fires the protocol crate's semver faults with it.
+"github:obi1kenobi/cargo-semver-checks" = "0.50.0"
 
 [settings]
 # The cargo backend builds its tools from source (`cargo install --locked`) rather than through
