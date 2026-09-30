@@ -38,4 +38,111 @@ run = ["cargo", "test", "-p", "microvms-core", "--test", "tunnel_end_to_end", "-
 expect = "test-failed"
 suite = "rust"
 message = "a reply that doesn't verify ends the tunnel rather than relaying"
-transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "        Some(identity) => match initiate(&mut socket, identity, guest_port).await? {\n            Initiated::Transport(transport) => Some(transport),\n            Initiated::Refused(end) => return Ok(Opened::Refused(end)),\n        },", with = "        Some(identity) => match initiate(&mut socket, identity, guest_port).await {\n            Ok(Initiated::Transport(transport)) => Some(transport),\n            Ok(Initiated::Refused(end)) => return Ok(Opened::Refused(end)),\n            Err(_) => None,\n        }," }
+transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "        Some(identity) => match initiate(&mut socket, identity, guest_port).await? {\n            Initiated::Transport(verified) => Some(verified),\n            Initiated::Refused(end) => return Ok(Opened::Refused(end)),\n        },", with = "        Some(identity) => match initiate(&mut socket, identity, guest_port).await {\n            Ok(Initiated::Transport(verified)) => Some(verified),\n            Ok(Initiated::Refused(end)) => return Ok(Opened::Refused(end)),\n            Err(_) => None,\n        }," }
+
+# ── the verified tunnel's end of stream (#342) ──────────────────────────────────
+
+# The daemon closes after the guest's EOF without its end of stream: the real client reads the
+# clean download as cut short.
+[[fault]]
+id = "agentd-tunnel-no-end-of-stream"
+guard = "bind_23_a_stream_the_guest_finishes_arrives_whole_and_ends_closed"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tunnel_end_of_stream", "--", "--exact", "bind_23_a_stream_the_guest_finishes_arrives_whole_and_ends_closed"]
+expect = "test-failed"
+suite = "rust"
+message = "the daemon's end of stream is the clean end"
+transform = { file = "crates/agentd/src/tunnel.rs", replace = "            if channel.send_end().await {\n                channel.close(close::NORMAL, \"\").await;\n            }", with = "            channel.close(close::NORMAL, \"\").await;" }
+
+# The same fault, caught by the daemon's own test of what it sends.
+[[fault]]
+id = "agentd19-no-end-of-stream-before-the-close"
+guard = "agentd_19_a_guest_eof_reaches_the_caller_as_the_end_of_stream"
+run = ["cargo", "test", "-p", "agentd", "--test", "tunnel_relay", "--", "--exact", "agentd_19_a_guest_eof_reaches_the_caller_as_the_end_of_stream"]
+expect = "test-failed"
+suite = "rust"
+message = "the guest's EOF must arrive as the end of stream before the close frame"
+transform = { file = "crates/agentd/src/tunnel.rs", replace = "            if channel.send_end().await {\n                channel.close(close::NORMAL, \"\").await;\n            }", with = "            channel.close(close::NORMAL, \"\").await;" }
+
+# The daemon closes the guest connection on a caller end nothing proves, so the guest reads EOF.
+[[fault]]
+id = "agentd20-unproven-caller-end-closes-the-guest"
+guard = "agentd_20_a_close_without_the_callers_end_of_stream_resets_the_guest"
+run = ["cargo", "test", "-p", "agentd", "--test", "tunnel_relay", "--", "--exact", "agentd_20_a_close_without_the_callers_end_of_stream_resets_the_guest"]
+expect = "test-failed"
+suite = "rust"
+message = "a caller's close without its end of stream must reach the guest as a reset, not an EOF"
+transform = { file = "crates/agentd/src/tunnel.rs", replace = "    if cut_short {\n        reset(guest_read, guest_write, port);\n    }", with = "    let _ = (cut_short, port);" }
+
+# The same fault, with the real client's end of stream withheld on the path.
+[[fault]]
+id = "agentd20-withheld-client-end-closes-the-guest"
+guard = "agentd_20_the_clients_end_of_stream_withheld_resets_the_guest"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tunnel_end_of_stream", "--", "--exact", "agentd_20_the_clients_end_of_stream_withheld_resets_the_guest"]
+expect = "test-failed"
+suite = "rust"
+message = "an upload whose end of stream never arrived must reach the guest as a reset"
+transform = { file = "crates/agentd/src/tunnel.rs", replace = "    if cut_short {\n        reset(guest_read, guest_write, port);\n    }", with = "    let _ = (cut_short, port);" }
+
+# The daemon holds a caller from before the end of stream to one, and resets its every upload.
+[[fault]]
+id = "agentd-tunnel-older-caller-held-to-an-end"
+guard = "a_caller_that_offers_no_end_of_stream_closes_the_guest_as_before"
+run = ["cargo", "test", "-p", "agentd", "--test", "tunnel_relay", "--", "--exact", "a_caller_that_offers_no_end_of_stream_closes_the_guest_as_before"]
+expect = "test-failed"
+suite = "rust"
+message = "an older caller's close is its end, as it always was"
+transform = { file = "crates/agentd/src/tunnel.rs", replace = "let caller_proves_end = protocol::identity::offers_end_of_stream(&scratch[..offer]);", with = "let caller_proves_end = protocol::identity::offers_end_of_stream(&protocol::identity::HANDSHAKE_PAYLOAD);" }
+
+# The client reads a verified tunnel's unproven end as a clean one, which is #342's defect: a
+# close frame forged mid-stream through a real daemon reads as a finished download.
+[[fault]]
+id = "bind23-unproven-end-read-as-closed"
+guard = "bind_23_a_close_frame_forged_mid_stream_ends_truncated"
+run = ["cargo", "test", "-p", "model-conformance", "--test", "tunnel_end_of_stream", "--", "--exact", "bind_23_a_close_frame_forged_mid_stream_ends_truncated"]
+expect = "test-failed"
+suite = "rust"
+message = "a stream cut short must not read as a clean end"
+transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "Some(verified) if verified.daemon_proves_end => TunnelEnd::Truncated { code },", with = "Some(verified) if verified.daemon_proves_end => TunnelEnd::Closed," }
+
+# The same fault, caught by the client crate's own test.
+[[fault]]
+id = "bind23-unproven-end-read-as-closed-edges"
+guard = "bind_23_a_close_without_the_offered_end_of_stream_is_truncated"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "tunnel_end_of_stream", "--", "--exact", "bind_23_a_close_without_the_offered_end_of_stream_is_truncated"]
+expect = "test-failed"
+suite = "rust"
+message = "a close frame alone proves nothing"
+transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "Some(verified) if verified.daemon_proves_end => TunnelEnd::Truncated { code },", with = "Some(verified) if verified.daemon_proves_end => TunnelEnd::Closed," }
+
+# The client ignores the daemon's offer, so every daemon reads as one from before the end of
+# stream and a cut stream ends unproven instead of truncated.
+[[fault]]
+id = "bind23-daemon-offer-ignored"
+guard = "bind_23_a_close_without_the_offered_end_of_stream_is_truncated"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "tunnel_end_of_stream", "--", "--exact", "bind_23_a_close_without_the_offered_end_of_stream_is_truncated"]
+expect = "test-failed"
+suite = "rust"
+message = "left: ClosedUnproven"
+transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "let daemon_proves_end = protocol::identity::offers_end_of_stream(&scratch[..offer]);", with = "let daemon_proves_end = protocol::identity::offers_end_of_stream(&scratch[..0]);" }
+
+# The client holds a daemon from before the end of stream to one, failing every tunnel into an
+# older image.
+[[fault]]
+id = "bind23-older-daemon-held-to-an-end"
+guard = "bind_23_a_daemon_that_offers_no_end_of_stream_ends_closed_unproven"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "tunnel_end_of_stream", "--", "--exact", "bind_23_a_daemon_that_offers_no_end_of_stream_ends_closed_unproven"]
+expect = "test-failed"
+suite = "rust"
+message = "left: Truncated"
+transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "let daemon_proves_end = protocol::identity::offers_end_of_stream(&scratch[..offer]);", with = "let daemon_proves_end = protocol::identity::offers_end_of_stream(&protocol::identity::HANDSHAKE_PAYLOAD);" }
+
+# The client ends the tunnel without its own end of stream, so the daemon resets the guest's
+# connection on a finished upload.
+[[fault]]
+id = "bind23-client-sends-no-end-of-stream"
+guard = "the_local_eof_sends_the_end_of_stream_before_the_close"
+run = ["cargo", "test", "-p", "microvms-edges", "--test", "tunnel_end_of_stream", "--", "--exact", "the_local_eof_sends_the_end_of_stream_before_the_close"]
+expect = "test-failed"
+suite = "rust"
+message = "the end of stream came before the close"
+transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "    if let Ok(Some(end)) = seal(noise, &[], scratch) {\n        let _ = socket.send(Message::Binary(end.into())).await;\n    }\n", with = "    let _ = (&noise, &scratch);\n" }
