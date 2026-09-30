@@ -169,9 +169,11 @@ def main() -> int:
         "//! random pool) resolve here through the prelude import, which is how a caller keeps them.",
         "//!",
         "//! The generator's `REMOVED` lists the paths a later change removed on purpose, each with",
-        "//! the issue that removed it.",
+        "//! the issue that removed it. A path kept as a deprecated alias still resolves, which is",
+        "//! all this file checks, so naming one is allowed.",
         "",
         "#![allow(unused_imports)]",
+        "#![allow(deprecated)]",
         "",
     ]
     lines += [f"use {path} as _;" for path in sorted(paths)]

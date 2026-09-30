@@ -1,0 +1,23 @@
+# ── a launch returns once its daemon answers, and the exec waits' defaults (#254) ──
+
+# `wait_until_running` hands the session back at RUNNING again, as `Sandbox::run` did before.
+[[fault]]
+id = "app-run-returns-at-running"
+guard = "sandbox::tests::a_launch_returns_once_its_daemon_answers"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "sandbox::tests::a_launch_returns_once_its_daemon_answers"]
+expect = "test-failed"
+suite = "rust"
+message = "one poll refused, one bootstrapped, and nothing after"
+note = "crates/microvms-app/src/sandbox.rs::a_launch_returns_once_its_daemon_answers"
+transform = { file = "crates/microvms-app/src/sandbox.rs", replace = "        let session = self.session.as_mut().expect(\"just assigned\");\n        session\n            .wait_until_ready(crate::session::DEFAULT_BOOTSTRAP_TIMEOUT)\n            .await?;\n        Ok(session)\n", with = "        Ok(self.session.as_mut().expect(\"just assigned\"))\n" }
+
+# `exec --timeout` drifts from the core's exec wait by a second.
+[[fault]]
+id = "cli-exec-timeout-default-drifts"
+guard = "cli::tests::the_exec_wait_flags_default_to_the_cores_exec_wait"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "cli::tests::the_exec_wait_flags_default_to_the_cores_exec_wait"]
+expect = "test-failed"
+suite = "rust"
+message = "exec --timeout"
+note = "crates/microvms-cli/src/cli.rs::the_exec_wait_flags_default_to_the_cores_exec_wait"
+transform = { file = "crates/microvms-cli/src/cli.rs", replace = "    /// running in the guest. --timeout-sec is the daemon's deadline for the command itself.\n    #[arg(long, default_value = \"300\", value_parser = parse_seconds)]\n", with = "    /// running in the guest. --timeout-sec is the daemon's deadline for the command itself.\n    #[arg(long, default_value = \"301\", value_parser = parse_seconds)]\n" }

@@ -51,8 +51,9 @@ pub fn client_defaults() -> Value {
         "agentSizeMib": DEFAULT_SIZE.baseline_mib(),
         "agentPort": DEFAULT_AGENT_PORT,
         "execWaitSeconds": seconds(DEFAULT_EXEC_WAIT),
-        "readyTimeoutSeconds": seconds(crate::session::DEFAULT_READY_TIMEOUT),
-        "launchTimeoutSeconds": seconds(crate::sandbox::DEFAULT_READY_TIMEOUT),
+        // The daemon wait a launch makes after RUNNING, and the RUNNING wait before it (#254).
+        "readyTimeoutSeconds": seconds(crate::session::DEFAULT_BOOTSTRAP_TIMEOUT),
+        "launchTimeoutSeconds": seconds(crate::sandbox::DEFAULT_RUNNING_TIMEOUT),
         "lifecycleTimeoutSeconds": seconds(DEFAULT_LIFECYCLE_TIMEOUT),
         "lifecyclePollIntervalSeconds": seconds(LIFECYCLE_POLL_INTERVAL),
         "promptTimeoutSeconds": seconds(DEFAULT_PROMPT_TIMEOUT),
