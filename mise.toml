@@ -586,6 +586,37 @@ description = "Create and push a release tag, refusing a reused or stale one. TH
 # main's tip, and `publish:check` against the tag.
 run = "./scripts/release-tag.sh"
 
+# ── the changelog: fragments in changelog.d/, written into CHANGELOG.md at release ──
+#
+# CHANGELOG.md's `## Unreleased` was one list that every product PR appended to, so any two in
+# flight conflicted there. Each entry is a fragment now, a file of its own, and towncrier
+# (towncrier.toml) builds the release's section from them. All three tasks run
+# `./scripts/changelog.py`, whose PEP 723 header pins towncrier, so they and CI's step run one
+# version; the script's docstring has the rules.
+
+[tasks."changelog:check"]
+description = "Every changelog.d/ fragment is well named and builds, and a branch that changes shipped code adds one. Offline once uv has towncrier"
+# In `check` for `ratchet:check`'s reason: it reads the working tree against its merge base with
+# origin/main, a local ref, so a branch learns it needs a fragment before a push rather than
+# from CI's `security` job, which runs the same command with the pull request's base and
+# author. The unit tests run first, for `trace:check`'s reason: they build throwaway repos and
+# run the real script over them.
+run = [
+  "uv run python -m unittest discover -s scripts -p 'test_changelog.py'",
+  "./scripts/changelog.py check",
+]
+
+[tasks."changelog:draft"]
+description = "Print the next release's CHANGELOG.md section from changelog.d/, writing nothing"
+run = "./scripts/changelog.py draft"
+
+[tasks."release:prepare"]
+description = "Write changelog.d/ into CHANGELOG.md as release X.Y.Z and remove the fragments (towncrier build), staged for the release PR"
+# Before `release:tag`, in the release PR that bumps the versions: the section it writes is the
+# one the tag publishes. It refuses a malformed fragment, a version that isn't semver, and a
+# build with nothing to render, which is what a second run finds.
+run = "./scripts/changelog.py build"
+
 [tasks."npm:check"]
 description = "The npm package's loader and glibc floor. Needs a built addon"
 # Out of `check`, because both gates read build artifacts rather than sources: `index.js` and
@@ -673,6 +704,7 @@ depends = [
   "live:check",
   "conformance:self-test",
   "agents:check",
+  "changelog:check",
   "build",
   "background:check",
   "trace:check",
