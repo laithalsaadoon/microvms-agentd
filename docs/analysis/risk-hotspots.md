@@ -6,7 +6,7 @@ Risk here is composed from two measured signals, because the one the default rec
 for is empty. Both gate-level static-analysis passes return zero findings on every file:
 `cargo clippy --all-targets --message-format=json` emits 0 diagnostics at `warning` or
 `error` level, and the semgrep pass the gate runs over all seven crates
-(`mise.toml:115`) reports 0 results. So severity is measured instead as **test-tier reach**,
+(`.config/mise/tasks/security.toml:20`) reports 0 results. So severity is measured instead as **test-tier reach**,
 using CodeGraph's covering-test relation over the 4,430-node index. A symbol counts once, and
 only if it carries at least one inbound `calls`/`references`/`instantiates` dependent and
 sits outside any `#[cfg(test)]` region. **`error`** means no test file reaches it and its
@@ -106,7 +106,7 @@ dependents, `bindings/microvms-py/src/cost.rs:488`), the `seconds` getter (6 dep
 `bindings/microvms-py/src/cost.rs:126`), `PyDuration` (5, `bindings/microvms-py/src/cost.rs:89`) and
 `PyRateTable` (5, `bindings/microvms-py/src/cost.rs:576`). The mitigation is real and it is dynamic:
 `bindings/microvms-py/tests/test_cost.py` holds 39 pytest functions over 753 lines, and the generated
-stubs are gated by `stubs:check` (`mise.toml:219-250`, listed in `check` at `mise.toml:448`).
+stubs are gated by `stubs:check` (`.config/mise/tasks/contracts.toml:188-238`, listed in `check` at `.config/mise/tasks/check.toml:15`).
 What no tier covers is a Rust-level refactor of the absences the module docs enumerate — a
 `__float__` accidentally reintroduced on `EstimatedUsd` is caught only if a Python test
 happens to assert its absence, after a full native rebuild.
@@ -140,7 +140,7 @@ symbols are `SizeClass` (27 dependents, `bindings/microvms-js/src/cost.rs:422`),
 but CodeGraph does not classify `.mjs` as a test file, so those never appear in `affected`
 output for any path. This crate's `index.d.ts` is gitignored (`.gitignore:29`) and no drift
 gate for it appears anywhere in `mise.toml`, unlike its Python twin whose stubs are checked
-at `mise.toml:219-235` — the one asymmetry on this list that is a gap in the gate rather than
+at `.config/mise/tasks/contracts.toml:188-238` — the one asymmetry on this list that is a gap in the gate rather than
 a limit of the measurement.
 
 ### 3. `bindings/microvms-js/src/session.rs`
@@ -206,7 +206,7 @@ deterministically by a `turmoil` tier that controls virtual time only. Since #28
 is in `crates/microvms-core/src/prelude.rs:26` and the floor is the pure
 `CalendarDate::from_unix_secs` (`crates/microvms-domain/src/cost.rs:255`), which takes the time.
 Second, `RateTable::retrieved` (`crates/microvms-domain/src/cost.rs:856`) makes rate freshness a data property, which the separate
-`tools/check-live-rates.py --twin-only` cross-check exists to verify (`mise.toml:599-601`)
+`tools/check-live-rates.py --twin-only` cross-check exists to verify (`.config/mise/tasks/live.toml:135-138`)
 rather than any Rust test tier.
 
 ### 5. `bindings/microvms-py/src/exec.rs`
@@ -251,7 +251,7 @@ Every number above traces to one of these, run from the repository root at commi
   `benches/` that still exist on disk (78 files; 15 touched paths have since been deleted,
   including the retired `clients/python/` package).
 - Static-analysis baseline — `cargo clippy --all-targets --message-format=json` (0
-  diagnostics) and the semgrep invocation at `mise.toml:115` (0 results).
+  diagnostics) and the semgrep invocation at `.config/mise/tasks/security.toml:20` (0 results).
 - Covering-test relation — reverse traversal of `calls`/`references`/`instantiates` edges in
   `.codegraph/codegraph.db` at depth 1. The rule was validated against 126 markers harvested
   from 33 `codegraph explore` calls: depth 1 agrees on 124 of 126, and the 2 disagreements are

@@ -596,6 +596,9 @@ impl PyAgentVm {
     /// default to the core's figures (ten-minute idle and suspended windows, a one-hour
     /// ceiling); a multi-hour session raises `max_duration_sec` and polls `health` from
     /// outside to stay awake.
+    ///
+    /// `image_identifier` is an image ARN or a bare image name; the core resolves a name with
+    /// one `ListMicrovmImages` read and raises `PreconditionError` for a name no image carries.
     #[pyo3(signature = (
         *,
         image_identifier,

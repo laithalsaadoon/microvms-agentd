@@ -1,0 +1,263 @@
+# The live AWS tier: billable, and run by hand. `live:check` is the offline guard over
+# its wiring, and `check` runs it.
+
+["live:check"]
+description = "Fail if the live tier's own wiring is wrong. Offline and free"
+# In `check` rather than `live` for the reason `model:check` gives: no network, no
+# credentials, no money, so it costs the same as a lint. It is also the one gate whose
+# subject is *this file*, which nothing checked — and a 228-second billable run on
+# 2026-08-15 found three defects in it, none of them in anything the suite tests: a leak
+# check that reported clean at t=5s before the suite created anything, a free rate check
+# racing the billable suite it could abort, and a marker write that failed outright in a
+# worktree. All three are cheap to assert offline and expensive to find any other way.
+#
+# `live:` prefixed but deliberately NOT in `live`'s own dependency list: a guard over the
+# tier's wiring belongs in the gate that runs every time, not in the tier it describes,
+# which runs when someone decides to spend money.
+run = "./tools/check-live-wiring.py"
+
+["live:infra"]
+description = "Apply the conformance stack (idempotent)"
+run = "terraform -chdir=conformance/infra init -input=false && terraform -chdir=conformance/infra apply -auto-approve -input=false"
+
+# `live:conformance` was here: 56 checks through `conformance/run.py` and the Python
+# client. The Python tier moved to git history after the Rust port went live-green — both
+# suites passed against real AWS on the same commit, which is what retired the oracle
+# rather than merely duplicating it. `live:conformance-rs` below is the live suite now,
+# and it says in its own description how much of the 56 it can express.
+#
+# `live:probe` went the same way: `conformance/probe_suspend_resume.py` measured what a
+# real suspend/resume cycle preserves, and its measurements live on in
+# `docs/PLATFORM.md`, "Suspend and resume preserve everything". The suspend/resume
+# *assertions* it fed are still run, by `live:conformance-rs`'s own suspend/resume
+# section — the ticker gap, the surviving token, the surviving filesystem, the
+# backgrounded process still counting. What is gone is the standalone probe that
+# discovered them.
+
+["live:conformance-rs"]
+description = "The live suite through the Rust client: all 236 checks, no SKIP"
+depends = ["build", "build:cli", "live:infra"]
+# Both binaries: `--binary` is the aarch64 daemon that gets baked into the image, and
+# `--microvm-binary` is the host-architecture CLI under test. Naming both is what makes the
+# two-target split `build:cli` describes visible at the call site rather than only in a comment.
+#
+# This description read "38 of the oracle's 56 checks" for a release, and the number was in
+# it on purpose: the CLI's `exec` was one-shot with a generated exec id and there was no
+# `microvm cp`, `ack`, `exec --stream`, or `stdin`, so file transfer, tar round trips, the
+# four hostile archives, SSE, the stdin lifecycle, and the health flags were not expressible
+# through this client. The suite printed each of the 34 as SKIP with the missing subcommand
+# named, and a description claiming 56 would have been the more comfortable lie.
+#
+# `docs/CLI-COVERAGE-PLAN.md` grew the five doors — `health`, exec identity
+# (`--exec-id`/`--poll`), `ack`, `cp` (+`--tar`), `--stream`, `stdin` — and every SKIP became
+# a real check under the name run.py gave it. 75 rather than 72 because two of the old 38
+# were weak readings off the launch envelope and are now asserted directly against
+# `microvm health`; the suite's own docstring names all three deltas.
+#
+# The number stays in the description for the same reason it did when it was 38: this task's
+# one line is where someone decides whether to trust the tier, and "the live suite" without
+# a count is a sentence that stays true while coverage shrinks.
+run = """
+./conformance/run_rs.py \
+  --binary target/$AGENTD_TARGET/release/agentd \
+  --microvm-binary target/release/microvm
+"""
+
+["live:paths"]
+description = "The cursor encoding and the colon image ARN, against the real signer. Free."
+# Read-only and free — four GETs over resources the account already holds — but it needs
+# credentials, so it belongs here rather than in `check` for the reason `live:rates` gives
+# at length.
+#
+# It exists because every other test of the pagination cursor goes through the injected
+# `Transport`, so the fake mints the token the loop reads back and `SignedTransport` plus
+# the SigV4 canonical query are never exercised. That gap is not academic: measured
+# 2026-08-15, a cursor sent with its `=` padding unencoded is refused **400
+# `{"message":null}`** — a blank parse failure on page two of a listing whose page one
+# worked, naming nothing. The tests are `#[ignore]` so a credential-less
+# `cargo test --workspace` stays green; this task is how they run.
+run = "cargo test -p microvms-core --test live_pagination -- --ignored --nocapture"
+
+["live:release"]
+description = "Fetch and verify a published daemon release with no gh and no token. Free."
+# No AWS and no credentials: it downloads a public GitHub release and verifies its attestation
+# the way a client does (#284). The version defaults to the core's own, which exists only once
+# it's tagged, so before a tag pass an earlier one: `MICROVM_RELEASE_VERSION=0.10.0 mise run
+# live:release`. It isn't in `live`'s sequence because the conformance quickstart already
+# provisions the daemon the same way with `gh` logged out. The check before a release is
+# published is `crates/microvms-edges/tests/release_bundle.rs`, which `release.yml` runs over the
+# bundle it just produced.
+run = 'env -u GITHUB_TOKEN -u GH_TOKEN GH_CONFIG_DIR="$(mktemp -d)" cargo test -p microvms-core --test live_release -- --ignored --nocapture'
+
+["live:versions"]
+description = "The four version/build operations against the real service. Costs one short VM."
+# Same argument `live:paths` makes, plus two things a fake structurally cannot hold.
+#
+# `UpdateMicrovmImageVersion` is the only `PATCH` this client sends, so `Method::Patch` reaching
+# the SigV4 canonical request correctly is unexercised until a real signature is computed over
+# one — and a method the enum spells and the signer signs differently is refused in a way that
+# reads like bad credentials.
+#
+# And `INACTIVE` is only a retire if the *service* enforces it. A readback saying `INACTIVE` is
+# the service echoing a field back; the property the whole feature rests on is that `RunMicrovm`
+# then refuses, which nothing but the service can demonstrate. Measured 2026-08-16: it answers
+# **404 `No active version found for MicroVM image <arn> and version 1.0`**, for a pinned launch
+# and an unpinned one alike.
+#
+# NOT free, unlike `live:paths`, and the description says so because the cost is the reason
+# someone might not run it: the ACTIVE half of the round trip launches a real VM and terminates
+# it on the next line, about ten seconds of a 2 GB baseline. There is no cheaper way — a
+# `RunMicrovm` with the execution role omitted **succeeds** (the member is optional in the model
+# and the service means it, measured 2026-08-16 at the cost of one leaked VM), so there is no
+# incomplete launch that fails locally the way the bogus-ARN technique gives for other members.
+#
+# `--test-threads=1` because one of the four tests flips a version's status and restores it, and
+# a sibling reading the same version in parallel would see whichever half it happened to catch.
+# Ordered after `live:paths` in the aggregate below for the same reason `live:rates` goes after
+# the suite: this one spends money, so the free checks report first.
+run = "cargo test -p microvms-core --test live_versions -- --ignored --nocapture --test-threads=1"
+
+["live:rates"]
+description = "Fail if the pinned rate table no longer matches the AWS Pricing API"
+# The same argument as `schema:check`: a stale pinned artifact is worse than none,
+# because a consumer trusts a price *because* it is pinned and no diff reveals that
+# it describes a bill nobody pays. `STALE_AFTER_DAYS` could only say nobody had
+# looked; this looks.
+#
+# In `live` rather than `check` despite costing nothing — the Pricing API is free
+# and creates no resources — because it needs network and credentials, and `check`
+# is defined by needing neither. A gate that fails on a plane without AWS creds is
+# a gate people learn to skip, and `check` is the one command that must never be
+# skipped.
+#
+# A standalone script rather than a module in a client, because it used to be the Python
+# client's `pricing` module and that client is now git history. The pinned figures are
+# inlined there as literals — a deliberate second copy of `microvms-core`'s
+# `pinned_rates()`, since a drift check that imported the values it checks would compare
+# a table against itself. `tools/check-live-rates.py --twin-only` runs that cross-check
+# alone, offline and free, and it also runs first on this path.
+run = "./tools/check-live-rates.py"
+
+["live:verify-clean"]
+description = "Ask the account what leaked, rather than trusting teardown"
+# Independent of the code that did the cleanup, which is the whole point:
+# `terraform destroy` once reported success while six service-created log groups
+# survived, because Terraform never owned them.
+#
+# Ordering it *after* the suite is `live`'s job, not a `wait_for` here — see that task's
+# body for why the sequencing had to move out of `depends` entirely. This task stays a
+# plain one so `mise run live:verify-clean` remains the bare "what is in my account right
+# now" question, which is what someone reaches for after an interrupted run.
+run = "./tools/verify-clean.py"
+
+[live]
+description = "Every live suite, then an independent leak check. BILLABLE."
+# `live:rates` is in here even though it is the one member that spends nothing and
+# creates nothing. It is the cheapest thing in the tier and the only one that can
+# tell you a figure this repo publishes has gone wrong, so leaving it out of the
+# aggregate would mean it only ever ran when someone remembered to name it.
+#
+# `live:conformance-rs` is in here rather than left to be remembered, which is the same
+# argument `live:rates` earned above. Every AWS-facing defect this project has hit was
+# invisible until a real run, and the Rust client's live paths have *never* had one — its 628
+# tests all go through an injected seam, so `ControlPlane::new` and everything past it are
+# unexercised against the real service. A suite that only runs when someone names it is a
+# suite that runs the week it is written.
+#
+# Three members rather than five. `live:conformance` and `live:probe` drove the Python
+# client, and the Python tier moved to git history after the Rust port went live-green:
+# both suites passed against real AWS on the same commit, so the oracle's job was
+# finished rather than duplicated. `live:conformance-rs` is now the whole of the live
+# protocol coverage, and as of the CLI-coverage waves it expresses all 77 named checks
+# with none skipped — the 34 it used to name as inexpressible are real checks against the
+# five new attached subcommands.
+# 77 rather than the 75 this line and the README carried until 2026-08-15. The count had
+# already drifted to 76 without either being updated — a measured live run reported
+# "76 of 76" against three places claiming 75 — and the log-group delete described in
+# `drive_teardown` adds the 77th. The number is in these descriptions because this is
+# where someone decides whether to trust the tier, so it is worth keeping right; that it
+# drifted once is the argument for reading it off a run rather than from memory.
+#
+# Only the two builds and the stack in `depends`. The three suites are sequenced in the
+# body below instead, and that is a correction rather than a style choice: measured
+# 2026-08-15, `depends = ["live:rates", "live:conformance-rs", "live:verify-clean"]` ran all
+# three **in parallel**, and each of the three orderings it produced was wrong.
+#
+#   `live:verify-clean` finished at t=5s of a 228-second run and printed "account
+#   us-east-1: clean" — about an account nothing had touched yet. A leak check that
+#   cannot have seen the leak is not a weak check, it is a false assurance, and it is
+#   the one line a caller reads to decide whether to go looking.
+#
+#   `live:rates` raced the billable suite. mise kills the surviving siblings when one
+#   member of a parallel set fails, so a rate drifting past the 0.5% tolerance — a free
+#   check about a published figure — would have aborted the run that spends the money,
+#   mid-flight, with a MicroVM up. The killed task gets a TERM and a shell trap fires,
+#   but the VM here is launched by a Python driver two processes down.
+#
+#   And nothing ordered the marker write after the suites at all.
+#
+# mise has no `if: always()`. `depends_post` runs only when the task succeeds, and a
+# `wait_for` chain stops dead at the first failure — both measured — so under either one
+# the leak check is skipped exactly when the suite failed, which is precisely when
+# resources survive. That is the reason this is a shell body with a trap: the trap is the
+# only always-run primitive available, and `.github/workflows/live-conformance.yml` says
+# the same thing with `if: always()` on both cleanup steps.
+depends = ["build", "build:cli", "live:infra"]
+# Order, and what each position buys:
+#
+# 1. the suite, first, because it is the billable one and nothing free should be able to
+#    kill it. The stack it needs is already applied by `depends`.
+# 2. `live:rates` after, so a drifted rate is reported once the VM is down. Same order
+#    the CI workflow uses, for the reason it states: "runs after the suite so a rate that
+#    moved does not stop the account from being torn down".
+# 3. `live:verify-clean` in the trap, so it runs on the failure path too — an interrupted
+#    or failed suite is the case where the account most needs asking.
+# 4. the marker only on the success path, because it is a claim that this commit is
+#    live-verified and a failed run does not support it. `set -e` above is what makes
+#    that true by construction rather than by an `if`.
+#
+# Records the commit that was last proven against real AWS. The pre-push hook reads it to
+# tell you whether the daemon has changed since — advisory only, because only a human knows
+# whether a given change could touch the platform boundary. Lives in the git directory so
+# it is per-clone and never committed: a marker claiming someone else's run is worse than
+# no marker.
+#
+# The path comes from `tools/live-marker-path` rather than the literal `.git/…`, because
+# in a **worktree** `.git` is a *file* and the redirect fails with "Not a directory" —
+# measured 2026-08-15, where a 228-second billable run ended `[live] ERROR task failed` on
+# this line with all 76 checks green and the account clean. `mise run marker:check` is the
+# offline guard over both repo shapes, and that script's docstring carries the rest.
+run = """
+set -e
+# Idempotent, because the trap fires on the normal exit as well as on a failure and a
+# double leak report reads like two leaks.
+verified=0
+verify_clean() {
+  [ "$verified" = 1 ] && return 0
+  verified=1
+  echo '== independent leak check =='
+  mise run live:verify-clean
+}
+trap verify_clean EXIT INT TERM
+
+# Before the suite: free, read-only, seconds, and it is the member that fails first when
+# a URL member's encoding is wrong, so a signing bug is reported as a signing bug rather
+# than as a launch that could not resolve its image.
+mise run live:paths
+# After `live:paths` and before the suite. It writes — one version's status, flipped and
+# restored — and it launches one short VM, so it goes after the free member and before the
+# long one: a `PATCH` that will not sign should be reported in seconds rather than after a
+# four-minute build. Its own restore is on every exit path, so a failure here leaves the
+# version ACTIVE and the trap below still asks the account what leaked.
+mise run live:versions
+mise run live:conformance-rs
+mise run live:rates
+verify_clean
+
+git rev-parse HEAD > "$(./tools/check-live-wiring.py --marker-path)"
+echo 'recorded this commit as live-verified'
+"""
+
+["live:destroy"]
+description = "Tear down the conformance stack"
+run = "terraform -chdir=conformance/infra destroy -auto-approve"

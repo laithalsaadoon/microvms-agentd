@@ -93,8 +93,8 @@ pre-push:
       # out of core (#283): the edges now hold every call the live tier makes.
       #
       # `git rev-parse --git-path` rather than the literal `.git/`, matching the writer in
-      # `mise.toml`. In a worktree `.git` is a file, so the literal names a path inside a
-      # non-directory: the writer failed outright there, and this reader would have taken
+      # `.config/mise/tasks/live.toml`. In a worktree `.git` is a file, so the literal names a path
+      # inside a non-directory: the writer failed outright there, and this reader would have taken
       # the "no live run recorded" branch forever — the quieter failure of the two, and the
       # worse one, because the note it prints is indistinguishable from the truth.
       run: |

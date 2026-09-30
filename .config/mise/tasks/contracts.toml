@@ -1,0 +1,317 @@
+# The generated contracts and the gates that hold each to what generates it: the
+# daemon's schema, the CLI's manifest, core's API snapshot, the Python stub, the
+# TypeScript declarations, and the service constraints against botocore's model.
+
+["toolchain:id"]
+description = "Write the Rust toolchain's `rustc -vV` to target/toolchain-id, only when it changed"
+hide = true
+# The generate-and-diff gates below (`schema:check`, `manifest:check`, `core-api:check`,
+# `stubs:check`) declare `sources`, so mise skips one whose inputs haven't changed since it last
+# passed here. mise compares the path, size and mtime of every source against the last passing
+# run, and always counts the file that defines the task, which is this one. CI runs no mise
+# (D14), so CI runs every one of them on every push; the skip is local only, and
+# `mise run --force <task>` runs one anyway.
+#
+# A skip is only as sound as its list: a file the generator reads and the list leaves out makes a
+# stale artifact pass. Each list starts with what a cargo build of this workspace reads from the
+# tree: the lockfile, which pins the registry's crates by checksum, the workspace manifest, the
+# toolchain pin, cargo's config, and every top-level crate's manifest, build script and `src/`.
+# The builds these gates run compile nothing from outside `src/` (the one `#[path]` into another
+# crate's `tests/` is `cfg(test)`), and every file each gate's build read, from cargo's dep-info,
+# was in its list when the lists were written. It's every crate rather than each gate's own
+# dependency closure, so that a new dependency between crates can't fall outside a list; the
+# docs site's `site/src/` comes along, which only runs a gate more often. Each glob is its own
+# entry with no braces, so `agents:check` holds every one to a tracked file. mise reads `src/**`
+# as directories only, which is why each says `src/**/*`.
+#
+# Then the toolchain, which is this task. `rust-toolchain.toml` says `stable`, so a new stable
+# changes the compiler with no file in the tree changing, and a new rustdoc can write JSON the
+# walk reads differently. Each gate depends on this task, which mise runs before it decides
+# whether to skip the gate, and lists `target/toolchain-id`, whose mtime moves only when the
+# toolchain cargo would use here does.
+#
+# Then mise.toml, whose `[tools]`, `[env]` and `[vars]` reach every command a gate runs. mise
+# doesn't count it for a task another file defines: measured on mise 2026.8.1, a gate in an
+# included file skipped after an edit to mise.toml and reran after one to its own file.
+run = """
+set -eu
+mkdir -p target
+rustc -vV > target/toolchain-id.new
+if cmp -s target/toolchain-id.new target/toolchain-id; then
+  rm target/toolchain-id.new
+else
+  mv target/toolchain-id.new target/toolchain-id
+fi
+"""
+
+[schema]
+description = "Regenerate docs/schema.json from the serde types"
+run = "cargo run -q -p agentd --bin schema"
+
+["schema:check"]
+description = "Fail if the committed schema no longer matches what is served"
+# A stale generated artifact is worse than none: consumers trust it *because* it
+# is generated, and a diff never reveals that it describes a protocol nobody
+# serves.
+#
+# `toolchain:id` says how mise skips it and why the list is complete. The generator is
+# `crates/agentd/src/bin/schema.rs` over the daemon's and the protocol's serde types, so the Rust
+# entries hold it, and the one file it reads at run time is the committed schema.
+sources = [
+  "Cargo.toml",
+  "Cargo.lock",
+  "rust-toolchain.toml",
+  ".cargo/config.toml",
+  "crates/*/Cargo.toml",
+  "crates/*/src/**/*",
+  "bindings/*/Cargo.toml",
+  "bindings/*/build.rs",
+  "bindings/*/src/**/*",
+  "target/toolchain-id",
+  "mise.toml",
+  "docs/schema.json",
+]
+depends = ["toolchain:id"]
+outputs = { auto = true }
+run = "cargo run -q -p agentd --bin schema -- --check"
+
+["schema:compat"]
+description = "docs/schema.json against the previous release tag's copy: no route, status or field an older client or daemon reads is gone or newly required. Offline"
+# `schema:check` holds the schema to what this tree serves; this holds it to what the last
+# release served, which is what a caller meets mid-upgrade (#298). The script's docstring has
+# the direction-aware rule, what's out of scope, and why a clone with no `v*` tag refuses
+# rather than passes. The base is a local tag read with `git show`, so it's offline; CI's
+# `rust` job runs both commands on its ubuntu leg, with the full history and tags.
+#
+# The unit tests run first, for `trace:check`'s reason: they run the real script over the
+# v0.8.0, v0.9.0 and v0.10.0 schemas and over copies with one break seeded in each.
+run = [
+  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider tools/test_check_schema_compat.py",
+  "./tools/check-schema-compat.py",
+]
+
+[manifest]
+description = "Regenerate docs/manifest.json from the CLI's own argument tree"
+# The docs site's Reference tier (`site/scripts/gen-reference.mjs`) is generated from this
+# file: one page per command, the exit codes, the envelope, the response types. It is what
+# `microvm manifest` prints, so the CLI and the site can only disagree by this file being stale.
+run = "cargo run -q -p microvms-cli -- manifest > docs/manifest.json"
+
+["manifest:check"]
+description = "Fail if the committed manifest no longer matches what the CLI emits"
+# `schema:check`'s argument, pointed at the command surface. A stale manifest publishes a
+# command table for a binary nobody ships, and it does so with a generated artifact's
+# authority: a reader trusts the page *because* nothing in it was typed by hand.
+#
+# The CLI has no `--check` flag of its own, so the comparison is done here: regenerate into
+# a temp file and `diff -u` against the committed one. `set -e` so a build failure fails the
+# gate rather than diffing the committed file against an empty one and calling that drift.
+#
+# `toolchain:id` says how mise skips it and why the list is complete. The generator is the CLI's
+# own argument tree, so the Rust entries hold it, and it reads no file at run time; the other
+# input is the committed manifest.
+sources = [
+  "Cargo.toml",
+  "Cargo.lock",
+  "rust-toolchain.toml",
+  ".cargo/config.toml",
+  "crates/*/Cargo.toml",
+  "crates/*/src/**/*",
+  "bindings/*/Cargo.toml",
+  "bindings/*/build.rs",
+  "bindings/*/src/**/*",
+  "target/toolchain-id",
+  "mise.toml",
+  "docs/manifest.json",
+]
+depends = ["toolchain:id"]
+outputs = { auto = true }
+run = """
+set -eu
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+cargo run -q -p microvms-cli -- manifest > "$tmp"
+diff -u docs/manifest.json "$tmp"
+"""
+
+[core-api]
+description = "Regenerate verify/parity/core-api.json, every public path of microvms-core"
+# The core surface `parity:check` reads (#271). Core re-exports most of its API from the crates
+# below it, so this builds the rustdoc JSON of each and stitches them; the script's docstring
+# has why it's a committed snapshot and how it builds on stable.
+run = "./tools/generate-core-api.py"
+
+["core-api:check"]
+description = "Fail if verify/parity/core-api.json no longer matches core's public surface"
+# `schema:check`'s argument, pointed at the snapshot `parity:check` reads for core: a stale one
+# holds the table to a surface nobody ships. The stitcher's unit tests run first; they build a
+# two-crate fixture workspace with the real toolchain, so a rustdoc that changed under the pin
+# fails there, naming its format_version, before the gate reads core through it. It documents
+# the five crates alone, no dependency docs: measured 2026-09-28, about 5 s warm. CI's `rust`
+# job runs both. The JSON builds into `target/rustdoc-json`, not the shared target, and
+# `tools/rustdoc_walk.py`'s `build` says why.
+#
+# `toolchain:id` says how mise skips it and why the list is complete. Its sources are the five
+# crates (in the Rust entries), the toolchain, whose rustdoc writes the JSON and builds the
+# tests' fixture (the tests write the fixture's crates themselves), the stitcher, the generator,
+# the tests, and the committed snapshot.
+sources = [
+  "Cargo.toml",
+  "Cargo.lock",
+  "rust-toolchain.toml",
+  ".cargo/config.toml",
+  "crates/*/Cargo.toml",
+  "crates/*/src/**/*",
+  "bindings/*/Cargo.toml",
+  "bindings/*/build.rs",
+  "bindings/*/src/**/*",
+  "target/toolchain-id",
+  "mise.toml",
+  "verify/parity/core-api.json",
+  "tools/generate-core-api.py",
+  "tools/rustdoc_walk.py",
+  "tools/test_rustdoc_walk.py",
+]
+depends = ["toolchain:id"]
+outputs = { auto = true }
+run = [
+  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider tools/test_rustdoc_walk.py",
+  "./tools/generate-core-api.py --check",
+]
+
+[stubs]
+description = "Regenerate bindings/microvms-py/microvms.pyi from the pyo3 surface"
+# `stubs:check`'s target, for its reason, so the two share one build.
+env = { CARGO_TARGET_DIR = "{{config_root}}/target/stubs" }
+run = "./tools/generate-py-stubs.py"
+
+["stubs:check"]
+description = "Fail if the committed Python stub no longer matches the pyo3 surface"
+# `schema:check`'s argument, pointed at the binding rather than at the wire.
+#
+# The stale case is *worse* here than it is for the schema, because `py.typed` ships in the
+# wheel beside the stub. That marker is a promise to a type checker that this package is
+# typed, so a stub describing a surface the crate no longer has does not degrade to
+# "unchecked" — it degrades to confidently wrong, approving in an editor a call that raises
+# `AttributeError` when it runs. The crate shipped no stub and no marker at all until this
+# landed, which is why the gate arrives in the same commit as the artifact rather than after
+# it.
+#
+# In `check` rather than left to CI, for the reason `model:check` gives: no network, no
+# credentials, no money, so it costs what a lint costs. It builds `microvms-py` twice, once for
+# maturin's introspection pass and once for the importable cdylib the exception hierarchy is
+# read out of, and both build into `target/stubs` rather than the shared target. `test` runs its
+# tests and doc tests holding no cargo lock, and these builds rewrote units it reads: maturin
+# sets `PYO3_BUILD_EXTENSION_MODULE` and `PYO3_CONFIG_FILE`, the script's own build runs under
+# uv's `VIRTUAL_ENV` and `PATH`, and pyo3-ffi's build script declares all four as inputs, so
+# each build reran it and rebuilt pyo3-ffi and pyo3 in place; and `--features stubs` rewrote the
+# `libmicrovms.rlib` and `.so` that `test` builds, whose names carry no hash because the crate
+# builds a cdylib. Measured 2026-09-30 at be99c5d: shared, this task rewrote those files and
+# `test`'s next build recompiled three crates; in its own target nothing of `test`'s changes, and
+# a cold build there took 80 s run alone. CI's bindings job runs the script in its shared
+# target, a step at a time, where nothing races it, and reuses `maturin develop`'s build.
+# `targets:check` holds the target.
+#
+# `toolchain:id` says how mise skips it and why the list is complete. Its sources are the pyo3
+# crate and the crates below it (in the Rust entries), the toolchain, the crate's
+# `pyproject.toml` (maturin's module name and features), the script, which pins maturin, and the
+# committed stub.
+sources = [
+  "Cargo.toml",
+  "Cargo.lock",
+  "rust-toolchain.toml",
+  ".cargo/config.toml",
+  "crates/*/Cargo.toml",
+  "crates/*/src/**/*",
+  "bindings/*/Cargo.toml",
+  "bindings/*/build.rs",
+  "bindings/*/src/**/*",
+  "target/toolchain-id",
+  "mise.toml",
+  "bindings/microvms-py/microvms.pyi",
+  "bindings/microvms-py/pyproject.toml",
+  "tools/generate-py-stubs.py",
+]
+depends = ["toolchain:id"]
+outputs = { auto = true }
+env = { CARGO_TARGET_DIR = "{{config_root}}/target/stubs" }
+run = "./tools/generate-py-stubs.py --check"
+
+[dts]
+description = "Regenerate bindings/microvms-js/index.d.ts from the napi-rs surface"
+# `napi build` is the only thing that writes this file: napi-derive records each `#[napi]` item's
+# TypeScript shape at compile time and the CLI stitches them together, with the SPDX header from
+# `bindings/microvms-js/package.json`'s `napi.dtsHeader`. It also writes `index.js` and the platform `.node`
+# addon beside it, both gitignored, so this is the same command `ci.yml`'s bindings job runs.
+run = "npx -y -p @napi-rs/cli@3 napi build --manifest-path Cargo.toml --package microvms-js --platform --output-dir . --cwd bindings/microvms-js"
+
+["dts:check"]
+description = "Fail if the committed TypeScript declarations no longer match the napi-rs surface"
+# `stubs:check`'s argument for the other binding. The declarations are committed because the docs
+# site's TypeScript reference is generated from them (`site/scripts/reference/sdk/typescript.mjs`),
+# and before they were, the only copy was whatever a developer's last local build had left behind:
+# measured 2026-09-24, one checkout's `index.d.ts` was 1,966 lines while `main` generated 2,323.
+#
+# Built into a scratch directory rather than over the committed file, so a stale copy is reported
+# as a diff instead of silently repaired. `ci.yml`'s bindings job runs the same comparison with
+# `git diff` after the build it already does for the node tests.
+#
+# The diff proves the file matches the generator; `check-dts-consumer.py` proves the generator's
+# output lets a caller type what the docs show. The two differ: `ExecStream` was declared with no
+# `[Symbol.asyncIterator]()`, byte-identical to the build, and `tsc` rejected the `for await` loop
+# `stream()` documents (#262). The bindings job runs the second step on its own too.
+#
+# No `sources`, unlike the other generate-and-diff gates: npx resolves `@napi-rs/cli@3` to the
+# newest 3.x on each run, here and in every workflow, so a CLI release can make the committed file
+# stale while no file here changes, and a skip would pass it.
+#
+# The consumer check's unit tests run first, for `model:check`'s reason: its tsc locate runs under
+# the npx cache's lock and refuses a tsc npx didn't install (#348), and a fake npx proves both.
+run = [
+  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider tools/test_check_dts_consumer.py",
+  '''
+#!/usr/bin/env bash
+set -euo pipefail
+out=$(mktemp -d)
+trap 'rm -rf "$out"' EXIT
+npx -y -p @napi-rs/cli@3 napi build --manifest-path Cargo.toml --package microvms-js --platform --output-dir "$out" --cwd bindings/microvms-js >/dev/null
+if ! diff -u bindings/microvms-js/index.d.ts "$out/index.d.ts"; then
+  echo "bindings/microvms-js/index.d.ts is stale: run \`mise run dts\` and commit the result" >&2
+  exit 1
+fi
+''',
+  "./tools/check-dts-consumer.py",
+]
+
+["model:check"]
+description = "Fail if a hardcoded API constraint no longer matches botocore's service model"
+# Same argument as `schema:check`, pointed the other way. That one asserts the
+# generated artifact still describes what we serve; this one asserts the constants we
+# wrote by hand still describe what AWS accepts. Both exist because a value nobody
+# can disagree with drifts silently: this project published a 16 KB `runHookPayload`
+# ceiling through several review passes against a model that says 4096.
+#
+# In `check` rather than `live` because the model is a file inside botocore — no
+# network, no credentials, no money — so it costs the same as a lint and belongs
+# where the gate is unconditional.
+#
+# TRAP-12's "verify each hardcoded service constraint against the pinned botocore service
+# model in the build gate": `microvms-core`'s constants, read through
+# `microvm constants --emit-json`, against the shipped model.
+#
+# It compared THREE ways while the Python client existed — each client against the model,
+# then the two against each other. `MICROVM_REGIONS` and the sizing table are
+# measurement-backed, so the model can say nothing about them and client-vs-client was the
+# only check they could ever have. The script now holds its own pinned copies of those two
+# and compares against them, which keeps a second reader for the two values that need one.
+#
+# No `depends = ["build-cli"]`, because the script reaches the Rust constants through
+# `cargo run -q -p microvms-cli` itself. A prebuilt path would be faster and can be *stale*,
+# and a stale constants dump is precisely this gate's failure mode — it would compare a
+# value nobody ships and report agreement. Measured 2026-08-08: 0.4s warm, against 0.006s
+# for the built binary, which is nothing beside the rest of `check`. `--rust-binary` exists
+# for anyone who wants that trade knowingly.
+run = [
+  "./tools/check-model-drift.py",
+  "{{vars.pytest}} --with 'boto3>=1.40' --with 'pyyaml==6.0.3' pytest -n auto -q -p no:cacheprovider tools/test_model_drift.py",
+]

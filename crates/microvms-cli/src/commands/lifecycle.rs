@@ -714,15 +714,28 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
         outcome.image_identifier = Some(image.identifier.clone());
         ledger.record_image(&image.identifier, &image.name);
     }
+    // A launch from an existing image reports that image, as the ARN core resolved and sent,
+    // rather than the per-invocation default a build would have used (measured 2026-09-12: a
+    // launch from `--image <arn>` said `imageName: microvm-cli-<epoch>`). The name is the ARN's
+    // last colon segment (docs/PLATFORM.md, "The image ARN separator is a colon"). Not recorded
+    // on the ledger: this run did not build the image, so a kept VM launched from it must not
+    // list the image as its own to tear down.
+    if args.image.is_some()
+        && let Some(arn) = sandbox.launch_image_arn()
+    {
+        outcome.image_identifier = Some(arn.to_string());
+        outcome.image_name = Some(image_name_of(arn));
+    }
 
     // The daemon's hook log, read *before* the teardown because a terminated VM cannot
     // answer, and best-effort throughout: this is the teardown path, and a health fetch
     // that failed must not displace the run's real outcome. Short deadline for the same
     // reason — a wedged endpoint must not hold the teardown hostage for the transport's
-    // full 60s. Only attempted when a session is in hand; a launch that never built one
-    // has no endpoint to ask.
+    // full 60s. Only attempted once the platform reported the run hook answered (STATE-2):
+    // the session exists from the accepted launch, but a VM that never reached RUNNING has
+    // no daemon to ask, and the probe would mint a proxy token for nothing.
     let observed_hooks: Vec<microvms_core::protocol::health::HookObservation> =
-        match sandbox.session() {
+        match sandbox.session().filter(|_| sandbox.token_installed()) {
             Some(session) => {
                 match tokio::time::timeout(HEALTH_PROBE_DEADLINE, session.health()).await {
                     Ok(Ok(health)) => health.hooks,
@@ -1002,28 +1015,11 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
 
     let image_identifier = match &args.image {
         Some(identifier) => {
-            // A bare name is resolved to its ARN through the image listing before the
-            // launch: `RunMicrovm.imageIdentifier` takes an ARN, and a name sent verbatim
-            // is answered with HTTP 400 "Malformed ARN" — a message that says nothing
-            // about names. An identifier already shaped like an ARN passes through with
-            // zero extra calls (core checks the prefix first), so a caller who holds the
-            // ARN pays nothing for the convenience existing.
-            let resolved = sandbox.resolve_image_arn(identifier).await?;
-            if resolved != *identifier {
-                ctx.out
-                    .progress(&format!("resolved image name {identifier} to {resolved}"));
-            }
+            // A name or an ARN: `Sandbox::run` resolves a bare name to its ARN, and the
+            // envelope reads the ARN it sent back off the sandbox once the select ends.
             ctx.out
-                .progress(&format!("launching from the existing image {resolved}"));
-            // The launched image's own identity, so the envelope does not report the
-            // per-invocation default a build would have used (measured 2026-09-12: a launch
-            // from `--image <arn>` said `imageName: microvm-cli-<epoch>`). The name is the
-            // ARN's last colon segment (docs/PLATFORM.md, "The image ARN separator is a
-            // colon"). Not recorded on the ledger: this run did not build the image, so a
-            // kept VM launched from it must not list the image as its own to tear down.
-            outcome.image_identifier = Some(resolved.clone());
-            outcome.image_name = Some(image_name_of(&resolved));
-            resolved
+                .progress(&format!("launching from the existing image {identifier}"));
+            identifier.clone()
         }
         None => {
             // Resolved by the caller: the typed positional, the config file's `binary`,
@@ -1092,7 +1088,20 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
 
     ctx.out.progress("launching");
     let run_started = std::time::Instant::now();
-    let session = sandbox.run(request).await?;
+    // Accepted first and waited for second, so the name core resolved is reported as the
+    // launch goes out rather than after the RUNNING wait, and a launch the service refused
+    // reports it too.
+    let ready_timeout = request.ready_timeout;
+    request.wait = false;
+    let accepted = sandbox.run(request).await.map(|_| ());
+    if let (Some(identifier), Some(resolved)) = (&args.image, sandbox.launch_image_arn())
+        && resolved != identifier
+    {
+        ctx.out
+            .progress(&format!("resolved image name {identifier} to {resolved}"));
+    }
+    accepted?;
+    let session = sandbox.wait_until_running(ready_timeout).await?;
     // Read off the session and the sandbox rather than remembered from the request, because
     // the endpoint is what the *service* reported.
     let endpoint = session.endpoint().to_string();

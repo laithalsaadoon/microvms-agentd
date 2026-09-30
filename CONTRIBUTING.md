@@ -27,7 +27,7 @@ its `[actions]` table; the file also records each step `ci:local` skips and why,
 `check` does not create AWS resources. Initial dependency downloads, security
 rule loading, and advisory updates can require network access. Documentation,
 binding integration tests, and formal requirements have additional setup;
-consult their tasks in `mise.toml` and the CI workflows.
+consult their tasks in `.config/mise/tasks/` and the CI workflows.
 
 Useful checks while iterating:
 
