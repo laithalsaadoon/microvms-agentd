@@ -2129,12 +2129,17 @@ transform = { file = "model/src/exec_start.rs", replace = "Layering::Specified =
 
 # ── model_conformance.rs: the bootstrap and exec model replayed against agentd (#296) ──
 
+# The walk is replayed in slices, each a run of its shortest-first order, so the shortest path a
+# daemon fault fails on is slice 0's, and each fault below that seeds the daemon names slice 0.
+# The walk's floors, and the check that the slices replay it once, are
+# `the_slices_replay_every_walked_path_once`.
+
 # A step the per-state paths never take: every state a removing `Collect` reaches has a shorter
 # path, so only the walk's untaken-step paths drive it.
 [[fault]]
 id = "model-conformance-collect-keeps-acked"
-guard = "every_walked_path_of_the_model_replays_against_the_daemon"
-run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+guard = "slice_0_of_the_walk_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "slice_0_of_the_walk_replays_against_the_daemon"]
 expect = "test-failed"
 suite = "rust"
 message = "collect_expired removed 0 entries; the model collects 1"
@@ -2143,8 +2148,8 @@ transform = { file = "agentd/src/exec.rs", replace = "            Some(at) => no
 # The floor: a recorder that records nothing replays nothing and would pass.
 [[fault]]
 id = "model-conformance-empty-walk"
-guard = "every_walked_path_of_the_model_replays_against_the_daemon"
-run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+guard = "the_slices_replay_every_walked_path_once"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "the_slices_replay_every_walked_path_once"]
 expect = "test-failed"
 suite = "rust"
 message = "the walk recorded no path, so nothing was replayed"
@@ -2154,8 +2159,8 @@ transform = { file = "agentd/tests/model_conformance.rs", replace = "accessor().
 # names it.
 [[fault]]
 id = "model-conformance-untaken-steps"
-guard = "every_walked_path_of_the_model_replays_against_the_daemon"
-run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+guard = "the_slices_replay_every_walked_path_once"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "the_slices_replay_every_walked_path_once"]
 expect = "test-failed"
 suite = "rust"
 message = "the walk never takes [\"collect 200 removed\"]"
@@ -2166,8 +2171,8 @@ transform = { file = "agentd/tests/model_conformance.rs", replace = "    paths.e
 # replay reaches it on the shortest path that acks before the child exits.
 [[fault]]
 id = "model-conformance-ack-running"
-guard = "every_walked_path_of_the_model_replays_against_the_daemon"
-run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+guard = "slice_0_of_the_walk_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "slice_0_of_the_walk_replays_against_the_daemon"]
 expect = "test-failed"
 suite = "rust"
 message = "ExecAck(0) }): answered 200 OK; the model's response is 409 Conflict"
@@ -2177,8 +2182,8 @@ transform = { file = "agentd/src/exec.rs", replace = "    if slot.is_none() {\n"
 # catches it too.
 [[fault]]
 id = "model-conformance-collect-unacked-exited"
-guard = "every_walked_path_of_the_model_replays_against_the_daemon"
-run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+guard = "slice_0_of_the_walk_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "slice_0_of_the_walk_replays_against_the_daemon"]
 expect = "test-failed"
 suite = "rust"
 message = "collect_expired removed 1 entries; the model collects 0"
@@ -2189,8 +2194,8 @@ transform = { file = "agentd/src/exec.rs", replace = "            Some(at) => no
 # away (Running where the model has Acked) before the spawn count does.
 [[fault]]
 id = "model-conformance-restart-acked"
-guard = "every_walked_path_of_the_model_replays_against_the_daemon"
-run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+guard = "slice_0_of_the_walk_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "slice_0_of_the_walk_replays_against_the_daemon"]
 expect = "test-failed"
 suite = "rust"
 message = "the model's is Acked"
@@ -2202,11 +2207,11 @@ transform = { file = "agentd/src/exec.rs", replace = "    let already_present = 
 # (`exec::tests::a_retried_start_does_not_spawn_a_second_child` retries after the exit).
 [[fault]]
 id = "model-conformance-restart-running"
-guard = "every_walked_path_of_the_model_replays_against_the_daemon"
-run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+guard = "slice_0_of_the_walk_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "slice_0_of_the_walk_replays_against_the_daemon"]
 expect = "test-failed"
 suite = "rust"
-note = "agentd/tests/model_conformance.rs::every_walked_path_of_the_model_replays_against_the_daemon"
+note = "agentd/tests/model_conformance.rs::slice_0_of_the_walk_replays_against_the_daemon"
 message = "spawned 2 children; the model spawned 1"
 transform = { file = "agentd/src/exec.rs", replace = "    let already_present = state.with_execs(|execs| execs.contains_key(&req.exec_id));\n", with = "    let already_present = state.with_execs(|execs| execs.get(&req.exec_id).is_some_and(|entry| entry.acked_at.is_some() || entry.shared.terminal.try_lock().map_or(true, |terminal| terminal.is_some())));\n" }
 
@@ -2215,8 +2220,8 @@ transform = { file = "agentd/src/exec.rs", replace = "    let already_present = 
 # catches it too; this entry is what shows the replay reaches auth.
 [[fault]]
 id = "model-conformance-auth-before-bootstrap"
-guard = "every_walked_path_of_the_model_replays_against_the_daemon"
-run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+guard = "slice_0_of_the_walk_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "slice_0_of_the_walk_replays_against_the_daemon"]
 expect = "test-failed"
 suite = "rust"
 message = "answered 401 Unauthorized; the model's response is 503 Service Unavailable"
@@ -2227,12 +2232,66 @@ transform = { file = "agentd/src/auth.rs", replace = "            None => Some(S
 # this entry is what shows the replay reaches the hook.
 [[fault]]
 id = "model-conformance-hook-replaces-token"
-guard = "every_walked_path_of_the_model_replays_against_the_daemon"
-run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "every_walked_path_of_the_model_replays_against_the_daemon"]
+guard = "slice_0_of_the_walk_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "slice_0_of_the_walk_replays_against_the_daemon"]
 expect = "test-failed"
 suite = "rust"
 message = "answered 200 OK; the model's response is 409 Conflict"
 transform = { file = "agentd/src/state.rs", replace = "                } else {\n                    Bootstrap::Conflict\n                }\n", with = "                } else {\n                    *slot = Some(presented.to_vec());\n                    Bootstrap::Installed\n                }\n" }
+
+# A slice start that skips the walk's first path, so no test replays it. Every slice test stays
+# green.
+[[fault]]
+id = "model-conformance-slice-gap"
+guard = "the_slices_replay_every_walked_path_once"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "the_slices_replay_every_walked_path_once"]
+expect = "test-failed"
+suite = "rust"
+message = "paths [0] are in no slice"
+transform = { file = "agentd/tests/model_conformance.rs", replace = "        if before * SLICES >= states * k {\n", with = "        if before * SLICES > states * k {\n" }
+
+# Each slice starts one path early, so a path at each cut is replayed twice.
+[[fault]]
+id = "model-conformance-slice-overlap"
+guard = "the_slices_replay_every_walked_path_once"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "the_slices_replay_every_walked_path_once"]
+expect = "test-failed"
+suite = "rust"
+note = "agentd/tests/model_conformance.rs::the_slices_replay_every_walked_path_once"
+message = "paths are in more than one slice"
+transform = { file = "agentd/tests/model_conformance.rs", replace = "    slice_start(paths, k)..slice_start(paths, k + 1)\n", with = "    slice_start(paths, k).saturating_sub(1)..slice_start(paths, k + 1)\n" }
+
+# A slice test that replays another's slice: the partition is whole, but the last slice's paths
+# run in no test and the one before's in two.
+[[fault]]
+id = "model-conformance-slice-unwired"
+guard = "the_slices_replay_every_walked_path_once"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "the_slices_replay_every_walked_path_once"]
+expect = "test-failed"
+suite = "rust"
+message = "slices [7] are replayed by no test"
+transform = { file = "agentd/tests/model_conformance.rs", replace = "    replay_slice(7).await;\n", with = "    replay_slice(6).await;\n" }
+
+# The wiring check on empty input: a source with no tests replays no slice, and says so.
+[[fault]]
+id = "model-conformance-slices-empty-source"
+guard = "the_slices_replay_every_walked_path_once"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "the_slices_replay_every_walked_path_once"]
+expect = "test-failed"
+suite = "rust"
+message = "no test in this file calls `replay_slice`"
+transform = { file = "agentd/tests/model_conformance.rs", replace = "syn::parse_str(include_str!(\"model_conformance.rs\"))", with = "syn::parse_str(\"\")" }
+
+# A slice's own floor: truncating division puts every path in the last slice, which the
+# partition check accepts, and a slice with nothing to replay would pass.
+[[fault]]
+id = "model-conformance-empty-slice"
+guard = "slice_0_of_the_walk_replays_against_the_daemon"
+run = ["cargo", "test", "-p", "agentd", "--test", "model_conformance", "--", "--exact", "slice_0_of_the_walk_replays_against_the_daemon"]
+expect = "test-failed"
+suite = "rust"
+message = "slice 0 holds no path, so it replays nothing"
+transform = { file = "agentd/tests/model_conformance.rs", replace = "        if before * SLICES >= states * k {\n", with = "        if before >= k / SLICES * states {\n" }
 
 # The key floor: a model property that loses its key leaves the replay's claim with nothing
 # to back it, and trace:check can't see that while the key isn't in TRACED.
