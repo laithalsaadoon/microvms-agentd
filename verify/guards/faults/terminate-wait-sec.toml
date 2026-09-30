@@ -1,0 +1,38 @@
+# ── a terminate that waits a given number of seconds, on every surface (#267) ────
+
+# The CLI's `--wait-sec` dropped: only `--wait` decides, so the flag alone waits for nothing.
+[[fault]]
+id = "cli-terminate-ignores-wait-sec"
+guard = "guards::history::a_terminate_with_wait_sec_waits_for_terminated_up_to_that_deadline"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::history::a_terminate_with_wait_sec_waits_for_terminated_up_to_that_deadline"]
+expect = "test-failed"
+suite = "rust"
+message = "--wait-sec waits by itself"
+note = "crates/microvms-cli/src/guards/history.rs::a_terminate_with_wait_sec_waits_for_terminated_up_to_that_deadline"
+transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "    let wait = args\n        .wait_sec\n        .or(args.wait.then_some(DEFAULT_LIFECYCLE_TIMEOUT));\n", with = "    let wait = args.wait.then_some(DEFAULT_LIFECYCLE_TIMEOUT);\n" }
+
+# Each binding maps a number of seconds to the core's default wait, so the seconds never reach
+# `TeardownOpts` and a negative one is no longer refused.
+[[fault]]
+id = "py-terminate-ignores-wait-seconds"
+guard = "bindings/microvms-py/tests/test_control.py::test_terminate_waits_for_a_bool_or_a_number_of_seconds"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_control.py::test_terminate_waits_for_a_bool_or_a_number_of_seconds"],
+]
+expect = "test-failed"
+suite = "bindings"
+note = "bindings/microvms-py/tests/test_control.py::test_terminate_waits_for_a_bool_or_a_number_of_seconds"
+transform = { file = "bindings/microvms-py/src/sandbox.rs", replace = "            WaitForTerminated::Seconds(timeout) => {\n                opts.wait_for_terminated = Some(seconds(timeout)?);\n            }\n", with = "            WaitForTerminated::Seconds(_) => opts = opts.waiting_for_terminated(),\n" }
+
+[[fault]]
+id = "js-terminate-ignores-wait-seconds"
+guard = "terminate waits for a boolean or a number of seconds"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/control.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+note = "bindings/microvms-js/__test__/control.mjs::terminate waits for a boolean or a number of seconds"
+transform = { file = "bindings/microvms-js/src/sandbox.rs", replace = "            Some(Either::B(timeout)) => opts.wait_for_terminated = Some(seconds_async(timeout)?),\n", with = "            Some(Either::B(_)) => opts = opts.waiting_for_terminated(),\n" }

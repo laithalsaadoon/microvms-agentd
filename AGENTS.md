@@ -116,13 +116,14 @@ which #300 checks through the generated surfaces.
 If an adapter needs something private to a lower crate, make it public there or
 move the caller down. Never copy it.
 
-Drift is layering drift, parity gaps and untraced requirements. `mise run
-ratchet:check` collects it from the working tree and from the merge base's tree,
-with the same collectors, and fails when the tree has drift the base doesn't: a
-PR can't add drift, and a fix removes it by fixing the code, with no list to
-edit. Nobody edits `verify/ratchet/drift.json`: it's a generated snapshot for
-the docs site's history chart, which `mise run ratchet:snapshot` rewrites in a
-change of its own. A permanent exception is a decision in
+Drift is layering drift, parity gaps, the case corpus's markers and skips, and
+untraced requirements. `mise run ratchet:check` collects it from the working
+tree and from the merge base's tree, with the same collectors, and fails when
+the tree has drift the base doesn't: a PR can't add drift, and a fix removes it
+by fixing the code, with no list to edit. Nobody edits
+`verify/ratchet/drift.json`: it's a generated snapshot for the docs site's
+history chart, which `mise run ratchet:snapshot` rewrites in a change of its
+own. A permanent exception is a decision in
 `verify/ratchet/decisions.toml`, with its reason, and a decision whose finding is
 gone fails the check. An untraced requirement takes no decision: list it in its
 group's file under `verify/spec/traced/` (`verify/spec/traced/TRAP.toml` for a

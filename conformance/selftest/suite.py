@@ -26,6 +26,7 @@ from selftest.names import check_terminate_fallback
 from selftest.posture import check_posture_lines
 from selftest.privacy import check_log_privacy
 from selftest.quickstart import check_gh_logged_out
+from selftest.skew import check_version_skew_helpers
 from selftest.stub import STUB_SOURCE
 
 
@@ -56,6 +57,7 @@ def self_test() -> int:
         check_ensure_image_section(results)
         check_caller_artifact_section(results)
         check_gh_logged_out(results)
+        check_version_skew_helpers(results)
 
         # -- the success side -------------------------------------------------
         ok = cli.call("ok")

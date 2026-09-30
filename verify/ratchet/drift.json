@@ -10,9 +10,7 @@
     "subprocess": [
       "crates/microvms-cli/src/seam.rs: Command::new(\"aws\")"
     ],
-    "port-impl": [
-      "crates/microvms-cli/src/seam.rs: TokenMinter for PlaneMinter"
-    ],
+    "port-impl": [],
     "adapter-logic": [],
     "parity-gap": [
       "ControlPlane.region/ts",
@@ -50,7 +48,6 @@
       "managed-base-versions/ts",
       "port-forward/py",
       "port-forward/ts",
-      "retryable/ts",
       "run-to-completion/cli",
       "set-image-version-status/cli",
       "set-image-version-status/py",
@@ -68,6 +65,25 @@
       "wait-until-ready/cli",
       "wait-until-running/cli",
       "wrap-dockerfile/cli"
+    ],
+    "parity-drift": [
+      "cost/estimate-running-and-suspended/py: known_drift label",
+      "cost/estimate-running-and-suspended/py: known_drift size.headroomMib",
+      "cost/estimate-running-and-suspended/ts: known_drift label",
+      "cost/estimate-running-and-suspended/ts: known_drift size.headroomMib",
+      "cost/estimate-suspended-only/py: known_drift items",
+      "cost/estimate-suspended-only/py: known_drift label",
+      "cost/estimate-suspended-only/py: known_drift size.headroomMib",
+      "cost/estimate-suspended-only/py: known_drift total",
+      "cost/estimate-suspended-only/ts: known_drift items",
+      "cost/estimate-suspended-only/ts: known_drift label",
+      "cost/estimate-suspended-only/ts: known_drift size.headroomMib",
+      "cost/estimate-suspended-only/ts: known_drift total",
+      "cost/estimate-with-running-time/py: known_drift label",
+      "cost/estimate-with-running-time/py: known_drift size.headroomMib",
+      "cost/estimate-with-running-time/ts: known_drift label",
+      "cost/estimate-with-running-time/ts: known_drift size.headroomMib",
+      "image-name/ensure-image-name/cli: known_drift name"
     ],
     "untraced": [
       "ARCH-5",
@@ -115,6 +131,7 @@
     "port-impl": 1,
     "adapter-logic": 5,
     "parity-gap": 0,
+    "parity-drift": 2,
     "untraced": 0
   }
 }

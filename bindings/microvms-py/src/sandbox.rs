@@ -260,6 +260,16 @@ impl PyImage {
     }
 }
 
+/// `wait_for_terminated` as a caller gives it: a `bool`, or how many seconds to wait.
+///
+/// `Flag` first: PyO3's `bool` extraction takes only a real `bool`, while an `f64` extraction
+/// would read `True` as one second.
+#[derive(FromPyObject)]
+pub(crate) enum WaitForTerminated {
+    Flag(bool),
+    Seconds(f64),
+}
+
 /// What a teardown did, and what it left behind.
 ///
 /// Returned rather than raised — see the module docs.
@@ -510,6 +520,102 @@ impl PySandbox {
     pub(crate) fn read<T>(&self, body: impl FnOnce(&Sandbox) -> T) -> T {
         let guard = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         body(&guard)
+    }
+}
+
+/// `build_image`'s keywords, which `preflight` takes too, so the request a caller checks is
+/// the request the build sends.
+struct ImageRequestArgs<'a> {
+    name: &'a str,
+    binary: Vec<u8>,
+    code_artifact_uri: &'a str,
+    build_role_arn: &'a str,
+    size: Option<PySizeClass>,
+    base_image: Option<PyBaseImage>,
+    dockerfile: Option<String>,
+    repair_guest_identity: bool,
+    inherit_workdir: bool,
+    run_hook_timeout: Option<PyRunHookTimeout>,
+    build_hook_timeout: Option<PyBuildHookTimeout>,
+    tags: Option<std::collections::BTreeMap<String, String>>,
+    log_group: Option<String>,
+    log_stream: Option<String>,
+    token_scope: Option<String>,
+}
+
+/// The core request for `build_image`'s keywords: each one set on core's own request type,
+/// every unset one left at core's default.
+fn create_image_request(args: ImageRequestArgs<'_>) -> CreateImageRequest {
+    let mut request = CreateImageRequest::new(
+        args.name,
+        args.binary,
+        args.code_artifact_uri,
+        args.build_role_arn,
+    );
+    if let Some(size) = args.size {
+        request.size = size.inner;
+    }
+    if let Some(base) = args.base_image {
+        request.base_image = base.inner;
+    }
+    request.dockerfile = args.dockerfile;
+    request.repair_guest_identity = args.repair_guest_identity;
+    request.inherit_workdir = args.inherit_workdir;
+    if let Some(timeout) = args.run_hook_timeout {
+        request.run_hook_timeout = timeout.inner;
+    }
+    if let Some(timeout) = args.build_hook_timeout {
+        request.build_hook_timeout = timeout.inner;
+    }
+    if let Some(tags) = args.tags {
+        request.tags = tags;
+    }
+    // The stream is a *prefix* by core's contract: the create call appends `/<16
+    // hex>` per attempt (one build is three VMs writing three streams under an
+    // exact-name member), and the resolved name comes back on `Image.log_stream`.
+    request.log_group = args.log_group;
+    request.log_stream = args.log_stream;
+    request.token_scope = args.token_scope;
+    request
+}
+
+/// One version of a managed base image, from `ListManagedMicrovmImageVersions`.
+#[pyclass(frozen, name = "ManagedBaseVersion", module = "microvms")]
+pub struct PyManagedBaseVersion {
+    inner: microvms_core::control::ops::ManagedMicrovmImageVersionWire,
+}
+
+#[pymethods]
+impl PyManagedBaseVersion {
+    #[getter]
+    fn image_arn(&self) -> &str {
+        &self.inner.image_arn
+    }
+
+    /// A bare integer for a managed base (`"0"`, `"1"`), where a custom image's versions read
+    /// `"1.0"`: the value `build_image`'s pin takes, not one to compare with a build's readback.
+    #[getter]
+    fn image_version(&self) -> &str {
+        &self.inner.image_version
+    }
+
+    /// Unix seconds.
+    #[getter]
+    fn created_at(&self) -> f64 {
+        self.inner.created_at
+    }
+
+    /// Unix seconds, when the service reported it.
+    #[getter]
+    fn updated_at(&self) -> Option<f64> {
+        self.inner.updated_at
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ManagedBaseVersion(image_version={:?})",
+            self.inner.image_version
+        )
     }
 }
 
@@ -769,32 +875,23 @@ impl PySandbox {
         log_stream: Option<String>,
         token_scope: Option<String>,
     ) -> PyCoreResult<PyImage> {
-        let mut request = CreateImageRequest::new(name, binary, code_artifact_uri, build_role_arn);
-        if let Some(size) = size {
-            request.size = size.inner;
-        }
-        if let Some(base) = base_image {
-            request.base_image = base.inner;
-        }
-        request.dockerfile = dockerfile;
-        request.repair_guest_identity = repair_guest_identity;
-        request.inherit_workdir = inherit_workdir;
-        if let Some(timeout) = run_hook_timeout {
-            request.run_hook_timeout = timeout.inner;
-        }
-        if let Some(timeout) = build_hook_timeout {
-            request.build_hook_timeout = timeout.inner;
-        }
-        if let Some(tags) = tags {
-            request.tags = tags;
-        }
-        // The stream is a *prefix* by core's contract: the create call appends `/<16
-        // hex>` per attempt (one build is three VMs writing three streams under an
-        // exact-name member), and the resolved name comes back on `Image.log_stream`.
-        request.log_group = log_group;
-        request.log_stream = log_stream;
-        request.token_scope = token_scope;
-
+        let request = create_image_request(ImageRequestArgs {
+            name,
+            binary,
+            code_artifact_uri,
+            build_role_arn,
+            size,
+            base_image,
+            dockerfile,
+            repair_guest_identity,
+            inherit_workdir,
+            run_hook_timeout,
+            build_hook_timeout,
+            tags,
+            log_group,
+            log_stream,
+            token_scope,
+        });
         let built = self.detached(py, move |sandbox| {
             runtime::block_on_detached(sandbox.build_image(request)).map(|image| PyImage {
                 identifier: image.identifier.clone(),
@@ -901,6 +998,89 @@ impl PySandbox {
             uploaded: ensured.uploaded,
             warnings: ensured.warnings,
         })
+    }
+
+    /// Every local guard `build_image` runs, with zero calls: raises the refusal `build_image`
+    /// would, so a caller who uploads its own artifact checks the request before paying for
+    /// the upload. Takes `build_image`'s keywords.
+    #[pyo3(signature = (
+        *,
+        name,
+        binary,
+        code_artifact_uri,
+        build_role_arn,
+        size=None,
+        base_image=None,
+        dockerfile=None,
+        repair_guest_identity=false,
+        inherit_workdir=false,
+        run_hook_timeout=None,
+        build_hook_timeout=None,
+        tags=None,
+        log_group=None,
+        log_stream=None,
+        token_scope=None,
+    ))]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "`build_image`'s keywords, one per CreateImageRequest field, so the \
+         request checked is the request built"
+    )]
+    fn preflight(
+        &self,
+        name: &str,
+        binary: Vec<u8>,
+        code_artifact_uri: &str,
+        build_role_arn: &str,
+        size: Option<PySizeClass>,
+        base_image: Option<PyBaseImage>,
+        dockerfile: Option<String>,
+        repair_guest_identity: bool,
+        inherit_workdir: bool,
+        run_hook_timeout: Option<PyRunHookTimeout>,
+        build_hook_timeout: Option<PyBuildHookTimeout>,
+        tags: Option<std::collections::BTreeMap<String, String>>,
+        log_group: Option<String>,
+        log_stream: Option<String>,
+        token_scope: Option<String>,
+    ) -> PyCoreResult<()> {
+        let request = create_image_request(ImageRequestArgs {
+            name,
+            binary,
+            code_artifact_uri,
+            build_role_arn,
+            size,
+            base_image,
+            dockerfile,
+            repair_guest_identity,
+            inherit_workdir,
+            run_hook_timeout,
+            build_hook_timeout,
+            tags,
+            log_group,
+            log_stream,
+            token_scope,
+        });
+        Ok(self.read(|sandbox| sandbox.preflight(&request))?)
+    }
+
+    /// `ListManagedMicrovmImageVersions`, every page: the versions of a managed base, the
+    /// values `build_image`'s base-version pin takes.
+    ///
+    /// `base_image_arn` is the base's full ARN, such as
+    /// `arn:aws:lambda:us-east-1:aws:microvm-image:al2023-1`; a bare name is refused.
+    fn managed_base_versions(
+        &self,
+        py: Python<'_>,
+        base_image_arn: String,
+    ) -> PyCoreResult<Vec<PyManagedBaseVersion>> {
+        let versions = self.detached(py, move |sandbox| {
+            runtime::block_on_detached(sandbox.managed_base_versions(&base_image_arn))
+        })?;
+        Ok(versions
+            .into_iter()
+            .map(|inner| PyManagedBaseVersion { inner })
+            .collect())
     }
 
     /// The artifact bytes to upload to `code_artifact_uri`.
@@ -1153,14 +1333,15 @@ impl PySandbox {
     ///
     /// `wait_for_terminated=False` by default: the caller is on the way out, and a teardown
     /// that blocked five minutes on a state nobody reads is five minutes of a CI job. The
-    /// report then honestly ends in `"TERMINATING"`.
+    /// report then honestly ends in `"TERMINATING"`. `True` waits for TERMINATED up to the
+    /// core's lifecycle default; a number of seconds waits up to that instead.
     #[pyo3(signature = (
         *,
         delete_image=false,
         delete_log_group=false,
         delete_attempts=None,
         delete_backoff=None,
-        wait_for_terminated=false,
+        wait_for_terminated=WaitForTerminated::Flag(false),
     ))]
     pub(crate) fn terminate(
         &self,
@@ -1169,7 +1350,7 @@ impl PySandbox {
         delete_log_group: bool,
         delete_attempts: Option<u32>,
         delete_backoff: Option<f64>,
-        wait_for_terminated: bool,
+        wait_for_terminated: WaitForTerminated,
     ) -> PyCoreResult<PyTeardownReport> {
         // The two retry knobs default to the core's own figures rather than to numbers
         // written here: twenty attempts fifteen seconds apart is the difference between a
@@ -1186,8 +1367,12 @@ impl PySandbox {
             },
             wait_for_terminated: defaults.wait_for_terminated,
         };
-        if wait_for_terminated {
-            opts = opts.waiting_for_terminated();
+        match wait_for_terminated {
+            WaitForTerminated::Flag(false) => {}
+            WaitForTerminated::Flag(true) => opts = opts.waiting_for_terminated(),
+            WaitForTerminated::Seconds(timeout) => {
+                opts.wait_for_terminated = Some(seconds(timeout)?);
+            }
         }
         // `terminate` answers a report rather than a `Result`, so the `Ok` here is this
         // wrapper's and never the core's — a teardown cannot raise, which is the whole
