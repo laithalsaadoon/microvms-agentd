@@ -1,0 +1,82 @@
+# ── the ratchet's parity-drift: the case corpus's markers and skips (#320) ──
+
+# A marker added to a case the base has without one: the change that lets a surface drift and
+# marks the case that catches it, which every gate passed before (#320).
+[[fault]]
+id = "ratchet-parity-drift-new-marker"
+guard = "tools/ratchet.py"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "new drift: [parity-drift] size-class/cpu-only/py: known_drift baseline_mib. Make the surface give the case's answer"
+transform = { file = "verify/parity/cases/size-class/cpu-only.json", replace = "  \"capability\": \"size-from-request\",\n", with = "  \"capability\": \"size-from-request\",\n  \"known_drift\": { \"py\": { \"issue\": \"#255\", \"keys\": [\"baseline_mib\"] } },\n" }
+
+# A skip added the same way: a surface quietly taken out of a case.
+[[fault]]
+id = "ratchet-parity-drift-new-skip"
+guard = "tools/ratchet.py"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "new drift: [parity-drift] size-class/cpu-only/ts: skip"
+transform = { file = "verify/parity/cases/size-class/cpu-only.json", replace = "  \"capability\": \"size-from-request\",\n", with = "  \"capability\": \"size-from-request\",\n  \"skip\": { \"ts\": \"no offline call answers it (#255)\" },\n" }
+
+# The Python binding answers the case at last and its skip goes, but its decision stays.
+[[fault]]
+id = "ratchet-parity-drift-stale-decision"
+guard = "verify/ratchet/decisions.toml"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "stale decision: [parity-drift] image-name/ensure-image-name/py: skip decides a finding the tree doesn't have"
+transform = { file = "verify/parity/cases/image-name/ensure-image-name.json", replace = "    \"py\": \"`ensure_image` computes the name in core's local half and hands it back only with a built image, so no offline call answers it (IMAGE-12)\",\n", with = "" }
+
+# The floor: a loader that finds no case file, which would read every marker as fixed.
+[[fault]]
+id = "ratchet-parity-drift-floor"
+guard = "tools/ratchet.py"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "holds no case, so no marker or skip can be counted"
+transform = { file = "tools/ratchet.py", replace = "glob(\"*/*.json\")", with = "glob(\"*/*.case\")" }
+
+# The sentinel: a loader that reads the files and counts nothing in them.
+[[fault]]
+id = "ratchet-parity-drift-sentinel"
+guard = "verify/ratchet/fixtures/sentinel/expected.json"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "sentinel: the parity-drift collector found nothing"
+transform = { file = "tools/ratchet.py", replace = "    for path in cases:\n", with = "    for path in cases[:0]:\n" }
+
+# And one that counts the markers but not the skips.
+[[fault]]
+id = "ratchet-parity-drift-skips-dropped"
+guard = "verify/ratchet/fixtures/sentinel/expected.json"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "sentinel: [parity-drift] cost/marked/ts: skip was not reported"
+transform = { file = "tools/ratchet.py", replace = "            found[(\"parity-drift\", f\"{name}/{surface}: skip\")] += 1\n", with = "            pass\n" }
+
+# A marker with no paths counted as nothing rather than refused.
+[[fault]]
+id = "ratchet-parity-drift-unit-shape"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "ParityDriftTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_marker_or_skip_the_collector_cannot_read_is_an_error ("
+transform = { file = "tools/ratchet.py", replace = "                or not paths\n", with = "" }
+
+# A marker's key read as `<path>: <text>`, so renaming its case pairs as a move.
+[[fault]]
+id = "ratchet-parity-drift-unit-pairs"
+guard = "test_ratchet.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "ParityDriftTests"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_renamed_case_is_new_drift_rather_than_a_move ("
+transform = { file = "tools/ratchet.py", replace = "(\"placement\", \"parity-gap\", \"parity-drift\", \"untraced\")", with = "(\"placement\", \"parity-gap\", \"untraced\")" }

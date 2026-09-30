@@ -897,13 +897,13 @@ tools = { "cargo:cargo-mutants" = "27.1.0" }
 run = "./tools/check-mutants.py"
 
 [tasks."ratchet:check"]
-description = "Fail on drift (layering, parity gaps, untraced requirements) the merge base doesn't have, and on a stale decision"
-# Drift is the places a driving adapter does work that belongs below it, the parity gaps (#271)
-# and the untraced requirements (#295). A pass/fail rule can't say whether that count is
-# shrinking, and `tests/thinness.rs` showed it can move drift sideways: it pushed an upload into
-# an `aws s3 cp` subprocess it couldn't see. The script collects the drift from the working tree
-# and from the merge base's tree, exported from git, and fails on drift the base doesn't have;
-# its docstring has the four rules.
+description = "Fail on drift (layering, parity gaps, the case corpus's markers and skips, untraced requirements) the merge base doesn't have, and on a stale decision"
+# Drift is the places a driving adapter does work that belongs below it, the parity gaps (#271),
+# the case corpus's markers and skips (#320) and the untraced requirements (#295). A pass/fail
+# rule can't say whether that count is shrinking, and `tests/thinness.rs` showed it can move drift
+# sideways: it pushed an upload into an `aws s3 cp` subprocess it couldn't see. The script
+# collects the drift from the working tree and from the merge base's tree, exported from git, and
+# fails on drift the base doesn't have; its docstring has the four rules.
 #
 # In `check` for `model:check`'s reason: `git archive`, `cargo metadata --no-deps --offline` and
 # ast-grep over local files, so no network, no credentials, no money. The base is the merge base

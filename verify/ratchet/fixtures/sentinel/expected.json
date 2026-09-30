@@ -16,5 +16,11 @@
     "adapter/src/lib.rs: operation-literal: \"RunMicrovm\""
   ],
   "parity-gap": ["Session.spawn/ts", "adopt/cli", "legacy_helper/py"],
+  "parity-drift": [
+    "cost/marked/py: known_drift label",
+    "cost/marked/py: known_drift total",
+    "cost/marked/ts: skip",
+    "error/marked/cli: known_drift error.code"
+  ],
   "untraced": ["DAEMON-2", "GATE-2", "GATE-3", "GATE-4"]
 }

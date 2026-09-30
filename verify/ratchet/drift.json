@@ -69,6 +69,31 @@
       "wait-until-running/cli",
       "wrap-dockerfile/cli"
     ],
+    "parity-drift": [
+      "cost/estimate-running-and-suspended/py: known_drift label",
+      "cost/estimate-running-and-suspended/py: known_drift size.headroomMib",
+      "cost/estimate-running-and-suspended/ts: known_drift label",
+      "cost/estimate-running-and-suspended/ts: known_drift size.headroomMib",
+      "cost/estimate-suspended-only/py: known_drift items",
+      "cost/estimate-suspended-only/py: known_drift label",
+      "cost/estimate-suspended-only/py: known_drift size.headroomMib",
+      "cost/estimate-suspended-only/py: known_drift total",
+      "cost/estimate-suspended-only/ts: known_drift items",
+      "cost/estimate-suspended-only/ts: known_drift label",
+      "cost/estimate-suspended-only/ts: known_drift size.headroomMib",
+      "cost/estimate-suspended-only/ts: known_drift total",
+      "cost/estimate-with-running-time/py: known_drift label",
+      "cost/estimate-with-running-time/py: known_drift size.headroomMib",
+      "cost/estimate-with-running-time/ts: known_drift label",
+      "cost/estimate-with-running-time/ts: known_drift size.headroomMib",
+      "error/health-401-unauthorized/ts: known_drift error.retryable",
+      "error/health-503-not-bootstrapped/ts: known_drift error.retryable",
+      "error/sync-507-disk-pressure/cli: known_drift error.code",
+      "error/sync-507-disk-pressure/cli: known_drift error.retryable",
+      "error/sync-507-disk-pressure/cli: known_drift error.wire_kind",
+      "error/upload-file-507-disk-pressure/ts: known_drift error.retryable",
+      "image-name/ensure-image-name/cli: known_drift name"
+    ],
     "untraced": [
       "ARCH-5",
       "BIND-5",
@@ -115,6 +140,7 @@
     "port-impl": 1,
     "adapter-logic": 5,
     "parity-gap": 0,
+    "parity-drift": 2,
     "untraced": 0
   }
 }

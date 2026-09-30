@@ -64,3 +64,15 @@ reason = "the quiet period `sync --watch` waits after a file event so one save's
 category = "adapter-logic"
 key = "crates/microvms-cli/src/commands/attached.rs: literal-default: Duration::from_millis(500)"
 reason = "`RESIZE_POLL_INTERVAL`, how often the interactive shell re-reads the local terminal's size to send a resize frame; the terminal is the CLI's, and no layer below it has one"
+
+# The corpus's two skips (#320, D-I4): both cite IMAGE-12, whose issue (#221) is closed, and no
+# open issue changes what they skip: a binding gets the name back only with a built image.
+[[decision]]
+category = "parity-drift"
+key = "image-name/ensure-image-name/py: skip"
+reason = "IMAGE-12: `ensure_image` computes the name in core's local half and hands it back only with a built image, so no offline call on the Python binding answers the case; the binding is a pass-through, and core's runner checks the name"
+
+[[decision]]
+category = "parity-drift"
+key = "image-name/ensure-image-name/ts: skip"
+reason = "IMAGE-12: `ensureImage` computes the name in core's local half and hands it back only with a built image, so no offline call on the TypeScript binding answers the case; the binding is a pass-through, and core's runner checks the name"
