@@ -57,7 +57,8 @@ from local test results.
 - `crates/model/`, `verify/spec/`, `conformance/`: portable model tests, formal requirements,
   and live AWS checks.
 - `crates/model-conformance/`: unpublished, tests only; drives the app's policies and
-  `Sandbox` over the models' rows and paths.
+  `Sandbox` over the models' rows and paths, and the daemon's tunnel route against the
+  client's, the one place both halves meet.
 - `verify/arch/placement.toml`, `verify/ratchet/`: each crate's allowed dependencies and the
   drift count (see Architecture).
 

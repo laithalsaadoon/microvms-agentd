@@ -369,6 +369,10 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 29] = [
             "guestPort",
             "connectionsServed",
             "connectionsRefused",
+            // Verified connections that ended without the daemon's end of stream, and ones
+            // whose daemon predates it (#342).
+            "connectionsTruncated",
+            "connectionsUnproven",
             "proxyTokenMints",
             "interrupted",
         ],
