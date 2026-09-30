@@ -1672,3 +1672,79 @@ expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_download_by_a_range_is_floating_and_one_by_an_exact_version_is_not ("
 transform = { file = "tools/check-guards-fire.py", replace = "                specs += list(tomllib.loads(body).get(\"dependencies\") or [])\n", with = "                pass\n" }
+
+# A script batch proves an entry only by the one line carrying its message, naming its own file
+# and no other entry's; each rule off lets a line prove an entry its own run might not.
+[[fault]]
+id = "guards-fire-script-batch-message-twice"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_message_on_two_lines_leaves_its_entry_to_run_alone"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_message_on_two_lines_leaves_its_entry_to_run_alone ("
+transform = { file = "tools/check-guards-fire.py", replace = "        if len(carrying) != 1:\n", with = "        if not carrying:\n" }
+
+[[fault]]
+id = "guards-fire-script-batch-another-entrys-file"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_one_line_naming_two_entries_files_counts_for_neither"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_one_line_naming_two_entries_files_counts_for_neither ("
+transform = { file = "tools/check-guards-fire.py", replace = "        elif named - {position}:\n", with = "        elif False:\n" }
+
+[[fault]]
+id = "guards-fire-script-batch-no-file-of-its-own"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_line_naming_no_seeded_file_leaves_its_entry_to_run_alone"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_line_naming_no_seeded_file_leaves_its_entry_to_run_alone ("
+transform = { file = "tools/check-guards-fire.py", replace = "        if position not in named:\n", with = "        if False:\n" }
+
+[[fault]]
+id = "guards-fire-script-batch-passed"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_batch_whose_run_passes_leaves_every_entry_to_run_alone"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_batch_whose_run_passes_leaves_every_entry_to_run_alone ("
+transform = { file = "tools/check-guards-fire.py", replace = "    if code == 0:\n        return {}, dict.fromkeys(\n            positions, \"the batch's run passed, so it proves nothing\"\n        )\n", with = "" }
+
+# What shares a batch: one entry a file, no fault in the gate's own code, no test runner.
+[[fault]]
+id = "guards-fire-script-batch-shared-file"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_entries_that_seed_one_file_go_to_different_batches"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_entries_that_seed_one_file_go_to_different_batches ("
+transform = { file = "tools/check-guards-fire.py", replace = "            if not taken & mine:\n", with = "            if True:\n" }
+
+[[fault]]
+id = "guards-fire-script-batch-gate-code"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_fault_in_the_gates_own_directory_runs_alone"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_fault_in_the_gates_own_directory_runs_alone ("
+transform = { file = "tools/check-guards-fire.py", replace = "    return not any(\n        os.path.normpath(item[\"file\"]).startswith(home + os.sep)\n", with = "    return not any(\n        os.path.normpath(item[\"file\"]).startswith(\"\\0\")\n" }
+
+[[fault]]
+id = "guards-fire-script-batch-test-runner"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_only_a_gate_seeded_outside_its_own_code_batches"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_only_a_gate_seeded_outside_its_own_code_batches ("
+transform = { file = "tools/check-guards-fire.py", replace = "    if runner(argv) or \"unittest\" in argv:\n        return False\n    program = script_program(argv)\n", with = "    program = script_program(argv)\n" }
+
+# `--record` keeps the batch's run for each entry it proves.
+[[fault]]
+id = "guards-fire-script-batch-unrecorded"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_batch_records_what_its_run_read_for_each_entry_it_proves"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_batch_records_what_its_run_read_for_each_entry_it_proves ("
+transform = { file = "tools/check-guards-fire.py", replace = "                    # the files the other entries seeded besides.\n                    closure = worker.closure(trace, first.run)\n                    for position in proven:\n                        recorded[faults[position].id] = (\"fired\", elapsed, closure)\n", with = "                    # the files the other entries seeded besides.\n                    closure = worker.closure(trace, first.run)\n" }
