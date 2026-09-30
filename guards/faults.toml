@@ -5836,7 +5836,17 @@ guard = "scripts/check-ci-parity.py"
 run = ["./scripts/check-ci-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "ci.yml job `background-example` is skipped and gives no reason"
+message = "ci.yml job `sbom` is skipped and gives no reason"
+transform = { file = "ci/local.toml", replace = "skip = \"its installs `sudo mv` binaries into /usr/local/bin, and its scanners read vulnerability databases that change daily, so a local pass says nothing about the next CI run. `mise run sbom` and `mise run vuln` are the local forms\"\n", with = "skip = \"\"\n" }
+
+# The same rule for one step of a job ci:local runs: the background example's, in the `rust` job.
+[[fault]]
+id = "ci-parity-step-skip-no-reason"
+guard = "scripts/check-ci-parity.py"
+run = ["./scripts/check-ci-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "ci.yml job `rust` step `background coding example` is skipped and gives no reason"
 transform = { file = "ci/local.toml", replace = "skip = \"`mise run background:check` runs the same commands, and it's in `check`\"\n", with = "skip = \"\"\n" }
 
 [[fault]]
@@ -5962,7 +5972,7 @@ guard = "scripts/check-ci-parity.py"
 run = ["./scripts/check-ci-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "ruff: ci.yml job `background-example` step `Check example` runs 0.1.0, and mise.toml pins"
+message = "ruff: ci.yml job `rust` step `background coding example` runs 0.1.0, and mise.toml pins"
 transform = { file = ".github/workflows/ci.yml", replace = "uvx ruff@0.15.22 check examples/background-coding-agent", with = "uvx -q ruff@0.1.0 check examples/background-coding-agent" }
 
 [[fault]]
@@ -5971,7 +5981,7 @@ guard = "scripts/check-ci-parity.py"
 run = ["./scripts/check-ci-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "ruff: ci.yml job `background-example` step `Check example` runs 0.1.0, and mise.toml pins"
+message = "ruff: ci.yml job `rust` step `background coding example` runs 0.1.0, and mise.toml pins"
 transform = { file = ".github/workflows/ci.yml", replace = "uvx ruff@0.15.22 check examples/background-coding-agent", with = "uvx --from ruff==0.1.0 ruff check examples/background-coding-agent" }
 
 [[fault]]
@@ -5980,7 +5990,7 @@ guard = "scripts/check-ci-parity.py"
 run = ["./scripts/check-ci-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "ruff: ci.yml job `background-example` step `Check example` runs 0.1.0, and mise.toml pins"
+message = "ruff: ci.yml job `rust` step `background coding example` runs 0.1.0, and mise.toml pins"
 transform = { file = ".github/workflows/ci.yml", replace = "uvx ruff@0.15.22 check examples/background-coding-agent", with = "uv tool run ruff@0.1.0 check examples/background-coding-agent" }
 
 [[fault]]
@@ -6017,7 +6027,7 @@ run = ["./scripts/check-ci-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "has no `version` input, so it runs the latest release"
-transform = { file = ".github/workflows/ci.yml", replace = "          version: \"0.12.13\" # mise.toml's uv; ci:parity compares them\n          enable-cache: false\n      - uses: hashicorp/setup-terraform", with = "          enable-cache: false\n      - uses: hashicorp/setup-terraform" }
+transform = { file = ".github/workflows/ci.yml", replace = "          version: \"0.12.13\" # mise.toml's uv; ci:parity compares them\n          enable-cache: false\n      # For the capability table's check (#271)", with = "          enable-cache: false\n      # For the capability table's check (#271)" }
 
 [[fault]]
 id = "ci-parity-uv-mise-side"
