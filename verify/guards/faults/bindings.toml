@@ -393,7 +393,7 @@ run = [
 expect = "test-failed"
 suite = "bindings"
 message = "assert 120.0 == 300.0"
-transform = { file = "bindings/microvms-py/src/session.rs", replace = "        \"defaultExecWaitSeconds\",\n        microvms_core::session::DEFAULT_EXEC_WAIT.as_secs_f64(),\n", with = "        \"defaultExecWaitSeconds\",\n        microvms_core::session::DEFAULT_READY_TIMEOUT.as_secs_f64(),\n" }
+transform = { file = "bindings/microvms-py/src/session.rs", replace = "        \"defaultExecWaitSeconds\",\n        microvms_core::session::DEFAULT_EXEC_WAIT.as_secs_f64(),\n", with = "        \"defaultExecWaitSeconds\",\n        microvms_core::session::DEFAULT_BOOTSTRAP_TIMEOUT.as_secs_f64(),\n" }
 
 [[fault]]
 id = "ts-session-constants-exec-wait"
@@ -405,4 +405,4 @@ run = [
 expect = "test-failed"
 suite = "bindings"
 message = "120 !== 300"
-transform = { file = "bindings/microvms-js/src/session.rs", replace = "        microvms_core::session::DEFAULT_EXEC_WAIT.as_secs_f64(),\n        microvms_core::session::DEFAULT_READY_TIMEOUT.as_secs_f64(),\n", with = "        microvms_core::session::DEFAULT_READY_TIMEOUT.as_secs_f64(),\n        microvms_core::session::DEFAULT_READY_TIMEOUT.as_secs_f64(),\n" }
+transform = { file = "bindings/microvms-js/src/session.rs", replace = "        microvms_core::session::DEFAULT_EXEC_WAIT.as_secs_f64(),\n        microvms_core::session::DEFAULT_BOOTSTRAP_TIMEOUT.as_secs_f64(),\n", with = "        microvms_core::session::DEFAULT_BOOTSTRAP_TIMEOUT.as_secs_f64(),\n        microvms_core::session::DEFAULT_BOOTSTRAP_TIMEOUT.as_secs_f64(),\n" }

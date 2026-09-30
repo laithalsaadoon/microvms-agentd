@@ -385,6 +385,15 @@ def test_both_proxy_headers_are_published_because_one_without_the_other_is_rejec
     assert constants["proxyAuthHeader"] != constants["proxyPortHeader"]
 
 
+def test_the_running_wait_is_published_beside_the_daemon_wait() -> None:
+    """`Sandbox.run` waits `defaultRunningTimeoutSeconds` for RUNNING, and then
+    `defaultReadyTimeoutSeconds` for the daemon to answer (#254).
+    """
+    constants = microvms.session_constants()
+    assert constants["defaultRunningTimeoutSeconds"] == 300.0
+    assert constants["defaultReadyTimeoutSeconds"] == 120.0
+
+
 def test_the_refresh_window_is_inside_the_token_lifetime_with_room_to_spare() -> None:
     """A long run crosses the sixty-minute ceiling mid-flight, so the refresh has to precede it.
 

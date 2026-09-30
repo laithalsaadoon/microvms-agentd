@@ -1100,13 +1100,11 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
             .progress(&format!("resolved image name {identifier} to {resolved}"));
     }
     accepted?;
+    // RUNNING and then the daemon answering, both in core (#254).
     let session = sandbox.wait_until_running(ready_timeout).await?;
     // Read off the session and the sandbox rather than remembered from the request, because
     // the endpoint is what the *service* reported.
     let endpoint = session.endpoint().to_string();
-    session
-        .wait_until_ready(microvms_core::session::DEFAULT_READY_TIMEOUT)
-        .await?;
 
     // The synced tree goes up before any exec: the daemon extracts it (its openat2
     // confinement is the upload's whole trust story), and the exec below runs *in* it.

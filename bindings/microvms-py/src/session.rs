@@ -55,7 +55,8 @@ use crate::region::PyRegion;
 use crate::runtime;
 
 /// How long to wait for a daemon to report bootstrapped: the core's default.
-const DEFAULT_READY_TIMEOUT: f64 = microvms_core::session::DEFAULT_READY_TIMEOUT.as_secs_f64();
+const DEFAULT_BOOTSTRAP_TIMEOUT: f64 =
+    microvms_core::session::DEFAULT_BOOTSTRAP_TIMEOUT.as_secs_f64();
 
 /// The default one-shot `run_sync` deadline: the core's exec wait, since `run_sync` waits the
 /// same way.
@@ -673,7 +674,7 @@ impl PySession {
     /// just reached RUNNING commonly refuses a connection or two before the proxy path is
     /// wired up. A *fatal* error ends the wait at once, because retrying a 401 until the
     /// deadline is the mistake the retryable split exists to prevent.
-    #[pyo3(signature = (timeout=DEFAULT_READY_TIMEOUT))]
+    #[pyo3(signature = (timeout=DEFAULT_BOOTSTRAP_TIMEOUT))]
     fn wait_until_ready(&self, py: Python<'_>, timeout: f64) -> PyCoreResult<PyHealth> {
         let timeout = seconds(timeout)?;
         Ok(PyHealth::wrap(self.detached(py, |session| {
@@ -1264,14 +1265,20 @@ pub(crate) fn session_constants<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyD
     )?;
     // The waits' defaults, core's (#266): the stub prints a default named for a core constant as
     // `...`, so a caller reads the figure here, and a signature that states one is tested
-    // against it.
+    // against it. `defaultReadyTimeoutSeconds` is the wait for the daemon to answer, core's
+    // `DEFAULT_BOOTSTRAP_TIMEOUT`, and `defaultRunningTimeoutSeconds` the wait for RUNNING
+    // before it (#254).
     dict.set_item(
         "defaultExecWaitSeconds",
         microvms_core::session::DEFAULT_EXEC_WAIT.as_secs_f64(),
     )?;
     dict.set_item(
         "defaultReadyTimeoutSeconds",
-        microvms_core::session::DEFAULT_READY_TIMEOUT.as_secs_f64(),
+        microvms_core::session::DEFAULT_BOOTSTRAP_TIMEOUT.as_secs_f64(),
+    )?;
+    dict.set_item(
+        "defaultRunningTimeoutSeconds",
+        microvms_core::sandbox::DEFAULT_RUNNING_TIMEOUT.as_secs_f64(),
     )?;
     dict.set_item(
         "defaultLifecycleTimeoutSeconds",

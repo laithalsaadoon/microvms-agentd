@@ -116,7 +116,9 @@ pub enum Verdict {
 pub enum Action {
     /// A launch the service accepted (STATE-1).
     LaunchAccepted,
-    /// The platform reporting the run hook answered with a success status (STATE-2).
+    /// The platform reporting the run hook answered with a success status (STATE-2), and the
+    /// client's wait for the daemon to answer through the endpoint after it, one proxied
+    /// request that warms the proxy token cache.
     HookSucceeded,
     /// The caller sending a request through the endpoint proxy, which is what mints —
     /// and caches — a proxy token when none is held. The warm half of STATE-8: without
@@ -154,9 +156,9 @@ pub struct State {
     // ── what the client did and holds ────────────────────────────────────────
     /// Every control-plane call, counted. See [`Wire`].
     pub wire: Wire,
-    /// Whether a proxy token is cached. Filled by the first proxied request
-    /// ([`Action::ExecRequested`]) that finds it cold, dropped on every resume
-    /// completion (STATE-8).
+    /// Whether a proxy token is cached. Filled by the first proxied request that finds it
+    /// cold, the launch's wait for the daemon ([`Action::HookSucceeded`]) or a later
+    /// [`Action::ExecRequested`], and dropped on every resume completion (STATE-8).
     pub proxy_token_cached: bool,
     /// How many proxy tokens have been minted, which is the only externally visible
     /// evidence that an invalidation happened at all: a token cached forever and one
@@ -404,6 +406,10 @@ impl Model for ClientLifecycle {
                     // `token_replacements` a comparison of a value against itself, and
                     // the "never replaced" property a claim nothing could break.
                     next.installed_token = Some(last.wire.launches - 1);
+                    // RUNNING isn't where the client stops: it waits for the daemon to answer
+                    // through the endpoint (#254), a proxied request on the cold cache, so
+                    // the running VM's token is cached from here.
+                    next.proxy_token_cached = true;
                     Verdict::Issued
                 }
             }
@@ -854,17 +860,16 @@ mod tests {
         assert_eq!(running.vm_state, VmState::Running);
         assert_eq!(running.bootstrap_count, 1);
         assert_eq!(running.installed_token, Some(0));
-
-        // A proxied request warms the cache, so the drop below has a token to drop —
-        // without this step the final assertion holds on an always-empty cache and
-        // measures nothing.
-        let warmed = model
-            .next_state(&running, Action::ExecRequested)
-            .expect("a proxied request caches a token");
-        assert!(warmed.proxy_token_cached, "the request must warm the cache");
+        // The launch's wait for the daemon was a proxied request, so the drop below has a
+        // token to drop; without it the final assertion would hold on an always-empty cache
+        // and measure nothing.
+        assert!(
+            running.proxy_token_cached,
+            "the launch's wait for the daemon must warm the cache (#254)"
+        );
 
         let suspending = model
-            .next_state(&warmed, Action::SuspendRequested)
+            .next_state(&running, Action::SuspendRequested)
             .expect("a suspend from RUNNING is issued");
         assert_eq!(suspending.wire.suspends, 1);
         let suspended = model
