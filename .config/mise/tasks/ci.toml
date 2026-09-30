@@ -1,74 +1,260 @@
-# CI's side: `ci:parity` holds ci.yml to mise.toml's tools and env, and each
-# `ci:<job>` runs a CI job here.
+# CI's side: each job of ci.yml and fuzz.yml runs one `ci:<job>` task here, and `ci:parity`
+# holds every task `check` depends on to one of them reaching it.
 
 ["ci:parity"]
-description = "ci.yml's env and tool versions match mise.toml's, and ci/local.toml covers every CI step. No builds"
-# CI doesn't install mise (D14), so the two files are compared rather than run: ci.yml's
-# top-level `env` against mise.toml's `[env]`, and each tool CI installs against the version
-# pinned in its `[tools]` (the script's docstring lists them). Offline once uv has the
-# script's pinned pyyaml. CI's `security` job runs both commands as steps.
+description = "Every task `check` depends on is one a CI job reaches, the Rust channel is one channel, no tool floats, and every task is well formed. No builds"
+# CI runs these tasks, so the tools, `[env]` and each check's command are the same on both
+# sides by construction. What that leaves is what `./tools/check-ci-parity.py` holds, and its
+# docstring says why each rule is there: every task `check` depends on is reached from a task a
+# workflow runs (so a check can't be local-only by accident), each workflow's Rust toolchain
+# input is `rust-toolchain.toml`'s channel, and no tool is `latest` or an unpinned `uvx`. Offline
+# once uv has the script's pinned pyyaml.
 #
-# It also holds `ci/local.toml` to the workflows: every `run:` step needs an entry there, so
-# `ci:local` (below) runs it or says why not.
-#
-# The unit tests run first, over fixture ci.yml and mise.toml pairs, so a rule that stopped
-# matching fails there before it reads this tree. The runner's tests clone throwaway repos.
+# The unit tests run first, over fixture workflows and task tables. Their `CiCommands` class
+# runs each CI job's `mise run` step, as the workflow writes it, through real mise over this
+# file's tasks with every command stubbed, and requires each command a job reaches to run and
+# its failure to fail the job. The runner's tests clone throwaway repos. `mise tasks validate`
+# last: a `depends` naming no task, in any task, fails there.
 run = [
-  "{{vars.pytest}} --with 'pyyaml==6.0.3' pytest -n auto -q -p no:cacheprovider tools/test_check_ci_parity.py tools/test_ci_local.py",
+  "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_check_ci_parity.py tools/test_ci_local.py",
   "./tools/check-ci-parity.py",
+  "mise tasks validate",
 ]
 
-# ── ci:local: CI's Linux jobs, here (#315) ──────────────────────────────────
+# ── CI: each job of ci.yml and fuzz.yml runs one of these ───────────────────
 #
-# Each `ci:<job>` task runs that CI job's own `run:` steps, in order, in a clone of a snapshot
-# of this worktree shaped like the job's checkout, with the workflow's env. `ci/local.toml` says
-# which jobs each task runs and why any step runs differently; `./tools/ci-local.py`'s
-# docstring has the rest. `mise run ci:local` runs them all in parallel, each with its own
-# target directory, then prints every result and what stays CI-only. `mise run -c ci:local`
-# lets the rest finish when one fails.
-#
-# Not in `check` or any hook (`ci:parity` fails if `check` depends on one): each task builds
-# the tree from its own target, and `ci:fuzz` fuzzes for fuzz.yml's full time bounds. It's the
-# step before a push. Pass arguments through: `mise run ci:security -- --apply fault.patch`
-# runs the job over the snapshot with the patch applied, and the worktree stays as it is.
+# A job is its checkout, the Rust toolchain and cache it needs, `.github/actions/mise` (mise at
+# the version `min_version` names, and `[tools]` installed `--locked` from mise.lock, out of the
+# tools cache), and `mise run ci:<job>`. The task holds the job's steps: each runs a task a
+# contributor runs, one after another, and the first that fails fails the job. `ci:parity`
+# holds every task `check` depends on to one of these reaching it. `mise run ci:<job>` runs a
+# job here, in this worktree; `mise run ci:local` runs the Linux jobs in clones shaped like
+# their checkouts. None is in `check`: each builds the tree its job builds.
 
 ["ci:rust"]
-description = "CI's `rust` job (the ubuntu leg), in a shallow clone of a worktree snapshot"
-run = "./tools/ci-local.py rust"
+description = "CI's `rust` job on its ubuntu leg: lint, every test tier, the generated contracts and the surface table, the publish dry run, and the background example"
+# The leg with the daemon: agentd's exec and fs tiers assume a Unix process model on purpose
+# (the guest is one), and the other legs run `ci:rust-client`. `publish:dry-run` resolves
+# against crates.io, which is why it's here and not in `check`, which is offline; the job's
+# checkout is committed and clean, which the dry run needs. The job has the full history and
+# the tags, for `schema:compat`'s previous release.
+run = [
+  { task = "lint" },
+  { task = "test" },
+  { task = "schema:check" },
+  { task = "schema:compat" },
+  { task = "manifest:check" },
+  { task = "core-api:check" },
+  { task = "parity:check" },
+  { task = "publish:dry-run" },
+  { task = "background:check" },
+]
+
+["ci:rust-client"]
+description = "CI's `rust` job on macOS and Windows: clippy and the tests of the client crates, which leave out the daemon and the bindings"
+# The CLI, the library and the bindings run wherever a developer sits, so the client tiers
+# build and test on all three platforms, and a platform break fails the same required check as
+# a logic break. agentd stays behind: it's guest software, and nix, sethostname and bind mounts
+# don't exist on a laptop OS. The binding crates too: pyo3 wants a Python to link against on
+# Windows and napi its build tooling, and the `bindings` job covers both. Each line is one
+# command with no shell syntax, because mise runs a task's lines through `cmd /c` on Windows.
+# These legs install mise's Rust alone (`.github/actions/mise`'s `install_args`), since nothing
+# here runs another tool.
+run = [
+  "cargo clippy -p microvms-protocol -p microvms-domain -p microvms-app -p microvms-edges -p microvms-core -p microvms-cli -p agentd-model --all-targets -- -D warnings",
+  "cargo test -p microvms-protocol -p microvms-domain -p microvms-app -p microvms-edges -p microvms-core -p microvms-cli -p agentd-model",
+]
 
 ["ci:security"]
-description = "CI's `security` job, in a full clone of a worktree snapshot with origin/main"
-run = "./tools/ci-local.py security"
+description = "CI's `security` job: the security gates, then every offline gate over the repository's own records and tooling"
+# Here because the job is a required check and builds nothing, and the ratchet's rule 3 only
+# holds where it can block a merge. The job's checkout has the full history, which betterleaks
+# scans and which the base refs of `ratchet:check`, `guards:list` and `changelog:check` need;
+# the job sets `GATE_BASE`, `PR_BASE` and `PR_AUTHOR` for them.
+run = [
+  { task = "security" },
+  { task = "conformance:self-test" },
+  { task = "agents:check" },
+  { task = "changelog:check" },
+  { task = "ci:parity" },
+  { task = "ratchet:check" },
+  { task = "trace:check" },
+  { task = "guards:list" },
+  { task = "mutants:check" },
+  { task = "publish:check" },
+  { task = "live:check" },
+  { task = "targets:check" },
+  { task = "release:check" },
+]
+
+["ci:sbom"]
+description = "CI's `sbom` job: the VEX document's shape, the SBOMs, and the three vulnerability scanners over them and the tree"
+# Not in `check`: the scanners read vulnerability databases that change daily, so a pass says
+# nothing about the next run. The job uploads `sbom/` as an artifact after this task.
+run = [
+  { task = "vex:check" },
+  { task = "vuln" },
+]
 
 ["ci:drift"]
-description = "CI's `drift` job, in a shallow clone of a worktree snapshot"
-run = "./tools/ci-local.py drift"
+description = "CI's `drift` job: the hardcoded service constraints against the botocore model"
+run = [{ task = "model:check" }]
 
 ["ci:bindings"]
-description = "CI's `bindings` job, in a shallow clone of a worktree snapshot"
-run = "./tools/ci-local.py bindings"
+description = "CI's `bindings` job: both bindings built and tested, their committed declarations against the surfaces, and the typed consumers"
+# `cargo test --workspace` runs none of the binding suites (BIND-2 and BIND-5 live there), so
+# this job is the one that does. `dts:check` runs before `bindings:js`, which rebuilds
+# `index.d.ts` in place: after that build, its diff would compare the file with itself.
+# `npm:loader` needs that in-place build's `index.js`.
+run = [
+  { task = "bindings:py" },
+  { task = "stubs:check" },
+  { task = "bindings:py-typed" },
+  { task = "dts:check" },
+  { task = "bindings:js" },
+  { task = "npm:loader" },
+]
 
 ["ci:guards"]
-description = "CI's `guards` job on a pull request (the seeded faults it affects), in a full clone of a worktree snapshot with origin/main"
-run = "./tools/ci-local.py guards"
+description = "CI's `guards` job: shard $SHARD (k/N, or all of it unset) of every suite's seeded faults, four at a time, each worker's bindings entries in an environment of its own"
+# `guards:fire`'s command as the job runs it. The job's steps add `--target-dir target`, the
+# directory rust-cache restores, and a pull request's leg adds `--affected --base <its base>`;
+# `mise run` puts arguments after the task's command. The script's docstring has what each flag
+# does. A command's own timeout sits below the job's, so a hung fault prints its name and the
+# tail of its output instead of the runner cutting the log off.
+#
+# `CARGO_INCREMENTAL` on: dtolnay/rust-toolchain writes 0 into the job's environment, and a
+# task's `env` wins over the environment it inherits. Each fault edits one crate and rebuilds
+# it, and the restored pass rebuilds it again, so rustc reusing the codegen units the edit
+# didn't touch is the whole cost of a Rust fault: measured 3.0 to 5.7 s a rebuild with it
+# against 8.2 to 23 s without, on four pinned cores at 74e2347. It changes nothing a guard
+# reads, and dependencies never build incrementally, so the cache is the same.
+tools = { "cargo:cargo-mutants" = "{{vars.cargo_mutants}}" }
+env = { CARGO_INCREMENTAL = "1" }
+run = './tools/check-guards-fire.py fire --suite rust --suite script --suite bindings --venv-per-worker --timeout 900 --jobs 4 --shard "${SHARD:-0/1}"'
+
+["ci:guards-cache"]
+description = "CI's `guards-cache` job: compile what every rust entry's cargo commands and every bindings entry's extension builds compile, and run nothing"
+# The job passes `--target-dir target`, the directory it saves as the guards' dependency cache.
+run = "./tools/check-guards-fire.py build --suite rust --suite bindings"
+
+["ci:tools"]
+description = "Install every task's own `tools`, which `mise install` leaves out, so the tools cache CI's `guards-cache` job saves holds them"
+# The tasks name their tools with `[vars]` pins, and mise reads the rendered versions back.
+# Without these in the cache, every `guards` and `mutants` leg built cargo-mutants from source
+# before it tested anything.
+run = '''
+mise tasks ls --all --hidden --json \
+  | jq -r '[.[] | (.tools // {}) | to_entries[] | "\(.key)@\(.value)"] | unique | .[]' \
+  | xargs -r mise install
+'''
+
+["ci:mutants"]
+description = "CI's `mutants` job's command: the wrapper over cargo-mutants. The job passes `--base <its base> -- --shard k/4 --in-place`"
+# `--in-place` mutates this checkout, which the runner throws away, so rust-cache can restore
+# dependencies into its target. Run from a worktree you keep, pass it without `--in-place`, or
+# run `mise run mutants`.
+tools = { "cargo:cargo-mutants" = "{{vars.cargo_mutants}}" }
+run = "./tools/check-mutants.py"
 
 ["ci:build"]
-description = "CI's `build` job (the static aarch64 binary), in a shallow clone of a worktree snapshot"
-run = "./tools/ci-local.py build"
+description = "CI's `build` job: the release build of the daemon for the shipping target, and its size and linkage"
+# The job installs the runner's aarch64 gcc and names it as the linker, as the release job
+# does; without it, .cargo/config.toml's rust-lld links the same static target, as here.
+run = [
+  { task = "build" },
+  "ls -l target/$AGENTD_TARGET/release/agentd",
+  "file target/$AGENTD_TARGET/release/agentd",
+]
 
-["ci:fuzz"]
-description = "fuzz.yml's jobs one after another, with its time bounds. Needs a nightly toolchain"
-run = "./tools/ci-local.py fuzz"
+["ci:fuzz-cli-core"]
+description = "fuzz.yml's `cli-core` job: the CLI's closed-output harness and core's wrap, ignore-rule and context-hash harnesses under libFuzzer, side by side. Needs a nightly toolchain"
+# `+nightly`, because `rust-toolchain.toml` pins stable and libFuzzer needs `-Z`. One harness
+# of each crate for one input first, which builds the crate's fuzz binaries for all of its
+# harnesses before any of them fuzzes. Then one harness a vCPU, each with its output in a log
+# of its own, printed whole once all have ended: a failed harness's outside a collapsed group,
+# after an error naming it. fuzz.yml says why features are unified across the workspace.
+tools = { "cargo:cargo-bolero" = "{{vars.cargo_bolero}}" }
+env = { CARGO_UNSTABLE_FEATURE_UNIFICATION = "true", CARGO_RESOLVER_FEATURE_UNIFICATION = "workspace" }
+shell = "bash -e -c"
+run = [
+  "cargo +nightly bolero test closed_output_fuzz::output_plan -p microvms-cli --runs 1",
+  "cargo +nightly bolero test wrap_case -p microvms-core --runs 1",
+  '''
+logs=$(mktemp -d) status=0
+declare -a harness=()
+start() { "${@:2}" > "$logs/$1.log" 2>&1 & harness[$!]=$1; }
+finish() {
+  for pid in "${!harness[@]}"; do
+    name=${harness[$pid]}
+    if wait "$pid"; then
+      echo "::group::$name passed"; cat "$logs/$name.log"; echo "::endgroup::"
+    else
+      status=1; echo "::error::$name failed; its output follows"; cat "$logs/$name.log"
+    fi
+  done
+  harness=()
+}
+start closed-output cargo +nightly bolero test closed_output_fuzz::output_plan -p microvms-cli -T 120s
+start wrap cargo +nightly bolero test wrap_case -p microvms-core -T 120s
+start ignore-rules cargo +nightly bolero test ignore_rules_agree_with_mobys_regex_translation -p microvms-core -T 60s
+start context-hash cargo +nightly bolero test the_context_hash_extends_the_legacy_one_and_follows_every_entry -p microvms-core -T 60s
+finish
+exit "$status"
+''',
+]
+
+["ci:fuzz-daemon-edges-app"]
+description = "fuzz.yml's `daemon-edges-app` job: the cargo-fuzz tar target and the daemon's, the edges' and the app's harnesses under libFuzzer, side by side. Needs a nightly toolchain"
+# `ci:fuzz-cli-core` says how the harnesses build and fuzz. `cargo fuzz` runs from the directory
+# that holds `fuzz/`. Four two-minute harnesses, then the four provisioning parsers.
+tools = { "cargo:cargo-fuzz" = "{{vars.cargo_fuzz}}", "cargo:cargo-bolero" = "{{vars.cargo_bolero}}" }
+env = { CARGO_UNSTABLE_FEATURE_UNIFICATION = "true", CARGO_RESOLVER_FEATURE_UNIFICATION = "workspace" }
+shell = "bash -e -c"
+run = [
+  "cd crates/agentd && cargo +nightly fuzz build tar_extract",
+  "cargo +nightly bolero test exec_start_fuzz::start_resolution -p agentd --runs 1",
+  "cargo +nightly bolero test provision_fuzz::version -p microvms-edges --runs 1",
+  "cargo +nightly bolero test control::posture_fuzz::posture_matches_the_launch -p microvms-app --runs 1",
+  '''
+logs=$(mktemp -d) status=0
+declare -a harness=()
+start() { "${@:2}" > "$logs/$1.log" 2>&1 & harness[$!]=$1; }
+finish() {
+  for pid in "${!harness[@]}"; do
+    name=${harness[$pid]}
+    if wait "$pid"; then
+      echo "::group::$name passed"; cat "$logs/$name.log"; echo "::endgroup::"
+    else
+      status=1; echo "::error::$name failed; its output follows"; cat "$logs/$name.log"
+    fi
+  done
+  harness=()
+}
+start tar-extract env -C crates/agentd cargo +nightly fuzz run tar_extract -- -max_total_time=120
+start exec-start cargo +nightly bolero test exec_start_fuzz::start_resolution -p agentd -T 120s
+start egress-posture cargo +nightly bolero test control::posture_fuzz::posture_matches_the_launch -p microvms-app -T 120s
+start event-stream cargo +nightly bolero test session::sse_fuzz::hostile_stream_bytes_stay_bounded_and_every_event_round_trips -p microvms-app -T 120s
+finish
+for target in version sums record elf; do
+  start "provision-$target" cargo +nightly bolero test "provision_fuzz::$target" -p microvms-edges -T 30s
+done
+finish
+exit "$status"
+''',
+]
+
+# ── ci:local: CI's Linux jobs, in clones shaped like their checkouts (#315) ──
+#
+# `mise run ci:<job>` runs in this worktree, with its target, its untracked files and its
+# origin/main. `./tools/ci-local.py` runs each Linux job's `mise run` step as the workflow writes
+# it, in a clone of a snapshot of this worktree at the job's checkout depth, with a target of
+# its own; its docstring has the rest. `mise run ci:local` runs them all at once, then prints
+# every result and what stays CI-only; `mise run ci:local -- security drift` runs two, and
+# `-- --apply fault.patch` runs over the snapshot with the patch applied, leaving the worktree
+# as it is. Not in `check` or any hook: each job builds the tree from its own target, and the
+# fuzz jobs fuzz for their full time bounds.
 
 ["ci:local"]
-description = "Every ci:<job> task in parallel, then their results and what stays CI-only"
-depends = [
-  "ci:rust",
-  "ci:security",
-  "ci:drift",
-  "ci:bindings",
-  "ci:guards",
-  "ci:build",
-  "ci:fuzz",
-]
-run = "./tools/ci-local.py summary"
+description = "CI's Linux jobs in clones shaped like their checkouts, all at once, then their results and what stays CI-only"
+run = "./tools/ci-local.py"

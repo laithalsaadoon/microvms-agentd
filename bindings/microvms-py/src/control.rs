@@ -8,7 +8,7 @@
 //! replaying in a fresh process, or a reaper sweeping a fleet, is the caller this is for.
 
 use std::sync::Arc;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 use std::collections::BTreeMap;
 
@@ -539,9 +539,8 @@ impl PyControlPlane {
         poll_interval: f64,
     ) -> PyCoreResult<PyMicrovm> {
         let opts = WaitOpts {
-            timeout: seconds(timeout)?,
             poll_interval: seconds(poll_interval)?,
-            stall_grace: Duration::MAX,
+            ..WaitOpts::for_lifecycle(seconds(timeout)?)
         };
         let plane = Arc::clone(&self.inner);
         let fail_on = fail_on.unwrap_or_default();

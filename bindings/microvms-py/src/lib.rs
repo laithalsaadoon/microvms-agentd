@@ -158,8 +158,8 @@ mod microvms {
     use super::region::PyRegion;
     #[pymodule_export]
     use super::sandbox::{
-        PyBaseImage, PyDetached, PyEnsuredImage, PyImage, PySandbox, PyTeardownReport,
-        egress_posture_for, wrap_dockerfile,
+        PyBaseImage, PyDetached, PyEnsuredImage, PyImage, PyManagedBaseVersion, PySandbox,
+        PyTeardownReport, egress_posture_for, wrap_dockerfile,
     };
     #[pymodule_export]
     use super::session::{

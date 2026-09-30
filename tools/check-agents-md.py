@@ -857,12 +857,13 @@ CENSUS_SOURCES = {
     "constants": SCRIPT_GLOB,
 }
 # A path each source always names, so a pass means its reader parsed this tree: the workflow
-# lint hook's glob, this check's own script in its task and in CI's `security` job, the fuzz
-# crate's lockfile directory, and the registry's directory check-guards-fire.py reads.
+# lint hook's glob, this check's own script in its task, the script CI's `mutants` job runs in
+# a step before it installs anything (the rest of CI's steps run tasks), the fuzz crate's
+# lockfile directory, and the registry's directory check-guards-fire.py reads.
 CENSUS_SENTINELS = {
     "lefthook": ".github/workflows/*.yml",
     "mise": "tools/check-agents-md.py",
-    "workflows": "tools/check-agents-md.py",
+    "workflows": "tools/check-mutants.py",
     "dependabot": "crates/agentd/fuzz",
     "constants": "verify/guards/faults",
 }
@@ -872,8 +873,8 @@ DECISION_SENTINEL = "D35"
 # `/` covers every word under that directory. An entry no source names any more fails, so the
 # list can't outlive its reason.
 CENSUS_NOT_PATHS = {
-    "p/rust": "a Semgrep registry ruleset, `semgrep --config p/rust` (`security`, ci.yml)",
-    "p/secrets": "a Semgrep registry ruleset, `semgrep --config p/secrets` (`security`, ci.yml)",
+    "p/rust": "a Semgrep registry ruleset, `semgrep --config p/rust` (the `security` task)",
+    "p/secrets": "a Semgrep registry ruleset, `semgrep --config p/secrets` (the `security` task)",
     "cli-dist/": "where release.yml's `draft` job downloads the CLI archives",
     "staging/": "where release.yml's `draft` job gathers the release assets",
     "release-sums/": "where release.yml's `live-gate` and `github-release` jobs download the draft's SHA256SUMS",

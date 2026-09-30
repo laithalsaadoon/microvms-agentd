@@ -366,3 +366,42 @@ expect = "exit-nonzero"
 suite = "bindings"
 message = "has no attribute 'UnexpectedError'"
 transform = { file = "bindings/microvms-py/src/errors.rs", replace = "    for kind in ErrorKind::ALL {\n", with = "    for kind in ErrorKind::ALL.into_iter().skip(1) {\n" }
+
+# The wait defaults each binding publishes are core's, and Python's written-out `wait_for_state`
+# defaults are held to them (#266): the issue's "change a literal to 301", on the literals left.
+
+[[fault]]
+id = "py-wait-for-state-default-301"
+guard = "bindings/microvms-py/tests/test_control.py::test_the_lifecycle_wait_defaults_the_signature_states_are_cores"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_control.py::test_the_lifecycle_wait_defaults_the_signature_states_are_cores"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "assert 301.0 == 300.0"
+transform = { file = "bindings/microvms-py/src/control.rs", replace = "timeout=300.0, poll_interval=5.0))]", with = "timeout=301.0, poll_interval=5.0))]" }
+
+[[fault]]
+id = "py-session-constants-exec-wait"
+guard = "bindings/microvms-py/tests/test_session.py::test_the_wait_defaults_are_published"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_session.py::test_the_wait_defaults_are_published"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "assert 120.0 == 300.0"
+transform = { file = "bindings/microvms-py/src/session.rs", replace = "        \"defaultExecWaitSeconds\",\n        microvms_core::session::DEFAULT_EXEC_WAIT.as_secs_f64(),\n", with = "        \"defaultExecWaitSeconds\",\n        microvms_core::session::DEFAULT_READY_TIMEOUT.as_secs_f64(),\n" }
+
+[[fault]]
+id = "ts-session-constants-exec-wait"
+guard = "the wait defaults are published"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/session.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "120 !== 300"
+transform = { file = "bindings/microvms-js/src/session.rs", replace = "        microvms_core::session::DEFAULT_EXEC_WAIT.as_secs_f64(),\n        microvms_core::session::DEFAULT_READY_TIMEOUT.as_secs_f64(),\n", with = "        microvms_core::session::DEFAULT_READY_TIMEOUT.as_secs_f64(),\n        microvms_core::session::DEFAULT_READY_TIMEOUT.as_secs_f64(),\n" }

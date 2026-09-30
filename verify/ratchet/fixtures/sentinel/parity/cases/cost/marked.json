@@ -1,0 +1,7 @@
+{
+  "capability": "estimate",
+  "input": { "size_mib": 2048, "running_seconds": 0 },
+  "expect": { "label": "estimate", "total": "0.00" },
+  "known_drift": { "py": { "issue": "#255", "keys": ["label", "total"] } },
+  "skip": { "ts": "no offline call answers this case there (IMAGE-12)" }
+}

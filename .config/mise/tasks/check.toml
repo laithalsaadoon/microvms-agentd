@@ -1,5 +1,12 @@
 # `check`, the definition of done: every local gate, run at once. It creates no AWS
 # resources; mise.toml's header says what it leaves to `live`.
+#
+# The gates' unit suites run under pytest with pytest-xdist, in the environment pyproject.toml's
+# `dev` group locks (`uv run --locked`). xdist spreads a suite's tests over every core:
+# `test_check_guards_fire.py` took 46 s serial and 11 s this way, measured 2026-09-30 at 7780e97
+# on a shared 16-vCPU devbox. The suites are `unittest` classes, which pytest runs as they are.
+# `-p no:cacheprovider` in each call because pytest's cache is nothing the suites read, and
+# `check` runs them at once.
 
 [check]
 description = "The full local gate — the definition of done"
@@ -36,6 +43,7 @@ description = "Every build `check` runs with an environment of its own names a c
 # `check` runs its tasks at once, and `test`'s doc tests read `target/debug` after cargo has
 # released its lock, so a build there that sees another value of a variable a unit's build
 # script declares rebuilds the unit in place and fails them with E0463. The test's docstring has
-# the rule, what it reads, and what it can't see. CI runs its steps one at a time and without
-# mise, so the race and this test are local; CI's `guards` job fires the test's seeded faults.
-run = "{{vars.pytest}} pytest -q -p no:cacheprovider tools/test_check_targets.py"
+# the rule, what it reads, and what it can't see. CI's jobs run their tasks one after another,
+# so the race is local; CI's `security` job runs the test, and its `guards` job fires the
+# test's seeded faults.
+run = "uv run --locked pytest -q -p no:cacheprovider tools/test_check_targets.py"
