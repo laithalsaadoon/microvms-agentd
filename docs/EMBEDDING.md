@@ -466,6 +466,22 @@ for item in plane.list(image_identifier=vm.image_arn):
 
 Pair `vm.endpoint` with the agent token in `Session.attach` for exec and files.
 
+The same object administers images by identifier: `list_images`, `delete_image`,
+`list_image_versions`, `set_image_version_status`, `list_image_builds` and
+`get_image_build` (`listImages`, `deleteImage` and so on in TypeScript). A version's status
+is the canary and rollback lever: `INACTIVE` makes `RunMicrovm` refuse the version while
+running VMs keep running and its readback stays, and the call raises when the readback
+doesn't carry the status asked for:
+
+```python
+plane.set_image_version_status(image_arn, "2.0", "INACTIVE")  # retire the new build
+for version in plane.list_image_versions(image_arn):
+    print(version.image_version, version.state, version.status)
+```
+
+`delete_image` doesn't raise: it answers `False` when every attempt failed, with the same
+retries a teardown's delete makes.
+
 The process that launches a VM for later steps hands it off with `detach()` rather than
 dropping the sandbox, which would warn that a live VM was abandoned:
 
