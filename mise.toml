@@ -50,6 +50,8 @@ node = "22"
 # matches, and the ratchet's sentinel fails on any change in what it finds. CI installs the same
 # release by checksum (ci.yml's `security` job, a required check).
 "aqua:ast-grep/ast-grep" = "0.43.0"
+# `semver:check`'s. CI installs the same release by checksum (ci.yml's `semver` job).
+"github:obi1kenobi/cargo-semver-checks" = "0.50.0"
 
 [settings]
 # The cargo backend builds its tools from source (`cargo install --locked`) rather than through

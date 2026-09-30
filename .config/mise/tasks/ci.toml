@@ -56,6 +56,10 @@ run = "./tools/ci-local.py guards"
 description = "CI's `build` job (the static aarch64 binary), in a shallow clone of a worktree snapshot"
 run = "./tools/ci-local.py build"
 
+["ci:semver"]
+description = "CI's `semver` job (the published crates against crates.io), in a shallow clone of a worktree snapshot"
+run = "./tools/ci-local.py semver"
+
 ["ci:fuzz"]
 description = "fuzz.yml's jobs one after another, with its time bounds. Needs a nightly toolchain"
 run = "./tools/ci-local.py fuzz"
@@ -69,6 +73,7 @@ depends = [
   "ci:bindings",
   "ci:guards",
   "ci:build",
+  "ci:semver",
   "ci:fuzz",
 ]
 run = "./tools/ci-local.py summary"

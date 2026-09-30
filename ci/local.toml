@@ -152,6 +152,7 @@ task = "guards"
 steps = [
   "install ast-grep (pinned, checksummed)",
   "install cargo-mutants (pinned, checksummed)",
+  "install cargo-semver-checks (pinned, checksummed)",
   "the seeded faults a pull request affects fire",
   "every seeded fault fires",
   "disk left after the fire",
@@ -179,6 +180,14 @@ steps = [
   "the change touches Rust",
   "install cargo-mutants (pinned, checksummed)",
   "mutate this shard of the change",
+]
+
+[job."ci.yml".semver]
+task = "semver"
+steps = [
+  "install cargo-semver-checks (pinned, checksummed)",
+  "microvms-protocol keeps its published API",
+  "microvms-core against its last release, reported",
 ]
 
 [job."ci.yml".build]

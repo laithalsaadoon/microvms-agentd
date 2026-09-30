@@ -1,6 +1,7 @@
 # The generated contracts and the gates that hold each to what generates it: the
 # daemon's schema, the CLI's manifest, core's API snapshot, the Python stub, the
-# TypeScript declarations, and the service constraints against botocore's model.
+# TypeScript declarations, the service constraints against botocore's model, and the
+# published crates' API against crates.io.
 
 ["toolchain:id"]
 description = "Write the Rust toolchain's `rustc -vV` to target/toolchain-id, only when it changed"
@@ -88,6 +89,26 @@ description = "docs/schema.json against the previous release tag's copy: no rout
 run = [
   "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider tools/test_check_schema_compat.py",
   "./tools/check-schema-compat.py",
+]
+
+["semver:check"]
+description = "microvms-protocol keeps the API of its last release on crates.io; microvms-core's comparison with its own is printed, not gated"
+# cargo-semver-checks builds each crate's rustdoc and the rustdoc of the release on crates.io its
+# version resolves to, and fails on a change that release's users couldn't compile against (#298).
+# The protocol crate is gated: it's the wire types both the daemon and every client compile
+# against. Its one allowed lint, and why, is in `crates/protocol/Cargo.toml`.
+#
+# microvms-core is printed and never fails, until 0.11.0 is on crates.io: against 0.10.0, every
+# item #283 moved into the domain, the app and the edges and re-exported reads as removed
+# (cargo-semver-checks#355, measured 2026-09-30: six lints over the moved paths). The domain, the
+# app and the edges have no release on crates.io to compare with before their manual first
+# publish (CONTRIBUTING.md, Releases). CI's `semver` job runs both.
+#
+# Not in `check`: it fetches each baseline from crates.io and builds two rustdocs per crate,
+# about 20 s for the protocol crate and 100 s for core on four cores.
+run = [
+  "cargo semver-checks -p microvms-protocol",
+  "cargo semver-checks -p microvms-core || echo 'semver: microvms-core is reported, not gated, until 0.11.0 is on crates.io (#298)'",
 ]
 
 [manifest]

@@ -125,6 +125,45 @@ provenance = "cosign"
 version = "0.20.2"
 backend = "cargo:cargo-deny"
 
+[[tools."github:obi1kenobi/cargo-semver-checks"]]
+version = "0.50.0"
+backend = "github:obi1kenobi/cargo-semver-checks"
+
+[tools."github:obi1kenobi/cargo-semver-checks"."platforms.linux-arm64"]
+checksum = "sha256:e35f435ea322659381f52e7034bb4f0470108f5b267d29f13cf08152fa4af29b"
+url = "https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v0.50.0/cargo-semver-checks-aarch64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/obi1kenobi/cargo-semver-checks/releases/assets/498086634"
+
+[tools."github:obi1kenobi/cargo-semver-checks"."platforms.linux-arm64-musl"]
+checksum = "sha256:3c44160c3fdd93f72d2f5c84774c370a63e09d0d17ae0cdcc3dde346f30a1348"
+url = "https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v0.50.0/cargo-semver-checks-aarch64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/obi1kenobi/cargo-semver-checks/releases/assets/498086895"
+
+[tools."github:obi1kenobi/cargo-semver-checks"."platforms.linux-x64"]
+checksum = "sha256:52a65dc88dc53fa8b57d6087954eb52cda149ca03bcfca78ce3fdecd23f893c4"
+url = "https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v0.50.0/cargo-semver-checks-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/obi1kenobi/cargo-semver-checks/releases/assets/498085744"
+
+[tools."github:obi1kenobi/cargo-semver-checks"."platforms.linux-x64-musl"]
+checksum = "sha256:5763f6f62310f76428ba19d42cac060c56e07a1b8e3be0394c8c686398978f48"
+url = "https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v0.50.0/cargo-semver-checks-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/obi1kenobi/cargo-semver-checks/releases/assets/498087038"
+
+[tools."github:obi1kenobi/cargo-semver-checks"."platforms.macos-arm64"]
+checksum = "sha256:f99f928d67501c29e8410026f27a54cf799fb13611c3b4a6a58f2772cf7e3799"
+url = "https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v0.50.0/cargo-semver-checks-aarch64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/obi1kenobi/cargo-semver-checks/releases/assets/498087281"
+
+[tools."github:obi1kenobi/cargo-semver-checks"."platforms.macos-x64"]
+checksum = "sha256:e320f7368a3d37a96d6509c0d5dd1d69bde4e8ef5fcb76d60b5a5a0ae4b755be"
+url = "https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v0.50.0/cargo-semver-checks-x86_64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/obi1kenobi/cargo-semver-checks/releases/assets/498086502"
+
+[tools."github:obi1kenobi/cargo-semver-checks"."platforms.windows-x64"]
+checksum = "sha256:58854aaeaf84fee3266d1b4d9c45df585fe0478c7cabb4db4fac8f060a636864"
+url = "https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v0.50.0/cargo-semver-checks-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/obi1kenobi/cargo-semver-checks/releases/assets/498090877"
+
 [[tools.grype]]
 version = "0.116.1"
 backend = "aqua:anchore/grype"

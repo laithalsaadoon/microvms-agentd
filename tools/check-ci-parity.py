@@ -22,7 +22,7 @@ It fails when:
   the local gate that runs it), uv through `setup-uv`'s `version` input, Node through
   `setup-node` (majors compared), actionlint through `raven-actions/actionlint`'s `version`
   input, and the release downloads CI checks by sha256 (ast-grep, betterleaks, syft, grype,
-  osv-scanner). The Rust channel in rust-toolchain.toml must match mise.toml and every
+  osv-scanner, cargo-semver-checks). The Rust channel in rust-toolchain.toml must match mise.toml and every
   `dtolnay/rust-toolchain` input. A mise task's own `tools` pin of a compared tool must equal
   the `[tools]` one, or that task runs a version CI doesn't.
 - a checksummed download has no `sha256sum -c` in its step, or checks a hash other than the
@@ -112,6 +112,7 @@ TOOLS = (
     "syft",
     "grype",
     "osv-scanner",
+    "cargo-semver-checks",
 )
 # The mise.toml `[tools]` key for each tool whose local version mise pins. maturin's local
 # version is the stub generator's, since that's the local gate that runs it.
@@ -126,6 +127,7 @@ MISE_KEYS = {
     "syft": "syft",
     "grype": "grype",
     "osv-scanner": "osv-scanner",
+    "cargo-semver-checks": "github:obi1kenobi/cargo-semver-checks",
 }
 # The release downloads CI checks by sha256, by GitHub repository.
 RELEASES = {
@@ -134,6 +136,7 @@ RELEASES = {
     "anchore/syft": "syft",
     "anchore/grype": "grype",
     "google/osv-scanner": "osv-scanner",
+    "obi1kenobi/cargo-semver-checks": "cargo-semver-checks",
 }
 # The actions that install a compared tool at their `version` input, by action.
 VERSION_INPUTS = {"raven-actions/actionlint": "actionlint", "astral-sh/setup-uv": "uv"}

@@ -710,6 +710,16 @@ jobs:
           mkdir cargo-mutants
           tar -xzf cargo-mutants.tgz -C cargo-mutants cargo-mutants
           echo "$RUNNER_TEMP/cargo-mutants" >> "$GITHUB_PATH"
+      # The protocol semver entry runs cargo-semver-checks: the `semver` job's install, same
+      # version and hash.
+      - name: install cargo-semver-checks (pinned, checksummed)
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -sSfL -o cargo-semver-checks.tgz https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v0.50.0/cargo-semver-checks-x86_64-unknown-linux-gnu.tar.gz
+          echo "52a65dc88dc53fa8b57d6087954eb52cda149ca03bcfca78ce3fdecd23f893c4  cargo-semver-checks.tgz" | sha256sum -c -
+          mkdir cargo-semver-checks
+          tar -xzf cargo-semver-checks.tgz -C cargo-semver-checks cargo-semver-checks
+          echo "$RUNNER_TEMP/cargo-semver-checks" >> "$GITHUB_PATH"
       # A command's own timeout below the job's, so a hung fault prints its name and the
       # tail of its output instead of the runner cutting the log off. `--target-dir target`
       # for rust-cache: the script's own default target exists so a developer's next cargo run
@@ -901,6 +911,36 @@ jobs:
           name: mutants-out-shard-${{ matrix.shard }}
           path: mutants.out/
           if-no-files-found: warn
+
+  # The published crates' Rust API against their last release on crates.io (#298). The protocol
+  # crate is gated; microvms-core is printed, not gated, until 0.11.0 is its baseline, since
+  # against 0.10.0 every item #283 moved and re-exported reads as removed. `mise run
+  # semver:check` is the local form, and its comment has the rest.
+  semver:
+    name: published crates keep their API
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # mise.toml's pin, and mise.lock's linux-x64 hash; ci:parity compares them.
+      - name: install cargo-semver-checks (pinned, checksummed)
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -sSfL -o cargo-semver-checks.tgz https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v0.50.0/cargo-semver-checks-x86_64-unknown-linux-gnu.tar.gz
+          echo "52a65dc88dc53fa8b57d6087954eb52cda149ca03bcfca78ce3fdecd23f893c4  cargo-semver-checks.tgz" | sha256sum -c -
+          mkdir cargo-semver-checks
+          tar -xzf cargo-semver-checks.tgz -C cargo-semver-checks cargo-semver-checks
+          echo "$RUNNER_TEMP/cargo-semver-checks" >> "$GITHUB_PATH"
+      - name: microvms-protocol keeps its published API
+        run: cargo semver-checks -p microvms-protocol
+      - name: microvms-core against its last release, reported
+        run: |
+          cargo semver-checks -p microvms-core || echo "semver: microvms-core is reported, not gated, until 0.11.0 is on crates.io (#298)"
 
   build:
     name: static aarch64 binary

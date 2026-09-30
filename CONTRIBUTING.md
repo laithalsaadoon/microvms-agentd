@@ -18,7 +18,7 @@ mise tasks             # all available tasks
 `ci:local` isn't part of `check`: it builds the tree once per job, keeping a target
 per job (tens of GB under `$TMPDIR`, or `$CI_LOCAL_DIR`), and fuzzes for fuzz.yml's
 time bounds. `mise run ci:<job>` runs one job (`ci:rust`, `ci:security`, `ci:drift`,
-`ci:bindings`, `ci:guards`, `ci:build`, `ci:fuzz`). It tests your branch, and CI tests
+`ci:bindings`, `ci:guards`, `ci:build`, `ci:semver`, `ci:fuzz`). It tests your branch, and CI tests
 its merge with main, so rebase onto a fresh origin/main before you rely on it. A new
 step in ci.yml needs an entry in `ci/local.toml`, or, for a setup action, a reason in
 its `[actions]` table; the file also records each step `ci:local` skips and why, and
@@ -212,6 +212,16 @@ mise run stubs         # Python declarations
 mise run core-api      # verify/parity/core-api.json, core's public paths
 mise run model:check   # implemented constraints versus the installed boto3 model
 ```
+
+The published crates' Rust API is compared with their last release on crates.io:
+`mise run semver:check` runs cargo-semver-checks, and CI's `semver` job runs the same
+commands. `microvms-protocol` is gated: a change its last release's users couldn't compile
+against fails, unless the version bumps with it or its `Cargo.toml` allows that lint with the
+reason (the one it allows now is `StartRequest`'s `#[non_exhaustive]`, which 0.11.0 ships).
+`microvms-core`'s comparison is printed and never fails until 0.11.0 is its baseline, since
+against 0.10.0 every item the layer split moved and re-exported reads as removed. The domain,
+the app and the edges join once their first release is on crates.io. It isn't in `check`: it
+fetches each baseline and builds two rustdocs per crate.
 
 A wire change also has to work with the previous release in both directions.
 `schema:compat` in `check` compares `docs/schema.json` with the copy at the
