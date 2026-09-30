@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The version-skew section's helpers, offline: which release it skews against, and how it
-checks the assets it downloads. Each refusal is asserted to refuse."""
+"""The version-skew section's helpers, offline: which release it skews against, how it checks
+the assets it downloads, and which daemon version each pairing expects health to report. Each
+refusal is asserted to refuse."""
 
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ from lanes.skew import (
     CLI_ASSET,
     DAEMON_ASSET,
     RELEASES,
+    daemon_version,
     fetch_release,
     pick_previous,
     sha256_sums,
@@ -31,6 +33,15 @@ def refused(call: Callable[[], object], needle: str) -> tuple[bool, str]:
     except RuntimeError as error:
         return needle in str(error), str(error)
     return False, f"returned {got!r}"
+
+
+def answered(call: Callable[[], object]) -> object:
+    """What `call` returns, or None when it raises: `Results.eq` then fails the check by name
+    instead of the self-test stopping on the error."""
+    try:
+        return call()
+    except RuntimeError:
+        return None
 
 
 def release(tamper: str = "") -> dict[str, bytes]:
@@ -131,3 +142,33 @@ def check_version_skew_helpers(results: Results) -> None:
                 needle,
             )
             results.check(f"skew: {name} is refused", ok, detail)
+
+    # Health reports agentd's crate version, not the release tag's (wave 2's live run: v0.10.0's
+    # daemon answered 0.1.0 where the section expected 0.10.0). The manifest moved in #374, so
+    # a release before it has only the old path.
+    manifest = '[package]\nname = "agentd"\nversion = "0.1.0"\n'
+    moved = {"crates/agentd/Cargo.toml": manifest.replace("0.1.0", "0.2.0")}
+    results.eq(
+        "skew: the daemon's version is agentd's crate version, at the current path",
+        answered(lambda: daemon_version(moved.get)),
+        "0.2.0",
+    )
+    before = {"agentd/Cargo.toml": manifest}
+    results.eq(
+        "skew: a release from before the move reads agentd's old manifest",
+        answered(lambda: daemon_version(before.get)),
+        "0.1.0",
+    )
+    both = {**before, **moved}
+    results.eq(
+        "skew: the current path wins where both exist",
+        answered(lambda: daemon_version(both.get)),
+        "0.2.0",
+    )
+    ok, detail = refused(lambda: daemon_version({}.get), "is in that tree")
+    results.check("skew: a tree with neither manifest is refused", ok, detail)
+    unversioned = {"crates/agentd/Cargo.toml": '[package]\nname = "agentd"\n'}
+    ok, detail = refused(
+        lambda: daemon_version(unversioned.get), "has no [package] version"
+    )
+    results.check("skew: a manifest with no version is refused", ok, detail)
