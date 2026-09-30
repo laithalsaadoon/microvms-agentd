@@ -41,6 +41,7 @@ import {
   defaultBaseImage,
   egressPostureFor,
   estimateRun,
+  isRetryable,
   wrapDockerfile,
 } from '../index.js';
 import { codeOf, startSseServer, wireKindOf } from './support/sse.mjs';
@@ -268,12 +269,12 @@ function judge(testCase, answer) {
 
 // ── TypeScript's entry points, one handler per area ──────────────────────────
 
-/** The facets every runner reports. `retryable` is absent on TypeScript errors (#256). */
+/** The facets every runner reports. TypeScript's `retryable` is `isRetryable(error)`. */
 function refusal(error) {
   const code = codeOf(error);
   if (code === undefined) throw error;
   return {
-    error: { code, wire_kind: wireKindOf(error) ?? null, retryable: error.retryable ?? null },
+    error: { code, wire_kind: wireKindOf(error) ?? null, retryable: isRetryable(error) },
   };
 }
 

@@ -10,13 +10,5 @@
       "wire_kind": "Unauthorized",
       "retryable": false
     }
-  },
-  "known_drift": {
-    "ts": {
-      "issue": "#256",
-      "keys": [
-        "error.retryable"
-      ]
-    }
   }
 }

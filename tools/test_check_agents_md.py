@@ -4,6 +4,9 @@
 Each case runs the real script in a throwaway git repo, because the docs and the paths come
 from `git ls-files` in the directory it's pointed at. A healthy fixture names one reference of
 every kind; each failing case breaks one thing in it and requires the output to name it.
+
+The task loader the check reads through, tools/mise_config.py, is shared by every gate that
+reads the tasks; its own rules are driven directly in `MiseConfigTests`.
 """
 
 import importlib.util
@@ -17,6 +20,9 @@ from pathlib import Path
 from unittest import mock
 
 SCRIPT = Path(__file__).with_name("check-agents-md.py")
+sys.path.insert(0, str(SCRIPT.parent))
+
+import mise_config  # noqa: E402
 
 
 def load_script():
@@ -781,14 +787,17 @@ class AgentsMdTests(unittest.TestCase):
         self.healthy(**{"mise.toml": config + MISE, "tasks/fuzz.toml": stale})
         self.assert_fails_with("tasks/fuzz.toml:2: `crate/src/fz.rs` is no such path")
         refused = {
-            "a directory": ('includes = ["tasks"]', "is a directory of file tasks"),
+            "a directory": (
+                'includes = ["tasks"]',
+                "mise.toml:2: the include `tasks` names the directory `tasks`",
+            ),
             "a missing file": (
                 'includes = ["tasks/gone.toml"]',
-                "`tasks/gone.toml` is no such path",
+                "mise.toml:2: the include `tasks/gone.toml` matches no file",
             ),
             "a remote": (
                 'includes = ["git::https://x/y.git//t"]',
-                "isn't a file in this tree",
+                "isn't a path in this tree",
             ),
         }
         for case, (line, needle) in refused.items():
@@ -797,9 +806,58 @@ class AgentsMdTests(unittest.TestCase):
                 self.healthy(**{"mise.toml": text})
                 self.assert_fails_with(needle)
 
+    def test_the_tasks_can_all_live_in_included_files_under_a_glob(self):
+        # The repo's own shape: mise.toml holds no task, and `check` is only in a task file.
+        tasks = MISE.replace("[tasks.", "[")
+        config = '[task_config]\nincludes = ["tasks/*.toml"]\n'
+        self.healthy(**{"mise.toml": config, "tasks/all.toml": tasks})
+        self.assert_passes()
+        # The census names a stale path in an included file by that file and line.
+        stale = tasks.replace(
+            "./tools/check-agents-md.py", "./scripts/check-agents-md.py"
+        )
+        self.healthy(**{"mise.toml": config, "tasks/all.toml": stale})
+        self.assert_fails_with(
+            "tasks/all.toml:17: `scripts/check-agents-md.py` is no such path in this tree"
+        )
+
+    def test_an_include_glob_that_matches_nothing_fails_naming_the_floor(self):
+        config = '[task_config]\nincludes = ["task/*.toml"]\n'
+        self.healthy(
+            **{"mise.toml": config, "tasks/all.toml": MISE.replace("[tasks.", "[")}
+        )
+        self.assert_fails_with(
+            "mise.toml:2: the include `task/*.toml` matches no file",
+            "found no tasks in mise.toml",
+        )
+
+    def test_a_check_task_only_an_include_held_fails_naming_the_sentinel(self):
+        # mise.toml keeps a task of its own, so the floor passes; `check` went with the file.
+        config = (
+            '[task_config]\nincludes = ["tasks/*.toml"]\n\n[tasks.own]\nrun = "true"\n'
+        )
+        rest = MISE.replace("[tasks.", "[").replace(
+            '[check]\ndepends = ["lint", "parity:check"]\n', ""
+        )
+        self.healthy(**{"mise.toml": config, "tasks/all.toml": rest})
+        self.assert_fails_with(
+            "the sentinel task `check` isn't among the tasks of mise.toml or the files it"
+            " includes"
+        )
+
+    def test_a_task_two_files_define_fails_naming_both(self):
+        config = '[task_config]\nincludes = ["tasks/*.toml"]\n\n'
+        twice = '[fuzz]\nrun = "true"\n'
+        self.healthy(
+            **{"mise.toml": config + MISE, "tasks/a.toml": twice, "tasks/b.toml": twice}
+        )
+        self.assert_fails_with(
+            "tasks/b.toml:1: task `fuzz` is also defined at tasks/a.toml:1"
+        )
+
     def test_a_default_file_task_directory_is_refused(self):
         self.healthy(**{".mise/tasks/fuzz": "#!/bin/sh\n"})
-        self.assert_fails_with("mise reads file tasks from `.mise/tasks/`")
+        self.assert_fails_with("mise reads tasks from `.mise/tasks/`")
 
     def test_a_mise_toml_whose_tasks_name_no_path_fails_naming_the_floor(self):
         text = MISE.replace('run = "./tools/check-agents-md.py"', 'run = "true"')
@@ -1095,6 +1153,149 @@ class YamlReaderTests(unittest.TestCase):
                 with self.assertRaises(CHECK.YamlSubsetError) as caught:
                     CHECK.load_yaml(text, "t.yml")
                 self.assertIn(needle, str(caught.exception))
+
+
+class MiseConfigTests(unittest.TestCase):
+    """tools/mise_config.py, the task loader every gate that reads the tasks shares."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+
+    def tree(self, **files: str) -> Path:
+        for relative, text in files.items():
+            path = self.root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(textwrap.dedent(text), encoding="utf-8")
+        return self.root
+
+    def refused(self, **files: str) -> str:
+        with self.assertRaises(mise_config.Unreadable) as caught:
+            mise_config.load(self.tree(**files))
+        return str(caught.exception)
+
+    def test_a_task_only_an_included_file_defines_is_read_with_its_file_and_line(self):
+        config = mise_config.load(
+            self.tree(
+                **{
+                    "mise.toml": """\
+                        [tools]
+                        uv = "1"
+
+                        [task_config]
+                        includes = [".config/mise/tasks/*.toml"]
+
+                        [tasks.own]
+                        run = "true"
+                        """,
+                    ".config/mise/tasks/b.toml": """\
+                        # A comment first.
+                        ["ci:rust"]
+                        run = "./tools/ci-local.py rust"
+                        """,
+                    ".config/mise/tasks/a.toml": '[check]\ndepends = ["ci:rust"]\n',
+                }
+            )
+        )
+        self.assertEqual(config.data["tools"], {"uv": "1"})
+        self.assertEqual(
+            config.files,
+            ["mise.toml", ".config/mise/tasks/a.toml", ".config/mise/tasks/b.toml"],
+        )
+        found = {name: (t.file, t.line, t.header) for name, t in config.tasks.items()}
+        self.assertEqual(
+            found,
+            {
+                "own": ("mise.toml", 7, "[tasks.own]"),
+                "check": (".config/mise/tasks/a.toml", 1, "[check]"),
+                "ci:rust": (".config/mise/tasks/b.toml", 2, '["ci:rust"]'),
+            },
+        )
+        self.assertEqual(config.tables()["check"], {"depends": ["ci:rust"]})
+        self.assertEqual(config.includes[0].line, 5)
+
+    def test_an_include_that_matches_nothing_is_refused(self):
+        out = self.refused(
+            **{"mise.toml": '[task_config]\nincludes = ["tasks/*.toml"]\n'}
+        )
+        self.assertIn(
+            "mise.toml:2: the include `tasks/*.toml` matches no file, so mise reads no task"
+            " from it",
+            out,
+        )
+
+    def test_a_task_defined_twice_is_refused_naming_both_places(self):
+        out = self.refused(
+            **{
+                "mise.toml": """\
+                    [task_config]
+                    includes = ["tasks/*.toml"]
+
+                    [tasks.lint]
+                    run = "true"
+                    """,
+                "tasks/a.toml": '[x]\nrun = "true"\n\n[lint]\nrun = "false"\n',
+                "tasks/b.toml": '[x]\nrun = "true"\n',
+            }
+        )
+        self.assertIn("tasks/a.toml:4: task `lint` is also defined at mise.toml:4", out)
+        self.assertIn("tasks/b.toml:1: task `x` is also defined at tasks/a.toml:1", out)
+
+    def test_a_file_two_includes_match_is_read_once(self):
+        config = mise_config.load(
+            self.tree(
+                **{
+                    "mise.toml": '[task_config]\nincludes = ["t/a.toml", "t/*.toml"]\n',
+                    "t/a.toml": '[x]\nrun = "true"\n',
+                }
+            )
+        )
+        self.assertEqual(config.files, ["mise.toml", "t/a.toml"])
+        self.assertEqual(list(config.tasks), ["x"])
+
+    def test_an_include_outside_the_tree_or_of_file_tasks_is_refused(self):
+        cases = {
+            "git::https://x/y.git//t": "isn't a path in this tree",
+            "https://example.com/t.toml": "isn't a path in this tree",
+            "/etc/tasks.toml": "isn't a path in this tree",
+            "../tasks.toml": "isn't a path in this tree",
+            "tasks": "names the directory `tasks`, whose file tasks the gates don't read",
+        }
+        for include, needle in cases.items():
+            with self.subTest(include=include):
+                out = self.refused(
+                    **{
+                        "mise.toml": f'[task_config]\nincludes = ["{include}"]\n',
+                        "tasks/build": "#!/bin/sh\n",
+                    }
+                )
+                self.assertIn(f"mise.toml:2: the include `{include}`", out)
+                self.assertIn(needle, out)
+
+    def test_a_value_that_isnt_a_task_table_is_refused(self):
+        out = self.refused(
+            **{
+                "mise.toml": '[task_config]\nincludes = ["t.toml"]\n',
+                "t.toml": 'x = 1\n[y]\nrun = "true"\n',
+            }
+        )
+        self.assertIn("t.toml:1: `x` is a int, not a task table", out)
+
+    def test_a_file_that_doesnt_parse_is_refused_by_name(self):
+        out = self.refused(
+            **{
+                "mise.toml": '[task_config]\nincludes = ["t.toml"]\n',
+                "t.toml": "[y\n",
+            }
+        )
+        self.assertIn("t.toml: doesn't parse as TOML", out)
+
+    def test_with_no_includes_a_default_task_directory_is_refused(self):
+        config = mise_config.load(self.tree(**{"mise.toml": "[tasks.a]\nrun = 'x'\n"}))
+        self.assertEqual(list(config.tasks), ["a"])
+        out = self.refused(**{".config/mise/tasks/x.toml": "[x]\n"})
+        self.assertIn("mise reads tasks from `.config/mise/tasks/`", out)
 
 
 if __name__ == "__main__":

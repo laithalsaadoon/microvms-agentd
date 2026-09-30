@@ -115,12 +115,15 @@ so a harness provider is a thin client over the published wire protocol
 instead of a daemon author. The coding-agents example is the seed; this is
 its generalization.
 
-**3. Image name resolution and content-addressed reuse in the CLI.**
-`run --image` passes the identifier verbatim to the service, which rejects
-bare names ("Malformed ARN"); both Harbor's provider and our example resolve
-ARNs by listing, and both key image names to content hashes to avoid the
-stale-snapshot-on-name-reuse hazard. Resolve names client-side and offer
-`build --reuse` keyed on artifact content hash.
+**3. Image name resolution and content-addressed reuse. Shipped.** The
+service rejects a bare image name in `RunMicrovm` ("Malformed ARN"), so both
+Harbor's provider and our example resolved ARNs by listing. Core's
+`Sandbox::run` now does that itself: a name is resolved to its ARN through
+the image listing (one read; an ARN costs none) after the launch's local
+refusals, and `run --image`, both bindings' `Sandbox.run` and
+`AgentVm.launch` all launch through it. Both harness shapes also key image
+names to content hashes to avoid the stale-snapshot-on-name-reuse hazard,
+which `build --reuse` and `ensure_image` do with the artifact's content hash.
 
 **4. A per-launch environment channel. Shipped.** Omnigent's whole
 hooks-server shim existed because the platform offers no per-launch env

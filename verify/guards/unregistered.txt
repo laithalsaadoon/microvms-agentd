@@ -134,7 +134,6 @@ crates/microvms-cli/src/guards/config.rs::the_region_report_names_the_environmen
 crates/microvms-cli/src/guards/config.rs::the_resolved_config_report_names_each_knobs_source
 crates/microvms-cli/src/guards/doctor.rs::doctor_reports_a_credential_chain_that_resolves_nothing
 crates/microvms-cli/src/guards/exit_codes.rs::each_induced_failure_class_earns_its_own_code_and_finding
-crates/microvms-cli/src/guards/files.rs::a_disk_pressure_507_is_platform_with_the_remedy_not_retryable
 crates/microvms-cli/src/guards/files.rs::a_hostile_guest_manifest_cannot_order_deletions_outside_the_workspace
 crates/microvms-cli/src/guards/files.rs::a_second_sync_of_an_unchanged_tree_sends_no_archive
 crates/microvms-cli/src/guards/interrupt.rs::an_interrupt_after_launch_tears_down_and_names_every_leaked_identifier

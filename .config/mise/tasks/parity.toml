@@ -1,0 +1,16 @@
+# The capability table's gate: core, the CLI, Python and TypeScript expose the same
+# capabilities, or verify/parity/capabilities.toml says why one doesn't.
+
+["parity:check"]
+description = "Every capability in verify/parity/capabilities.toml resolves on core, the CLI, Python and TypeScript, and every function, method and command it holds has a row"
+# The table says, for each capability, what each surface calls it or why it lacks it (#271); the
+# script's docstring has the rules. It reads the committed surfaces (core-api.json, manifest.json,
+# microvms.pyi, index.d.ts), so the gates that hold those to the code (`core-api:check`,
+# `manifest:check`, `stubs:check`, `dts:check`) are what make a pass here mean the shipped
+# surfaces agree. Griffe runs from the site's lockfile and TypeDoc through npx at the site's
+# pins, so a cold cache downloads them once. The self-test runs first, for `model:check`'s
+# reason. CI's `rust` job runs both.
+run = [
+  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider tools/test_check_parity.py",
+  "./tools/check-parity.py",
+]

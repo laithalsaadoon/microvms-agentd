@@ -1,0 +1,67 @@
+# The security scans: `security`, which `check` runs, and the SBOM and the
+# vulnerability scanners, which CI runs.
+
+[security]
+description = "Semgrep + secrets + license headers + dependency licenses + workflow lint"
+# Every check here, one exit. Semgrep runs the public rust and secrets rulesets over
+# shipped source only (test fixtures plant fake tokens on purpose). betterleaks
+# scans the whole git history, not just the tree — a secret that was committed
+# and then deleted is published the moment the repo is. The header check is a
+# closed set over tracked sources, so an unlicensed file cannot land quietly.
+# cargo-deny is the dependency-license policy (.cargo/deny.toml: measured allowlist,
+# yanked crates, untrusted registries) — `mise run vuln` covers CVEs, this
+# covers what a CVE scanner cannot. actionlint is the only linter that reads
+# the workflows; before it, a workflow mistake was found by the workflow
+# misbehaving.
+run = [
+  # --severity WARNING drops the INFO tier: its findings here are std::env::args
+  # in a CLI and TempDir in tests — idioms, not defects — and a gate that cries
+  # wolf gets --no-verify'd. WARNING and ERROR still fail the run.
+  "semgrep scan --config p/rust --config p/secrets --severity WARNING --severity ERROR --error --quiet --metrics=off crates/protocol/src crates/agentd/src crates/model/src crates/microvms-domain/src crates/microvms-app/src crates/microvms-edges/src crates/microvms-core/src crates/microvms-cli/src bindings/microvms-py/src bindings/microvms-js/src",
+  "betterleaks git .",
+  # The header check's own floor, in throwaway repos: an empty `git ls-files` must fail.
+  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider tools/test_license_headers.py",
+  "./tools/check-license-headers.py",
+  "cargo deny check",
+  "actionlint",
+]
+
+[sbom]
+description = "CycloneDX + SPDX SBOMs into sbom/ (gitignored; CI publishes them as artifacts)"
+# Excludes are the difference between an SBOM of what ships and an inventory of
+# the workshop: .terraform/ holds a vendored Go provider binary (402 modules of
+# someone else's dependency tree), target/ and node_modules/ are build output.
+run = """
+mkdir -p sbom
+syft . --exclude './conformance/infra/.terraform/**' --exclude './target/**' --exclude './bindings/microvms-js/node_modules/**' \
+  --exclude './site/node_modules/**' --exclude './site/dist/**' \
+  -o cyclonedx-json=sbom/microvms-agentd.cdx.json \
+  -o spdx-json=sbom/microvms-agentd.spdx.json -q
+"""
+
+[vuln]
+description = "Grype + trivy + osv-scanner over the tree and the fresh SBOM"
+depends = ["sbom"]
+# Three scanners because their databases disagree at the margins and each has a
+# lane the others lack: grype reads the SBOM (so it audits what we publish),
+# trivy adds IaC misconfig and its own secret pass over the tree, osv-scanner
+# reads the lockfiles against OSV directly. Every accepted finding lives in
+# .vex/microvms-agentd.openvex.json (dependency vulnerabilities; grype reads it
+# through --vex and trivy through TRIVY_VEX, exactly as ci.yml passes them) or in
+# .config/trivyignore.yaml / osv-scanner.toml WITH its reason — an ignore without a
+# reason is a finding someone silenced. The VEX flags were absent here until the
+# first npm acceptance landed (2026-09-05), so this task failed on a finding CI
+# accepted; the two invocations now agree. trivy skips the same installed trees the
+# SBOM task excludes: CI scans a fresh checkout with no node_modules, while a local
+# tree carries a dependency's bundled example lockfiles (starlight-base-path ships
+# two bun.lock files naming an old astro), which reported twelve HIGH findings that
+# describe nothing this repository installs or ships.
+run = [
+  "grype sbom:sbom/microvms-agentd.cdx.json --fail-on high -q --vex .vex/microvms-agentd.openvex.json",
+  "TRIVY_VEX=.vex/microvms-agentd.openvex.json trivy fs --scanners vuln,misconfig,secret --skip-dirs conformance/infra/.terraform --skip-dirs target --skip-dirs site/node_modules --skip-dirs site/dist --skip-dirs bindings/microvms-js/node_modules --exit-code 1 --severity HIGH,CRITICAL --ignorefile .config/trivyignore.yaml -q .",
+  # `--config` is required, not decorative: osv-scanner applies a config file only to the
+  # lockfiles in its own directory, so without it the root file governs Cargo.lock and
+  # nothing governs site/pnpm-lock.yaml (measured 2026-09-05: the extract-zip ignore was
+  # reported as unused while the finding it names failed the scan).
+  "osv-scanner scan source -r . --config osv-scanner.toml",
+]

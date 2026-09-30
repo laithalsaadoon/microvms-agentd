@@ -1,0 +1,38 @@
+# ── the task loader: tools/mise_config.py, which every gate that reads the tasks shares ──
+#
+# mise reads an include that matches nothing, and a task two files define, without a word, so
+# the loader refuses both. `agents:check` reads the tasks through it, so each entry fires there
+# on the real tree: a glob that matches nothing is the floor, and a loader that stopped reading
+# the included files loses the sentinel task `check`, which only an included file defines.
+
+[[fault]]
+id = "mise-config-include-floor"
+guard = "tools/check-agents-md.py"
+run = ["./tools/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "the include `.config/mise/task/*.toml` matches no file"
+transform = { file = "mise.toml", replace = "includes = [\".config/mise/tasks/*.toml\"]\n", with = "includes = [\".config/mise/task/*.toml\"]\n" }
+
+# mise.toml gains a task of its own here, so the task set isn't empty and only the sentinel
+# can tell that the included files went unread.
+[[fault]]
+id = "mise-config-include-sentinel"
+guard = "tools/check-agents-md.py"
+run = ["./tools/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "the sentinel task `check` isn't among the tasks of mise.toml or the files it includes"
+transform = [
+  { file = "tools/mise_config.py", replace = "    for include in includes:\n        for file in include.files:\n", with = "    for include in includes[:0]:\n        for file in include.files:\n" },
+  { file = "mise.toml", replace = "includes = [\".config/mise/tasks/*.toml\"]\n", with = "includes = [\".config/mise/tasks/*.toml\"]\n\n[tasks.own]\nrun = \"true\"\n" },
+]
+
+[[fault]]
+id = "mise-config-task-twice"
+guard = "tools/check-agents-md.py"
+run = ["./tools/check-agents-md.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "task `check` is also defined at .config/mise/tasks/check.toml"
+transform = { file = ".config/mise/tasks/lint.toml", replace = "[fmt]\n", with = "[check]\nrun = \"true\"\n\n[fmt]\n" }

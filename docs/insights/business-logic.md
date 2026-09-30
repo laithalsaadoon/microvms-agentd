@@ -50,7 +50,7 @@ The spec's `stateModel` names its variables: `vm_state` over
 `mise run spec:core`, whose run recorded 2026-08-08 reports 3 constraints proved under
 hypotheses, 0 violated, 0 unknown (`mise.toml:224-226` at 9c462f0) — that task needs a
 symspec v5 CLI at an absolute path, so it is deliberately outside `mise run check`
-(`mise.toml:222-227`). The runnable half is `stateright`, which restates the same invariants
+(`.config/mise/tasks/trace.toml:15-28`). The runnable half is `stateright`, which restates the same invariants
 over every interleaving in
 `crates/model/src/client.rs:554-570` and passes under `cargo test -p agentd-model`. The waivers are all
 `GTWR_R6_MISSING_UNITS`: against TRAP-5, because the linter's unit list does not include bytes,

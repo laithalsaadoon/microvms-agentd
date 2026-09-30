@@ -53,8 +53,8 @@ guard = "tools/check-ci-parity.py"
 run = ["./tools/check-ci-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "ruff: mise.toml [tasks.'docs:links'] tools pins `ruff` = '0.1.0', and [tools] pins"
-transform = { file = "mise.toml", replace = "tools = { \"aqua:lycheeverse/lychee\" = \"0.24.2\" }", with = "tools = { \"aqua:lycheeverse/lychee\" = \"0.24.2\", ruff = \"0.1.0\" }" }
+message = "ruff: .config/mise/tasks/docs.toml [\"docs:links\"] tools pins `ruff` = '0.1.0', and [tools] pins"
+transform = { file = ".config/mise/tasks/docs.toml", replace = "tools = { \"aqua:lycheeverse/lychee\" = \"0.24.2\" }", with = "tools = { \"aqua:lycheeverse/lychee\" = \"0.24.2\", ruff = \"0.1.0\" }" }
 
 [[fault]]
 id = "ci-parity-uv-unpinned"
