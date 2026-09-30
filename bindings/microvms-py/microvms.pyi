@@ -320,6 +320,11 @@ class ControlPlane:
         """
         `ListMicrovms`, every page, optionally narrowed to one image and version.
         """
+    @property
+    def region(self, /) -> Region:
+        """
+        The region this plane addresses.
+        """
     def resume(self, /, microvm_id: str) -> None:
         """
         `ResumeMicrovm`. Returns once accepted; `wait_for_state` for RUNNING.

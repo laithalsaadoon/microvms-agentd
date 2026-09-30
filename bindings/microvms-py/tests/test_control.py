@@ -38,6 +38,15 @@ def test_the_control_plane_checks_identifiers_before_the_wire() -> None:
         plane.wait_for_state("mvm-1", ["RUNNING"], timeout=-1)
 
 
+def test_a_control_plane_reports_the_region_it_addresses() -> None:
+    """`ControlPlane.region`, as TypeScript's has it: the region the plane was built for (#267).
+
+    Regions other than the default, so a getter that answered a constant would be caught.
+    """
+    for built_for in (microvms.Region.us_west_2(), microvms.Region.eu_west_1()):
+        assert microvms.ControlPlane(built_for).region == built_for
+
+
 def test_service_shapes_come_only_from_the_service() -> None:
     for cls in (microvms.Microvm, microvms.MicrovmSummary, microvms.IdlePolicy):
         with pytest.raises(TypeError):
