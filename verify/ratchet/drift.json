@@ -1,13 +1,12 @@
 {
   "version": 1,
-  "enforced": ["adapter-logic"],
+  "enforced": ["port-impl", "adapter-logic"],
   "entries": [
     { "category": "placement", "key": "microvms-cli -> const-hex", "issue": 260 },
     { "category": "placement", "key": "microvms-cli -> globset", "issue": 260 },
     { "category": "placement", "key": "microvms-cli -> sha2", "issue": 260 },
     { "category": "placement", "key": "microvms-cli -> tar", "issue": 260 },
     { "category": "subprocess", "key": "crates/microvms-cli/src/seam.rs: Command::new(\"aws\")", "issue": 258 },
-    { "category": "port-impl", "key": "crates/microvms-cli/src/seam.rs: TokenMinter for PlaneMinter", "issue": 270 },
     { "category": "parity-gap", "key": "wait-until-running/cli", "issue": 269 },
     { "category": "parity-gap", "key": "ensure-image/cli", "issue": 258 },
     { "category": "parity-gap", "key": "adopt/cli", "issue": 269 },

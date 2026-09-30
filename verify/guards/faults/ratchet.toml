@@ -49,3 +49,14 @@ expect = "exit-nonzero"
 suite = "script"
 message = "not in the base: [placement] microvms-cli -> reqwest is an entry here"
 transform = { file = "verify/ratchet/drift.json", replace = "    { \"category\": \"placement\", \"key\": \"microvms-cli -> tar\", \"issue\": 260 },\n", with = "    { \"category\": \"placement\", \"key\": \"microvms-cli -> tar\", \"issue\": 260 },\n    { \"category\": \"placement\", \"key\": \"microvms-cli -> reqwest\", \"issue\": 260 },\n" }
+
+# port-impl is enforced (#270): with the CLI's copied minter gone, a port implemented in an
+# adapter again is new drift the file can't take as an entry, and fails on the real tree.
+[[fault]]
+id = "ratchet-port-impl-cli-minter"
+guard = "verify/ratchet/drift.json"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "new drift: [port-impl] crates/microvms-cli/src/seam.rs: TokenMinter for CopiedMinter."
+transform = { file = "crates/microvms-cli/src/seam.rs", replace = "/// `aws s3 cp - <uri>`, with the artifact on the child's stdin.\n", with = "struct CopiedMinter;\n\nimpl microvms_core::session::TokenMinter for CopiedMinter {}\n\n/// `aws s3 cp - <uri>`, with the artifact on the child's stdin.\n" }
