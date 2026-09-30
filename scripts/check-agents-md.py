@@ -861,11 +861,6 @@ CENSUS_NOT_PATHS = {
     "mise/tasks": "a file-task directory mise reads by default; the tree has none",
     ".mise/tasks": "a file-task directory mise reads by default; the tree has none",
     ".config/mise/tasks": "a file-task directory mise reads by default; the tree has none",
-    # Stale, and lefthook.yml's to fix: lefthook's default matcher reads `**/` as one or
-    # more directories, so these match nothing and the hook skips the example's pyproject.toml
-    # and its top-level Python files (measured with lefthook 2.1.10, 2026-09-30).
-    "examples/background-coding-agent/**/*.toml": "lefthook.yml's background example glob",
-    "examples/background-coding-agent/**/*.yml": "lefthook.yml's background example glob",
 }
 # A cited decision id: `D` and digits as a word, not inside a URL, a hex color or a path, so
 # the `-D97757?` of a badge color in README.md isn't one.

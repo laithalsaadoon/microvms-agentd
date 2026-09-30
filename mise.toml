@@ -71,6 +71,16 @@ AGENTD_TARGET = "aarch64-unknown-linux-musl"
 # PR #314's first CI run failed `AdapterLintTests` that way.
 CARGO_TERM_COLOR = "always"
 
+[vars]
+# The gates' unit suites run under pytest with pytest-xdist, which spreads a suite's tests over
+# every core: `test_check_guards_fire.py` took 46 s serial and 11 s this way, measured
+# 2026-09-30 at 7780e97 on a shared 16-vCPU devbox. The suites are `unittest` classes, which
+# pytest runs as they are, and CI still runs them with `python -m unittest`. Besides the two
+# runners, each suite gets the packages its ci.yml step installs and no others, so it can't pass
+# here on one CI lacks. Pinned exactly, for the reason `[tools]` gives. `-p no:cacheprovider` in
+# each call because pytest's cache is nothing the suites read, and `check` runs them at once.
+pytest = "uv run --with 'pytest==9.1.1' --with 'pytest-xdist==3.8.0'"
+
 # ── local gates ─────────────────────────────────────────────────────────────
 
 [tasks.fmt]
@@ -147,7 +157,7 @@ run = [
   "semgrep scan --config p/rust --config p/secrets --severity WARNING --severity ERROR --error --quiet --metrics=off protocol/src agentd/src model/src microvms-domain/src microvms-app/src microvms-edges/src microvms-core/src microvms-cli/src microvms-py/src microvms-js/src",
   "betterleaks git .",
   # The header check's own floor, in throwaway repos: an empty `git ls-files` must fail.
-  "uv run python -m unittest discover -s scripts -p 'test_license_headers.py'",
+  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider scripts/test_license_headers.py",
   "./scripts/check-license-headers.py",
   "cargo deny check",
   "actionlint",
@@ -211,6 +221,44 @@ run = "cargo test --all"
 # used to see. `./scripts/check-lint-coverage.py` prints the count on every run, which is what
 # keeps this number from drifting the way the live-suite counts above did.
 
+[tasks."toolchain:id"]
+description = "Write the Rust toolchain's `rustc -vV` to target/toolchain-id, only when it changed"
+hide = true
+# The generate-and-diff gates below (`schema:check`, `manifest:check`, `core-api:check`,
+# `stubs:check`) declare `sources`, so mise skips one whose inputs haven't changed since it last
+# passed here. mise compares the path, size and mtime of every source against the last passing
+# run, and always counts the task's own definition and this file. CI runs no mise (D14), so CI
+# runs every one of them on every push; the skip is local only, and `mise run --force <task>`
+# runs one anyway.
+#
+# A skip is only as sound as its list: a file the generator reads and the list leaves out makes a
+# stale artifact pass. Each list starts with what a cargo build of this workspace reads from the
+# tree: the lockfile, which pins the registry's crates by checksum, the workspace manifest, the
+# toolchain pin, cargo's config, and every top-level crate's manifest, build script and `src/`.
+# The builds these gates run compile nothing from outside `src/` (the one `#[path]` into another
+# crate's `tests/` is `cfg(test)`), and every file each gate's build read, from cargo's dep-info,
+# was in its list when the lists were written. It's every crate rather than each gate's own
+# dependency closure, so that a new dependency between crates can't fall outside a list; the
+# docs site's `site/src/` comes along, which only runs a gate more often. Each glob is its own
+# entry with no braces, so `agents:check` holds every one to a tracked file. mise reads `src/**`
+# as directories only, which is why each says `src/**/*`.
+#
+# Then the toolchain, which is this task. `rust-toolchain.toml` says `stable`, so a new stable
+# changes the compiler with no file in the tree changing, and a new rustdoc can write JSON the
+# walk reads differently. Each gate depends on this task, which mise runs before it decides
+# whether to skip the gate, and lists `target/toolchain-id`, whose mtime moves only when the
+# toolchain cargo would use here does.
+run = """
+set -eu
+mkdir -p target
+rustc -vV > target/toolchain-id.new
+if cmp -s target/toolchain-id.new target/toolchain-id; then
+  rm target/toolchain-id.new
+else
+  mv target/toolchain-id.new target/toolchain-id
+fi
+"""
+
 [tasks.schema]
 description = "Regenerate docs/schema.json from the serde types"
 run = "cargo run -q -p agentd --bin schema"
@@ -220,6 +268,23 @@ description = "Fail if the committed schema no longer matches what is served"
 # A stale generated artifact is worse than none: consumers trust it *because* it
 # is generated, and a diff never reveals that it describes a protocol nobody
 # serves.
+#
+# `toolchain:id` says how mise skips it and why the list is complete. The generator is
+# `agentd/src/bin/schema.rs` over the daemon's and the protocol's serde types, so the Rust
+# entries hold it, and the one file it reads at run time is the committed schema.
+sources = [
+  "Cargo.toml",
+  "Cargo.lock",
+  "rust-toolchain.toml",
+  ".cargo/config.toml",
+  "*/Cargo.toml",
+  "*/build.rs",
+  "*/src/**/*",
+  "target/toolchain-id",
+  "docs/schema.json",
+]
+depends = ["toolchain:id"]
+outputs = { auto = true }
 run = "cargo run -q -p agentd --bin schema -- --check"
 
 [tasks."schema:compat"]
@@ -233,7 +298,7 @@ description = "docs/schema.json against the previous release tag's copy: no rout
 # The unit tests run first, for `trace:check`'s reason: they run the real script over the
 # v0.8.0, v0.9.0 and v0.10.0 schemas and over copies with one break seeded in each.
 run = [
-  "uv run python -m unittest discover -s scripts -p 'test_check_schema_compat.py'",
+  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider scripts/test_check_schema_compat.py",
   "./scripts/check-schema-compat.py",
 ]
 
@@ -253,6 +318,23 @@ description = "Fail if the committed manifest no longer matches what the CLI emi
 # The CLI has no `--check` flag of its own, so the comparison is done here: regenerate into
 # a temp file and `diff -u` against the committed one. `set -e` so a build failure fails the
 # gate rather than diffing the committed file against an empty one and calling that drift.
+#
+# `toolchain:id` says how mise skips it and why the list is complete. The generator is the CLI's
+# own argument tree, so the Rust entries hold it, and it reads no file at run time; the other
+# input is the committed manifest.
+sources = [
+  "Cargo.toml",
+  "Cargo.lock",
+  "rust-toolchain.toml",
+  ".cargo/config.toml",
+  "*/Cargo.toml",
+  "*/build.rs",
+  "*/src/**/*",
+  "target/toolchain-id",
+  "docs/manifest.json",
+]
+depends = ["toolchain:id"]
+outputs = { auto = true }
 run = """
 set -eu
 tmp=$(mktemp)
@@ -275,9 +357,31 @@ description = "Fail if parity/core-api.json no longer matches core's public surf
 # two-crate fixture workspace with the real toolchain, so a rustdoc that changed under the pin
 # fails there, naming its format_version, before the gate reads core through it. It documents
 # the five crates alone, no dependency docs: measured 2026-09-28, about 5 s warm. CI's `rust`
-# job runs both.
+# job runs both. The JSON builds into `target/rustdoc-json`, not the shared target, and
+# `scripts/rustdoc_walk.py`'s `build` says why.
+#
+# `toolchain:id` says how mise skips it and why the list is complete. Its sources are the five
+# crates (in the Rust entries), the toolchain, whose rustdoc writes the JSON and builds the
+# tests' fixture (the tests write the fixture's crates themselves), the stitcher, the generator,
+# the tests, and the committed snapshot.
+sources = [
+  "Cargo.toml",
+  "Cargo.lock",
+  "rust-toolchain.toml",
+  ".cargo/config.toml",
+  "*/Cargo.toml",
+  "*/build.rs",
+  "*/src/**/*",
+  "target/toolchain-id",
+  "parity/core-api.json",
+  "scripts/generate-core-api.py",
+  "scripts/rustdoc_walk.py",
+  "scripts/test_rustdoc_walk.py",
+]
+depends = ["toolchain:id"]
+outputs = { auto = true }
 run = [
-  "uv run python -m unittest discover -s scripts -p 'test_rustdoc_walk.py'",
+  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider scripts/test_rustdoc_walk.py",
   "./scripts/generate-core-api.py --check",
 ]
 
@@ -291,7 +395,7 @@ description = "Every capability in parity/capabilities.toml resolves on core, th
 # pins, so a cold cache downloads them once. The self-test runs first, for `model:check`'s
 # reason. CI's `rust` job runs both.
 run = [
-  "uv run python -m unittest discover -s scripts -p 'test_check_parity.py'",
+  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider scripts/test_check_parity.py",
   "./scripts/check-parity.py",
 ]
 
@@ -315,6 +419,26 @@ description = "Fail if the committed Python stub no longer matches the pyo3 surf
 # credentials, no money, so it costs what a lint costs. It does build `microvms-py` twice —
 # once for maturin's introspection pass, once for the importable cdylib the exception
 # hierarchy is read out of — and both are incremental builds `test` has already warmed.
+#
+# `toolchain:id` says how mise skips it and why the list is complete. Its sources are the pyo3
+# crate and the crates below it (in the Rust entries), the toolchain, the crate's
+# `pyproject.toml` (maturin's module name and features), the script, which pins maturin, and the
+# committed stub.
+sources = [
+  "Cargo.toml",
+  "Cargo.lock",
+  "rust-toolchain.toml",
+  ".cargo/config.toml",
+  "*/Cargo.toml",
+  "*/build.rs",
+  "*/src/**/*",
+  "target/toolchain-id",
+  "microvms-py/microvms.pyi",
+  "microvms-py/pyproject.toml",
+  "scripts/generate-py-stubs.py",
+]
+depends = ["toolchain:id"]
+outputs = { auto = true }
 run = "./scripts/generate-py-stubs.py --check"
 
 [tasks.dts]
@@ -340,6 +464,10 @@ description = "Fail if the committed TypeScript declarations no longer match the
 # output lets a caller type what the docs show. The two differ: `ExecStream` was declared with no
 # `[Symbol.asyncIterator]()`, byte-identical to the build, and `tsc` rejected the `for await` loop
 # `stream()` documents (#262). The bindings job runs the second step on its own too.
+#
+# No `sources`, unlike the other generate-and-diff gates: npx resolves `@napi-rs/cli@3` to the
+# newest 3.x on each run, here and in every workflow, so a CLI release can make the committed file
+# stale while no file here changes, and a skip would pass it.
 run = [
   '''
 #!/usr/bin/env bash
@@ -412,7 +540,7 @@ description = "Fail if a hardcoded API constraint no longer matches botocore's s
 # for anyone who wants that trade knowingly.
 run = [
   "./scripts/check-model-drift.py",
-  "uv run --with 'boto3>=1.40' --with 'pyyaml==6.0.3' python -m unittest discover -s scripts -p 'test_model_drift.py'",
+  "{{vars.pytest}} --with 'boto3>=1.40' --with 'pyyaml==6.0.3' pytest -n auto -q -p no:cacheprovider scripts/test_model_drift.py",
 ]
 
 [tasks.build]
@@ -523,7 +651,7 @@ description = "Every task, fault id, path, file, CI job and code name AGENTS.md,
 # The unit tests run first, for `trace:check`'s reason: they build throwaway repos and run the
 # real script over them, so an extractor that stopped matching fails there first.
 run = [
-  "uv run python -m unittest discover -s scripts -p 'test_check_agents_md.py'",
+  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider scripts/test_check_agents_md.py",
   "./scripts/check-agents-md.py",
 ]
 
@@ -567,8 +695,7 @@ description = "ci.yml's env and tool versions match mise.toml's, and ci/local.to
 # The unit tests run first, over fixture ci.yml and mise.toml pairs, so a rule that stopped
 # matching fails there before it reads this tree. The runner's tests clone throwaway repos.
 run = [
-  "uv run --with 'pyyaml==6.0.3' python -m unittest discover -s scripts -p 'test_check_ci_parity.py'",
-  "uv run --with 'pyyaml==6.0.3' python -m unittest discover -s scripts -p 'test_ci_local.py'",
+  "{{vars.pytest}} --with 'pyyaml==6.0.3' pytest -n auto -q -p no:cacheprovider scripts/test_check_ci_parity.py scripts/test_ci_local.py",
   "./scripts/check-ci-parity.py",
 ]
 
@@ -639,7 +766,7 @@ description = "Every seeded fault in guards/faults.toml still applies, and every
 # The unit tests run first, for `trace:check`'s reason: they build throwaway repos with a fake
 # runner and drive every verdict through the real script, `fire` included.
 run = [
-  "uv run --with 'pyyaml==6.0.3' python -m unittest discover -s scripts -p 'test_check_guards_fire.py'",
+  "{{vars.pytest}} --with 'pyyaml==6.0.3' pytest -n auto -q -p no:cacheprovider scripts/test_check_guards_fire.py",
   "./scripts/check-guards-fire.py list",
 ]
 
@@ -671,7 +798,7 @@ description = "The mutants wrapper's unit tests, and the skip sites and exclusio
 # The cheap half of `mutants`, in `check` and in CI's `security` job. A fake cargo stands in for
 # cargo-mutants, and the CI job's own steps run from ci.yml over a throwaway repo, so a broken
 # wrapper or step fails here rather than as a green shard that mutated nothing.
-run = "uv run --with 'pyyaml==6.0.3' python -m unittest discover -s scripts -p 'test_check_mutants.py'"
+run = "{{vars.pytest}} --with 'pyyaml==6.0.3' pytest -n auto -q -p no:cacheprovider scripts/test_check_mutants.py"
 
 [tasks.mutants]
 description = "Mutation-test the Rust this branch changes against origin/main; fails on a mutant its tests miss"
@@ -702,7 +829,7 @@ description = "Fail on new drift (layering, parity gaps, untraced requirements),
 # The unit tests run first because they build throwaway workspaces and run both tools over them;
 # if a tool changed under the pin, the tests say so before the gate reads the tree through it.
 run = [
-  "uv run python -m unittest discover -s scripts -p 'test_ratchet.py'",
+  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider scripts/test_ratchet.py",
   "./scripts/ratchet.py",
 ]
 
@@ -720,7 +847,7 @@ description = "Every traced requirement appears in the model, a Gherkin tag, a f
 # The unit tests run first: they build throwaway trees and run the real parsers over them, so a
 # rule that stopped telling a test's doc from a comment fails there before it reads this tree.
 run = [
-  "uv run python -m unittest discover -s scripts -p 'test_check_trace.py'",
+  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider scripts/test_check_trace.py",
   "./scripts/check-trace.py --check",
 ]
 
