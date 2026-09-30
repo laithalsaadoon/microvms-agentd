@@ -2569,6 +2569,8 @@
           "guestPort",
           "connectionsServed",
           "connectionsRefused",
+          "connectionsTruncated",
+          "connectionsUnproven",
           "proxyTokenMints",
           "interrupted"
         ],

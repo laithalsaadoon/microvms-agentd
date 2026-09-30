@@ -238,7 +238,8 @@ fn edges_among_members(metadata: &cargo_metadata::Metadata, name: &str) -> BTree
 /// the model and replays each path against the daemon's routes. The guest image ships protocol
 /// and nothing else of ours, so [`DEV_ONLY_EDGES`] holds that edge to its dev kind.
 /// `model-conformance` is the app's proof crate: its tests drive the app's functions over the
-/// model's rows, so it sits above both, and nothing depends on it.
+/// model's rows, and run the daemon's tunnel route against the edges' tunnel client (#342), so
+/// it sits above all of them, and nothing depends on it.
 const MEMBER_EDGES: [(&str, &[&str]); 11] = [
     ("microvms-protocol", &[]),
     ("agentd-model", &[]),
@@ -261,7 +262,16 @@ const MEMBER_EDGES: [(&str, &[&str]); 11] = [
     ("microvms-cli", &["microvms-core"]),
     ("microvms-py", &["microvms-core", "microvms-protocol"]),
     ("microvms-js", &["microvms-core", "microvms-protocol"]),
-    ("model-conformance", &["agentd-model", "microvms-app"]),
+    (
+        "model-conformance",
+        &[
+            "agentd",
+            "agentd-model",
+            "microvms-app",
+            "microvms-edges",
+            "microvms-protocol",
+        ],
+    ),
 ];
 
 /// **ARCH-1, ARCH-2, ARCH-6, ARCH-7 and ARCH-8.** Each workspace member depends on exactly the
