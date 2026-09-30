@@ -325,7 +325,8 @@ class ByteStream:
 @final
 class ControlPlane:
     """
-    MicroVM lifecycle by ID: get, list, suspend, resume, terminate, and wait.
+    MicroVM lifecycle by ID (get, list, suspend, resume, terminate, and wait) and image
+    administration (list, delete, versions and their status, builds).
     
     Holds no lifecycle state, so it checks nothing a `Sandbox` would (STATE-5, STATE-7,
     STATE-12): a suspend of a SUSPENDED VM is the service's to refuse. Use it when a
@@ -336,17 +337,52 @@ class ControlPlane:
         Resolves credentials for `region` from the default chain.
         """
     def __repr__(self, /) -> str: ...
+    def delete_image(self, /, identifier: str, *, attempts: int |None = None, backoff: float |None = None) -> bool:
+        """
+        Deletes the image, its extra versions first, retrying while it refuses (an image still
+        `CREATING`, or one a terminating VM holds).
+        
+        Returns `True` once the service took the deletion and `False` when every attempt failed
+        or `identifier` is not one the service accepts. It doesn't raise, as a teardown's delete
+        shouldn't. `attempts` and `backoff` (seconds) default to the core's teardown figures.
+        """
     def get(self, /, microvm_id: str) -> Microvm:
         """
         `GetMicrovm`.
+        """
+    def get_image_build(self, /, identifier: str, version: str, build_id: str) -> ImageBuild:
+        """
+        `GetMicrovmImageBuild`: one build, with the snapshot sizes the listing doesn't carry.
         """
     def list(self, /, *, image_identifier: str |None = None, image_version: str |None = None) -> list[MicrovmSummary]:
         """
         `ListMicrovms`, every page, optionally narrowed to one image and version.
         """
+    def list_image_builds(self, /, identifier: str, version: str) -> list[ImageBuild]:
+        """
+        `ListMicrovmImageBuilds` for one version, every page: one build per Graviton
+        generation. Each `build_id` is what `get_image_build` takes.
+        """
+    def list_image_versions(self, /, identifier: str) -> list[ImageVersion]:
+        """
+        `ListMicrovmImageVersions`, every page: each version, its status, and its build
+        configuration.
+        """
+    def list_images(self, /) -> list[ImageSummary]:
+        """
+        `ListMicrovmImages`, every page: every image in the account and region.
+        """
     def resume(self, /, microvm_id: str) -> None:
         """
         `ResumeMicrovm`. Returns once accepted; `wait_for_state` for RUNNING.
+        """
+    def set_image_version_status(self, /, identifier: str, version: str, status: str) -> ImageVersion:
+        """
+        `UpdateMicrovmImageVersion`: `status` is `"ACTIVE"` or `"INACTIVE"`.
+        
+        `INACTIVE` is the non-destructive retire: `RunMicrovm` refuses the version, running VMs
+        keep running, and the version's readback stays. Returns the readback, and raises when it
+        doesn't carry the status asked for, so a 200 that didn't take isn't a rollback.
         """
     def suspend(self, /, microvm_id: str) -> None:
         """
@@ -1097,6 +1133,152 @@ class Image:
     def state(self, /) -> str: ...
     @property
     def version(self, /) -> str: ...
+
+@final
+class ImageBuild:
+    """
+    One build of an image version: one per Graviton generation, so a version's builds differ
+    in `chipset_generation`. `get_image_build` adds the snapshot sizes the listing lacks.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def architecture(self, /) -> str: ...
+    @property
+    def build_id(self, /) -> str:
+        """
+        What `get_image_build` takes, and nothing else in the API mints one.
+        """
+    @property
+    def build_state(self, /) -> str:
+        """
+        `buildState`, as the service spells it.
+        """
+    @property
+    def chipset(self, /) -> str: ...
+    @property
+    def chipset_generation(self, /) -> str: ...
+    @property
+    def code_install_size_in_bytes(self, /) -> int |None:
+        """
+        `snapshotBuild.codeInstallSizeInBytes`, from `get_image_build` only.
+        """
+    @property
+    def created_at(self, /) -> float:
+        """
+        Unix seconds.
+        """
+    @property
+    def disk_snapshot_size_in_bytes(self, /) -> int |None:
+        """
+        `snapshotBuild.diskSnapshotSizeInBytes`, from `get_image_build` only.
+        """
+    @property
+    def image_arn(self, /) -> str: ...
+    @property
+    def image_version(self, /) -> str: ...
+    @property
+    def memory_snapshot_size_in_bytes(self, /) -> int |None:
+        """
+        `snapshotBuild.memorySnapshotSizeInBytes`, from `get_image_build` only, and only when
+        the service reported it.
+        """
+    @property
+    def state_reason(self, /) -> str |None:
+        """
+        Why the build is in this state, when the service said: where a failed build's reason
+        lives.
+        """
+
+@final
+class ImageSummary:
+    """
+    One `ListMicrovmImages` item: an image's ARN, name and state.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def image_arn(self, /) -> str: ...
+    @property
+    def name(self, /) -> str: ...
+    @property
+    def state(self, /) -> str:
+        """
+        As the service spells it, such as `"CREATING"` or `"CREATED"`.
+        """
+
+@final
+class ImageVersion:
+    """
+    One image version as `ListMicrovmImageVersions` or `UpdateMicrovmImageVersion` reads it
+    back: its build state, whether `RunMicrovm` launches it, and what it was built with.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def additional_os_capabilities(self, /) -> list[str] |None: ...
+    @property
+    def base_image_arn(self, /) -> str: ...
+    @property
+    def base_image_version(self, /) -> str |None:
+        """
+        The base version the build used, as the service spells it (`"1.0"` where the managed
+        base lists `"1"`). A record of the build, not a value to pass back as a pin.
+        """
+    @property
+    def build_role_arn(self, /) -> str: ...
+    @property
+    def code_artifact_uri(self, /) -> str:
+        """
+        `codeArtifact.uri`: the artifact the version was built from.
+        """
+    @property
+    def created_at(self, /) -> float:
+        """
+        Unix seconds.
+        """
+    @property
+    def description(self, /) -> str |None: ...
+    @property
+    def egress_network_connectors(self, /) -> list[str] |None: ...
+    @property
+    def environment_variables(self, /) -> dict[str, str] |None: ...
+    @property
+    def image_arn(self, /) -> str: ...
+    @property
+    def image_version(self, /) -> str: ...
+    @property
+    def is_active(self, /) -> bool:
+        """
+        Whether `RunMicrovm` launches this version.
+        """
+    @property
+    def minimum_memory_mib(self, /) -> int |None:
+        """
+        `resources[0].minimumMemoryInMiB`, the list's one member: the size class the version
+        was built for, and the only place a built image reports it.
+        """
+    @property
+    def state(self, /) -> str:
+        """
+        The version's build state, as the service spells it.
+        """
+    @property
+    def state_reason(self, /) -> str |None:
+        """
+        Why the version is in this state, when the service said. A failed build's reason is on
+        its build (`list_image_builds`), and this one is usually absent.
+        """
+    @property
+    def status(self, /) -> str:
+        """
+        `"ACTIVE"` (`RunMicrovm` launches it) or `"INACTIVE"` (it refuses; running VMs keep
+        running).
+        """
+    @property
+    def tags(self, /) -> dict[str, str] |None: ...
+    @property
+    def updated_at(self, /) -> float |None:
+        """
+        Unix seconds, when the service reported it.
+        """
 
 @final
 class KeepAwake:
@@ -2212,7 +2394,7 @@ class Session:
         """
         Unauthenticated liveness.
         """
-    def keep_awake(self, /, interval: float |None = None, *, while_busy: bool = False, max_duration: float |None = None, idle_window: float |None = None) -> KeepAwake:
+    def keep_awake(self, /, interval: float |None = None, *, while_busy: bool = False, max_duration: float |None = None, idle_window: float |None = None, tolerated_errors: int |None = None) -> KeepAwake:
         """
         Keeps the VM awake by polling health from this process until stopped.
         
@@ -2223,6 +2405,9 @@ class Session:
         running; `max_duration` ends it after that many seconds. `idle_window` is the VM's
         `maxIdleDurationSeconds`: a sandbox-held session knows it, an attached one assumes
         the platform minimum of 60, and `interval` may be at most half of it.
+        `tolerated_errors` is how many retryable poll failures in a row it retries, a second
+        apart, before it ends with the error; omitted, it's the core's
+        `DEFAULT_TOLERATED_ERRORS`.
         
         On a sandbox-held session a suspend or terminate through the sandbox ends the
         keepalive before its next poll. Stop it before suspending through anything else,

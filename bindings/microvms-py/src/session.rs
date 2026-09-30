@@ -621,11 +621,21 @@ impl PySession {
     /// running; `max_duration` ends it after that many seconds. `idle_window` is the VM's
     /// `maxIdleDurationSeconds`: a sandbox-held session knows it, an attached one assumes
     /// the platform minimum of 60, and `interval` may be at most half of it.
+    /// `tolerated_errors` is how many retryable poll failures in a row it retries, a second
+    /// apart, before it ends with the error; omitted, it's the core's
+    /// `DEFAULT_TOLERATED_ERRORS`.
     ///
     /// On a sandbox-held session a suspend or terminate through the sandbox ends the
     /// keepalive before its next poll. Stop it before suspending through anything else,
     /// or the next poll auto-resumes the VM. Dropping the returned handle stops it.
-    #[pyo3(signature = (interval=None, *, while_busy=false, max_duration=None, idle_window=None))]
+    #[pyo3(signature = (
+        interval=None,
+        *,
+        while_busy=false,
+        max_duration=None,
+        idle_window=None,
+        tolerated_errors=None,
+    ))]
     fn keep_awake(
         &self,
         py: Python<'_>,
@@ -633,6 +643,7 @@ impl PySession {
         while_busy: bool,
         max_duration: Option<f64>,
         idle_window: Option<f64>,
+        tolerated_errors: Option<u32>,
     ) -> PyCoreResult<crate::keepalive::PyKeepAwake> {
         let explicit = idle_window.map(seconds).transpose()?;
         let (source, known) = match &self.held {
@@ -646,8 +657,13 @@ impl PySession {
                     )
                 })?,
         };
-        let policy =
-            crate::keepalive::policy(explicit.or(known), interval, while_busy, max_duration)?;
+        let policy = crate::keepalive::policy(
+            explicit.or(known),
+            interval,
+            while_busy,
+            max_duration,
+            tolerated_errors,
+        )?;
         Ok(crate::keepalive::PyKeepAwake::start(source, policy)?)
     }
 

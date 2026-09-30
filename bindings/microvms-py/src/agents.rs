@@ -751,17 +751,16 @@ impl PyAgentVm {
     ) -> PyCoreResult<PyExecResult> {
         let agent: Agent = agent.parse().map_err(CoreError)?;
         let spec = agents::spec_for(&self.specs, agent)?.clone();
-        let timeout = seconds(timeout)?;
         let options = PromptOptions {
             exec_id,
-            timeout: Some(timeout),
+            timeout: Some(seconds(timeout)?),
             permission_mode: permission_mode.parse().map_err(CoreError)?,
             reap_group_on_exit,
         };
-        let request = agents::prompt_request(&spec, task, &options)?;
+        let task = task.to_string();
         let result = self.detached(py, |sandbox| {
             Self::with_session(sandbox, |session| {
-                runtime::block_on_detached(session.run_sync(request, timeout))
+                runtime::block_on_detached(agents::prompt_sync(session, &spec, &task, &options))
             })
         })?;
         Ok(PyExecResult::wrap(result))
