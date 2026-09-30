@@ -129,7 +129,10 @@ mod microvms {
         installed_agents, mint_bedrock_token, mint_bedrock_token_with_credentials, prompt_agent,
     };
     #[pymodule_export]
-    use super::control::{PyControlPlane, PyIdlePolicy, PyMicrovm, PyMicrovmSummary};
+    use super::control::{
+        PyControlPlane, PyIdlePolicy, PyImageBuild, PyImageSummary, PyImageVersion, PyMicrovm,
+        PyMicrovmSummary,
+    };
     #[pymodule_export]
     use super::core_version;
     #[pymodule_export]
