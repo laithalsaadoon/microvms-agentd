@@ -5,8 +5,9 @@
 #
 # The npm entry covers microvms-js's single devDependency (@napi-rs/cli);
 # cargo covers Cargo.lock; github-actions covers the version-tagged actions in
-# both workflows, including the checksummed binaries' actions (the checksummed
-# curl installs are refreshed by hand, as their comments state).
+# the workflows and the mise action. The tools mise installs are mise.lock's
+# (`mise lock` refreshes it), and the checksummed curl installs left in the
+# release workflows are refreshed by hand, as their comments state.
 version: 2
 updates:
   - package-ecosystem: cargo
@@ -25,8 +26,10 @@ updates:
   # full CI, and five separate action bumps (#324 to #328) ran it five times
   # for one week's updates. The group takes version updates only (that's the
   # `applies-to` default), so a security update still arrives on its own.
+  # The workflows, and the composite action every CI job installs mise through, whose own
+  # `uses:` pins (actions/cache, jdx/mise-action) a scan of the workflows alone doesn't see.
   - package-ecosystem: github-actions
-    directory: /
+    directories: ["/", "/.github/actions/mise"]
     schedule:
       interval: weekly
     groups:

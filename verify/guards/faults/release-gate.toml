@@ -84,7 +84,7 @@ transform = { file = "tools/release-gate.py", replace = "(\"cargo publish\", re.
 [[fault]]
 id = "release-gate-unit-commit"
 guard = "test_release_gate.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_release_gate.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_release_gate.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_run_on_another_commit_is_refused ("
@@ -93,7 +93,7 @@ transform = { file = "tools/release-gate.py", replace = "                (\"head
 [[fault]]
 id = "release-gate-unit-ref"
 guard = "test_release_gate.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_release_gate.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_release_gate.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_run_on_another_ref_is_refused ("
@@ -102,7 +102,7 @@ transform = { file = "tools/release-gate.py", replace = "                (\"head
 [[fault]]
 id = "release-gate-unit-conclusion"
 guard = "test_release_gate.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_release_gate.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_release_gate.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_failed_or_unfinished_run_is_refused ("
@@ -112,7 +112,7 @@ transform = { file = "tools/release-gate.py", replace = "                (\"conc
 [[fault]]
 id = "release-gate-unit-sums"
 guard = "test_release_gate.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_release_gate.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_release_gate.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_marker_for_another_draft_is_refused ("

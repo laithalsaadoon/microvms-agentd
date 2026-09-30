@@ -25,6 +25,8 @@ __pycache__/
 dist-wheel/
 .venv-typed/
 .venv-bindings/
+# The unit suites' environment, synced from uv.lock by `uv run` (pyproject.toml says why).
+.venv/
 # The napi-rs build outputs. `napi build --platform` writes the compiled addon plus a
 # generated loader and type declarations beside `package.json`, all three derived from
 # `bindings/microvms-js/src/`. The addon and the loader stay out: committing them would commit one

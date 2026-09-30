@@ -12,7 +12,7 @@ description = "Semgrep + secrets + license headers + dependency licenses + workf
 # yanked crates, untrusted registries) — `mise run vuln` covers CVEs, this
 # covers what a CVE scanner cannot. actionlint is the only linter that reads
 # the workflows; before it, a workflow mistake was found by the workflow
-# misbehaving.
+# misbehaving. CI's `security` job runs this task.
 run = [
   # --severity WARNING drops the INFO tier: its findings here are std::env::args
   # in a CLI and TempDir in tests — idioms, not defects — and a gate that cries
@@ -20,9 +20,20 @@ run = [
   "semgrep scan --config p/rust --config p/secrets --severity WARNING --severity ERROR --error --quiet --metrics=off crates/protocol/src crates/agentd/src crates/model/src crates/microvms-domain/src crates/microvms-app/src crates/microvms-edges/src crates/microvms-core/src crates/microvms-cli/src bindings/microvms-py/src bindings/microvms-js/src",
   "betterleaks git .",
   # The header check's own floor, in throwaway repos: an empty `git ls-files` must fail.
-  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider tools/test_license_headers.py",
+  "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_license_headers.py",
   "./tools/check-license-headers.py",
-  "cargo deny check",
+  # The LICENSE file itself, and every crate manifest declaring a license. The dependency
+  # licenses are cargo-deny's, next; this holds the repo's own claim consistent.
+  '''
+test -s LICENSE
+grep -q "Apache License" LICENSE
+for m in $(git ls-files '*/Cargo.toml'); do
+  grep -Eq 'license(\.workspace)?[[:space:]]*=' "$m" || { echo "$m declares no license"; exit 1; }
+done
+''',
+  # `--all-features`, as cargo-deny-action ran it in CI before CI ran this task: an optional
+  # feature's dependencies are licensed and sourced like the rest.
+  "cargo deny --all-features check",
   "actionlint",
 ]
 
@@ -65,3 +76,21 @@ run = [
   # reported as unused while the finding it names failed the scan).
   "osv-scanner scan source -r . --config osv-scanner.toml",
 ]
+
+["vex:check"]
+description = "The OpenVEX document has the shape grype and trivy read: an id, an author, statements naming a vulnerability and products, and a justification for each not_affected. Offline"
+# The document is where every accepted dependency vulnerability carries its reason (`vuln` above
+# hands it to grype and trivy), so a `not_affected` with no justification is an acceptance with
+# no reason. CI's `sbom` job runs it before the scanners.
+run = '''
+jq -e '
+  (.["@context"] and .["@id"] and .author and .timestamp and (.version >= 1)) and
+  (.statements | length > 0) and
+  (.statements | all(
+    (.vulnerability.name != null) and
+    (.products | length > 0 and all(.["@id"] != null)) and
+    ((.status == "not_affected" or .status == "affected" or .status == "fixed" or .status == "under_investigation")) and
+    (if .status == "not_affected" then (.justification != null or .impact_statement != null) else true end)
+  ))' .vex/microvms-agentd.openvex.json > /dev/null \
+  || { echo "::error file=.vex/microvms-agentd.openvex.json::OpenVEX document failed shape validation (see .vex/README.md)"; exit 1; }
+'''

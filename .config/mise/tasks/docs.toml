@@ -130,7 +130,7 @@ depends = ["docs:build"]
 # `--offline` is absent on purpose: the whole point is the network. The exit code is preserved
 # so a human running it sees the failure; `.github/workflows/links.yml` is what declines to
 # gate.
-tools = { "aqua:lycheeverse/lychee" = "0.24.2" }
+tools = { "aqua:lycheeverse/lychee" = "{{vars.lychee}}" }
 run = "lychee --config .config/lychee.toml 'site/dist/**/*.html'"
 
 ["docs:check"]

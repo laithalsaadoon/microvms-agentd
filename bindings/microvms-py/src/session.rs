@@ -1151,6 +1151,25 @@ pub(crate) fn session_constants<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyD
         "defaultRefreshAfterSeconds",
         microvms_core::session::DEFAULT_REFRESH_AFTER.as_secs(),
     )?;
+    // The waits' defaults, core's (#266): the stub prints a default named for a core constant as
+    // `...`, so a caller reads the figure here, and a signature that states one is tested
+    // against it.
+    dict.set_item(
+        "defaultExecWaitSeconds",
+        microvms_core::session::DEFAULT_EXEC_WAIT.as_secs_f64(),
+    )?;
+    dict.set_item(
+        "defaultReadyTimeoutSeconds",
+        microvms_core::session::DEFAULT_READY_TIMEOUT.as_secs_f64(),
+    )?;
+    dict.set_item(
+        "defaultLifecycleTimeoutSeconds",
+        microvms_core::sandbox::DEFAULT_LIFECYCLE_TIMEOUT.as_secs_f64(),
+    )?;
+    dict.set_item(
+        "lifecyclePollIntervalSeconds",
+        microvms_core::sandbox::LIFECYCLE_POLL_INTERVAL.as_secs_f64(),
+    )?;
     // The closed sets come from the protocol enums rather than being spelled here: a
     // phase added to `protocol::exec::Phase` appears in this list without an edit.
     dict.set_item(

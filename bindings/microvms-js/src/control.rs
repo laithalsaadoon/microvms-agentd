@@ -6,7 +6,7 @@
 //! the STATE guards a `Sandbox` does — it answers what the service says.
 
 use std::sync::Arc;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 use microvms_core::control::{ControlPlane as CoreControlPlane, Microvm as CoreMicrovm};
 use microvms_core::control::{MicrovmFilter, WaitOpts};
@@ -197,17 +197,16 @@ impl ControlPlane {
     ) -> Result<Microvm, AsyncError> {
         let options = options.unwrap_or_default();
         let opts = WaitOpts {
-            timeout: seconds_async(
-                options
-                    .timeout
-                    .unwrap_or(DEFAULT_LIFECYCLE_TIMEOUT.as_secs_f64()),
-            )?,
             poll_interval: seconds_async(
                 options
                     .poll_interval
                     .unwrap_or(LIFECYCLE_POLL_INTERVAL.as_secs_f64()),
             )?,
-            stall_grace: Duration::MAX,
+            ..WaitOpts::for_lifecycle(seconds_async(
+                options
+                    .timeout
+                    .unwrap_or(DEFAULT_LIFECYCLE_TIMEOUT.as_secs_f64()),
+            )?)
         };
         let fail_on = options.fail_on.unwrap_or_default();
         let wanted: Vec<&str> = wanted.iter().map(String::as_str).collect();

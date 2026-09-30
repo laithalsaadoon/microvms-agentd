@@ -4,7 +4,7 @@
 [[fault]]
 id = "mutants-wrapper-missed-passes"
 guard = "test_check_mutants.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_missed_mutant_fails_and_names_it ("
@@ -13,7 +13,7 @@ transform = { file = "tools/check-mutants.py", replace = "    if code == 0:\n   
 [[fault]]
 id = "mutants-wrapper-timeout-passes"
 guard = "test_check_mutants.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_timeout_fails_and_names_the_mutant ("
@@ -23,7 +23,7 @@ transform = { file = "tools/check-mutants.py", replace = "    if code == 0:\n   
 [[fault]]
 id = "mutants-wrapper-git-failure-is-empty"
 guard = "test_check_mutants.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_base_git_cannot_resolve_fails_rather_than_reading_as_no_changes ("
@@ -33,7 +33,7 @@ transform = { file = "tools/check-mutants.py", replace = "    if result.returnco
 [[fault]]
 id = "mutants-wrapper-pathspec-empty"
 guard = "test_check_mutants.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_clean_run_passes ("
@@ -43,7 +43,7 @@ transform = { file = "tools/check-mutants.py", replace = "names = git(\"diff\", 
 [[fault]]
 id = "mutants-wrapper-whole-diff"
 guard = "test_check_mutants.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_it_hands_over_the_rust_diff_the_packages_and_the_extra_arguments ("
@@ -52,7 +52,7 @@ transform = { file = "tools/check-mutants.py", replace = "diff = git(\"diff\", *
 [[fault]]
 id = "mutants-wrapper-model-package"
 guard = "test_check_mutants.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_it_hands_over_the_rust_diff_the_packages_and_the_extra_arguments ("
@@ -63,7 +63,7 @@ transform = { file = "tools/check-mutants.py", replace = "    \"agentd\",\n)\n",
 [[fault]]
 id = "mutants-wrapper-given-diff-unchecked"
 guard = "test_check_mutants.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_given_diff_with_no_rust_in_it_fails_without_running_cargo_mutants ("
@@ -72,7 +72,7 @@ transform = { file = "tools/check-mutants.py", replace = "    if not RUST_HEADER
 [[fault]]
 id = "mutants-wrapper-rust-header-matches-nothing"
 guard = "test_check_mutants.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_given_diff_is_handed_over_as_it_is ("
@@ -83,7 +83,7 @@ transform = { file = "tools/check-mutants.py", replace = "(?:b/)?\\S+\\.rs\\s*$"
 [[fault]]
 id = "mutants-wrapper-shared-target"
 guard = "test_check_mutants.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_cargo_mutants_builds_in_its_own_targets_unless_it_mutates_in_place ("
@@ -111,7 +111,7 @@ transform = { file = ".cargo/mutants.toml", replace = "  '^crates/agentd/src/fs\
 [[fault]]
 id = "mutants-wrapper-user-diff-prefix"
 guard = "test_check_mutants.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_the_diff_keeps_its_a_and_b_prefixes_whatever_git_is_set_to ("
@@ -122,7 +122,7 @@ transform = { file = "tools/check-mutants.py", replace = "diff = git(\"diff\", *
 [[fault]]
 id = "mutants-wrapper-members-unchecked"
 guard = "test_check_mutants.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_workspace_member_in_neither_list_fails_naming_it ("
@@ -133,7 +133,7 @@ transform = { file = "tools/check-mutants.py", replace = "    if problems:\n", w
 [[fault]]
 id = "mutants-wrapper-members-read-nothing"
 guard = "test_check_mutants.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_clean_run_passes ("
@@ -143,7 +143,7 @@ transform = { file = "tools/check-mutants.py", replace = "for package in metadat
 [[fault]]
 id = "mutants-wrapper-detect-always-false"
 guard = "test_check_mutants.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_detect_answers_whether_there_is_rust_without_running_cargo ("
@@ -155,7 +155,7 @@ transform = { file = "tools/check-mutants.py", replace = "print(f\"rust={'true' 
 [[fault]]
 id = "mutants-ci-detect-step-wrong-base"
 guard = "test_check_mutants.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_the_ci_jobs_steps_run_the_wrapper_as_these_cases_do ("
@@ -165,7 +165,7 @@ transform = { file = ".github/workflows/ci.yml", replace = "run: python3 tools/c
 [[fault]]
 id = "mutants-ci-gated-step-wrong-output"
 guard = "test_check_mutants.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_the_ci_jobs_steps_run_the_wrapper_as_these_cases_do ("
@@ -176,7 +176,7 @@ transform = { file = ".github/workflows/ci.yml", replace = "        if: steps.di
 [[fault]]
 id = "mutants-skip-on-shipping-code"
 guard = "test_check_mutants.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_every_mutants_skip_is_a_listed_site ("
@@ -186,7 +186,7 @@ transform = { file = "crates/microvms-app/src/provision.rs", replace = "pub fn s
 [[fault]]
 id = "mutants-skip-scan-reads-nothing"
 guard = "test_check_mutants.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_every_mutants_skip_is_a_listed_site ("
@@ -198,7 +198,7 @@ transform = { file = "tools/test_check_mutants.py", replace = "\"--exclude-stand
 [[fault]]
 id = "mutants-exclusion-drops-logic"
 guard = "test_check_mutants.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_each_exclusion_drops_only_a_named_functions_return_value ("
@@ -208,7 +208,7 @@ transform = { file = ".cargo/mutants.toml", replace = "  '^crates/microvms-edges
 [[fault]]
 id = "mutants-exclusion-reads-nothing"
 guard = "test_check_mutants.py"
-run = ["uv", "run", "--with", "pyyaml==6.0.3", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutants.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_each_exclusion_drops_only_a_named_functions_return_value ("
