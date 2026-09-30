@@ -441,6 +441,11 @@ class ControlPlane:
         """
         `ListMicrovmImages`, every page: every image in the account and region.
         """
+    @property
+    def region(self, /) -> Region:
+        """
+        The region this plane addresses.
+        """
     def resume(self, /, microvm_id: str) -> None:
         """
         `ResumeMicrovm`. Returns once accepted; `wait_for_state` for RUNNING.
@@ -2259,7 +2264,13 @@ class Sandbox:
         """
     def run(self, /, *, image_identifier: str |None = None, image_version: str |None = None, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, launch_env: dict[str, str] |None = None, egress: bool = False, egress_network_connectors: Sequence[str] |None = None, deny_egress: bool = False, shell: bool = False, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None, ready_timeout: float |None = None, token_scope: str |None = None, wait: bool = True, log_group: str |None = None, log_stream: str |None = None, disable_logging: bool = False) -> Session:
         """
-        Launches a MicroVM, waits for RUNNING, and returns its session.
+        Launches a MicroVM, waits for RUNNING and for its daemon to answer, and returns its
+        session.
+        
+        `ready_timeout` bounds the wait for RUNNING (default
+        `session_constants()["defaultRunningTimeoutSeconds"]`); the wait for the daemon after it
+        is `defaultReadyTimeoutSeconds`, and a daemon that never answers raises
+        `TimeoutError` with the VM left RUNNING.
         
         `image_identifier` is an image ARN or a bare image name, or omitted for the image
         `build_image` built. The core resolves a name to its ARN with one `ListMicrovmImages`
@@ -2350,7 +2361,8 @@ class Sandbox:
         """
     def wait_until_running(self, /, *, timeout: float |None = None) -> Session:
         """
-        Finishes a `run(wait=False)`: waits for RUNNING and returns the session.
+        Finishes a `run(wait=False)`: waits for RUNNING and for the daemon to answer, and
+        returns the session. `timeout` bounds the wait for RUNNING, as `ready_timeout` does.
         
         A launch whose `client_token` adopted an existing, idle-suspended VM resumes it;
         a fresh launch that reaches a terminal state first raises `LaunchDiedError` with

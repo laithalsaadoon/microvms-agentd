@@ -98,7 +98,7 @@ Locally, `mise run guards:fire -- --jobs 4` seeds faults in four scratch worktre
 once and reports what a serial run reports, in the same order; add `--venv-per-worker`
 to fire the binding entries too. On each push to main, CI's `guards` job fires every
 entry under strace and records what each one's runs read (`--record`). A pull request
-restores main's latest record and keeps each recorded `fired` verdict whose inputs are
+restores main's latest records (every leg's, from one push) and keeps each recorded `fired` verdict whose inputs are
 all unchanged since the recorded commit (`--reuse`): it fires an entry whose registry
 entry, a file or directory its runs read, a tool they ran, the environment or
 tools/check-guards-fire.py changed, and one whose command reads the git history or
@@ -133,6 +133,18 @@ behind a feature `cargo test` doesn't enable), add an `exclude_re` entry to
 instead. An entry drops only a function's `replace <function> -> ` mutants, so
 move any logic worth testing out of that function first. A mutant in
 `timeout.txt` made the tests hang, and it's handled like a missed one.
+
+CI's `mutmut` job asks the same question of the gate scripts. `tools/check-mutmut.py` runs
+mutmut over the functions a pull request changes in `tools/*.py` and fails when one has more
+surviving mutants than it had on the base; a new function starts from none, so the survivors in
+code nobody touches wait for a change that meets them. `mise run mutmut` runs it over your branch
+against origin/main (`mise run mutmut -- --jobs 4`), and `mutmut:check` in `check` runs its unit
+tests. mutmut credits a test with a function only when the script's module has mutmut's name for
+it, so a script's own suite loads it with `runpy.run_path(<path>, run_name="tools.<stem>")`; a
+script no suite loads that way isn't measured, and the job says so. A surviving mutant prints
+with its diff: write the assertion that fails with it in. One no test could tell from the
+original takes a no-mutate pragma on its line, with the reason in parentheses after it, which
+the script requires.
 
 Two kinds of code take `#[cfg_attr(test, mutants::skip)]` rather than an
 exclusion: a new test double behind `cfg(any(test, feature = "test-support"))`

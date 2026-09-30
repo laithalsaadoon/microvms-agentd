@@ -113,7 +113,7 @@ moves directory sync into core. The ratchet's adapter-logic rules
 (`verify/ratchet/rules/`) refuse an operation name written as a literal and a retyped
 default in the CLI's and both bindings' code; they don't read file formats, or
 attribute defaults such as clap's `default_value_t` and PyO3's `signature`,
-which #300 checks through the generated surfaces.
+which `parity:check` holds to core's through the generated surfaces.
 
 If an adapter needs something private to a lower crate, make it public there or
 move the caller down. Never copy it.
@@ -147,7 +147,7 @@ production constructors outside `crates/microvms-cli/src/seam.rs`, and the bindi
 transport calls. `protocol::exec::StartRequest` is `#[non_exhaustive]`, so every
 start request is built from `StartRequest::new`, which holds the wire's defaults.
 The Python binding's `run` signatures still restate four of them as keyword
-defaults, which #300 checks.
+defaults, which `parity:check` holds to `StartRequest::new`'s.
 
 Core is the one implementation. The CLI, Python and TypeScript expose the same
 capabilities, or `verify/parity/capabilities.toml` says why one doesn't.
@@ -166,8 +166,10 @@ capabilities, or `verify/parity/capabilities.toml` says why one doesn't.
   or retry literal of their own without a decision in `verify/ratchet/decisions.toml`.
   The ratchet's `literal-default` rule (`verify/ratchet/rules/literal-default.yml`)
   fails `ratchet:check` on one in adapter source that has no decision there. A
-  flag or keyword default isn't held yet: #300 checks those through the
-  generated surfaces.
+  flag or keyword default is held through the generated surfaces: core publishes
+  its defaults as the manifest's `clientDefaults`, and `parity:check` fails on a
+  default in `docs/manifest.json` or `microvms.pyi` that no `[[default]]` row in
+  `verify/parity/capabilities.toml` maps to one, or that differs from it.
 - A bug in behavior the surfaces share is a case in `verify/parity/cases/`,
   which every surface's runner checks against one `expect`, not a new test and
   seeded fault on each surface. Where main marks the wrong surface with
@@ -274,8 +276,10 @@ check that holds it, or says that review does.
   no entry and no line in `verify/guards/unregistered.txt`.
 - Tests assert the verdict, not only that something ran or stayed contained.
   CI's `mutants` job fails on a mutant of the changed Rust that no test
-  catches, which is what a test that only checks "it returned" leaves behind.
-  It isn't a required check yet, so read its result before a merge.
+  catches, which is what a test that only checks "it returned" leaves behind,
+  and its `mutmut` job fails when a function a change touches in `tools/*.py`
+  has more surviving mutants than it had on the base. Neither is a required
+  check yet, so read their results before a merge.
 - A requirement is covered by a test that names it, not by a mention.
   `trace:check` counts a key only in a test's name, its own doc comment or
   docstring, a pytest marker, or a Node test's title.

@@ -98,7 +98,8 @@ fn launch(
         Region::UsEast1,
         Arc::new(TestClock::new()) as Arc<dyn crate::control::Clock>,
     );
-    let mut sandbox = Sandbox::with_control_plane(plane);
+    let mut sandbox = Sandbox::with_control_plane(plane)
+        .with_session_backend(crate::testing::HealthyDaemon::new());
     let posture = runtime.block_on(async {
         let posture = sandbox
             .run(request)

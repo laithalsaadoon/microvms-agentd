@@ -36,6 +36,7 @@ depends = [
   "guards:list",
   "fail-to-pass:check",
   "mutants:check",
+  "mutmut:check",
   "targets:check",
   "ci:parity",
 ]

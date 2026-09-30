@@ -135,7 +135,9 @@ fn ask_in(world: &mut Harness, region: String) {
 
 #[when("the sandbox launches them")]
 async fn launch(world: &mut Harness) {
-    let mut sandbox = Sandbox::with_control_plane(world.plane());
+    // A daemon that answers health, because a launch waits for one.
+    let mut sandbox = Sandbox::with_control_plane(world.plane())
+        .with_session_backend(microvms_app::testing::HealthyDaemon::new());
     let session = sandbox
         .run(world.request())
         .await
