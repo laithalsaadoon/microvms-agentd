@@ -26,6 +26,10 @@ converts types and maps errors; behavior belongs in the Rust layers below.
 
 - Tests stay offline. To make the daemon fetch fail in a test, point `HTTPS_PROXY` at a closed
   local port and clear `NO_PROXY` (see `__test__/provision.mjs`).
+- `package.json`'s `main`, `types`, `exports` and `files` are held to the tarball they ship in:
+  `tools/check-npm-package.py` (`npm:package`, in CI's bindings job) runs publint and
+  @arethetypeswrong/cli over what `npm pack` makes, at the exact versions `devDependencies`
+  pins. It needs a built addon, like the loader check.
 - `package.json`'s `napi.targets` is the source of truth for the platforms that get an npm
   package; `tools/check-publishable.py` fails a workflow matrix that doesn't match it.
 - This is the one crate where `unsafe_code` is `deny` rather than `forbid`, because

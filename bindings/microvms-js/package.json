@@ -49,7 +49,9 @@
     "test:unit": "node --test __test__/cost.mjs __test__/errors.mjs __test__/exec.mjs __test__/process.mjs __test__/session.mjs __test__/numbers.mjs"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^3.8.2"
+    "@arethetypeswrong/cli": "0.18.5",
+    "@napi-rs/cli": "^3.8.2",
+    "publint": "0.3.24"
   },
   "engines": {
     "node": ">=22.13.0"

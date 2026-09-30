@@ -583,6 +583,13 @@ py = ["AgentVm.build_artifact", "AgentVm.build_image"]
 ts = ["AgentVm.buildArtifact", "AgentVm.buildImage"]
 
 [[capability]]
+id = "agent-ensure-image"
+core = ["microvms_core::agents::AgentVm::ensure_image", "microvms_core::agents::ensure_request_for"]
+cli = "agent-up"
+py = "AgentVm.ensure_image"
+ts = "AgentVm.ensureImage"
+
+[[capability]]
 id = "agent-vm-access-and-prompt"
 core = ["microvms_core::agents::AgentVm::install_access", "microvms_core::agents::AgentVm::prompt"]
 cli = ["agent-up", "agent-prompt"]
@@ -629,7 +636,7 @@ ts = ["NameRegistry.register", "NameRegistry.get", "NameRegistry.put"]
 [[capability]]
 id = "list-and-delete-names"
 core = "microvms_core::names::NameStore"
-cli = { exempt = "names are only released at terminate", issue = "#267" }
+cli = ["names", "names --delete"]
 py = ["NameRegistry.list", "NameRegistry.delete"]
 ts = ["NameRegistry.list", "NameRegistry.delete"]
 

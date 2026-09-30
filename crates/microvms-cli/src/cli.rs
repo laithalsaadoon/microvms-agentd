@@ -308,6 +308,14 @@ pub enum Command {
     /// between execs.
     History(HistoryArgs),
 
+    /// List the names this machine's registry holds, or delete one whose VM is gone.
+    ///
+    /// A local read of the registry `run --keep --vm-name` writes, one file per name under
+    /// the state directory. The listing leaves out each record's agent token and identity
+    /// seed. A name is released when a terminate of its VM is accepted; `--delete` clears one
+    /// whose VM ended some other way, which would otherwise refuse the name's reuse.
+    Names(NamesArgs),
+
     /// Name an image's build log group and print the `aws logs tail` command that reads it.
     ///
     /// The group is `/aws/lambda-microvms/<image-name>`, derived from the name rather than
@@ -1905,6 +1913,18 @@ pub struct HistoryArgs {
 }
 
 #[derive(Args, Debug)]
+pub struct NamesArgs {
+    /// Delete this name's record first; repeat for more. A name the registry doesn't hold is
+    /// refused, and then nothing is deleted.
+    #[arg(long = "delete", value_name = "NAME")]
+    pub delete: Vec<String>,
+
+    /// Where the registry lives. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs.
+    #[arg(long)]
+    pub state_dir: Option<PathBuf>,
+}
+
+#[derive(Args, Debug)]
 pub struct LogsArgs {
     /// The image whose log group to name.
     #[arg(value_name = "IMAGE_NAME")]
@@ -2547,14 +2567,14 @@ mod tests {
         assert!(big.contains("65535"), "{big}");
     }
 
-    /// Twenty-nine subcommands, named as the manifest and the response table name them.
+    /// The subcommands, named as the manifest and the response table name them.
     ///
     /// The block after `exec` is the attached one — `health`, `keepalive`, `ack`, `kill`, `ps`, `stdin`, `cp`,
     /// `tunnel`, `port-forward`, and `shell` beside it — and their position is asserted rather than incidental,
     /// because `--help`'s reading order is the only documentation of which commands need the
     /// identifier triple (`shell` sits with them because it addresses a running VM, though its
-    /// credential is the minted shell token rather than the agent token). `history` sits beside
-    /// `ls` because both are local reads of this machine's own state directory.
+    /// credential is the minted shell token rather than the agent token). `history` and `names`
+    /// sit beside `ls` because all three are local reads of this machine's own state directory.
     #[test]
     fn the_tree_registers_the_lifecycle_commands_the_attached_block_and_the_local_ones() {
         let registered: Vec<String> = Cli::command()
@@ -2587,6 +2607,7 @@ mod tests {
                 "terminate",
                 "ls",
                 "history",
+                "names",
                 "logs",
                 "cost",
                 "doctor",

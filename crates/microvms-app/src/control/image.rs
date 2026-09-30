@@ -364,7 +364,15 @@ impl ControlPlane {
     /// because the byte-scan guard (AC-2-3) needs to inspect these bytes without making a
     /// control-plane call.
     pub fn build_artifact_for(&self, request: &CreateImageRequest) -> Result<Vec<u8>, Error> {
-        let dockerfile = match request.dockerfile.as_deref() {
+        let dockerfile = self.dockerfile_for(request);
+        artifact::build_artifact(&request.binary, &dockerfile, request.project_files.as_ref())
+    }
+
+    /// The Dockerfile `request` builds with: its own, or the default stanza for its base,
+    /// this plane's port and its project's ecosystem. The one fallback the artifact, its
+    /// content hash and an ensure request built from `request` all take.
+    pub fn dockerfile_for(&self, request: &CreateImageRequest) -> String {
+        match request.dockerfile.as_deref() {
             Some(dockerfile) => dockerfile.to_string(),
             None => artifact::default_dockerfile(
                 self.port,
@@ -372,8 +380,7 @@ impl ControlPlane {
                 &request.base_image,
                 request.project_files.as_ref().map(|files| files.ecosystem),
             ),
-        };
-        artifact::build_artifact(&request.binary, &dockerfile, request.project_files.as_ref())
+        }
     }
 
     /// Polls until the image is usable, distinguishing a stalled build from a slow one.
@@ -1163,15 +1170,7 @@ impl ControlPlane {
     /// of the same request would carry. See [`artifact::artifact_content_hash`] for what
     /// is hashed and why it is the inputs rather than the zip.
     pub fn artifact_content_hash_for(&self, request: &CreateImageRequest) -> String {
-        let dockerfile = match request.dockerfile.as_deref() {
-            Some(dockerfile) => dockerfile.to_string(),
-            None => artifact::default_dockerfile(
-                self.port,
-                None,
-                &request.base_image,
-                request.project_files.as_ref().map(|files| files.ecosystem),
-            ),
-        };
+        let dockerfile = self.dockerfile_for(request);
         artifact::artifact_content_hash(
             &request.binary,
             &dockerfile,
@@ -2774,6 +2773,52 @@ mod tests {
                 .await
         );
         assert_eq!(fake.call_count("DeleteMicrovmImage"), 2);
+    }
+
+    /// **The one Dockerfile fallback (#258).** A request's own Dockerfile, or the default
+    /// stanza for its base and this plane's port, and the artifact carries exactly that text
+    /// beside the daemon, so an ensure built from the request and its two-step build agree.
+    #[test]
+    fn the_artifact_carries_the_dockerfile_the_request_builds_with() {
+        use std::io::Read as _;
+
+        let (plane, fake, _) = planted();
+        let mut request = a_request();
+        request.dockerfile = None;
+        let default = plane.dockerfile_for(&request);
+        assert_eq!(
+            default,
+            artifact::default_dockerfile(
+                crate::control::DEFAULT_AGENT_PORT,
+                None,
+                &request.base_image,
+                None
+            )
+        );
+        let sandbox = crate::sandbox::Sandbox::with_control_plane(planted().0);
+        assert_eq!(sandbox.dockerfile_for(&request), default);
+
+        let own = "FROM public.ecr.aws/amazonlinux/amazonlinux:2023-minimal\nCMD [\"/agentd\"]\n";
+        request.dockerfile = Some(own.to_string());
+        assert_eq!(plane.dockerfile_for(&request), own);
+
+        let bytes = plane.build_artifact_for(&request).expect("builds the zip");
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("a zip");
+        let mut dockerfile = String::new();
+        archive
+            .by_name("Dockerfile")
+            .expect("the Dockerfile entry")
+            .read_to_string(&mut dockerfile)
+            .expect("reads");
+        assert_eq!(dockerfile, own);
+        let mut daemon = Vec::new();
+        archive
+            .by_name("agentd")
+            .expect("the daemon entry")
+            .read_to_end(&mut daemon)
+            .expect("reads");
+        assert_eq!(daemon, request.binary);
+        assert_eq!(fake.calls().len(), 0);
     }
 
     /// The artifact bytes are available without a control-plane call, which is what lets the

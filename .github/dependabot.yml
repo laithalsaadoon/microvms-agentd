@@ -3,8 +3,9 @@
 # live suite exercises directly, and an unattended provider bump there changes
 # what a paid conformance run tests.
 #
-# The npm entry covers microvms-js's single devDependency (@napi-rs/cli);
-# cargo covers Cargo.lock; github-actions covers the version-tagged actions in
+# The npm entry covers microvms-js's devDependencies: @napi-rs/cli, and the
+# exact publint and @arethetypeswrong/cli pins tools/check-npm-package.py
+# reads; cargo covers Cargo.lock; github-actions covers the version-tagged actions in
 # the workflows and the mise action. The tools mise installs are mise.lock's
 # (`mise lock` refreshes it), and the checksummed curl installs left in the
 # release workflows are refreshed by hand, as their comments state.

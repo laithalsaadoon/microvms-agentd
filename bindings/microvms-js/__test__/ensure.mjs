@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { Region, Sandbox, wrapDockerfile } from '../index.js';
+import { AgentVm, Region, Sandbox, wrapDockerfile } from '../index.js';
 import { elfHeader } from './support/elf.mjs';
 import { codeOf } from './support/sse.mjs';
 
@@ -57,3 +57,26 @@ test('IMAGE-12: a context directory is read by core', async () => {
   writeFileSync(join(dir, 'agentd'), 'not the daemon');
   await refused({ contextDir: dir }, /agentd/);
 });
+
+// #258: `AgentVm.ensureImage` is `Sandbox.ensureImage` over the agents' request, so core refuses
+// the same inputs before any call.
+for (const [overrides, cause] of [
+  [{ s3Bucket: 'Not_A_Bucket' }, /bucket/],
+  [{ buildRoleArn: 'not-an-arn' }, /buildRoleArn/],
+  [{ s3KeyPrefix: 'a\nb' }, /key prefix/],
+]) {
+  test(`an agent VM ensures its image through the core refusals: ${Object.keys(overrides)[0]}`, async () => {
+    const vm = await AgentVm.create(Region.usEast1(), [{ agent: 'codex' }]);
+    const options = {
+      binary: elfHeader(0xb7),
+      buildRoleArn: 'arn:aws:iam::123456789012:role/build',
+      s3Bucket: 'agentd-conformance-bucket',
+      ...overrides,
+    };
+    await assert.rejects(vm.ensureImage(options), (error) => {
+      assert.equal(codeOf(error), 'ERR_INVALID_ARG', error.message);
+      assert.match(error.message, cause);
+      return true;
+    });
+  });
+}

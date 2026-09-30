@@ -347,6 +347,20 @@ pub struct AgentImageOptions {
     pub code_artifact_uri: Option<String>,
 }
 
+/// What `ensureImage` builds or reuses from: the daemon binary, the build role, and where
+/// the artifact goes.
+#[napi(object)]
+pub struct AgentEnsureOptions {
+    /// The daemon binary's bytes, zipped into the artifact.
+    pub binary: napi::bindgen_prelude::Uint8Array,
+    /// The build role, which must read the bucket and grant logs on `/aws/lambda-microvms/*`.
+    pub build_role_arn: String,
+    /// The bucket the artifact is uploaded to, in the VM's region.
+    pub s3_bucket: String,
+    /// A key prefix inside the bucket, or absent for the bucket root.
+    pub s3_key_prefix: Option<String>,
+}
+
 /// Everything a launch takes beyond what the layer fixes (egress on, the image).
 #[derive(Default)]
 #[napi(object)]
@@ -565,8 +579,8 @@ impl AgentVm {
     }
 
     /// The image name for these specs and this daemon binary: `agent-vm-<agents>-<hash12>`.
-    /// Content-addressed, so an unchanged binary and spec set name the image a previous run
-    /// built; `findImage` looks it up.
+    /// Content-addressed, so an unchanged binary, spec set and size name the image a previous
+    /// run built; `findImage` looks it up, and `ensureImage` builds or reuses it.
     #[napi]
     pub async fn image_name(
         &self,
@@ -588,6 +602,31 @@ impl AgentVm {
         let name = self.image_request(&guard, options, size)?.name;
         let found = guard.find_image_by_name(&name).await.map_err(js_async)?;
         Ok(found.map(|image| image.image_arn))
+    }
+
+    /// Builds or reuses this VM's image, named per `imageName`: resolved at once when ready,
+    /// waited on while building, deleted and rebuilt when failed, and uploaded to
+    /// `s3://<s3Bucket>/<s3KeyPrefix>/<name>/artifact.zip` only when a build is needed.
+    #[napi]
+    pub async fn ensure_image(
+        &self,
+        options: AgentEnsureOptions,
+        size: Option<&SizeClass>,
+    ) -> Result<crate::sandbox::EnsuredImage, AsyncError> {
+        let size = size.map(|size| size.inner).unwrap_or(DEFAULT_SIZE);
+        let mut guard = self.sandbox.lock().await;
+        let request = agents::ensure_request_for(
+            &guard,
+            &self.specs,
+            options.binary.to_vec(),
+            options.build_role_arn,
+            size,
+            options.s3_bucket,
+            options.s3_key_prefix,
+        )
+        .map_err(js_async)?;
+        let ensured = guard.ensure_image(request).await.map_err(js_async)?;
+        Ok(ensured.into())
     }
 
     /// The artifact bytes to upload to `s3://<bucket>/<imageName>.zip` before `buildImage`.
