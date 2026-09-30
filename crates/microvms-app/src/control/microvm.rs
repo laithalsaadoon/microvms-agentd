@@ -431,6 +431,53 @@ impl ControlPlane {
     /// here, and the connectors are derived from intents (TRAP-4). The `clientToken` is
     /// minted from a label (TRAP-1).
     pub async fn run_microvm(&self, request: RunMicrovmRequest) -> Result<Microvm, Error> {
+        let (ingress, egress) = self.launch_connectors(&request)?;
+
+        let wire = ops::RunMicrovmWire {
+            image_identifier: request.image_identifier.clone(),
+            image_version: request.image_version.clone(),
+            execution_role_arn: request.execution_role_arn.clone(),
+            ingress_network_connectors: ingress,
+            // Absent rather than empty: omitting egress omits the connector from the request.
+            // Measured 2026-09-11 and 2026-09-12 the platform still gave such a VM outbound
+            // network (`docs/PLATFORM.md`, "A VM launched without the egress connector still
+            // has outbound network").
+            egress_network_connectors: (!egress.is_empty()).then_some(egress),
+            idle_policy: ops::IdlePolicy {
+                max_idle_duration_seconds: request.max_idle_sec,
+                suspended_duration_seconds: request.suspended_sec,
+                auto_resume_enabled: request.auto_resume,
+            },
+            maximum_duration_in_seconds: request.max_duration_sec,
+            run_hook_payload: request.run_hook_payload.as_str().to_string(),
+            logging: request.logging.clone(),
+            client_token: match request.client_token {
+                Some(token) => token,
+                None => token::run_token_with(
+                    request
+                        .token_scope
+                        .as_deref()
+                        .unwrap_or(&request.image_identifier),
+                    self.entropy(),
+                )?,
+            },
+        };
+
+        let call = Call::post_json("RunMicrovm", paths::microvms(), &wire)?;
+        let reply = send_with_retry(self.transport(), call).await?;
+        let launched: ops::MicrovmResponseWire = reply.json("RunMicrovm")?;
+        Ok(launched.into())
+    }
+
+    /// Every local refusal [`Self::run_microvm`] makes, then the ingress and egress connector
+    /// ARNs the launch carries. Local; zero calls.
+    ///
+    /// Separate so [`crate::sandbox::Sandbox::run`] can ask it before it resolves an image
+    /// name: that listing is a call, and a launch this client refuses anyway should cost none.
+    pub(crate) fn launch_connectors(
+        &self,
+        request: &RunMicrovmRequest,
+    ) -> Result<(Vec<String>, Vec<String>), Error> {
         if let Some(token) = request.client_token.as_deref() {
             super::token::require_run_token(token)?;
         }
@@ -535,9 +582,9 @@ impl ControlPlane {
         if !egress.is_empty() && !request.egress_network_connectors.is_empty() {
             return Err(super::connector::egress_with_connectors());
         }
-        for arn in request.egress_network_connectors {
-            super::connector::require_egress_connector_arn(&arn, &self.region)?;
-            egress.push(arn);
+        for arn in &request.egress_network_connectors {
+            super::connector::require_egress_connector_arn(arn, &self.region)?;
+            egress.push(arn.clone());
         }
 
         // Each request member is a NetworkConnectorList with its own limit.
@@ -550,40 +597,7 @@ impl ControlPlane {
             }
         }
 
-        let wire = ops::RunMicrovmWire {
-            image_identifier: request.image_identifier.clone(),
-            image_version: request.image_version.clone(),
-            execution_role_arn: request.execution_role_arn.clone(),
-            ingress_network_connectors: ingress,
-            // Absent rather than empty: omitting egress omits the connector from the request.
-            // Measured 2026-09-11 and 2026-09-12 the platform still gave such a VM outbound
-            // network (`docs/PLATFORM.md`, "A VM launched without the egress connector still
-            // has outbound network").
-            egress_network_connectors: (!egress.is_empty()).then_some(egress),
-            idle_policy: ops::IdlePolicy {
-                max_idle_duration_seconds: request.max_idle_sec,
-                suspended_duration_seconds: request.suspended_sec,
-                auto_resume_enabled: request.auto_resume,
-            },
-            maximum_duration_in_seconds: request.max_duration_sec,
-            run_hook_payload: request.run_hook_payload.as_str().to_string(),
-            logging: request.logging.clone(),
-            client_token: match request.client_token {
-                Some(token) => token,
-                None => token::run_token_with(
-                    request
-                        .token_scope
-                        .as_deref()
-                        .unwrap_or(&request.image_identifier),
-                    self.entropy(),
-                )?,
-            },
-        };
-
-        let call = Call::post_json("RunMicrovm", paths::microvms(), &wire)?;
-        let reply = send_with_retry(self.transport(), call).await?;
-        let launched: ops::MicrovmResponseWire = reply.json("RunMicrovm")?;
-        Ok(launched.into())
+        Ok((ingress, egress))
     }
 
     /// Polls to RUNNING, failing fast on a terminal state (TRAP-8).

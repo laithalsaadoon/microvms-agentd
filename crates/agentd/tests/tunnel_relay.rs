@@ -992,3 +992,110 @@ async fn a_plain_guests_eof_still_ends_with_a_close_at_code_1000() {
     .expect("a close frame, not a dropped transport");
     assert_eq!(code, protocol::tunnel::close::NORMAL);
 }
+
+// ── frames that don't authenticate at their position (#297) ─────────────────
+
+/// A guest that records what it reads as it arrives and reports how its read ended.
+async fn recording_guest() -> (
+    SocketAddr,
+    std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    tokio::sync::oneshot::Receiver<Result<(), std::io::ErrorKind>>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("a free port");
+    let addr = listener.local_addr().expect("bound");
+    let recorded = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let record = recorded.clone();
+    let (report, outcome) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.expect("one connection");
+        let mut buffer = vec![0_u8; 4096];
+        let result = loop {
+            match socket.read(&mut buffer).await {
+                Ok(0) => break Ok(()),
+                Ok(count) => record
+                    .lock()
+                    .expect("not poisoned")
+                    .extend_from_slice(&buffer[..count]),
+                Err(error) => break Err(error.kind()),
+            }
+        };
+        let _ = report.send(result);
+    });
+    (addr, recorded, outcome)
+}
+
+/// A verified tunnel whose first chunk, `once`, has reached a recording guest: the socket, the
+/// frame that carried the chunk, and the guest's record and outcome.
+async fn one_chunk_relayed() -> (
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
+    Message,
+    std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    tokio::sync::oneshot::Receiver<Result<(), std::io::ErrorKind>>,
+) {
+    let vm_seed = [7_u8; 32];
+    let host_seed = [9_u8; 32];
+    let vm_public =
+        *x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(vm_seed)).as_bytes();
+    let (guest, recorded, outcome) = recording_guest().await;
+    let daemon = identity_daemon(vm_seed, host_seed).await;
+    let mut socket = open_identity_tunnel(daemon, guest.port()).await;
+    let mut noise = initiate(&mut socket, host_seed, vm_public)
+        .await
+        .expect("the launching host's handshake completes");
+    let frame = sealed(&mut noise, b"once");
+    socket.send(frame.clone()).await.expect("sent");
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while recorded.lock().expect("not poisoned").as_slice() != b"once" {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the first chunk reaches the guest");
+    (socket, frame, recorded, outcome)
+}
+
+/// **A replayed frame ends the tunnel and never reaches the guest** (AGENTD-21).
+///
+/// The same ciphertext twice: it authenticated at position 0 and can't at position 1, since
+/// the nonce is the position. Relaying it would hand the guest the chunk twice.
+#[tokio::test]
+async fn agentd_21_a_replayed_frame_ends_the_tunnel_unrelayed() {
+    let (mut socket, frame, recorded, outcome) = one_chunk_relayed().await;
+    socket.send(frame).await.expect("the replay is sent");
+
+    let ended = tokio::time::timeout(std::time::Duration::from_secs(5), outcome)
+        .await
+        .expect("the daemon ends the guest connection")
+        .expect("the guest reports");
+    assert_eq!(
+        recorded.lock().expect("not poisoned").as_slice(),
+        b"once",
+        "a replayed frame must never reach the guest"
+    );
+    assert_eq!(ended, Err(std::io::ErrorKind::ConnectionReset));
+}
+
+/// **A forged frame ends the tunnel and never reaches the guest** (AGENTD-21).
+#[tokio::test]
+async fn agentd_21_a_forged_frame_ends_the_tunnel_unrelayed() {
+    let (mut socket, _, recorded, outcome) = one_chunk_relayed().await;
+    // Bytes of a sealed chunk's length that no holder of the session key wrote.
+    let forged: Vec<u8> = (0_u8..36)
+        .map(|byte| byte.wrapping_mul(29) ^ 0x3c)
+        .collect();
+    socket
+        .send(Message::Binary(forged.into()))
+        .await
+        .expect("the forgery is sent");
+
+    let ended = tokio::time::timeout(std::time::Duration::from_secs(5), outcome)
+        .await
+        .expect("the daemon ends the guest connection")
+        .expect("the guest reports");
+    assert_eq!(
+        recorded.lock().expect("not poisoned").as_slice(),
+        b"once",
+        "a forged frame must never reach the guest"
+    );
+    assert_eq!(ended, Err(std::io::ErrorKind::ConnectionReset));
+}

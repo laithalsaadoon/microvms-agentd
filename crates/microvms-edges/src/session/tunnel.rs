@@ -429,10 +429,10 @@ where
                         Some(verified) => {
                             let count = verified.transport.read_message(&bytes, &mut scratch).map_err(|err| {
                                 // Failing rather than skipping, because a frame that does not
-                                // authenticate on a verified tunnel is a forged or corrupted
-                                // frame — writing it to the local client would hand the
-                                // application attacker-controlled bytes on the one path that
-                                // promised otherwise.
+                                // authenticate on a verified tunnel is a forged, replayed or
+                                // reordered frame (the nonce is its position), and writing it to
+                                // the local client would hand the application attacker-controlled
+                                // bytes on the one path that promised otherwise (BIND-24).
                                 Error::new(
                                     ErrorKind::Unexpected,
                                     format!("a tunnel frame did not authenticate: {err}"),

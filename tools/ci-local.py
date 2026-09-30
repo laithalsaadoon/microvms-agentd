@@ -383,13 +383,17 @@ def load_plan(root: Path) -> list:
 
 
 def mise_only_keys(root: Path, jobs: list) -> set[str]:
-    """mise.toml `[env]` keys no planned job's workflow sets: a CI runner doesn't have them."""
+    """mise.toml `[env]` keys no planned job's workflow sets: a CI runner doesn't have them.
+
+    Read through the loader `ci:parity` reads the tasks with, so a config it refuses stops the
+    run rather than leaving those keys in the job's environment.
+    """
     try:
-        mise = PARITY["load_toml"](root / "mise.toml", "mise.toml")
-    except PARITY["Unreadable"]:
-        return set()
+        mise = PARITY["load_mise"](root, root / PARITY["MISE"])
+    except PARITY["Unreadable"] as error:
+        raise Failed(str(error)) from None
     ci_keys = {key for job in jobs for key in job.env}
-    return {str(k) for k in (mise.get("env") or {})} - ci_keys
+    return {str(k) for k in (mise.data.get("env") or {})} - ci_keys
 
 
 def run_task(

@@ -152,7 +152,7 @@ Serves the machine-readable wire contract: every route, shape, status code, and 
 
 **Input:** none, per the signature at `crates/agentd/src/routes.rs:433`.
 
-**Output:** the schema document, built by `schema::document(state.config(), &surface_docs())` (`crates/agentd/src/routes.rs:434`). Its top-level keys are `$defs`, `$schema`, `auth`, `daemon_version`, `definition_collisions`, `generated_from`, `hook_prefix`, `limits`, `protocol_version`, `routes`, `title`, `unmatched_path`, `version_header`, and the committed copy is `docs/schema.json`, regenerated and compared by the `schema:check` task (`mise.toml:181-186`) and by a test tier that also drives every documented route through the real router to confirm the daemon still answers it (`crates/agentd/tests/schema_artifact.rs:1-12`).
+**Output:** the schema document, built by `schema::document(state.config(), &surface_docs())` (`crates/agentd/src/routes.rs:434`). Its top-level keys are `$defs`, `$schema`, `auth`, `daemon_version`, `definition_collisions`, `generated_from`, `hook_prefix`, `limits`, `protocol_version`, `routes`, `title`, `unmatched_path`, `version_header`, and the committed copy is `docs/schema.json`, regenerated and compared by the `schema:check` task (`.config/mise/tasks/contracts.toml:51-76`) and by a test tier that also drives every documented route through the real router to confirm the daemon still answers it (`crates/agentd/tests/schema_artifact.rs:1-12`).
 
 **Statuses:** 200 (`crates/agentd/src/schema.rs:712-717`).
 

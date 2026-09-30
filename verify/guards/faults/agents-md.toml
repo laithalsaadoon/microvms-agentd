@@ -8,7 +8,7 @@ run = ["./tools/check-agents-md.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "`mise run guards:fire` names no task in mise.toml"
-transform = { file = "mise.toml", replace = "[tasks.\"guards:fire\"]\n", with = "[tasks.\"guards:seed\"]\n" }
+transform = { file = ".config/mise/tasks/guards.toml", replace = "[\"guards:fire\"]\n", with = "[\"guards:seed\"]\n" }
 
 [[fault]]
 id = "agents-md-path-dangling"
@@ -121,7 +121,7 @@ run = ["./tools/check-agents-md.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "`guards:list` isn't in `check`"
-transform = { file = "mise.toml", replace = "  \"guards:list\",\n", with = "" }
+transform = { file = ".config/mise/tasks/check.toml", replace = "  \"guards:list\",\n", with = "" }
 
 [[fault]]
 id = "agents-md-fault-id-renamed"
@@ -318,7 +318,7 @@ run = ["./tools/check-agents-md.py"]
 expect = "exit-nonzero"
 suite = "script"
 message = "`scripts/check-license-headers.py` is no such path in this tree"
-transform = { file = "mise.toml", replace = "\"./tools/check-license-headers.py\",", with = "\"./scripts/check-license-headers.py\"," }
+transform = { file = ".config/mise/tasks/security.toml", replace = "\"./tools/check-license-headers.py\",", with = "\"./scripts/check-license-headers.py\"," }
 
 [[fault]]
 id = "agents-md-census-workflow-paths-stale"

@@ -626,8 +626,8 @@ mod handshake {
                 }
                 Ok(count) => Inbound::Bytes(self.scratch[..count].to_vec()),
                 // A frame that does not authenticate is not a protocol nicety to work around:
-                // it is a forged or corrupted frame, and continuing would relay attacker bytes
-                // into the guest.
+                // it is a forged, replayed or reordered frame (the nonce is its position), and
+                // continuing would relay attacker bytes into the guest (AGENTD-21).
                 Err(error) => {
                     Inbound::Failed(format!("a tunnel frame did not authenticate: {error}"))
                 }
