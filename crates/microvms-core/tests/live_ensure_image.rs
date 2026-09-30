@@ -10,7 +10,8 @@
 //!    `USER nobody`, a `.dockerignore`, an executable script, an ignored file, and a symlink.
 //!    The Dockerfile is wrapped with `wrap_dockerfile` and paired with
 //!    `BaseImage::from_dockerfile` by `ensure_image` itself.
-//! 2. Two sandboxes ensure the image at once: one builds, the other joins (IMAGE-11).
+//! 2. Two sandboxes ensure the image at once: one builds, the other joins (IMAGE-11). A probe
+//!    task beside them records the longest time any task held the runtime's one worker.
 //! 3. A third ensure on one of those sandboxes reuses it with no upload (IMAGE-9) and no
 //!    second account lookup (IMAGE-8).
 //! 4. A VM launched from it shows the daemon running as root after the task's `USER`
@@ -22,7 +23,7 @@
 //! still a named check with its reason.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use futures_util::future::BoxFuture;
@@ -183,13 +184,36 @@ async fn run(report: &mut Value) -> Result<(), Box<dyn std::error::Error>> {
         .await?
         .with_build_services(services_b.clone());
 
-    // 2. The race.
+    // 2. The race, with a probe beside it that wakes every 10 ms and keeps the longest gap
+    //    between two wakes. This runtime has one worker, so a gap is time some task held it:
+    //    an ensure hashing and zipping inline held it for about a second, and a credential
+    //    fetch parked behind that past the metadata provider's one-second timeout failed the
+    //    other ensure (#309).
     let started = Instant::now();
-    let (a, b) = tokio::join!(
-        first.ensure_image(request()?),
-        second.ensure_image(request()?)
-    );
+    let racing = AtomicBool::new(true);
+    let (request_a, request_b) = (request()?, request()?);
+    let race = async {
+        let outcome = tokio::join!(
+            first.ensure_image(request_a),
+            second.ensure_image(request_b)
+        );
+        racing.store(false, Ordering::SeqCst);
+        outcome
+    };
+    let probe = async {
+        let mut longest = Duration::ZERO;
+        let mut last = Instant::now();
+        while racing.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            let now = Instant::now();
+            longest = longest.max(now - last);
+            last = now;
+        }
+        longest
+    };
+    let ((a, b), longest_stall) = tokio::join!(race, probe);
     let race_seconds = started.elapsed().as_secs_f64();
+    report["race"] = json!({"longestStallMs": longest_stall.as_millis()});
     let (a, b) = (a?, b?);
     eprintln!(
         "race: {} reused={} / {} reused={} in {race_seconds:.0}s",
@@ -206,6 +230,7 @@ async fn run(report: &mut Value) -> Result<(), Box<dyn std::error::Error>> {
         "versions": [a.image.version, b.image.version],
         "states": [a.image.state, b.image.state],
         "seconds": race_seconds,
+        "longestStallMs": longest_stall.as_millis(),
     });
     let arn = a.image.identifier.clone();
 

@@ -1,5 +1,34 @@
 # The ARCH group's traced requirements. The format and the rules are in tools/check-trace.py.
 
+# ARCH-5 waits on #260: the tar and glob extraction a binding needs still lives in the CLI.
+[ARCH-1]
+issue = "#307"
+waive.model = "a property of the workspace's dependency graph, not of a state"
+waive.gherkin = "no behavior to script: cargo metadata's resolved graph is the evidence, and dependency_direction.rs reads it"
+waive.fuzz = "there is no input stream; the rule is over manifests and re-exports"
+waive.live = "composition makes no AWS call of its own"
+
+[ARCH-2]
+issue = "#307"
+waive.model = "a property of the workspace's dependency graph, not of a state"
+waive.gherkin = "no behavior to script: the shared crate makes a wire-type mismatch a compile error, before anything runs"
+waive.fuzz = "there is no input stream; the rule is over manifests"
+waive.live = "a build-time property; the live tier runs a client and a daemon built from the one protocol crate, which is its premise, not a check of it"
+
+[ARCH-3]
+issue = "#307"
+waive.model = "a property of the workspace's dependency graph, not of a state"
+waive.gherkin = "no behavior to script: cargo metadata's resolved graph is the evidence, and dependency_direction.rs reads it"
+waive.fuzz = "there is no input stream; the rule is over manifests"
+waive.live = "a dependency edge makes no AWS call"
+
+[ARCH-4]
+issue = "#307"
+waive.model = "a property of the workspace's dependency graph, not of a state"
+waive.gherkin = "no behavior to script: cargo metadata's resolved graph is the evidence, and dependency_direction.rs reads it"
+waive.fuzz = "there is no input stream; the rule is over manifests"
+waive.live = "a dependency edge makes no AWS call"
+
 [ARCH-6]
 issue = "#282"
 waive.model = "a property of a crate's code and dependencies, not of a state"

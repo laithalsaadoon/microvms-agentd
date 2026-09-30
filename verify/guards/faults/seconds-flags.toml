@@ -248,3 +248,38 @@ expect = "lint-error"
 suite = "rust"
 message = "use of a disallowed method `std::time::Duration::from_secs_f32`"
 transform = { file = "bindings/microvms-js/src/session.rs", replace = "impl ExecOptions {\n    fn empty() -> Self {\n", with = "impl ExecOptions {\n    fn empty() -> Self {\n        let _ = std::time::Duration::from_secs_f32(1.0);\n" }
+
+# ── the daemon's budget and the service's timestamps (#335) ──────────────────
+# The same float arithmetic below the CLI: agentd converts `timeout_sec` and adds it to now, and
+# the control-plane parser converts `startedAt` and `terminatedAt`. Each conversion is the
+# checked one and the daemon's deadline is a checked add; each fault puts one back.
+
+[[fault]]
+id = "agentd-timeout-past-a-duration-panics"
+guard = "exec::tests::a_bad_timeout_is_rejected_before_the_child_spawns"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec::tests::a_bad_timeout_is_rejected_before_the_child_spawns"]
+expect = "test-failed"
+suite = "rust"
+message = "cannot convert float seconds to Duration"
+note = "crates/agentd/src/exec.rs::a_bad_timeout_is_rejected_before_the_child_spawns"
+transform = { file = "crates/agentd/src/exec.rs", replace = "    Duration::try_from_secs_f64(secs)\n        .map(Some)\n        .map_err(|_| format!(\"timeout_sec is more seconds than a duration holds, got {secs:?}\"))\n", with = "    Ok(Some(Duration::from_secs_f64(secs)))\n" }
+
+[[fault]]
+id = "agentd-timeout-past-the-clock-panics"
+guard = "exec::tests::a_timeout_past_what_the_clock_can_hold_still_finishes"
+run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec::tests::a_timeout_past_what_the_clock_can_hold_still_finishes"]
+expect = "test-failed"
+suite = "rust"
+message = "exec hugetimeout never finished"
+note = "crates/agentd/src/exec.rs::a_timeout_past_what_the_clock_can_hold_still_finishes"
+transform = { file = "crates/agentd/src/exec.rs", replace = "    let deadline = timeout.and_then(|budget| Instant::now().checked_add(budget));\n", with = "    let deadline = timeout.map(|budget| Instant::now() + budget);\n" }
+
+[[fault]]
+id = "app-epoch-past-a-duration-panics"
+guard = "control::microvm::tests::an_out_of_range_timestamp_reads_as_absent"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::microvm::tests::an_out_of_range_timestamp_reads_as_absent"]
+expect = "test-failed"
+suite = "rust"
+message = "cannot convert float seconds to Duration"
+note = "crates/microvms-app/src/control/microvm.rs::an_out_of_range_timestamp_reads_as_absent"
+transform = { file = "crates/microvms-app/src/control/microvm.rs", replace = "std::time::Duration::try_from_secs_f64(seconds?).ok()?", with = "std::time::Duration::from_secs_f64(seconds?)" }

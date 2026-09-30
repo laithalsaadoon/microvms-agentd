@@ -150,6 +150,7 @@ def check_ensure_image_section(results: "Results") -> None:
             "identifiers": [arn, arn],
             "versions": ["1", "1"],
             "states": ["CREATED", "CREATED"],
+            "longestStallMs": 14,
         },
         "reuse": {"reused": True, "uploaded": False, "identifier": arn},
         "accountCalls": [1, 1],
@@ -166,7 +167,7 @@ def check_ensure_image_section(results: "Results") -> None:
     ensure_image_checks(complete, prefix, bucket, key_prefix, probe)
     results.check(
         "the ensure-image checks all pass on a complete report",
-        len(probe.passed) == 9 and not probe.failed,
+        len(probe.passed) == 10 and not probe.failed,
         f"passed={len(probe.passed)} failed={probe.failed!r}",
     )
     gaps = {
@@ -178,6 +179,18 @@ def check_ensure_image_section(results: "Results") -> None:
         "IMAGE-8": {**complete, "accountCalls": [2, 1]},
         "IMAGE-2": {**complete, "guest": {**complete["guest"], "uid": "65534"}},
         "IMAGE-10": {**complete, "forced": {"error": "refused"}},
+        "the ensure race never held": {
+            **complete,
+            "race": {**complete["race"], "longestStallMs": 1100},
+        },
+        "the ensure race never held the caller's runtime": {
+            **complete,
+            "race": {
+                key: value
+                for key, value in complete["race"].items()
+                if key != "longestStallMs"
+            },
+        },
     }
     missed = []
     for key, report in gaps.items():

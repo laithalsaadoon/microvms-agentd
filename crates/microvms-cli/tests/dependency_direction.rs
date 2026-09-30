@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! **ARCH-1, ARCH-3, ARCH-4, ARCH-5, ARCH-6, and BIND-1**: the workspace's dependency edges,
-//! asserted exactly.
+//! **ARCH-1 to ARCH-6, and BIND-1**: the workspace's dependency edges, asserted exactly.
 //!
 //! Requirements that are all the same claim from different sides: the CLI depends on core, core
 //! depends on neither the CLI nor the bindings, the bindings depend on core and not on the CLI,
@@ -261,14 +260,17 @@ const MEMBER_EDGES: [(&str, &[&str]); 11] = [
     ("model-conformance", &["agentd-model", "microvms-app"]),
 ];
 
-/// **ARCH-1, ARCH-6, ARCH-7 and ARCH-8.** Each workspace member depends on exactly the crates
-/// of ours [`MEMBER_EDGES`] records for it.
+/// **ARCH-1, ARCH-2, ARCH-6, ARCH-7 and ARCH-8.** Each workspace member depends on exactly the
+/// crates of ours [`MEMBER_EDGES`] records for it.
 ///
 /// The domain's row is what keeps it below everything: an edge onto the app or core would hand
 /// it the control plane, and one onto the edges the clock and the random pool. The app's row
 /// keeps the use cases off the production implementations, so they can't reach reqwest through
 /// the edges' types. Core's row is ARCH-1's re-export: a core that stopped depending on a layer
-/// would have copied it.
+/// would have copied it, and a binding's row that named a layer as well would reach past core.
+/// Core's and agentd's rows are ARCH-2: both hold `microvms-protocol` and neither holds the
+/// other, so the client and the daemon compile against one set of wire types, and a change to
+/// one of them breaks whichever side still uses the old shape at build time.
 ///
 /// **Falsification**: add `microvms-edges = { path = "../microvms-edges" }` to the app's
 /// `[dev-dependencies]` and this goes red naming the edge. (A normal dependency is a cycle,

@@ -12,6 +12,9 @@
 //! every AWS-touching command fails when the library seam is made to refuse. Any one of those
 //! alone is defeatable, which is why there are three.
 //!
+//! Each control-plane and endpoint-proxy operation this binary runs is a `microvms-core` call
+//! (ARCH-3), and core is its one edge among the workspace's crates.
+//!
 //! # A coding agent is a first-class consumer
 //!
 //! So the surface is machine-legible by construction. `microvm manifest` emits the whole command
