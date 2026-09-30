@@ -45,3 +45,20 @@ issue = "#297"
 waive.model = "#297 adds a stateright model of the tunnel handshake and its pins; until then the handshake and relay tests hold the key"
 waive.gherkin = "no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate"
 waive.fuzz = "#297 adds a harness over the daemon's tunnel frame read"
+
+# The verified tunnel's end of stream, AGENTD-19 and AGENTD-20 here and BIND-23 in BIND.toml, share
+# their model, gherkin and fuzz waivers with the identity keys above: #297's handshake model and
+# frame harnesses take the end of stream in with the handshake.
+[AGENTD-19]
+issue = "#342"
+waive.model = "#297 adds a stateright model of the tunnel handshake and its end of stream; until then the relay tests and the daemon-against-client tests hold the key"
+waive.gherkin = "no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate"
+waive.fuzz = "#297 adds a harness over the daemon's tunnel frame read"
+waive.live = "the live suite's BIND-23 check observes it: the client reads Closed through the real proxy only when this end of stream crossed it"
+
+[AGENTD-20]
+issue = "#342"
+waive.model = "#297 adds a stateright model of the tunnel handshake and its end of stream; until then the relay tests and the daemon-against-client tests hold the key"
+waive.gherkin = "no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate"
+waive.fuzz = "#297 adds a harness over the daemon's tunnel frame read"
+waive.live = "a live run can't cut the endpoint proxy's connection mid-stream or withhold one frame, so no live check presents a caller end without its end of stream; the relay tests drive the daemon's real route"

@@ -9,6 +9,8 @@ repository.workspace = true
 # here while `cargo test -p agentd-model` stays green. The tests can't live in `microvms-app`:
 # it's published, so an edge onto the unpublished model would need a crates.io version that
 # doesn't exist, and .cargo/deny.toml refuses a path dependency without one (#296, D18).
+# `tests/tunnel_end_of_stream.rs` drives the daemon's relay against the client's for the same
+# reason: no other crate may depend on both (#342).
 publish = false
 
 # Dev-dependencies, because the library target is empty: only the tests link these. Each path
@@ -29,8 +31,19 @@ serde_json = "1"
 # reads its own: the keys a test's doc claims come from the file's syntax tree, not a copied list.
 syn = { version = "3.0.6", default-features = false, features = ["full", "parsing"] }
 # The preflight is async, and a row whose listing never answers waits out the retry backoff,
-# which `test-util`'s paused clock skips.
-tokio = { version = "1.53", features = ["rt", "macros", "test-util"] }
+# which `test-util`'s paused clock skips. `net`, `io-util` and `time` for the tunnel test's
+# sockets and its bounds.
+tokio = { version = "1.53", features = ["rt", "macros", "test-util", "net", "io-util", "time"] }
+# The daemon's real `/v1/tcp` route and the client's real relay, for
+# `tests/tunnel_end_of_stream.rs`: the verified tunnel's end of stream is a contract between the
+# two, and a stand-in for either half would test the contract against itself.
+agentd = { path = "../agentd", version = "0.1.0" }
+microvms-edges = { path = "../microvms-edges", version = "0.10.0" }
+protocol = { package = "microvms-protocol", path = "../protocol", version = "0.10.0" }
+# The on-path party the tunnel test puts between them, which terminates the WebSocket as the
+# endpoint proxy does. The same line the client and the daemon's tests use.
+tokio-tungstenite = "0.30"
+futures-util = "0.3"
 
 [lints.rust]
 # No hand-written `unsafe` in this crate; a future one is a build error, not a scan finding.
