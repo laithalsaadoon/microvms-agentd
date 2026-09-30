@@ -489,7 +489,11 @@ description = "Fail if the committed TypeScript declarations no longer match the
 # No `sources`, unlike the other generate-and-diff gates: npx resolves `@napi-rs/cli@3` to the
 # newest 3.x on each run, here and in every workflow, so a CLI release can make the committed file
 # stale while no file here changes, and a skip would pass it.
+#
+# The consumer check's unit tests run first, for `model:check`'s reason: its tsc locate runs under
+# the npx cache's lock and refuses a tsc npx didn't install (#348), and a fake npx proves both.
 run = [
+  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider tools/test_check_dts_consumer.py",
   '''
 #!/usr/bin/env bash
 set -euo pipefail
