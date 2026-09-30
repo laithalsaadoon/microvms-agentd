@@ -231,7 +231,7 @@ ts = { exempt = "no client asks for a line range", issue = "#265" }
 [[capability]]
 id = "file-exists"
 core = "microvms_core::session::Session::file_exists"
-cli = { exempt = "no command", issue = "#269" }
+cli = "exists"
 py = "Session.file_exists"
 ts = "Session.fileExists"
 

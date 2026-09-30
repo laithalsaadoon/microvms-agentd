@@ -210,6 +210,13 @@ pub enum Command {
     /// extractor in the system.
     Cp(CpArgs),
 
+    /// Say whether a path exists in a running MicroVM.
+    ///
+    /// Only the daemon's not-found answers `false`; any other refusal fails the command, so an
+    /// absent file is never confused with a bad path or a daemon that can't be reached. Exits 0
+    /// either way: the answer is `data.exists`.
+    Exists(ExistsArgs),
+
     /// Sync a project directory into a running MicroVM's /workspace, uploading only what changed.
     ///
     /// The incremental half of issue #71 (`run <DIR>` is the launch-coupled batch half). The
@@ -1338,6 +1345,19 @@ pub struct KeepaliveArgs {
         default_value_t = microvms_core::session::keepalive::DEFAULT_TOLERATED_ERRORS
     )]
     pub tolerated_errors: u32,
+
+    #[command(flatten)]
+    pub attach: AttachFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct ExistsArgs {
+    /// The absolute path in the guest.
+    #[arg(value_name = "PATH")]
+    pub path: String,
 
     #[command(flatten)]
     pub attach: AttachFlags,
@@ -2526,8 +2546,8 @@ mod tests {
 
     /// The subcommands, named as the manifest and the response table name them.
     ///
-    /// The block after `exec` is the attached one — `health`, `keepalive`, `ack`, `kill`, `ps`, `stdin`, `cp`,
-    /// `tunnel`, `port-forward`, and `shell` beside it — and their position is asserted rather than incidental,
+    /// The block after `exec` is the attached one (`health`, `keepalive`, `ack`, `kill`, `ps`, `stdin`, `cp`,
+    /// `exists`, `tunnel`, `port-forward`, and `shell` beside it), and their position is asserted rather than incidental,
     /// because `--help`'s reading order is the only documentation of which commands need the
     /// identifier triple (`shell` sits with them because it addresses a running VM, though its
     /// credential is the minted shell token rather than the agent token). `history` and `names`
@@ -2554,6 +2574,7 @@ mod tests {
                 "ps",
                 "stdin",
                 "cp",
+                "exists",
                 "sync",
                 "attach",
                 "tunnel",
