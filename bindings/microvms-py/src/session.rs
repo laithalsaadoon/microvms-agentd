@@ -42,8 +42,8 @@ use std::sync::Arc;
 use microvms_core::prelude::*;
 use microvms_core::sandbox::Sandbox;
 use microvms_core::session::{
-    CompletionOptions, CompletionPlan, DEFAULT_CLIENT_GRACE, OutputFlow, OutputSink, Session,
-    mint_exec_id,
+    CompletionOptions, CompletionPlan, DEFAULT_CLIENT_GRACE, GapPolicy, OutputFlow, OutputSink,
+    Session, StreamOptions, mint_exec_id,
 };
 use microvms_core::{Error, ErrorKind};
 use pyo3::prelude::*;
@@ -621,11 +621,21 @@ impl PySession {
     /// running; `max_duration` ends it after that many seconds. `idle_window` is the VM's
     /// `maxIdleDurationSeconds`: a sandbox-held session knows it, an attached one assumes
     /// the platform minimum of 60, and `interval` may be at most half of it.
+    /// `tolerated_errors` is how many retryable poll failures in a row it retries, a second
+    /// apart, before it ends with the error; omitted, it's the core's
+    /// `DEFAULT_TOLERATED_ERRORS`.
     ///
     /// On a sandbox-held session a suspend or terminate through the sandbox ends the
     /// keepalive before its next poll. Stop it before suspending through anything else,
     /// or the next poll auto-resumes the VM. Dropping the returned handle stops it.
-    #[pyo3(signature = (interval=None, *, while_busy=false, max_duration=None, idle_window=None))]
+    #[pyo3(signature = (
+        interval=None,
+        *,
+        while_busy=false,
+        max_duration=None,
+        idle_window=None,
+        tolerated_errors=None,
+    ))]
     fn keep_awake(
         &self,
         py: Python<'_>,
@@ -633,6 +643,7 @@ impl PySession {
         while_busy: bool,
         max_duration: Option<f64>,
         idle_window: Option<f64>,
+        tolerated_errors: Option<u32>,
     ) -> PyCoreResult<crate::keepalive::PyKeepAwake> {
         let explicit = idle_window.map(seconds).transpose()?;
         let (source, known) = match &self.held {
@@ -646,8 +657,13 @@ impl PySession {
                     )
                 })?,
         };
-        let policy =
-            crate::keepalive::policy(explicit.or(known), interval, while_busy, max_duration)?;
+        let policy = crate::keepalive::policy(
+            explicit.or(known),
+            interval,
+            while_busy,
+            max_duration,
+            tolerated_errors,
+        )?;
         Ok(crate::keepalive::PyKeepAwake::start(source, policy)?)
     }
 
@@ -744,6 +760,105 @@ impl PySession {
         Ok(PyExecHandle::wrap(self.detached(py, move |session| {
             runtime::block_on_detached(session.run(request))
         })?))
+    }
+
+    /// Starts a command and returns it as two byte iterators, a `wait()`, and a `kill()`.
+    ///
+    /// The **process** shape, as against `run`'s handle: the same start request and keyword
+    /// arguments, so `spawn` and `run` with one `exec_id` address one server-side child.
+    /// `proc.stdout` and `proc.stderr` iterate `bytes`, split out of the one stream the
+    /// daemon sends, which reconnects at the byte cursor after a cut, so a suspend and resume
+    /// doesn't end them early. Read both sides, from two threads when a command writes much
+    /// to both: each holds one unread chunk, like a pipe.
+    ///
+    /// `gap_policy` is what an evicted byte range does. `"error"`, the default when it's
+    /// `None`, raises `PlatformError` (wire kind `OutputGap`) from both iterators naming the
+    /// range, since the wire can't say which side lost the bytes; `"event"` records it on
+    /// `proc.gaps` and keeps both going. `offset`, `reconnect`, `max_reconnects` and
+    /// `idle_timeout` are `ExecHandle.stream()`'s.
+    // The start request's keyword defaults restate the wire's, for the reason `run` gives.
+    // `offset` and `reconnect` restate `StreamOptions::default()`'s, as `ExecHandle.stream()`
+    // does. `gap_policy` is `None` rather than `"error"`, so core's default stays the one copy.
+    #[pyo3(signature = (
+        command,
+        *,
+        shell=ShellArg::Flag(false),
+        cwd=None,
+        env=None,
+        user=None,
+        group=None,
+        timeout_sec=None,
+        stdin=false,
+        exec_id=None,
+        reap_group_on_exit=false,
+        inherit_image_env=false,
+        offset=0,
+        reconnect=true,
+        max_reconnects=None,
+        idle_timeout=None,
+        gap_policy=None,
+    ))]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the run() signature plus the stream's options, deliberately"
+    )]
+    fn spawn(
+        &self,
+        py: Python<'_>,
+        command: Command,
+        shell: ShellArg,
+        cwd: Option<String>,
+        env: Option<std::collections::HashMap<String, String>>,
+        user: Option<Principal>,
+        group: Option<Principal>,
+        timeout_sec: Option<f64>,
+        stdin: bool,
+        exec_id: Option<String>,
+        reap_group_on_exit: bool,
+        inherit_image_env: bool,
+        offset: u64,
+        reconnect: bool,
+        max_reconnects: Option<u32>,
+        idle_timeout: Option<f64>,
+        gap_policy: Option<&str>,
+    ) -> PyResult<crate::process::PyExecProcess> {
+        // Every argument is checked before anything starts, so a bad policy or idle timeout
+        // costs no exec.
+        let policy: GapPolicy = gap_policy
+            .map(str::parse)
+            .transpose()
+            .map_err(CoreError)?
+            .unwrap_or_default();
+        let defaults = StreamOptions::default();
+        let options = StreamOptions {
+            offset,
+            reconnect,
+            max_reconnects: max_reconnects.unwrap_or(defaults.max_reconnects),
+            idle_timeout: match idle_timeout {
+                Some(idle) => seconds(idle).map_err(CoreError)?,
+                None => defaults.idle_timeout,
+            },
+            ..defaults
+        };
+        let request = protocol::exec::StartRequest::new(
+            exec_id.unwrap_or_else(mint_exec_id),
+            command.into_argv(),
+        )
+        .with_shell(shell)
+        .with_cwd(cwd)
+        .with_env(env.unwrap_or_default())
+        .with_user(user.map(Into::into))
+        .with_group(group.map(Into::into))
+        .with_timeout_sec(timeout_sec)
+        .with_stdin(stdin)
+        .with_reap_group_on_exit(reap_group_on_exit)
+        .with_inherit_image_env(inherit_image_env);
+        let handle = self
+            .detached(py, move |session| {
+                runtime::block_on_detached(session.run(request))
+            })
+            .map_err(CoreError)?;
+        crate::process::PyExecProcess::start(py, handle, options, policy)
     }
 
     /// A handle for an exec started earlier, possibly by another process.
