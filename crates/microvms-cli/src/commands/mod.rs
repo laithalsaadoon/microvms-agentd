@@ -106,7 +106,7 @@ pub struct Ctx<'a, O: Write, E: Write> {
 /// command added without an entry fails rather than shipping undescribed. That check is the
 /// only thing that keeps this table from being the hand-maintained artifact the manifest is
 /// forbidden to be.
-pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 29] = [
+pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 30] = [
     (
         "run",
         "microvm.run",
@@ -449,6 +449,7 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 29] = [
         &["runs", "watch", "source", "remote", "pruned"],
     ),
     ("history", "microvm.history", &["microvmId", "events"]),
+    ("names", "microvm.names", &["names", "deleted"]),
     (
         "logs",
         "microvm.logs",
