@@ -27,7 +27,7 @@ stateright = "0.31"
 serde_json = "1"
 # The Rust parser the key check reads `tests/client_lifecycle.rs` through, as agentd's replay
 # reads its own: the keys a test's doc claims come from the file's syntax tree, not a copied list.
-syn = { version = "2.0.119", default-features = false, features = ["full", "parsing"] }
+syn = { version = "3.0.6", default-features = false, features = ["full", "parsing"] }
 # The preflight is async, and a row whose listing never answers waits out the retry backoff,
 # which `test-util`'s paused clock skips.
 tokio = { version = "1.53", features = ["rt", "macros", "test-util"] }

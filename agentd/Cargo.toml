@@ -158,7 +158,7 @@ stateright = "0.31"
 # The Rust parser the key check reads `tests/model_conformance.rs` through, already in the graph
 # under the derive macros: the keys a test's doc claims for the trace come from the file's own
 # syntax tree, the same test-and-doc shape scripts/check-trace.py credits, not a copied list.
-syn = { version = "2.0.119", default-features = false, features = ["full", "parsing"] }
+syn = { version = "3.0.6", default-features = false, features = ["full", "parsing"] }
 
 [[test]]
 name = "bdd_exec_start"
