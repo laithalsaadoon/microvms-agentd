@@ -1273,7 +1273,7 @@ guard = "scripts/check-parity.py"
 run = ["./scripts/check-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "pins: typedoc is 0.28.20 here and 0.28.21 in site/package.json"
+message = "here and 0.28.21 in site/package.json"
 transform = { file = "site/package.json", replace = "    \"typedoc\": \"0.28.20\",\n", with = "    \"typedoc\": \"0.28.21\",\n" }
 
 # Rule (a) and the type pairing over the real surfaces: a row pointed away from the method it
@@ -3242,6 +3242,46 @@ suite = "script"
 message = "fs.rs::normalize_rejects_escapes_and_absorbs_benign_traversal ("
 transform = { file = "agentd/src/fs.rs", replace = "    #[test]\n    fn normalize_rejects_escapes_and_absorbs_benign_traversal() {", with = "    /// **Falsification**: drop the `?` from `parts.pop()?` and this fails.\n    #[test]\n    fn normalize_rejects_escapes_and_absorbs_benign_traversal() {" }
 
+# The shape check's rule that a `message` names no pin the tree owns, through the script's own
+# suite: a SHA refused, a version the fault doesn't write refused (the anchor's own included),
+# and the versions a patch writes still its own.
+
+[[fault]]
+id = "guards-shape-message-sha"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "RegistryShape"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_sha_in_a_message_fails ("
+transform = { file = "scripts/check-guards-fire.py", replace = "PINNED_HEX.findall(message)", with = "PINNED_HEX.findall(\"\")" }
+
+[[fault]]
+id = "guards-shape-message-version"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "RegistryShape"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_tree_version_in_a_message_fails ("
+transform = { file = "scripts/check-guards-fire.py", replace = "tree = sorted(set(VERSION.findall(message)) - seeded_versions(entry, root))", with = "tree: list[str] = []" }
+
+[[fault]]
+id = "guards-shape-message-anchor-version"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "RegistryShape"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_version_the_anchor_carries_into_the_fault_is_the_trees ("
+transform = { file = "scripts/check-guards-fire.py", replace = "out |= _versions([item[\"with\"]]) - _versions([item[\"replace\"]])", with = "out |= _versions([item[\"with\"]])" }
+
+[[fault]]
+id = "guards-shape-message-patch-version"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "RegistryShape"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_version_the_fault_seeds_passes ("
+transform = { file = "scripts/check-guards-fire.py", replace = "lines = (root / patch).read_text(encoding=\"utf-8\").splitlines()", with = "lines = []" }
+
 # `fire --jobs` and `fire --affected` (#315), through the script's own suite: verdicts in
 # registry order, a miss still reported as one, a target per worker and none left behind, a
 # signal that ends every command and removes every tree, and a selection that reads the seeded
@@ -5009,7 +5049,7 @@ guard = "scripts/check-ci-parity.py"
 run = ["./scripts/check-ci-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "runs 0.15.21, and mise.toml pins 0.15.22"
+message = "ruff: ci.yml job `drift` step `uvx ruff@0.15.21 check .` runs 0.15.21, and mise.toml pins"
 transform = { file = ".github/workflows/ci.yml", replace = "      - run: uvx ruff@0.15.22 check .\n", with = "      - run: uvx ruff@0.15.21 check .\n" }
 
 [[fault]]
@@ -5018,7 +5058,7 @@ guard = "scripts/check-ci-parity.py"
 run = ["./scripts/check-ci-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "runs 1.176.1, and mise.toml pins 1.177.0"
+message = "and mise.toml pins 1.177.0"
 transform = { file = "mise.toml", replace = "semgrep = \"1.176.1\"\n", with = "semgrep = \"1.177.0\"\n" }
 
 [[fault]]
@@ -5027,7 +5067,7 @@ guard = "scripts/check-ci-parity.py"
 run = ["./scripts/check-ci-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "runs 1.14.1, and scripts/generate-py-stubs.py pins 1.14.2"
+message = "and scripts/generate-py-stubs.py pins 1.14.2"
 transform = { file = "scripts/generate-py-stubs.py", replace = "MATURIN = \"maturin@1.14.1\"\n", with = "MATURIN = \"maturin@1.14.2\"\n" }
 
 [[fault]]
@@ -5054,7 +5094,7 @@ guard = "scripts/check-ci-parity.py"
 run = ["./scripts/check-ci-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "betterleaks: ci.yml job `security` step `betterleaks over full history (pinned, checksummed)` runs 1.7.4, and mise.toml pins 1.7.3"
+message = "betterleaks: ci.yml job `security` step `betterleaks over full history (pinned, checksummed)` runs 1.7.4, and mise.toml pins"
 transform = { file = ".github/workflows/ci.yml", replace = "betterleaks/releases/download/v1.7.3/betterleaks_1.7.3_", with = "betterleaks/releases/download/v1.7.4/betterleaks_1.7.4_" }
 
 [[fault]]
@@ -5294,7 +5334,7 @@ guard = "scripts/check-ci-parity.py"
 run = ["./scripts/check-ci-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "ruff: ci.yml job `background-example` step `Check example` runs 0.1.0, and mise.toml pins 0.15.22"
+message = "ruff: ci.yml job `background-example` step `Check example` runs 0.1.0, and mise.toml pins"
 transform = { file = ".github/workflows/ci.yml", replace = "uvx ruff@0.15.22 check examples/background-coding-agent", with = "uvx -q ruff@0.1.0 check examples/background-coding-agent" }
 
 [[fault]]
@@ -5303,7 +5343,7 @@ guard = "scripts/check-ci-parity.py"
 run = ["./scripts/check-ci-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "ruff: ci.yml job `background-example` step `Check example` runs 0.1.0, and mise.toml pins 0.15.22"
+message = "ruff: ci.yml job `background-example` step `Check example` runs 0.1.0, and mise.toml pins"
 transform = { file = ".github/workflows/ci.yml", replace = "uvx ruff@0.15.22 check examples/background-coding-agent", with = "uvx --from ruff==0.1.0 ruff check examples/background-coding-agent" }
 
 [[fault]]
@@ -5312,7 +5352,7 @@ guard = "scripts/check-ci-parity.py"
 run = ["./scripts/check-ci-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "ruff: ci.yml job `background-example` step `Check example` runs 0.1.0, and mise.toml pins 0.15.22"
+message = "ruff: ci.yml job `background-example` step `Check example` runs 0.1.0, and mise.toml pins"
 transform = { file = ".github/workflows/ci.yml", replace = "uvx ruff@0.15.22 check examples/background-coding-agent", with = "uv tool run ruff@0.1.0 check examples/background-coding-agent" }
 
 [[fault]]
@@ -5339,7 +5379,7 @@ guard = "scripts/check-ci-parity.py"
 run = ["./scripts/check-ci-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "ruff: mise.toml [tasks.'docs:links'] tools pins `ruff` = '0.1.0', and [tools] pins 0.15.22"
+message = "ruff: mise.toml [tasks.'docs:links'] tools pins `ruff` = '0.1.0', and [tools] pins"
 transform = { file = "mise.toml", replace = "tools = { \"aqua:lycheeverse/lychee\" = \"0.24.2\" }", with = "tools = { \"aqua:lycheeverse/lychee\" = \"0.24.2\", ruff = \"0.1.0\" }" }
 
 [[fault]]
@@ -5348,7 +5388,7 @@ guard = "scripts/check-ci-parity.py"
 run = ["./scripts/check-ci-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "uv: ci.yml job `background-example` step `astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4` has no `version` input"
+message = "has no `version` input, so it runs the latest release"
 transform = { file = ".github/workflows/ci.yml", replace = "          version: \"0.12.13\" # mise.toml's uv; ci:parity compares them\n          enable-cache: false\n      - uses: hashicorp/setup-terraform", with = "          enable-cache: false\n      - uses: hashicorp/setup-terraform" }
 
 [[fault]]
@@ -5357,7 +5397,7 @@ guard = "scripts/check-ci-parity.py"
 run = ["./scripts/check-ci-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "runs 0.12.13, and mise.toml pins 0.12.14"
+message = "and mise.toml pins 0.12.14"
 transform = { file = "mise.toml", replace = "uv = \"0.12.13\"", with = "uv = \"0.12.14\"" }
 
 # A lint shipped as an action, in a job ci:local runs (the critic's `typos` probe).
@@ -5394,7 +5434,7 @@ guard = "scripts/check-ci-parity.py"
 run = ["./scripts/check-ci-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = "step `uvx ruff@0.15.22 format --check .` sets `continue-on-error`, which ci:local doesn't model"
+message = "sets `continue-on-error`, which ci:local doesn't model"
 transform = { file = ".github/workflows/ci.yml", replace = "      - run: uvx ruff@0.15.22 format --check .\n", with = "      - run: uvx ruff@0.15.22 format --check .\n        continue-on-error: true\n" }
 
 [[fault]]

@@ -150,6 +150,16 @@ whatever environment is active. One fault that several guards catch is one entry
 A `message` is matched after ANSI color codes are stripped, since CI sets
 `CARGO_TERM_COLOR=always`.
 
+A `message` names no pin the tree owns. A version or SHA bump, Dependabot's included, changes
+what the command prints, and the entry then stops firing where only a full `fire` sees it while
+`list` stays green: the action SHA in a step name that ci:parity prints is one such pin. So the
+shape check refuses a `message` carrying a run of 40 or more hex digits (a commit SHA or a
+digest), or an x.y.z version its fault doesn't write. A version is the fault's own when a
+transform's `with` has it and that transform's `replace` doesn't, when a patch's added lines
+have it and its removed lines don't, or when `argv_fault` has it; a version the anchor carries
+into `with` unchanged is the tree's. Match the text around a pin, or the version the fault
+seeds.
+
 The note census reads tracked `.rs`, `.py`, `.mjs`, `.js`, `.cjs` and `.ts` files (the site's
 vitest suite is TypeScript). Rust notes are doc comments on a function, found with ast-grep
 (pinned in `mise.toml`, installed by checksum in CI); Python notes are a function's
@@ -335,7 +345,7 @@ def load(root: Path) -> tuple[list[Fault], list[str]]:
         fid = entry.get("id")
         if isinstance(fid, str):
             where = f"{REGISTRY} entry {fid!r}"
-        bad = [f"{where}: {m}" for m in shape(entry)]
+        bad = [f"{where}: {m}" for m in shape(entry, root)]
         if not bad and fid in seen:
             bad.append(f"{where}: the id is used twice")
         if bad:
@@ -376,7 +386,52 @@ def _argv(value: object) -> bool:
     )
 
 
-def shape(entry: dict) -> list[str]:
+# What a pin bump changes in a command's output: a commit SHA or a digest, and an x.y.z version.
+# A version is three parts exactly, so an address like 169.254.169.254 isn't one.
+PINNED_HEX = re.compile(r"[0-9a-fA-F]{40,}")
+VERSION = re.compile(r"(?<![\d.])\d+\.\d+\.\d+(?!\.?\d)")
+
+
+def _versions(texts: list[str]) -> set[str]:
+    return {v for text in texts for v in VERSION.findall(text)}
+
+
+def seeded_versions(entry: dict, root: Path) -> set[str]:
+    """The x.y.z versions an entry's fault writes: in a transform's `with` and not its
+    `replace`, on a patch's added lines and not its removed ones, or in `argv_fault`.
+
+    A version the anchor carries into `with` unchanged is still the tree's, and a bump moves
+    it.
+    """
+    out: set[str] = set()
+    transform = entry.get("transform")
+    items = [transform] if isinstance(transform, dict) else transform
+    for item in items if isinstance(items, list) else []:
+        if (
+            isinstance(item, dict)
+            and isinstance(item.get("with"), str)
+            and isinstance(item.get("replace"), str)
+        ):
+            out |= _versions([item["with"]]) - _versions([item["replace"]])
+    argv = entry.get("argv_fault")
+    if isinstance(argv, list):
+        out |= _versions([a for a in argv if isinstance(a, str)])
+    patch = entry.get("patch")
+    if isinstance(patch, str) and patch:
+        try:
+            lines = (root / patch).read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            # `list` names a patch it can't read when it checks that the patch applies.
+            lines = []
+        added = [s[1:] for s in lines if s.startswith("+") and not s.startswith("+++")]
+        removed = [
+            s[1:] for s in lines if s.startswith("-") and not s.startswith("---")
+        ]
+        out |= _versions(added) - _versions(removed)
+    return out
+
+
+def shape(entry: dict, root: Path) -> list[str]:
     """Every way one entry breaks the schema in the module docstring."""
     out = [f"unknown key {k!r}" for k in sorted(set(entry) - KEYS)]
     fid = entry.get("id")
@@ -451,6 +506,20 @@ def shape(entry: dict) -> list[str]:
                 )
     if "argv_fault" in entry and not _argv(entry["argv_fault"]):
         out.append("`argv_fault` must be a non-empty argv list")
+    message = entry.get("message")
+    if isinstance(message, str):
+        for pinned in PINNED_HEX.findall(message):
+            out.append(
+                f"`message` carries {pinned}, a SHA or digest a pin bump changes: "
+                "match the text around it"
+            )
+        tree = sorted(set(VERSION.findall(message)) - seeded_versions(entry, root))
+        if tree:
+            out.append(
+                f"`message` carries {', '.join(tree)}, a version its fault doesn't write, "
+                "and a bump changes it: match the text around it or the version the fault "
+                "seeds"
+            )
     return out
 
 

@@ -21,10 +21,17 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 2
+  # Every action bump in one pull request a week: each pull request runs the
+  # full CI, and five separate action bumps (#324 to #328) ran it five times
+  # for one week's updates. The group takes version updates only (that's the
+  # `applies-to` default), so a security update still arrives on its own.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
   - package-ecosystem: npm
     directory: /microvms-js
     schedule:
