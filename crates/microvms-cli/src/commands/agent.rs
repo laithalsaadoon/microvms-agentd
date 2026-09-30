@@ -42,12 +42,25 @@ use crate::ledger::{Ledger, NameRecord, Names};
 use crate::seam::{Attach, state_dir};
 
 /// The specs the flags describe, in the order given, one row per agent.
+fn specs_from(args: &AgentUpArgs) -> Vec<AgentSpec> {
+    agent_specs(&args.agent, |arg| match arg {
+        AgentArg::ClaudeCode => (args.claude_model.clone(), args.claude_version.clone()),
+        AgentArg::Codex => (args.codex_model.clone(), args.codex_version.clone()),
+    })
+}
+
+/// The specs a repeatable `--agent` names, in the order given, one row per agent, with each
+/// agent's model and version from `pins`; `claude-code` when none is named. Shared by
+/// `agent-up` and `dockerfile --agent`, so both read the flags one way.
 ///
 /// A repeated `--agent` collapses to one row rather than reaching core's refusal, because
 /// `--agent codex --agent codex` is a shell-history accident and not a second model.
-fn specs_from(args: &AgentUpArgs) -> Vec<AgentSpec> {
+pub(crate) fn agent_specs(
+    named: &[AgentArg],
+    pins: impl Fn(AgentArg) -> (Option<String>, Option<String>),
+) -> Vec<AgentSpec> {
     let mut agents: Vec<AgentArg> = Vec::new();
-    for agent in &args.agent {
+    for agent in named {
         if !agents.contains(agent) {
             agents.push(*agent);
         }
@@ -59,12 +72,7 @@ fn specs_from(args: &AgentUpArgs) -> Vec<AgentSpec> {
         .into_iter()
         .map(|arg| {
             let mut spec = AgentSpec::new(arg.agent());
-            let (model, version) = match arg {
-                AgentArg::ClaudeCode => (&args.claude_model, &args.claude_version),
-                AgentArg::Codex => (&args.codex_model, &args.codex_version),
-            };
-            spec.model = model.clone();
-            spec.cli_version = version.clone();
+            (spec.model, spec.cli_version) = pins(arg);
             spec
         })
         .collect()

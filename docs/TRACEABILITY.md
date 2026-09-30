@@ -67,9 +67,9 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | CLI-8 | 1 | 1 | 1 | 2 | 3 | 1 |
 | CLI-9 | 1 | 1 | 1 | 2 | 3 | 1 |
 | IMAGE-1 | 1 | 1 | 1 | 1 | 1 | waived |
-| IMAGE-2 | 1 | 1 | 1 | 1 | 1 | 1 |
-| IMAGE-3 | 1 | 1 | 1 | 1 | 1 | waived |
-| IMAGE-4 | 1 | 1 | 1 | 1 | 1 | 1 |
+| IMAGE-2 | 1 | 1 | 1 | 1 | 2 | 1 |
+| IMAGE-3 | 1 | 1 | 1 | 1 | 2 | waived |
+| IMAGE-4 | 1 | 1 | 1 | 1 | 2 | 1 |
 | IMAGE-5 | waived | waived | waived | 2 | 2 | waived |
 | IMAGE-6 | waived | 1 | 1 | 2 | 2 | 1 |
 | IMAGE-7 | waived | 1 | 1 | 3 | 5 | 1 |
@@ -771,7 +771,7 @@ When a caller wraps a task Dockerfile, the microvms-core shall end the result wi
 - **gherkin:** `crates/microvms-core/tests/features/wrap_dockerfile.feature`
 - **fuzz:** `crates/microvms-core/tests/wrap_fuzz.rs`
 - **test:** `crates/microvms-app/src/control/artifact.rs`
-- **impl:** `crates/microvms-app/src/control/artifact.rs`
+- **impl:** `crates/microvms-app/src/control/artifact.rs`, `crates/microvms-cli/src/commands/local.rs`
 - **live:** `conformance/lanes/ensure_image.py`
 
 ## IMAGE-3
@@ -782,7 +782,7 @@ If a task Dockerfile has no FROM, ends inside an unfinished instruction, or sets
 - **gherkin:** `crates/microvms-core/tests/features/wrap_dockerfile.feature`
 - **fuzz:** `crates/microvms-core/tests/wrap_fuzz.rs`
 - **test:** `crates/microvms-app/src/control/artifact.rs`
-- **impl:** `crates/microvms-app/src/control/artifact.rs`
+- **impl:** `crates/microvms-app/src/control/artifact.rs`, `crates/microvms-cli/src/commands/local.rs`
 - **live:** waived: a pure function of Dockerfile text; it makes no AWS call
 
 ## IMAGE-4
@@ -793,7 +793,7 @@ When a caller derives a base image from a Dockerfile, the microvms-core shall ta
 - **gherkin:** `crates/microvms-core/tests/features/wrap_dockerfile.feature`
 - **fuzz:** `crates/microvms-core/tests/wrap_fuzz.rs`
 - **test:** `crates/microvms-app/src/control/artifact.rs`
-- **impl:** `crates/microvms-app/src/control/artifact.rs`
+- **impl:** `crates/microvms-app/src/control/artifact.rs`, `crates/microvms-cli/src/commands/local.rs`
 - **live:** `conformance/lanes/ensure_image.py`
 
 ## IMAGE-5
