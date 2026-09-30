@@ -63,7 +63,7 @@ If a reader closes the CLI's stdout or stderr, then the CLI crate shall exit wit
 - **fuzz:** `microvms-cli/src/closed_output_fuzz.rs`
 - **test:** `microvms-cli/src/closed_output.rs`, `microvms-cli/src/closed_output_fuzz.rs`, `microvms-cli/tests/thinness.rs`
 - **impl:** `microvms-app/src/lib.rs`, `microvms-cli/src/closed_output.rs`, `microvms-cli/src/envelope.rs`, `microvms-cli/src/main.rs`, `microvms-core/src/lib.rs`, `microvms-domain/src/lib.rs`, `microvms-edges/src/adapters.rs`, `microvms-edges/src/lib.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/closed_output.py`
 
 ## CLI-8
 
@@ -74,7 +74,7 @@ If the reader of stdout or stderr closes after a command has started, then the C
 - **fuzz:** `microvms-cli/src/closed_output_fuzz.rs`
 - **test:** `microvms-cli/src/closed_output_fuzz.rs`, `microvms-cli/src/guards.rs`
 - **impl:** `microvms-cli/src/closed_output.rs`, `microvms-cli/src/envelope.rs`, `microvms-cli/src/main.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/closed_output.py`
 
 ## CLI-9
 
@@ -85,7 +85,7 @@ If the stdout reader of a streaming command closes, then the CLI crate shall sto
 - **fuzz:** `microvms-cli/src/closed_output_fuzz.rs`
 - **test:** `microvms-cli/src/closed_output_fuzz.rs`, `microvms-cli/src/guards.rs`
 - **impl:** `microvms-cli/src/closed_output.rs`, `microvms-cli/src/commands/attached.rs`, `microvms-cli/src/envelope.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/closed_output.py`
 
 ## IMAGE-1
 
@@ -107,7 +107,7 @@ When a caller wraps a task Dockerfile, the microvms-core shall end the result wi
 - **fuzz:** `microvms-core/tests/wrap_fuzz.rs`
 - **test:** `microvms-app/src/control/artifact.rs`
 - **impl:** `microvms-app/src/control/artifact.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/ensure_image.py`
 
 ## IMAGE-3
 
@@ -129,7 +129,7 @@ When a caller derives a base image from a Dockerfile, the microvms-core shall ta
 - **fuzz:** `microvms-core/tests/wrap_fuzz.rs`
 - **test:** `microvms-app/src/control/artifact.rs`
 - **impl:** `microvms-app/src/control/artifact.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/ensure_image.py`
 
 ## IMAGE-5
 
@@ -151,7 +151,7 @@ The microvms-core shall name an ensured image by its prefix and twelve hex chara
 - **fuzz:** `microvms-core/tests/context_fuzz.rs`
 - **test:** `microvms-app/src/control/artifact.rs`, `microvms-app/src/control/ensure.rs`
 - **impl:** `microvms-app/src/control/artifact.rs`, `microvms-app/src/control/ensure.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/ensure_image.py`
 
 ## IMAGE-7
 
@@ -162,7 +162,7 @@ When a caller supplies a build context directory, the microvms-core shall add ea
 - **fuzz:** `microvms-core/tests/context_fuzz.rs`
 - **test:** `microvms-app/src/control/artifact.rs`, `microvms-app/src/control/context.rs`, `microvms-edges/src/control/context.rs`
 - **impl:** `microvms-app/src/control/artifact.rs`, `microvms-app/src/control/context.rs`, `microvms-app/src/control/ensure.rs`, `microvms-core/src/lib.rs`, `microvms-edges/src/control/context.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/ensure_image.py`
 
 ## IMAGE-8
 
@@ -173,7 +173,7 @@ When the microvms-core ensures an image, the microvms-core shall resolve the ima
 - **fuzz:** `microvms-core/tests/context_fuzz.rs`
 - **test:** `microvms-app/src/control/ensure.rs`, `microvms-edges/src/control/services.rs`
 - **impl:** `microvms-app/src/control/ensure.rs`, `microvms-app/src/control/services.rs`, `microvms-app/src/sandbox.rs`, `microvms-edges/src/control/services.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/ensure_image.py`
 
 ## IMAGE-9
 
@@ -184,7 +184,7 @@ When a describe finds the ensured image ready or building and the caller has not
 - **fuzz:** waived: the input space is two callers interleaved against the platform, which model/src/image.rs checks exhaustively; the decision table is ten rows, all pinned by the_plan_table
 - **test:** `microvms-app/src/control/ensure.rs`
 - **impl:** `microvms-app/src/control/ensure.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/ensure_image.py`
 
 ## IMAGE-10
 
@@ -195,7 +195,7 @@ If the ensured image has failed or the caller forces a rebuild, then the microvm
 - **fuzz:** waived: the input space is two callers interleaved against the platform, which model/src/image.rs checks exhaustively; the decision table is ten rows, all pinned by the_plan_table
 - **test:** `microvms-app/src/control/ensure.rs`
 - **impl:** `microvms-app/src/control/ensure.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/ensure_image.py`
 
 ## IMAGE-11
 
@@ -206,7 +206,7 @@ If the create of an ensured image is refused because another caller created the 
 - **fuzz:** waived: the input space is two callers interleaved against the platform, which model/src/image.rs checks exhaustively; the decision table is ten rows, all pinned by the_plan_table
 - **test:** `microvms-app/src/control/ensure.rs`
 - **impl:** `microvms-app/src/control/ensure.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/ensure_image.py`
 
 ## IMAGE-12
 
@@ -228,7 +228,7 @@ When a start request names its user or its group with a JSON string, the agentd 
 - **fuzz:** `agentd/src/exec_start_fuzz.rs`
 - **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
 - **impl:** `agentd/src/exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-js/src/session.rs`, `microvms-py/src/session.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/exec.py`
 
 ## AGENTD-8
 
@@ -239,7 +239,7 @@ If a start request names a user or a group that the guest's /etc/passwd or /etc/
 - **fuzz:** `agentd/src/exec_start_fuzz.rs`
 - **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
 - **impl:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/exec.py`
 
 ## AGENTD-9
 
@@ -250,7 +250,7 @@ When the user of a start request resolves to a passwd row, the agentd shall set 
 - **fuzz:** `agentd/src/exec_start_fuzz.rs`
 - **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
 - **impl:** `agentd/src/exec_start.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/exec.py`
 
 ## AGENTD-10
 
@@ -261,7 +261,7 @@ While a start request leaves inherit_image_env unset, the agentd shall build the
 - **fuzz:** `agentd/src/exec_start_fuzz.rs`
 - **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
 - **impl:** `agentd/src/exec_start.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/exec.py`
 
 ## AGENTD-11
 
@@ -272,7 +272,7 @@ When a start request sets inherit_image_env, the agentd shall place the environm
 - **fuzz:** `agentd/src/exec_start_fuzz.rs`
 - **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
 - **impl:** `agentd/src/exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-js/src/session.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/exec.py`
 
 ## AGENTD-12
 
@@ -283,7 +283,7 @@ The agentd shall exclude each AGENTD_ variable and the agent token from the imag
 - **fuzz:** `agentd/src/exec_start_fuzz.rs`
 - **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
 - **impl:** `agentd/src/exec_start.rs`, `agentd/src/lib.rs`, `agentd/src/main.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/exec.py`
 
 ## AGENTD-13
 
@@ -294,7 +294,7 @@ The agentd shall report on /v1/health whether an image environment snapshot exis
 - **fuzz:** `agentd/src/exec_start_fuzz.rs`
 - **test:** `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`, `protocol/src/health.rs`
 - **impl:** `agentd/src/routes.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/exec.py`
 
 ## AGENTD-14
 
@@ -305,7 +305,7 @@ When a start request names a shell, the agentd shall resolve the shell name on t
 - **fuzz:** `agentd/src/exec_start_fuzz.rs`
 - **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
 - **impl:** `agentd/src/exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-py/src/session.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/exec.py`
 
 ## AGENTD-15
 
@@ -316,7 +316,7 @@ If a start request names a shell that no searched directory holds as an executab
 - **fuzz:** `agentd/src/exec_start_fuzz.rs`
 - **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
 - **impl:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/exec.py`
 
 ## AGENTD-16
 
@@ -327,7 +327,7 @@ When a start request carries its user and group as integers and its shell as a b
 - **fuzz:** `agentd/src/exec_start_fuzz.rs`
 - **test:** `agentd/src/exec.rs`, `agentd/src/exec_start.rs`, `microvms-js/__test__/exec_start.mjs`, `microvms-py/tests/test_exec_start.py`
 - **impl:** `agentd/src/exec_start.rs`, `microvms-cli/src/cli.rs`, `microvms-js/src/session.rs`, `microvms-py/src/session.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/exec.py`
 
 ## AGENTD-17
 
@@ -349,7 +349,7 @@ While the handshake of an identity-verified tunnel has not completed, the agentd
 - **fuzz:** waived: #297 adds a harness over the daemon's tunnel frame read
 - **test:** `agentd/tests/tunnel_relay.rs`
 - **impl:** `agentd/src/tunnel.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/tunnel.py`
 
 ## BIND-11
 
@@ -360,7 +360,7 @@ The microvms-core shall derive a launch's egress posture from its launch options
 - **fuzz:** `microvms-app/src/control/posture_fuzz.rs`
 - **test:** `microvms-app/src/control/connector.rs`, `microvms-js/__test__/egress_posture.mjs`, `microvms-py/tests/test_egress_posture.py`
 - **impl:** `microvms-app/src/control/connector.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/posture.py`
 
 ## BIND-12
 
@@ -371,7 +371,7 @@ The language bindings layer shall expose on each session the egress posture the 
 - **fuzz:** `microvms-app/src/control/posture_fuzz.rs`
 - **test:** `microvms-app/src/sandbox.rs`, `microvms-cli/src/guards.rs`, `microvms-core/tests/live_posture.rs`, `microvms-js/__test__/egress_posture.mjs`, `microvms-py/tests/test_egress_posture.py`
 - **impl:** `microvms-app/src/sandbox.rs`, `microvms-app/src/session/mod.rs`, `microvms-cli/src/commands/lifecycle.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/posture.py`
 
 ## BIND-13
 
@@ -393,7 +393,7 @@ When a caller requests the agentd daemon binary, the language bindings layer sha
 - **fuzz:** `microvms-edges/src/provision_fuzz.rs`
 - **test:** `microvms-edges/src/provision.rs`, `microvms-js/__test__/provision.mjs`
 - **impl:** `microvms-edges/src/lib.rs`, `microvms-edges/src/provision.rs`, `microvms-js/src/provision.rs`, `microvms-py/src/provision.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/quickstart.py`
 
 ## BIND-18
 
@@ -404,7 +404,7 @@ If a fetched agentd release asset fails its attestation or SHA256SUMS verificati
 - **fuzz:** `microvms-edges/src/provision_fuzz.rs`
 - **test:** `microvms-app/src/provision.rs`, `microvms-edges/src/provision.rs`, `microvms-edges/src/provision/release.rs`, `microvms-js/__test__/provision.mjs`
 - **impl:** `microvms-app/src/provision.rs`, `microvms-edges/src/provision.rs`, `microvms-edges/src/provision/release.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/quickstart.py`
 
 ## BIND-19
 
@@ -415,7 +415,7 @@ If a cached agentd binary does not match the digest recorded when its release as
 - **fuzz:** `microvms-edges/src/provision_fuzz.rs`
 - **test:** `microvms-edges/src/provision.rs`, `microvms-js/__test__/provision.mjs`
 - **impl:** `microvms-edges/src/provision.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/quickstart.py`
 
 ## BIND-20
 
@@ -426,7 +426,7 @@ If a caller-supplied or fetched agentd binary is not an aarch64 ELF executable, 
 - **fuzz:** `microvms-edges/src/provision_fuzz.rs`
 - **test:** `microvms-edges/src/provision.rs`, `microvms-js/__test__/provision.mjs`
 - **impl:** `microvms-edges/src/provision.rs`, `microvms-js/src/provision.rs`, `microvms-py/src/provision.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/quickstart.py`
 
 ## BIND-21
 
@@ -437,7 +437,7 @@ If the far end of an identity-verified tunnel does not complete the handshake ag
 - **fuzz:** waived: #297 adds a harness over the client's tunnel frame read
 - **test:** `microvms-core/tests/tunnel_end_to_end.rs`
 - **impl:** `microvms-edges/src/session/tunnel.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/tunnel.py`
 
 ## BIND-22
 
@@ -459,7 +459,7 @@ The microvms-core shall report a finished exec's POSIX exit code as 124 when a d
 - **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
 - **test:** `microvms-app/src/session/exec.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
 - **impl:** `microvms-app/src/session/complete.rs`, `microvms-app/src/session/exec.rs`, `microvms-js/src/exec.rs`, `microvms-js/src/session.rs`, `microvms-py/src/exec.rs`, `microvms-py/src/session.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/sessions.py`
 
 ## BIND-7
 
@@ -470,7 +470,7 @@ The microvms-core shall annotate an exec result with one human-readable note for
 - **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
 - **test:** `microvms-app/src/session/exec.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
 - **impl:** `microvms-app/src/session/exec.rs`, `microvms-js/src/exec.rs`, `microvms-py/src/exec.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/sessions.py`
 
 ## BIND-8
 
@@ -481,7 +481,7 @@ If the output stream of a run-to-completion call ends without the terminal exit 
 - **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
 - **test:** `microvms-app/src/session/complete.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
 - **impl:** `microvms-app/src/session/complete.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/sessions.py`
 
 ## BIND-9
 
@@ -492,7 +492,7 @@ If the client deadline of a run-to-completion call expires before the exec's res
 - **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
 - **test:** `microvms-app/src/session/complete.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
 - **impl:** `microvms-app/src/session/complete.rs`, `microvms-app/src/session/exec.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/sessions.py`
 
 ## BIND-10
 
@@ -503,7 +503,7 @@ If the acknowledgement that follows a client-deadline kill fails, then the micro
 - **fuzz:** `microvms-core/tests/run_to_completion_fuzz.rs`
 - **test:** `microvms-app/src/session/complete.rs`, `microvms-core/tests/live_run_to_completion.rs`, `microvms-js/__test__/run_to_completion.mjs`, `microvms-py/tests/test_run_to_completion.py`
 - **impl:** `microvms-app/src/session/complete.rs`, `microvms-app/src/session/exec.rs`, `microvms-js/src/exec.rs`, `microvms-py/src/exec.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/sessions.py`
 
 ## BIND-14
 
@@ -525,7 +525,7 @@ When a caller asks for a preflight, the microvms-core shall report whether the r
 - **fuzz:** waived: the outcome space (3 region x 2 credential x 3 service worlds) is enumerated exhaustively by the Stateright model; there is no input stream to fuzz
 - **test:** `microvms-app/src/preflight.rs`, `microvms-cli/src/guards.rs`, `microvms-core/tests/live_preflight.rs`, `microvms-js/__test__/request_and_preflight.mjs`, `microvms-py/tests/test_request_and_preflight.py`
 - **impl:** `microvms-app/src/control/image.rs`, `microvms-app/src/control/transport.rs`, `microvms-app/src/preflight.rs`, `microvms-domain/src/preflight.rs`, `microvms-js/src/preflight.rs`, `microvms-py/src/preflight.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/local.py`
 
 ## BIND-16
 
@@ -536,7 +536,7 @@ The microvms-core shall not make a billable or mutating AWS call during a prefli
 - **fuzz:** waived: the outcome space (3 region x 2 credential x 3 service worlds) is enumerated exhaustively by the Stateright model; there is no input stream to fuzz
 - **test:** `microvms-app/src/preflight.rs`, `microvms-core/tests/live_preflight.rs`, `microvms-js/__test__/request_and_preflight.mjs`, `microvms-py/tests/test_request_and_preflight.py`
 - **impl:** `microvms-app/src/control/image.rs`, `microvms-app/src/preflight.rs`, `microvms-domain/src/preflight.rs`, `microvms-js/src/preflight.rs`, `microvms-py/src/preflight.rs`
-- **live:** `conformance/run_rs.py`
+- **live:** `conformance/lanes/local.py`
 
 ## ARCH-6
 
