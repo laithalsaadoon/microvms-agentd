@@ -421,12 +421,8 @@ impl SpawnOptions {
 
     /// The core's stream options.
     ///
-    /// `errorOnGap` is deliberately **not** set from `gapPolicy`, and that is the one
-    /// non-obvious mapping here. Core's `error_on_gap` ends the drive with a typed error, which
-    /// would lose the byte range's attribution and would stop `gaps` from ever being populated;
-    /// this handle needs to *see* the gap event in order to error both streams with the range in
-    /// the message under `'error'`, and to record it under `'event'`. So the gap always arrives
-    /// as an event from core and the policy is applied one layer up, in the drive.
+    /// `error_on_gap` isn't set from `gapPolicy`: core's split replaces it with the gap
+    /// policy, which it applies to the gap event itself (`ExecHandle::split`).
     fn stream_options(&self) -> Result<StreamOptions, AsyncError> {
         let defaults = StreamOptions::default();
         Ok(StreamOptions {

@@ -198,20 +198,22 @@ jobs:
       - run: mise run ci:bindings
 
   # `mise run guards:fire` (#274): each entry in verify/guards/faults/*.toml (every one on a push to main,
-  # the ones it affects on a pull request) is seeded into a scratch worktree, and its guard must
-  # fail for the reason the entry names. Its own job because each fault is one more incremental
-  # build, which is why it isn't in `check` either. Ubuntu only: the guards it seeds are the same
-  # code on every platform, and the `rust` matrix already runs them unseeded.
+  # the ones whose recorded verdict it can't keep on a pull request) is seeded into a scratch
+  # worktree, and its guard must fail for the reason the entry names. Its own job because each
+  # fault is one more incremental build, which is why it isn't in `check` either. Ubuntu only:
+  # the guards it seeds are the same code on every platform, and the `rust` matrix already runs
+  # them unseeded.
   #
-  # A pull request fires only the entries its diff affects (`--affected` against its base
-  # branch), and every push to main fires every entry (#323). The script's docstring has the
-  # selection rule; a change to the script itself, to a build input (such as Cargo.lock, a
-  # Cargo.toml or mise.toml), or to this job's steps or the `ci:guards` task they run still
-  # selects every entry. The cost is that a fault only a full fire catches shows up on main after
-  # the merge instead of on its pull request, and `mise run guards:fire -- --jobs 4
-  # --venv-per-worker` is the full fire before one. A red `seeded faults fire` on main is fixed
-  # before the next merge, since the next pull request that selects every entry fails on it too;
-  # one that fails an entry it didn't touch reads main's last push run first.
+  # Every push to main fires every entry under strace and records, per leg, what each entry's
+  # runs read and its verdict (`--record`); a pull request's leg restores its leg's latest
+  # record from main and fires only the entries whose recorded `fired` verdict it can't keep
+  # (`--reuse`). The script's docstring has the rule: a changed file or directory a run read, a
+  # changed entry, tool, environment or fire script, and a command that reads the git history
+  # or downloads by a range all fire, and so does everything when no record restores. The
+  # record is diffed from its own commit, not the merge base, so main's changes since count too.
+  # A red `seeded faults fire` on main is fixed before the next merge, since no pull request
+  # keeps a verdict main's record didn't see fire; one that fails an entry it didn't touch reads
+  # main's last push run first.
   #
   # The job is a matrix of shards (D35, #345). Each leg fires `--shard k/N` of the same
   # selection (whole commands, weighted by their entries' rough CI seconds; the script's
@@ -225,8 +227,8 @@ jobs:
   # jobs at once on 2026-09-30, so a pull request's 22 jobs fit with room. The legs restore the dependency cache the `guards-cache` job saves,
   # which holds what every leg's commands compile, and never save one of their own. Each leg's
   # workers 2 to 4 start from a copy of it, without the workspace's own crates (the script's
-  # docstring has why). `mise run guards:fire -- --venv-per-worker --affected --shard 1/6` runs
-  # one pull request leg's share locally.
+  # docstring has why). `mise run guards:fire -- --venv-per-worker --shard 1/6 --reuse DIR` runs
+  # one pull request leg's share locally, from a record in DIR.
   #
   # Every suite fires here, the bindings one included, each worker in a venv of its own
   # (`--venv-per-worker`), so those entries spread over the legs and their workers like the rest.
@@ -241,7 +243,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          # `--affected` diffs against the base branch, which a shallow clone doesn't have.
+          # `--reuse` diffs the tree from the record's commit, which a shallow clone doesn't have.
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
@@ -253,22 +255,47 @@ jobs:
           shared-key: guards-deps
           save-if: false
       - uses: ./.github/actions/mise
+      # `--record` traces every run with strace, which a mise task can't install. The runner
+      # image carries it; this installs it where one doesn't. Both legs have it: the pull
+      # request's runs the TraceReading entry's real-strace case, so a runner that can't trace
+      # fails a pull request and not main's next push.
+      - name: strace
+        run: command -v strace > /dev/null || { sudo apt-get update && sudo apt-get install -y strace; }
+      # This leg's record from main's latest push: the one at the pull request's base when that
+      # push finished, or the newest before it. Each leg's slice is the same entries whatever it
+      # restores (the script cuts the slice before `--reuse`), so a leg reads its own leg's
+      # record, and a command that moved to another leg has none here and fires. Only main's
+      # legs save under this key.
+      - name: main's record of what each verdict read
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/guards-verdicts
+          key: guards-verdicts-${{ matrix.shard }}-of-${{ strategy.job-total }}-${{ github.event.pull_request.base.sha }}
+          restore-keys: guards-verdicts-${{ matrix.shard }}-of-${{ strategy.job-total }}-
       # `ci:guards` holds the fire's command and turns incremental builds on for it. `--target-dir
       # target` for rust-cache: the script's own default target exists so a developer's next
       # cargo run can't pick up a scratch build, and nothing here builds after `fire`. The two
-      # steps are one command, and the pull request's adds only the selection;
-      # test_check_guards_fire.py runs both as written here, through the task's command.
-      - name: the seeded faults a pull request affects fire
+      # steps are one command but for the last flag, `--reuse` on a pull request and `--record`
+      # on main; test_check_guards_fire.py runs both as written here, through the task's command.
+      - name: the seeded faults whose recorded verdicts a pull request can't keep fire
         if: github.event_name == 'pull_request'
         env:
-          BASE: origin/${{ github.base_ref }}
           SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
-        run: mise run ci:guards --target-dir target --affected --base "$BASE"
-      - name: every seeded fault fires
+        run: mise run ci:guards --target-dir target --reuse "$RUNNER_TEMP/guards-verdicts"
+      - name: every seeded fault fires, and its record is written
         if: github.event_name != 'pull_request'
         env:
           SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
-        run: mise run ci:guards --target-dir target
+        run: mise run ci:guards --target-dir target --record "$RUNNER_TEMP/guards-verdicts"
+      # Under a key per leg and commit, which the pull requests' restore finds by its prefix. A
+      # leg whose fire failed saves nothing, and pull requests read that leg's previous record.
+      - name: save the record for pull requests
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/guards-verdicts
+          key: guards-verdicts-${{ matrix.shard }}-of-${{ strategy.job-total }}-${{ github.sha }}
       # The warm workers' copies and the incremental data cost disk: what the fire left, while
       # their size on the runner is still being measured.
       - name: disk left after the fire
@@ -281,7 +308,7 @@ jobs:
   # passing, and it passes on `success` only: GitHub reports a shard that timed out as
   # `cancelled`, not `failure`. It's `always()` and not `!cancelled()`: a cancelled run would
   # skip this job, and a skipped required check passes, so a superseded pull request run shows
-  # red instead. A pull request that selects nothing still reports it green, because each
+  # red instead. A pull request that keeps every verdict still reports it green, because each
   # shard passes with nothing to fire. It has no step `if` and no `continue-on-error`, since
   # either would let it pass over a red shard, and test_check_guards_fire.py holds its shape.
   # It checks nothing out and runs no task: its one command reads the shards' result.

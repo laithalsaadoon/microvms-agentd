@@ -24,7 +24,7 @@
 //! takes that URI.
 
 use std::sync::Arc;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 use microvms_core::agents::bedrock::{self, BearerToken as CoreToken, MAX_LIFETIME};
 use microvms_core::agents::{
@@ -726,17 +726,10 @@ impl AgentVm {
         options: Option<PromptOptions>,
     ) -> Result<ExecResult, AsyncError> {
         let spec = self.spec(&agent)?;
-        let options = options.unwrap_or_default();
-        let timeout: Duration = match options.timeout_sec {
-            Some(timeout) => seconds_async(timeout)?,
-            None => DEFAULT_PROMPT_TIMEOUT,
-        };
-        let mut core_options = options.into_core()?;
-        core_options.timeout = Some(timeout);
-        let request = agents::prompt_request(&spec, &task, &core_options).map_err(js_async)?;
+        // Left out, `timeoutSec` is core's `DEFAULT_PROMPT_TIMEOUT`, which `prompt_sync` applies.
+        let options = options.unwrap_or_default().into_core()?;
         let guard = self.sandbox.lock().await;
-        let result = Self::require_session(&guard)?
-            .run_sync(request, timeout)
+        let result = agents::prompt_sync(Self::require_session(&guard)?, &spec, &task, &options)
             .await
             .map_err(js_async)?;
         Ok(ExecResult::wrap(result))

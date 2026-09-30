@@ -302,6 +302,27 @@ class BuildHookTimeout:
     def seconds(self, /) -> int: ...
 
 @final
+class ByteStream:
+    """
+    One side of a spawned exec's output, as an iterator of `bytes`.
+    
+    Ends with `StopIteration` after the command's `exit`, and raises the error that ended the
+    side otherwise: a gap under the default policy, or a failure the stream couldn't reconnect
+    through. The `receiver` is behind a `Mutex` for the reason `ExecStream`'s is: `recv` needs
+    `&mut`, and the lock is held only across one `recv`, never across a Python callback.
+    """
+    def __iter__(self, /) -> ByteStream: ...
+    def __next__(self, /) -> bytes:
+        """
+        The next chunk, or `StopIteration` when the side ends.
+        
+        Blocks with the GIL released, so another Python thread (the one reading the other side)
+        runs while this one waits on the daemon. The end is raised rather than returned as
+        `None`, as `ExecStream`'s is, so the stub's element type is `bytes` and not
+        `bytes | None`.
+        """
+
+@final
 class ControlPlane:
     """
     MicroVM lifecycle by ID: get, list, suspend, resume, terminate, and wait.
@@ -629,6 +650,53 @@ class ExecHandle:
         `eof` in the same call is the common case for feeding a prompt: two round trips
         would leave a window where the child has the bytes but not the EOF that says the
         input is complete.
+        """
+
+@final
+class ExecProcess:
+    """
+    A running exec as two byte iterators, a `wait()`, and an idempotent `kill()`.
+    
+    Built by `Session.spawn`, never by a constructor: a process with no exec behind it is one
+    whose every method fails in a way that looks like a dead VM.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def exec_id(self, /) -> str:
+        """
+        The exec id, which is the idempotency key: `Session.exec(exec_id)` reattaches to it.
+        """
+    @property
+    def gaps(self, /) -> list[OutputGap]:
+        """
+        Every byte range the daemon couldn't replay, under `gap_policy="event"`. Empty under
+        the default policy, where a gap raises from both iterators instead.
+        """
+    def kill(self, /) -> bool:
+        """
+        Signals the whole process group. Idempotent: `False` means nothing was signalled
+        because the group was already gone, which is the outcome a kill wanted, so a caller
+        can call this in a `finally` without guarding it.
+        """
+    @property
+    def stderr(self, /) -> ByteStream:
+        """
+        The child's standard error. Order is kept within each side and isn't recoverable
+        between them; `ExecHandle.stream()` has the interleaving.
+        """
+    @property
+    def stdout(self, /) -> ByteStream:
+        """
+        The child's standard output. The same iterator every time, since two over one side
+        would split its bytes between them.
+        """
+    def wait(self, /, timeout: float |None = None) -> ExecResult:
+        """
+        Polls the daemon's exec record until the command is done, or raises `TimeoutError`.
+        
+        From the record, not from the iterators ending: a stream that stopped carrying bytes
+        is the same observation for a cut connection and a finished command. A timeout hasn't
+        touched the exec, so a caller can wait again. `timeout` defaults to `ExecHandle.wait`'s.
         """
 
 @final
@@ -1358,6 +1426,26 @@ class OutputChunk:
         
         A method rather than a getter on `data`, so the lossy step is a call a reader sees
         — the same reasoning as the core's `break_even_seconds_f64`.
+        """
+
+@final
+class OutputGap:
+    """
+    One byte range the daemon couldn't replay, under `gap_policy="event"`.
+    
+    `start` inclusive and `end` exclusive, as on the stream's `Gap` event, so `end` is the
+    offset a resume passes.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def end(self, /) -> int: ...
+    @property
+    def start(self, /) -> int: ...
+    @property
+    def stream(self, /) -> str |None:
+        """
+        `"stdout"` or `"stderr"`: the side of the output that followed the gap, whose log has
+        the hole. `None` when the stream ended on the gap, with nothing after it to name one.
         """
 
 @final
@@ -2124,7 +2212,7 @@ class Session:
         """
         Unauthenticated liveness.
         """
-    def keep_awake(self, /, interval: float |None = None, *, while_busy: bool = False, max_duration: float |None = None, idle_window: float |None = None) -> KeepAwake:
+    def keep_awake(self, /, interval: float |None = None, *, while_busy: bool = False, max_duration: float |None = None, idle_window: float |None = None, tolerated_errors: int |None = None) -> KeepAwake:
         """
         Keeps the VM awake by polling health from this process until stopped.
         
@@ -2135,6 +2223,9 @@ class Session:
         running; `max_duration` ends it after that many seconds. `idle_window` is the VM's
         `maxIdleDurationSeconds`: a sandbox-held session knows it, an attached one assumes
         the platform minimum of 60, and `interval` may be at most half of it.
+        `tolerated_errors` is how many retryable poll failures in a row it retries, a second
+        apart, before it ends with the error; omitted, it's the core's
+        `DEFAULT_TOLERATED_ERRORS`.
         
         On a sandbox-held session a suspend or terminate through the sandbox ends the
         keepalive before its next poll. Stop it before suspending through anything else,
@@ -2211,6 +2302,23 @@ class Session:
         so nothing is left behind, and then the exception is re-raised. `shell`, `user`,
         `group`, and `inherit_image_env` mean what they mean on `run()`: `shell="bash"` with a
         script string runs it under bash, which dash-based images need for `pipefail`.
+        """
+    def spawn(self, /, command: Sequence[str] |str, *, shell: bool |str = ..., cwd: str |None = None, env: dict[str, str] |None = None, user: int |str |None = None, group: int |str |None = None, timeout_sec: float |None = None, stdin: bool = False, exec_id: str |None = None, reap_group_on_exit: bool = False, inherit_image_env: bool = False, offset: int = 0, reconnect: bool = True, max_reconnects: int |None = None, idle_timeout: float |None = None, gap_policy: str |None = None) -> ExecProcess:
+        """
+        Starts a command and returns it as two byte iterators, a `wait()`, and a `kill()`.
+        
+        The **process** shape, as against `run`'s handle: the same start request and keyword
+        arguments, so `spawn` and `run` with one `exec_id` address one server-side child.
+        `proc.stdout` and `proc.stderr` iterate `bytes`, split out of the one stream the
+        daemon sends, which reconnects at the byte cursor after a cut, so a suspend and resume
+        doesn't end them early. Read both sides, from two threads when a command writes much
+        to both: each holds one unread chunk, like a pipe.
+        
+        `gap_policy` is what an evicted byte range does. `"error"`, the default when it's
+        `None`, raises `PlatformError` (wire kind `OutputGap`) from both iterators naming the
+        range, since the wire can't say which side lost the bytes; `"event"` records it on
+        `proc.gaps` and keeps both going. `offset`, `reconnect`, `max_reconnects` and
+        `idle_timeout` are `ExecHandle.stream()`'s.
         """
     def upload_file(self, /, path: str, data: bytes, *, mode: str |None = None) -> None:
         """
