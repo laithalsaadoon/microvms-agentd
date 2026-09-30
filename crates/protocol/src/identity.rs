@@ -59,6 +59,28 @@
 //! rather than `ring?/std`, so enabling it force-enables the very C dependency the daemon
 //! cannot build.
 //!
+//! # The end of stream (#342)
+//!
+//! Every relayed chunk rides one Noise transport message, and so does the end of a stream: a
+//! side that has sent its last byte sends one more message with an empty plaintext. A relayed
+//! chunk is never empty, so the empty message is unambiguous, and it authenticates under the
+//! session's keys like any other. It also counts: each transport message decrypts only at its
+//! own position (snow's nonce is a counter), so the end of stream proves every message before
+//! it arrived, in order, with none added. That's why it carries no byte counts.
+//!
+//! The WebSocket close frame that follows it stays plaintext, since it has to reach a caller
+//! whose handshake failed. After the handshake it's a diagnosis and never the verdict: anything
+//! on the path can send a close frame or drop the connection, and only the end of stream says a
+//! stream finished rather than being cut short.
+//!
+//! Each side offers the end of stream in its handshake message's payload
+//! ([`HANDSHAKE_PAYLOAD`]), and a side holds its peer to it only when the peer offered it. The
+//! payloads are inside the handshake's encryption and its hash, so an on-path party can't strip
+//! the offer the way it could strip a query flag. An older peer sends an empty payload and no
+//! end of stream, and it reads the newer peer's end of stream as a message with nothing in it,
+//! so a release that predates the end of stream and one that sends it still work together in
+//! either order. `docs/PROTOCOL.md` has what each side does without one.
+//!
 //! # The honest limit, restated here because this is where a reader will look
 //!
 //! This proves the far end is **`agentd` in the VM the caller launched**. It does not prove
@@ -111,6 +133,35 @@ pub const HOST_PUBLIC_KEY_KEY: &str = "identity_host_public_key";
 /// with the agent token and the launch environment, and a caller near that ceiling needs the
 /// number rather than a warning. `microvms-core` asserts the real composition against it.
 pub const IDENTITY_PAYLOAD_BYTES: usize = 137;
+
+/// The handshake payload's flag for the end of stream: the sender sends one, and checks the
+/// peer's when the peer offered it too.
+pub const END_OF_STREAM: u8 = 0b0000_0001;
+
+/// The payload each side writes into its handshake message: the flags it offers.
+///
+/// One byte of flags, so a later release can offer something more in another bit. The
+/// initiator's first message and the responder's reply both carry it, and both are encrypted
+/// under keys only the two pinned statics can derive, so the offer can't be forged or stripped.
+pub const HANDSHAKE_PAYLOAD: [u8; 1] = [END_OF_STREAM];
+
+/// Whether a peer's handshake payload offers the end of stream.
+///
+/// An empty payload is a peer that predates it. A flag or a byte this release doesn't know is
+/// ignored rather than refused, so a later release's payload still reads here.
+pub fn offers_end_of_stream(payload: &[u8]) -> bool {
+    payload
+        .first()
+        .is_some_and(|flags| flags & END_OF_STREAM != 0)
+}
+
+/// Whether a transport message's plaintext is the end of stream.
+///
+/// The one message with nothing in it: neither side relays an empty read, so an empty
+/// plaintext can't be a chunk of the stream.
+pub fn is_end_of_stream(plaintext: &[u8]) -> bool {
+    plaintext.is_empty()
+}
 
 /// Why some bytes are not a usable identity seed.
 ///
@@ -261,6 +312,23 @@ mod tests {
             assert_ne!(key, "agent_token");
             assert_ne!(key, "env");
         }
+    }
+
+    /// The offer reads from the flags byte alone, and an older peer's empty payload offers
+    /// nothing.
+    ///
+    /// The empty payload is the skew case: every release before #342 wrote one, and reading it
+    /// as an offer would hold that peer to an end of stream it never sends, failing every
+    /// tunnel to an older image. A later release's extra flag or byte must not turn the offer
+    /// off either.
+    #[test]
+    fn the_end_of_stream_is_offered_by_its_flag_and_not_by_an_empty_payload() {
+        assert!(offers_end_of_stream(&HANDSHAKE_PAYLOAD));
+        assert!(!offers_end_of_stream(&[]));
+        assert!(!offers_end_of_stream(&[0b0000_0010]));
+        assert!(offers_end_of_stream(&[END_OF_STREAM | 0b1000_0000, 0xff]));
+        assert!(is_end_of_stream(&[]));
+        assert!(!is_end_of_stream(&[0]));
     }
 
     /// The identity payload budget is what a caller near the ceiling needs, so it is asserted

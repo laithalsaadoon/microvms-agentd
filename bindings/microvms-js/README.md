@@ -144,7 +144,8 @@ For a `Sandbox` named `vm` and its `session`:
 `runSync` returns a Promise: it starts a command, waits, and acknowledges
 its saved output. A nonzero exit is a result, so check `result.ok` or
 `result.exitCode`. Use `{ shell: true }` when passing a shell script string.
-Async library errors expose their `ERR_*` code through `error.cause.message`.
+Async library errors expose their `ERR_*` code through `error.cause.message`,
+and `isRetryable(error)` says whether an identical retry could succeed.
 
 Omitting `egress` does not block outbound traffic. For no egress, use
 `egressNetworkConnectors: [vpcConnectorArn]` with a VPC without an internet

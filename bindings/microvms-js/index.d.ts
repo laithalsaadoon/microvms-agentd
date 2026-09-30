@@ -1732,6 +1732,18 @@ export declare function installAgentAccess(session: Session, agents: Array<Agent
  */
 export declare function installedAgents(session: Session): Promise<Array<AgentSpec>>
 
+/**
+ * Whether retrying the identical call could plausibly succeed, for an error this library raised.
+ *
+ * The TypeScript spelling of Python's `.retryable`, read off the chain every error here
+ * carries: `err.cause.message` is the `ERR_*` code, and core answers for its kind. A
+ * transient condition (a refused connection, a mint failure, a daemon not yet bootstrapped)
+ * is `true`; a full disk, a credential, or a refused argument is `false`. Anything that
+ * isn't a library error (no cause, or a cause whose message is no `ERR_*` code) is `false`,
+ * because nothing says a retry would land differently.
+ */
+export declare function isRetryable(error: unknown): boolean
+
 /** The options bag for `keepAwake`. */
 export interface KeepAwakeOptions {
   /** Seconds between polls. Default: a third of the idle window, at most 20. */

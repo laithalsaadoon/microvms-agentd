@@ -257,7 +257,9 @@ applied at open. `PUT`/`GET /v1/fs/tar` move directory trees; extraction is
 confined by lexical resolution with symlink and bomb defenses and member/size
 caps (`crates/agentd/src/fs.rs:4-41`), and a write that would push the filesystem
 under the disk reserve is refused with 507 naming the real free space
-(`crates/agentd/src/fs.rs:66-91`).
+(`crates/agentd/src/fs.rs:66-91`). Every client reads a 507 as the wire kind
+`InsufficientStorage`, `ERR_PLATFORM` and not retryable: a retry needs space
+freed first.
 
 **Health.** `GET /v1/health` is unauthenticated and reports version, bootstrap
 state, disk pressure, and the identity-repair flags — the conditions that are
