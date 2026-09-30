@@ -7,16 +7,18 @@
 """Print the drift count's history as JSON, for the docs site's "Architecture drift" page.
 
 One point per first-parent commit that changed `verify/ratchet/drift.json`, oldest first: the commit,
-its committer date, and the entry count per collected category. On main that's the series of
-merges, one per PR that moved the count. A working tree whose file differs from HEAD's adds a
-last point with no commit, so a local docs build shows the change being made.
+its committer date, and the drift per collected category. A working tree whose file differs from
+HEAD's adds a last point with no commit, so a local docs build shows a rewrite before it lands.
+
+The file was two things over time, and both are read. Up to the merge-base rule it was the
+hand-kept count (version 1), which `ratchet:check` held equal to the tree on every commit, so
+each merge that moved the count is a point. Since then it's the generated snapshot (version 2),
+the tree's drift at the commit that last rewrote it (`./tools/ratchet.py snapshot`), so each
+rewrite is a point.
 
 A category that commit's own `tools/ratchet.py` didn't collect yet has a null count there,
-not a zero: nobody measured it, and its first entries arrive with the commit that starts
+not a zero: nobody measured it, and its first drift arrives with the commit that starts
 collecting it.
-
-The counts come from the file, not from rerunning the collectors at each commit: `ratchet:check`
-holds the file equal to the tree on every commit that passes, so the file is the record.
 
 Usage, from anywhere:
 
@@ -51,9 +53,50 @@ def git(root: Path, *args: str) -> str:
     ).stdout
 
 
+def counts_of(text: str, where: str) -> tuple[Counter, int]:
+    """The drift per category in a copy of `drift.json`, and how many decisions it counted.
+
+    Either version: 1 lists `entries` and `decisions`, and 2 maps each category to its drift
+    and its decisions' count. Anything else is an error naming `where`, not an empty point.
+    """
+
+    def fail(message: str):
+        raise SystemExit(f"{where}: {message}")
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as error:
+        fail(f"not JSON: {error}")
+    version = data.get("version") if isinstance(data, dict) else None
+    if version == 1:
+        entries, decisions = data.get("entries"), data.get("decisions")
+        if not isinstance(entries, list) or not isinstance(decisions, list):
+            fail("a version 1 file lists entries and decisions")
+        if not all(
+            isinstance(e, dict) and isinstance(e.get("category"), str) for e in entries
+        ):
+            fail("each entry names its category")
+        return Counter(entry["category"] for entry in entries), len(decisions)
+    if version == 2:
+        drift, decisions = data.get("drift"), data.get("decisions")
+        if (
+            not isinstance(drift, dict)
+            or not all(isinstance(keys, list) for keys in drift.values())
+            or not isinstance(decisions, dict)
+            or not all(isinstance(n, int) and n >= 0 for n in decisions.values())
+        ):
+            fail(
+                "a version 2 file maps each category to its drift and its decisions' count"
+            )
+        return (
+            Counter({category: len(keys) for category, keys in drift.items()}),
+            sum(decisions.values()),
+        )
+    fail(f"unknown version {version!r}")
+
+
 def point(sha: str | None, date: str, text: str, collected: tuple[str, ...]) -> dict:
-    file = RATCHET["parse"](json.loads(text), f"{sha or 'working tree'}:{DRIFT}")
-    counts = Counter(entry["category"] for entry in file["entries"])
+    counts, decisions = counts_of(text, f"{sha or 'working tree'}:{DRIFT}")
     return {
         "sha": sha,
         "date": date,
@@ -62,7 +105,7 @@ def point(sha: str | None, date: str, text: str, collected: tuple[str, ...]) -> 
             for category in RATCHET["COLLECTED"]
         },
         "total": sum(counts.values()),
-        "decisions": len(file["decisions"]),
+        "decisions": decisions,
     }
 
 

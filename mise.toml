@@ -47,8 +47,8 @@ node = "22"
 "cargo:cargo-deny" = "0.20.2"
 "aqua:rhysd/actionlint" = "1.7.12"
 # `ratchet:check`'s Rust collectors. A tree-sitter grammar update can change what a rule
-# matches, and the ratchet fails on any change in what's found. CI installs the same release by
-# checksum (ci.yml's `security` job, a required check).
+# matches, and the ratchet's sentinel fails on any change in what it finds. CI installs the same
+# release by checksum (ci.yml's `security` job, a required check).
 "aqua:ast-grep/ast-grep" = "0.43.0"
 
 [settings]
@@ -883,15 +883,17 @@ tools = { "cargo:cargo-mutants" = "27.1.0" }
 run = "./tools/check-mutants.py"
 
 [tasks."ratchet:check"]
-description = "Fail on new drift (layering, parity gaps, untraced requirements), and on a fix verify/ratchet/drift.json doesn't record yet"
-# `verify/ratchet/drift.json` is the count of places a driving adapter does work that belongs below it,
-# of parity gaps (#271) and of untraced requirements (#295), each with the issue that removes it. A pass/fail rule can't say whether that count is
+description = "Fail on drift (layering, parity gaps, untraced requirements) the merge base doesn't have, and on a stale decision"
+# Drift is the places a driving adapter does work that belongs below it, the parity gaps (#271)
+# and the untraced requirements (#295). A pass/fail rule can't say whether that count is
 # shrinking, and `tests/thinness.rs` showed it can move drift sideways: it pushed an upload into
-# an `aws s3 cp` subprocess it couldn't see. The script's docstring has the four rules.
+# an `aws s3 cp` subprocess it couldn't see. The script collects the drift from the working tree
+# and from the merge base's tree, exported from git, and fails on drift the base doesn't have;
+# its docstring has the four rules.
 #
-# In `check` for `model:check`'s reason: `cargo metadata --no-deps --offline` and ast-grep over
-# local files, so no network, no credentials, no money. Rule 3 compares with the merge base of
-# HEAD and origin/main, a local ref; CI passes the PR's base branch, or HEAD^ on main.
+# In `check` for `model:check`'s reason: `git archive`, `cargo metadata --no-deps --offline` and
+# ast-grep over local files, so no network, no credentials, no money. The base is the merge base
+# of HEAD and origin/main, a local ref; CI passes the PR's base branch, or HEAD^ on main.
 #
 # The unit tests run first because they build throwaway workspaces and run both tools over them;
 # if a tool changed under the pin, the tests say so before the gate reads the tree through it.
@@ -900,11 +902,13 @@ run = [
   "./tools/ratchet.py",
 ]
 
-[tasks."ratchet:update"]
-description = "Delete the entries verify/ratchet/drift.json holds for drift that's gone. Never adds one"
-# Adding an entry is a hand edit on purpose, and the check refuses one the base branch doesn't
-# have: new drift is fixed or recorded as a decision with its reason, never waved through.
-run = "./tools/ratchet.py update"
+[tasks."ratchet:snapshot"]
+description = "Rewrite verify/ratchet/drift.json, the drift snapshot the docs site charts, from the tree"
+# Not in `check`, and not part of a change that fixes drift: the check never reads the snapshot,
+# so a fix leaves it alone and two fixes can't conflict in it. It's rewritten in a change of its
+# own, which is what adds a point to the chart; `./tools/ratchet.py snapshot --check` fails while
+# it's stale.
+run = "./tools/ratchet.py snapshot"
 
 [tasks."trace:check"]
 description = "Every traced requirement appears in the model, a Gherkin tag, a fuzz harness and a test that name it, and the code; docs/TRACEABILITY.md is current"
