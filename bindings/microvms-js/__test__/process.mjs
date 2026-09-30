@@ -196,9 +196,9 @@ test('one interleaved SSE channel becomes two independent byte streams', async (
   // that sent every frame to both, or that keyed on the wrong field, would still deliver the
   // right total byte count.
   //
-  // **Guard proof.** Sending every frame to `out_tx` regardless of the discriminator — the
-  // shape of a bridge that forgot to demultiplex — makes this red, along with the order and
-  // both-streams-reconnect tests. Verified.
+  // **Guard proof.** Routing every frame to stdout regardless of the discriminator (in core's
+  // `session/split.rs`, the shape of a bridge that forgot to demultiplex) makes this red, along
+  // with the order and both-streams-reconnect tests.
   const server = await startSpawnServer([
     [
       outputFrame(0, 'out-one\n', 'stdout'),
@@ -348,15 +348,15 @@ test('a gap errors both streams by default and names the range to resume from', 
   // which side's bytes were evicted: erroring only one would leave the other looking complete
   // when it may be the truncated one.
   //
-  // **Guard proof.** Forcing `error_on_gap = false` in the drive — i.e. making `'event'` the
-  // only behaviour — makes this red: both loops finish normally, `out.text` is
+  // **Guard proof.** Mapping `GapPolicy.Error` onto core's `GapPolicy::Event`, making `'event'`
+  // the only behaviour, makes this red: both loops finish normally, `out.text` is
   // `'beforeafter'`, and a consumer reading it cannot tell that 894 bytes are missing.
-  // Verified.
   //
-  // **Falsification**: putting the bare `napi::Error::new(GenericFailure, message)` back in the
-  // drive's gap branch turns this red with `undefined` for the code, and so does a stderr copy
-  // of the rejection that drops its `cause`. A stderr copy that keeps the chain but blanks its
-  // reason turns it red on the stderr message.
+  // **Falsification**: converting a channel's error to a bare
+  // `napi::Error::new(GenericFailure, message)` in `process.rs`'s `chunk` turns this red with
+  // `undefined` for the code. Core's stderr copy of the rejection (`twin` in
+  // `session/split.rs`) turns it red on stderr when it drops the wire kind, and on the stderr
+  // message when it blanks the text.
   const server = await startSpawnServer([
     [
       outputFrame(0, 'before', 'stdout'),
@@ -464,10 +464,10 @@ test('an exhausted reconnect budget rejects both streams with its code', async (
   // on the first one, so the drive itself fails. The code is what lets a caller tell a budget it
   // could retry from a refusal it can't; no daemon status is involved, so there's no wire kind.
   //
-  // **Falsification**: flattening the drive error to `error.to_string()` in a bare
-  // `napi::Error::new(GenericFailure, message)` turns this red with `undefined` for the code.
-  // Rebuilding the error with its kind but a message of the binding's own turns it red on the
-  // message, which must stay the drive error's own text.
+  // **Falsification**: flattening a channel's error to `error.to_string()` in a bare
+  // `napi::Error::new(GenericFailure, message)` in `process.rs`'s `chunk` turns this red with
+  // `undefined` for the code. Rebuilding the drive error in core's split with its kind but a
+  // message of its own turns it red on the message, which must stay the drive error's own text.
   const server = await startSpawnServer([[outputFrame(0, 'AA', 'stdout')]]);
   try {
     const proc = await spawnAgainst(server, { maxReconnects: 0 });
@@ -504,10 +504,11 @@ test('a refused reconnect rejects both streams with its code and wire kind', asy
   // The reconnect reaches the daemon and it answers 401, so both levels of the chain are there:
   // the code a caller branches on and the daemon's status class under it.
   //
-  // **Falsification**: flattening the drive error to `error.to_string()` in a bare
-  // `napi::Error::new(GenericFailure, message)` turns this red with `undefined` for the code.
-  // Rebuilding the error with its kind and wire kind but a message of the binding's own turns it
-  // red on the message, which must still name the request and the status.
+  // **Falsification**: flattening a channel's error to `error.to_string()` in a bare
+  // `napi::Error::new(GenericFailure, message)` in `process.rs`'s `chunk` turns this red with
+  // `undefined` for the code. Rebuilding the drive error in core's split with its kind and wire
+  // kind but a message of its own turns it red on the message, which must still name the request
+  // and the status.
   const server = await startSpawnServer([[outputFrame(0, 'AA', 'stdout')], { status: 401 }]);
   try {
     const proc = await spawnAgainst(server);
@@ -549,8 +550,9 @@ test('a stderr reader gets the drive error while a stdout chunk sits unread', as
   // the caller reads stderr to the end before it touches stdout, the order a harness that
   // collects stderr first uses. stderr's rejection must not wait on the stdout reader.
   //
-  // **Falsification**: sending the two rejections one after the other, stdout first, turns this
-  // red: stdout's send parks on the unread chunk, so stderr's read never settles.
+  // **Falsification**: sending the two rejections one after the other, stdout first (core's
+  // `reject_both` in `session/split.rs`), turns this red: stdout's send parks on the unread
+  // chunk, so stderr's read never settles.
   const server = await startSpawnServer([[outputFrame(0, 'AA', 'stdout')]]);
   try {
     const proc = await spawnAgainst(server, { maxReconnects: 0 });
