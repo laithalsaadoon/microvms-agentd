@@ -76,7 +76,7 @@ the trap ladder.
 | Bindings | `pyo3 = "0.29"` with `abi3-py39`; `napi = "3"` with `napi5` + `async` + `web_stream` | `bindings/microvms-py/Cargo.toml:38`, `bindings/microvms-js/Cargo.toml:44-48` |
 | Verification tiers | `stateright = "0.31"`, `turmoil = "0.7.2"`, `proptest = "1.11"` | `crates/model/Cargo.toml:10`, `crates/agentd/Cargo.toml:76`, `crates/agentd/Cargo.toml:73` |
 | Live suite | PEP 723 inline script under `uv`, `boto3` + `httpx` | `conformance/run_rs.py:1-5` |
-| Build gate | `mise run check` — lint, security, tests, schema, manifest, Python stubs, TypeScript declarations, model drift, publishability, live wiring, build, background example, traceability | `mise.toml:440-456` |
+| Build gate | `mise run check` — lint, security, tests, schema, manifest, Python stubs, TypeScript declarations, model drift, publishability, live wiring, build, background example, traceability | `.config/mise/tasks/check.toml:4-32` |
 
 ## Module map
 

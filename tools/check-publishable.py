@@ -47,6 +47,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+import mise_config
+
 #: The crates that go to crates.io, and nothing else.
 #:
 #: An allowlist, for the reason `crates/microvms-cli/tests/thinness.rs` gives about its own
@@ -81,7 +83,7 @@ MAX_CATEGORIES = 5
 #: `cargo test -p protocol` as the example of what *does not* work — so scanning docs here
 #: would fail the gate on its own documentation.
 #:
-#: Every workflow or `mise.toml` that runs cargo with a selector must be listed; the check
+#: Every workflow or mise task file that runs cargo with a selector must be listed; the check
 #: below reports one that isn't, because a surface left off this list is one whose stale
 #: selector passes (the #277 review found workflows missing from it).
 SELECTOR_FILES = (
@@ -90,11 +92,14 @@ SELECTOR_FILES = (
     ".github/workflows/fuzz.yml",
     ".github/workflows/live-conformance.yml",
     ".github/workflows/release.yml",
-    "mise.toml",
+    ".config/mise/tasks/contracts.toml",
+    ".config/mise/tasks/live.toml",
+    ".config/mise/tasks/release.toml",
 )
 
-#: Where an executable cargo selector can live, for the listing check above.
-SELECTOR_SURFACES = (".github/workflows/*.yml", "mise.toml")
+#: Where an executable cargo selector can live, for the listing check above: the workflows,
+#: and every file mise reads tasks from, as tools/mise_config.py lists them (`Config.files`).
+SELECTOR_SURFACES = (".github/workflows/*.yml",)
 
 #: Workflows whose addon build matrix must cover exactly `napi.targets`.
 #:
@@ -207,6 +212,10 @@ def stale_selectors(names: set[str]) -> list[str]:
     surfaces = {
         p.as_posix() for pattern in SELECTOR_SURFACES for p in Path().glob(pattern)
     }
+    try:
+        surfaces |= set(mise_config.load(Path()).files)
+    except mise_config.Unreadable as error:
+        failures.append(f"the mise config can't be read for its task files: {error}")
     # The listing check is only as wide as the glob. One that reached nothing would pass it
     # vacuously, so it must at least reach every listed file.
     unreached = [f for f in SELECTOR_FILES if Path(f).exists() and f not in surfaces]

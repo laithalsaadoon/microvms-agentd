@@ -1117,6 +1117,10 @@ impl PySandbox {
 
     /// Launches a MicroVM, waits for RUNNING, and returns its session.
     ///
+    /// `image_identifier` is an image ARN or a bare image name, or omitted for the image
+    /// `build_image` built. The core resolves a name to its ARN with one `ListMicrovmImages`
+    /// read, and a name no image carries raises `PreconditionError` before anything launches.
+    ///
     /// `egress` requests the managed INTERNET_EGRESS connector. Omission does not block
     /// outbound traffic. For no egress, pass existing VPC connector ARNs through
     /// `egress_network_connectors`, using a VPC without an internet gateway or NAT

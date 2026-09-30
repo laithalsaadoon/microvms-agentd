@@ -1158,7 +1158,10 @@ export interface AgentImageOptions {
 
 /** Everything a launch takes beyond what the layer fixes (egress on, the image). */
 export interface AgentLaunchOptions {
-  /** The image ARN from `findImage` or `buildImage`. */
+  /**
+   * The image ARN from `findImage` or `buildImage`, or a bare image name, which the core
+   * resolves with one `ListMicrovmImages` read.
+   */
   imageIdentifier: string
   /** The execution role. Optional in the model; every real launch needs one. */
   executionRoleArn?: string
@@ -2076,7 +2079,12 @@ export interface ProvisionOptions {
 
 /** Everything a launch needs. */
 export interface RunOptions {
-  /** The image to launch, or omitted for the one `buildImage` built. */
+  /**
+   * The image to launch, as an ARN or a bare image name, or omitted for the one
+   * `buildImage` built. The core resolves a name to its ARN with one `ListMicrovmImages`
+   * read, and a name no image carries is refused with `ERR_PRECONDITION` before anything
+   * launches.
+   */
   imageIdentifier?: string
   /**
    * `imageVersion`, or omitted for the image's own latest active version.

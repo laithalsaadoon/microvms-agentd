@@ -21,7 +21,9 @@ mise gives every task one environment, so a plain `cargo` command in a task's `r
 - the rustdoc JSON walk (`tools/rustdoc_walk.py`'s `build`), which sets `RUSTC_BOOTSTRAP` inside
   the script, builds into a directory under cargo's target rather than the target itself.
 
-A build some other script runs inside itself isn't visible from `mise.toml`, and a scan of the
+The tasks are read through tools/mise_config.py, the loader every gate that reads them shares,
+so a task in any file mise.toml includes is scanned. A build some other script runs inside itself
+isn't visible from the tasks, and a scan of the
 scripts' source can't tell a build from the cargo argv their fixtures and fakes hold, so a new one
 is review's to catch. To measure one: `cargo test --all --no-run`, then the task, then that
 command again, which must find nothing to rebuild (`-v` prints why a unit is dirty).
@@ -34,7 +36,6 @@ import stat
 import sys
 import tempfile
 import textwrap
-import tomllib
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,6 +44,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import mise_config  # noqa: E402
 import rustdoc_walk  # noqa: E402
 
 # The cargo subcommands that compile into the target. `publish` and `package` aren't here: their
@@ -127,10 +129,8 @@ def builds(name: str, task: dict) -> list[Build]:
 
 
 def scan(root: Path) -> tuple[list[str], list[Build]]:
-    """`check`'s closure in `root`'s mise.toml, and every build its `run` lines run."""
-    tasks = tomllib.loads((root / "mise.toml").read_text(encoding="utf-8")).get(
-        "tasks", {}
-    )
+    """`check`'s closure in `root`'s mise tasks, and every build its `run` lines run."""
+    tasks = mise_config.load(root).tables()
     names = closure(tasks)
     return names, [b for name in names for b in builds(name, tasks[name])]
 
@@ -284,6 +284,19 @@ class RunLineRules(unittest.TestCase):
             run = "uvx maturin@1.14.1 develop --target-dir target/d"
             """
         self.assertEqual(self.unowned_tasks(mise), ["a", "c"])
+
+    def test_a_task_in_an_included_file_is_scanned(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            (root / "mise.toml").write_text(
+                '[task_config]\nincludes = ["tasks/*.toml"]\n\n'
+                '[tasks.check]\ndepends = ["a"]\n'
+            )
+            (root / "tasks").mkdir()
+            (root / "tasks" / "a.toml").write_text(
+                '[a]\nrun = "RUSTC_BOOTSTRAP=1 cargo doc --no-deps"\n'
+            )
+            self.assertEqual(sorted(unowned(scan(root)[1])), ["a"])
 
     def test_a_task_outside_checks_closure_is_not_read(self):
         mise = """

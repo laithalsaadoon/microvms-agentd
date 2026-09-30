@@ -146,6 +146,46 @@ async fn a_launch_from_an_existing_image_reports_that_images_name() {
     assert_eq!(envelope["data"]["imageIdentifier"], arn);
 }
 
+/// **A refused launch by bare name reports the ARN core resolved, and the image's own name.**
+///
+/// Core resolves the name inside `Sandbox::run` (#253), so the CLI reads the ARN back off the
+/// sandbox after the launch rather than from a resolution of its own. The refusal is the case
+/// that needs the sandbox's record: no VM was accepted, so `microvm()` has nothing to say.
+///
+/// **Falsification**: drop the `launch_image_arn` read after the select in `run`, and the
+/// envelope has no `imageIdentifier` and names the invocation's default image.
+#[tokio::test]
+async fn a_refused_launch_by_name_reports_the_resolved_image() {
+    let dir = TempDir::new("resolve-refused");
+    let transport = Arc::new(ScriptedTransport::new());
+    transport
+        .answer(
+            "ListMicrovmImages",
+            200,
+            &list_images_body(&["coding-agents"], None),
+        )
+        .answer("RunMicrovm", 400, r#"{"message": "scripted stop"}"#);
+    let seam = ScriptedSeam {
+        transport: Arc::clone(&transport),
+        clock: Arc::new(YieldingClock::default()),
+    };
+    let command = Command::Run(Box::new(run_args_for_image("coding-agents", dir.0.clone())));
+    let (result, _) = dispatch_with(&seam, &command, full_infra()).await;
+    let failure = result.expect_err("the scripted RunMicrovm failure ends the run");
+    let envelope = crate::envelope::error(&failure);
+    assert_eq!(
+        envelope["data"]["imageIdentifier"],
+        "arn:aws:lambda:us-east-1:123456789012:microvm-image:coding-agents",
+        "the envelope names the ARN the launch asked for: {envelope}"
+    );
+    assert_eq!(envelope["data"]["imageName"], "coding-agents", "{envelope}");
+    assert_eq!(
+        transport.called("ListMicrovmImages"),
+        1,
+        "resolved once, in core"
+    );
+}
+
 /// **`run --launch-env` reaches the `runHookPayload` the daemon parses.**
 ///
 /// Asserted on the wire body rather than on `RunArgs`, because the flag existing and the
