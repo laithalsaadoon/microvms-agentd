@@ -35,6 +35,7 @@ mod exit_codes;
 mod files;
 mod health;
 mod history;
+mod image;
 mod interrupt;
 mod ls;
 mod names;

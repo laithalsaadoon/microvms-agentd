@@ -1,0 +1,52 @@
+# ── the CLI's image commands (#264) ───────────────────────────────────────────
+
+# `image-set-status` sending ACTIVE whatever the argument says: the scripted INACTIVE readback
+# then disagrees with the request, core refuses it, and the guard's command fails.
+[[fault]]
+id = "cli-image-set-status-ignores-status"
+guard = "guards::image::image_set_status_sends_one_update_with_the_status_and_reports_the_readback"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::image::image_set_status_sends_one_update_with_the_status_and_reports_the_readback"]
+expect = "test-failed"
+suite = "rust"
+message = "the update is answered with the status asked for"
+note = "crates/microvms-cli/src/guards/image.rs::image_set_status_sends_one_update_with_the_status_and_reports_the_readback"
+transform = { file = "crates/microvms-cli/src/commands/image.rs", replace = "        .set_image_version_status(&image_arn, &args.image_version, args.status)\n", with = "        .set_image_version_status(&image_arn, &args.image_version, microvms_core::control::ops::VersionStatus::Active)\n" }
+
+# The live section's round trip, through the self-test's fake CLI: a check that stops reading
+# the pinned launch, a round trip that never restores, a launch attempted on a version the
+# retire didn't reach, and a version picked from an image with more than one.
+[[fault]]
+id = "conformance-image-versions-pinned-unread"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/image_versions.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "a service that launches an INACTIVE version: failed []"
+transform = { file = "conformance/lanes/image_versions.py", replace = "        isinstance(pinned, KindError),\n", with = "        True,\n" }
+
+[[fault]]
+id = "conformance-image-versions-no-restore"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/image_versions.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "a service that enforces the retire: failed"
+transform = { file = "conformance/lanes/image_versions.py", replace = "        restored = call(cli, \"image-set-status\", image_arn, version, \"ACTIVE\")\n", with = "        restored = retired\n" }
+
+[[fault]]
+id = "conformance-image-versions-launch-unguarded"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/image_versions.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "a retire that doesn't take: failed"
+transform = { file = "conformance/lanes/image_versions.py", replace = "        if isinstance(retired, Envelope) and retired.data.get(\"status\") == \"INACTIVE\":\n", with = "        if True:\n" }
+
+[[fault]]
+id = "conformance-image-versions-any-version"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/image_versions.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "an image with two versions: failed"
+transform = { file = "conformance/lanes/image_versions.py", replace = "    version = str(active[0].get(\"imageVersion\") or \"\") if len(versions) == 1 else \"\"\n", with = "    version = str(active[0].get(\"imageVersion\") or \"\") if active else \"\"\n" }
