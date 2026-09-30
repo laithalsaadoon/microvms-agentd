@@ -131,8 +131,7 @@ pub enum ErrorKind {
 - **Node callers cannot read `.code`.** `bindings/microvms-js/src/errors.rs:16-38` records the measured
   collapse: `code="ERR_INVALID_ARG"` on a sync export, `code="GenericFailure"` through a
   Promise rejection. The contract is `err.cause.message`, which is exactly the `ERR_*` string
-  on every path (`bindings/microvms-js/src/errors.rs:70-80`). Restates
-  `.erpaval/solutions/api-patterns/napi-async-collapses-error-codes.md`.
+  on every path (`bindings/microvms-js/src/errors.rs:70-80`).
 
 **Drift risk:** adding a kind is forced into the exhaustive matches
 (`crates/microvms-domain/src/error.rs:188`, `crates/microvms-cli/src/exit.rs:141`,
@@ -243,8 +242,7 @@ pub struct Session {
   different answers during a launch, so a probing constructor would conflate them.
 - **`agent_token()` is readable but never printed.** `crates/microvms-app/src/session/mod.rs:182-191`
   makes it public because a reattaching caller needs it; the hand-written `Debug` at
-  `:396-405` drops it. Restates
-  `.erpaval/solutions/best-practices/credential-structs-never-derive-debug.md`.
+  `:396-405` drops it.
 - **`Session::direct` is a supported shape, not a test escape hatch**
   (`crates/microvms-app/src/session/mod.rs:208-213`) — the conformance path and every local-binary
   test go through it, so proxy-auth headers being absent is a valid state rather than a bug.
@@ -254,8 +252,7 @@ pub struct Session {
   (`crates/microvms-app/src/session/mod.rs:418-432`).
 - **The HTTP backend is a replaceable seam** (`crates/microvms-app/src/session/mod.rs:434-439`),
   which is what lets `crates/microvms-core/tests/turmoil_client.rs` drive the real client under
-  simulated network faults. Restates
-  `.erpaval/solutions/api-patterns/axum-listener-trait-enables-turmoil.md`.
+  simulated network faults.
 
 **Drift risk:** the port a session was built with is also the port its proxy token is scoped
 to (`crates/microvms-app/src/session/mod.rs:441-446`), so a consumer that changes the agent port
@@ -411,8 +408,7 @@ pub struct Sandbox {
   leak nobody can clean up" (`crates/microvms-app/src/sandbox.rs:495-509`), and the build log group
   lands there unconditionally: this crate cannot delete it.
 - **`image_deleted: Option<bool>`** distinguishes "deletion was not asked for" from
-  "deletion failed" (`crates/microvms-app/src/sandbox.rs:513`). Restates
-  `.erpaval/solutions/architecture-patterns/an-absent-value-is-not-a-neutral-one.md`.
+  "deletion failed" (`crates/microvms-app/src/sandbox.rs:513`).
 - **`Debug` omits the agent token** (`crates/microvms-app/src/sandbox.rs:666-670`), so a consumer
   logging a sandbox does not leak the credential.
 
@@ -470,8 +466,8 @@ impl StreamKind {
 
 - **One shared byte-offset space across both pipes.** `crates/protocol/src/exec.rs:76-78` states it,
   and every reconnect depends on it: a client resumes with a single `?offset=N`
-  (`crates/protocol/src/exec.rs:171-178`). Restates
-  `.erpaval/solutions/architecture-patterns/byte-offset-cursor-is-what-makes-reconnect-work.md`.
+  (`crates/protocol/src/exec.rs:171-178`). The daemon's reason for the cursor is in its
+  module docs (`crates/agentd/src/exec.rs:34-37`).
 - **A gap is attributed to the stream a *later* frame named**, not to one the gap frame
   carried — `bindings/microvms-js/src/process.rs:159-169` names this as the field a reader would guess
   wrong. So a consumer demultiplexing into two channels cannot attribute a gap without
@@ -890,8 +886,8 @@ pub const EVENT_EXIT: &str = "exit";
 - **The absence of an `exit` event is the signal, not silence.**
   `crates/protocol/src/exec.rs:195-197` and `crates/microvms-app/src/session/sse.rs:253-255` — a raw byte
   stream cannot distinguish a finished command from a dropped connection, so the terminal
-  typed event is what makes the difference observable. Restates
-  `.erpaval/solutions/architecture-patterns/byte-offset-cursor-is-what-makes-reconnect-work.md`.
+  typed event is what makes the difference observable. The daemon chose SSE over a raw
+  chunked body for that reason (`crates/agentd/src/exec.rs:37-39`).
 - **`GapEvent.from` is inclusive and `to` is exclusive**, so `to` is where a cursor resumes
   (`crates/microvms-app/src/session/sse.rs:249-252`). Nothing in the wire type says this — it is a
   client-side convention documented only at the consumer.

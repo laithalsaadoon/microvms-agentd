@@ -632,10 +632,9 @@ pub(super) fn script_prov_build(transport: &ScriptedTransport) {
 // So this section scripts the *daemon* rather than refusing at the seam:
 // `Session::builder(..).with_backend(..)` is public, so a queue of canned HTTP replies is a real
 // session over a fake wire. Every reply body below is a **literal** written from the protocol
-// crate's own field names, for the reason `ScriptedTransport` gives above and the reason lesson #5
-// in `.erpaval/solutions/test-failures/guards-that-passed-against-broken-code.md` gives: a fake
-// built by calling the same serializer the code under test calls cannot disagree with it, and
-// therefore cannot catch a shape error. These can.
+// crate's own field names, for the reason `ScriptedTransport` gives above: a fake built by
+// calling the same serializer the code under test calls cannot disagree with it, and therefore
+// cannot catch a shape error. These can.
 
 /// A queue of canned HTTP replies, keeping every request that was sent.
 ///
