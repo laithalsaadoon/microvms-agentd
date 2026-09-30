@@ -782,7 +782,7 @@ id = "retryable"
 core = "microvms_core::error::Error::retryable"
 cli = { exempt = "the exit code's row says it" }
 py = "MicrovmError"
-ts = { exempt = "no retryable on any error", issue = "#256" }
+ts = "isRetryable"
 
 # ── the CLI's own commands ───────────────────────────────────────────────────
 

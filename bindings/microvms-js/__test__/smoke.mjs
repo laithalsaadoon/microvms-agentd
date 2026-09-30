@@ -352,9 +352,9 @@ test('every ERR_ code is enumerable and there are thirteen', () => {
   assert.equal(new Set(codes).size, 13);
 });
 
-test('every wire kind is enumerable and there are thirteen', () => {
+test('every wire kind is enumerable and there are fourteen', () => {
   const kinds = wireKinds();
-  assert.equal(kinds.length, 13);
+  assert.equal(kinds.length, 14);
   // The load-bearing pair: 400 and 404 are different things, and the conformance oracle
   // asserts on exactly these names.
   assert.ok(kinds.includes('ProtocolError'));
