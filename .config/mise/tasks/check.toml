@@ -28,6 +28,7 @@ depends = [
   "conformance:self-test",
   "agents:check",
   "changelog:check",
+  "pr-body:check",
   "build",
   "background:check",
   "trace:check",

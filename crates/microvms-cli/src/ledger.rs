@@ -333,6 +333,21 @@ impl Names {
     pub fn release_by_vm(&self, microvm_id: &str) -> Vec<String> {
         self.store.release_by_vm(microvm_id).unwrap_or_default()
     }
+
+    /// Every readable record, sorted by name.
+    pub fn list(&self) -> Result<Vec<NameRecord>, microvms_core::Error> {
+        self.store.list()
+    }
+
+    /// Removes `name`, answering whether a record was there.
+    pub fn delete(&self, name: &str) -> Result<bool, microvms_core::Error> {
+        self.store.delete(name)
+    }
+
+    /// Where the registry lives, for a message that names it.
+    pub fn describe(&self) -> String {
+        self.store.describe()
+    }
 }
 
 /// Every ledger under `root`, oldest first.

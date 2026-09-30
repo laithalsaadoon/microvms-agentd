@@ -935,8 +935,9 @@ impl Sandbox {
         Ok(self.image.as_ref().expect("just assigned"))
     }
 
-    /// Builds or reuses the content-addressed image for `request` (#221). Not yet
-    /// implemented.
+    /// Builds or reuses the content-addressed image for `request` (#221): the name, the
+    /// decision after each describe, the upload and the create race are
+    /// [`crate::control::ensure`]'s.
     pub async fn ensure_image(
         &mut self,
         request: crate::control::EnsureImageRequest,
@@ -1028,6 +1029,12 @@ impl Sandbox {
     /// The content hash `build --reuse` keys an image name to. Local; zero calls.
     pub fn artifact_content_hash_for(&self, request: &CreateImageRequest) -> String {
         self.control.artifact_content_hash_for(request)
+    }
+
+    /// The Dockerfile `request` builds with; see [`ControlPlane::dockerfile_for`]. Local;
+    /// zero calls.
+    pub fn dockerfile_for(&self, request: &CreateImageRequest) -> String {
+        self.control.dockerfile_for(request)
     }
 
     /// The versions of a managed base image, for pinning

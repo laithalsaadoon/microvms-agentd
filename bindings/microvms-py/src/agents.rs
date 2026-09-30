@@ -45,7 +45,7 @@ use crate::errors::{CoreError, PyCoreResult};
 use crate::exec::{PyExecHandle, PyExecResult, seconds};
 use crate::region::PyRegion;
 use crate::runtime;
-use crate::sandbox::{PyImage, PySandbox, PyTeardownReport};
+use crate::sandbox::{PyEnsuredImage, PyImage, PySandbox, PyTeardownReport};
 use crate::session::PySession;
 
 /// One agent to install: its name, and the two defaults a caller may override.
@@ -528,8 +528,8 @@ impl PyAgentVm {
 
     /// The image name for these specs and this daemon binary: `agent-vm-<agents>-<hash12>`.
     ///
-    /// Content-addressed, so an unchanged binary and spec set name the image a previous
-    /// run built; `find_image` looks it up.
+    /// Content-addressed, so an unchanged binary, spec set and size name the image a previous
+    /// run built; `find_image` looks it up, and `ensure_image` builds or reuses it.
     #[pyo3(signature = (*, binary, build_role_arn, size=None))]
     fn image_name(
         &self,
@@ -554,6 +554,37 @@ impl PyAgentVm {
             runtime::block_on_detached(sandbox.find_image_by_name(&name))
         })?;
         Ok(found.map(|image| image.image_arn))
+    }
+
+    /// Builds or reuses this VM's image, named per `image_name`: returned at once when ready,
+    /// waited on while building, deleted and rebuilt when failed, and uploaded to
+    /// `s3://<s3_bucket>/<s3_key_prefix>/<name>/artifact.zip` only when a build is needed.
+    #[pyo3(signature = (*, binary, build_role_arn, s3_bucket, size=None, s3_key_prefix=None))]
+    fn ensure_image(
+        &self,
+        py: Python<'_>,
+        binary: Vec<u8>,
+        build_role_arn: &str,
+        s3_bucket: &str,
+        size: Option<PySizeClass>,
+        s3_key_prefix: Option<String>,
+    ) -> PyCoreResult<PyEnsuredImage> {
+        let size = size.map(|size| size.inner).unwrap_or(DEFAULT_SIZE);
+        let request = self.read(|sandbox| {
+            agents::ensure_request_for(
+                sandbox,
+                &self.specs,
+                binary,
+                build_role_arn,
+                size,
+                s3_bucket,
+                s3_key_prefix,
+            )
+        })?;
+        let ensured = self.detached(py, move |sandbox| {
+            runtime::block_on_detached(sandbox.ensure_image(request))
+        })?;
+        Ok(PyEnsuredImage::from(ensured))
     }
 
     /// The artifact bytes to upload to `s3://<bucket>/<image_name>.zip` before `build_image`.

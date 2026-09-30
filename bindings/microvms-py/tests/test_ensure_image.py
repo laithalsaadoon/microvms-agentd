@@ -80,3 +80,27 @@ def test_the_result_class_is_built_by_the_binding_only() -> None:
         microvms.EnsuredImage()  # type: ignore[call-arg]
     for field in ("image", "reused", "artifact_uri", "uploaded", "warnings"):
         assert hasattr(microvms.EnsuredImage, field)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "cause"),
+    [
+        ({"s3_bucket": "Not_A_Bucket"}, "bucket"),
+        ({"build_role_arn": "not-an-arn"}, "buildRoleArn"),
+        ({"s3_key_prefix": "a\nb"}, "key prefix"),
+    ],
+)
+def test_an_agent_vm_ensures_its_image_through_cores_local_refusals(
+    overrides: dict[str, object], cause: str
+) -> None:
+    """#258: `AgentVm.ensure_image` is `Sandbox.ensure_image` over the agents' request, so
+    core refuses the same inputs before any call."""
+    vm = microvms.AgentVm(microvms.Region.us_east_1(), [microvms.AgentSpec.codex()])
+    arguments: dict[str, object] = {
+        "binary": b"\x7fELF\x02\x01" + bytes(12) + b"\xb7\x00",
+        "build_role_arn": ROLE,
+        "s3_bucket": BUCKET,
+    }
+    arguments.update(overrides)
+    with pytest.raises(microvms.InvalidArgError, match=cause):
+        vm.ensure_image(**arguments)  # type: ignore[arg-type]
