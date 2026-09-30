@@ -905,7 +905,8 @@ fn exit_of(events: &[Sse]) -> Option<&Sse> {
 // 1. The harness is real
 // ---------------------------------------------------------------------------
 
-/// Bootstrap and an authorized control request, over the simulated network.
+/// Bootstrap and an authorized control request, over the simulated network: the hook installs
+/// the token (AGENTD-2), and a control request presenting it is served (AGENTD-6).
 ///
 /// This exists to keep every other test in this file honest. If the listener
 /// adapter, the DNS name, or the port were wrong, the failures below would all
@@ -1021,7 +1022,8 @@ fn a_launch_env_from_the_run_hook_reaches_a_child_and_a_request_overrides_it() -
     sim.run()
 }
 
-/// An unbootstrapped daemon answers 503, and only a bad credential gets 401.
+/// An unbootstrapped daemon answers 503 (AGENTD-1), and only a bad credential gets 401
+/// (AGENTD-5).
 ///
 /// These two codes carry different instructions to a client: 503 means the VM is
 /// not ready and the request is worth retrying, while 401 means the token is wrong

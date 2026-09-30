@@ -67,7 +67,8 @@ pub struct ExitRow {
     pub finding: &'static str,
 }
 
-/// The exit-code contract. Append-only.
+/// The exit-code contract (CLI-3): a stable code per documented failure class, and `Unexpected`
+/// for an error no class claims. Append-only.
 ///
 /// `#[repr(u8)]` with explicit discriminants so the integer a shell sees is written down
 /// beside the name rather than inferred from declaration order — a variant inserted in the

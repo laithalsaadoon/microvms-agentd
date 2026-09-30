@@ -451,14 +451,36 @@ impl Model for Agentd {
             Property::<Self>::always("attacker never authorized", |_, state| {
                 !state.attacker_authorized
             }),
-            Property::<Self>::always("bootstrap is one-shot", |_, state| {
+            Property::<Self>::always("AGENTD-3 bootstrap is one-shot", |_, state| {
                 state.token_replacements == 0
             }),
             Property::<Self>::always(
-                "only the installed token is accepted",
+                "AGENTD-3 only the installed token is accepted",
                 |_, state| match state.last {
                     Some((Action::RunHook { token, .. }, Response::Ok)) => {
                         state.installed_token() == Some(token)
+                    }
+                    _ => true,
+                },
+            ),
+            // Only a hook moves `boot`, and every state starts uninitialized, so the first hook
+            // is the one that found no token installed.
+            Property::<Self>::always(
+                "AGENTD-2 the first bootstrap installs its token",
+                |_, state| match state.last {
+                    Some((Action::RunHook { token, .. }, response)) if state.hooks_seen == 1 => {
+                        response == Response::Ok && state.installed_token() == Some(token)
+                    }
+                    _ => true,
+                },
+            ),
+            Property::<Self>::always(
+                "AGENTD-4 a bootstrap presenting the installed token is accepted",
+                |_, state| match state.last {
+                    Some((Action::RunHook { token, .. }, response))
+                        if state.installed_token() == Some(token) =>
+                    {
+                        response == Response::Ok
                     }
                     _ => true,
                 },
@@ -468,6 +490,30 @@ impl Model for Agentd {
                 |_, state| match state.last {
                     Some((Action::Control { .. }, response)) => {
                         state.boot != Boot::Uninitialized || response == Response::Unavailable
+                    }
+                    _ => true,
+                },
+            ),
+            // A control request changes no token, so the installed one after it is the one it
+            // was checked against.
+            Property::<Self>::always(
+                "AGENTD-5 a control request presenting another token is refused",
+                |_, state| match (state.last, state.installed_token()) {
+                    (Some((Action::Control { token, .. }, response)), Some(installed))
+                        if installed != token =>
+                    {
+                        response == Response::Unauthorized
+                    }
+                    _ => true,
+                },
+            ),
+            Property::<Self>::always(
+                "AGENTD-6 a control request presenting the installed token is accepted",
+                |_, state| match (state.last, state.installed_token()) {
+                    (Some((Action::Control { token, .. }, response)), Some(installed))
+                        if installed == token =>
+                    {
+                        response != Response::Unauthorized && response != Response::Unavailable
                     }
                     _ => true,
                 },
@@ -574,7 +620,7 @@ mod tests {
             .checker()
             .spawn_bfs()
             .join()
-            .assert_no_discovery("bootstrap is one-shot");
+            .assert_no_discovery("AGENTD-3 bootstrap is one-shot");
     }
 
     /// Polling must not mutate the exec it reads. Expressed against the

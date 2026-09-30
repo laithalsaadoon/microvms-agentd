@@ -6,6 +6,12 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 
 | Requirement | model | gherkin | fuzz | test | impl | live |
 |---|---|---|---|---|---|---|
+| AGENTD-1 | 1 | waived | waived | 2 | 1 | waived |
+| AGENTD-2 | 1 | waived | waived | 2 | 1 | 1 |
+| AGENTD-3 | 1 | waived | waived | 1 | 1 | 1 |
+| AGENTD-4 | 1 | waived | waived | 1 | 1 | 1 |
+| AGENTD-5 | 1 | waived | waived | 1 | 1 | 1 |
+| AGENTD-6 | 1 | waived | waived | 1 | 1 | 1 |
 | AGENTD-7 | 1 | 1 | 1 | 4 | 4 | 1 |
 | AGENTD-8 | 1 | 1 | 1 | 4 | 2 | 1 |
 | AGENTD-9 | 1 | 1 | 1 | 2 | 1 | 1 |
@@ -46,6 +52,12 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | BIND-20 | 1 | 1 | 1 | 2 | 3 | 1 |
 | BIND-21 | waived | waived | waived | 1 | 1 | 1 |
 | BIND-22 | waived | waived | 1 | 1 | 1 | waived |
+| CLI-1 | waived | waived | waived | 1 | 2 | waived |
+| CLI-2 | waived | waived | waived | 1 | 5 | waived |
+| CLI-3 | waived | waived | waived | 2 | 1 | 2 |
+| CLI-4 | waived | waived | waived | 3 | 5 | 2 |
+| CLI-5 | waived | waived | waived | 4 | 4 | waived |
+| CLI-6 | waived | waived | waived | 5 | 6 | waived |
 | CLI-7 | 1 | 1 | 1 | 3 | 8 | 1 |
 | CLI-8 | 1 | 1 | 1 | 2 | 3 | 1 |
 | CLI-9 | 1 | 1 | 1 | 2 | 3 | 1 |
@@ -61,6 +73,72 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | IMAGE-10 | 1 | 1 | waived | 1 | 1 | 1 |
 | IMAGE-11 | 1 | 1 | waived | 1 | 1 | 1 |
 | IMAGE-12 | waived | waived | waived | 2 | 2 | waived |
+
+## AGENTD-1
+
+While the agent token is not installed, the agentd shall reject the control request.
+
+- **model:** `crates/model/src/lib.rs`
+- **gherkin:** waived: the token rules turn on two facts, whether a token is installed and whether the presented one equals it; the model checks every interleaving of them and the replay drives each against the daemon's routes, which a scenario would restate
+- **fuzz:** waived: the verdict depends only on those two facts, which the model enumerates exhaustively, so there is no input space left for a fuzzer
+- **test:** `crates/agentd/tests/model_conformance.rs`, `crates/agentd/tests/turmoil_transport.rs`
+- **impl:** `crates/agentd/src/auth.rs`
+- **live:** waived: the platform runs the hook before it forwards any traffic (AGENTD-2's live check), so a live run never reaches the daemon before bootstrap
+
+## AGENTD-2
+
+When a bootstrap request presents a token and the agent token is not installed, the agentd shall install the agent token.
+
+- **model:** `crates/model/src/lib.rs`
+- **gherkin:** waived: the token rules turn on two facts, whether a token is installed and whether the presented one equals it; the model checks every interleaving of them and the replay drives each against the daemon's routes, which a scenario would restate
+- **fuzz:** waived: the verdict depends only on those two facts, which the model enumerates exhaustively, so there is no input space left for a fuzzer
+- **test:** `crates/agentd/src/state.rs`, `crates/agentd/tests/turmoil_transport.rs`
+- **impl:** `crates/agentd/src/state.rs`
+- **live:** `conformance/lanes/lifecycle.py`
+
+## AGENTD-3
+
+When a bootstrap request presents a token that differs from the installed agent token, the agentd shall reject the bootstrap request.
+
+- **model:** `crates/model/src/lib.rs`
+- **gherkin:** waived: the token rules turn on two facts, whether a token is installed and whether the presented one equals it; the model checks every interleaving of them and the replay drives each against the daemon's routes, which a scenario would restate
+- **fuzz:** waived: the verdict depends only on those two facts, which the model enumerates exhaustively, so there is no input space left for a fuzzer
+- **test:** `crates/agentd/src/state.rs`
+- **impl:** `crates/agentd/src/state.rs`
+- **live:** `conformance/lanes/bootstrap.py`
+
+## AGENTD-4
+
+When a bootstrap request presents a token equal to the installed agent token, the agentd shall accept the bootstrap request.
+
+- **model:** `crates/model/src/lib.rs`
+- **gherkin:** waived: the token rules turn on two facts, whether a token is installed and whether the presented one equals it; the model checks every interleaving of them and the replay drives each against the daemon's routes, which a scenario would restate
+- **fuzz:** waived: the verdict depends only on those two facts, which the model enumerates exhaustively, so there is no input space left for a fuzzer
+- **test:** `crates/agentd/src/state.rs`
+- **impl:** `crates/agentd/src/state.rs`
+- **live:** `conformance/lanes/bootstrap.py`
+
+## AGENTD-5
+
+When a control request presents a token that differs from the installed agent token, the agentd shall reject the control request.
+
+- **model:** `crates/model/src/lib.rs`
+- **gherkin:** waived: the token rules turn on two facts, whether a token is installed and whether the presented one equals it; the model checks every interleaving of them and the replay drives each against the daemon's routes, which a scenario would restate
+- **fuzz:** waived: the verdict depends only on those two facts, which the model enumerates exhaustively, so there is no input space left for a fuzzer
+- **test:** `crates/agentd/tests/turmoil_transport.rs`
+- **impl:** `crates/agentd/src/auth.rs`
+- **live:** `conformance/lanes/bootstrap.py`
+
+## AGENTD-6
+
+When a control request presents a token equal to the installed agent token, the agentd shall accept the control request.
+
+- **model:** `crates/model/src/lib.rs`
+- **gherkin:** waived: the token rules turn on two facts, whether a token is installed and whether the presented one equals it; the model checks every interleaving of them and the replay drives each against the daemon's routes, which a scenario would restate
+- **fuzz:** waived: the verdict depends only on those two facts, which the model enumerates exhaustively, so there is no input space left for a fuzzer
+- **test:** `crates/agentd/tests/turmoil_transport.rs`
+- **impl:** `crates/agentd/src/auth.rs`
+- **live:** `conformance/lanes/bootstrap.py`
 
 ## AGENTD-7
 
@@ -502,6 +580,72 @@ If a daemon event stream carries bytes that are not well-formed server-sent even
 - **impl:** `crates/microvms-app/src/session/sse.rs`
 - **live:** waived: a live daemon sends well-formed events, so a live run can't present hostile bytes
 
+## CLI-1
+
+The CLI crate shall render its interactive surface with ratatui.
+
+- **model:** waived: a rendering choice, not a state
+- **gherkin:** waived: the TUI draws only when stdout is a terminal, and the Gherkin tier runs the binary on pipes
+- **fuzz:** waived: a frame is drawn from rows the command has already rendered as text; there is no input stream
+- **test:** `crates/microvms-cli/src/tui.rs`
+- **impl:** `crates/microvms-cli/src/envelope.rs`, `crates/microvms-cli/src/tui.rs`
+- **live:** waived: the live suite runs the CLI with --json on a pipe, where the TUI never draws
+
+## CLI-2
+
+The CLI crate shall reach the control plane and the endpoint proxy only through microvms-core.
+
+- **model:** waived: a property of the crate's dependencies and of its one door to core, not of a state
+- **gherkin:** waived: the behavioral guard already drives every AWS-touching command through a seam that refuses, which a scenario would restate
+- **fuzz:** waived: there is no input stream; the rule is over the dependency set and the source
+- **test:** `crates/microvms-cli/src/guards/thinness.rs`
+- **impl:** `crates/microvms-app/src/session/exec.rs`, `crates/microvms-cli/src/commands/attached.rs`, `crates/microvms-cli/src/commands/local.rs`, `crates/microvms-cli/src/provision.rs`, `crates/microvms-cli/src/seam.rs`
+- **live:** waived: a live run can't show that a call didn't bypass core; the dependency denylist, the clippy bans and the refusing seam can
+
+## CLI-3
+
+The CLI crate shall emit a stable exit code per documented failure class, distinct from the code for an unexpected error.
+
+- **model:** waived: a fixed table from failure class to code, not a state machine
+- **gherkin:** waived: the table-driven test asserts every row, and tests/exit_codes.rs reads each class's code at the process boundary; a scenario per row would restate the table
+- **fuzz:** waived: the input is a closed enum of failure kinds, which the table-driven test walks exhaustively
+- **test:** `crates/microvms-cli/src/exit.rs`, `crates/microvms-cli/src/guards/exit_codes.rs`
+- **impl:** `crates/microvms-cli/src/exit.rs`
+- **live:** `conformance/lanes/local.py`, `conformance/selftest/suite.py`
+
+## CLI-4
+
+Where JSON output is requested, the CLI crate shall emit exactly one envelope object per invocation on stdout, carrying an outcome discriminant and on failure a machine-readable code.
+
+- **model:** waived: one envelope per invocation follows from main's single write, not from a state; crates/model/src/output.rs models the closed-pipe rules, CLI-7 to CLI-9
+- **gherkin:** waived: tests/exit_codes.rs parses stdout as one document at the process boundary, and the live harness does on every call
+- **fuzz:** waived: the envelope's count isn't input-driven: one call in main writes it, and the closed-output harness fuzzes what happens around it (CLI-9)
+- **test:** `crates/microvms-cli/src/envelope.rs`, `crates/microvms-cli/tests/exit_codes.rs`, `crates/microvms-cli/tests/thinness.rs`
+- **impl:** `crates/microvms-cli/src/commands/attached.rs`, `crates/microvms-cli/src/commands/local.rs`, `crates/microvms-cli/src/commands/mod.rs`, `crates/microvms-cli/src/envelope.rs`, `crates/microvms-cli/src/main.rs`
+- **live:** `conformance/lanes/local.py`, `conformance/selftest/suite.py`
+
+## CLI-5
+
+The CLI crate shall not expose an option that permits a value microvms-core rejects.
+
+- **model:** waived: a property of the parser's closed domains, not of a state
+- **gherkin:** waived: the parser tests enumerate each closed domain and round-trip the manifest's published values; a scenario per value would restate them
+- **fuzz:** waived: the domains are closed sets the tests enumerate exactly, so there is no open input space to search
+- **test:** `crates/microvms-cli/src/cli.rs`, `crates/microvms-cli/src/config.rs`, `crates/microvms-cli/src/manifest.rs`, `crates/microvms-cli/tests/manifest.rs`
+- **impl:** `crates/microvms-cli/src/cli.rs`, `crates/microvms-cli/src/commands/local.rs`, `crates/microvms-cli/src/config.rs`, `crates/microvms-cli/src/manifest.rs`
+- **live:** waived: a value the parser refuses never leaves the process, so the service never sees it
+
+## CLI-6
+
+If a command is interrupted after a MicroVM has launched, then the CLI crate shall tear down the MicroVM and emit the identifiers of every resource it could not delete.
+
+- **model:** waived: one interrupt in one window of one launch; the guard places it there against a scripted control plane
+- **gherkin:** waived: the guard is the scenario: it scripts the control plane, interrupts at RunMicrovm and asserts the exit code, the terminate call, the envelope and the ledger
+- **fuzz:** waived: there is no input stream; the window that matters is the one between the launch and RUNNING
+- **test:** `crates/microvms-app/src/sandbox.rs`, `crates/microvms-cli/src/envelope.rs`, `crates/microvms-cli/src/guards/closed_output.rs`, `crates/microvms-cli/src/guards/interrupt.rs`, `crates/microvms-cli/src/ledger.rs`
+- **impl:** `crates/microvms-app/src/sandbox.rs`, `crates/microvms-cli/src/commands/agent.rs`, `crates/microvms-cli/src/commands/attached.rs`, `crates/microvms-cli/src/commands/lifecycle.rs`, `crates/microvms-cli/src/exit.rs`, `crates/microvms-cli/src/main.rs`
+- **live:** waived: an interrupt has to land between a billable launch and RUNNING, which a live run can't place deterministically; the guard places it at RunMicrovm
+
 ## CLI-7
 
 If a reader closes the CLI's stdout or stderr, then the CLI crate shall exit with a status from its exit table and neither panic nor terminate by signal.
@@ -674,7 +818,7 @@ trace it.
 
 | Threat | Requirement | Guard | Status |
 |---|---|---|---|
-| An in-VM process races the platform to the bootstrap hook | AGENTD-1 (not traced), AGENTD-3 (not traced) | `crates/agentd/tests/model_conformance.rs::slice_0_of_the_walk_replays_against_the_daemon`, `crates/agentd/src/state.rs::identical_replay_succeeds_and_a_different_token_conflicts` | guarded; a process that starts before the daemon still wins, which is the unenforced invariant below |
+| An in-VM process races the platform to the bootstrap hook | AGENTD-1, AGENTD-3 | `crates/agentd/tests/model_conformance.rs::slice_0_of_the_walk_replays_against_the_daemon`, `crates/agentd/src/state.rs::identical_replay_succeeds_and_a_different_token_conflicts` | guarded; a process that starts before the daemon still wins, which is the unenforced invariant below |
 | A caller holding the agent token but not the host key opens a verified tunnel | AGENTD-17 | `crates/agentd/src/tunnel_identity.rs::only_the_pinned_host_key_completes_a_handshake`, `crates/agentd/tests/tunnel_relay.rs::a_valid_token_with_the_wrong_host_key_is_refused` | guarded; its seeded fault waits for #297's handshake model, since under KK no one-sided change turns the pin off |
 | A verified tunnel's handshake fails, or the VM has no key, and the guest service is reached anyway | AGENTD-18 | `crates/agentd/tests/tunnel_relay.rs::a_refused_caller_never_causes_a_guest_connection`, `crates/agentd/tests/tunnel_relay.rs::identity_against_a_seedless_vm_is_refused_not_downgraded` | guarded |
 | A guest answers a verified tunnel's handshake with a key other than the pinned VM key | BIND-21 | `crates/microvms-core/tests/tunnel_end_to_end.rs::a_wrong_pin_fails_closed_with_a_diagnosis`, `crates/microvms-core/tests/tunnel_end_to_end.rs::a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel` | guarded |
