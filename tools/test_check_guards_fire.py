@@ -60,7 +60,9 @@ GIT_ENV_LEAKS = (
 # `CARGO_TERM_COLOR=always` does, `slow=N` sleeps N tenths of a second, and `hang=yes` sleeps
 # past any timeout (with a child that sleeps too, and both pids written under $FAKE_PIDS when
 # it's set). `write=F` writes
-# the file F into the tree, and `absent=F` fails the run when F is there. With
+# the file F into the tree, and `absent=F` fails the run when F is there. `mark=N` creates
+# $FAKE_SYNC/N as the run starts, and `await=N` waits for $FAKE_SYNC/N before it goes on (failing
+# after 30 seconds), so a test can order runs in two workers without a clock. With
 # CARGO_TARGET_DIR set, the runner stands in for a build there: `built.txt` records the state
 # it last ran on, `runs` counts runs, and `flaky=N` fails the Nth run; $FAKE_DEPS, when set,
 # gets the target and the names in its `debug/deps` before each run. $FAKE_LOG, when set,
@@ -111,7 +113,9 @@ if tool == "cargo" and "clippy" in sys.argv[1:]:
             for kind, at, text in re.findall(r"(LINT|WARN|BROKEN|GARBLED)(?:@(\\d+))?\\(([^)]*)\\)", line):
                 marks.append((kind, path.as_posix(), int(at or number), text))
 seeded = bool(marks) or any(
-    v not in ("ok", "no") for k, v in state.items() if k not in ("slow", "flaky", "absent")
+    v not in ("ok", "no")
+    for k, v in state.items()
+    if k not in ("slow", "flaky", "absent", "mark", "await")
 )
 if os.environ.get("FAKE_SPANS"):
     def span(edge):
@@ -158,6 +162,16 @@ if os.environ.get("CARGO_TARGET_DIR"):
     if state.get("flaky") == str(count):
         say(f"run {{count}} went red")
         sys.exit(1)
+if state.get("mark"):
+    pathlib.Path(os.environ["FAKE_SYNC"], state["mark"]).write_text("")
+if state.get("await"):
+    awaited = pathlib.Path(os.environ["FAKE_SYNC"], state["await"])
+    deadline = time.monotonic() + 30
+    while not awaited.exists():
+        if time.monotonic() > deadline:
+            say(f"{{awaited.name}} never started")
+            sys.exit(1)
+        time.sleep(0.02)
 time.sleep(int(state.get("slow", "0")) / 10)
 if state.get("absent") and pathlib.Path(state["absent"]).exists():
     say(f"found {{state['absent']}}, which an earlier run left")
@@ -1672,23 +1686,31 @@ class FireInParallel(unittest.TestCase):
                 time.sleep(0.1)
             self.assertFalse(alive(pid), f"pid {pid} outlived the run")
 
-    def stealing(self, state: str) -> tuple[Repo, Path]:
-        """Three slow faults on one command and one quick fault on another, over two workers:
-        worker 2 finishes its own and takes the last slow one from worker 1's queue."""
+    def stealing(self, state: str) -> tuple[Repo, dict[str, str]]:
+        """Three faults on one command and one on another, over two workers: worker 2 finishes
+        its own and takes exactly one of worker 1's, the last, a3.
+
+        The order is held by the runs themselves, not by their durations, because timings
+        stretch on a loaded host and a second take changes every run count after it. a1 waits
+        until a3 has started, so worker 2 goes idle with a2 and a3 still queued and takes the
+        back one. a3 waits until a2 has started, so worker 1 has taken a2 before worker 2 could.
+        """
         tmp = self.scratch_tmp()
         log = tmp.parent / (tmp.name + ".log")
         self.addCleanup(lambda: log.unlink(missing_ok=True))
-        slow = [
+        sync = self.scratch_tmp()
+        knobs = {1: "await=a3", 2: "mark=a2", 3: "mark=a3 await=a2"}
+        faults = [
             entry(
                 fid=f"a{n}",
                 guard="g1",
                 run=["cargo", "test", "--", "--exact", "g1"],
-                fault=f'transform = {{ file = "state.txt", replace = "s{n}=ok", with = "s{n}=ok g1=fail slow=10" }}',
+                fault=f'transform = {{ file = "state.txt", replace = "s{n}=ok", with = "s{n}=ok g1=fail {knobs[n]}" }}',
             )
             for n in (1, 2, 3)
         ]
-        repo = fire_repo(self, *slow, keyed("b", "g2", "g2"), state=state)
-        return repo, log
+        repo = fire_repo(self, *faults, keyed("b", "g2", "g2"), state=state)
+        return repo, {"FAKE_LOG": str(log), "FAKE_SYNC": str(sync)}
 
     def runs_of(self, repo: Repo, log: Path) -> list[list[str]]:
         rows = [line.split("\t") for line in log.read_text().splitlines()]
@@ -1701,10 +1723,10 @@ class FireInParallel(unittest.TestCase):
         return rows
 
     def test_a_worker_that_takes_a_fault_runs_its_command_clean_again(self):
-        repo, log = self.stealing("g1=ok g2=ok s1=ok s2=ok s3=ok\n")
-        out = repo.run("fire", "--jobs", "2", FAKE_LOG=str(log))
+        repo, env = self.stealing("g1=ok g2=ok s1=ok s2=ok s3=ok\n")
+        out = repo.run("fire", "--jobs", "2", **env)
         self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
-        rows = self.runs_of(repo, log)
+        rows = self.runs_of(repo, Path(env["FAKE_LOG"]))
         # Each tree's last run of each command it ran is clean, the taken one included.
         for tree in {r[2] for r in rows}:
             for command in {r[4] for r in rows if r[2] == tree}:
@@ -1714,9 +1736,9 @@ class FireInParallel(unittest.TestCase):
     def test_a_restored_run_red_in_one_worker_only_fails_the_run(self):
         # `flaky=5` fails the fifth run in a target, which only worker 2's reaches: its clean
         # g2, its fault, the fault it took, its restored g2, then its restored g1.
-        repo, log = self.stealing("g1=ok g2=ok s1=ok s2=ok s3=ok flaky=5\n")
-        out = repo.run("fire", "--jobs", "2", FAKE_LOG=str(log))
-        self.runs_of(repo, log)
+        repo, env = self.stealing("g1=ok g2=ok s1=ok s2=ok s3=ok flaky=5\n")
+        out = repo.run("fire", "--jobs", "2", **env)
+        self.runs_of(repo, Path(env["FAKE_LOG"]))
         self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
         self.assertIn(
             "already red: a1: the command exits 1 with no fault seeded (restored run)",
