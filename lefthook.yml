@@ -12,6 +12,14 @@
 # checks that were worth having. Run `mise run live` deliberately, or dispatch the
 # live-conformance workflow.
 
+# `**/` matches zero or more directories and `*` stops at a `/`, which is how the
+# globs below read. Under lefthook's default matcher (gobwas) `*` crosses a `/` and
+# `**/` needs at least one directory, so `*/src/**/*.rs` never matched `src/lib.rs`,
+# `src/main.rs` or `src/cli.rs`, and `*/tests/**/*` never matched a file directly
+# under `tests/`: the traceability job skipped them, and the background example's
+# job skipped the files at its top level.
+glob_matcher: doublestar
+
 pre-commit:
   parallel: true
   jobs:
@@ -19,7 +27,7 @@ pre-commit:
       run: mise run lint
       # Only when Rust or Python actually changed; a docs-only commit should not
       # pay for a clippy pass.
-      glob: "*.{rs,py,toml,tf}"
+      glob: "**/*.{rs,py,toml,tf}"
 
     - name: secrets
       # Staged changes only — the fast scan for the thing a commit can newly
@@ -29,15 +37,15 @@ pre-commit:
 
     - name: background example quality
       run: mise run background:check
-      glob: "examples/background-coding-agent/**/*.{py,tf,toml,yml}"
+      glob: "examples/background-coding-agent/**/*.{py,tf,toml,lock}"
 
     - name: requirement traceability
       run: mise run trace:check
-      glob: "{spec/*.json,model/src/*.rs,*/src/**/*.rs,*/tests/**/*,agentd/fuzz/fuzz_targets/*.rs,microvms-js/__test__/*,conformance/run_rs.py,scripts/check-trace.py,scripts/test_check_trace.py,docs/TRACEABILITY.md}"
+      glob: "{spec/*.json,model/src/**/*.rs,*/src/**/*.rs,*/tests/**,agentd/fuzz/fuzz_targets/*.rs,microvms-js/__test__/**,conformance/run_rs.py,scripts/check-trace.py,scripts/test_check_trace.py,docs/TRACEABILITY.md,docs/TRUST.md}"
 
     - name: license headers
       run: ./scripts/check-license-headers.py
-      glob: "*.{rs,py,pyi,mjs,sh,tf}"
+      glob: "**/*.{rs,py,pyi,mjs,sh,tf}"
 
     - name: dependency licenses
       # deny.toml's allowlist against the resolved graph. Only when the graph
@@ -46,7 +54,7 @@ pre-commit:
       # cargo, which is the exact failure this file's header warns about, and
       # this hook demonstrated it on its own first run.
       run: mise exec -- cargo deny check licenses bans sources
-      glob: "{Cargo.toml,Cargo.lock,*/Cargo.toml,deny.toml}"
+      glob: "{Cargo.lock,**/Cargo.toml,deny.toml}"
 
     - name: workflow lint
       run: mise exec -- actionlint
@@ -58,9 +66,11 @@ pre-push:
   piped: true
   jobs:
     - name: local gate
-      # `check` is lint + the whole Rust test suite + schema freshness + the
-      # service-model drift gate + the aarch64 cross-compile. Around forty seconds
-      # warm, and it catches the great majority of what would otherwise fail in CI.
+      # `check` is lint, the whole Rust test suite, the generated-artifact and drift
+      # gates with their unit suites, and the aarch64 cross-compile, and it catches the
+      # great majority of what would otherwise fail in CI. Warm with nothing changed it
+      # took 81 s, nearly all of it the Rust test tier: measured 2026-09-30 on a shared
+      # 16-vCPU devbox, at 39b564c with the change that wrote this line.
       run: mise run check
 
     - name: live-suite staleness
