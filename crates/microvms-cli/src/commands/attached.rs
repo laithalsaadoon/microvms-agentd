@@ -2420,7 +2420,7 @@ pub async fn port_forward<O: std::io::Write, E: std::io::Write>(
     args: &crate::cli::PortForwardArgs,
     interrupt: crate::commands::lifecycle::Interrupt<'_>,
 ) -> Result<Rendered, CliError> {
-    use microvms_core::session::forward;
+    use microvms_core::session::{forward, serve};
 
     // Refused before the attach, so a mistyped pair costs no AWS call. See
     // `crate::cli::parse_port_pair` on why the mint is the thing worth not spending.
@@ -2447,19 +2447,6 @@ pub async fn port_forward<O: std::io::Write, E: std::io::Write>(
 
     let (session, microvm_id) = attach(ctx, &args.region, &args.attach).await?;
 
-    // A direct session mints nothing, so there is no port-scoped credential to forward with —
-    // and a tunnel that silently sent unauthenticated requests would fail at the proxy with a
-    // message about the token rather than about the missing minter.
-    let Some(auth) = session.proxy_auth().cloned() else {
-        return Err(CliError::new(
-            Exit::Precondition,
-            "this session reaches the daemon directly rather than through the endpoint proxy, so \
-             there is no port-scoped token to forward with. Port forwarding exists to cross the \
-             proxy; a direct session is already on the other side of it."
-                .to_string(),
-        ));
-    };
-
     let spec = forward::ForwardSpec::new(bind, guest_port, session.endpoint().to_string());
     let listener = forward::bind(&spec).await?;
     let bound = listener.local_addr().map_err(|err| {
@@ -2474,79 +2461,48 @@ pub async fn port_forward<O: std::io::Write, E: std::io::Write>(
         bound.port()
     ));
 
-    // One client for the whole tunnel: connection reuse to the endpoint is what keeps a
-    // page-load of thirty assets from paying thirty TLS handshakes. Built through core's
-    // newtype, because this crate cannot name an HTTP client (CLI-2's thinness guard).
-    let client = forward::ForwardClient::new()?;
-
-    let mut served: u32 = 0;
-    let mut refused: u32 = 0;
-    let mut upgrades: u32 = 0;
-    let mut interrupted = false;
-    let mut interrupt = interrupt;
-
-    loop {
-        if args.max_connections.is_some_and(|max| served >= max) {
-            break;
-        }
-
-        let accepted = tokio::select! {
-            // Biased so a pending interrupt wins over a connection that arrived in the same
-            // wakeup: the caller pressed the key, and serving one more request first would look
-            // like the key did nothing.
-            biased;
-            () = &mut interrupt => {
-                interrupted = true;
-                break;
+    // Core's loop: a task per connection, so a slow request doesn't hold the next one. Each
+    // connection's warnings print as it ends.
+    let out = &mut ctx.out;
+    let report = serve::serve_forward(
+        listener,
+        spec,
+        session.proxy_auth().cloned(),
+        serve::ServeLimits {
+            max_connections: args.max_connections,
+        },
+        interrupt,
+        |notice| match notice {
+            // A warning rather than a failure: one refused request must not tear down a forward
+            // whose other ports or paths are working, and the sentence is the 403-vs-502
+            // diagnostic the user needs to act.
+            serve::ForwardNotice::Event {
+                event: forward::ForwardEvent::Refused { explanation, .. },
+                ..
+            } => out.warn(&explanation),
+            serve::ForwardNotice::Event { .. } => {}
+            // Per connection, so a dev server that dropped one request doesn't end the forward.
+            // The peer is named because with several tabs open it is the only way to tell which
+            // connection failed.
+            serve::ForwardNotice::Failed { peer, error } => {
+                out.warn(&format!("the connection from {peer} ended early: {error}"));
             }
-            accepted = forward::accept(&listener) => accepted,
-        };
-
-        let (local, peer) = match accepted {
-            Ok(pair) => pair,
-            Err(error) => {
-                // An accept failure is the listener's problem, not one connection's, so this
-                // ends the tunnel rather than looping on a socket that will keep failing.
-                ctx.out
-                    .warn(&format!("the local listener stopped: {error}"));
-                break;
-            }
-        };
-
-        let mut events = Vec::new();
-        let outcome = forward::serve_connection(local, &spec, &auth, &client, |event| {
-            events.push(event);
-        })
-        .await;
-
-        for event in &events {
-            match event {
-                forward::ForwardEvent::Refused { explanation, .. } => {
-                    refused += 1;
-                    // A warning rather than a failure: one refused request must not tear down a
-                    // tunnel whose other ports or paths are working, and the sentence is the
-                    // 403-vs-502 diagnostic the user needs to act.
-                    ctx.out.warn(explanation);
-                }
-                forward::ForwardEvent::Forwarded { upgraded: true, .. } => upgrades += 1,
-                _ => {}
-            }
-        }
-
-        match outcome {
-            Ok(()) => served += 1,
-            Err(error) => {
-                // Per-connection, so a dev server that dropped one request does not end the
-                // tunnel. The peer is named because with several tabs open it is the only way to
-                // tell which connection failed.
-                ctx.out
-                    .warn(&format!("the connection from {peer} ended early: {error}"));
-                served += 1;
-            }
-        }
+        },
+    )
+    .await?;
+    if let serve::StopReason::ListenerFailed(error) = &report.stopped {
+        ctx.out
+            .warn(&format!("the local listener stopped: {error}"));
     }
 
-    let mints = auth.mint_count();
+    let serve::ForwardReport {
+        served,
+        refused,
+        upgrades,
+        proxy_token_mints: mints,
+        ..
+    } = report;
+    let interrupted = report.stopped.was_requested();
     let mut data = Map::new();
     data.insert("microvmId".into(), json!(microvm_id));
     data.insert("localPort".into(), json!(bound.port()));
@@ -2594,11 +2550,12 @@ pub async fn port_forward<O: std::io::Write, E: std::io::Write>(
 /// without deciding per connection whether the payload was HTTP, which is a guess about
 /// somebody else's protocol.
 ///
-/// # One task per connection, and a spawn is the whole concurrency story
+/// # One task per connection, in core's loop
 ///
-/// Each accepted connection gets its own WebSocket and its own task, matching the daemon's
-/// no-multiplexing decision. `psql` opens one connection and `ssh` opens one; a client that
-/// opens five gets five tunnels, and none of them can stall another.
+/// Each accepted connection gets its own WebSocket and its own task
+/// (`microvms_core::session::serve::serve_tunnel`), matching the daemon's no-multiplexing
+/// decision. `psql` opens one connection and `ssh` opens one; a client that opens five gets
+/// five tunnels, and none of them can stall another.
 ///
 /// # Ctrl-C is a success
 ///
@@ -2609,9 +2566,7 @@ pub async fn tunnel<O: std::io::Write, E: std::io::Write>(
     args: &crate::cli::TunnelArgs,
     interrupt: crate::commands::lifecycle::Interrupt<'_>,
 ) -> Result<Rendered, CliError> {
-    use microvms_core::session::{forward, tunnel as core_tunnel};
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicU32, Ordering};
+    use microvms_core::session::{forward, serve, tunnel as core_tunnel};
 
     // Refused before the attach, so a mistyped pair costs no AWS call — the same ordering
     // `port-forward` uses, and the same shared parser, so the two cannot disagree about what
@@ -2694,16 +2649,6 @@ pub async fn tunnel<O: std::io::Write, E: std::io::Write>(
 
     let (session, microvm_id) = attach(ctx, &args.region, &args.attach).await?;
 
-    let Some(auth) = session.proxy_auth().cloned() else {
-        return Err(CliError::new(
-            Exit::Precondition,
-            "this session reaches the daemon directly rather than through the endpoint proxy, so \
-             there is no port-scoped token to tunnel with. A tunnel exists to cross the proxy; a \
-             direct session is already on the other side of it."
-                .to_string(),
-        ));
-    };
-
     // The listener is `forward`'s, because binding a local port and naming the collision is the
     // same problem for both commands and a second copy would be a second error message.
     let spec = forward::ForwardSpec::new(bind, guest_port, session.endpoint().to_string());
@@ -2720,120 +2665,61 @@ pub async fn tunnel<O: std::io::Write, E: std::io::Write>(
         bound.port()
     ));
 
-    let endpoint = Arc::new(session.endpoint().to_string());
-    let agent_token = Arc::new(session.agent_token().to_string());
-    // Shared counters rather than returned values, because each connection lives in its own
-    // task and the envelope is written after the loop.
-    let served = Arc::new(AtomicU32::new(0));
-    let refused = Arc::new(AtomicU32::new(0));
-    let truncated = Arc::new(AtomicU32::new(0));
-    let unproven = Arc::new(AtomicU32::new(0));
-    let mut refusals: Vec<String> = Vec::new();
-    let mut interrupted = false;
-    let mut interrupt = interrupt;
-    let mut tasks = Vec::new();
-
-    loop {
-        if args
-            .max_connections
-            .is_some_and(|max| served.load(Ordering::SeqCst) >= max)
-        {
-            break;
-        }
-
-        let accepted = tokio::select! {
-            // Biased, so a pending interrupt wins over a connection that arrived in the same
-            // wakeup: the caller pressed the key, and accepting one more first looks like the
-            // key did nothing.
-            biased;
-            () = &mut interrupt => {
-                interrupted = true;
-                break;
-            }
-            accepted = forward::accept(&listener) => accepted,
-        };
-
-        let (local, peer) = match accepted {
-            Ok(pair) => pair,
-            Err(error) => {
-                ctx.out
-                    .warn(&format!("the local listener stopped: {error}"));
-                break;
-            }
-        };
-
-        served.fetch_add(1, Ordering::SeqCst);
-        let endpoint = Arc::clone(&endpoint);
-        let token = Arc::clone(&agent_token);
-        let auth = Arc::clone(&auth);
-        let refused = Arc::clone(&refused);
-        let truncated = Arc::clone(&truncated);
-        let unproven = Arc::clone(&unproven);
-        let identity = identity.clone();
-        tasks.push(tokio::spawn(async move {
-            let outcome = match &identity {
-                None => {
-                    core_tunnel::relay_connection(local, &endpoint, guest_port, &token, &auth).await
-                }
-                Some(identity) => {
-                    core_tunnel::relay_connection_verified(
-                        local, &endpoint, guest_port, &token, &auth, identity,
-                    )
-                    .await
-                }
-            };
-            match outcome {
-                Ok(core_tunnel::TunnelEnd::Closed) => None,
+    // Core's loop: a task per connection, drained when it stops. The warnings are printed after
+    // it ends, since each connection ends on a task of its own.
+    let mut warnings: Vec<String> = Vec::new();
+    let report = serve::serve_tunnel(
+        listener,
+        serve::TunnelTarget::for_session(&session, guest_port, identity),
+        serve::ServeLimits {
+            max_connections: args.max_connections,
+        },
+        interrupt,
+        |connection| {
+            let peer = connection.peer;
+            match connection.end {
                 // Warned about once after the loop rather than per connection: it's the daemon
                 // in the image, the same for every connection.
-                Ok(core_tunnel::TunnelEnd::ClosedUnproven) => {
-                    unproven.fetch_add(1, Ordering::SeqCst);
-                    None
-                }
+                Ok(core_tunnel::TunnelEnd::Closed | core_tunnel::TunnelEnd::ClosedUnproven) => {}
                 Ok(core_tunnel::TunnelEnd::Truncated { code }) => {
-                    truncated.fetch_add(1, Ordering::SeqCst);
-                    Some(truncated_warning(peer, code))
+                    warnings.push(truncated_warning(peer, code));
                 }
+                // The relay's own sentence when it sent one, and core's explanation of the code
+                // otherwise, never a bare number, which tells a caller nothing about which
+                // component refused.
                 Ok(core_tunnel::TunnelEnd::Refused { code, reason }) => {
-                    refused.fetch_add(1, Ordering::SeqCst);
-                    // The relay's own sentence when it sent one, and core's explanation of the
-                    // code otherwise — never a bare number, which tells a caller nothing about
-                    // which component refused.
-                    Some(if reason.is_empty() {
+                    warnings.push(if reason.is_empty() {
                         core_tunnel::explain_close(code, guest_port)
                             .unwrap_or_else(|| format!("the tunnel closed with code {code}"))
                     } else {
                         reason
-                    })
+                    });
                 }
-                Err(error) => {
-                    refused.fetch_add(1, Ordering::SeqCst);
-                    Some(format!("the tunnel from {peer} failed: {error}"))
-                }
+                Err(error) => warnings.push(format!("the tunnel from {peer} failed: {error}")),
             }
-        }));
+        },
+    )
+    .await;
+    if let serve::StopReason::ListenerFailed(error) = &report.stopped {
+        ctx.out
+            .warn(&format!("the local listener stopped: {error}"));
     }
-
-    // Drained rather than abandoned: a task still relaying when the loop ends holds bytes the
-    // caller's client is waiting for, and dropping the handle would truncate them.
-    for task in tasks {
-        if let Ok(Some(detail)) = task.await {
-            refusals.push(detail);
-        }
-    }
-    for detail in &refusals {
+    for detail in &warnings {
         ctx.out.warn(detail);
     }
-    let truncated = truncated.load(Ordering::SeqCst);
-    let unproven = unproven.load(Ordering::SeqCst);
-    if let Some(warning) = unproven_warning(unproven) {
+    if let Some(warning) = unproven_warning(report.unproven) {
         ctx.out.warn(&warning);
     }
 
-    let served = served.load(Ordering::SeqCst);
-    let refused = refused.load(Ordering::SeqCst);
-    let mints = auth.mint_count();
-
+    let serve::TunnelReport {
+        served,
+        refused,
+        truncated,
+        unproven,
+        proxy_token_mints: mints,
+        ..
+    } = report;
+    let interrupted = report.stopped.was_requested();
     let mut data = Map::new();
     data.insert("microvmId".into(), json!(microvm_id));
     data.insert("localPort".into(), json!(bound.port()));
