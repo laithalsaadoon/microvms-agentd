@@ -12,13 +12,15 @@ description = "Fail on drift (layering, parity gaps, the case corpus's markers a
 #
 # In `check` for `model:check`'s reason: `git archive`, `cargo metadata --no-deps --offline` and
 # ast-grep over local files, so no network, no credentials, no money. The base is the merge base
-# of HEAD and origin/main, a local ref; CI passes the PR's base branch, or HEAD^ on main.
+# of HEAD and origin/main, a local ref. `GATE_BASE` overrides it: CI's `security` job sets it to
+# the pull request's base branch, and on a push to main to HEAD^, since the merge base of main and
+# itself is itself and rule 3 would pass vacuously.
 #
 # The unit tests run first because they build throwaway workspaces and run both tools over them;
 # if a tool changed under the pin, the tests say so before the gate reads the tree through it.
 run = [
-  "{{vars.pytest}} pytest -n auto -q -p no:cacheprovider tools/test_ratchet.py",
-  "./tools/ratchet.py",
+  "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_ratchet.py",
+  './tools/ratchet.py ${GATE_BASE:+--base "$GATE_BASE"}',
 ]
 
 ["ratchet:snapshot"]

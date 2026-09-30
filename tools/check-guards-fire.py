@@ -129,9 +129,11 @@ Three subcommands:
           or imports, the `-p` crate's file that defines a cargo test, the crate's clippy.toml
           for a lint). A change to this script, or to a build input every command reads
           (any Cargo.toml, Cargo.lock, rust-toolchain.toml, .cargo/config.toml, the root
-          clippy.toml, mise.toml, mise.lock), selects every entry, and so does a change to
-          ci.yml's `guards` job or its top-level `env` (CI's side of mise.toml: that job's
-          steps install the toolchain every command runs under). It's a rule, not a trace:
+          clippy.toml, mise.toml, mise.lock, the `.github/actions/mise` action CI installs
+          them through), selects every entry, and so does a change to ci.yml's `guards` job or
+          its top-level `env`, or to the `ci:guards` task that job runs (CI's side of
+          mise.toml: that job's steps install the toolchain every command runs under, and the
+          task holds the fire's flags and environment). It's a rule, not a trace:
           a change to code a guard reaches without naming it (the module that defines a type
           a clippy ban names, a helper a test calls) selects nothing, so a green run here
           isn't the full fire. It prints why each entry is in, the ids it skipped, and where
@@ -254,7 +256,7 @@ A `message` is matched after ANSI color codes are stripped, since CI sets
 
 A `message` names no pin the tree owns. A version or SHA bump, Dependabot's included, changes
 what the command prints, and the entry then stops firing where only a full `fire` sees it while
-`list` stays green: the action SHA in a step name that ci:parity prints is one such pin. So the
+`list` stays green: an action SHA in a step name a gate prints is one such pin. So the
 shape check refuses a `message` carrying a run of 40 or more hex digits (a commit SHA or a
 digest), or an x.y.z version its fault doesn't write. A version is the fault's own when a
 transform's `with` has it and that transform's `replace` doesn't, when a patch's added lines
@@ -313,13 +315,20 @@ BUILD_INPUTS = {
     "clippy.toml",
     "mise.toml",
     "mise.lock",
+    # The action every CI job installs mise and its tools through.
+    ".github/actions/mise/action.yml",
 }
-# CI's side of mise.toml: on the runner, the `guards` job's own steps install the toolchain and
-# tools every command runs under (the Rust components, uv, Node, the ast-grep and cargo-mutants
-# pins), and the workflow's top-level `env` reaches every step. A change to either selects every
-# entry, as a mise.toml change does.
+# CI's side of mise.toml: on the runner, the `guards` job's own steps install the toolchain every
+# command runs under (the Rust components) and pass the fire its flags, and the workflow's
+# top-level `env` reaches every step. A change to either selects every entry, as a mise.toml
+# change does.
 CI_WORKFLOW = ".github/workflows/ci.yml"
 CI_JOB = "guards"
+# The task the `guards` job's steps run, and the file it's in: its command and its `env` reach
+# every entry the job fires, as the job's own steps do, so a change to its table selects every
+# entry too. A task file isn't a build input: a change to another task in it selects nothing.
+CI_TASK = "ci:guards"
+CI_TASK_FILE = ".config/mise/tasks/ci.toml"
 UNREGISTERED = "verify/guards/unregistered.txt"
 
 # Built, not written, so this file doesn't carry the marker it counts.
@@ -2012,6 +2021,33 @@ def workflow_inputs_changed(root: Path, commit: str) -> bool:
     return workflow_inputs(base) != workflow_inputs(head)
 
 
+def task_inputs(text: str) -> list[str]:
+    """The `ci:guards` table of a task file, blank and comment lines dropped: its header to the
+    next table's. A line scan, for workflow_inputs's reason; each table opens on a line of its
+    own in the files mise includes."""
+    table: list[str] = []
+    inside = False
+    for line in text.splitlines():
+        body = line.strip()
+        if line.startswith("[") and not line.startswith("[["):
+            inside = body.split("#", 1)[0].strip() in (
+                f'["{CI_TASK}"]',
+                f"['{CI_TASK}']",
+            )
+        if inside and body and not body.startswith("#"):
+            table.append(line)
+    return table
+
+
+def task_inputs_changed(root: Path, commit: str) -> bool:
+    """Whether the `ci:guards` task differs between `commit` and the working tree. A task that
+    moved to another file, or is gone, differs from a base that had it."""
+    path = root / CI_TASK_FILE
+    head = path.read_text(encoding="utf-8") if path.is_file() else ""
+    base = git(root, "show", f"{commit}:{CI_TASK_FILE}", check=False).stdout
+    return task_inputs(base) != task_inputs(head)
+
+
 def crate_dirs(root: Path, files: set[str]) -> dict[str, str]:
     """Each workspace package's name and directory, from the tracked Cargo.toml files."""
     out: dict[str, str] = {}
@@ -2030,8 +2066,8 @@ def crate_dirs(root: Path, files: set[str]) -> dict[str, str]:
 def sibling_scripts(root: Path, scripts: set[str], files: set[str]) -> set[str]:
     """The scripts beside each of `scripts` that it loads by file name (`runpy.run_path`
     on `Path(__file__).with_name("x.py")`) or imports, and theirs in turn. Read with `ast`:
-    ci-local.py runs from check-ci-parity.py's `plan()`, so a change there moves ci-local's
-    suite too."""
+    ci-local.py reads the workflows through check-ci-parity.py, so a change there moves
+    ci-local's suite too."""
     seen: set[str] = set()
     todo = sorted(scripts)
     while todo:
@@ -2143,6 +2179,7 @@ def affected(
         p for p in changed if p in BUILD_INPUTS or Path(p).name == "Cargo.toml"
     )
     workflow = CI_WORKFLOW in changed and workflow_inputs_changed(root, commit)
+    task = CI_TASK_FILE in changed and task_inputs_changed(root, commit)
     for fault in faults:
         if this in changed:
             reasons[fault.id] = f"{this} changed, and it decides every verdict"
@@ -2154,6 +2191,11 @@ def affected(
             reasons[fault.id] = (
                 f"the `{CI_JOB}` job or the top-level `env` in {CI_WORKFLOW} changed, "
                 "and CI runs every command under them"
+            )
+        elif task:
+            reasons[fault.id] = (
+                f"the `{CI_TASK}` task in {CI_TASK_FILE} changed, and CI runs every "
+                "command under it"
             )
         elif fault.id not in before:
             reasons[fault.id] = f"the entry is new in {fault.file}"

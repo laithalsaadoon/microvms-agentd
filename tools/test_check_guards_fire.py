@@ -22,7 +22,6 @@ import tempfile
 import textwrap
 import threading
 import time
-import tomllib
 import types
 import unittest
 from pathlib import Path
@@ -1149,7 +1148,7 @@ class RegistryShape(unittest.TestCase):
         self.check(entry(guards="x"), "unknown key 'guards'")
 
     def test_a_sha_in_a_message_fails(self):
-        # The step name ci:parity prints carries the action's SHA, which Dependabot bumps.
+        # A step name a gate prints can carry an action's SHA, which Dependabot bumps.
         sha = "bec219d24cd3e171d82865faccec33120bb574f4"
         self.check(
             entry(
@@ -2925,8 +2924,8 @@ class FireAffected(unittest.TestCase):
         )
 
     def test_a_script_a_tested_script_loads_selects_the_suite(self):
-        # ci-local.py runs from check-ci-parity.py's plan(), so test_ci_local.py's verdict
-        # moves when check-ci-parity.py changes.
+        # ci-local.py reads the workflows through check-ci-parity.py, so test_ci_local.py's
+        # verdict moves when check-ci-parity.py changes.
         suite = textwrap.dedent(
             """\
             import unittest
@@ -3014,6 +3013,49 @@ class FireAffected(unittest.TestCase):
                     (repo.root / WORKFLOW).unlink()
                 self.check(repo, ALL, f"affected: a: {WORKFLOW_REASON}")
 
+    # The task those steps run (`ci:guards`): its command and `env` are the job's too.
+
+    def task_repo(self) -> Repo:
+        repo = affected_repo(self)
+        repo.write(TASK_FILE, FIXTURE_TASKS)
+        repo.commit("the tasks")
+        git(repo.root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        return repo
+
+    def test_a_change_to_the_guards_task_selects_every_entry(self):
+        # A pull request that turns incremental builds off or drops a suite from the fire
+        # changes how every entry the job fires runs.
+        for old, new in (
+            ('CARGO_INCREMENTAL = "1"', 'CARGO_INCREMENTAL = "0"'),
+            ("--suite rust", "--suite script"),
+        ):
+            with self.subTest(change=new):
+                repo = self.task_repo()
+                repo.write(TASK_FILE, FIXTURE_TASKS.replace(old, new))
+                self.check(repo, ALL, f"affected: a: {TASK_REASON}")
+
+    def test_a_deleted_task_file_or_a_moved_task_selects_every_entry(self):
+        for moved in (False, True):
+            with self.subTest(moved=moved):
+                repo = self.task_repo()
+                if moved:
+                    repo.write(
+                        TASK_FILE, FIXTURE_TASKS.replace('["ci:guards"]', '["ci:fire"]')
+                    )
+                else:
+                    (repo.root / TASK_FILE).unlink()
+                self.check(repo, ALL, f"affected: a: {TASK_REASON}")
+
+    def test_another_task_or_a_comment_in_the_task_file_selects_nothing(self):
+        repo = self.task_repo()
+        repo.write(
+            TASK_FILE,
+            FIXTURE_TASKS.replace("echo other", "echo changed").replace(
+                "# The fire's command.", "# The fire's own command."
+            ),
+        )
+        self.check(repo, set())
+
     def test_another_job_or_a_comment_in_the_workflow_selects_nothing(self):
         repo = self.workflow_repo()
         repo.write(
@@ -3025,6 +3067,21 @@ class FireAffected(unittest.TestCase):
         self.check(repo, set())
 
 
+TASK_FILE = ".config/mise/tasks/ci.toml"
+TASK_REASON = (
+    f"the `ci:guards` task in {TASK_FILE} changed, and CI runs every command under it"
+)
+FIXTURE_TASKS = """\
+# CI's tasks.
+
+["ci:guards"]
+# The fire's command.
+env = { CARGO_INCREMENTAL = "1" }
+run = "./tools/check-guards-fire.py fire --suite rust"
+
+["ci:other"]
+run = "echo other"
+"""
 WORKFLOW = ".github/workflows/ci.yml"
 WORKFLOW_REASON = (
     f"the `guards` job or the top-level `env` in {WORKFLOW} changed, and CI runs every "
@@ -3506,13 +3563,15 @@ ON_PUSH = "github.event_name != 'pull_request'"
 # it has no origin/main, so a step that ignores `github.base_ref` (a hard-coded origin/main, or
 # a `$BASE` that's unset and falls back to it) finds no merge base and fails.
 EXPRESSIONS = {"github.base_ref": "release"}
-LOCAL = HERE.parent / "ci/local.toml"
 EXPRESSION = re.compile(r"\$\{\{\s*(.+?)\s*\}\}")
+MISE_RUN = re.compile(r"(?<![\w./-])mise\s+run\s+(\S+)([^\n]*)")
+# The action each job installs mise and its tools through.
+MISE_ACTION = "./.github/actions/mise"
 
 
 def workflow_jobs() -> dict:
-    # Imported here, not at the top: the registry's `-k` entries run this module without
-    # pyyaml, and none of them reaches this class.
+    # Imported here, not at the top, so the module loads without pyyaml: every class but
+    # this one reads no workflow.
     import yaml
 
     workflow = yaml.safe_load(CI.read_text()) or {}
@@ -3521,6 +3580,51 @@ def workflow_jobs() -> dict:
 
 def guards_job() -> dict:
     return workflow_jobs().get("guards") or {}
+
+
+def parity() -> dict:
+    """check-ci-parity.py, whose loader reads mise.toml's tasks and its includes. Loaded here,
+    not at the top, since it imports pyyaml."""
+    return runpy.run_path(str(HERE / "check-ci-parity.py"))
+
+
+def task_command(step: dict) -> tuple[str, str, dict[str, str]]:
+    """The task a `mise run <task> <arguments>` step runs, the command it runs, and the `env`
+    the task sets. mise puts a step's arguments after the task's last line, and the task's
+    `env` wins over the environment it inherits; test_check_ci_parity.py's `CiCommands` holds
+    real mise to both."""
+    match = MISE_RUN.search(step.get("run", ""))
+    if match is None:
+        raise AssertionError(f"`{step.get('name')}` runs no `mise run`")
+    name, args = match.groups()
+    task = parity()["load_tasks"](HERE.parent).get(name)
+    if task is None:
+        raise AssertionError(
+            f"`{step.get('name')}` runs `mise run {name}`, which mise.toml lacks"
+        )
+    run = task.get("run")
+    if not isinstance(run, str):
+        raise AssertionError(
+            f"`{name}` isn't one command, which these cases read it as"
+        )
+    env = {str(k): str(v) for k, v in (task.get("env") or {}).items()}
+    return name, run + args, env
+
+
+def commands_of(step: dict) -> list[str]:
+    """Every command a step's `mise run` reaches, through the tasks its task calls."""
+    match = MISE_RUN.search(step.get("run", ""))
+    if match is None:
+        return []
+    script = parity()
+    tasks = script["load_tasks"](HERE.parent)
+    out = []
+    for name in script["reached"](tasks, [match.group(1)]):
+        run = tasks[name].get("run")
+        out += [
+            e for e in (run if isinstance(run, list) else [run]) if isinstance(e, str)
+        ]
+    return out
 
 
 # The check ruleset 21934766 requires. The shards report under their own names, and one job
@@ -3550,11 +3654,11 @@ class GuardsJob(unittest.TestCase):
         steps = [
             s
             for s in guards_job().get("steps") or []
-            if "check-guards-fire.py fire" in s.get("run", "")
+            if any("check-guards-fire.py fire" in c for c in commands_of(s))
         ]
         self.assertTrue(
             steps,
-            "ci.yml's guards job has no step that runs `check-guards-fire.py fire`",
+            "ci.yml's guards job has no step whose task runs `check-guards-fire.py fire`",
         )
         chosen = []
         for step in steps:
@@ -3589,11 +3693,12 @@ class GuardsJob(unittest.TestCase):
             )
             return answers[match.group(1)]
 
+        _, command, task_env = task_command(step)
         env = {
             k: EXPRESSION.sub(value, str(v)) for k, v in (step.get("env") or {}).items()
-        }
+        } | task_env
         # The step runs the checkout's own script; this one stands in, pointed at the fixture.
-        run = step["run"].replace(
+        run = command.replace(
             "./tools/check-guards-fire.py",
             f"{shlex.quote(sys.executable)} {shlex.quote(str(SCRIPT))} --root {shlex.quote(str(repo.root))}",
         )
@@ -3666,8 +3771,8 @@ class GuardsJob(unittest.TestCase):
         each_shard("pull_request", pr, {"a", "sc", "bi"}, {"a", "sc", "bi"})
 
         (push,) = self.fire_steps("push")
-        self.assertNotIn("--affected", push["run"])
-        self.assertNotIn("--only", push["run"])
+        self.assertNotIn("--affected", task_command(push)[1])
+        self.assertNotIn("--only", task_command(push)[1])
         each_shard("push", push, set(), {*ORDER, "sc", "bi"})
 
     def test_the_pull_request_step_is_the_push_step_plus_the_selection(self):
@@ -3677,12 +3782,20 @@ class GuardsJob(unittest.TestCase):
         # four-vCPU runner, and a hung fault stopped well inside the job's time.
         (pr,) = self.fire_steps("pull_request")
         (push,) = self.fire_steps("push")
-        pr_argv, push_argv = shlex.split(pr["run"]), shlex.split(push["run"])
+        pr_argv, push_argv = (
+            shlex.split(task_command(pr)[1]),
+            shlex.split(task_command(push)[1]),
+        )
         suites = [b for a, b in zip(push_argv, push_argv[1:]) if a == "--suite"]
         self.assertEqual(suites, ["rust", "script", "bindings"], push["run"])
         self.assertIn("--venv-per-worker", push_argv, "the push step's environments")
         options = dict(zip(push_argv, push_argv[1:]))
-        for flag, want in (("--jobs", "4"), ("--timeout", "900")):
+        # `--target-dir target` is the directory rust-cache restores.
+        for flag, want in (
+            ("--jobs", "4"),
+            ("--timeout", "900"),
+            ("--target-dir", "target"),
+        ):
             self.assertEqual(options.get(flag), want, f"the push step's {flag}")
         self.assertEqual(pr_argv, [*push_argv, "--affected", "--base", "$BASE"])
 
@@ -3690,23 +3803,34 @@ class GuardsJob(unittest.TestCase):
         # ci:local runs one leg, the pull request's, as one run of its whole selection. Its
         # answers have to agree with each other and with ci.yml: swapped event answers would run
         # main's full fire there, and a shard count above one would fire a third of it.
-        local = tomllib.loads(LOCAL.read_text())
-        answers = local["expressions"]
-        self.assertEqual(answers.get(ON_PULL_REQUEST), "true", ON_PULL_REQUEST)
-        self.assertEqual(answers.get(ON_PUSH), "false", ON_PUSH)
+        runner = runpy.run_path(str(HERE / "ci-local.py"))
+        answers = runner["ON_PULL_REQUEST"]
+        self.assertIs(answers.get(ON_PULL_REQUEST), True, ON_PULL_REQUEST)
+        self.assertIs(answers.get(ON_PUSH), False, ON_PUSH)
+        expressions = runner["EXPRESSIONS"]
         # ci-local.py clones origin/main as the base, so the base branch is main.
-        self.assertEqual(answers.get("github.base_ref"), "main")
+        self.assertEqual(expressions.get("github.base_ref"), "main")
         self.assertEqual(
-            (answers.get("matrix.shard"), answers.get("strategy.job-total")),
+            (expressions.get("matrix.shard"), expressions.get("strategy.job-total")),
             ("0", "1"),
             "ci:local runs one shard of the selection, not all of it",
         )
-        jobs = local["job"]["ci.yml"]
+        jobs, _ = runner["plan"](HERE.parent)
+        (guards,) = [job for job in jobs if job.name == "guards"]
+        fires = {
+            step.label: step.skipped for step in guards.steps if "ci:guards" in step.run
+        }
+        (pr,) = self.fire_steps("pull_request")
+        (push,) = self.fire_steps("push")
+        self.assertIsNone(
+            fires.get(pr["name"], "missing"), "ci:local skips the pull request's fire"
+        )
+        self.assertIsNotNone(fires.get(push["name"]), "ci:local runs main's full fire")
         (name,) = [
             j for j, body in workflow_jobs().items() if body.get("name") == REQUIRED
         ]
-        self.assertIn(
-            "skip", jobs.get(name, {}), f"ci/local.toml runs the `{name}` job"
+        self.assertNotIn(
+            name, {job.name for job in jobs}, f"ci:local runs the `{name}` job"
         )
 
     def test_the_fire_steps_build_incrementally(self):
@@ -3716,9 +3840,9 @@ class GuardsJob(unittest.TestCase):
         steps = [*self.fire_steps("pull_request"), *self.fire_steps("push")]
         self.assertEqual(len(steps), 2, "the pull request's fire step and the push's")
         for step in steps:
-            self.assertEqual(
-                (step.get("env") or {}).get("CARGO_INCREMENTAL"), "1", step.get("name")
-            )
+            # The task's `env` wins over the step's and the job's.
+            _, _, env = task_command(step)
+            self.assertEqual(env.get("CARGO_INCREMENTAL"), "1", step.get("name"))
 
     def test_the_guards_legs_are_the_one_place_faults_fire(self):
         # The bindings job fired the bindings suite on one worker for ten of its thirteen
@@ -3728,7 +3852,7 @@ class GuardsJob(unittest.TestCase):
             (name, s.get("name"))
             for name, job in workflow_jobs().items()
             for s in job.get("steps") or []
-            if "check-guards-fire.py fire" in s.get("run", "")
+            if any("check-guards-fire.py fire" in c for c in commands_of(s))
         ]
         self.assertTrue(firing, "no step in ci.yml fires a seeded fault")
         self.assertEqual({name for name, _ in firing}, {"guards"}, firing)
@@ -3760,11 +3884,11 @@ class GuardsJob(unittest.TestCase):
         (build,) = [
             s
             for s in saver.get("steps") or []
-            if "check-guards-fire.py build" in s.get("run", "")
+            if any("check-guards-fire.py build" in c for c in commands_of(s))
         ]
-        argv = shlex.split(build["run"])
+        argv = shlex.split(task_command(build)[1])
         (push,) = self.fire_steps("push")
-        fire = shlex.split(push["run"])
+        fire = shlex.split(task_command(push)[1])
         suites = [b for a, b in zip(fire, fire[1:]) if a == "--suite"]
         self.assertIn("rust", suites)
         self.assertIn("bindings", suites)
@@ -3774,15 +3898,16 @@ class GuardsJob(unittest.TestCase):
             [b for a, b in zip(argv, argv[1:]) if a == "--suite"],
             [s for s in suites if s != "script"],
         )
-        # `napi build` runs through npx, on the Node the legs run it on.
-        node = [
-            [s.get("uses"), (s.get("with") or {}).get("node-version")]
-            for job in ("guards", "guards-cache")
-            for s in jobs[job].get("steps") or []
-            if s.get("uses", "").startswith("actions/setup-node@")
-        ]
-        self.assertEqual(len(node), 2, node)
-        self.assertEqual(node[0], node[1])
+        # `napi build` runs through npx, on the Node the legs run it on: both jobs take theirs,
+        # with every other tool, from mise.lock through the one action, and neither installs a
+        # Node of its own.
+        for job in ("guards", "guards-cache"):
+            uses = [s.get("uses", "") for s in jobs[job].get("steps") or []]
+            self.assertIn(MISE_ACTION, uses, job)
+            self.assertFalse(
+                [u for u in uses if u.startswith("actions/setup-node@")],
+                f"{job} installs a Node",
+            )
         self.assertEqual(dict(zip(argv, argv[1:])).get("--target-dir"), "target")
         self.assertEqual(
             build.get("if"), f"steps.{step.get('id')}.outputs.cache-hit != 'true'"
@@ -3794,6 +3919,74 @@ class GuardsJob(unittest.TestCase):
                     self.assertIn(
                         (s.get("with") or {}).get("save-if"), (False, on_main), name
                     )
+
+    def test_the_tools_cache_is_saved_by_one_job_on_main(self):
+        # Every job restores the tools cache, and only the `guards-cache` job saves it, on a
+        # push to main, after installing every task's own tools: a save from a pull request
+        # pushes the repository's caches past their cap, and one from any job but this holds
+        # none of the tasks' tools, so each `guards` leg would build cargo-mutants first.
+        import yaml
+
+        action = yaml.safe_load(
+            (HERE.parent / ".github/actions/mise/action.yml").read_text()
+        )
+        steps = (action.get("runs") or {}).get("steps") or []
+        uses = [str(s.get("uses", "")).split("@")[0] for s in steps]
+        self.assertIn(
+            "actions/cache/restore", uses, "the action restores no tools cache"
+        )
+        self.assertNotIn(
+            "actions/cache", uses, "the action's cache saves when its job ends"
+        )
+        (mise,) = [
+            s for s in steps if str(s.get("uses", "")).startswith("jdx/mise-action@")
+        ]
+        self.assertIs(
+            (mise.get("with") or {}).get("cache"),
+            False,
+            "mise-action saves its own cache",
+        )
+        workflows = [CI, HERE.parent / ".github/workflows/fuzz.yml"]
+        for path in workflows:
+            for name, job in (
+                yaml.safe_load(path.read_text()).get("jobs") or {}
+            ).items():
+                for step in job.get("steps") or []:
+                    with self.subTest(
+                        job=name, step=step.get("name") or step.get("uses")
+                    ):
+                        given = step.get("with") or {}
+                        if step.get("uses") == MISE_ACTION and (path, name) != (
+                            CI,
+                            "guards-cache",
+                        ):
+                            self.assertNotEqual(given.get("tools-cache"), "exact", name)
+                        if str(step.get("uses", "")).startswith("actions/cache/save@"):
+                            self.assertEqual(
+                                (path, name), (CI, "guards-cache"), "another job saves"
+                            )
+        saver = workflow_jobs()["guards-cache"]
+        self.assertEqual(saver.get("if"), "github.event_name == 'push'")
+        (mise_step,) = [s for s in saver["steps"] if s.get("uses") == MISE_ACTION]
+        self.assertEqual((mise_step.get("with") or {}).get("tools-cache"), "exact")
+        missed = f"steps.{mise_step.get('id')}.outputs.tools-cache-hit != 'true'"
+        (tools,) = [
+            s
+            for s in saver["steps"]
+            if MISE_RUN.search(s.get("run", "")) and "ci:tools" in s["run"]
+        ]
+        self.assertEqual(tools.get("if"), missed)
+        (save,) = [
+            s
+            for s in saver["steps"]
+            if str(s.get("uses", "")).startswith("actions/cache/save@")
+        ]
+        self.assertGreater(saver["steps"].index(save), saver["steps"].index(tools))
+        self.assertEqual(save.get("if"), f"{missed} && github.ref == 'refs/heads/main'")
+        self.assertEqual(
+            (save.get("with") or {}).get("key"),
+            f"${{{{ steps.{mise_step.get('id')}.outputs.tools-cache-key }}}}",
+        )
 
     def test_every_shard_has_sixty_minutes_on_both_legs(self):
         # D35: one budget for a pull request's shards and main's push's, as a number, so a
@@ -3824,11 +4017,12 @@ class GuardsJob(unittest.TestCase):
                 "${{ matrix.shard }}/${{ strategy.job-total }}",
                 f"{event}: the fire step's SHARD isn't its leg of the matrix",
             )
-            argv = shlex.split(step["run"])
+            # `ci:guards` reads the step's SHARD, and fires the whole selection without one.
+            argv = shlex.split(task_command(step)[1])
             self.assertIn(
-                ("--shard", "$SHARD"),
+                ("--shard", "${SHARD:-0/1}"),
                 list(zip(argv, argv[1:])),
-                f'{event}: the fire step doesn\'t pass --shard "$SHARD"',
+                f"{event}: the fire step's task doesn't pass --shard its SHARD",
             )
 
     def aggregator(self) -> dict:
@@ -3908,9 +4102,9 @@ class GuardsJob(unittest.TestCase):
 
     def test_the_aggregator_has_no_way_to_pass_over_a_red_shard(self):
         # A step `if` skips its one step and `continue-on-error` swallows its exit, and either
-        # leaves the job green with a shard red. ci:parity checks a job's keys against what
-        # ci:local models, but not a job ci/local.toml skips, as this one is, so this holds
-        # the aggregator to keys that can't make it pass.
+        # leaves the job green with a shard red. The aggregator runs no task, so
+        # test_check_ci_parity.py's `CiCommands` never runs it; this holds it to keys that can't
+        # make it pass.
         job = self.aggregator()
         extra = set(job) - {
             "name",
