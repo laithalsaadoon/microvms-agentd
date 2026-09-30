@@ -10,7 +10,7 @@ behavior and [Trust](docs/TRUST.md) before changing authentication or execution.
 ```bash
 mise install
 mise run install       # install git hooks
-mise run check         # code, security, tests, schema, stubs and declarations, surface parity, API drift, packaging, build, traceability, the drift ratchet, seeded-fault registry, doc references and config paths, changelog fragments
+mise run check         # code, security, tests, schema, stubs and declarations, surface parity, API drift, packaging, build, traceability, the drift ratchet, seeded-fault registry, doc references and config paths, changelog fragments, the pull request template's sections
 mise run ci:local      # CI's Linux jobs, each in a clone shaped like its checkout; before a push
 mise tasks             # all available tasks
 ```
@@ -159,6 +159,19 @@ an issue as parity-gap drift, and a PR can't add drift, so a new function or
 method lands on every surface or is exempted without an issue, as a decision.
 `mise run core-api` regenerates the core snapshot, and `core-api:check` fails
 when it's stale.
+
+A bug in behavior the surfaces share, such as a refusal one surface lets through,
+is a case in `verify/parity/cases/` (`verify/parity/cases/README.md` has the
+format), not a test and a seeded fault in each language: core, the CLI, Python
+and TypeScript each run every case against its one `expect`. When main marks the
+wrong surface with `known_drift`, the marker is the failing-first proof, because
+every runner fails a marked path that starts agreeing ("now agrees; remove
+known_drift"), so the fix changes core, deletes the marker, and adds nothing
+else. When the corpus has no case for the bug yet, the fix adds one, and the pull
+request shows the wrong surface's runner failing it on the merge base with only
+the case file applied; review holds that. The ratchet counts each marker as
+parity drift, so a pull request can't add one. The runners' own seeded faults
+prove each runner can fail, so a case needs no fault of its own.
 
 Each driving adapter's `clippy.toml` bans a subprocess (`std::process::Command`,
 `tokio::process::Command`) and a direct environment read (`std::env::var`,
@@ -319,6 +332,48 @@ author and no other. It also fails a file in `changelog.d/` that isn't a fragmen
 `towncrier.toml` doesn't define, an entry that isn't a bold-lead list item, and fragments that
 don't build.
 
+## Pull requests
+
+A pull request explains the problem, the resulting behavior, its validation, and
+what's still unverified, under the sections of `.github/PULL_REQUEST_TEMPLATE.md`.
+
+- **One issue per pull request**, or one box of a tracker's checklist. A change
+  that depends on another open one is stacked on it, not folded into it. A
+  premise that turns out wrong midway is a follow-up, unless the fix is wrong
+  without it.
+- **A soft cap of about 400 changed lines of product code.** Product code is the
+  shipped source directories `tools/changelog.py` names in `SHIPPED`, less the
+  generated type surfaces and the test-only files `NOT_SHIPPED` matches; the unit
+  tests inside a source file count, since they sit in the files a fix edits. Past
+  the cap, the body has a line that opens `Size:` and says why the change can't
+  be split, such as a move that can't land in halves, and review judges the
+  reason.
+- **A follow-up is a tracker checkbox, not an issue.** A finding the change
+  doesn't need to be correct goes in the body's Follow-ups section and onto the
+  parent tracker's checklist. It gets an issue of its own only when it's a
+  security defect, a panic, data loss, or a question that needs a design
+  discussion of its own.
+
+`pr-body:check` holds the body to the parts of these rules a script can read:
+What and why, Evidence, Guards and Follow-ups are each there with something in
+them besides the template's comment (`None.` when there's nothing), and a pull
+request past the cap has its `Size:` line. CI's `security` job runs it on a pull
+request, over the body in the run's event (`GITHUB_EVENT_PATH`), which is the
+body as it was when the event fired. A body edit starts no run, so after fixing
+the body, push a commit, or close and reopen the pull request. `pr-body:check`
+in `check` has no body to read, so it holds the template to the sections a body
+needs; `mise run pr-body:check -- --body <file>` checks a body you've written
+against your branch. It skips a Dependabot pull request, by the `dependabot[bot]`
+author and no other. One issue a change, stacking, and the tracker entry are
+review's to hold.
+
+Review scales with risk. A small change with no change in behavior gets a
+premise check and one reviewer; a medium one adds a check of the plan and a
+second reviewer; a change to security or the protocol, or a large one, gets
+four. Each reviewer reports at most five findings, ranked by behavior, reach and
+cost. A reviewer who asks for another seeded fault names the mutant or the input
+the existing guards miss.
+
 ## Releases and reviews
 
 The release workflow publishes `microvms-protocol`, `microvms-domain`,
@@ -388,7 +443,6 @@ delete the draft and its tag (`gh release delete vX.Y.Z --cleanup-tag`, then
 that already has a release, draft or published, so rerunning the whole workflow
 after a failed draft needs the stale draft deleted first.
 
-PRs should explain the problem, the resulting behavior, validation, and any
-remaining uncertainty. Keep scheduling and pooling in consumer applications;
-see [Strategy](docs/STRATEGY.md) for scope. Report suspected vulnerabilities
-through [Security](SECURITY.md).
+Keep scheduling and pooling in consumer applications; see
+[Strategy](docs/STRATEGY.md) for scope. Report suspected vulnerabilities through
+[Security](SECURITY.md).

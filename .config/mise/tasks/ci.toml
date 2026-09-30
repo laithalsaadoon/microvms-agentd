@@ -69,13 +69,15 @@ run = [
 description = "CI's `security` job: the security gates, then every offline gate over the repository's own records and tooling"
 # Here because the job is a required check and builds nothing, and the ratchet's rule 3 only
 # holds where it can block a merge. The job's checkout has the full history, which betterleaks
-# scans and which the base refs of `ratchet:check`, `guards:list` and `changelog:check` need;
-# the job sets `GATE_BASE`, `PR_BASE` and `PR_AUTHOR` for them.
+# scans and which the base refs of `ratchet:check`, `guards:list`, `changelog:check` and
+# `pr-body:check` need; the job sets `GATE_BASE`, `PR_BASE` and `PR_AUTHOR` for them, and
+# `pr-body:check` reads the pull request's body from the runner's `GITHUB_EVENT_PATH`.
 run = [
   { task = "security" },
   { task = "conformance:self-test" },
   { task = "agents:check" },
   { task = "changelog:check" },
+  { task = "pr-body:check" },
   { task = "ci:parity" },
   { task = "ratchet:check" },
   { task = "trace:check" },
