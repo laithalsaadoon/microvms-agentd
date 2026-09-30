@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import socket
 import subprocess
 import time
 from pathlib import Path
@@ -70,11 +71,70 @@ def _tunnel_fetch(
                 proc.kill()
 
 
+def _tunnel_fetch_to_eof(
+    cli: Cli,
+    vm_name: str,
+    state_dir: Path,
+    local_port: int,
+    guest_port: int,
+) -> tuple[bytes | None, Envelope | None]:
+    """One verified HTTP/1.1 request the guest closes after answering, read to the tunnel's EOF.
+
+    `Connection: close` makes the daemon's HTTP server end the connection after its answer, so
+    the guest's side ends first and the tunnel's end is the daemon's end of stream (#342). The
+    local client is a raw socket that never closes first: it reads until the tunnel closes the
+    local connection, so the end the CLI counts is the one that crossed the proxy.
+    """
+    argv = cli.argv(
+        "tunnel",
+        f"{local_port}:{guest_port}",
+        "--name",
+        vm_name,
+        "--state-dir",
+        str(state_dir),
+        "--region",
+        cli.region,
+        "--max-connections",
+        "1",
+        "--verify-identity",
+    )
+    cli.log.append(command_for_log(argv))
+    with subprocess.Popen(
+        argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    ) as proc:
+        try:
+            body: bytes | None = None
+            # The listener needs a moment to bind; the retry is the wait.
+            for _ in range(20):
+                time.sleep(0.5)
+                try:
+                    with socket.create_connection(
+                        ("127.0.0.1", local_port), timeout=30.0
+                    ) as conn:
+                        conn.sendall(
+                            b"GET /v1/schema HTTP/1.1\r\nHost: localhost\r\n"
+                            b"Connection: close\r\n\r\n"
+                        )
+                        chunks = []
+                        while chunk := conn.recv(65536):
+                            chunks.append(chunk)
+                        body = b"".join(chunks)
+                    break
+                except OSError:
+                    continue
+            stdout, _ = proc.communicate(timeout=30)
+            return body, cli.parse_stdout(stdout, argv) if stdout.strip() else None
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+
+
 def drive_tunnel_identity(
     cli: Cli, launched: Envelope, state_dir: Path, results: Results
 ) -> None:
-    """Tunnel identity (issue #70 layer 3): prove the VM, fail closed. Eight checks,
-    two of them `attach --verify-identity` (issue #66) over the same pin.
+    """Tunnel identity (issue #70 layer 3): prove the VM, fail closed. Nine checks,
+    two of them `attach --verify-identity` (issue #66) over the same pin, and one the
+    verified tunnel's end of stream crossing the real proxy (#342).
 
     Its own VM, launched `--identity` from the image the suite already built: the seed is
     delivered only at launch, so the suite's VM — launched without one — cannot carry it.
@@ -152,6 +212,27 @@ def drive_tunnel_identity(
             "a verified tunnel served a request through the real proxy",
             verified is not None and '"protocol_version"' in verified,
             f"body: {verified[:80] if verified else verified!r}",
+        )
+
+        # The daemon's end of stream is a Noise message the proxy carries ahead of the close
+        # frame. The client counts a connection truncated when a close arrives without it, and
+        # unproven when the daemon's handshake didn't offer it, so both counts at zero with the
+        # connection served is the end of stream arriving through the proxy.
+        ended_body, ended = _tunnel_fetch_to_eof(
+            cli, vm_name, state_dir, 18446, AGENT_PORT
+        )
+        ended_data = ended.data if ended else {}
+        results.check(
+            "BIND-23 a verified tunnel whose guest ends first ends with the daemon's end of stream through the real proxy",
+            ended_body is not None
+            and b'"protocol_version"' in ended_body
+            and ended_data.get("connectionsServed") == 1
+            and ended_data.get("connectionsTruncated") == 0
+            and ended_data.get("connectionsUnproven") == 0,
+            f"bodyBytes={len(ended_body) if ended_body is not None else None} "
+            f"served={ended_data.get('connectionsServed')!r} "
+            f"truncated={ended_data.get('connectionsTruncated')!r} "
+            f"unproven={ended_data.get('connectionsUnproven')!r}",
         )
 
         # `attach --verify-identity` (issue #66) runs the tunnel's handshake with no relay

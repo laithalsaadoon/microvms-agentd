@@ -499,7 +499,8 @@ async fn open_identity_tunnel(
     socket
 }
 
-/// Runs the initiator's half of the Noise KK handshake over an open WebSocket.
+/// Runs the initiator's half of the Noise KK handshake over an open WebSocket, offering the
+/// end of stream as a current client does.
 ///
 /// Returns the transport state, or the daemon's close outcome when the handshake was
 /// refused — which is itself an assertable result rather than a test failure.
@@ -508,6 +509,25 @@ async fn initiate(
     host_seed: [u8; 32],
     pinned_vm_public: [u8; 32],
 ) -> Result<snow::TransportState, Option<(u16, String)>> {
+    initiate_with(
+        socket,
+        host_seed,
+        pinned_vm_public,
+        &protocol::identity::HANDSHAKE_PAYLOAD,
+    )
+    .await
+    .map(|(transport, _)| transport)
+}
+
+/// [`initiate`] with `payload` in the first message, returning the daemon's reply payload too.
+///
+/// An empty `payload` is a client from before the end of stream.
+async fn initiate_with(
+    socket: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
+    host_seed: [u8; 32],
+    pinned_vm_public: [u8; 32],
+    payload: &[u8],
+) -> Result<(snow::TransportState, Vec<u8>), Option<(u16, String)>> {
     let mut initiator =
         snow::Builder::new(protocol::identity::NOISE_PATTERN.parse().expect("parses"))
             .local_private_key(&host_seed)
@@ -518,7 +538,9 @@ async fn initiate(
             .expect("builds");
 
     let mut scratch = vec![0_u8; 65535];
-    let written = initiator.write_message(&[], &mut scratch).expect("writes");
+    let written = initiator
+        .write_message(payload, &mut scratch)
+        .expect("writes");
     socket
         .send(Message::Binary(scratch[..written].to_vec().into()))
         .await
@@ -531,10 +553,11 @@ async fn initiate(
             .expect("an answer arrives")
         {
             Some(Ok(Message::Binary(reply))) => {
-                initiator
+                let read = initiator
                     .read_message(&reply, &mut scratch)
                     .expect("the daemon's reply authenticates");
-                return Ok(initiator.into_transport_mode().expect("transport"));
+                let offer = scratch[..read].to_vec();
+                return Ok((initiator.into_transport_mode().expect("transport"), offer));
             }
             Some(Ok(Message::Close(Some(CloseFrame { code, reason })))) => {
                 return Err(Some((code.into(), reason.to_string())));
@@ -706,4 +729,266 @@ async fn a_refused_caller_never_causes_a_guest_connection() {
         0,
         "a refused caller must never cause a connection to the guest service"
     );
+}
+
+// ── the end of stream (#342) ────────────────────────────────────────────────
+
+/// A guest server that reads its one connection to the end and reports how the read ended.
+///
+/// `Ok` with every byte is a connection its peer closed; `Err` with the error's kind is one that
+/// broke. The difference is the whole point: a guest reading an upload to EOF keeps what it read
+/// on an EOF and throws it away on a reset.
+async fn reading_guest() -> (
+    SocketAddr,
+    tokio::sync::oneshot::Receiver<Result<Vec<u8>, std::io::ErrorKind>>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("a free port");
+    let addr = listener.local_addr().expect("bound");
+    let (report, outcome) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.expect("one connection");
+        let mut read = Vec::new();
+        let result = socket
+            .read_to_end(&mut read)
+            .await
+            .map(|_| read)
+            .map_err(|error| error.kind());
+        let _ = report.send(result);
+    });
+    (addr, outcome)
+}
+
+/// Seals `plain` under `noise` into one binary frame.
+fn sealed(noise: &mut snow::TransportState, plain: &[u8]) -> Message {
+    let mut scratch = vec![0_u8; 65535];
+    let written = noise.write_message(plain, &mut scratch).expect("encrypts");
+    Message::Binary(scratch[..written].to_vec().into())
+}
+
+/// A verified tunnel's daemon, a guest reading to the end, and a current caller whose handshake
+/// completed and whose first chunk has been sent.
+async fn verified_upload(
+    offer: &[u8],
+) -> (
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
+    snow::TransportState,
+    tokio::sync::oneshot::Receiver<Result<Vec<u8>, std::io::ErrorKind>>,
+) {
+    let vm_seed = [7_u8; 32];
+    let host_seed = [9_u8; 32];
+    let vm_public =
+        *x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(vm_seed)).as_bytes();
+    let (guest, outcome) = reading_guest().await;
+    let daemon = identity_daemon(vm_seed, host_seed).await;
+    let mut socket = open_identity_tunnel(daemon, guest.port()).await;
+    let (mut noise, _) = initiate_with(&mut socket, host_seed, vm_public, offer)
+        .await
+        .expect("the launching host's handshake completes");
+    socket
+        .send(sealed(&mut noise, b"the whole upload"))
+        .await
+        .expect("sent");
+    (socket, noise, outcome)
+}
+
+/// The guest's report, bounded so a relay that never ends the guest connection fails here.
+async fn guest_report(
+    outcome: tokio::sync::oneshot::Receiver<Result<Vec<u8>, std::io::ErrorKind>>,
+) -> Result<Vec<u8>, std::io::ErrorKind> {
+    tokio::time::timeout(std::time::Duration::from_secs(5), outcome)
+        .await
+        .expect("the daemon ends the guest connection")
+        .expect("the guest reports")
+}
+
+/// **The guest's EOF reaches a verified caller as the end of stream, after every byte**
+/// (AGENTD-19).
+///
+/// The daemon's reply offers the end of stream, the guest's bytes arrive, then one message whose
+/// plaintext is empty, and only then the close frame. A close frame alone is plaintext that
+/// anything on the path can send, so it's the message inside the session that says the guest
+/// finished.
+#[tokio::test]
+async fn agentd_19_a_guest_eof_reaches_the_caller_as_the_end_of_stream() {
+    let vm_seed = [7_u8; 32];
+    let host_seed = [9_u8; 32];
+    let vm_public =
+        *x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(vm_seed)).as_bytes();
+    let total = 100 * 1024;
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("a free port");
+    let guest = listener.local_addr().expect("bound");
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.expect("one connection");
+        let payload: Vec<u8> = (0..total).map(|index| (index % 251) as u8).collect();
+        let _ = socket.write_all(&payload).await;
+        let _ = socket.shutdown().await;
+    });
+
+    let daemon = identity_daemon(vm_seed, host_seed).await;
+    let mut socket = open_identity_tunnel(daemon, guest.port()).await;
+    let (mut noise, offer) = initiate_with(
+        &mut socket,
+        host_seed,
+        vm_public,
+        &protocol::identity::HANDSHAKE_PAYLOAD,
+    )
+    .await
+    .expect("the launching host's handshake completes");
+    assert!(
+        protocol::identity::offers_end_of_stream(&offer),
+        "the daemon's reply must offer the end of stream: {offer:?}"
+    );
+
+    let mut received = Vec::new();
+    let mut scratch = vec![0_u8; 65535];
+    let mut ended = false;
+    loop {
+        let message = tokio::time::timeout(std::time::Duration::from_secs(5), socket.next())
+            .await
+            .expect("a frame arrives")
+            .expect("a message")
+            .expect("not an error");
+        match message {
+            Message::Binary(frame) => {
+                assert!(!ended, "nothing may follow the end of stream but the close");
+                let count = noise
+                    .read_message(&frame, &mut scratch)
+                    .expect("every frame authenticates");
+                if count == 0 {
+                    ended = true;
+                } else {
+                    received.extend_from_slice(&scratch[..count]);
+                }
+            }
+            Message::Close(frame) => {
+                let code = frame.map_or(1000, |frame| u16::from(frame.code));
+                assert_eq!(code, protocol::tunnel::close::NORMAL);
+                break;
+            }
+            _ => continue,
+        }
+    }
+    assert!(
+        ended,
+        "the guest's EOF must arrive as the end of stream before the close frame"
+    );
+    let expected: Vec<u8> = (0..total).map(|index| (index % 251) as u8).collect();
+    assert_eq!(received, expected, "every guest byte comes before the end");
+}
+
+/// **A caller's end of stream reaches the guest as an EOF, after every byte.**
+///
+/// The complement of the reset below: the caller proved it sent everything, so the guest reads
+/// the whole upload and then EOF.
+#[tokio::test]
+async fn the_callers_end_of_stream_reaches_the_guest_as_eof() {
+    let (mut socket, mut noise, outcome) =
+        verified_upload(&protocol::identity::HANDSHAKE_PAYLOAD).await;
+    socket.send(sealed(&mut noise, &[])).await.expect("sent");
+    let _ = socket.close(None).await;
+
+    assert_eq!(
+        guest_report(outcome).await,
+        Ok(b"the whole upload".to_vec()),
+        "the guest reads the caller's bytes, then EOF"
+    );
+}
+
+/// **A close frame without the caller's end of stream resets the guest rather than closing it**
+/// (AGENTD-20).
+///
+/// The caller offered the end of stream, so a close without it is what an on-path party
+/// forging a close looks like. A guest that read EOF here would take a cut upload for a whole
+/// one; a reset tells it the stream broke.
+#[tokio::test]
+async fn agentd_20_a_close_without_the_callers_end_of_stream_resets_the_guest() {
+    let (mut socket, _noise, outcome) =
+        verified_upload(&protocol::identity::HANDSHAKE_PAYLOAD).await;
+    let _ = socket.close(None).await;
+
+    assert_eq!(
+        guest_report(outcome).await,
+        Err(std::io::ErrorKind::ConnectionReset),
+        "a caller's close without its end of stream must reach the guest as a reset, not an EOF"
+    );
+}
+
+/// **A dropped connection without the caller's end of stream resets the guest too**
+/// (AGENTD-20).
+#[tokio::test]
+async fn agentd_20_a_dropped_caller_without_its_end_of_stream_resets_the_guest() {
+    let (socket, _noise, outcome) = verified_upload(&protocol::identity::HANDSHAKE_PAYLOAD).await;
+    // Give the chunk time to reach the guest, then drop the TCP connection with no close frame.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    drop(socket);
+
+    assert_eq!(
+        guest_report(outcome).await,
+        Err(std::io::ErrorKind::ConnectionReset),
+        "a caller that vanished without its end of stream must reach the guest as a reset"
+    );
+}
+
+/// **A caller from before the end of stream still ends the guest connection with an EOF.**
+///
+/// The skew rule. Its handshake payload is empty, so it never sends an end of stream, and
+/// resetting the guest on its every close would break every upload through an older client.
+#[tokio::test]
+async fn a_caller_that_offers_no_end_of_stream_closes_the_guest_as_before() {
+    let (mut socket, _noise, outcome) = verified_upload(&[]).await;
+    let _ = socket.close(None).await;
+
+    assert_eq!(
+        guest_report(outcome).await,
+        Ok(b"the whole upload".to_vec()),
+        "an older caller's close is its end, as it always was"
+    );
+}
+
+/// **A plain tunnel's close still reaches the guest as an EOF.**
+///
+/// A plain tunnel has no end of stream: nothing on it is authenticated, so its caller's close is
+/// its end, as it always was, and resetting the guest here would break every upload through it.
+#[tokio::test]
+async fn a_plain_callers_close_still_reaches_the_guest_as_eof() {
+    let (guest, outcome) = reading_guest().await;
+    let daemon = daemon().await;
+    let mut socket = open_tunnel(daemon, guest.port(), Some(TOKEN))
+        .await
+        .expect("the upgrade succeeds");
+    socket
+        .send(Message::Binary(b"a plain upload".to_vec().into()))
+        .await
+        .expect("sent");
+    let _ = socket.close(None).await;
+
+    assert_eq!(guest_report(outcome).await, Ok(b"a plain upload".to_vec()));
+}
+
+/// **A plain tunnel's guest EOF still ends with a close frame at code 1000.**
+///
+/// Stricter than `the_guest_hanging_up_closes_the_tunnel`, which accepts a dropped transport:
+/// the plain channel has no end of stream to send first, and it must still send the close.
+#[tokio::test]
+async fn a_plain_guests_eof_still_ends_with_a_close_at_code_1000() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("a free port");
+    let guest = listener.local_addr().expect("bound");
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.expect("one connection");
+        let _ = socket.write_all(b"all of it").await;
+        let _ = socket.shutdown().await;
+    });
+
+    let daemon = daemon().await;
+    let mut socket = open_tunnel(daemon, guest.port(), Some(TOKEN))
+        .await
+        .expect("the upgrade succeeds");
+    let (code, _) = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        close_outcome(&mut socket),
+    )
+    .await
+    .expect("the relay ends the tunnel")
+    .expect("a close frame, not a dropped transport");
+    assert_eq!(code, protocol::tunnel::close::NORMAL);
 }
