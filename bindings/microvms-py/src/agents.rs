@@ -774,7 +774,7 @@ impl PyAgentVm {
         delete_log_group=false,
         delete_attempts=None,
         delete_backoff=None,
-        wait_for_terminated=false,
+        wait_for_terminated=crate::sandbox::WaitForTerminated::Flag(false),
     ))]
     fn terminate(
         &self,
@@ -783,7 +783,7 @@ impl PyAgentVm {
         delete_log_group: bool,
         delete_attempts: Option<u32>,
         delete_backoff: Option<f64>,
-        wait_for_terminated: bool,
+        wait_for_terminated: crate::sandbox::WaitForTerminated,
     ) -> PyCoreResult<PyTeardownReport> {
         self.sandbox().terminate(
             py,
@@ -810,7 +810,14 @@ impl PyAgentVm {
         traceback: Option<Py<PyAny>>,
     ) -> bool {
         let _ = (exc_type, exc_value, traceback);
-        let _ = self.terminate(py, false, false, None, None, false);
+        let _ = self.terminate(
+            py,
+            false,
+            false,
+            None,
+            None,
+            crate::sandbox::WaitForTerminated::Flag(false),
+        );
         false
     }
 

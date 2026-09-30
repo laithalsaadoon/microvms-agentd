@@ -33,8 +33,9 @@
 //! [`crate::control::ControlPlane::run_microvm`] refuses the combination locally
 //! instead. The pair that works is `[HTTP_INGRESS, SHELL_INGRESS]`.
 //!
-//! The sibling half of TRAP-11 — the shell-auth operation — is still closed by the
-//! absence of a method on [`crate::control::ControlPlane`]; see that module's docs.
+//! The sibling half of TRAP-11, the shell-auth operation, is
+//! [`crate::control::ControlPlane::mint_shell_auth_token`]: `microvm shell`'s door, which the
+//! exec path never calls. See that module's docs.
 
 use crate::region::Region;
 
