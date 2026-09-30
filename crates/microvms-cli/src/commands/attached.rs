@@ -2445,7 +2445,7 @@ pub async fn port_forward<O: std::io::Write, E: std::io::Write>(
         proxy_token_mints: mints,
         ..
     } = report;
-    let interrupted = report.stopped == serve::StopReason::Requested;
+    let interrupted = report.stopped.was_requested();
     let mut data = Map::new();
     data.insert("microvmId".into(), json!(microvm_id));
     data.insert("localPort".into(), json!(bound.port()));
@@ -2662,7 +2662,7 @@ pub async fn tunnel<O: std::io::Write, E: std::io::Write>(
         proxy_token_mints: mints,
         ..
     } = report;
-    let interrupted = report.stopped == serve::StopReason::Requested;
+    let interrupted = report.stopped.was_requested();
     let mut data = Map::new();
     data.insert("microvmId".into(), json!(microvm_id));
     data.insert("localPort".into(), json!(bound.port()));

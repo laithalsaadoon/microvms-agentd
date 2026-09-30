@@ -58,6 +58,14 @@ pub enum StopReason {
     ListenerFailed(String),
 }
 
+impl StopReason {
+    /// Whether the caller stopped the loop, which the CLI reports as `interrupted`: a stop is
+    /// a success, and a loop that ended at its limit or on its listener wasn't interrupted.
+    pub fn was_requested(&self) -> bool {
+        matches!(self, StopReason::Requested)
+    }
+}
+
 /// What a tunnel reaches: the daemon, the guest port, and the credentials to present.
 #[derive(Clone)]
 pub struct TunnelTarget {
@@ -387,6 +395,14 @@ mod tests {
             (2, 3, 2),
             "{report:?}"
         );
+    }
+
+    /// Only the caller's own stop reads as requested.
+    #[test]
+    fn only_the_callers_stop_was_requested() {
+        assert!(StopReason::Requested.was_requested());
+        assert!(!StopReason::Limit.was_requested());
+        assert!(!StopReason::ListenerFailed("gone".to_string()).was_requested());
     }
 
     /// A refusal and an upgrade each land in their column; other events count nowhere.

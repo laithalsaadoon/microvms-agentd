@@ -1590,6 +1590,7 @@
     "microvms_core::session::serve::StopReason::Limit": "variant",
     "microvms_core::session::serve::StopReason::ListenerFailed": "variant",
     "microvms_core::session::serve::StopReason::Requested": "variant",
+    "microvms_core::session::serve::StopReason::was_requested": "method",
     "microvms_core::session::serve::TunnelConnection": "struct",
     "microvms_core::session::serve::TunnelReport": "struct",
     "microvms_core::session::serve::TunnelTarget": "struct",
