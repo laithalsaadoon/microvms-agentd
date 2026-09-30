@@ -51,6 +51,7 @@ use microvms_core::sandbox::{
     Detached as CoreDetached, RunRequest, Sandbox as CoreSandbox, TeardownOpts,
     TeardownReport as CoreTeardownReport,
 };
+use napi::bindgen_prelude::Either;
 use napi_derive::napi;
 use tokio::sync::Mutex;
 
@@ -597,8 +598,9 @@ pub struct TeardownOptions {
     pub delete_backoff: Option<f64>,
     /// `false` by default: the caller is on the way out, and a teardown that blocked five
     /// minutes on a state nobody reads is five minutes of a CI job. The report then honestly
-    /// ends in `"TERMINATING"`.
-    pub wait_for_terminated: Option<bool>,
+    /// ends in `"TERMINATING"`. `true` waits for TERMINATED up to the core's lifecycle default;
+    /// a number of seconds waits up to that instead.
+    pub wait_for_terminated: Option<Either<bool, f64>>,
 }
 
 impl TeardownOptions {
@@ -617,8 +619,10 @@ impl TeardownOptions {
             },
             wait_for_terminated: defaults.wait_for_terminated,
         };
-        if self.wait_for_terminated.unwrap_or(false) {
-            opts = opts.waiting_for_terminated();
+        match self.wait_for_terminated {
+            None | Some(Either::A(false)) => {}
+            Some(Either::A(true)) => opts = opts.waiting_for_terminated(),
+            Some(Either::B(timeout)) => opts.wait_for_terminated = Some(seconds_async(timeout)?),
         }
         Ok(opts)
     }
