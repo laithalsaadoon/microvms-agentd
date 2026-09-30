@@ -88,20 +88,20 @@ Three subcommands:
           commands. CI's `guards` job runs one shard a leg (#345). The N shards partition the
           selection, and shard k of N of the same tree and base is always the same entries. A
           shard holds whole commands, so a command's clean and restored runs happen once across
-          the matrix. Each command weighs the sum of its entries' rough CI seconds
-          (`entry_cost`: 16 for an entry that builds the CLI, 14 for another Rust entry, 6 for
-          a script one, 18 for a bindings entry that builds the Node addon and 6 for another
-          bindings one), and commands go heaviest first onto the lightest shard, a tie in
-          weight to the command that comes first in the registry and a tie in load to the lower
-          shard; a shard's entries keep registry order. A cost, not a count, because a Rust
-          entry costs about twice a script entry's time and the CLI's entries sit together:
-          split by entry count, one of three shards held most of the CLI's entries and took
-          440 s locally against 295 s and 314 s for the other two, and split by cost the three
-          took 302 s, 359 s and 304 s (2026-09-29, this change's tree). Modeled on main's push
-          at 6a868e9 with that run's per-command and per-fault seconds, the slowest of three
-          legs is about 12 minutes by cost against about 17 by count, and about 15 either way
-          with #340's entries added. Commands stay whole because splitting one repeats its
-          clean and restored runs in each shard that holds part of it. It prints which shard
+          the matrix. Each command weighs the sum of its entries' rough cost in a CI shard
+          (`entry_cost`, in units that give a Rust entry 14: 24 for an entry that builds the
+          CLI, 17 for a script one, 119 for a bindings entry that builds the Node addon and 53
+          for another bindings one), and commands go heaviest first onto the lightest shard, a
+          tie in weight to the command that comes first in the registry and a tie in load to
+          the lower shard; a shard's entries keep registry order. A cost, not a count, because
+          an entry's cost spans an order of magnitude and a command's entries sit together:
+          one `napi build` entry costs about eight Rust ones. Modeled on the per-command seconds
+          of run 36663996459, which fired every entry in three legs, these weights split it
+          into about 12.8, 12.3 and 11.7 minutes of work a worker, where that run's own weights
+          (the bindings entries at their one-worker cost, and the Rust and script ones from
+          before #351's incremental builds) had given 16.3, 13.6 and 7.0. Commands stay whole
+          because splitting one repeats its clean and restored runs in each shard that holds
+          part of it. It prints which shard
           it is and how much of the selection it keeps, and a shard with nothing in its slice
           exits 0.
           `mise run guards:fire -- --affected --shard 1/3` runs one pull request leg's share
@@ -1294,19 +1294,21 @@ def command_weights(
 
 
 def entry_cost(fault: Fault) -> int:
-    """An entry's seconds on CI's runner, roughly, for the split over shards: an entry that
-    builds the CLI (its argv names microvms-cli) about 16, another Rust entry (a cargo build)
-    about 14, and a script entry about 6. Measured per fault on main's push at 6a868e9 (cargo
-    13.7 s, the rest 5.8 s) and on #340's second round (entries naming microvms-cli 17.8 s).
-    A bindings entry that builds the Node addon (`napi build`) about 18, and another bindings
-    one about 6: the bindings job's per-fault seconds on main's push at 74e2347 (run
-    36622110872: `napi build` entries 17.9 s, `maturin develop` ones 6.1 s), one worker to
-    the runner. The module docstring's `--shard` says why a cost and not a count."""
+    """An entry's cost in a CI shard, roughly, for the split over shards, in units that give a
+    Rust entry (a cargo build) 14: an entry that builds the CLI (its argv names microvms-cli)
+    24, a script entry 17, a bindings entry that builds the Node addon (`napi build`) 119, and
+    another bindings entry 53. They're the mean seconds a fault took in shards 1 and 2 of run
+    36663996459, four workers to a runner (shard 0 held the costliest napi command, and its
+    contention slowed every kind there): Rust 3.39 s, CLI 5.74 s, script 4.18 s, `napi build`
+    28.87 s, and `maturin develop` or the stub check 12.8 s, scaled so a Rust entry keeps its
+    14. Main's push at be99c5d, with no bindings entries in its shards, put a CLI entry at 1.9
+    Rust ones and a script entry at 1.5. The module docstring's `--shard` says why a cost and
+    not a count."""
     if fault.suite == "bindings":
-        return 18 if any("napi" in argv for argv in fault.run) else 6
+        return 119 if any("napi" in argv for argv in fault.run) else 53
     if any("microvms-cli" in arg for argv in fault.run for arg in argv):
-        return 16
-    return 14 if fault.suite == "rust" else 6
+        return 24
+    return 14 if fault.suite == "rust" else 17
 
 
 def spread(

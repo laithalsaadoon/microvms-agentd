@@ -3896,14 +3896,20 @@ transform = { file = "scripts/check-guards-fire.py", replace = "                
 [[fault]]
 id = "guards-fire-shard-bindings-weight"
 guard = "test_check_guards_fire.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "test_a_bindings_entry_weighs_what_its_extension_build_costs"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "test_a_shard_weighs_an_entry_by_what_it_builds"]
 expect = "exit-nonzero"
 suite = "script"
-message = "AssertionError: Lists differ: [6, 6, 14] != [18, 6, 14]"
-transform = { file = "scripts/check-guards-fire.py", replace = "        return 18 if any(\"napi\" in argv for argv in fault.run) else 6\n", with = "        return 6\n" }
+message = "FAIL: test_a_shard_weighs_an_entry_by_what_it_builds ("
+transform = { file = "scripts/check-guards-fire.py", replace = "        return 119 if any(\"napi\" in argv for argv in fault.run) else 53\n", with = "        return 53\n" }
 
-# The fire steps build incrementally, and the legs restore the one dependency cache a push to
-# main saves.
+[[fault]]
+id = "guards-fire-shard-bindings-as-script"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_guards_fire.py", "-k", "test_a_shard_weighs_an_entry_by_what_it_builds"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_shard_weighs_an_entry_by_what_it_builds ("
+transform = { file = "scripts/check-guards-fire.py", replace = "    if fault.suite == \"bindings\":\n        return 119 if any(\"napi\" in argv for argv in fault.run) else 53\n", with = "" }
 
 [[fault]]
 id = "guards-job-fire-not-incremental"
@@ -4235,7 +4241,7 @@ run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_shard_weighs_an_entry_by_what_it_builds ("
-transform = { file = "scripts/check-guards-fire.py", replace = "        return 16\n", with = "        return 14\n" }
+transform = { file = "scripts/check-guards-fire.py", replace = "        return 24\n", with = "        return 14\n" }
 
 [[fault]]
 id = "guards-fire-shard-script-weight"
@@ -4244,7 +4250,7 @@ run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_shard_weighs_an_entry_by_what_it_builds ("
-transform = { file = "scripts/check-guards-fire.py", replace = "    return 14 if fault.suite == \"rust\" else 6\n", with = "    return 14\n" }
+transform = { file = "scripts/check-guards-fire.py", replace = "    return 14 if fault.suite == \"rust\" else 17\n", with = "    return 14\n" }
 
 # A shard's entries come out in the order the split visits commands, not registry order.
 [[fault]]

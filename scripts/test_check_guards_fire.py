@@ -2736,20 +2736,31 @@ class FireSharded(unittest.TestCase):
                 self.assertEqual(fired_ids(out.stdout), [])
 
     def test_a_shard_weighs_an_entry_by_what_it_builds(self):
-        # X: three script entries (6 each), Y: two that build the CLI (16 each), Z: two other
-        # Rust entries (14 each). By cost Y goes first to shard 0 and Z and X share shard 1. A
-        # count, a CLI entry priced as another Rust one, or a script entry priced as a Rust
-        # one each gives other slices.
+        # One command of each kind, in registry order: a CLI entry (24), a Rust one (14), a
+        # script one (17), a `napi build` one (119), and two `maturin develop` ones (53 each).
+        # By cost the napi command goes first to shard 0, the maturin one to shard 1, and the
+        # rest fill in around them. A count, a CLI entry priced as another Rust one, a script
+        # entry priced as a Rust one, a napi entry priced as a maturin one, or a bindings entry
+        # priced as a script one each gives other slices.
+        napi = ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build"]
+        maturin = ["uvx", "maturin@1.14.1", "develop", "-q"]
         spec = [
-            ("x", "script", ["python3", "x.py"]),
             (
-                "y",
+                "c",
                 "rust",
-                ["cargo", "test", "-p", "microvms-cli", "--", "--exact", "y"],
+                ["cargo", "test", "-p", "microvms-cli", "--", "--exact", "c"],
+                1,
             ),
-            ("z", "rust", ["cargo", "test", "--", "--exact", "z"]),
+            ("r", "rust", ["cargo", "test", "--", "--exact", "r"], 1),
+            ("s", "script", ["python3", "s.py"], 1),
+            (
+                "n",
+                "bindings",
+                [napi, ["node", "--test", "--test-reporter=tap", "n"]],
+                1,
+            ),
+            ("o", "bindings", [maturin, ["pytest", "-rA", "t.py::o"]], 2),
         ]
-        sizes = {"x": 3, "y": 2, "z": 2}
         registry = "".join(
             entry(
                 fid=f"{name}{i}",
@@ -2760,47 +2771,19 @@ class FireSharded(unittest.TestCase):
                 message="no",
                 fault=f'transform = {{ file = "state.txt", replace = "{name}{i}=ok", with = "{name}{i}=bad" }}',
             )
-            for name, suite, run in spec
-            for i in range(sizes[name])
+            for name, suite, run, size in spec
+            for i in range(size)
         )
-        state = " ".join(f"{n}{i}=ok" for n, size in sizes.items() for i in range(size))
+        state = " ".join(f"{n}{i}=ok" for n, _, _, size in spec for i in range(size))
         repo = Repo(self, {"guards/faults.toml": registry, "state.txt": state + "\n"})
         script = runpy.run_path(str(SCRIPT))
         faults, problems = script["load"](repo.root)
         self.assertEqual(problems, [])
         self.assertEqual(
             [[f.id for f in script["shard"](faults, k, 2)] for k in (0, 1)],
-            [["y0", "y1"], ["x0", "x1", "x2", "z0", "z1"]],
+            [["s0", "n0"], ["c0", "r0", "o0", "o1"]],
             "the shards aren't split by the entries' cost",
         )
-
-    def test_a_bindings_entry_weighs_what_its_extension_build_costs(self):
-        # On CI's runner a `napi build` entry took about three times a `maturin develop` one
-        # (run 36622110872), and neither is a Rust entry's cost.
-        napi = ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build"]
-        maturin = ["uvx", "maturin@1.14.1", "develop", "-q"]
-        registry = "".join(
-            [
-                entry(
-                    fid="js",
-                    guard="t",
-                    run=[napi, ["node", "--test", "--test-reporter=tap", "t"]],
-                    suite="bindings",
-                ),
-                entry(
-                    fid="py",
-                    guard="t.py::t",
-                    run=[maturin, ["pytest", "-rA", "t.py::t"]],
-                    suite="bindings",
-                ),
-                entry(fid="rs"),
-            ]
-        )
-        repo = Repo(self, {"guards/faults.toml": registry, "state.txt": "x=ok\n"})
-        script = runpy.run_path(str(SCRIPT))
-        faults, problems = script["load"](repo.root)
-        self.assertEqual(problems, [])
-        self.assertEqual([script["entry_cost"](f) for f in faults], [18, 6, 14])
 
     def test_the_registrys_own_shards_partition_it(self):
         # The split CI makes, on the registry it makes it of: every suite's entries in CI's
