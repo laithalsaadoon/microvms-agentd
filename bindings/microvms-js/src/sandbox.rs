@@ -503,6 +503,18 @@ pub struct EnsuredImage {
     pub warnings: Vec<String>,
 }
 
+impl From<microvms_core::control::EnsuredImage> for EnsuredImage {
+    fn from(ensured: microvms_core::control::EnsuredImage) -> Self {
+        EnsuredImage {
+            image: Image::wrap(&ensured.image),
+            reused: ensured.reused,
+            artifact_uri: ensured.artifact_uri,
+            uploaded: ensured.uploaded,
+            warnings: ensured.warnings,
+        }
+    }
+}
+
 /// Everything a launch needs.
 #[derive(Default)]
 #[napi(object)]
@@ -884,13 +896,7 @@ impl Sandbox {
         }
         let mut guard = self.inner.lock().await;
         let ensured = guard.ensure_image(request).await.map_err(js_async)?;
-        Ok(EnsuredImage {
-            image: Image::wrap(&ensured.image),
-            reused: ensured.reused,
-            artifact_uri: ensured.artifact_uri,
-            uploaded: ensured.uploaded,
-            warnings: ensured.warnings,
-        })
+        Ok(EnsuredImage::from(ensured))
     }
 
     /// The artifact bytes to upload to `codeArtifactUri`.

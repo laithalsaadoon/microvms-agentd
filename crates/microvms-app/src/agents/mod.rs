@@ -171,13 +171,54 @@ pub fn spec_for(specs: &[AgentSpec], agent: Agent) -> Result<&AgentSpec, Error> 
 
 /// [`AgentVm::image_name`] for a caller holding the sandbox and the specs separately:
 /// the bindings, whose sandbox sits behind a lock shared with every session they hand out.
+///
+/// The name [`ensure_request_for`]'s ensure gives the image (#258): the stem, then ensure's
+/// identity over the artifact's inputs, the base and the size class, so the two-step path
+/// (`image_request`, the caller's upload, `build`) and the ensure name one image.
 pub fn image_name_for(
     sandbox: &Sandbox,
     specs: &[AgentSpec],
     request: &CreateImageRequest,
 ) -> String {
-    let hash = sandbox.artifact_content_hash_for(request);
-    format!("{}-{}", image_stem(specs), &hash[..12])
+    let identity = crate::control::ensure::pinned_identity_hash(
+        &sandbox.artifact_content_hash_for(request),
+        &request.base_image,
+        request.base_image_version.as_deref(),
+        request.size,
+    );
+    let stem = image_stem(specs);
+    // The stem is `agent-vm-` and profile names, all of them characters the ImageName
+    // pattern admits, well inside its length; the fallback is that same name spelled out.
+    crate::control::ensure::ensured_image_name(&stem, &identity)
+        .unwrap_or_else(|_| format!("{stem}-{}", &identity[..12]))
+}
+
+/// [`AgentVm::ensure_image`]'s request, for a caller holding the sandbox and the specs
+/// separately: the stem as the name prefix, the agents' Dockerfile on the managed base, and
+/// the artifact under `s3://<s3_bucket>/<s3_key_prefix>/<name>/artifact.zip`.
+pub fn ensure_request_for(
+    sandbox: &Sandbox,
+    specs: &[AgentSpec],
+    binary: Vec<u8>,
+    build_role_arn: impl Into<String>,
+    size: SizeClass,
+    s3_bucket: impl Into<String>,
+    s3_key_prefix: Option<String>,
+) -> Result<crate::control::EnsureImageRequest, Error> {
+    require_specs(specs)?;
+    let base = BaseImage::al2023();
+    let dockerfile = dockerfile(specs, &base, sandbox.port())?;
+    let mut request = crate::control::EnsureImageRequest::new(
+        image_stem(specs),
+        binary,
+        dockerfile,
+        s3_bucket,
+        build_role_arn,
+    );
+    request.base_image = Some(base);
+    request.size = size;
+    request.s3_key_prefix = s3_key_prefix;
+    Ok(request)
 }
 
 /// [`AgentVm::image_request`] for a caller holding the sandbox and the specs separately.
@@ -750,9 +791,10 @@ impl AgentVm {
         self.sandbox.session()
     }
 
-    /// The image name for these specs and this binary: the stem plus the first twelve
-    /// hex characters of the artifact content hash, so an unchanged binary and an
-    /// unchanged spec set name the image `build --reuse` would find (AGENT-3).
+    /// The image name for these specs and this binary: the stem plus the first twelve hex
+    /// characters of ensure's identity over the artifact, the base and the size, so an
+    /// unchanged binary, spec set and size name the image [`AgentVm::ensure_image`] would find
+    /// (AGENT-3).
     pub fn image_name(&self, request: &CreateImageRequest) -> String {
         image_name_for(&self.sandbox, &self.specs, request)
     }
@@ -775,6 +817,30 @@ impl AgentVm {
     /// Builds the image. The caller has uploaded the artifact to the request's URI.
     pub async fn build(&mut self, request: CreateImageRequest) -> Result<&Image, Error> {
         self.sandbox.build_image(request).await
+    }
+
+    /// Builds or reuses this VM's image through [`Sandbox::ensure_image`] (#258): named per
+    /// [`AgentVm::image_name`], reused when ready, waited on while building, rebuilt when
+    /// failed, and uploaded to `s3://<s3_bucket>/<s3_key_prefix>/<name>/artifact.zip` only
+    /// when a build is needed.
+    pub async fn ensure_image(
+        &mut self,
+        binary: Vec<u8>,
+        build_role_arn: impl Into<String>,
+        size: SizeClass,
+        s3_bucket: impl Into<String>,
+        s3_key_prefix: Option<String>,
+    ) -> Result<crate::control::EnsuredImage, Error> {
+        let request = ensure_request_for(
+            &self.sandbox,
+            &self.specs,
+            binary,
+            build_role_arn,
+            size,
+            s3_bucket,
+            s3_key_prefix,
+        )?;
+        self.sandbox.ensure_image(request).await
     }
 
     /// The launch request: egress on (AGENT-9), because neither agent reaches Bedrock
@@ -1250,6 +1316,54 @@ mod tests {
             crate::sandbox::Lifecycle::Suspended
         );
         assert_eq!(vm.specs().len(), 2);
+    }
+
+    /// **AGENT-3 through ensure (#258).** The two-step path's name (`image_request`, the
+    /// caller's upload, `build`) is the name `ensure_image` gives, and the size class is part
+    /// of it: an image is created at one size, so another size is another image.
+    ///
+    /// **Falsification**: go back to the stem and the artifact hash alone in `image_name_for`
+    /// and the two names part, and the two sizes share one.
+    #[test]
+    fn the_two_step_name_is_the_name_ensure_gives_and_it_covers_the_size() {
+        let vm = AgentVm::new(sandbox(), both()).expect("specs");
+        let role = "arn:aws:iam::123456789012:role/b";
+        let daemon = crate::testing::aarch64_daemon(b"daemon");
+        let two_step = vm
+            .image_request(daemon.clone(), role, DEFAULT_SIZE)
+            .expect("request");
+        let ensure = ensure_request_for(
+            vm.sandbox(),
+            &vm.specs(),
+            daemon.clone(),
+            role,
+            DEFAULT_SIZE,
+            "bucket",
+            Some("agents".to_string()),
+        )
+        .expect("request");
+        let prepared = crate::control::ensure::prepare(
+            &crate::testing::control_plane(
+                Arc::new(crate::control::fake::FakeControlPlane::new()),
+                Region::UsEast1,
+                Arc::new(crate::control::fake::TestClock::new()),
+            ),
+            ensure,
+        )
+        .expect("prepares");
+        assert_eq!(prepared.name, two_step.name, "one name for one agent image");
+        assert_eq!(
+            prepared.key,
+            format!("agents/{}/artifact.zip", two_step.name),
+            "the ensure's key"
+        );
+
+        let larger = SizeClass::from_baseline_mib(4096).expect("a class");
+        let other_size = vm.image_request(daemon, role, larger).expect("request");
+        assert_ne!(
+            other_size.name, two_step.name,
+            "another size is another image"
+        );
     }
 
     /// **The image request is named by content and the URI is left to the caller.**

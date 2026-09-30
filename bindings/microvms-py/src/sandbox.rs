@@ -128,6 +128,18 @@ pub struct PyEnsuredImage {
     warnings: Vec<String>,
 }
 
+impl From<microvms_core::control::EnsuredImage> for PyEnsuredImage {
+    fn from(ensured: microvms_core::control::EnsuredImage) -> Self {
+        PyEnsuredImage {
+            image: ensured.image,
+            reused: ensured.reused,
+            artifact_uri: ensured.artifact_uri,
+            uploaded: ensured.uploaded,
+            warnings: ensured.warnings,
+        }
+    }
+}
+
 #[pymethods]
 impl PyEnsuredImage {
     /// The ready image; pass `image.identifier` to `run`.
@@ -904,13 +916,7 @@ impl PySandbox {
             }
             runtime::block_on_detached(sandbox.ensure_image(request))
         })?;
-        Ok(PyEnsuredImage {
-            image: ensured.image,
-            reused: ensured.reused,
-            artifact_uri: ensured.artifact_uri,
-            uploaded: ensured.uploaded,
-            warnings: ensured.warnings,
-        })
+        Ok(PyEnsuredImage::from(ensured))
     }
 
     /// The artifact bytes to upload to `code_artifact_uri`.
