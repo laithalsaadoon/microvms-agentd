@@ -685,8 +685,8 @@ impl PySession {
     /// command's own child exits, so nothing it backgrounded outlives it; off by default,
     /// which keeps the backgrounded-grandchild-output guarantee for callers who rely on it.
     // `shell`, `stdin`, `reap_group_on_exit` and `inherit_image_env` restate the wire's defaults
-    // (`StartRequest::new`'s) here and in `run_sync`, and `run_to_completion` restates `shell`
-    // and `inherit_image_env`, because a Python signature shows a value: `Option<bool> = None`
+    // (`StartRequest::new`'s) here and in `run_sync`, and `run_to_completion` restates `shell`,
+    // `reap_group_on_exit` and `inherit_image_env`, because a Python signature shows a value: `Option<bool> = None`
     // would turn the stub's `bool = False` into `bool | None`, an API change. So these setters
     // are called unconditionally, and a wire default that changes has to change here too.
     // #300's surface check is where that's caught.
@@ -824,8 +824,9 @@ impl PySession {
     ///
     /// An exception from `on_output` stops delivery; the exec is still waited for and acked
     /// so nothing is left behind, and then the exception is re-raised. `shell`, `user`,
-    /// `group`, and `inherit_image_env` mean what they mean on `run()`: `shell="bash"` with a
-    /// script string runs it under bash, which dash-based images need for `pipefail`.
+    /// `group`, `reap_group_on_exit` and `inherit_image_env` mean what they mean on `run()`:
+    /// `shell="bash"` with a script string runs it under bash, which dash-based images need for
+    /// `pipefail`.
     #[pyo3(signature = (
         command,
         *,
@@ -837,6 +838,7 @@ impl PySession {
         group=None,
         timeout_sec=None,
         exec_id=None,
+        reap_group_on_exit=false,
         inherit_image_env=false,
         client_grace_sec=DEFAULT_CLIENT_GRACE_SEC,
     ))]
@@ -857,6 +859,7 @@ impl PySession {
         group: Option<Principal>,
         timeout_sec: Option<f64>,
         exec_id: Option<String>,
+        reap_group_on_exit: bool,
         inherit_image_env: bool,
         client_grace_sec: f64,
     ) -> PyResult<PyExecResult> {
@@ -870,6 +873,7 @@ impl PySession {
         .with_user(user.map(Into::into))
         .with_group(group.map(Into::into))
         .with_timeout_sec(timeout_sec)
+        .with_reap_group_on_exit(reap_group_on_exit)
         .with_inherit_image_env(inherit_image_env);
         let options = CompletionOptions {
             client_grace: seconds(client_grace_sec).map_err(CoreError)?,

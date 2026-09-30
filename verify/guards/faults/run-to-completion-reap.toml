@@ -1,0 +1,27 @@
+# ── `reap_group_on_exit` on run-to-completion, in both bindings (#267) ────────────
+
+# Each binding drops the flag on its way to the start request, so the wire says `false`
+# whatever the caller asked.
+[[fault]]
+id = "py-run-to-completion-drops-reap"
+guard = "bindings/microvms-py/tests/test_run_to_completion.py::test_reap_group_on_exit_reaches_the_start"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_run_to_completion.py::test_reap_group_on_exit_reaches_the_start"],
+]
+expect = "test-failed"
+suite = "bindings"
+note = "bindings/microvms-py/tests/test_run_to_completion.py::test_reap_group_on_exit_reaches_the_start"
+transform = { file = "bindings/microvms-py/src/session.rs", replace = "        .with_timeout_sec(timeout_sec)\n        .with_reap_group_on_exit(reap_group_on_exit)\n        .with_inherit_image_env(inherit_image_env);\n        let options = CompletionOptions {\n", with = "        .with_timeout_sec(timeout_sec)\n        .with_inherit_image_env(inherit_image_env);\n        let _ = reap_group_on_exit;\n        let options = CompletionOptions {\n" }
+
+[[fault]]
+id = "js-run-to-completion-drops-reap"
+guard = "reapGroupOnExit reaches the start, and is off by default"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/run_to_completion.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+note = "bindings/microvms-js/__test__/run_to_completion.mjs::reapGroupOnExit reaches the start, and is off by default"
+transform = { file = "bindings/microvms-js/src/session.rs", replace = "            exec_id: self.exec_id,\n            reap_group_on_exit: self.reap_group_on_exit,\n            inherit_image_env: self.inherit_image_env,\n            ..ExecOptions::empty()\n", with = "            exec_id: self.exec_id,\n            inherit_image_env: self.inherit_image_env,\n            ..ExecOptions::empty()\n" }

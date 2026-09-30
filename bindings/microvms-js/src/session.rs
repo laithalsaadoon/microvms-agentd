@@ -351,6 +351,9 @@ pub struct CompletionRequest {
     pub timeout_sec: Option<f64>,
     /// The idempotency key. Omitted, one is minted.
     pub exec_id: Option<String>,
+    /// Signal the whole process group once the command's own child exits. See
+    /// `ExecOptions.reapGroupOnExit`.
+    pub reap_group_on_exit: Option<bool>,
     /// Start the child's environment from the image's `ENV`. See `ExecOptions.inheritImageEnv`.
     pub inherit_image_env: Option<bool>,
     /// How long past `timeoutSec` the client waits before it kills, and how long it then
@@ -368,6 +371,7 @@ impl CompletionRequest {
             group: self.group,
             timeout_sec: self.timeout_sec,
             exec_id: self.exec_id,
+            reap_group_on_exit: self.reap_group_on_exit,
             inherit_image_env: self.inherit_image_env,
             ..ExecOptions::empty()
         }
