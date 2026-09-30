@@ -3182,9 +3182,35 @@ class AppLintTests(unittest.TestCase):
         )
 
 
+# The pointers a git hook exports, copied from check-guards-fire.py's `GIT_ENV_LEAKS` rather
+# than read from ratchet.py's copy, so the throwaway repos stay throwaway when the code under
+# test is broken. `mise run check` runs this file from lefthook's pre-push, and from a linked
+# worktree git exports `GIT_DIR` there. Inherited, it turns `git_repo()`'s init and config writes
+# and `commit()`'s `add` and `commit` into writes to the real repo (#311).
+GIT_ENV_LEAKS = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_CEILING_DIRECTORIES",
+    "GIT_PREFIX",
+)
+
+
+def clean_env():
+    """`os.environ` without the inherited git pointers, read at call time."""
+    return {k: v for k, v in os.environ.items() if k not in GIT_ENV_LEAKS}
+
+
 def git(root, *args):
     return subprocess.run(
-        ["git", "-C", str(root), *args], check=True, capture_output=True, text=True
+        ["git", "-C", str(root), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=clean_env(),
     ).stdout
 
 
@@ -3219,7 +3245,7 @@ def commit(root, message, drift=None, date="2026-09-25T12:00:00+00:00"):
     subprocess.run(
         ["git", "-C", str(root), "commit", "-q", "-m", message],
         check=True,
-        env={**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date},
+        env={**clean_env(), "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date},
     )
     return git(root, "rev-parse", "HEAD").strip()
 
@@ -3366,6 +3392,46 @@ class HistoryTests(unittest.TestCase):
         self.assertIsNone(first["counts"]["untraced"])
         self.assertEqual(second["counts"]["untraced"], 1)
         self.assertEqual(second["total"], len(BASELINE))
+
+
+class InheritedGitEnvTests(unittest.TestCase):
+    def test_an_inherited_git_dir_leaves_that_repo_alone(self):
+        # The hook case (#311): `GIT_DIR` names another repo while the throwaway repos are made
+        # and read. Inherited, it turned `git_repo()`'s init and config writes and `commit()`
+        # into writes to that repo, and `read_base` and `history` read it instead of the root
+        # they were given. The decoy has a commit, so a leaked read finds a HEAD with no drift
+        # file rather than failing on an empty repo.
+        with tempfile.TemporaryDirectory() as tmp:
+            decoy = Path(tmp)
+            git(decoy, "init", "-q", "-b", "main")
+            (decoy / "decoy").write_text("decoy\n")
+            git(decoy, "add", "-A")
+            git(
+                decoy,
+                *("-c", "user.email=decoy@example.com", "-c", "user.name=decoy"),
+                *("-c", "commit.gpgsign=false", "commit", "-q", "-m", "decoy"),
+            )
+
+            def state():
+                return (
+                    git(decoy, "rev-list", "--all"),
+                    git(decoy, "ls-files", "--stage"),
+                    (decoy / ".git" / "config").read_text(),
+                )
+
+            hook = {"GIT_DIR": str(decoy / ".git")}
+            before = state()
+            with mock.patch.dict(os.environ, hook):
+                root = git_repo(self)
+                ratchet_script(root)
+                sha = commit(root, "baseline", drift_file(BASELINE))
+            self.assertEqual(state(), before)
+            with mock.patch.dict(os.environ, hook):
+                base = read_base(root, "HEAD")
+                points = HISTORY["history"](root)
+            self.assertIsNotNone(base)
+            self.assertEqual(len(base["entries"]), len(BASELINE))
+            self.assertEqual([p["sha"] for p in points], [sha])
 
 
 if __name__ == "__main__":

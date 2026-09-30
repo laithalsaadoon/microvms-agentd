@@ -40,8 +40,14 @@ SCRIPT = RATCHET["SCRIPT"]
 
 
 def git(root: Path, *args: str) -> str:
+    # Without the hook's git pointers, which would override `-C root` (ratchet.py's
+    # `GIT_ENV_LEAKS`).
     return subprocess.run(
-        ["git", "-C", str(root), *args], capture_output=True, text=True, check=True
+        ["git", "-C", str(root), *args],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=RATCHET["clean_env"](),
     ).stdout
 
 
@@ -72,7 +78,9 @@ def history(root: Path) -> list[dict]:
         # The commit that deletes the file has no copy to count.
         if (
             subprocess.run(
-                ["git", "-C", str(root), "cat-file", "-e", spec], capture_output=True
+                ["git", "-C", str(root), "cat-file", "-e", spec],
+                capture_output=True,
+                env=RATCHET["clean_env"](),
             ).returncode
             != 0
         ):
