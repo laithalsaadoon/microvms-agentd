@@ -98,5 +98,13 @@ refusal regresses the case fails on a connection error rather than a signed requ
 - `error`: a daemon status answered to one call, as the error's code, wire kind and
   retryability.
 - `egress`: a launch's egress options, refused or classified.
+- `names`: a VM adopted by name (`from-name`) from a registry holding `input.record_text` as
+  `<name>.json`, in `input.region`. A record from another region and a torn one are refused
+  before any AWS call. Each refusal also answers `message_mentions`: for each string in
+  `input.message_mentions`, whether the message contains it, so a case can require the file
+  to inspect or both regions and forbid the agent token. The CLI answers through `exec --name`
+  against a seam that refuses every door, and core through `names::resolve` and
+  `Sandbox::adopt_record` on an offline plane, which is `Sandbox::from_name` with its plane
+  swapped, so a regression that lets a record through fails without reaching AWS.
 - `size-class`: the class a resource request selects, or the refusal.
 - `wrap-dockerfile`: a task Dockerfile with the agentd stanza appended.

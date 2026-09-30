@@ -366,3 +366,57 @@ expect = "exit-nonzero"
 suite = "bindings"
 message = "has no attribute 'UnexpectedError'"
 transform = { file = "bindings/microvms-py/src/errors.rs", replace = "    for kind in ErrorKind::ALL {\n", with = "    for kind in ErrorKind::ALL.into_iter().skip(1) {\n" }
+
+# The `names` corpus area through each binding (#338): core's region rule broken, and each
+# binding's `Sandbox.from_name` lets the record through to an adopt, which the proxy nothing
+# listens on refuses instead of AWS.
+
+[[fault]]
+id = "parity-py-names-region"
+guard = "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[names/region-mismatch]"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_a_case[names/region-mismatch]"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "names/region-mismatch: py answered"
+transform = { file = "crates/microvms-domain/src/names.rs", replace = "        && expected.as_str() != record.region\n", with = "        && expected.as_str() != record.region\n        && false\n" }
+
+[[fault]]
+id = "parity-ts-names-region"
+guard = "names/region-mismatch"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "names/region-mismatch: ts answered"
+transform = { file = "crates/microvms-domain/src/names.rs", replace = "        && expected.as_str() != record.region\n", with = "        && expected.as_str() != record.region\n        && false\n" }
+
+# A wait's refusal claims no report (#338), through each binding's seconds conversion.
+
+[[fault]]
+id = "py-wait-refusal-names-a-credit"
+guard = "bindings/microvms-py/tests/test_smoke.py::test_a_wait_refusal_names_no_report"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_smoke.py::test_a_wait_refusal_names_no_report"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "credit on the report"
+transform = { file = "bindings/microvms-py/src/exec.rs", replace = "    microvms_core::duration::of_secs_f64(value)\n", with = "    microvms_core::cost::duration_of_secs_f64(value)\n" }
+
+[[fault]]
+id = "ts-wait-refusal-names-a-credit"
+guard = "a wait refusal names no report"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/smoke.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "credit on the report"
+transform = { file = "bindings/microvms-js/src/exec.rs", replace = "    microvms_core::duration::of_secs_f64(value).map_err(js_async)\n", with = "    microvms_core::cost::duration_of_secs_f64(value).map_err(js_async)\n" }
