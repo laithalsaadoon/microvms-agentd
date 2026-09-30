@@ -1425,6 +1425,20 @@ pub async fn cp<O: std::io::Write, E: std::io::Write>(
     args: &CpArgs,
 ) -> Result<Rendered, CliError> {
     let (direction, local, remote) = resolve_paths(&args.src, &args.dst)?;
+    // Refused before the attach, since it costs nothing to know: a line range reads a window
+    // out of a file in the VM, and an upload writes the whole local file.
+    if args.lines.is_some() && matches!(direction, Direction::Upload) {
+        return Err(CliError::new(
+            Exit::InvalidArg,
+            format!(
+                "--lines reads a window out of a file in the VM, and {local} -> vm:{remote} \
+                 writes one; an upload sends the whole local file"
+            ),
+        )
+        .suggest(
+            "to read lines of a file in the VM: `microvm cp vm:/path ./local --lines START:END`",
+        ));
+    }
     let (session, _) = attach(ctx, &args.region, &args.attach).await?;
 
     let bytes = match direction {
@@ -1454,10 +1468,15 @@ pub async fn cp<O: std::io::Write, E: std::io::Write>(
         }
         Direction::Download => {
             ctx.out.progress(&format!("downloading vm:{remote}"));
-            let payload = if args.tar {
-                session.download_tar(&remote).await?
-            } else {
-                session.download_file(&remote).await?
+            let payload = match (args.tar, args.lines) {
+                (true, _) => session.download_tar(&remote).await?,
+                // The daemon slices the file; core refuses a window no file could have.
+                (false, Some(range)) => {
+                    session
+                        .download_file_lines(&remote, range.start, range.end)
+                        .await?
+                }
+                (false, None) => session.download_file(&remote).await?,
             };
             let count = payload.len();
             // Parent directories created, because the remote side's parents are created too

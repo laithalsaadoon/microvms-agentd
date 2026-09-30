@@ -1376,7 +1376,7 @@ fn attach_cost<O: std::io::Write, E: std::io::Write>(
         ctx.out.warn(warning);
     }
     ctx.out.progress(&report.render());
-    outcome.cost = Some(crate::render::report_to_json(&report));
+    outcome.cost = Some(report.to_json());
 }
 
 // ── build ───────────────────────────────────────────────────────────────────

@@ -30,7 +30,7 @@ import {
   Session,
   sessionConstants,
 } from '../index.js';
-import { codeOf, wireKindOf } from './support/sse.mjs';
+import { codeOf, startSseServer, wireKindOf } from './support/sse.mjs';
 
 const SUPPORTED = ['us-east-1', 'us-east-2', 'us-west-2', 'eu-west-1', 'ap-northeast-1'];
 
@@ -545,4 +545,48 @@ test('the phase and stream vocabularies are closed and published', () => {
   const constants = JSON.parse(sessionConstants());
   assert.deepEqual(constants.phases, ['running', 'exited', 'acked']);
   assert.deepEqual(constants.streamKinds, ['stdout', 'stderr']);
+});
+
+test('downloadFile sends a line range as the daemon\'s two query keys', async () => {
+  // `startLine` and `endLine` reach the daemon after the path (#265), and no range is the request
+  // `downloadFile` always sent, byte for byte.
+  const server = await startSseServer([['two\nthree\nfour\n'], ['all'], ['tail']]);
+  try {
+    const session = Session.direct(server.endpoint, 'agent-token');
+    const lines = await session.downloadFile('/tmp/a b', { startLine: 2, endLine: 4 });
+    assert.equal(Buffer.from(lines).toString(), 'two\nthree\nfour\n');
+    await session.downloadFile('/tmp/a b');
+    await session.downloadFile('/tmp/f', { startLine: 40 });
+    assert.deepEqual(server.requestedPaths, [
+      '/v1/fs/file?path=%2Ftmp%2Fa%20b&start_line=2&end_line=4',
+      '/v1/fs/file?path=%2Ftmp%2Fa%20b',
+      '/v1/fs/file?path=%2Ftmp%2Ff&start_line=40',
+    ]);
+  } finally {
+    await server.close();
+  }
+});
+
+test('downloadFile refuses a range no file can satisfy before any request', async () => {
+  // Line 0 and an end before the start are core's refusal, with the daemon's wording.
+  const server = await startSseServer([]);
+  try {
+    const session = Session.direct(server.endpoint, 'agent-token');
+    for (const [options, wording] of [
+      [{ startLine: 0, endLine: 3 }, /start_line is 1-based/],
+      [{ startLine: 5, endLine: 2 }, /is before start_line 5/],
+    ]) {
+      await assert.rejects(
+        () => session.downloadFile('/tmp/f', options),
+        (error) => {
+          assert.equal(codeOf(error), 'ERR_INVALID_ARG');
+          assert.match(error.message, wording);
+          return true;
+        },
+      );
+    }
+    assert.deepEqual(server.requestedPaths, [], 'a refused range cost a request');
+  } finally {
+    await server.close();
+  }
 });

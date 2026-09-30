@@ -144,8 +144,6 @@ crates/microvms-cli/src/history.rs::a_terminated_event_appends_and_the_file_surv
 crates/microvms-cli/src/history.rs::unseen_hook_observations_append_once_and_a_repeat_poll_appends_nothing
 crates/microvms-cli/src/ledger.rs::clear_refuses_to_remove_a_ledger_that_still_names_a_live_resource
 crates/microvms-cli/src/render.rs::a_launch_with_no_exec_still_states_its_egress_posture
-crates/microvms-cli/src/render.rs::an_unpriced_line_omits_the_usd_key_rather_than_reporting_zero
-crates/microvms-cli/src/render.rs::every_dollar_is_a_string_and_every_seconds_figure_is_a_number
 crates/microvms-cli/src/render.rs::the_dense_cost_rendering_is_three_fields_and_no_total
 crates/microvms-cli/src/sync.rs::extraction_never_writes_under_the_local_git
 crates/microvms-cli/tests/dependency_direction.rs::each_layer_declares_exactly_the_features_it_is_allowed

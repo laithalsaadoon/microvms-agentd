@@ -165,6 +165,7 @@ async fn parity_daemon_status(case: &parity_corpus::Case) -> serde_json::Value {
                 dst: format!("vm:{}", case.input_str("path")),
                 tar: false,
                 mode: None,
+                lines: None,
                 attach: attach_flags(),
                 region: region_flags(),
             })

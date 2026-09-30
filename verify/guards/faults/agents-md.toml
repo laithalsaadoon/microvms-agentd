@@ -512,3 +512,13 @@ expect = "exit-nonzero"
 suite = "script"
 message = "FAIL  a named terminate that never reached TERMINATED falls back the same way"
 transform = { file = "conformance/lanes/names.py", replace = "        and gone.data.get(\"state\") == \"TERMINATED\"\n        and not gone.data.get(\"leaked\")\n", with = "        and not gone.data.get(\"leaked\")\n" }
+
+# The census doesn't read the docs, so the docs floor doesn't take it out.
+[[fault]]
+id = "agents-md-docs-floor-ends-the-check"
+guard = "test_check_agents_md.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_agents_md.py", "-k", "test_an_empty_doc_set_still_holds_the_census"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_an_empty_doc_set_still_holds_the_census ("
+transform = { file = "tools/check-agents-md.py", replace = "            *census(root, present)[0],\n", with = "" }
