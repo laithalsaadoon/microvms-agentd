@@ -2905,6 +2905,45 @@ suite = "script"
 message = "SELECTOR_SURFACES doesn't reach"
 transform = { file = "scripts/check-publishable.py", replace = "SELECTOR_SURFACES = (\".github/workflows/*.yml\", \"mise.toml\")", with = "SELECTOR_SURFACES = ()" }
 
+# targets:check: a build `check` runs with an environment of its own names a target of its own.
+# The stub generator back in the shared target, the rustdoc walk back in cargo's target, a
+# `check` the scan can't find (the floor), and a scan that stopped seeing tools (the sentinel).
+[[fault]]
+id = "check-targets-stubs-shared"
+guard = "test_check_targets.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_targets.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_build_with_its_own_environment_names_its_own_target ("
+transform = { file = "mise.toml", replace = "outputs = { auto = true }\nenv = { CARGO_TARGET_DIR = \"{{config_root}}/target/stubs\" }\nrun = \"./scripts/generate-py-stubs.py --check\"\n", with = "outputs = { auto = true }\nrun = \"./scripts/generate-py-stubs.py --check\"\n" }
+
+[[fault]]
+id = "check-targets-rustdoc-shared"
+guard = "test_check_targets.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_targets.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_rustdoc_walk_builds_outside_cargos_target ("
+transform = { file = "scripts/rustdoc_walk.py", replace = "Path(json.loads(metadata.stdout)[\"target_directory\"]) / \"rustdoc-json\"", with = "Path(json.loads(metadata.stdout)[\"target_directory\"])" }
+
+[[fault]]
+id = "check-targets-floor"
+guard = "test_check_targets.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_targets.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_check_runs_a_build ("
+transform = { file = "mise.toml", replace = "[tasks.check]\n", with = "[tasks.check-renamed]\n" }
+
+[[fault]]
+id = "check-targets-sentinel"
+guard = "test_check_targets.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_check_targets.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_scan_sees_each_kind_of_build ("
+transform = { file = "scripts/test_check_targets.py", replace = "                if re.search(tool, line):\n", with = "                if False:\n" }
+
 # ── the live suite's own helpers (#277), against a stub CLI ──────────────────
 
 [[fault]]

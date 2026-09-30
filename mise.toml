@@ -401,6 +401,8 @@ run = [
 
 [tasks.stubs]
 description = "Regenerate microvms-py/microvms.pyi from the pyo3 surface"
+# `stubs:check`'s target, for its reason, so the two share one build.
+env = { CARGO_TARGET_DIR = "{{config_root}}/target/stubs" }
 run = "./scripts/generate-py-stubs.py"
 
 [tasks."stubs:check"]
@@ -416,9 +418,19 @@ description = "Fail if the committed Python stub no longer matches the pyo3 surf
 # it.
 #
 # In `check` rather than left to CI, for the reason `model:check` gives: no network, no
-# credentials, no money, so it costs what a lint costs. It does build `microvms-py` twice —
-# once for maturin's introspection pass, once for the importable cdylib the exception
-# hierarchy is read out of — and both are incremental builds `test` has already warmed.
+# credentials, no money, so it costs what a lint costs. It builds `microvms-py` twice, once for
+# maturin's introspection pass and once for the importable cdylib the exception hierarchy is
+# read out of, and both build into `target/stubs` rather than the shared target. `test` runs its
+# tests and doc tests holding no cargo lock, and these builds rewrote units it reads: maturin
+# sets `PYO3_BUILD_EXTENSION_MODULE` and `PYO3_CONFIG_FILE`, the script's own build runs under
+# uv's `VIRTUAL_ENV` and `PATH`, and pyo3-ffi's build script declares all four as inputs, so
+# each build reran it and rebuilt pyo3-ffi and pyo3 in place; and `--features stubs` rewrote the
+# `libmicrovms.rlib` and `.so` that `test` builds, whose names carry no hash because the crate
+# builds a cdylib. Measured 2026-09-30 at be99c5d: shared, this task rewrote those files and
+# `test`'s next build recompiled three crates; in its own target nothing of `test`'s changes, and
+# a cold build there took 80 s run alone. CI's bindings job runs the script in its shared
+# target, a step at a time, where nothing races it, and reuses `maturin develop`'s build.
+# `targets:check` holds the target.
 #
 # `toolchain:id` says how mise skips it and why the list is complete. Its sources are the pyo3
 # crate and the crates below it (in the Rust entries), the toolchain, the crate's
@@ -439,6 +451,7 @@ sources = [
 ]
 depends = ["toolchain:id"]
 outputs = { auto = true }
+env = { CARGO_TARGET_DIR = "{{config_root}}/target/stubs" }
 run = "./scripts/generate-py-stubs.py --check"
 
 [tasks.dts]
@@ -686,6 +699,15 @@ run = [
   "./scripts/check-agents-md.py",
 ]
 
+[tasks."targets:check"]
+description = "Every build `check` runs with an environment of its own names a cargo target of its own, outside `test`'s. No builds"
+# `check` runs its tasks at once, and `test`'s doc tests read `target/debug` after cargo has
+# released its lock, so a build there that sees another value of a variable a unit's build
+# script declares rebuilds the unit in place and fails them with E0463. The test's docstring has
+# the rule, what it reads, and what it can't see. CI runs its steps one at a time and without
+# mise, so the race and this test are local; CI's `guards` job fires the test's seeded faults.
+run = "{{vars.pytest}} pytest -q -p no:cacheprovider scripts/test_check_targets.py"
+
 [tasks.check]
 description = "The full local gate — the definition of done"
 depends = [
@@ -711,6 +733,7 @@ depends = [
   "ratchet:check",
   "guards:list",
   "mutants:check",
+  "targets:check",
   "ci:parity",
 ]
 
