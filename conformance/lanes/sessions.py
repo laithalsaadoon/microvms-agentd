@@ -24,11 +24,25 @@ from harness.results import Results
 
 
 def run_to_completion_live(cli: Cli, launched: Envelope, name: str) -> tuple[bool, str]:
-    """One ignored test of `crates/microvms-core/tests/live_run_to_completion.rs` on the kept VM.
+    """One ignored test of `crates/microvms-core/tests/live_run_to_completion.rs` on the kept VM."""
+    return attached_live(
+        cli, launched, "live_run_to_completion", name, ("exec=", "collected")
+    )
+
+
+def attached_live(
+    cli: Cli,
+    launched: Envelope,
+    test: str,
+    name: str,
+    summary_prefixes: tuple[str, ...],
+) -> tuple[bool, str]:
+    """One ignored test of `crates/microvms-core/tests/<test>.rs` on the kept VM.
 
     The attach coordinates travel in `MICROVM_LIVE_ATTACH`, so the test attaches through core's
     `Session::attach` (a fresh control plane and proxy-token minter) rather than launching.
-    Returns whether it passed and a detail line carrying the test's own `eprintln!` summary.
+    Returns whether it passed and a detail line carrying the stderr lines that start with one of
+    `summary_prefixes`, the test's own `eprintln!` summary.
     """
     env = os.environ.copy()
     env["AWS_REGION"] = cli.region
@@ -47,7 +61,7 @@ def run_to_completion_live(cli: Cli, launched: Envelope, name: str) -> tuple[boo
         "-p",
         "microvms-core",
         "--test",
-        "live_run_to_completion",
+        test,
         name,
         "--",
         "--ignored",
@@ -70,7 +84,7 @@ def run_to_completion_live(cli: Cli, launched: Envelope, name: str) -> tuple[boo
     summary = [
         line.strip()
         for line in run.stderr.splitlines()
-        if line.startswith(("exec=", "collected"))
+        if line.startswith(summary_prefixes)
     ]
     return run.returncode == 0, f"exit={run.returncode} {' | '.join(summary)[:400]}"
 
@@ -188,6 +202,41 @@ def drive_stable_launch(cli: Cli, launched: Envelope, results: Results) -> None:
             False,
             "Rust live check exceeded 15 minutes; VM lifetime capped at 300s",
         )
+
+
+def drive_serve(cli: Cli, launched: Envelope, results: Results) -> None:
+    """The serving loops behind `tunnel` and `port-forward` and the SDKs' handles (#263), against
+    the kept VM through the real proxy.
+
+    Two Rust tests through core (`crates/microvms-core/tests/live_serve.rs`): a tunnel and a
+    forward, each to the daemon's own port with a limit of one connection, each answering
+    `GET /v1/schema` and stopping at the limit with the connection counted.
+    """
+    print("\n-- serve (#263: the tunnel and forward loops) --")
+    passed, detail = attached_live(
+        cli,
+        launched,
+        "live_serve",
+        "live_tunnel_serves_one_connection_through_the_proxy",
+        ("tunnel report=",),
+    )
+    results.check(
+        "the core tunnel loop serves one connection through the real proxy and stops at its limit",
+        passed,
+        detail,
+    )
+    passed, detail = attached_live(
+        cli,
+        launched,
+        "live_serve",
+        "live_forward_serves_one_request_through_the_proxy",
+        ("forward report=",),
+    )
+    results.check(
+        "the core forward loop serves one request through the real proxy and stops at its limit",
+        passed,
+        detail,
+    )
 
 
 def run_rust_live(

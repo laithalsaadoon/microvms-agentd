@@ -203,6 +203,26 @@ pub fn upstream_url(endpoint: &str, target: &str) -> String {
     }
 }
 
+/// The URL a direct session's request targets: the endpoint's host at `guest_port`.
+///
+/// Through the proxy the guest port travels as a header; with no proxy in the path, the port
+/// is the port. The scheme is the endpoint's, read the way [`upstream_url`] reads it.
+pub fn direct_url(endpoint: &str, guest_port: u16, target: &str) -> Result<String, Error> {
+    let mut url = reqwest::Url::parse(&upstream_url(endpoint, target)).map_err(|err| {
+        Error::new(
+            ErrorKind::InvalidArg,
+            format!("{endpoint} is not an endpoint a request can be addressed to: {err}"),
+        )
+    })?;
+    url.set_port(Some(guest_port)).map_err(|()| {
+        Error::new(
+            ErrorKind::InvalidArg,
+            format!("{endpoint} names no host a port can be set on"),
+        )
+    })?;
+    Ok(url.to_string())
+}
+
 /// Header names this forwarder must never copy from the caller's request.
 ///
 /// The two proxy headers are minted per hop, so a client that sent its own would either be
@@ -279,11 +299,10 @@ pub async fn hop_headers(
     auth.headers_for_port(guest_port).await
 }
 
-/// Accepts one connection, for a caller driving the accept loop itself.
+/// Accepts one connection, for a caller driving an accept loop of its own.
 ///
-/// Exposed so the CLI owns the loop — and therefore owns Ctrl-C, the progress output, and
-/// the decision to keep serving after one connection fails. A forwarder that owned its own
-/// loop would have to grow a callback for each of those.
+/// The CLI's and the SDKs' loop is [`super::serve::serve_forward`], which takes the stop, the
+/// limit and a callback as parameters; this is for a caller that wants the primitive.
 pub async fn accept(listener: &TcpListener) -> Result<(TcpStream, SocketAddr), Error> {
     listener.accept().await.map_err(|err| {
         Error::new(
@@ -328,9 +347,29 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> LocalStream for T {}
 /// [`refusal_explanation`]'s sentence, so a browser renders the reason. Dropping the socket
 /// would render as "the site can't be reached", which names the wrong component.
 pub async fn serve_connection<S, F>(
-    mut local: S,
+    local: S,
     spec: &ForwardSpec,
     auth: &Arc<ProxyAuth>,
+    client: &ForwardClient,
+    on_event: F,
+) -> Result<(), Error>
+where
+    S: LocalStream,
+    F: FnMut(ForwardEvent),
+{
+    serve_connection_via(local, spec, Some(auth), client, on_event).await
+}
+
+/// [`serve_connection`] over an optional proxy credential.
+///
+/// `None` is a direct session's, which is already on the far side of the endpoint proxy: no
+/// proxy headers are minted, and the request goes to the endpoint's host at the guest port
+/// ([`direct_url`]), since there is no proxy to route it there by header. The serving loop
+/// (`super::serve`) takes whichever the session has.
+pub(crate) async fn serve_connection_via<S, F>(
+    mut local: S,
+    spec: &ForwardSpec,
+    auth: Option<&Arc<ProxyAuth>>,
     client: &ForwardClient,
     mut on_event: F,
 ) -> Result<(), Error>
@@ -347,9 +386,16 @@ where
 
     // Minted per exchange rather than once at bind time. This call is the token refresh —
     // see the module docs.
-    let minted = hop_headers(auth, spec.guest_port).await?;
-
-    let url = upstream_url(&spec.endpoint, &head.target);
+    let (minted, url) = match auth {
+        Some(auth) => (
+            hop_headers(auth, spec.guest_port).await?,
+            upstream_url(&spec.endpoint, &head.target),
+        ),
+        None => (
+            Vec::new(),
+            direct_url(&spec.endpoint, spec.guest_port, &head.target)?,
+        ),
+    };
     let method = reqwest::Method::from_bytes(head.method.as_bytes()).map_err(|err| {
         Error::new(
             ErrorKind::InvalidArg,
@@ -728,7 +774,13 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("a free port");
         let addr = listener.local_addr().expect("bound");
         let handle = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.expect("one connection");
+            // Bounded, so a forwarder that never reaches the upstream fails the test rather
+            // than hanging it.
+            let (mut socket, _) =
+                tokio::time::timeout(std::time::Duration::from_secs(10), listener.accept())
+                    .await
+                    .expect("the forwarder reaches the upstream")
+                    .expect("one connection");
             let head = read_request_head(&mut socket)
                 .await
                 .expect("a readable request")

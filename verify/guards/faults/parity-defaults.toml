@@ -1,0 +1,77 @@
+# ── parity:check's [[default]] rows: every surface default held to core's (#300) ──
+# Core publishes its defaults as the manifest's `clientDefaults`; each entry breaks one link: a
+# default no row names, a core value the surfaces no longer state, a manifest behind core, a
+# reader that stops reading (the floor, once per surface), the sentinel row, and core's own copy.
+
+[[fault]]
+id = "parity-default-undeclared"
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "py: ExecHandle.write_stdin(eof) = False belongs to no [[default]] row"
+transform = { file = "verify/parity/capabilities.toml", replace = "[[default]]\nid = \"stdin-eof\"\nexempt = \"whether this one write closes stdin: an argument of the call, with no default anywhere else\"\npy = \"ExecHandle.write_stdin(eof)\"\n", with = "" }
+
+[[fault]]
+id = "parity-default-core-changed"
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "exec --timeout defaults to 300, but clientDefaults.execWaitSeconds is 301.0"
+transform = { file = "docs/manifest.json", replace = "\"execWaitSeconds\": 300.0", with = "\"execWaitSeconds\": 301.0" }
+
+[[fault]]
+id = "parity-default-manifest-behind-core"
+guard = "manifest:check"
+run = ["bash", "-c", "set -eu; tmp=$(mktemp); trap 'rm -f \"$tmp\"' EXIT; cargo run -q -p microvms-cli -- manifest > \"$tmp\"; diff -u docs/manifest.json \"$tmp\""]
+expect = "exit-nonzero"
+suite = "rust"
+message = "\"execWaitSeconds\": 301.0"
+transform = { file = "crates/microvms-app/src/session/exec.rs", replace = "pub const DEFAULT_EXEC_WAIT: Duration = Duration::from_secs(300);", with = "pub const DEFAULT_EXEC_WAIT: Duration = Duration::from_secs(301);" }
+
+[[fault]]
+id = "parity-default-no-client-defaults"
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "cli: the manifest carries no clientDefaults to compare with"
+transform = { file = "docs/manifest.json", replace = "\"clientDefaults\": {", with = "\"clientDefault\": {" }
+
+[[fault]]
+id = "parity-default-cli-floor"
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "cli: the surface states no default the rows hold, so nothing was read"
+transform = { file = "tools/check-parity.py", replace = "            if parameter.get(\"default\") is not None:\n", with = "            if False:\n" }
+
+[[fault]]
+id = "parity-default-py-floor"
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "py: the surface states no default the rows hold, so nothing was read"
+transform = { file = "tools/check-parity.py", replace = "        if parameter.get(\"default\") is not None:\n            surface.defaults[f\"{owner}", with = "        if False:\n            surface.defaults[f\"{owner}" }
+
+[[fault]]
+id = "parity-default-sentinel"
+guard = "tools/check-parity.py"
+run = ["./tools/check-parity.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "the table marks no sentinel [[default]] row"
+transform = { file = "verify/parity/capabilities.toml", replace = "id = \"exec-wait\"\nsentinel = true\n", with = "id = \"exec-wait\"\n" }
+
+[[fault]]
+id = "core-client-defaults-copy"
+guard = "defaults::tests::the_client_defaults_are_cores_own_values"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "defaults::tests::the_client_defaults_are_cores_own_values"]
+expect = "test-failed"
+suite = "rust"
+message = "execWaitSeconds"
+note = "crates/microvms-app/src/defaults.rs::the_client_defaults_are_cores_own_values"
+transform = { file = "crates/microvms-app/src/defaults.rs", replace = "        \"execWaitSeconds\": seconds(DEFAULT_EXEC_WAIT),\n", with = "        \"execWaitSeconds\": 301.0,\n" }
