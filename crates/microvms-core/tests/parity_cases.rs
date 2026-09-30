@@ -20,7 +20,7 @@ use microvms_core::control::artifact::{
 use microvms_core::control::ensure::{EnsureImageRequest, prepare};
 use microvms_core::control::{ControlPlane, DEFAULT_AGENT_PORT, SystemClock, egress_posture_for};
 use microvms_core::cost::{
-    Amount, CalendarDate, CostReport, LineItem, PlanUsage, estimate_run, pinned_rates,
+    CalendarDate, DEFAULT_ESTIMATE_LABEL, PlanUsage, estimate_run, pinned_rates,
 };
 use microvms_core::names::FileNameStore;
 use microvms_core::prelude::*;
@@ -130,81 +130,26 @@ fn image_name(case: &Case) -> Value {
 
 fn cost(case: &Case) -> Value {
     assert_eq!(case.capability, "estimate", "{}: an estimate case", case.id);
-    let defaults = case.input("defaults");
-    let plan = PlanUsage {
+    let mut plan = PlanUsage {
         running_seconds: case.input_f64("running_seconds"),
         suspended_seconds: case.input_f64("suspended_seconds"),
         suspend_resume_cycles: u32::try_from(case.input_u64("suspend_resume_cycles"))
             .expect("a cycle count in range"),
-        launched: defaults["launched"].as_bool().expect("defaults.launched"),
         ..PlanUsage::default()
     };
-    let label = defaults["label"].as_str().expect("defaults.label");
+    // Core has no optional arguments, so its runner applies the defaults every surface's caller
+    // gets by leaving `launched` and the label out: core's inference and core's label.
+    plan.launched = plan.infer_launched();
     match estimate_run(
         size(case),
         &plan,
         &pinned_rates(),
         CalendarDate::today_utc(),
-        label,
+        DEFAULT_ESTIMATE_LABEL,
     ) {
-        Ok(report) => report_json(&report),
+        Ok(report) => report.to_json(),
         Err(error) => refusal(&error),
     }
-}
-
-/// The CLI's `cost --json` report shape, from core's accessors.
-///
-/// Core has no serializer for a report: the CLI, Python and TypeScript each write their own
-/// (#255 moves the shape into core, and this function then calls it). This one is the corpus's
-/// reading of core's values in the shape `expect` is written in.
-fn report_json(report: &CostReport) -> Value {
-    let size = report.size();
-    let total = report.total();
-    json!({
-        "label": report.label(),
-        "size": {
-            "baselineMib": size.baseline_mib(),
-            "baselineVcpu": size.baseline_vcpu(),
-            "peakMib": size.peak_mib(),
-            "peakVcpu": size.peak_vcpu(),
-            "headroomMib": size.headroom_mib(),
-            "describe": size.to_string(),
-        },
-        "rates": {
-            "region": report.rates().region().as_str(),
-            "retrieved": report.rates().retrieved().to_string(),
-            "sourceUrl": report.rates().source_url(),
-        },
-        "estimated": true,
-        "fullyMeasured": report.fully_measured(),
-        "complete": report.is_complete(),
-        "staleness": report.staleness(),
-        "items": report.items().iter().map(line_json).collect::<Vec<_>>(),
-        "total": {
-            "priced": total.floor().amount().to_string(),
-            "isLowerBound": total.is_lower_bound(),
-            "render": total.to_string(),
-        },
-    })
-}
-
-fn line_json(item: &LineItem) -> Value {
-    let amount = match &item.amount {
-        Amount::Estimated(usd) => json!({"kind": "estimated-usd", "usd": usd.amount().to_string()}),
-        Amount::Unpriced { reason } => json!({"kind": "unpriced", "reason": reason}),
-    };
-    json!({
-        "phase": item.phase.as_str(),
-        "line": item.line.map(|line| line.as_str()),
-        "quantity": item.quantity.to_string(),
-        "unit": item.unit,
-        "amount": amount,
-        "duration": item.duration.map(|duration| json!({
-            "seconds": duration.seconds_f64(),
-            "provenance": duration.provenance().as_str(),
-        })),
-        "note": item.note,
-    })
 }
 
 /// A daemon that answers every request with the case's status and body.

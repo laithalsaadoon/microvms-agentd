@@ -258,7 +258,8 @@ export declare class CostReport {
   /** Plain text, leading with what the dollars are rather than with the dollars. */
   render(): string
   /**
-   * The `cli.py:688 report_to_dict` shape as a JSON **string**.
+   * Core's JSON shape for a report, as a JSON **string**: the one `microvm cost --json`
+   * and Python's `to_dict` emit (#255).
    *
    * A string for the same reason [`LineItem::to_json`] is: the unpriced line item omits
    * its `usd` key, which no typed return shape can express.
@@ -521,7 +522,7 @@ export declare class LineItem {
   get duration(): Duration | null
   get note(): string
   /**
-   * The `cli.py` `_line_to_dict` shape as a JSON **string**.
+   * Core's JSON shape for a line item, as a JSON **string**.
    *
    * A string rather than an object because the unpriced case must **omit** the `usd` key
    * entirely, and a `#[napi(object)]` return type cannot express an absent key — an
@@ -2069,7 +2070,15 @@ export interface PlanUsageOptions {
   imageRetainedSeconds?: number
   suspendResumeCycles?: number
   snapshotGb?: number
+  /**
+   * Whether the plan launches, which reads a snapshot. Left out, the core infers it: running
+   * time, or an image of non-zero size, so suspended time alone reads no launch snapshot.
+   */
   launched?: boolean
+  /**
+   * What the report is of. Left out, `"estimate"`: the core's label, the one
+   * `microvm cost --estimate` uses for the same plan (#255).
+   */
   label?: string
 }
 
@@ -2357,8 +2366,12 @@ export interface RunUsageOptions {
   suspendResumeCycles?: number
   /** The suspend snapshot's size. Defaults to the baseline memory footprint. */
   snapshotGb?: number
-  /** Whether a launch happened. A launch reads a snapshot. */
+  /**
+   * Whether a launch happened. A launch reads a snapshot. Left out, the core infers it:
+   * running time, or an image of non-zero size.
+   */
   launched?: boolean
+  /** What the report is of. Left out, `"run"`: the core's label, the one `microvm cost` uses. */
   label?: string
 }
 

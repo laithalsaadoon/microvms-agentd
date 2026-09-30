@@ -91,13 +91,14 @@ refusal regresses the case fails on a connection error rather than a signed requ
   same inputs (`ensure-image`), and the name `AgentVm.image_name` gives an agent image
   (`agent-image-name`). The binary is `binary_hex`, built from the default Dockerfile on AL2023
   at the default agent port.
-- `cost`: estimate reports as JSON, the CLI's `cost --json` shape. `input.defaults` is what a
-  caller gets for the `launched` and `label` arguments it leaves out; core has no defaults for
-  them, so its runner passes these (#255 moves them into core). Every case passes
-  `suspend_resume_cycles` to every surface: the CLI's `--cycles` defaults to 1 and the
-  bindings' `suspend_resume_cycles` to 0, and no case holds that drift yet, because a marker
-  needs the issue that decides which default is right (#255 for cost defaults, #300 for
-  surface defaults).
+- `cost`: estimate reports as JSON, core's `CostReport::to_json` shape, which the CLI's
+  `cost --json`, Python's `to_dict` and TypeScript's `toJson` all emit. Every surface leaves
+  `launched` and the label out, so each case holds core's defaults (#255): the launch core
+  infers from the plan, and `DEFAULT_ESTIMATE_LABEL`, which core's runner passes since core
+  takes no optional arguments. Every case passes `suspend_resume_cycles` to every surface: the
+  CLI's `--cycles` defaults to 1 and the bindings' `suspend_resume_cycles` to 0, and no case
+  holds that drift yet, because a marker needs the issue that decides which default is right
+  (#300, surface defaults).
 - `error`: a daemon status answered to one call, as the error's code, wire kind and
   retryability.
 - `egress`: a launch's egress options, refused or classified.
