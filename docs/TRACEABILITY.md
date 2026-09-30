@@ -18,6 +18,10 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | AGENTD-16 | 1 | 1 | 1 | 4 | 4 | 1 |
 | AGENTD-17 | waived | waived | waived | 2 | 1 | waived |
 | AGENTD-18 | waived | waived | waived | 1 | 1 | 1 |
+| ARCH-1 | waived | waived | waived | 1 | 2 | waived |
+| ARCH-2 | waived | waived | waived | 1 | 4 | waived |
+| ARCH-3 | waived | waived | waived | 1 | 1 | waived |
+| ARCH-4 | waived | waived | waived | 1 | 1 | waived |
 | ARCH-6 | waived | waived | waived | 1 | 6 | waived |
 | ARCH-7 | waived | waived | waived | 2 | 3 | waived |
 | ARCH-8 | waived | waived | waived | 1 | 1 | waived |
@@ -185,6 +189,50 @@ While the handshake of an identity-verified tunnel has not completed, the agentd
 - **test:** `crates/agentd/tests/tunnel_relay.rs`
 - **impl:** `crates/agentd/src/tunnel.rs`
 - **live:** `conformance/lanes/tunnel.py`
+
+## ARCH-1
+
+The microvms-core shall be the single library crate the CLI crate and the language bindings depend on, composing microvms-app with microvms-edges and re-exporting microvms-domain.
+
+- **model:** waived: a property of the workspace's dependency graph, not of a state
+- **gherkin:** waived: no behavior to script: cargo metadata's resolved graph is the evidence, and dependency_direction.rs reads it
+- **fuzz:** waived: there is no input stream; the rule is over manifests and re-exports
+- **test:** `crates/microvms-cli/tests/dependency_direction.rs`
+- **impl:** `crates/microvms-core/src/lib.rs`, `crates/microvms-domain/src/lib.rs`
+- **live:** waived: composition makes no AWS call of its own
+
+## ARCH-2
+
+The microvms-core shall share protocol types with the agentd crate through a common dependency so that protocol drift fails compilation.
+
+- **model:** waived: a property of the workspace's dependency graph, not of a state
+- **gherkin:** waived: no behavior to script: the shared crate makes a wire-type mismatch a compile error, before anything runs
+- **fuzz:** waived: there is no input stream; the rule is over manifests
+- **test:** `crates/microvms-cli/tests/dependency_direction.rs`
+- **impl:** `crates/agentd/src/tunnel.rs`, `crates/microvms-app/src/session/mod.rs`, `crates/protocol/src/identity.rs`, `crates/protocol/src/tunnel.rs`
+- **live:** waived: a build-time property; the live tier runs a client and a daemon built from the one protocol crate, which is its premise, not a check of it
+
+## ARCH-3
+
+The CLI crate shall depend on microvms-core for each control-plane and endpoint-proxy operation.
+
+- **model:** waived: a property of the workspace's dependency graph, not of a state
+- **gherkin:** waived: no behavior to script: cargo metadata's resolved graph is the evidence, and dependency_direction.rs reads it
+- **fuzz:** waived: there is no input stream; the rule is over manifests
+- **test:** `crates/microvms-cli/tests/dependency_direction.rs`
+- **impl:** `crates/microvms-cli/src/main.rs`
+- **live:** waived: a dependency edge makes no AWS call
+
+## ARCH-4
+
+The microvms-core shall not depend on the CLI crate.
+
+- **model:** waived: a property of the workspace's dependency graph, not of a state
+- **gherkin:** waived: no behavior to script: cargo metadata's resolved graph is the evidence, and dependency_direction.rs reads it
+- **fuzz:** waived: there is no input stream; the rule is over manifests
+- **test:** `crates/microvms-cli/tests/dependency_direction.rs`
+- **impl:** `crates/microvms-core/src/lib.rs`
+- **live:** waived: a dependency edge makes no AWS call
 
 ## ARCH-6
 

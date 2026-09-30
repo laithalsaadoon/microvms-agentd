@@ -61,3 +61,37 @@ expect = "test-failed"
 suite = "rust"
 note = "crates/microvms-cli/tests/dependency_direction.rs::the_cli_exports_no_library_target_at_all"
 patch = "verify/guards/faults/deps-cli-lib.patch"
+
+# The layering keys these tests trace (#307), each broken where a manifest can say it without
+# breaking the build (a build that breaks doesn't count as a fire). ARCH-1: a binding that
+# depends on a layer below core as well reaches past the composition root.
+[[fault]]
+id = "deps-py-onto-app"
+guard = "each_member_depends_on_exactly_the_crates_of_ours_its_layer_allows"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_member_depends_on_exactly_the_crates_of_ours_its_layer_allows"]
+expect = "test-failed"
+suite = "rust"
+message = "microvms-py's dependencies among the workspace's crates"
+transform = { file = "bindings/microvms-py/Cargo.toml", replace = "[dependencies]\n", with = "[dependencies]\nmicrovms-app = { path = \"../../crates/microvms-app\" }\n" }
+
+# ARCH-2: a daemon without the protocol crate has to carry its own copy of the wire types, and
+# a copy drifts without a compile error.
+[[fault]]
+id = "deps-agentd-protocol-dropped"
+guard = "each_member_depends_on_exactly_the_crates_of_ours_its_layer_allows"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_member_depends_on_exactly_the_crates_of_ours_its_layer_allows"]
+expect = "test-failed"
+suite = "rust"
+message = "agentd's dependencies among the workspace's crates"
+transform = { file = "crates/agentd/Cargo.toml", replace = "protocol = { package = \"microvms-protocol\"", with = "# protocol = { package = \"microvms-protocol\"" }
+
+# ARCH-4: core onto the CLI, as a dev edge because the normal one is a cargo cycle. The CLI's own
+# edge onto core (ARCH-3) can't be dropped without breaking the CLI's build.
+[[fault]]
+id = "deps-core-dev-on-cli"
+guard = "the_cli_depends_on_core_and_core_depends_on_neither_the_cli_nor_a_binding"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "the_cli_depends_on_core_and_core_depends_on_neither_the_cli_nor_a_binding"]
+expect = "test-failed"
+suite = "rust"
+message = "microvms-core must depend on none of the CLI or the bindings"
+transform = { file = "crates/microvms-core/Cargo.toml", replace = "[dev-dependencies]\n", with = "[dev-dependencies]\nmicrovms-cli = { path = \"../microvms-cli\" }\n" }
