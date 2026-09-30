@@ -1,0 +1,47 @@
+# The AGENTD group's traced requirements. The format and the rules are in scripts/check-trace.py.
+
+[AGENTD-7]
+issue = "#224"
+
+[AGENTD-8]
+issue = "#224"
+
+[AGENTD-9]
+issue = "#224"
+
+[AGENTD-10]
+issue = "#225"
+
+[AGENTD-11]
+issue = "#225"
+
+[AGENTD-12]
+issue = "#225"
+
+[AGENTD-13]
+issue = "#225"
+
+[AGENTD-14]
+issue = "#226"
+
+[AGENTD-15]
+issue = "#226"
+
+[AGENTD-16]
+issue = "#224"
+
+# The tunnel's identity keys, AGENTD-17 and AGENTD-18 here and BIND-21 in BIND.toml, share their
+# model and gherkin waivers, so a change to one is a change to all three. #297's handshake model
+# removes the model waiver, and its frame harnesses the fuzz ones.
+[AGENTD-17]
+issue = "#297"
+waive.model = "#297 adds a stateright model of the tunnel handshake and its pins; until then the handshake and relay tests hold the key"
+waive.gherkin = "no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate"
+waive.fuzz = "#297 adds a harness over the daemon's tunnel frame read"
+waive.live = "no live check presents another host key: that needs a second host identity for one VM, and the relay tests drive the daemon's real route with one"
+
+[AGENTD-18]
+issue = "#297"
+waive.model = "#297 adds a stateright model of the tunnel handshake and its pins; until then the handshake and relay tests hold the key"
+waive.gherkin = "no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate"
+waive.fuzz = "#297 adds a harness over the daemon's tunnel frame read"

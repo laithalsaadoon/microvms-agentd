@@ -1,0 +1,22 @@
+# The ARCH group's traced requirements. The format and the rules are in scripts/check-trace.py.
+
+[ARCH-6]
+issue = "#282"
+waive.model = "a property of a crate's code and dependencies, not of a state"
+waive.gherkin = "no behavior to script: clippy and the dependency set enforce it at build time"
+waive.fuzz = "there is no input stream; the rule is over source and manifests"
+waive.live = "the domain makes no AWS call by construction"
+
+[ARCH-7]
+issue = "#283"
+waive.model = "a property of a crate's code and dependencies, not of a state"
+waive.gherkin = "no behavior to script: clippy and the dependency set enforce it at build time"
+waive.fuzz = "there is no input stream; the rule is over source and manifests"
+waive.live = "the app's AWS calls all go through ports, so the live tier exercises the edges' implementations, not this rule"
+
+[ARCH-8]
+issue = "#283"
+waive.model = "a property of a crate's code and dependencies, not of a state"
+waive.gherkin = "no behavior to script: the dependency set and the ratchet check it over source and manifests"
+waive.fuzz = "there is no input stream; the rule is over source and manifests"
+waive.live = "composition makes no AWS call of its own"

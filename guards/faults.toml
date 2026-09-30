@@ -1585,16 +1585,17 @@ suite = "script"
 message = "FAIL: test_untraced_is_null_before_the_commit_that_collects_it ("
 transform = { file = "scripts/ratchet-history.py", replace = "counts[category] if category in collected else None", with = "counts[category]" }
 
-# The untraced collector (#295). The real tree first: a traced key dropped from TRACED and a new
-# requirement with no TRACED entry are both new drift, with rule 1's advice for the category.
+# The untraced collector (#295). The real tree first: a traced key dropped from its group's file in
+# spec/traced/ and a new requirement with no entry are both new drift, with rule 1's advice for
+# the category.
 [[fault]]
 id = "ratchet-untraced-traced-deletion"
 guard = "ratchet/drift.json"
 run = ["./scripts/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
-message = "new drift: [untraced] IMAGE-8. Trace the requirement: list its key in TRACED"
-transform = { file = "scripts/check-trace.py", replace = "    \"IMAGE-8\": \"#221\",\n", with = "" }
+message = "new drift: [untraced] IMAGE-8. Trace the requirement: list its key in its group's file"
+transform = { file = "spec/traced/IMAGE.toml", replace = "[IMAGE-8]\nissue = \"#221\"\n\n", with = "" }
 
 [[fault]]
 id = "ratchet-untraced-new-key"
@@ -1602,7 +1603,7 @@ guard = "ratchet/drift.json"
 run = ["./scripts/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
-message = "new drift: [untraced] TRAP-14. Trace the requirement: list its key in TRACED"
+message = "new drift: [untraced] TRAP-14. Trace the requirement: list its key in its group's file"
 transform = { file = "spec/core.symspec.json", replace = "    \"5fc0dbf7-83f6-4d1d-96ea-902bfacee0b1\": {\n", with = "    \"seeded-trap-14\": { \"key\": \"TRAP-14\", \"sentence\": \"A seeded requirement.\" },\n    \"5fc0dbf7-83f6-4d1d-96ea-902bfacee0b1\": {\n" }
 
 # A spec the collector can't read is an error, not every entry fixed.
@@ -1673,7 +1674,7 @@ message = "FAIL: test_rule_1_an_untraced_requirement_points_at_traced ("
 transform = { file = "scripts/ratchet.py", replace = "NEW_DRIFT_FIX.get(category, LAYERING_FIX)", with = "LAYERING_FIX" }
 
 # #295 review round 1. A decision can't stand in for a trace: a new requirement with a decision
-# and no TRACED entry is refused, on the real tree and in the parse test, and rule 3's advice for
+# and no traced entry is refused, on the real tree and in the parse test, and rule 3's advice for
 # an untraced entry doesn't point at decisions.
 [[fault]]
 id = "ratchet-untraced-decision"
@@ -1681,7 +1682,7 @@ guard = "scripts/ratchet.py"
 run = ["./scripts/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
-message = "[untraced] TRAP-14 can't be a decision: a requirement that can't carry a layer waives that layer in TRACED"
+message = "[untraced] TRAP-14 can't be a decision: a requirement that can't carry a layer waives that layer in its group's file"
 transform = [
   { file = "spec/core.symspec.json", replace = "    \"5fc0dbf7-83f6-4d1d-96ea-902bfacee0b1\": {\n", with = "    \"seeded-trap-14\": { \"key\": \"TRAP-14\", \"sentence\": \"A seeded requirement.\" },\n    \"5fc0dbf7-83f6-4d1d-96ea-902bfacee0b1\": {\n" },
   { file = "ratchet/drift.json", replace = "  \"decisions\": [\n", with = "  \"decisions\": [\n    { \"category\": \"untraced\", \"key\": \"TRAP-14\", \"reason\": \"not worth a test\" },\n" },
@@ -1705,7 +1706,7 @@ suite = "script"
 message = "FAIL: test_rule_3_points_an_untraced_entry_at_traced ("
 transform = { file = "scripts/ratchet.py", replace = "NOT_IN_BASE_FIX.get(category, LAYERING_NOT_IN_BASE_FIX)", with = "LAYERING_NOT_IN_BASE_FIX" }
 
-# A TRACED row that waives every layer passes trace:check with nothing checking it, so it stays
+# A traced entry that waives every layer passes trace:check with nothing checking it, so it stays
 # untraced. On the real tree: TRAP-1 waived six times and its entry gone, as `update` would leave
 # it. In the collector: the waiver check off, which the sentinel's GATE-4 catches.
 [[fault]]
@@ -1716,7 +1717,7 @@ expect = "exit-nonzero"
 suite = "script"
 message = "new drift: [untraced] TRAP-1. Trace the requirement"
 transform = [
-  { file = "scripts/check-trace.py", replace = "    \"IMAGE-8\": \"#221\",\n", with = "    \"IMAGE-8\": \"#221\",\n    \"TRAP-1\": (\"#301\", {\"model\": \"s\", \"gherkin\": \"s\", \"fuzz\": \"s\", \"test\": \"s\", \"impl\": \"s\", \"live\": \"s\"}),\n" },
+  { file = "spec/traced/TRAP.toml", replace = "# The TRAP group's traced requirements. The format and the rules are in scripts/check-trace.py.\n", with = "# The TRAP group's traced requirements. The format and the rules are in scripts/check-trace.py.\n\n[TRAP-1]\nissue = \"#301\"\nwaive.model = \"s\"\nwaive.gherkin = \"s\"\nwaive.fuzz = \"s\"\nwaive.test = \"s\"\nwaive.impl = \"s\"\nwaive.live = \"s\"\n" },
   { file = "ratchet/drift.json", replace = "    { \"category\": \"untraced\", \"key\": \"TRAP-1\", \"issue\": 301 },\n", with = "" },
 ]
 
@@ -1727,9 +1728,9 @@ run = ["./scripts/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
 message = "sentinel: [untraced] GATE-4 was not reported"
-transform = { file = "scripts/ratchet.py", replace = "        if not set(layers) <= set(value[1] if isinstance(value, tuple) else ())\n", with = "" }
+transform = { file = "scripts/ratchet.py", replace = "for key, entry in traced.items() if not set(layers) <= set(entry.waive)", with = "for key, entry in traced.items()" }
 
-# LAYERS is read with TRACED: an empty one (a parser that returns nothing) is refused on the real
+# LAYERS is read with the loader: an empty one (a parser that returns nothing) is refused on the real
 # tree, and a script without one is refused in the unit test.
 [[fault]]
 id = "ratchet-untraced-empty-layers"
@@ -1747,7 +1748,7 @@ run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "scripts", "-p
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_script_without_layers_is_refused ("
-transform = { file = "scripts/ratchet.py", replace = "    if not isinstance(layers, tuple) or not layers:\n        raise SystemExit(f\"{scope.traced} has no LAYERS tuple\")\n", with = "    layers = layers or ()\n" }
+transform = { file = "scripts/ratchet.py", replace = "    if not isinstance(layers, tuple) or not layers:\n        raise SystemExit(f\"{scope.trace} has no LAYERS tuple\")\n", with = "    layers = layers or ()\n" }
 
 # A requirement with no key: check-trace.py skips it, so the collector refuses it, on the real
 # tree and in the unit test.
@@ -1757,7 +1758,7 @@ guard = "scripts/ratchet.py"
 run = ["./scripts/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
-message = "agentd.symspec.json: requirement seeded-keyless has no key, so TRACED can't list it"
+message = "agentd.symspec.json: requirement seeded-keyless has no key, so no traced file can list it"
 transform = { file = "spec/agentd.symspec.json", replace = "  \"requirements\": {\n", with = "  \"requirements\": {\n    \"seeded-keyless\": { \"key\": \"\", \"sentence\": \"The daemon shall do a seeded, keyless thing.\" },\n" }
 
 [[fault]]
@@ -2294,7 +2295,7 @@ message = "slice 0 holds no path, so it replays nothing"
 transform = { file = "agentd/tests/model_conformance.rs", replace = "        if before * SLICES >= states * k {\n", with = "        if before >= k / SLICES * states {\n" }
 
 # The key floor: a model property that loses its key leaves the replay's claim with nothing
-# to back it, and trace:check can't see that while the key isn't in TRACED.
+# to back it, and trace:check can't see that while the key isn't traced in spec/traced/.
 [[fault]]
 id = "model-conformance-unkeyed-property"
 guard = "the_keys_the_replay_backs_name_safety_properties_of_the_model"
@@ -2584,7 +2585,7 @@ message = "the replay never makes"
 transform = { file = "model-conformance/tests/client_lifecycle.rs", replace = "next == wanted && verdict(completed) == Verdict::Issued", with = "next == wanted && verdict(completed) == Verdict::Ignored" }
 
 # The key floor: a model property that loses its key leaves the replay's claim with nothing to
-# back it, and trace:check can't see that while the STATE keys aren't in TRACED (#302).
+# back it, and trace:check can't see that while spec/traced/STATE.toml lists no STATE key (#302).
 [[fault]]
 id = "model-conformance-client-unkeyed-property"
 guard = "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"
@@ -4906,8 +4907,66 @@ guard = "scripts/check-trace.py --check"
 run = ["./scripts/check-trace.py", "--check"]
 expect = "exit-nonzero"
 suite = "script"
-message = "the sentinel CLI-7 is not in TRACED"
-transform = { file = "scripts/check-trace.py", replace = "    \"CLI-7\": \"#216\",\n", with = "" }
+message = "the sentinel CLI-7 is not in spec/traced/CLI.toml"
+transform = { file = "spec/traced/CLI.toml", replace = "[CLI-7]\nissue = \"#216\"\n\n", with = "" }
+
+# The traced files in spec/traced/, one per requirement group, and the one loader trace:check and
+# the ratchet read them with. Each refusal names its file, seeded on the real files: a key in
+# another group's file, a key twice in one file (TOML refuses it) and in two files, an entry of
+# another shape, a file named for no group, and the floor, a directory with no group file.
+[[fault]]
+id = "trace-traced-wrong-group"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: spec/traced/BIND.toml: STATE-1 isn't in the BIND group"
+transform = { file = "spec/traced/BIND.toml", replace = "[BIND-6]\n", with = "[STATE-1]\nissue = \"#302\"\n\n[BIND-6]\n" }
+
+[[fault]]
+id = "trace-traced-twice-in-one-file"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: spec/traced/CLI.toml doesn't parse: Cannot declare ('CLI-8',) twice"
+transform = { file = "spec/traced/CLI.toml", replace = "[CLI-8]\nissue = \"#216\"\n", with = "[CLI-8]\nissue = \"#216\"\n\n[CLI-8]\nissue = \"#216\"\n" }
+
+[[fault]]
+id = "trace-traced-twice-in-two-files"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: CLI-7 is listed in more than one file: spec/traced/CLI.toml, spec/traced/IMAGE.toml"
+transform = { file = "spec/traced/IMAGE.toml", replace = "[IMAGE-1]\n", with = "[CLI-7]\nissue = \"#216\"\n\n[IMAGE-1]\n" }
+
+[[fault]]
+id = "trace-traced-malformed"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: spec/traced/CLI.toml: CLI-9 is malformed"
+transform = { file = "spec/traced/CLI.toml", replace = "[CLI-9]\nissue = \"#216\"\n", with = "[CLI-9]\nissues = \"#216\"\n" }
+
+[[fault]]
+id = "trace-traced-unknown-group"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: spec/traced/COSTS.toml isn't named for a requirement group the specs define"
+patch = "guards/faults/trace-traced-unknown-group.patch"
+
+[[fault]]
+id = "trace-traced-floor"
+guard = "scripts/check-trace.py --check"
+run = ["./scripts/check-trace.py", "--check"]
+expect = "exit-nonzero"
+suite = "script"
+message = "trace: spec/trace holds no group file, so no requirement is traced"
+transform = { file = "scripts/check-trace.py", replace = "TRACED_DIR = ROOT / \"spec\" / \"traced\"\n", with = "TRACED_DIR = ROOT / \"spec\" / \"trace\"\n" }
 
 [[fault]]
 id = "trace-keyless-shrinks"
