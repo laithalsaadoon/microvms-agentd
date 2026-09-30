@@ -225,7 +225,7 @@ def drive_health(cli: Cli, launched: Envelope, results: Results) -> None:
         f"daemon version {health.data.get('version')!r}",
     )
     results.eq(
-        "platform ran the run hook before forwarding traffic",
+        "AGENTD-2 platform ran the run hook before forwarding traffic",
         health.data.get("bootstrapped"),
         True,
     )
