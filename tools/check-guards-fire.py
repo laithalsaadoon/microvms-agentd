@@ -98,6 +98,29 @@ Three subcommands:
           with `--jobs 4`: the registry's lint entries took 120.8 s of faults one by one and
           3.4 s batched, with the same verdicts.
 
+          The `exit-nonzero` entries on one script gate's command batch too, under a proof of
+          their own (`script_batchable`, `script_batches`, `attribute_lines`). An entry joins
+          when its fault is transforms alone and it has a `message`, and its command runs a
+          script by path that isn't a test runner (`unittest`, pytest, `node --test`, `cargo
+          test`), with none of its transforms in that script's own directory: a fault in the
+          gate's code changes the gate every other entry in the batch would be held by, and a
+          test runner's line names the test that failed, not the file whose fault failed it.
+          Each entry goes into the first batch of its command whose entries seed none of its
+          files, in registry order, so every file in a batch is one entry's, and the command
+          runs once with them all seeded. An entry fired when exactly one line of that run's
+          output carries its `message`, and that line names a file its own fault seeded and
+          none another entry in the batch seeded: the gate located the finding in the entry's
+          own file, which is what the entry's own run shows. A line names a file by its path
+          from the tree's root, standing apart from any longer path, or by its path under the
+          tree's own directory. A second line carrying the message may be another entry's
+          fault drawing it, and a line naming another entry's file may be that entry's
+          finding, so either leaves the entry to run alone, as does a line that names no file
+          of its own. So do every entry of a batch whose run passed or timed out, and an entry
+          whose anchor doesn't match once. Every verdict is then the one the entry's own run
+          would give, as with the lint batches, and `--record` records the batch's run, which
+          read what each entry's own run reads and the other entries' files besides, for each
+          entry it proves.
+
           The restored pass runs a build at a time, not after the last fault. A command's
           build is what `build_of` says it compiles or installs, which every command that
           builds the same shares (the CLI's unit tests are one build under many `--exact`
@@ -1976,6 +1999,135 @@ def rendered_log(log: str) -> str:
                 continue
         out.append(line)
     return "".join(out)
+
+
+# ── script batches ───────────────────────────────────────────────────────────
+
+
+def script_program(argv: list[str]) -> str | None:
+    """The script a command runs, as a path from the tree's root: its first word that names a
+    `.py` file. None for a command that runs no script by path (`bash -c`, `cargo`)."""
+    for word in argv:
+        if word.endswith(".py") and not word.startswith("-"):
+            return os.path.normpath(word)
+    return None
+
+
+def script_batchable(fault: Fault) -> bool:
+    """Whether an `exit-nonzero` script entry can share a run with the others on its command:
+    it's seeded by transforms alone and has a `message`, its command runs a script by path and
+    no test runner, and no transform edits a file in that script's directory, the gate's own
+    code, which the other entries in a batch would then be held by."""
+    if (
+        fault.suite != "script"
+        or fault.expect != "exit-nonzero"
+        or not fault.transforms
+        or fault.patch
+        or fault.argv_fault
+        or not fault.message
+    ):
+        return False
+    argv = fault.run[-1]
+    if runner(argv) or "unittest" in argv:
+        return False
+    program = script_program(argv)
+    home = os.path.dirname(program) if program else ""
+    if not home:
+        return False
+    return not any(
+        os.path.normpath(item["file"]).startswith(home + os.sep)
+        for item in fault.transforms
+    )
+
+
+def transform_files(fault: Fault) -> set[str]:
+    """The files an entry's transforms edit, each as its path from the tree's root."""
+    return {os.path.normpath(item["file"]) for item in fault.transforms}
+
+
+def script_batches(selected: list[Fault]) -> dict[tuple, list[int]]:
+    """Each command's batchable script entries, by position in `selected`, grouped so that no
+    two in a group seed one file: each goes into the first group of its command that seeds none
+    of its files, in registry order. Group n of a command is keyed `(key, n)`, and a group of
+    one isn't a batch."""
+    groups: dict[tuple, list[tuple[list[int], set[str]]]] = {}
+    for index, fault in enumerate(selected):
+        if not script_batchable(fault):
+            continue
+        mine = transform_files(fault)
+        slots = groups.setdefault(command_key(fault), [])
+        for members, taken in slots:
+            if not taken & mine:
+                members.append(index)
+                taken |= mine
+                break
+        else:
+            slots.append(([index], set(mine)))
+    return {
+        (key, n): members
+        for key, slots in groups.items()
+        for n, (members, _) in enumerate(slots)
+        if len(members) > 1
+    }
+
+
+def names_file(line: str, path: str, tree: Path) -> bool:
+    """Whether a line of output names the file at `path` in `tree`: its path from the tree's
+    root, not inside a longer path or name, or its path under the tree's own directory."""
+    if f"{tree}/{path}" in line or f"{os.path.realpath(tree)}/{path}" in line:
+        return True
+    return bool(re.search(rf"(?:^|[^\w./-]){re.escape(path)}(?![\w-])(?!\.\w)", line))
+
+
+def attribute_lines(
+    said: str, code: int, faults: list[Fault], tree: Path
+) -> tuple[dict[int, str], dict[int, str]]:
+    """Which entries of a script batch its run proves fired, each with the line that proves it,
+    and why each other entry runs alone, keyed by position in `faults`.
+
+    An entry is proven when exactly one line of the output carries its `message`, and that line
+    names a file the entry's own fault seeded and none another entry in the batch seeded: the
+    gate put the finding in the entry's file, which is what the entry's own run shows. A second
+    line carrying the message may be another entry's fault drawing it, and a line naming another
+    entry's file may be that entry's finding, so either leaves the entry to run alone. A run
+    that passed proves nothing."""
+    positions = range(len(faults))
+    if code == 0:
+        return {}, dict.fromkeys(
+            positions, "the batch's run passed, so it proves nothing"
+        )
+    lines = said.splitlines()
+    files = [transform_files(fault) for fault in faults]
+    proven: dict[int, str] = {}
+    alone: dict[int, str] = {}
+    for position, fault in enumerate(faults):
+        carrying = [line for line in lines if fault.message and fault.message in line]
+        if len(carrying) != 1:
+            alone[position] = (
+                f"{len(carrying)} lines of the batch's output carry its message"
+                if carrying
+                else "no line of the batch's output carries its message"
+            )
+            continue
+        line = carrying[0]
+        named = {
+            other
+            for other in positions
+            for path in files[other]
+            if names_file(line, path, tree)
+        }
+        if position not in named:
+            alone[position] = (
+                "the line carrying its message names no file its fault seeded"
+            )
+        elif named - {position}:
+            alone[position] = (
+                "the line carrying its message names a file another entry in the batch "
+                "seeded"
+            )
+        else:
+            proven[position] = line.strip()
+    return proven, alone
 
 
 # ── the verdict cache ────────────────────────────────────────────────────────
@@ -3860,6 +4012,10 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
         # A command's lint batch takes its first entry's place: see the module docstring.
         batches = lint_batches(selected)
         batched = {index for members in batches.values() for index in members}
+        # A script gate's batches take their first entry's place in the same way.
+        scripted = script_batches(selected)
+        heads = {members[0]: group for group, members in scripted.items()}
+        batched |= {index for members in scripted.values() for index in members}
         fault_queues: list[list[Task]] = [[] for _ in workers]
         for index, fault in enumerate(selected):
             key = command_key(fault)
@@ -3867,7 +4023,11 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
                 fault_queues[owner[key]].append(
                     Task(index, pin and fault.suite == "bindings", build_of(key))
                 )
-            elif batches[key][0] == index:
+            elif index in heads:
+                fault_queues[owner[key]].append(
+                    Task(("script-batch", heads[index]), False, build_of(key))
+                )
+            elif key in batches and batches[key][0] == index:
                 fault_queues[owner[key]].append(
                     Task(
                         ("batch", key), pin and fault.suite == "bindings", build_of(key)
@@ -3970,6 +4130,80 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
             ]
             return results, follow
 
+        def run_script_batch(worker: Worker, task: Task):
+            """Seed a script gate's batch, run its command once, and put a verdict for each
+            entry a line of the run proves; the others go back on this worker's queue to run
+            alone."""
+            group = task.key[1]
+            members = scripted[group]
+            faults = [selected[index] for index in members]
+            worker.touched.setdefault(group[0])
+            worker.tree.reset()
+            alone = {
+                position: why
+                for position, fault in enumerate(faults)
+                if (why := seed(worker.tree.path, fault, dry=True))
+            }
+            joined = [
+                position for position in range(len(faults)) if position not in alone
+            ]
+            proven: dict[int, str] = {}
+            elapsed = 0.0
+            ran = len(joined) > 1
+            if ran:
+                for position in joined:
+                    seed(worker.tree.path, faults[position], dry=False)
+                first = faults[joined[0]]
+                started = time.monotonic()
+                trace = worker.trace()
+                code, output, said = run_commands(
+                    first,
+                    worker.tree.path,
+                    worker.env,
+                    args.timeout,
+                    True,
+                    procs,
+                    trace,
+                )
+                elapsed = time.monotonic() - started
+                if output.endswith(f"guards: timed out after {args.timeout} s\n"):
+                    unproven = dict.fromkeys(joined, "the batch's run timed out")
+                else:
+                    got, why = attribute_lines(
+                        said, code, [faults[p] for p in joined], worker.tree.path
+                    )
+                    proven = {joined[i]: line for i, line in got.items()}
+                    unproven = {joined[i]: reason for i, reason in why.items()}
+                if trace is not None:
+                    # As a lint batch's: the run read what each entry's own would have, and
+                    # the files the other entries seeded besides.
+                    closure = worker.closure(trace, first.run)
+                    for position in proven:
+                        recorded[faults[position].id] = ("fired", elapsed, closure)
+                alone.update(unproven)
+                ids = ", ".join(faults[p].id for p in joined)
+                for position, line in proven.items():
+                    log(
+                        f"{faults[position].id}.fault.log",
+                        f"guards: fired in one run of its batch, seeded together ({ids}); "
+                        f"the one line carrying its message names its own file: {line}\n"
+                        + output,
+                    )
+            else:
+                alone.update(
+                    dict.fromkeys(joined, "no other entry could share its run")
+                )
+            results: list[tuple[object, object]] = [
+                (
+                    members[position],
+                    (f"fired: {faults[position].id} ({elapsed:.1f} s)", False),
+                )
+                for position in sorted(proven)
+            ]
+            results.append((task.key, (ran, sorted(proven), alone, elapsed)))
+            follow = [Task(members[p], False, task.build) for p in sorted(alone)]
+            return results, follow
+
         def run_restore(worker: Worker, task: Task):
             """The restored run of each command of one build this worker ran, clean."""
             build = task.key[1]
@@ -3985,6 +4219,8 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
                 return [(task.key, run_fault(worker, task))], []
             if task.key[0] == "batch":
                 return run_batch(worker, task)
+            if task.key[0] == "script-batch":
+                return run_script_batch(worker, task)
             return run_restore(worker, task)
 
         state["seeded"] = True
@@ -4010,6 +4246,22 @@ def cmd_fire(root: Path, args: argparse.Namespace) -> int:
                 f"fired in one run ({elapsed:.1f} s)"
                 if ran
                 else f"guards: no two lint entries on `{command}` could share a run"
+            )
+            for position, why in sorted(alone.items()):
+                print(f"guards: {selected[members[position]].id} ran alone: {why}")
+        for group, members in scripted.items():
+            [(ran, proven, alone, elapsed)] = board.get(("script-batch", group))
+            command = " ".join(by_key[group[0]].run[-1])
+            which = (
+                f" (batch {group[1] + 1})"
+                if (group[0], 1) in scripted or group[1]
+                else ""
+            )
+            print(
+                f"guards: {len(proven)} of {len(members)} script entries on `{command}`"
+                f"{which} fired in one run ({elapsed:.1f} s)"
+                if ran
+                else f"guards: no two script entries on `{command}`{which} could share a run"
             )
             for position, why in sorted(alone.items()):
                 print(f"guards: {selected[members[position]].id} ran alone: {why}")
