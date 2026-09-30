@@ -29,6 +29,10 @@ jobs:
         with:
           toolchain: stable
       - run: cargo test --all
+      - name: install cargo-semver-checks
+        run: |
+          curl -sSfL -o csc.tgz https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v0.50.0/cargo-semver-checks-x86_64-unknown-linux-gnu.tar.gz
+          echo "1111111111111111111111111111111111111111111111111111111111111111  csc.tgz" | sha256sum -c -
   security:
     runs-on: ubuntu-latest
     steps:
@@ -101,6 +105,7 @@ osv-scanner = "2.5.0"
 node = "22"
 "aqua:rhysd/actionlint" = "1.7.12"
 "aqua:ast-grep/ast-grep" = "0.43.0"
+"github:obi1kenobi/cargo-semver-checks" = "0.50.0"
 
 [env]
 AGENTD_TARGET = "aarch64-unknown-linux-musl"
@@ -141,6 +146,12 @@ checksum = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 [tools."aqua:ast-grep/ast-grep"."platforms.macos-arm64"]
 checksum = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+
+[[tools."github:obi1kenobi/cargo-semver-checks"]]
+version = "0.50.0"
+
+[tools."github:obi1kenobi/cargo-semver-checks"."platforms.linux-x64"]
+checksum = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
 
 [[tools.betterleaks]]
 version = "1.7.3"
@@ -198,7 +209,7 @@ workflows = ["ci.yml"]
 
 [job."ci.yml".rust]
 task = "rust"
-steps = ["cargo test --all"]
+steps = ["cargo test --all", "install cargo-semver-checks"]
 
 [job."ci.yml".security]
 task = "security"
@@ -428,6 +439,12 @@ class ParityTests(unittest.TestCase):
             ("syft", 'syft = "1.50.0"', "1.50.0", "1.51.1"),
             ("grype", 'grype = "0.116.1"', "0.116.1", "0.118.0"),
             ("osv-scanner", 'osv-scanner = "2.5.0"', "2.5.0", "2.5.1"),
+            (
+                "cargo-semver-checks",
+                '"github:obi1kenobi/cargo-semver-checks" = "0.50.0"',
+                "0.50.0",
+                "0.51.0",
+            ),
         ):
             with self.subTest(tool=tool):
                 mise = edit(MISE, key, key.replace(old, new))
