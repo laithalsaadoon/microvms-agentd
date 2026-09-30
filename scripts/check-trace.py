@@ -7,8 +7,10 @@
 """Check that each traced requirement appears in every verification layer.
 
 Requirements are defined in `spec/core.symspec.json` and `spec/agentd.symspec.json`. A
-requirement is traced when it is listed in `TRACED` below. Each traced key must appear
-in six places, and this script reports where:
+requirement is traced when its group's file in `spec/traced/` lists it: one file per key prefix
+the specs define (`CLI.toml` lists the CLI keys), so the changes that trace different groups
+each edit their own file, and a group with no key traced yet has a file that lists nothing.
+Each traced key must appear in six places, and this script reports where:
 
   model    a Stateright property whose name starts with the key (`model/src/`)
   gherkin  a tag `@KEY` on a scenario (`<crate>/tests/features/*.feature`)
@@ -35,15 +37,29 @@ count for the test or fuzz layer: a file that mentioned a key and tested nothing
 the same as one that tests it. ast-grep (pinned in `mise.toml`) and stdlib `ast` tell them
 apart, so the script needs ast-grep on PATH and nothing from PyPI.
 
-A traced key may waive a layer with a reason, for example the live layer of a pure
-function that makes no AWS call. The waiver and its reason are rendered in the matrix,
-so an absent layer is a stated decision rather than a gap.
+An entry is a TOML table named for its key, with the issue that traced it and, for each layer
+the key waives, the reason:
+
+  [IMAGE-1]
+  issue = "#220"
+  waive.live = "a pure function of Dockerfile text; it makes no AWS call"
+
+A key waives a layer only with a reason, for example the live layer of a pure function that
+makes no AWS call. The waiver and its reason are rendered in the matrix, so an absent layer is
+a stated decision rather than a gap. The matrix lists the keys by group and then by number,
+whatever order the files hold them in.
+
+`load_traced` reads the files, for this script and for scripts/ratchet.py's untraced category,
+and refuses to load a file that isn't named `<GROUP>.toml` for a group the specs define, a key
+outside its file's group, a key listed twice (TOML refuses one repeated in a file, and the
+loader one listed in two), an entry of any other shape, and a directory with no group file.
+Each refusal names its file.
 
 It also refuses a mention of an unknown key anywhere in a file it reads, comments included,
 so a typo such as `CLI-10` for `CLI-9` cannot pass as coverage. Keys are recognized by the
 prefixes the two specs define. And it refuses to pass on input it didn't read: every
 directory it lists must yield a file and, unless KEYLESS says why not, a key; every layer's
-collector must find a key; and the sentinel key must still be in TRACED.
+collector must find a key; and the sentinel key must still be traced.
 It also holds the threat table in `docs/TRUST.md` ("Threats and the tests that guard them") to
 the specs and the tests. Each row names a threat, its requirement keys, its guards as
 `path::test`, and a status. A key must be one a spec defines; a guard must be a test that runs,
@@ -71,6 +87,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -91,200 +108,13 @@ THREAT_SENTINEL = "BIND-18"
 LIVE = ROOT / "conformance" / "run_rs.py"
 LIVE_SUITE = ROOT / "conformance"
 
-# The fuzz waiver the ensure_image decisions share: their input space is interleavings.
-INTERLEAVINGS = (
-    "the input space is two callers interleaved against the platform, which "
-    "model/src/image.rs checks exhaustively; the decision table is ten rows, all pinned "
-    "by the_plan_table"
-)
-
-# The waivers the tunnel's identity keys share until #297's handshake model and frame harnesses
-# land; each of those removes its waiver.
-TUNNEL_MODEL = (
-    "#297 adds a stateright model of the tunnel handshake and its pins; until then the "
-    "handshake and relay tests hold the key"
-)
-TUNNEL_GHERKIN = (
-    "no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire "
-    "themselves, which a scenario would only restate"
-)
-
-# Requirements traced end to end. The value is the issue that introduced the key, or
-# `(issue, {layer: reason})` for a key that waives a layer; see the module docs.
-# scripts/ratchet.py runs this file with runpy to read `TRACED` and `LAYERS` (its untraced
-# category), so the module level imports only the standard library.
-TRACED: dict[str, str | tuple[str, dict[str, str]]] = {
-    "CLI-7": "#216",
-    "CLI-8": "#216",
-    "CLI-9": "#216",
-    "IMAGE-1": (
-        "#220",
-        {"live": "a pure function of Dockerfile text; it makes no AWS call"},
-    ),
-    "IMAGE-2": "#220",
-    "IMAGE-3": (
-        "#220",
-        {"live": "a pure function of Dockerfile text; it makes no AWS call"},
-    ),
-    "IMAGE-4": "#220",
-    "IMAGE-5": (
-        "#220",
-        {
-            "model": "a binding pass-through has no states; core's are modeled as IMAGE-1..4",
-            "gherkin": "the scenarios are core's (IMAGE-1..4); each binding's tests check the pass-through",
-            "fuzz": "the binding hands the text unchanged to core's fuzzed function",
-            "live": "a pure function of Dockerfile text; it makes no AWS call",
-        },
-    ),
-    "IMAGE-6": (
-        "#221",
-        {
-            "model": "a pure function of the build inputs; the name has no states to explore"
-        },
-    ),
-    "IMAGE-7": (
-        "#221",
-        {
-            "model": "reading a directory has no states; the ignore rules are fuzzed "
-            "against moby's own regex translation instead"
-        },
-    ),
-    "IMAGE-8": "#221",
-    "IMAGE-9": ("#221", {"fuzz": INTERLEAVINGS}),
-    "IMAGE-10": ("#221", {"fuzz": INTERLEAVINGS}),
-    "IMAGE-11": ("#221", {"fuzz": INTERLEAVINGS}),
-    "IMAGE-12": (
-        "#221",
-        {
-            "model": "a binding pass-through has no states; core's are modeled as IMAGE-8..11",
-            "gherkin": "the scenarios are core's (IMAGE-6..11); each binding's tests check the "
-            "pass-through",
-            "fuzz": "the binding hands its arguments unchanged to core's fuzzed functions",
-            "live": "the conformance section drives core's ensure_image, which each binding "
-            "forwards unchanged",
-        },
-    ),
-    "AGENTD-7": "#224",
-    "AGENTD-8": "#224",
-    "AGENTD-9": "#224",
-    "AGENTD-10": "#225",
-    "AGENTD-11": "#225",
-    "AGENTD-12": "#225",
-    "AGENTD-13": "#225",
-    "AGENTD-14": "#226",
-    "AGENTD-15": "#226",
-    "AGENTD-16": "#224",
-    "AGENTD-17": (
-        "#297",
-        {
-            "model": TUNNEL_MODEL,
-            "gherkin": TUNNEL_GHERKIN,
-            "fuzz": "#297 adds a harness over the daemon's tunnel frame read",
-            "live": "no live check presents another host key: that needs a second host "
-            "identity for one VM, and the relay tests drive the daemon's real route with one",
-        },
-    ),
-    "AGENTD-18": (
-        "#297",
-        {
-            "model": TUNNEL_MODEL,
-            "gherkin": TUNNEL_GHERKIN,
-            "fuzz": "#297 adds a harness over the daemon's tunnel frame read",
-        },
-    ),
-    "BIND-11": "#227",
-    "BIND-12": "#227",
-    "BIND-13": (
-        "#227",
-        {
-            "live": "a pure function that makes no AWS call; its refusals precede any call, "
-            "so the service never sees them (zero calls asserted by the Gherkin scenarios "
-            "and the fuzz harness)"
-        },
-    ),
-    "BIND-17": "#219",
-    "BIND-18": "#219",
-    "BIND-19": "#219",
-    "BIND-20": "#219",
-    "BIND-21": (
-        "#297",
-        {
-            "model": TUNNEL_MODEL,
-            "gherkin": TUNNEL_GHERKIN,
-            "fuzz": "#297 adds a harness over the client's tunnel frame read",
-        },
-    ),
-    "BIND-22": (
-        "#297",
-        {
-            "model": "one stream read by one parser has no interleavings to explore; its "
-            "input space is bytes",
-            "gherkin": "hostile bytes aren't a scenario a caller drives; the parser's tests "
-            "feed it directly",
-            "live": "a live daemon sends well-formed events, so a live run can't present "
-            "hostile bytes",
-        },
-    ),
-    "BIND-6": "#222",
-    "BIND-7": "#222",
-    "BIND-8": "#222",
-    "BIND-9": "#222",
-    "BIND-10": "#222",
-    "BIND-14": (
-        "#223",
-        {
-            "model": "a stateless selection over the five-row size table; the bolero "
-            "harness checks minimality and coverage over arbitrary requests instead",
-            "live": "a pure function of the request and the documented table; it makes no "
-            "AWS call",
-        },
-    ),
-    "BIND-15": (
-        "#223",
-        {
-            "fuzz": "the outcome space (3 region x 2 credential x 3 service worlds) is "
-            "enumerated exhaustively by the Stateright model; there is no input stream to fuzz",
-        },
-    ),
-    "BIND-16": (
-        "#223",
-        {
-            "fuzz": "the outcome space (3 region x 2 credential x 3 service worlds) is "
-            "enumerated exhaustively by the Stateright model; there is no input stream to fuzz",
-        },
-    ),
-    "ARCH-6": (
-        "#282",
-        {
-            "model": "a property of a crate's code and dependencies, not of a state",
-            "gherkin": "no behavior to script: clippy and the dependency set enforce it at build "
-            "time",
-            "fuzz": "there is no input stream; the rule is over source and manifests",
-            "live": "the domain makes no AWS call by construction",
-        },
-    ),
-    "ARCH-7": (
-        "#283",
-        {
-            "model": "a property of a crate's code and dependencies, not of a state",
-            "gherkin": "no behavior to script: clippy and the dependency set enforce it at build "
-            "time",
-            "fuzz": "there is no input stream; the rule is over source and manifests",
-            "live": "the app's AWS calls all go through ports, so the live tier exercises the "
-            "edges' implementations, not this rule",
-        },
-    ),
-    "ARCH-8": (
-        "#283",
-        {
-            "model": "a property of a crate's code and dependencies, not of a state",
-            "gherkin": "no behavior to script: the dependency set and the ratchet check it over "
-            "source and manifests",
-            "fuzz": "there is no input stream; the rule is over source and manifests",
-            "live": "composition makes no AWS call of its own",
-        },
-    ),
-}
+# One file per requirement group the specs define, each named for its group (`CLI.toml`).
+# scripts/ratchet.py runs this file with runpy to call `load_traced` and read `LAYERS` (its
+# untraced category), so the module level imports only the standard library.
+TRACED_DIR = ROOT / "spec" / "traced"
+# The fields an entry may hold, and the issue as the tracker spells it.
+TRACED_FIELDS = {"issue", "waive"}
+TRACED_ISSUE = re.compile(r"#\d+")
 
 LAYERS = ("model", "gherkin", "fuzz", "test", "impl", "live")
 
@@ -325,9 +155,9 @@ KEYLESS = {
     "tests/",
 }
 
-# A key the traced table always carries. The per-key loop in `main` checks every layer
-# of every key in TRACED, this one included, so a TRACED that lost its entries would
-# pass that loop vacuously; this is what notices.
+# A key the traced files always carry. The per-key loop in `main` checks every layer of
+# every traced key, this one included, so a table that lost its entries (a group file
+# emptied, or a loader that read none) would pass that loop vacuously; this is what notices.
 SENTINEL = "CLI-7"
 
 TEST_MODULE = re.compile(r"^#\[cfg\(test\)\]\s*$", re.MULTILINE)
@@ -589,10 +419,101 @@ class Patterns:
         }
 
 
-def waivers(key: str, traced=None) -> dict[str, str]:
-    """The layers a traced key waives, each with its reason."""
-    entry = (TRACED if traced is None else traced)[key]
-    return entry[1] if isinstance(entry, tuple) else {}
+@dataclass(frozen=True)
+class Traced:
+    """One entry in a group file: a requirement traced end to end."""
+
+    #: The issue that traced the key.
+    issue: str
+    #: Each layer the key waives, with the reason.
+    waive: dict[str, str]
+    #: The file that lists it, relative to the root it was loaded under when it's in it.
+    file: str
+
+
+def _entry(value: object, file: str) -> Traced | None:
+    """The entry a group file's table holds for a key, or None for any other shape."""
+    if not isinstance(value, dict) or not set(value) <= TRACED_FIELDS:
+        return None
+    issue, waive = value.get("issue"), value.get("waive", {})
+    if not isinstance(issue, str) or not TRACED_ISSUE.fullmatch(issue):
+        return None
+    if not isinstance(waive, dict) or not all(
+        isinstance(reason, str) for reason in waive.values()
+    ):
+        return None
+    return Traced(issue, dict(waive), file)
+
+
+def load_traced(
+    directory: Path, groups: set[str], root: Path = ROOT
+) -> dict[str, Traced]:
+    """Every entry in the group files in `directory`, by key, in key order.
+
+    `groups` is the key prefixes the specs define. A file that's wrong fails the load rather
+    than dropping out of it, since a group that loaded nothing would pass every per-key check
+    and read as fewer keys to trace. So every problem is collected, each naming its file, and
+    raised together. A file is named relative to `root`, or in full when it isn't under it.
+    """
+
+    def shown(path: Path) -> str:
+        return rel(path, root) if path.is_relative_to(root) else path.as_posix()
+
+    problems: list[str] = []
+    listed: dict[str, list[Traced]] = {}
+    read = 0
+    try:
+        paths = sorted(directory.iterdir())
+    except FileNotFoundError:
+        paths = []
+    for path in paths:
+        where = shown(path)
+        group = path.stem
+        # Only `<GROUP>.toml` is read, so anything else here is refused rather than skipped: a
+        # misspelled name or suffix would take its group's keys out of the matrix.
+        if not (path.is_file() and path.suffix == ".toml" and group in groups):
+            problems.append(
+                f"{where} isn't named for a requirement group the specs define: a group file "
+                f"is <GROUP>.toml, for one of {', '.join(sorted(groups))}"
+            )
+            continue
+        # TOML refuses a key declared twice in one file, so that duplicate fails here.
+        try:
+            table = tomllib.loads(path.read_text(encoding="utf-8"))
+        except tomllib.TOMLDecodeError as error:
+            problems.append(f"{where} doesn't parse: {error}")
+            continue
+        read += 1
+        for key, value in table.items():
+            if not re.fullmatch(rf"{re.escape(group)}-\d+", key):
+                problems.append(
+                    f"{where}: {key} isn't in the {group} group; a group file lists only its "
+                    "group's keys"
+                )
+            entry = _entry(value, where)
+            if entry is None:
+                problems.append(
+                    f'{where}: {key} is malformed: an entry holds `issue = "#N"` and, for '
+                    'each layer it waives, `waive.<layer> = "reason"`, and nothing else'
+                )
+                continue
+            listed.setdefault(key, []).append(entry)
+    for key, entries in listed.items():
+        if len(entries) > 1:
+            files = ", ".join(entry.file for entry in entries)
+            problems.append(f"{key} is listed in more than one file: {files}")
+    if not read:
+        problems.append(
+            f"{shown(directory)} holds no group file, so no requirement is traced"
+        )
+    if problems:
+        raise SystemExit("\n".join(f"trace: {problem}" for problem in problems))
+
+    def order(key: str) -> tuple[str, int]:
+        group, number = key.rsplit("-", 1)
+        return group, int(number)
+
+    return {key: listed[key][0] for key in sorted(listed, key=order)}
 
 
 def rel(path: Path, root: Path = ROOT) -> str:
@@ -636,8 +557,10 @@ def enumerator_floors(root: Path = ROOT) -> list[str]:
     return problems
 
 
-def layer_floors(found: dict[str, dict[str, set[str]]]) -> list[str]:
-    """A layer or a listed entry that gave up no key, and a TRACED without the sentinel."""
+def layer_floors(
+    found: dict[str, dict[str, set[str]]], traced: dict[str, Traced]
+) -> list[str]:
+    """A layer or a listed entry that gave up no key, and traced files without the sentinel."""
     problems = [
         f"the {layer} collector found no requirement key in any file it read"
         for layer in LAYERS
@@ -658,8 +581,9 @@ def layer_floors(found: dict[str, dict[str, set[str]]]) -> list[str]:
                 )
         elif not yields:
             problems.append(f"the entry {entry} yields files but no requirement key")
-    if SENTINEL not in TRACED:
-        problems.append(f"the sentinel {SENTINEL} is not in TRACED")
+    if SENTINEL not in traced:
+        home = TRACED_DIR / f"{SENTINEL.rsplit('-', 1)[0]}.toml"
+        problems.append(f"the sentinel {SENTINEL} is not in {rel(home)}")
     return problems
 
 
@@ -1189,19 +1113,23 @@ def check_threats(
     return rows, problems
 
 
-def gaps(found: dict[str, dict[str, set[str]]], traced=None) -> list[str]:
+def gaps(found: dict[str, dict[str, set[str]]], traced: dict[str, Traced]) -> list[str]:
     """Each layer a traced key neither covers nor waives."""
-    traced = TRACED if traced is None else traced
     return [
         f"{key} has no {layer} layer"
-        for key in traced
+        for key, entry in traced.items()
         for layer in LAYERS
-        if layer not in waivers(key, traced) and not found.get(key, {}).get(layer)
+        if layer not in entry.waive and not found.get(key, {}).get(layer)
     ]
 
 
-def cell(found: dict[str, dict[str, set[str]]], key: str, layer: str) -> str:
-    if layer in waivers(key):
+def cell(
+    found: dict[str, dict[str, set[str]]],
+    traced: dict[str, Traced],
+    key: str,
+    layer: str,
+) -> str:
+    if layer in traced[key].waive:
         return "waived"
     return str(len(found.get(key, {}).get(layer, ())))
 
@@ -1209,6 +1137,7 @@ def cell(found: dict[str, dict[str, set[str]]], key: str, layer: str) -> str:
 def render(
     found: dict[str, dict[str, set[str]]],
     sentences: dict[str, str],
+    traced: dict[str, Traced],
     threats: list[Threat] | None = None,
 ) -> str:
     lines = [
@@ -1221,15 +1150,15 @@ def render(
         "| Requirement | " + " | ".join(LAYERS) + " |",
         "|---|" + "---|" * len(LAYERS),
     ]
-    for key in TRACED:
-        cells = [cell(found, key, layer) for layer in LAYERS]
+    for key in traced:
+        cells = [cell(found, traced, key, layer) for layer in LAYERS]
         lines.append(f"| {key} | " + " | ".join(cells) + " |")
-    for key in TRACED:
+    for key, entry in traced.items():
         lines += ["", f"## {key}", "", sentences[key], ""]
         for layer in LAYERS:
             files = sorted(found.get(key, {}).get(layer, ()))
             listed = ", ".join(f"`{f}`" for f in files)
-            reason = waivers(key).get(layer)
+            reason = entry.waive.get(layer)
             if reason:
                 listed = f"waived: {reason}" + (f" ({listed})" if listed else "")
             lines.append(f"- **{layer}:** " + (listed or "none"))
@@ -1245,7 +1174,7 @@ def render(
     ]
     for row in threats or []:
         keys = ", ".join(
-            key if key in TRACED else f"{key} (not traced)" for key in row.keys
+            key if key in traced else f"{key} (not traced)" for key in row.keys
         )
         guards = ", ".join(f"`{guard}`" for guard in row.guards)
         lines.append(
@@ -1265,16 +1194,19 @@ def main() -> int:
 
     sentences = spec_keys()
     patterns = Patterns(sentences)
+    traced = load_traced(TRACED_DIR, {key.rsplit("-", 1)[0] for key in sentences})
     found = collect(patterns)
-    problems = enumerator_floors() + layer_floors(found)
+    problems = enumerator_floors() + layer_floors(found, traced)
 
-    for key in TRACED:
+    for key, entry in traced.items():
         if key not in sentences:
-            problems.append(f"{key} is traced but not defined in either spec")
-        for layer, reason in waivers(key).items():
+            problems.append(
+                f"{entry.file}: {key} is traced but not defined in either spec"
+            )
+        for layer, reason in entry.waive.items():
             if layer not in LAYERS or not reason.strip():
                 problems.append(
-                    f"{key} waives {layer!r} without a known layer and reason"
+                    f"{entry.file}: {key} waives {layer!r} without a known layer and reason"
                 )
     written = mentions(patterns)
     for key, layers in found.items():
@@ -1285,21 +1217,23 @@ def main() -> int:
             problems.append(
                 f"{key} is mentioned but not defined in the spec: {', '.join(where)}"
             )
-    problems += gaps(found)
+    problems += gaps(found, traced)
     threats, threat_problems = check_threats(patterns, sentences)
     problems += threat_problems
 
     width = max(len(layer) for layer in LAYERS)
     print("requirement  " + "  ".join(layer.ljust(width) for layer in LAYERS))
-    for key in TRACED:
-        counts = [cell(found, key, layer).ljust(width) for layer in LAYERS]
+    for key in traced:
+        counts = [cell(found, traced, key, layer).ljust(width) for layer in LAYERS]
         print(f"{key:<11}  " + "  ".join(counts))
     print(f"\nthreats in {TRUST.as_posix()}, by line")
     for row in threats:
         status = "guarded" if row.status.startswith("guarded") else "gap"
         print(f"{row.line:<11}  {status:<7}  {', '.join(row.keys) or 'none'}")
 
-    rendered = render(found, sentences, threats) if not problems or args.write else ""
+    rendered = (
+        render(found, sentences, traced, threats) if not problems or args.write else ""
+    )
     if args.write and rendered:
         DOC.write_text(rendered)
         print(f"wrote {rel(DOC)}")

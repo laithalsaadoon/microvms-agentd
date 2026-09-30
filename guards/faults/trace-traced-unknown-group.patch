@@ -1,0 +1,8 @@
+diff --git a/spec/traced/COSTS.toml b/spec/traced/COSTS.toml
+new file mode 100644
+index 0000000..3aa6cb1
+--- /dev/null
++++ b/spec/traced/COSTS.toml
+@@ -0,0 +1,2 @@
++[COST-1]
++issue = "#303"

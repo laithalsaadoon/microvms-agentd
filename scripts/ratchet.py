@@ -83,13 +83,15 @@ thinness guard pushed an upload into an `aws s3 cp` subprocess it couldn't see.
   table's own decision and isn't read. `parity:check` holds the table to the surfaces, so a gap
   the table doesn't record fails there, not here.
 - untraced: each requirement key in `spec/core.symspec.json` and `spec/agentd.symspec.json`
-  that `TRACED` in `scripts/check-trace.py` doesn't list, a requirement no layer checks (#295).
-  The key is the bare spec key (`TRAP-1`); its group is the prefix. `trace:check` holds a
-  listed key to its layers, so a traced key missing one fails there, not here. A requirement
-  that can't carry a layer waives it in `TRACED` with its reason rather than staying an entry,
-  and the category takes no decisions, since a decision would take a requirement out of the
-  count with no layer checking it. A listed key that waives every layer is still an entry: no
-  layer checks it either. A requirement with no key is an error, since `TRACED` can't list it.
+  that no group file in `spec/traced/` lists, a requirement no layer checks (#295). The files
+  are read with `scripts/check-trace.py`'s own loader. The key is the bare spec key (`TRAP-1`);
+  its group is the prefix, and the file that would list it is `spec/traced/TRAP.toml`.
+  `trace:check` holds a listed key to its layers, so a traced key missing one fails there, not
+  here. A requirement that can't carry a layer waives it in its group's file with its reason
+  rather than staying an entry, and the category takes no decisions, since a decision would take
+  a requirement out of the count with no layer checking it. A listed key that waives every layer
+  is still an entry: no layer checks it either. A requirement with no key is an error, since no
+  group file can list it.
 
 The Rust collectors are ast-grep rules under `ratchet/`, and test code is out of all of them: an
 item after `#[cfg(test)]`, `#[cfg(feature = "test-support")]` or
@@ -142,6 +144,7 @@ SCRIPT = "scripts/ratchet.py"
 PLACEMENT = "arch/placement.toml"
 SGCONFIG = ROOT / "ratchet" / "sgconfig.yml"
 CHECK_PARITY = ROOT / "scripts" / "check-parity.py"
+CHECK_TRACE = ROOT / "scripts" / "check-trace.py"
 
 
 class Scope(NamedTuple):
@@ -170,8 +173,11 @@ class Scope(NamedTuple):
     parity_table: Path | None = None
     #: The requirement specs whose keys the untraced collector reads.
     specs: tuple[Path, ...] = ()
-    #: The script whose `TRACED` table lists the traced keys. None reads no untraced keys.
+    #: The directory of group files that list the traced keys. None reads no untraced keys.
     traced: Path | None = None
+    #: The script whose `load_traced` reads `traced` and whose `LAYERS` names the layers.
+    #: check-trace.py for every real scope, so this reads the files the way trace:check does.
+    trace: Path = CHECK_TRACE
 
 
 REPO = Scope(
@@ -187,7 +193,7 @@ REPO = Scope(
     composition_root="microvms-core",
     parity_table=ROOT / "parity" / "capabilities.toml",
     specs=(ROOT / "spec" / "core.symspec.json", ROOT / "spec" / "agentd.symspec.json"),
-    traced=ROOT / "scripts" / "check-trace.py",
+    traced=ROOT / "spec" / "traced",
 )
 
 SENTINEL_ROOT = ROOT / "ratchet" / "fixtures" / "sentinel"
@@ -202,7 +208,7 @@ SENTINEL = Scope(
         SENTINEL_ROOT / "spec" / "core.symspec.json",
         SENTINEL_ROOT / "spec" / "agentd.symspec.json",
     ),
-    traced=SENTINEL_ROOT / "traced.py",
+    traced=SENTINEL_ROOT / "spec" / "traced",
 )
 
 COLLECTED = (
@@ -239,8 +245,8 @@ PROMOTE = {
         "last gap"
     ),
     "untraced": (
-        "scripts/check-trace.py failing on a spec key missing from TRACED, once #301 to #307 "
-        "trace the last key"
+        "scripts/check-trace.py failing on a spec key no file in spec/traced/ lists, once #301 "
+        "to #307 trace the last key"
     ),
 }
 
@@ -253,9 +259,9 @@ NEW_DRIFT_FIX = {
         "issue in parity/capabilities.toml so it reads as a decision."
     ),
     "untraced": (
-        "Trace the requirement: list its key in TRACED in scripts/check-trace.py, give it each "
-        "layer or a waiver with its reason (a key that waives every layer stays untraced), and "
-        "run ./scripts/check-trace.py --write."
+        "Trace the requirement: list its key in its group's file, spec/traced/<GROUP>.toml, "
+        "give it each layer or a waiver with its reason (a key that waives every layer stays "
+        "untraced), and run ./scripts/check-trace.py --write."
     ),
 }
 LAYERING_FIX = (
@@ -269,15 +275,15 @@ NOT_IN_BASE_FIX = {
         "give that surface the capability, or, if the gap is permanent, drop the exemption's "
         "issue in parity/capabilities.toml."
     ),
-    "untraced": "trace the requirement in TRACED in scripts/check-trace.py instead.",
+    "untraced": "trace the requirement in its group's file, spec/traced/<GROUP>.toml, instead.",
 }
 LAYERING_NOT_IN_BASE_FIX = "fix the code, or add a decision with its reason."
 
 #: Categories `decisions` can't name, with what to do instead.
 NO_DECISIONS = {
     "untraced": (
-        "a requirement that can't carry a layer waives that layer in TRACED in "
-        "scripts/check-trace.py with its reason, so it stays traced"
+        "a requirement that can't carry a layer waives that layer in its group's file, "
+        "spec/traced/<GROUP>.toml, with its reason, so it stays traced"
     ),
 }
 
@@ -1039,19 +1045,20 @@ def parity_gaps(scope: Scope) -> Counter:
 
 
 def untraced(scope: Scope) -> Counter:
-    """Each requirement key in the scope's specs that its `TRACED` table doesn't list (#295).
+    """Each requirement key in the scope's specs that no traced group file lists (#295).
 
-    `TRACED` is read by running the script, the way `ratchet-history.py` loads this one: its
-    waivers name module constants, so a literal read can't take it, and the script imports
-    nothing from outside the standard library. A spec or a table that gives up nothing is an
-    error, not an empty category: every entry would read as fixed, and `update` would delete
-    them all.
+    The files are read with the `load_traced` of the scope's `trace` script, run the way
+    `ratchet-history.py` loads this one (the script imports nothing from outside the standard
+    library). It's the loader trace:check reads them with, so the two gates can't disagree about
+    what a file lists, and a file it refuses fails here too. A spec or a directory that gives up
+    nothing is an error, not an empty category: every entry would read as fixed, and `update`
+    would delete them all.
     """
     if scope.traced is None:
         return Counter()
     if not scope.specs:
         raise SystemExit(
-            f"{scope.traced} is read for TRACED, but the scope names no spec"
+            f"{scope.traced} is read for traced keys, but the scope names no spec"
         )
     keys: set[str] = set()
     for spec in scope.specs:
@@ -1073,27 +1080,26 @@ def untraced(scope: Scope) -> Counter:
             key = entry.get("key") if isinstance(entry, dict) else None
             if not isinstance(key, str) or not key.strip():
                 raise SystemExit(
-                    f"{spec}: requirement {uuid} has no key, so TRACED can't list it"
+                    f"{spec}: requirement {uuid} has no key, so no traced file can list it"
                 )
             found.add(key)
         if not found:
             raise SystemExit(f"{spec} defines no requirement keys")
         keys |= found
-    script = runpy.run_path(str(scope.traced))
-    traced = script.get("TRACED")
-    if not isinstance(traced, dict):
-        raise SystemExit(f"{scope.traced} has no TRACED dict")
-    if not traced:
-        raise SystemExit(f"{scope.traced}'s TRACED is empty")
+    script = runpy.run_path(str(scope.trace))
     layers = script.get("LAYERS")
     if not isinstance(layers, tuple) or not layers:
-        raise SystemExit(f"{scope.traced} has no LAYERS tuple")
-    # A value is the issue, or `(issue, {layer: reason})` for a key that waives a layer. A key
-    # that waives them all passes trace:check with nothing checking it, so it stays an entry.
+        raise SystemExit(f"{scope.trace} has no LAYERS tuple")
+    load = script.get("load_traced")
+    if not callable(load):
+        raise SystemExit(f"{scope.trace} has no load_traced")
+    traced = load(scope.traced, {key.rsplit("-", 1)[0] for key in keys}, scope.root)
+    if not traced:
+        raise SystemExit(f"{scope.traced} lists no traced key")
+    # A key that waives every layer passes trace:check with nothing checking it, so it stays
+    # an entry.
     checked = {
-        key
-        for key, value in traced.items()
-        if not set(layers) <= set(value[1] if isinstance(value, tuple) else ())
+        key for key, entry in traced.items() if not set(layers) <= set(entry.waive)
     }
     return Counter(("untraced", key) for key in keys - checked)
 

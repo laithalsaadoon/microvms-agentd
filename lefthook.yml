@@ -41,7 +41,7 @@ pre-commit:
 
     - name: requirement traceability
       run: mise run trace:check
-      glob: "{spec/*.json,model/src/**/*.rs,*/src/**/*.rs,*/tests/**,agentd/fuzz/fuzz_targets/*.rs,microvms-js/__test__/**,conformance/run_rs.py,scripts/check-trace.py,scripts/test_check_trace.py,docs/TRACEABILITY.md,docs/TRUST.md}"
+      glob: "{spec/*.json,spec/traced/*.toml,model/src/**/*.rs,*/src/**/*.rs,*/tests/**,agentd/fuzz/fuzz_targets/*.rs,microvms-js/__test__/**,conformance/run_rs.py,scripts/check-trace.py,scripts/test_check_trace.py,docs/TRACEABILITY.md,docs/TRUST.md}"
 
     - name: license headers
       run: ./scripts/check-license-headers.py
