@@ -368,6 +368,7 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 image_name: None,
                 delete_image: false,
                 wait: false,
+                wait_sec: None,
                 state_dir: Some(std::env::temp_dir().join("microvm-guard-history")),
                 region: region_flags(),
             }),

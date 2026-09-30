@@ -1784,6 +1784,10 @@ pub struct TerminateArgs {
     #[arg(long)]
     pub wait: bool,
 
+    /// Wait for TERMINATED for at most this many seconds. Implies --wait.
+    #[arg(long, value_name = "SECONDS", value_parser = parse_seconds)]
+    pub wait_sec: Option<std::time::Duration>,
+
     /// Where the VM's history is appended. Defaults to $MICROVM_STATE_DIR or ~/.microvm/runs.
     #[arg(long)]
     pub state_dir: Option<PathBuf>,
@@ -3271,6 +3275,7 @@ mod tests {
             (Command::Keepalive(args), "--interval") => args.interval,
             (Command::Keepalive(args), "--for") => args.for_sec,
             (Command::Keepalive(args), "--idle-window") => args.idle_window,
+            (Command::Terminate(args), "--wait-sec") => args.wait_sec,
             _ => None,
         }
     }
@@ -3290,7 +3295,7 @@ mod tests {
         let attached = ["--endpoint", "https://mvm-1.example", "--agent-token", "t"];
         let with_id =
             |rest: &[&'static str]| [&attached[..], &["--microvm-id", "mvm-1"], rest].concat();
-        let flags: [(&str, Vec<&str>, &str); 10] = [
+        let flags: [(&str, Vec<&str>, &str); 11] = [
             ("exec", with_id(&["true"]), "--timeout"),
             ("run", vec!["--no-config"], "--timeout"),
             ("sync", with_id(&["."]), "--timeout"),
@@ -3305,6 +3310,7 @@ mod tests {
             ("keepalive", with_id(&[]), "--interval"),
             ("keepalive", with_id(&[]), "--for"),
             ("keepalive", with_id(&[]), "--idle-window"),
+            ("terminate", vec!["mvm-1"], "--wait-sec"),
         ];
         let refused = ["inf", "infinity", "NaN", "-inf", "-5", "1e300", "abc"];
         let accepted = [
