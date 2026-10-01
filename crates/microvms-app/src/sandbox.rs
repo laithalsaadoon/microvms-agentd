@@ -69,8 +69,17 @@ use crate::error::{Error, ErrorKind};
 use crate::region::Region;
 use crate::session::{Session, TokenMinter};
 
-/// The default launch wait: five minutes, matching the Python client's `ready_timeout_sec`.
-pub const DEFAULT_READY_TIMEOUT: Duration = Duration::from_secs(300);
+/// The default wait for a launch to reach RUNNING: five minutes, matching the Python client's
+/// `ready_timeout_sec`. The daemon wait after it is
+/// [`crate::session::DEFAULT_BOOTSTRAP_TIMEOUT`].
+pub const DEFAULT_RUNNING_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// The old name of [`DEFAULT_RUNNING_TIMEOUT`], kept for one release.
+#[deprecated(
+    note = "renamed DEFAULT_RUNNING_TIMEOUT: `session::DEFAULT_READY_TIMEOUT` shared this name \
+            for a different wait, the daemon's"
+)]
+pub const DEFAULT_READY_TIMEOUT: Duration = DEFAULT_RUNNING_TIMEOUT;
 
 /// The default lifecycle wait for suspend, resume, and terminate, and for a state wait the
 /// caller gives no deadline (the bindings' `wait_for_state`, the CLI's `terminate --wait`).
@@ -261,17 +270,19 @@ pub struct RunRequest {
     pub auto_resume: bool,
     /// `maximumDurationInSeconds`, checked against 1..=28800 before the call.
     pub max_duration_sec: u32,
-    /// How long to wait for RUNNING.
+    /// How long to wait for RUNNING. The wait for the daemon to answer, after it, is
+    /// [`crate::session::DEFAULT_BOOTSTRAP_TIMEOUT`].
     pub ready_timeout: Duration,
     /// A label for the run token (TRAP-1). Never the token.
     pub token_scope: Option<String>,
     /// Per-VM `logging` (#201). See [`RunMicrovmRequest::logging`].
     pub logging: Option<crate::control::ops::Logging>,
-    /// Whether [`Sandbox::run`] waits for RUNNING before returning (the default).
+    /// Whether [`Sandbox::run`] waits for RUNNING and for the daemon to answer before
+    /// returning (the default).
     ///
     /// Off returns as soon as `RunMicrovm` is accepted, with the lifecycle still PENDING:
-    /// the session is addressable, and [`Sandbox::wait_until_running`] finishes the wait
-    /// later — from this process, or after a durable workflow's next step.
+    /// the session is addressable, and [`Sandbox::wait_until_running`] finishes both waits
+    /// later, from this process or after a durable workflow's next step.
     pub wait: bool,
 }
 
@@ -293,7 +304,7 @@ impl Default for RunRequest {
             suspended_sec: 600,
             auto_resume: false,
             max_duration_sec: 3_600,
-            ready_timeout: DEFAULT_READY_TIMEOUT,
+            ready_timeout: DEFAULT_RUNNING_TIMEOUT,
             token_scope: None,
             logging: None,
             wait: true,
@@ -1051,7 +1062,8 @@ impl Sandbox {
 
     // ── run (STATE-1, STATE-2, STATE-3) ──────────────────────────────────────
 
-    /// Launches a MicroVM, waits for RUNNING, and returns its session.
+    /// Launches a MicroVM, waits for RUNNING and for its daemon to answer, and returns its
+    /// session.
     ///
     /// # The three state requirements this is
     ///
@@ -1231,11 +1243,21 @@ impl Sandbox {
         Ok(())
     }
 
-    /// Waits for a launch accepted by [`Sandbox::run`] to reach RUNNING.
+    /// Waits for a launch accepted by [`Sandbox::run`] to reach RUNNING, up to `timeout`, and
+    /// then for its daemon to answer, up to [`crate::session::DEFAULT_BOOTSTRAP_TIMEOUT`].
     ///
     /// `run` calls this itself unless [`RunRequest::wait`] was off. A launch that adopted an
     /// existing VM through its client token resumes it if it idle-suspended (#195); a fresh
     /// launch that reaches any terminal state first fails fast with `stateReason` (TRAP-8).
+    ///
+    /// # Why RUNNING isn't enough
+    ///
+    /// RUNNING says the run hook answered, so the daemon is up and the token installed
+    /// (STATE-2), but the endpoint's proxy path commonly refuses a connection or two just
+    /// after. The session is handed back once one health poll through it has answered, so a
+    /// first exec after a launch doesn't meet that window, on any surface (#254). A daemon that
+    /// never answers fails this with `ERR_TIMEOUT`, and the lifecycle stays RUNNING: the VM is
+    /// there and billing, and [`Sandbox::session`] can still wait for it.
     pub async fn wait_until_running(&mut self, timeout: Duration) -> Result<&mut Session, Error> {
         self.refuse_detached("wait until running")?;
         let id = self.require_microvm("wait_until_running")?;
@@ -1261,7 +1283,11 @@ impl Sandbox {
         if self.session.is_none() {
             self.build_session()?;
         }
-        Ok(self.session.as_mut().expect("just assigned"))
+        let session = self.session.as_mut().expect("just assigned");
+        session
+            .wait_until_ready(crate::session::DEFAULT_BOOTSTRAP_TIMEOUT)
+            .await?;
+        Ok(session)
     }
 
     // ── adopt (STATE-3, with the lifecycle read from the service) ────────────
@@ -1884,7 +1910,10 @@ mod tests {
             Region::UsEast1,
             Arc::clone(&clock) as Arc<dyn crate::control::Clock>,
         );
-        (Sandbox::with_control_plane(plane), recorder, clock)
+        // A daemon that answers health, because a launch waits for one (#254).
+        let sandbox = Sandbox::with_control_plane(plane)
+            .with_session_backend(crate::testing::HealthyDaemon::new());
+        (sandbox, recorder, clock)
     }
 
     /// Suspend, resume and terminate wait five minutes at five-second polls, with no stall
@@ -2021,7 +2050,8 @@ mod tests {
             Arc::new(TestClock::new()),
         )
         .with_entropy(Arc::clone(&entropy) as Arc<dyn crate::entropy::Entropy>);
-        let mut sandbox = Sandbox::with_control_plane(plane);
+        let mut sandbox = Sandbox::with_control_plane(plane)
+            .with_session_backend(crate::testing::HealthyDaemon::new());
         answer_launch(&recorder);
         let session = sandbox
             .run(RunRequest::new().with_image("arn:image").with_identity())
@@ -2068,7 +2098,8 @@ mod tests {
             Arc::new(TestClock::new()),
         )
         .with_entropy(Arc::new(SequenceEntropy::unavailable()));
-        let mut sandbox = Sandbox::with_control_plane(plane);
+        let mut sandbox = Sandbox::with_control_plane(plane)
+            .with_session_backend(crate::testing::HealthyDaemon::new());
         answer_launch(&recorder);
         let err = sandbox
             .run(RunRequest::new().with_image("arn:image"))
@@ -2076,6 +2107,108 @@ mod tests {
             .expect_err("no pool, no bearer token");
         assert_eq!(err.kind(), ErrorKind::Unexpected, "{err}");
         assert_eq!(recorder.call_count("RunMicrovm"), 0);
+    }
+
+    // ── a launch waits for the daemon (#254) ──────────────────────────────────
+
+    /// A sandbox whose daemon answers health from `replies`, over a scripted plane that
+    /// answers a launch to RUNNING.
+    fn launching_to(
+        replies: Vec<crate::testing::Reply>,
+    ) -> (
+        Sandbox,
+        Arc<FakeControlPlane>,
+        Arc<crate::testing::Recorder>,
+    ) {
+        let recorder = Arc::new(FakeControlPlane::new());
+        let plane = crate::testing::control_plane(
+            Arc::clone(&recorder) as Arc<dyn crate::control::transport::Transport>,
+            Region::UsEast1,
+            Arc::new(TestClock::new()),
+        );
+        let daemon = crate::testing::Recorder::with(replies);
+        let sandbox = Sandbox::with_control_plane(plane).with_session_backend(daemon.clone());
+        answer_launch(&recorder);
+        (sandbox, recorder, daemon)
+    }
+
+    /// Not yet bootstrapped, then bootstrapped: the two health answers a launch waits through.
+    fn not_ready_then_ready() -> Vec<crate::testing::Reply> {
+        vec![
+            crate::testing::Reply::Body(503, b"not bootstrapped".to_vec()),
+            crate::testing::Reply::ok(crate::testing::health_body(true)),
+        ]
+    }
+
+    /// The paths a scripted daemon was asked for, in order.
+    fn daemon_paths(daemon: &crate::testing::Recorder) -> Vec<String> {
+        daemon
+            .requests()
+            .iter()
+            .map(|request| format!("{} {}", request.method, request.path))
+            .collect()
+    }
+
+    /// **`run` returns once the daemon answers, not at RUNNING (#254).** The plane reports
+    /// RUNNING and the daemon answers 503 and then 200 bootstrapped: `run` hands back the
+    /// session after the second poll, as the CLI's `run` and `AgentVm.launch` did on their own.
+    ///
+    /// **Falsification**: drop the `wait_until_ready` call from `Sandbox::wait_until_running`
+    /// and `run` returns at RUNNING having asked the daemon nothing.
+    #[tokio::test(start_paused = true)]
+    async fn a_launch_returns_once_its_daemon_answers() {
+        let (mut sandbox, _recorder, daemon) = launching_to(not_ready_then_ready());
+        sandbox
+            .run(RunRequest::new().with_image("arn:image"))
+            .await
+            .expect("the launch reaches RUNNING and its daemon answers");
+        assert_eq!(
+            daemon_paths(&daemon),
+            ["GET /v1/health", "GET /v1/health"],
+            "one poll refused, one bootstrapped, and nothing after"
+        );
+        sandbox.detach().expect("hand the scripted VM off quietly");
+    }
+
+    /// **A launch that didn't wait is finished the same way (#254):** `wait_until_running`
+    /// after `run(wait = false)` returns once the daemon answers too, and the accepted launch
+    /// itself asked the daemon nothing.
+    #[tokio::test(start_paused = true)]
+    async fn wait_until_running_returns_once_the_daemon_answers() {
+        let (mut sandbox, _recorder, daemon) = launching_to(not_ready_then_ready());
+        let mut request = RunRequest::new().with_image("arn:image");
+        request.wait = false;
+        sandbox.run(request).await.expect("the launch is accepted");
+        assert!(
+            daemon_paths(&daemon).is_empty(),
+            "an accepted launch doesn't wait"
+        );
+        sandbox
+            .wait_until_running(DEFAULT_RUNNING_TIMEOUT)
+            .await
+            .expect("RUNNING, then the daemon answers");
+        assert_eq!(daemon_paths(&daemon), ["GET /v1/health", "GET /v1/health"]);
+        sandbox.detach().expect("hand the scripted VM off quietly");
+    }
+
+    /// **A daemon that never answers fails the launch with `ERR_TIMEOUT` (#254),** after the
+    /// bootstrap wait, rather than the first exec failing later. The VM did reach RUNNING, so
+    /// the lifecycle says so and the token counts as installed (STATE-2).
+    #[tokio::test(start_paused = true)]
+    async fn a_launch_whose_daemon_never_answers_times_out_running() {
+        let never = (0..128)
+            .map(|_| crate::testing::Reply::Body(503, b"not bootstrapped".to_vec()))
+            .collect();
+        let (mut sandbox, _recorder, daemon) = launching_to(never);
+        let error = sandbox
+            .run(RunRequest::new().with_image("arn:image"))
+            .await
+            .expect_err("the daemon never answered");
+        assert_eq!(error.kind(), ErrorKind::Timeout, "{error}");
+        assert!(daemon.requests().len() > 1, "it kept asking");
+        assert_eq!(sandbox.lifecycle(), Lifecycle::Running);
+        assert!(sandbox.token_installed());
+        sandbox.detach().expect("hand the scripted VM off quietly");
     }
 
     // ── a launch by bare image name (#253) ───────────────────────────────────
@@ -2314,7 +2447,8 @@ mod tests {
             Arc::new(crate::testing::SequenceEntropy::new()),
             Arc::clone(&adapters) as Arc<dyn crate::adapters::Adapters>,
         );
-        let mut sandbox = Sandbox::with_control_plane(plane);
+        let mut sandbox = Sandbox::with_control_plane(plane)
+            .with_session_backend(crate::testing::HealthyDaemon::new());
         answer_launch(&recorder);
         sandbox
             .run(RunRequest::new().with_image("arn:image"))
@@ -2813,10 +2947,18 @@ mod tests {
     }
 
     /// A VM adopted while PENDING finishes through `wait_until_running`, which counts the
-    /// bootstrap exactly once.
+    /// bootstrap exactly once and, like a launch, waits for the daemon to answer.
     #[tokio::test]
     async fn an_adopted_pending_vm_counts_its_bootstrap_once_on_running() {
-        let (plane, recorder, _) = adopt_plane();
+        let recorder = Arc::new(FakeControlPlane::new());
+        let daemon = crate::testing::HealthyDaemon::new();
+        let plane = crate::control::ControlPlane::from_ports(
+            Arc::clone(&recorder) as Arc<dyn crate::control::transport::Transport>,
+            Region::UsEast1,
+            Arc::new(TestClock::new()),
+            Arc::new(crate::testing::SequenceEntropy::new()),
+            Arc::new(crate::testing::TestAdapters::new().with_backend(daemon.clone())),
+        );
         recorder
             .answer(
                 "GetMicrovm",
@@ -2825,6 +2967,10 @@ mod tests {
             .answer(
                 "GetMicrovm",
                 Answer::ok(fake::microvm_response("RUNNING", None)),
+            )
+            .answer(
+                "CreateMicrovmAuthToken",
+                Answer::ok(fake::auth_token_response("proxy-token")),
             );
         let mut sandbox = Sandbox::adopt(plane, "mvm-abc123", ADOPT_ENDPOINT, ADOPT_TOKEN)
             .await
@@ -2837,6 +2983,11 @@ mod tests {
             .expect("reaches RUNNING");
         assert_eq!(sandbox.bootstrap_count(), 1);
         assert!(sandbox.token_installed());
+        assert_eq!(
+            daemon.polls(),
+            1,
+            "the daemon answered before the session came back"
+        );
         assert!(
             sandbox
                 .run(RunRequest::new().with_image("arn:image"))
@@ -3743,13 +3894,13 @@ mod tests {
         assert_eq!(recorder.call_count("GetMicrovm"), 0, "nothing polled yet");
 
         sandbox
-            .wait_until_running(DEFAULT_READY_TIMEOUT)
+            .wait_until_running(DEFAULT_RUNNING_TIMEOUT)
             .await
             .expect("reaches RUNNING");
         assert_eq!(sandbox.lifecycle(), Lifecycle::Running);
         assert_eq!(sandbox.bootstrap_count(), 1);
         let error = sandbox
-            .wait_until_running(DEFAULT_READY_TIMEOUT)
+            .wait_until_running(DEFAULT_RUNNING_TIMEOUT)
             .await
             .expect_err("a running launch has nothing to wait for");
         assert_eq!(error.kind(), ErrorKind::InvalidArg);

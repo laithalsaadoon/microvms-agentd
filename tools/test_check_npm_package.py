@@ -19,7 +19,7 @@ from pathlib import Path
 from unittest import mock
 
 SCRIPT = Path(__file__).with_name("check-npm-package.py")
-NPM = runpy.run_path(str(SCRIPT))
+NPM = runpy.run_path(str(SCRIPT), run_name="tools.check-npm-package")
 PackageError = NPM["PackageError"]
 
 # A tool that prints FAKE_OUTPUT and exits FAKE_CODE, and records its arguments in FAKE_ARGV.

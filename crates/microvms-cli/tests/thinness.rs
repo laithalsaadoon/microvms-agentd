@@ -1,19 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-//! **CLI-2's manifest half, and the print-macro scan.** The CLI reaches AWS through
-//! `microvms-core` and through nothing else, asserted from the manifest here and from the source
-//! by the compiler and the ratchet.
+//! **CLI-2's print-macro scan.** The CLI reaches AWS through `microvms-core` and through nothing
+//! else. Its direct dependencies are held to exactly its set in `verify/arch/placement.toml` by
+//! `dependency_direction.rs`, which no HTTP client, signer or credential chain is in; its source
+//! is held by the compiler and the ratchet; and this file scans the shipping code for print
+//! macros, over its tokens with test regions taken out.
 //!
-//! # What's here
-//!
-//! A **denylist** of crates that would mean a second path to AWS or HTTP, read out of
-//! `cargo metadata`. Dependencies are welcome in this crate: a good, maintained crate beats
-//! hand-rolled code, and nothing here polices the manifest's size. What the manifest must never
-//! grow is a crate that can open a socket to AWS or sign a request without going through
-//! `microvms-core`; those are named below, and `cargo metadata` sees them however they are
-//! spelled into the manifest.
-//!
-//! A **source scan** for print macros, over the shipping code's tokens with test regions taken
-//! out.
+//! The denylist of crates that would mean a second path to AWS, which this file used to read out
+//! of `cargo metadata`, went with #260: once the CLI's placement drift was gone, the exact set
+//! refused every name on it. The sets don't read dev dependencies, and a dev-only HTTP client
+//! isn't refused: it never reaches the shipped binary, which is what CLI-2 is about.
 //!
 //! # Where the source half of CLI-2 went
 //!
@@ -43,92 +38,6 @@
 //! (cli.py line numbers resolve at `git show 'c4d396e^:clients/python/src/microvms_agentd/cli.py'`, the retired oracle.)
 
 use std::path::{Path, PathBuf};
-
-/// Crate names that would mean a second path to AWS or to HTTP.
-///
-/// A denylist of the hazard, not a cap on the manifest: dependencies are welcome here, and
-/// nothing polices how many this crate takes. What CLI-2 forbids is a crate that lets a
-/// handler reach AWS without going through `microvms-core` — an HTTP client, a signer, a
-/// credential chain. A reviewer reading a diff that added `reqwest` sees why it is refused
-/// rather than only that a name matched.
-const FORBIDDEN: [&str; 12] = [
-    "reqwest",
-    "hyper",
-    "hyper-util",
-    "http",
-    "aws-config",
-    "aws-sdk-s3",
-    "aws-sdk-sts",
-    "aws-sigv4",
-    "aws-credential-types",
-    "aws-smithy-runtime",
-    "rusoto_core",
-    "ureq",
-];
-
-/// This crate's package, out of `cargo metadata`.
-fn package() -> cargo_metadata::Package {
-    let metadata = cargo_metadata::MetadataCommand::new()
-        .manifest_path(manifest_path())
-        // The whole workspace, because the dependency-direction test in the sibling file needs the
-        // other members and building the graph twice is the slow part.
-        .exec()
-        .expect("cargo metadata runs");
-    metadata
-        .packages
-        .into_iter()
-        .find(|package| package.name.as_str() == "microvms-cli")
-        .expect("microvms-cli is a workspace member")
-}
-
-fn manifest_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")
-}
-
-/// **No second path to AWS.** The direct dependency set carries none of the crates that
-/// could open a socket to AWS or sign a request outside `microvms-core`.
-///
-/// A denylist, deliberately: dependencies are welcome in this crate, and this test says
-/// nothing about how many there are or what they are for. `cargo metadata` is the source
-/// rather than the TOML text, because it resolves path dependencies and workspace
-/// inheritance — an edge added through a renamed key or a `[target.'cfg(...)']` table is
-/// still an edge this sees, and a hand-parsed manifest would check the file instead of the
-/// build.
-///
-/// **Falsification** — add `reqwest = "0.13"` to `crates/microvms-cli/Cargo.toml` and this goes red
-/// naming it. Verified; see the packet's guard proofs.
-///
-/// Redundant once the CLI's allowed set in `verify/arch/placement.toml` is asserted exactly, since
-/// every name above is outside it. That happens when #260 clears the CLI's placement drift, and
-/// the change that does it should delete this test (#285 asked for the deletion and left it to
-/// that change). The sets don't read dev dependencies, which this test does, so that change
-/// should also say whether a dev-only HTTP client still needs refusing.
-#[test]
-fn no_direct_dependency_is_a_second_path_to_aws() {
-    let package = package();
-    let actual: Vec<String> = package
-        .dependencies
-        .iter()
-        .filter(|dependency| {
-            matches!(
-                dependency.kind,
-                cargo_metadata::DependencyKind::Normal
-                    | cargo_metadata::DependencyKind::Development
-            )
-        })
-        .map(|dependency| dependency.name.clone())
-        .collect();
-
-    for forbidden in FORBIDDEN {
-        assert!(
-            !actual.iter().any(|name| name == forbidden),
-            "{forbidden} is a direct dependency of the CLI, which gives it a second path to AWS \
-             or to HTTP — the requirement CLI-2 is. Every AWS call belongs in microvms-core; if \
-             this crate needs something the core does not expose, grow the core's API rather \
-             than a parallel transport."
-        );
-    }
-}
 
 /// The files the scan covers, each cut at its test region.
 ///

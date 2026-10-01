@@ -106,6 +106,10 @@ SKIP = {
         "ci.yml",
         "guards-cache",
     ): "it runs on a push to main only, to fill the caches the other jobs restore",
+    (
+        "ci.yml",
+        "mutmut",
+    ): "it runs on pull requests only, and its steps wait on the runner's answer to whether a script changed; `mise run mutmut` runs the same script over the branch against origin/main",
 }
 # A variable a job's step sets that names something only its runner has, and why it's dropped.
 UNSET = {

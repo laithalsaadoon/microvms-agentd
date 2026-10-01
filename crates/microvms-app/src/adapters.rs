@@ -68,12 +68,22 @@ pub(crate) mod testing {
     /// The HTTP backend answers every request with a transport failure naming it, and the
     /// build services refuse. A test that wants a session to succeed passes its own backend
     /// through `Sandbox::with_session_backend` or `SessionBuilder::with_backend`, which win
-    /// over the adapters. A test that sets neither can't reach the endpoint its fake launch
-    /// reply named.
-    #[derive(Debug, Default)]
+    /// over the adapters, or through [`TestAdapters::with_backend`] for a session nothing else
+    /// can hand one to (`Sandbox::adopt` builds its own). A test that sets none can't reach the
+    /// endpoint its fake launch reply named.
+    #[derive(Default)]
     pub struct TestAdapters {
         clock: Arc<TestClock>,
         warnings: std::sync::Mutex<Vec<String>>,
+        backend: Option<SharedBackend>,
+    }
+
+    impl std::fmt::Debug for TestAdapters {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("TestAdapters")
+                .field("backend", &self.backend.as_ref().map(|_| "scripted"))
+                .finish_non_exhaustive()
+        }
     }
 
     impl TestAdapters {
@@ -89,6 +99,13 @@ pub(crate) mod testing {
             }
         }
 
+        /// Adapters whose sessions all send through `backend`.
+        #[must_use]
+        pub fn with_backend(mut self, backend: SharedBackend) -> Self {
+            self.backend = Some(backend);
+            self
+        }
+
         /// Every warning reported through these adapters, oldest first.
         pub fn warnings(&self) -> Vec<String> {
             self.warnings
@@ -100,9 +117,12 @@ pub(crate) mod testing {
 
     impl Adapters for TestAdapters {
         fn http_backend(&self, endpoint: &str, _timeout: Duration) -> Result<SharedBackend, Error> {
-            Ok(Arc::new(Inert {
-                endpoint: endpoint.to_string(),
-            }))
+            Ok(match &self.backend {
+                Some(backend) => Arc::clone(backend),
+                None => Arc::new(Inert {
+                    endpoint: endpoint.to_string(),
+                }),
+            })
         }
 
         fn build_services(

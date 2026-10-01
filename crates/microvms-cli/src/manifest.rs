@@ -24,6 +24,14 @@
 //! twenty-six times as if each command owned it. `supportsJson` stays on every command for the
 //! consumer that already reads it.
 //!
+//! # `clientDefaults` is core's, beside the flags that restate it
+//!
+//! `microvms_core::defaults::client_defaults()`, verbatim (#300). A flag's `default` is the
+//! string clap prints, and clap can't take one from a `Duration` constant, so `--timeout 300` is a
+//! restatement of core's exec wait. Publishing core's figure in the same document is what lets
+//! `tools/check-parity.py` hold each restated default to it through the table's `[[default]]`
+//! rows, reading only generated files; `manifest:check` keeps this copy current with core.
+//!
 //! # `choices` is the CLI-5 witness
 //!
 //! Closed set or null, per parameter. An option whose library counterpart is S1 — the size
@@ -100,6 +108,7 @@ pub fn build() -> Value {
         "version": env!("CARGO_PKG_VERSION"),
         "commands": commands,
         "globalFlags": global_flags,
+        "clientDefaults": microvms_core::defaults::client_defaults(),
         "exitCodes": EXIT_TABLE.iter().map(|row| json!({
             "exit": row.exit.as_u8(),
             "code": row.code,
@@ -310,9 +319,10 @@ mod tests {
         assert_eq!(listed, registered);
         assert_eq!(
             listed.len(),
-            30,
+            33,
             "the lifecycle seven (quickstart included), the two agent helpers, the attached \
-             thirteen (shell, sync, attach, kill, ps, and keepalive included), and the local eight"
+             thirteen (shell, sync, attach, kill, ps, and keepalive included), the three image \
+             commands, and the local eight"
         );
     }
 
@@ -591,11 +601,11 @@ mod tests {
         for code in ["ERR_INVALID_ARG", "ERR_EXEC_FAILED", "ERR_INTERRUPTED"] {
             assert!(rendered.contains(code), "{code} missing");
         }
-        assert!(rendered.contains("30 commands"), "{rendered}");
+        assert!(rendered.contains("33 commands"), "{rendered}");
 
         // The dense rendering is one line per command with its parameters.
         let dense = render(&manifest, true);
-        assert_eq!(dense.lines().count(), 30);
+        assert_eq!(dense.lines().count(), 33);
         assert!(
             dense
                 .lines()

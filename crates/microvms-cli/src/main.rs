@@ -56,7 +56,6 @@ mod manifest;
 mod provision;
 mod render;
 mod seam;
-mod sync;
 mod tui;
 
 use std::process::ExitCode;
@@ -503,6 +502,9 @@ async fn handle<O: std::io::Write, E: std::io::Write>(
         Command::History(args) => commands::local::history(ctx, args),
         Command::Names(args) => commands::local::names(ctx, args),
         Command::Logs(args) => commands::local::logs(ctx, args),
+        Command::ImageVersions(args) => commands::image::versions(ctx, args).await,
+        Command::ImageSetStatus(args) => commands::image::set_status(ctx, args).await,
+        Command::ImageBuilds(args) => commands::image::builds(ctx, args).await,
         Command::Cost(args) => commands::cost::cost(ctx, args),
         Command::Doctor(args) => commands::doctor::doctor(ctx, args).await,
         Command::Manifest => commands::local::manifest(ctx),

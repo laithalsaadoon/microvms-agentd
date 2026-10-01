@@ -93,7 +93,7 @@ pub mod prelude;
 pub use microvms_domain::{constants, cost, duration, error, hooks, region, sizing};
 
 // Whole modules that live in one crate below.
-pub use microvms_app::sandbox;
+pub use microvms_app::{defaults, sandbox};
 pub use microvms_edges::{env, provision};
 
 // Re-exported so consumers name wire types through this crate rather than
@@ -283,6 +283,13 @@ pub mod session {
         use microvms_app::clock::Clock as _;
         exec_id_at(TokioClock::new().unix_now())
     }
+}
+
+pub mod workspace {
+    //! Directory transfer: the manifest, the diff and the sync pass, over the real filesystem's
+    //! walk, hash, pack and guarded extraction (#260).
+    pub use microvms_app::workspace::*;
+    pub use microvms_edges::workspace::*;
 }
 
 #[cfg(feature = "test-support")]

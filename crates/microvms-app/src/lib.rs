@@ -46,6 +46,7 @@ pub mod adapters;
 pub mod agents;
 pub mod clock;
 pub mod control;
+pub mod defaults;
 pub mod entropy;
 pub mod names;
 pub mod preflight;
@@ -54,6 +55,7 @@ pub mod sandbox;
 pub mod session;
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing;
+pub mod workspace;
 
 // The rules and values the use cases compute with, at the paths the moved code names them by.
 pub use microvms_domain::{constants, cost, duration, error, hooks, identity, region, sizing};

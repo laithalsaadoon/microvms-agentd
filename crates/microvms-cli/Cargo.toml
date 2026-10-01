@@ -74,29 +74,11 @@ tokio = { version = "1.53", features = [
 # concern — core deliberately knows nothing about where its arguments come from —
 # which is why the dependency lands here rather than in `microvms-core`.
 toml = "1"
-# Artifact-glob validation and matching (`artifacts = ["dist/**"]` in microvm.toml,
-# issues #73/#72). `doctor` compiles every declared glob so a bad pattern is a finding
-# before a run spends a launch on it, and `run <DIR>` selects downloaded members with
-# the same compiled set — one grammar, validated and consumed by the same crate.
-globset = "0.4"
-# `run <DIR>` sync mode (issue #72): pack the project directory for upload, and unpack
-# the glob-selected *regular-file* members of the returned archive. The daemon stays
-# the only tree extractor for uploads (its openat2 confinement, `crates/agentd/src/fs.rs`);
-# this side extracts only members it selected, via `unpack_in`'s traversal refusal.
-# Same version agentd carries, so the lock gains no second copy.
-tar = "0.4.46"
 # Terminal cell widths for the TUI's column sizing. Already in the tree under
 # ratatui; naming it directly is what lets column_widths measure display cells
 # rather than chars — a CJK glyph is two cells, and chars().count() under-sizes
 # the column it sits in.
 unicode-width = "0.2"
-# Content hashes for `sync` (`sync.rs`): the file-tree manifest that decides which bytes
-# move. In-process rather than shelled to `sha256sum`, which does not exist on Windows;
-# the same version core's artifact hash uses, so the lock gains no second copy. NOT a
-# second path to AWS: hashing is arithmetic. `const-hex` renders the digest the way
-# core's artifact hash does — sha2 0.11's output type carries no LowerHex impl.
-sha2 = "0.11"
-const-hex = "1.19"
 # `sync --watch` (issue #71): filesystem events for the live edit loop. The
 # cross-platform watcher the ecosystem settled on (inotify/FSEvents/ReadDirectory-
 # ChangesW behind one API) — hand-rolling any one of those would be a platform's
@@ -134,6 +116,9 @@ microvms-core = { version = "0.10.0", path = "../microvms-core", features = ["te
 # guaranteed cleanup on drop. Replaces eight hand-rolled pid+thread-id helpers
 # that deleted-then-created by fixed name.
 tempfile = "3"
+# The guards read the archives `sync` and `run <DIR>` upload, and build the ones a
+# scripted daemon hands back. Packing and extraction themselves are core's (#260).
+tar = "0.4.46"
 # The structural guards read the real dependency graph rather than parsing TOML:
 # `cargo metadata` resolves path dependencies and workspace inheritance, so an edge
 # added transitively or through a renamed key is still an edge this sees. Parsing
