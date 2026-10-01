@@ -1103,21 +1103,30 @@ pub struct BuildArgs {
 
     /// Reuse an existing image whose build inputs match, instead of building.
     ///
-    /// Computes a sha256 over the build inputs (the daemon binary's bytes and the
-    /// Dockerfile), derives the image name `<name>-<hash12>`, and checks the account's
-    /// image listing for that exact name: a hit skips the build entirely and reports the
-    /// existing image with `reused: true`; a miss builds under the derived name.
+    /// Core's `ensure_image` (#258): the image is named `<name>-<hash12>`, the hash over the
+    /// daemon, the Dockerfile, the --project pair, the base image, a pinned
+    /// --base-image-version and the --memory size class. A ready image under that name is
+    /// reused with `reused: true` and nothing uploaded; one still building is waited on; a
+    /// failed one is deleted and rebuilt; otherwise the artifact is uploaded to
+    /// `s3://<bucket>/[<--s3-key-prefix>/]<name>/artifact.zip` and the image built.
     ///
     /// Why the hash is in the name: recreating an image under a previously-used fixed
     /// name can serve a stale snapshot (measured — the same hazard class as the
     /// clientToken replay in docs/PLATFORM.md). Keying the name to the content hash gives
     /// both properties at once: unchanged inputs reuse their image, changed inputs get a
-    /// fresh name and therefore a fresh build. The match is on binary+Dockerfile (plus
-    /// the --project pair when given); `--memory` isn't part of it, so a reused image keeps
-    /// its size class. Refused with --artifact-uri: the hash covers only local inputs, and an
-    /// image built from your object under that name would answer a later plain --reuse.
+    /// fresh name and therefore a fresh build. Refused with --artifact-uri: the hash covers
+    /// only local inputs, and an image built from your object under that name would answer a
+    /// later plain --reuse.
     #[arg(long, conflicts_with = "artifact_uri")]
     pub reuse: bool,
+
+    /// Under --reuse, a key prefix inside the bucket for the artifact.
+    #[arg(long, value_name = "PREFIX", requires = "reuse")]
+    pub s3_key_prefix: Option<String>,
+
+    /// Under --reuse, delete a ready image under the derived name and build it afresh.
+    #[arg(long, requires = "reuse")]
+    pub force: bool,
 
     /// The daemon's port inside the guest.
     #[arg(long)]

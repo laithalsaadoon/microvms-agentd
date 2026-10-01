@@ -438,6 +438,7 @@
           "leaked",
           "cost",
           "egressPosture",
+          "imageReused",
           "resolvedConfig",
           "configPath",
           "sync",
@@ -538,6 +539,7 @@
           "leaked",
           "cost",
           "egressPosture",
+          "imageReused",
           "resolvedConfig",
           "configPath",
           "sync",
@@ -668,6 +670,24 @@
           {
             "choices": null,
             "default": null,
+            "help": "Under --reuse, a key prefix inside the bucket for the artifact",
+            "name": "s3-key-prefix",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Under --reuse, delete a ready image under the derived name and build it afresh",
+            "name": "force",
+            "positional": false,
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "choices": null,
+            "default": null,
             "help": "The daemon's port inside the guest",
             "name": "port",
             "positional": false,
@@ -733,6 +753,7 @@
           "logStream",
           "size",
           "reused",
+          "artifactUri",
           "agentd"
         ],
         "responseType": "microvm.image",

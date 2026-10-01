@@ -52,7 +52,7 @@ ts = "Sandbox.buildArtifact"
 [[capability]]
 id = "ensure-image"
 core = "microvms_core::sandbox::Sandbox::ensure_image"
-cli = { exempt = "`build --reuse` re-implements reuse instead of calling core", issue = "#258" }
+cli = "build --reuse"
 py = "Sandbox.ensure_image"
 ts = "Sandbox.ensureImage"
 

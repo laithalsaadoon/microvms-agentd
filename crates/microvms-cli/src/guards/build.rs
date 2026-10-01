@@ -10,57 +10,55 @@ use microvms_core::testing::YieldingClock;
 
 use super::support::{
     CountingFetch, FakeBinary, RefusingSeam, ScriptedSeam, ScriptedTransport, TempDir,
-    build_args_without_binary, dispatch_with, dispatch_with_fetch, full_infra, list_images_body,
+    build_args_without_binary, dispatch_with, dispatch_with_fetch, full_infra, microvm_body,
     region_flags, run_args_for_image, script_prov_build,
 };
 use crate::cli::{BuildArgs, Command, InfraFlags, MemoryMib};
 use crate::exit::Exit;
 use crate::seam::Infra;
 
-/// The name `build --reuse` derives for `binary`, computed the way the handler computes
-/// it — through core's public hash over the same inputs — so the test knows the name
-/// without copying the derivation logic.
+/// The name `build --reuse` derives for `binary` at 2048 MiB: core's `ensure_image` name over
+/// the default Dockerfile on the managed base, computed through core's public functions so the
+/// test knows the name without copying the derivation.
 fn expected_reuse_name(prefix: &str, binary: &std::path::Path) -> String {
     let bytes = std::fs::read(binary).expect("the fake binary is readable");
-    let dockerfile = microvms_core::control::default_dockerfile(
-        9000,
-        None,
-        &microvms_core::control::BaseImage::al2023(),
-        None,
-    );
+    let base = microvms_core::control::BaseImage::al2023();
+    let dockerfile = microvms_core::control::default_dockerfile(9000, None, &base, None);
     let hash = microvms_core::control::artifact_content_hash(&bytes, &dockerfile, None);
-    format!("{prefix}-{}", &hash[..12])
+    let identity = microvms_core::control::ensure::pinned_identity_hash(
+        &hash,
+        &base,
+        None,
+        MemoryMib::Mib2048.size_class(),
+    );
+    microvms_core::control::ensure::ensured_image_name(prefix, &identity).expect("a legal prefix")
 }
 
-/// **`build --reuse`, the hit: an image whose content-hash name already exists means no
-/// build at all.**
-///
-/// The load-bearing assertion is the `CreateMicrovmImage` count: a reuse that "worked"
-/// while still creating an image would bill a build and — worse — replay the
-/// stale-snapshot hazard the flag exists to close. The envelope carries `reused: true`
-/// and the existing image's identifier, which is what a script keys on.
-///
-/// **Guard proof.** Make the hit path fall through to the build (delete the early
-/// `return` on `find_image_by_name`'s `Some`) and the count assertion goes red with a
-/// `CreateMicrovmImage` the fake then also fails for lack of an answer.
-#[tokio::test]
-async fn a_reuse_build_whose_hash_name_exists_skips_the_build_entirely() {
-    let binary = FakeBinary::new("reuse-hit");
-    let expected = expected_reuse_name("coding-agents", &binary.0);
+/// `GetMicrovmImageResponse` for `name` in `state`, in the model's own spelling.
+fn image_in(name: &str, state: &str) -> String {
+    format!(
+        r#"{{"imageArn": "arn:aws:lambda:us-east-1:123456789012:microvm-image:{name}",
+             "name": "{name}", "state": "{state}", "latestActiveImageVersion": "1",
+             "createdAt": 1754524800}}"#
+    )
+}
 
-    let transport = Arc::new(ScriptedTransport::new());
-    transport.answer(
-        "ListMicrovmImages",
-        200,
-        &list_images_body(&[&expected], None),
-    );
+/// `CreateMicrovmImageResponse` for `name`.
+fn created(name: &str) -> String {
+    format!(
+        r#"{{"imageArn": "arn:aws:lambda:us-east-1:123456789012:microvm-image:{name}",
+             "name": "{name}", "state": "CREATING", "createdAt": 1754524800,
+             "baseImageArn": "arn:aws:lambda:us-east-1:aws:microvm-image:al2023-1",
+             "buildRoleArn": "arn:aws:iam::123456789012:role/build",
+             "codeArtifact": {{"uri": "s3://a-bucket/{name}/artifact.zip"}},
+             "imageVersion": "1"}}"#
+    )
+}
 
-    let seam = ScriptedSeam {
-        transport: Arc::clone(&transport),
-        clock: Arc::new(YieldingClock::default()),
-    };
-    let command = Command::Build(BuildArgs {
-        binary: Some(binary.0.clone()),
+/// `build --reuse` for `binary` under the prefix `coding-agents`.
+fn reuse_args(binary: &std::path::Path) -> BuildArgs {
+    BuildArgs {
+        binary: Some(binary.to_path_buf()),
         state_dir: None,
         base_image_version: None,
         artifact_uri: None,
@@ -72,10 +70,37 @@ async fn a_reuse_build_whose_hash_name_exists_skips_the_build_entirely() {
         log_group: None,
         log_stream: None,
         reuse: true,
+        s3_key_prefix: None,
+        force: false,
         port: None,
         region: region_flags(),
         infra: InfraFlags::default(),
-    });
+    }
+}
+
+/// **`build --reuse`, the hit: a ready image under the derived name means no build at all.**
+///
+/// The load-bearing assertion is the `CreateMicrovmImage` count: a reuse that "worked"
+/// while still creating an image would bill a build and — worse — replay the
+/// stale-snapshot hazard the flag exists to close. The envelope carries `reused: true`
+/// and the existing image's identifier, which is what a script keys on.
+///
+/// **Guard proof.** Map `Found::Ready` to `Plan::Build` in core's `plan` and the count
+/// assertion goes red with a `CreateMicrovmImage` the fake then also fails for lack of an
+/// answer.
+#[tokio::test]
+async fn a_reuse_build_whose_hash_name_exists_skips_the_build_entirely() {
+    let binary = FakeBinary::new("reuse-hit");
+    let expected = expected_reuse_name("coding-agents", &binary.0);
+
+    let transport = Arc::new(ScriptedTransport::new());
+    transport.answer("GetMicrovmImage", 200, &image_in(&expected, "CREATED"));
+
+    let seam = ScriptedSeam {
+        transport: Arc::clone(&transport),
+        clock: Arc::new(YieldingClock::default()),
+    };
+    let command = Command::Build(reuse_args(&binary.0));
     let (result, stderr) = dispatch_with(&seam, &command, full_infra()).await;
     let rendered = result.expect("a hit is a success");
 
@@ -85,12 +110,15 @@ async fn a_reuse_build_whose_hash_name_exists_skips_the_build_entirely() {
         "a reuse hit must build nothing: {:?}",
         transport.calls()
     );
-    assert_eq!(transport.called("ListMicrovmImages"), 1);
-    let listing = transport.paths_of("ListMicrovmImages");
     assert!(
-        listing[0].contains(&format!("nameFilter={expected}")),
-        "the listing is asked for the derived name: {}",
-        listing[0]
+        transport.uploads().is_empty(),
+        "and upload nothing: {:?}",
+        transport.uploads()
+    );
+    assert!(
+        transport.paths_of("GetMicrovmImage")[0].contains(&expected),
+        "the describe asks for the derived name: {:?}",
+        transport.paths_of("GetMicrovmImage")
     );
 
     assert_eq!(rendered.data["reused"], true);
@@ -100,19 +128,22 @@ async fn a_reuse_build_whose_hash_name_exists_skips_the_build_entirely() {
         format!("arn:aws:lambda:us-east-1:123456789012:microvm-image:{expected}"),
         "the existing image's identifier is the envelope's answer"
     );
+    assert_eq!(
+        rendered.data["artifactUri"],
+        format!("s3://a-bucket/{expected}/artifact.zip")
+    );
     assert!(stderr.contains("reusing"), "{stderr}");
 }
 
-/// **`build --reuse`, the miss: the build runs, under the derived name.**
+/// **`build --reuse`, the miss: the build runs, under the derived name, from core's upload
+/// to the content-addressed key.**
 ///
-/// Two claims. The build happened — `CreateMicrovmImage` went out — and the name it went
-/// out under carries the content hash, which is what makes the *next* invocation with
-/// the same inputs a hit. A miss that built under the bare prefix would create an image
-/// reuse can never find, and the flag would rebuild forever while reporting success.
+/// The build happened — `CreateMicrovmImage` went out — under the name that carries the
+/// hash, which is what makes the *next* invocation with the same inputs a hit, and the
+/// artifact went to `s3://<bucket>/<name>/artifact.zip` through the sandbox's build services.
 ///
-/// **Guard proof.** Keep the seed as the request name on the miss path (drop the
-/// `request.name = name.clone()` assignment) and the `body["name"]` assertion reads
-/// `coding-agents` with no hash suffix.
+/// **Guard proof.** Drop the size class from `pinned_identity_hash` and `expected_reuse_name`
+/// parts from the name the handler sends, because `build`'s name is ensure's.
 #[tokio::test]
 async fn a_reuse_build_whose_hash_name_is_absent_builds_under_the_derived_name() {
     let binary = FakeBinary::new("reuse-miss");
@@ -120,67 +151,271 @@ async fn a_reuse_build_whose_hash_name_is_absent_builds_under_the_derived_name()
 
     let transport = Arc::new(ScriptedTransport::new());
     transport
-        .answer("ListMicrovmImages", 200, &list_images_body(&[], None))
-        .answer(
-            "CreateMicrovmImage",
-            201,
-            &format!(
-                r#"{{"imageArn": "arn:aws:lambda:us-east-1:123456789012:microvm-image:{expected}",
-                     "name": "{expected}", "state": "CREATING", "createdAt": 1754524800,
-                     "baseImageArn": "arn:aws:lambda:us-east-1:aws:microvm-image:al2023-1",
-                     "buildRoleArn": "arn:aws:iam::123456789012:role/build",
-                     "codeArtifact": {{"uri": "s3://a-bucket/{expected}.zip"}},
-                     "imageVersion": "1"}}"#
-            ),
-        )
-        .answer(
-            "GetMicrovmImage",
-            200,
-            &format!(
-                r#"{{"imageArn": "arn:aws:lambda:us-east-1:123456789012:microvm-image:{expected}",
-                     "name": "{expected}", "state": "CREATED", "createdAt": 1754524800}}"#
-            ),
-        );
+        .answer("GetMicrovmImage", 404, r#"{"message": "Image not found"}"#)
+        .answer("GetMicrovmImage", 200, &image_in(&expected, "CREATED"))
+        .answer("CreateMicrovmImage", 201, &created(&expected));
 
     let seam = ScriptedSeam {
         transport: Arc::clone(&transport),
         clock: Arc::new(YieldingClock::default()),
     };
-    let command = Command::Build(BuildArgs {
-        binary: Some(binary.0.clone()),
-        state_dir: None,
-        base_image_version: None,
-        artifact_uri: None,
-        name: Some("coding-agents".into()),
-        memory: MemoryMib::Mib2048,
-        dockerfile: None,
-        project: None,
-        repair_identity: false,
-        log_group: None,
-        log_stream: None,
-        reuse: true,
-        port: None,
-        region: region_flags(),
-        infra: InfraFlags::default(),
-    });
+    let command = Command::Build(reuse_args(&binary.0));
     let (result, _) = dispatch_with(&seam, &command, full_infra()).await;
     let rendered = result.expect("a miss builds and succeeds");
 
     assert_eq!(transport.called("CreateMicrovmImage"), 1, "the miss builds");
     let body = transport.first_body("CreateMicrovmImage");
+    let key = format!("s3://a-bucket/{expected}/artifact.zip");
     assert_eq!(
         body["name"],
         expected.as_str(),
         "the build goes out under the derived name, hash included — the bare prefix would \
          create an image reuse can never find: {body}"
     );
+    assert_eq!(body["codeArtifact"]["uri"], key.as_str());
     assert_eq!(
-        body["codeArtifact"]["uri"],
-        format!("s3://a-bucket/{expected}.zip"),
-        "the derived artifact key follows the derived name"
+        transport.uploads(),
+        vec![key.clone()],
+        "core uploaded it there"
     );
     assert_eq!(rendered.data["reused"], false);
     assert_eq!(rendered.data["imageName"], expected.as_str());
+    assert_eq!(rendered.data["artifactUri"], key.as_str());
+}
+
+/// **#258: `build --reuse` over a FAILED image under the derived name deletes it and builds
+/// afresh, rather than handing the failed image back as reused.** The CLI's own reuse
+/// returned whatever the listing had under the name, failed or still creating.
+///
+/// **Falsification**: map `Found::Failed` to `Plan::Reuse` in core's `plan` and the guard
+/// reads `reused: true` with no delete and no create.
+#[tokio::test]
+async fn a_reuse_build_over_a_failed_image_deletes_it_and_builds() {
+    let binary = FakeBinary::new("reuse-failed");
+    let expected = expected_reuse_name("coding-agents", &binary.0);
+
+    let transport = Arc::new(ScriptedTransport::new());
+    transport
+        .answer(
+            "GetMicrovmImage",
+            200,
+            &image_in(&expected, "CREATE_FAILED"),
+        )
+        // The describe that finds it failed (above), the one that sees the name free after
+        // the delete, and the build's wait.
+        .answer("GetMicrovmImage", 404, r#"{"message": "Image not found"}"#)
+        .answer("GetMicrovmImage", 200, &image_in(&expected, "CREATED"))
+        .answer(
+            "ListMicrovmImageVersions",
+            200,
+            &microvms_core::testing::list_versions_response("1"),
+        )
+        .answer(
+            "DeleteMicrovmImage",
+            200,
+            &microvms_core::testing::delete_image_response(),
+        )
+        .answer("CreateMicrovmImage", 201, &created(&expected));
+
+    let seam = ScriptedSeam {
+        transport: Arc::clone(&transport),
+        clock: Arc::new(YieldingClock::default()),
+    };
+    let command = Command::Build(reuse_args(&binary.0));
+    let (result, _) = dispatch_with(&seam, &command, full_infra()).await;
+    let rendered = result.expect("the failed image is replaced");
+
+    let calls = transport.calls();
+    let deleted = calls
+        .iter()
+        .position(|call| call == "DeleteMicrovmImage")
+        .unwrap_or_else(|| panic!("the failed image is deleted: {calls:?}"));
+    let created_at = calls
+        .iter()
+        .position(|call| call == "CreateMicrovmImage")
+        .unwrap_or_else(|| panic!("and built afresh: {calls:?}"));
+    assert!(deleted < created_at, "deleted before the create: {calls:?}");
+    assert_eq!(rendered.data["reused"], false);
+    assert_eq!(rendered.data["imageName"], expected.as_str());
+}
+
+/// What one `run --name img` of `binary` left behind: the control-plane calls, the uploads, the
+/// ledger on disk, and the VM's history.
+struct RunTrace {
+    calls: Vec<String>,
+    uploads: Vec<String>,
+    ledgers: Vec<serde_json::Value>,
+    history: Vec<serde_json::Value>,
+}
+
+/// `run --name img` of `binary` over `transport`, whose launch fails fast (the VM reports
+/// TERMINATED before RUNNING) and whose terminate is refused, so the ledger survives the
+/// teardown and can be read back.
+async fn run_trace(binary: &std::path::Path, transport: &Arc<ScriptedTransport>) -> RunTrace {
+    transport
+        .answer("RunMicrovm", 200, &microvm_body("PENDING"))
+        .answer("GetMicrovm", 200, &microvm_body("TERMINATED"))
+        .answer(
+            "TerminateMicrovm",
+            409,
+            r#"{"message": "ConflictException"}"#,
+        )
+        .answer(
+            "ListMicrovmImageVersions",
+            200,
+            &microvms_core::testing::list_versions_response("1"),
+        )
+        .answer(
+            "DeleteMicrovmImage",
+            200,
+            &microvms_core::testing::delete_image_response(),
+        );
+    let state = TempDir::new("run-trace-ledger");
+    let seam = ScriptedSeam {
+        transport: Arc::clone(transport),
+        clock: Arc::new(YieldingClock::default()),
+    };
+    let mut args = run_args_for_image("unused", state.0.clone());
+    args.image = None;
+    args.binary = Some(binary.to_path_buf());
+    let (result, _) = dispatch_with(&seam, &Command::Run(Box::new(args)), full_infra()).await;
+    assert!(result.is_err(), "the scripted VM never reaches RUNNING");
+    RunTrace {
+        calls: transport.calls(),
+        uploads: transport.uploads(),
+        ledgers: crate::ledger::read_all(&state.0),
+        history: crate::history::read_events(&state.0, "mvm-abc123"),
+    }
+}
+
+/// **D-I2 (#258): `run` deletes at teardown only an image it built.** `run`'s build is an
+/// ensure, so `run --name img` names the content-addressed `img-<hash12>`, which another run of
+/// the same inputs may be launching from. Two runs of one binary: the first finds the name free
+/// and builds, the second finds it ready and reuses it.
+///
+/// The built image is uploaded, deleted at teardown, named on the ledger and recorded in the
+/// VM's history as built. The reused one is none of those: deleting it would pull the image out
+/// from under the other run, and a ledger naming it would send the operator to delete it too.
+/// Each run's terminate is refused, so its ledger survives the teardown to be read.
+///
+/// **Falsification**, run 2026-09-30. Three breaks, each registered in
+/// verify/guards/faults/ensure-image-paths.toml. Delete the image whatever the ensure said
+/// (`cli-run-deletes-a-reused-image`): red on `the reused image is not deleted`. Record the
+/// image on the ledger whatever the ensure said (`cli-run-lists-a-reused-image`): red on `the
+/// ledger does not name the reused image`. Write `imageBuilt` for a reused image
+/// (`cli-run-history-says-a-reused-image-was-built`): red on `the history does not say it was
+/// built`.
+#[tokio::test]
+async fn a_run_deletes_the_image_it_built_and_never_one_it_reused() {
+    let binary = FakeBinary::new("run-reuse");
+    let expected = expected_reuse_name("img", &binary.0);
+    let arn = format!("arn:aws:lambda:us-east-1:123456789012:microvm-image:{expected}");
+    let key = format!("s3://a-bucket/{expected}/artifact.zip");
+    let built_events = |history: &[serde_json::Value]| {
+        history
+            .iter()
+            .filter(|event| event["event"] == "imageBuilt")
+            .map(|event| event["imageIdentifier"].clone())
+            .collect::<Vec<_>>()
+    };
+
+    // The name is free: the describe answers 404, then the build's wait sees it CREATED.
+    let transport = Arc::new(ScriptedTransport::new());
+    transport
+        .answer("GetMicrovmImage", 404, r#"{"message": "Image not found"}"#)
+        .answer("GetMicrovmImage", 200, &image_in(&expected, "CREATED"))
+        .answer("CreateMicrovmImage", 201, &created(&expected));
+    let built = run_trace(&binary.0, &transport).await;
+    assert_eq!(
+        built.uploads,
+        [key.as_str()],
+        "the build uploads its artifact"
+    );
+    assert_eq!(
+        built
+            .calls
+            .iter()
+            .filter(|call| *call == "CreateMicrovmImage")
+            .count(),
+        1,
+        "{:?}",
+        built.calls
+    );
+    assert_eq!(
+        built
+            .calls
+            .iter()
+            .filter(|call| *call == "DeleteMicrovmImage")
+            .count(),
+        1,
+        "the image this run built is deleted at teardown: {:?}",
+        built.calls
+    );
+    assert_eq!(built.ledgers.len(), 1, "{:?}", built.ledgers);
+    assert_eq!(
+        built.ledgers[0]["imageIdentifier"],
+        arn.as_str(),
+        "the ledger names the image this run built: {:?}",
+        built.ledgers
+    );
+    assert_eq!(
+        built_events(&built.history),
+        [serde_json::json!(arn)],
+        "the history says this run built it: {:?}",
+        built.history
+    );
+
+    // The same inputs again, and the name is ready.
+    let transport = Arc::new(ScriptedTransport::new());
+    transport.answer("GetMicrovmImage", 200, &image_in(&expected, "CREATED"));
+    let reused = run_trace(&binary.0, &transport).await;
+    assert_eq!(
+        reused.uploads,
+        Vec::<String>::new(),
+        "a reuse uploads nothing"
+    );
+    assert!(
+        !reused.calls.iter().any(|call| call == "CreateMicrovmImage"),
+        "a reuse builds nothing: {:?}",
+        reused.calls
+    );
+    assert!(
+        reused.calls.iter().any(|call| call == "TerminateMicrovm"),
+        "the teardown ran: {:?}",
+        reused.calls
+    );
+    assert!(
+        !reused.calls.iter().any(|call| call == "DeleteMicrovmImage"),
+        "the reused image is not deleted: {:?}",
+        reused.calls
+    );
+    assert_eq!(reused.ledgers.len(), 1, "{:?}", reused.ledgers);
+    assert_eq!(
+        reused.ledgers[0]["imageIdentifier"],
+        serde_json::Value::Null,
+        "the ledger does not name the reused image: {:?}",
+        reused.ledgers
+    );
+    assert_eq!(
+        reused.ledgers[0]["leaked"],
+        serde_json::json!(["mvm-abc123"]),
+        "only the VM whose terminate was refused is outstanding: {:?}",
+        reused.ledgers
+    );
+    assert_eq!(
+        built_events(&reused.history),
+        Vec::<serde_json::Value>::new(),
+        "the history does not say it was built: {:?}",
+        reused.history
+    );
+    assert!(
+        reused
+            .history
+            .iter()
+            .any(|event| event["event"] == "launched"),
+        "the history was written: {:?}",
+        reused.history
+    );
 }
 
 /// **A `build` with no binary provisions one, builds from it, and says so on the
@@ -335,6 +570,8 @@ async fn a_plain_build_never_lists_and_reports_reused_false() {
         log_group: None,
         log_stream: None,
         reuse: false,
+        s3_key_prefix: None,
+        force: false,
         port: None,
         region: region_flags(),
         infra: InfraFlags::default(),
@@ -395,6 +632,8 @@ async fn a_locally_refused_dockerfile_costs_no_upload_and_no_call() {
         log_group: None,
         log_stream: None,
         reuse: false,
+        s3_key_prefix: None,
+        force: false,
         port: None,
         region: region_flags(),
         infra: InfraFlags::default(),
@@ -480,6 +719,8 @@ async fn a_daemon_that_is_not_an_aarch64_elf_costs_no_upload_and_no_call() {
             log_group: None,
             log_stream: None,
             reuse: false,
+            s3_key_prefix: None,
+            force: false,
             port: None,
             region: region_flags(),
             infra: InfraFlags::default(),
@@ -585,6 +826,8 @@ async fn a_pinned_base_image_version_reaches_the_create_body_from_the_build_flag
         log_group: None,
         log_stream: None,
         reuse: false,
+        s3_key_prefix: None,
+        force: false,
         port: None,
         region: region_flags(),
         infra: InfraFlags::default(),
@@ -658,6 +901,8 @@ async fn a_build_log_stream_reaches_the_wire_suffixed_and_the_envelope_reports_i
         log_group: Some("/aws/lambda-microvms/conformance-builds".into()),
         log_stream: Some("img-ci".into()),
         reuse: false,
+        s3_key_prefix: None,
+        force: false,
         port: None,
         region: region_flags(),
         infra: InfraFlags::default(),
@@ -737,6 +982,8 @@ async fn a_build_without_logging_flags_emits_no_logging_member_and_a_null_stream
         log_group: None,
         log_stream: None,
         reuse: false,
+        s3_key_prefix: None,
+        force: false,
         port: None,
         region: region_flags(),
         infra: InfraFlags::default(),

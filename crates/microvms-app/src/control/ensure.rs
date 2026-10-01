@@ -215,6 +215,25 @@ pub fn artifact_key(key_prefix: Option<&str>, name: &str) -> String {
     }
 }
 
+/// The bucket and key of an `s3://<bucket>/<key>` URI, refused when it isn't one S3 admits.
+///
+/// For the upload of a build whose artifact URI the caller chose ([`crate::sandbox::Sandbox::
+/// upload_artifact_for`]); an ensure derives its own.
+pub fn s3_location(uri: &str) -> Result<(&str, &str), Error> {
+    let (bucket, key) = uri
+        .strip_prefix("s3://")
+        .and_then(|rest| rest.split_once('/'))
+        .filter(|(_, key)| !key.is_empty())
+        .ok_or_else(|| {
+            Error::invalid_arg(format!(
+                "the artifact URI {uri:?} is not s3://<bucket>/<key>, the only place \
+                 CreateMicrovmImage reads an artifact from."
+            ))
+        })?;
+    require_valid_bucket(bucket)?;
+    Ok((bucket, key))
+}
+
 /// Refuses a bucket name S3 does not admit, before any call.
 fn require_valid_bucket(bucket: &str) -> Result<(), Error> {
     let chars_ok = bucket
@@ -1061,6 +1080,65 @@ mod tests {
             prepare(&plane, from).expect("prepares").name,
             prepare(&plane, direct).expect("prepares").name
         );
+    }
+
+    /// **A caller-named build uploads through the build services (#258).** The artifact goes to
+    /// the bucket and key its URI names, once, with the account unasked; a URI that isn't one
+    /// puts nothing.
+    #[tokio::test]
+    async fn a_named_builds_artifact_is_put_where_its_uri_says() {
+        let fake = Arc::new(FakeControlPlane::new());
+        let services = Arc::new(FakeServices::default());
+        let mut sandbox = sandbox(&fake, &services);
+        let mut create = CreateImageRequest::new(
+            "named",
+            aarch64_daemon(b"daemon"),
+            "s3://artifact-bucket/builds/named.zip",
+            ROLE,
+        );
+        create.dockerfile = Some(dockerfile());
+        create.base_image = BaseImage::from_dockerfile(&dockerfile()).expect("a FROM");
+        sandbox.upload_artifact_for(&create).await.expect("uploads");
+        let puts = services.puts.lock().expect("not poisoned").clone();
+        assert_eq!(puts.len(), 1);
+        assert_eq!(
+            (puts[0].0.as_str(), puts[0].1.as_str()),
+            ("artifact-bucket", "builds/named.zip")
+        );
+        assert_eq!(
+            puts[0].2,
+            sandbox
+                .build_artifact_for(&create)
+                .expect("the same artifact")
+        );
+        assert_eq!(services.account_calls.load(Ordering::SeqCst), 0);
+        assert!(fake.calls().is_empty(), "no control-plane call");
+
+        create.code_artifact_uri = "artifact-bucket/named.zip".to_string();
+        let error = sandbox
+            .upload_artifact_for(&create)
+            .await
+            .expect_err("not an S3 URI");
+        assert_eq!(error.kind(), ErrorKind::InvalidArg, "{error}");
+        assert_eq!(uploads(&services).len(), 1, "nothing more was put");
+    }
+
+    /// An artifact URI is `s3://<bucket>/<key>` with a bucket S3 admits, or it is refused.
+    #[test]
+    fn an_artifact_uri_names_a_bucket_and_a_key() {
+        assert_eq!(
+            s3_location("s3://artifact-bucket/a/b.zip").expect("an S3 URI"),
+            ("artifact-bucket", "a/b.zip")
+        );
+        for uri in [
+            "https://artifact-bucket/a.zip",
+            "s3://artifact-bucket",
+            "s3://artifact-bucket/",
+            "s3://Not_A_Bucket/a.zip",
+        ] {
+            let error = s3_location(uri).expect_err(uri);
+            assert_eq!(error.kind(), ErrorKind::InvalidArg, "{uri}: {error}");
+        }
     }
 
     /// **IMAGE-8, the key.** `<prefix>/<name>/artifact.zip`, with the prefix's slashes

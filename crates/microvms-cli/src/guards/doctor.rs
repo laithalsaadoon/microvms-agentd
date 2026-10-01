@@ -84,10 +84,6 @@ impl CoreSeam for NoCredentialsSeam {
     ) -> BoxFuture<'_, Result<Session, Error>> {
         Box::pin(async { Err(Error::new(ErrorKind::Platform, "doctor attaches nothing")) })
     }
-
-    fn put_artifact(&self, _uri: &str, _bytes: Vec<u8>) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Err(Error::new(ErrorKind::Platform, "doctor uploads nothing")) })
-    }
 }
 
 /// **BIND-15, shared with `doctor`: the credentials line resolves the chain.** A control plane
@@ -192,10 +188,6 @@ impl CoreSeam for RegionRecordingSeam {
         _attach: Attach,
     ) -> BoxFuture<'_, Result<Session, Error>> {
         Box::pin(async { Err(Error::new(ErrorKind::Platform, "doctor attaches nothing")) })
-    }
-
-    fn put_artifact(&self, _uri: &str, _bytes: Vec<u8>) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Err(Error::new(ErrorKind::Platform, "doctor uploads nothing")) })
     }
 }
 

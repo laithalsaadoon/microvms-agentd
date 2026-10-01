@@ -97,6 +97,8 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 log_group: None,
                 log_stream: None,
                 reuse: false,
+                s3_key_prefix: None,
+                force: false,
                 port: None,
                 region: region_flags(),
                 infra: InfraFlags::default(),
