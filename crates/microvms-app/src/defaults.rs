@@ -69,6 +69,7 @@ pub fn client_defaults() -> Value {
             "autoResume": launch.auto_resume,
             "egress": launch.egress,
             "denyEgress": launch.deny_egress,
+            "identity": launch.identity,
             "shell": launch.shell,
             "wait": launch.wait,
             // `None` keeps the service's default destination; logging is off only when a
