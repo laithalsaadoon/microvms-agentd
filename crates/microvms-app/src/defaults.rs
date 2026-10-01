@@ -61,6 +61,7 @@ pub fn client_defaults() -> Value {
         "bedrockTokenTtlHours": bedrock::MAX_LIFETIME.as_secs() / 3600,
         "residencyCycles": DEFAULT_RESIDENCY_CYCLES,
         "keepAwakeToleratedErrors": crate::session::keepalive::DEFAULT_TOLERATED_ERRORS,
+        "syncDeleteTimeoutSeconds": seconds(crate::workspace::DEFAULT_SYNC_DELETE_TIMEOUT),
         "launch": {
             "maxIdleSeconds": launch.max_idle_sec,
             "suspendedSeconds": launch.suspended_sec,
@@ -134,5 +135,9 @@ mod tests {
         let start = protocol::exec::StartRequest::new("x", vec!["true".into()]);
         assert_eq!(defaults["exec"]["stdin"], start.stdin);
         assert_eq!(defaults["exec"]["shell"], false);
+        assert_eq!(
+            defaults["syncDeleteTimeoutSeconds"],
+            crate::workspace::DEFAULT_SYNC_DELETE_TIMEOUT.as_secs_f64()
+        );
     }
 }
