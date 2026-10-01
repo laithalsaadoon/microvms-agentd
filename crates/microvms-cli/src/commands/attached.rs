@@ -138,7 +138,7 @@ fn unregistered_name(name: &str, root: &std::path::Path) -> CliError {
 ///
 /// Split from [`attach`] so the resolution is testable without a seam: everything here is
 /// local — clap guarantees exactly one spelling is present, and the registry is a file read.
-fn resolve_attach<O: std::io::Write, E: std::io::Write>(
+pub(crate) fn resolve_attach<O: std::io::Write, E: std::io::Write>(
     ctx: &Ctx<'_, O, E>,
     region: &RegionFlags,
     flags: &AttachFlags,
