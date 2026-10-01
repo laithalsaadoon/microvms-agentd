@@ -2,8 +2,9 @@
 //! The CLI's answers to the shared case corpus (`verify/parity/cases/`, #272), from a spawned
 //! `microvm`.
 //!
-//! This tier takes the areas a process can answer with no AWS call and no fake: `cost --json`,
-//! the launch refusals `run` makes before any call, and `dockerfile --wrap`. The areas that need a scripted control
+//! This tier takes the areas a process can answer with no AWS call and no fake: `cost --json`
+//! (a request's size class among them), the launch refusals `run` makes before any call, and
+//! `dockerfile --wrap`. The areas that need a scripted control
 //! plane or daemon are `src/guards/parity.rs`, which reads the same corpus by
 //! the same rules (`crates/microvms-core/tests/parity_corpus/mod.rs`).
 
@@ -26,6 +27,7 @@ fn the_cli_process_answers_the_shared_case_corpus() {
         let answer = match case.area.as_str() {
             "cost" => cost(&case),
             "egress" => egress(&case),
+            "size-class" => size(&case),
             "wrap-dockerfile" => wrap(&case),
             other => panic!(
                 "{}: parity_corpus::CLI_PROCESS_AREAS gives the process tier area {other:?}, \
@@ -97,13 +99,14 @@ fn cost(case: &Case) -> Value {
         .unwrap_or_else(|| panic!("{}: no data.report in {envelope}", case.id))
 }
 
+/// A launch's refusal from `run`, or a posture from `egress-posture` (#269): the same egress
+/// flags either way, since `egress-posture` takes `run`'s.
 fn egress(case: &Case) -> Value {
-    assert_eq!(
-        case.capability, "launch",
-        "{}: the CLI's egress cases are launches",
-        case.id
-    );
-    let mut args = vec!["--json", "run", "--image", IMAGE_ARN];
+    let mut args = match case.capability.as_str() {
+        "launch" => vec!["--json", "run", "--image", IMAGE_ARN],
+        "egress-posture-for" => vec!["--json", "egress-posture"],
+        other => panic!("{}: the CLI has no egress case for {other:?}", case.id),
+    };
     if case.input_bool("egress") {
         args.push("--egress");
     }
@@ -114,7 +117,37 @@ fn egress(case: &Case) -> Value {
     if case.input_bool("deny_egress") {
         args.push("--deny-egress");
     }
-    answer_of(&args).0
+    let (answer, envelope) = answer_of(&args);
+    if case.capability == "launch" || answer.get("error").is_some() {
+        return answer;
+    }
+    let posture = answer
+        .get("posture")
+        .cloned()
+        .unwrap_or_else(|| panic!("{}: no data.posture in {envelope}", case.id));
+    json!({"posture": posture})
+}
+
+/// `cost --cpus/--memory-mib`: the class core sizes the request into, as the report prices it.
+/// A `null` axis is the flag left off, which is how a caller asks for nothing on it.
+fn size(case: &Case) -> Value {
+    assert_eq!(case.capability, "size-from-request", "{}", case.id);
+    let mut args = vec!["--json".to_string(), "cost".to_string()];
+    for (key, flag) in [("cpus", "--cpus"), ("memory_mib", "--memory-mib")] {
+        if !case.input(key).is_null() {
+            args.extend([flag.to_string(), number(case, key)]);
+        }
+    }
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let (answer, envelope) = answer_of(&args);
+    if answer.get("error").is_some() {
+        return answer;
+    }
+    let baseline = answer["report"]["size"]
+        .get("baselineMib")
+        .cloned()
+        .unwrap_or_else(|| panic!("{}: no data.report.size.baselineMib in {envelope}", case.id));
+    json!({"baseline_mib": baseline})
 }
 
 /// `dockerfile --wrap` over the case's task, written to a file the way a caller has one.

@@ -129,7 +129,7 @@ ts = "Sandbox.preflight"
 [[capability]]
 id = "egress-posture-for"
 core = "microvms_core::control::connector::egress_posture_for"
-cli = { exempt = "reported on the `run` envelope only; the pre-launch checks are retyped in the CLI", issue = "#269" }
+cli = "egress-posture"
 py = "egress_posture_for"
 ts = "egressPostureFor"
 
@@ -732,7 +732,7 @@ ts = "buildUnpricedReason"
 [[capability]]
 id = "size-from-request"
 core = "microvms_core::sizing::SizeClass::from_request"
-cli = { exempt = "`--memory` is a closed set of classes", issue = "#269" }
+cli = ["run --cpus", "run --memory-mib", "build --cpus", "build --memory-mib", "cost --cpus", "cost --memory-mib", "agent-up --cpus", "agent-up --memory-mib"]
 py = "SizeClass.from_request"
 ts = "SizeClass.fromRequest"
 

@@ -327,8 +327,12 @@ Changes to AWS behavior need a named regression check in the live suite
 (`conformance/lanes/`, driven by `conformance/run_rs.py`). The live exercise of
 the changed path happens once per wave on main, one live run at a time because
 the Terraform state is single, rather than on each pull request; until that run,
-the pull request states that the change is verified offline only. Documentation
-and other local-only changes do not need a billable run.
+the pull request states that the change is verified offline only. A tracker's
+checkbox for the change is checked only after a live run on main that includes
+the change passes; until then the box stays open and says the change is
+verified offline only. Review holds this, since no check reads a tracker's
+checklist. Documentation and other local-only changes do not need a billable
+run.
 
 ```bash
 mise run live                # builds binaries, provisions infrastructure, tests AWS

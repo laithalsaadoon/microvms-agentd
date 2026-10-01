@@ -51,6 +51,7 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 exec: Some("true".into()),
                 name: Some("img".into()),
                 memory: MemoryMib::Mib2048,
+                size: crate::cli::SizeRequestFlags::default(),
                 dockerfile: None,
                 repair_identity: false,
                 log_group: None,
@@ -92,6 +93,7 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 artifact_uri: Some("s3://bucket/img.zip".into()),
                 name: Some("img".into()),
                 memory: MemoryMib::Mib2048,
+                size: crate::cli::SizeRequestFlags::default(),
                 dockerfile: None,
                 project: None,
                 repair_identity: false,
@@ -125,6 +127,7 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 codex_version: None,
                 project: None,
                 memory: MemoryMib::Mib1024,
+                size: crate::cli::SizeRequestFlags::default(),
                 token_ttl_hours: 12,
                 max_idle_sec: 600,
                 suspended_sec: 600,
@@ -450,7 +453,7 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
 ///
 /// Listed with a reason rather than skipped by a naming rule, so a *new* AWS-touching command is
 /// covered by the guard by default and can only leave the net by someone writing its name here.
-const LOCAL_ONLY: [(&str, &str); 8] = [
+const LOCAL_ONLY: [(&str, &str); 9] = [
     (
         "ls",
         "reads the local ledger; the whole point is that AWS cannot attribute a dead run",
@@ -474,6 +477,11 @@ const LOCAL_ONLY: [(&str, &str); 8] = [
     (
         "cost",
         "arithmetic over the rate table pinned in microvms-core; no account is involved",
+    ),
+    (
+        "egress-posture",
+        "core's egress_posture_for over run's merged options, a pure function of the flags, \
+         the config file and the region; no credentials are resolved",
     ),
     (
         "manifest",
@@ -631,6 +639,7 @@ async fn no_local_command_touches_a_seam_door() {
             estimate: false,
             compare: false,
             memory: MemoryMib::Mib2048,
+            size: crate::cli::SizeRequestFlags::default(),
             running_sec: 1.0,
             suspended_sec: 0.0,
             build_sec: 0.0,
@@ -641,6 +650,13 @@ async fn no_local_command_touches_a_seam_door() {
             // invocation is exercised here too: still no seam door.
             max_cost: Some("0.001".into()),
             on_breach: Some(crate::cli::OnBreach::Abort),
+        }),
+        Command::EgressPosture(crate::cli::EgressPostureArgs {
+            egress: false,
+            egress_network_connectors: Vec::new(),
+            deny_egress: true,
+            config: no_config(),
+            region: region_flags(),
         }),
         Command::Manifest,
         Command::Constants(crate::cli::ConstantsArgs { emit_json: true }),

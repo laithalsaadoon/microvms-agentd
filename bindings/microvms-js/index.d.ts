@@ -1523,8 +1523,16 @@ export interface BuildImageOptions {
   /** The build role, which must grant logs on `/aws/lambda-microvms/*`. */
   buildRoleArn: string
   baseImage?: BaseImageInput
+  /** Pins the managed base to one version, a value `managedBaseVersions` lists. */
+  baseImageVersion?: string
   /** A caller-supplied Dockerfile, checked against the base image's `FROM`. */
   dockerfile?: string
+  /**
+   * A directory whose one manifest+lockfile pair bakes an environment layer, by the rule
+   * the CLI's `--project` uses. A directory without exactly one pair is refused before any
+   * call.
+   */
+  projectDir?: string
   /** Whether to repair guest identity. A boolean, not a capability list — see above. */
   repairGuestIdentity?: boolean
   /**
@@ -1727,6 +1735,10 @@ export interface EnsureImageOptions {
   /** The build role. */
   buildRoleArn: string
   baseImage?: BaseImageInput
+  /** `buildImage`'s `baseImageVersion`; it joins the name's hash. */
+  baseImageVersion?: string
+  /** `buildImage`'s `projectDir`; the pair joins the name's hash. */
+  projectDir?: string
   /** Delete what exists under the name and build afresh. */
   force?: boolean
   tags?: Record<string, string>

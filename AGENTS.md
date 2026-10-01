@@ -200,7 +200,10 @@ capabilities, or `verify/parity/capabilities.toml` says why one doesn't.
   explicit statement that they remain unverified against AWS. Their live
   exercise happens once per wave on main, in one live run at a time, since the
   Terraform state is single; until that run, the pull request says it's verified
-  offline only. Guards follow "Checks that can fail" below.
+  offline only. A tracker's box for the change is checked only after a live run
+  on main that includes it passes; until then the box stays open and says the
+  change is verified offline only. No check reads a tracker, so review holds
+  that. Guards follow "Checks that can fail" below.
 - A release needs a green live run on its tag. `release.yml` drafts the GitHub
   release, and its gate, `live-gate`, opens only for a `live-conformance.yml`
   run dispatched on the tag that passed on that draft's assets. Every publishing

@@ -36,6 +36,7 @@ fn artifact_uri_build_args(binary: &std::path::Path, artifact_uri: Option<&str>)
         artifact_uri: artifact_uri.map(str::to_string),
         name: Some("img".into()),
         memory: MemoryMib::Mib2048,
+        size: crate::cli::SizeRequestFlags::default(),
         dockerfile: None,
         project: None,
         repair_identity: false,

@@ -179,6 +179,17 @@ suite = "script"
 message = "FAIL: test_a_restored_run_red_in_one_worker_only_fails_the_run ("
 transform = { file = "tools/check-guards-fire.py", replace = "        for code, output, said, _, _ in runs:\n", with = "        for code, output, said, _, _ in runs[:1]:\n" }
 
+# The restored check reads a command's runs in the order the workers finished, so which red run
+# it sees first, and whether `guards-fire-jobs-restored-every-worker` fires, hangs on timing.
+[[fault]]
+id = "guards-fire-restored-worker-order"
+guard = "test_check_guards_fire.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_guards_fire.py", "-k", "test_a_commands_runs_are_read_in_worker_order_whichever_finished_first"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_commands_runs_are_read_in_worker_order_whichever_finished_first ("
+transform = { file = "tools/check-guards-fire.py", replace = "        runs = sorted(board.get(key, counts[key]), key=lambda run: run[4])\n", with = "        runs = board.get(key, counts[key])\n" }
+
 [[fault]]
 id = "guards-fire-jobs-stolen-restored"
 guard = "test_check_guards_fire.py"

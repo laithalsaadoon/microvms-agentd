@@ -30,7 +30,7 @@ pub fn cost<O: std::io::Write, E: std::io::Write>(
     ctx: &mut Ctx<'_, O, E>,
     args: &CostArgs,
 ) -> Result<Rendered, CliError> {
-    let size = args.memory.size_class();
+    let size = args.size.resolve(args.memory)?.size_class();
     let rates = pinned_rates();
     // A parameter rather than a clock read inside the report, so a report is a pure function of
     // its inputs — which is core's own choice and what lets a test assert staleness without
@@ -238,6 +238,7 @@ mod tests {
             estimate: false,
             compare: false,
             memory,
+            size: crate::cli::SizeRequestFlags::default(),
             running_sec: 0.0,
             suspended_sec: 0.0,
             build_sec: 0.0,
