@@ -219,6 +219,30 @@ impl PyNameRegistry {
         self.store.release_by_vm(microvm_id).map_err(CoreError)
     }
 
+    /// Registers a record this registry didn't write, once the VM has answered one
+    /// authenticated request with the record's token; returns whether it refreshed a record of
+    /// the same VM.
+    ///
+    /// `session` must be attached with the record's endpoint and token (`Session.attach` from
+    /// its fields). A name held by another VM, or by an unreadable file, is refused before any
+    /// request, and a probe the daemon refuses writes nothing. Core's `names::import`, the rule
+    /// `microvm attach` applies.
+    fn import_record(
+        &self,
+        py: Python<'_>,
+        record: &PyNameRecord,
+        session: &crate::session::PySession,
+    ) -> PyCoreResult<bool> {
+        let store = self.store.clone();
+        let record = record.inner.clone();
+        let imported = session.detached(py, move |session| {
+            crate::runtime::block_on_detached(microvms_core::names::import(
+                &store, &record, session,
+            ))
+        })?;
+        Ok(imported.replaced)
+    }
+
     fn __repr__(&self) -> String {
         format!("NameRegistry({:?})", self.store.dir().display().to_string())
     }

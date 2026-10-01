@@ -66,9 +66,26 @@ PROJECT_PROBE = (
 )
 PROJECT_LOCKED_ATTRS = "attrs 26.1.0"
 
+#: The tag `build --tag` puts on the project image (#264), valued with the run's prefix so the
+#: readback can't match another run's image.
+PROJECT_TAG_KEY = "microvm-conformance"
+#: Hook timeouts longer than core's defaults, so `--run-hook-timeout-sec` and
+#: `--build-hook-timeout-sec` reach a real create without making the build any likelier to time
+#: out. The readback isn't asserted: a version's hooks block omits members on a real response
+#: (`MicrovmImageVersionSummaryWire` in crates/microvms-app/src/control/ops.rs), so the
+#: service accepting the create is what this run measures.
+PROJECT_RUN_HOOK_TIMEOUT_SEC = "45"
+PROJECT_BUILD_HOOK_TIMEOUT_SEC = "120"
+
 
 def drive_project_build(
-    cli: Cli, binary: Path, project: Path, logs: Any, s3: Any, results: Results
+    cli: Cli,
+    binary: Path,
+    project: Path,
+    logs: Any,
+    s3: Any,
+    plane: Any,
+    results: Results,
 ) -> None:
     """`build --project --reuse` twice, then a launch proving the layer (issue #74).
 
@@ -92,6 +109,9 @@ def drive_project_build(
     by hand (2026-09-02, `docs/PLATFORM.md`); it is not repeated here because it is a
     second three-minute build for a property the unit test states exactly.
 
+    The build also carries `build --tag` and both hook timeouts (#264), so their create is
+    exercised against the real service, and the image reads the tag back.
+
     `--keep` and an explicit `terminate --delete-image`, so the teardown is asserted
     rather than trusted. The service-created log group is deleted here, under the same
     discipline `drive_teardown` applies to the suite's own.
@@ -111,6 +131,12 @@ def drive_project_build(
         prefix,
         "--memory",
         str(BASELINE_MEMORY_MIB),
+        "--tag",
+        f"{PROJECT_TAG_KEY}={prefix}",
+        "--run-hook-timeout-sec",
+        PROJECT_RUN_HOOK_TIMEOUT_SEC,
+        "--build-hook-timeout-sec",
+        PROJECT_BUILD_HOOK_TIMEOUT_SEC,
         "--region",
         cli.region,
     )
@@ -146,6 +172,17 @@ def drive_project_build(
         built.data.get("artifactUri") == f"s3://{bucket}/{key}"
         and isinstance(first_head, dict),
         f"artifactUri={built.data.get('artifactUri')!r} head={first_head!r}",
+    )
+
+    # `build --tag` and both hook timeouts went on that create (#264): the service took them,
+    # and the image reads its tag back.
+    described = plane.get_microvm_image(
+        imageIdentifier=str(built.data["imageIdentifier"])
+    )
+    results.eq(
+        "build --tag reaches the image, read back by GetMicrovmImage (#264)",
+        (described.get("tags") or {}).get(PROJECT_TAG_KEY),
+        prefix,
     )
 
     started = time.monotonic()
