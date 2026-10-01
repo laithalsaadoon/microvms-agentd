@@ -922,13 +922,22 @@ pub fn constants<O: std::io::Write, E: std::io::Write>(
 ///
 /// `--from` overrides only the docker ref, for a caller pairing a different managed base; the
 /// emitted comment then reminds them the `baseImageArn` has to change with it.
+///
+/// `--wrap` and `--agent` print core's other two Dockerfiles, as the SDKs' `wrap_dockerfile`
+/// and `AgentVm.dockerfile` do; see [`wrapped_dockerfile`] and [`agent_dockerfile`].
 pub fn dockerfile<O: std::io::Write, E: std::io::Write>(
     _ctx: &mut Ctx<'_, O, E>,
     args: &DockerfileArgs,
 ) -> Result<Rendered, CliError> {
+    if let Some(task) = &args.wrap {
+        return wrapped_dockerfile(args, task);
+    }
     let mut base = microvms_core::control::BaseImage::al2023();
     if let Some(from) = args.from.as_deref() {
         base.docker_ref = from.to_string();
+    }
+    if !args.agent.is_empty() {
+        return agent_dockerfile(args, &base);
     }
     let stanza =
         microvms_core::control::default_dockerfile(args.port, args.workdir.as_deref(), &base, None);
@@ -971,6 +980,76 @@ pub fn dockerfile<O: std::io::Write, E: std::io::Write>(
     // Dense drops the header: the constraints are for a human editing the file, and a
     // token-paying consumer asked for the stanza itself.
     Ok(Rendered::ok(kind, data, text, stanza))
+}
+
+/// `dockerfile --wrap FILE`: the task Dockerfile with the agentd stanza appended, by core's
+/// `wrap_dockerfile` (IMAGE-2, IMAGE-3), and the base core derives from its `FROM` (IMAGE-4).
+///
+/// Core's refusals come back as they are, `ERR_INVALID_ARG` naming the cause. The envelope has
+/// the default stanza's keys, so a consumer reads one shape whichever Dockerfile it asked for.
+fn wrapped_dockerfile(args: &DockerfileArgs, task: &std::path::Path) -> Result<Rendered, CliError> {
+    let text = std::fs::read_to_string(task).map_err(|error| {
+        microvms_core::Error::new(
+            microvms_core::ErrorKind::Precondition,
+            format!("could not read {}: {error}", task.display()),
+        )
+        .with_source(error)
+    })?;
+    let wrapped = microvms_core::control::artifact::wrap_dockerfile(
+        &text,
+        &microvms_core::control::artifact::WrapOptions {
+            port: args.port,
+            workdir: args.workdir.clone(),
+            inherit_workdir: args.inherit_workdir,
+        },
+    )?;
+    let base = microvms_core::control::BaseImage::from_dockerfile(&text)?;
+    Ok(dockerfile_rendered(
+        wrapped,
+        &base,
+        args.port,
+        args.workdir.as_deref(),
+    ))
+}
+
+/// `dockerfile --agent AGENT`: the agent VM image's Dockerfile `agent-up` builds, by core's
+/// `agents::dockerfile` (AGENT-2), with the agents and version pins read as `agent-up` reads
+/// them. Its working directory is the agent image's own, so `--workdir` doesn't apply.
+fn agent_dockerfile(
+    args: &DockerfileArgs,
+    base: &microvms_core::control::BaseImage,
+) -> Result<Rendered, CliError> {
+    let specs = crate::commands::agent::agent_specs(&args.agent, |arg| {
+        let version = match arg {
+            crate::cli::AgentArg::ClaudeCode => &args.claude_version,
+            crate::cli::AgentArg::Codex => &args.codex_version,
+        };
+        (None, version.clone())
+    });
+    let text = microvms_core::agents::dockerfile(&specs, base, args.port)?;
+    Ok(dockerfile_rendered(
+        text,
+        base,
+        args.port,
+        Some(microvms_core::agents::WORKDIR),
+    ))
+}
+
+/// The `dockerfile` envelope for a Dockerfile core wrote in full, which needs no header.
+fn dockerfile_rendered(
+    text: String,
+    base: &microvms_core::control::BaseImage,
+    port: u16,
+    workdir: Option<&str>,
+) -> Rendered {
+    let mut data = Map::new();
+    data.insert("stanza".into(), json!(text));
+    data.insert("baseImageName".into(), json!(base.name));
+    data.insert("baseImageDockerRef".into(), json!(base.docker_ref));
+    data.insert("port".into(), json!(port));
+    data.insert("workdir".into(), json!(workdir));
+    let (kind, _) = response_type("dockerfile");
+    Rendered::ok(kind, data, text.clone(), text)
 }
 
 #[cfg(test)]
@@ -1502,6 +1581,11 @@ mod tests {
             from: None,
             port: 9000,
             workdir: None,
+            wrap: None,
+            inherit_workdir: false,
+            agent: Vec::new(),
+            claude_version: None,
+            codex_version: None,
         });
 
         let base = microvms_core::control::BaseImage::al2023();
@@ -1549,6 +1633,11 @@ mod tests {
             from: None,
             port: 8125,
             workdir: Some("/workspace".into()),
+            wrap: None,
+            inherit_workdir: false,
+            agent: Vec::new(),
+            claude_version: None,
+            codex_version: None,
         });
         let stanza = &rendered.dense_text;
         assert!(stanza.contains("RUN mkdir -p /workspace"), "{stanza}");
@@ -1573,6 +1662,11 @@ mod tests {
             from: Some("public.ecr.aws/example/other:2024".into()),
             port: 9000,
             workdir: Some("/srv".into()),
+            wrap: None,
+            inherit_workdir: false,
+            agent: Vec::new(),
+            claude_version: None,
+            codex_version: None,
         });
         let stanza = &rendered.dense_text;
         assert!(
@@ -1594,5 +1688,148 @@ mod tests {
             rendered.data["baseImageDockerRef"],
             json!("public.ecr.aws/example/other:2024")
         );
+    }
+
+    /// `dockerfile` with the default args and `edit` applied, answered.
+    fn dockerfile_with(edit: impl FnOnce(&mut DockerfileArgs)) -> Result<Rendered, CliError> {
+        let mut args = DockerfileArgs {
+            from: None,
+            port: 9000,
+            workdir: None,
+            wrap: None,
+            inherit_workdir: false,
+            agent: Vec::new(),
+            claude_version: None,
+            codex_version: None,
+        };
+        edit(&mut args);
+        let mut out = Output::new(Format::Plain, false, Vec::new(), Vec::new());
+        let env = |_: &str| None;
+        let seam = crate::seam::PanickingSeam;
+        let mut context = ctx(&mut out, &seam, &env);
+        dockerfile(&mut context, &args)
+    }
+
+    /// **`dockerfile --wrap` is core's wrap of the file, with the flags' options (#269).** The
+    /// task's `FROM` stays and names the base the envelope reports, and `--port` and
+    /// `--workdir` reach the stanza.
+    ///
+    /// **Falsification**: wrap with `WrapOptions::default()` instead of the flags' values and
+    /// the port and the workdir are the defaults.
+    #[test]
+    fn a_wrapped_dockerfile_is_cores_wrap_of_the_file() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let task = dir.path().join("Dockerfile");
+        let text = "FROM python:3.12-slim\nUSER app\n";
+        std::fs::write(&task, text).expect("writes");
+        let rendered = dockerfile_with(|args| {
+            args.wrap = Some(task.clone());
+            args.port = 8125;
+            args.workdir = Some("/srv".into());
+        })
+        .expect("a wrappable Dockerfile");
+        let expected = microvms_core::control::artifact::wrap_dockerfile(
+            text,
+            &microvms_core::control::artifact::WrapOptions {
+                port: 8125,
+                workdir: Some("/srv".into()),
+                inherit_workdir: false,
+            },
+        )
+        .expect("core wraps it");
+        assert_eq!(rendered.dense_text, expected);
+        assert_eq!(rendered.text, expected, "a wrap needs no header");
+        assert_eq!(rendered.data["stanza"], json!(expected));
+        assert!(expected.contains("ENV AGENTD_PORT=8125"), "{expected}");
+        assert!(expected.contains("WORKDIR /srv"), "{expected}");
+        assert_eq!(
+            rendered.data["baseImageDockerRef"],
+            json!("python:3.12-slim")
+        );
+        assert_eq!(rendered.data["port"], json!(8125));
+        assert_eq!(rendered.data["workdir"], json!("/srv"));
+    }
+
+    /// A task core can't wrap is its `ERR_INVALID_ARG`, and a file that can't be read is
+    /// `ERR_PRECONDITION` naming it.
+    #[test]
+    fn a_task_dockerfile_core_refuses_or_cannot_read_is_an_error() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let task = dir.path().join("Dockerfile");
+        std::fs::write(&task, "RUN true\n").expect("writes");
+        let refused = dockerfile_with(|args| args.wrap = Some(task.clone()))
+            .expect_err("no FROM to append to");
+        assert_eq!(
+            refused.exit,
+            crate::exit::Exit::InvalidArg,
+            "{}",
+            refused.message
+        );
+        assert!(refused.message.contains("no FROM"), "{}", refused.message);
+
+        let missing = dir.path().join("absent");
+        let unread =
+            dockerfile_with(|args| args.wrap = Some(missing.clone())).expect_err("nothing to read");
+        assert_eq!(
+            unread.exit,
+            crate::exit::Exit::Precondition,
+            "{}",
+            unread.message
+        );
+        assert!(unread.message.contains("absent"), "{}", unread.message);
+    }
+
+    /// **`dockerfile --agent` is the agent image's Dockerfile `agent-up` builds (#269),** with
+    /// the agents and the version pins read as `agent-up` reads them.
+    ///
+    /// **Falsification**: answer `(None, None)` from the pins closure in `agent_dockerfile` and
+    /// the Codex pin is missing from the Dockerfile.
+    #[test]
+    fn an_agent_dockerfile_is_the_image_agent_up_builds() {
+        let rendered = dockerfile_with(|args| {
+            args.agent = vec![crate::cli::AgentArg::Codex];
+            args.codex_version = Some("0.154.0".into());
+        })
+        .expect("an agent Dockerfile");
+        let mut spec = microvms_core::agents::AgentSpec::new(microvms_core::agents::Agent::Codex);
+        spec.cli_version = Some("0.154.0".into());
+        let expected = microvms_core::agents::dockerfile(
+            &[spec],
+            &microvms_core::control::BaseImage::al2023(),
+            9000,
+        )
+        .expect("core writes it");
+        assert_eq!(rendered.dense_text, expected);
+        assert!(
+            expected.contains("0.154.0"),
+            "the pin is in the image: {expected}"
+        );
+        assert_eq!(
+            rendered.data["workdir"],
+            json!(microvms_core::agents::WORKDIR)
+        );
+    }
+
+    /// The modes' flags refuse what doesn't apply to them, at parse time.
+    #[test]
+    fn the_dockerfile_modes_refuse_flags_that_do_not_apply() {
+        use clap::Parser as _;
+        for argv in [
+            vec!["--wrap", "Dockerfile", "--from", "x"],
+            vec!["--wrap", "Dockerfile", "--agent", "codex"],
+            vec!["--agent", "codex", "--workdir", "/x"],
+            vec!["--inherit-workdir"],
+            vec!["--claude-version", "1"],
+            vec!["--codex-version", "1"],
+        ] {
+            let full: Vec<&str> = ["microvm", "dockerfile"]
+                .into_iter()
+                .chain(argv.iter().copied())
+                .collect();
+            assert!(
+                crate::cli::Cli::try_parse_from(&full).is_err(),
+                "{full:?} parsed"
+            );
+        }
     }
 }

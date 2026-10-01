@@ -56,3 +56,26 @@ message = "null"
 note = "crates/microvms-cli/src/guards/run.rs::a_finished_run_reports_its_cost_in_cores_shape"
 transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "    outcome.cost = Some(report.to_json());\n", with = "    let _ = report.to_json();\n" }
 
+
+# The budget gate is core's (#270): a breach aborts only under the caller's `abort`, and a
+# floor at the ceiling is within it. Each entry breaks one, on core's `BudgetVerdict`.
+
+[[fault]]
+id = "domain-budget-abort-ignores-the-judgement"
+guard = "cost::tests::a_budget_verdict_follows_the_judgement_and_the_total_it_was_given"
+run = ["cargo", "test", "-p", "microvms-domain", "--lib", "--", "--exact", "cost::tests::a_budget_verdict_follows_the_judgement_and_the_total_it_was_given"]
+expect = "test-failed"
+suite = "rust"
+message = "aborts:"
+note = "crates/microvms-domain/src/cost.rs::a_budget_verdict_follows_the_judgement_and_the_total_it_was_given"
+transform = { file = "crates/microvms-domain/src/cost.rs", replace = "        self.breached() && self.budget.on_breach == OnBreach::Abort\n", with = "        self.breached()\n" }
+
+[[fault]]
+id = "domain-budget-at-the-ceiling-breaches"
+guard = "cost::tests::a_budget_verdict_follows_the_judgement_and_the_total_it_was_given"
+run = ["cargo", "test", "-p", "microvms-domain", "--lib", "--", "--exact", "cost::tests::a_budget_verdict_follows_the_judgement_and_the_total_it_was_given"]
+expect = "test-failed"
+suite = "rust"
+message = "breached:"
+note = "crates/microvms-domain/src/cost.rs::a_budget_verdict_follows_the_judgement_and_the_total_it_was_given"
+transform = { file = "crates/microvms-domain/src/cost.rs", replace = "        self.floor > self.budget.max\n", with = "        self.floor >= self.budget.max\n" }

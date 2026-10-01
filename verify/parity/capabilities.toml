@@ -478,7 +478,7 @@ ts = "Image.buildLogGroup"
 [[capability]]
 id = "wrap-dockerfile"
 core = "microvms_core::control::artifact::wrap_dockerfile"
-cli = { exempt = "`dockerfile` prints the default stanza only", issue = "#269" }
+cli = "dockerfile --wrap"
 py = "wrap_dockerfile"
 ts = "wrapDockerfile"
 
@@ -543,7 +543,7 @@ ts = "AgentVm.imageName"
 [[capability]]
 id = "agent-dockerfile"
 core = "microvms_core::agents::dockerfile"
-cli = { exempt = "`dockerfile` prints the default stanza only, not an agent VM's", issue = "#269" }
+cli = "dockerfile --agent"
 py = "AgentVm.dockerfile"
 ts = "AgentVm.dockerfile"
 
@@ -680,10 +680,10 @@ ts = "compareResidency"
 
 [[capability]]
 id = "budget-gate"
-core = { exempt = "parts only", issue = "#270" }
+core = ["microvms_core::cost::Budget::new", "microvms_core::cost::Budget::check"]
 cli = "cost --max-cost"
-py = { exempt = "no budget gate", issue = "#270" }
-ts = { exempt = "no budget gate", issue = "#270" }
+py = "check_budget"
+ts = "checkBudget"
 
 [[capability]]
 id = "pinned-rates"

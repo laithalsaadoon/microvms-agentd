@@ -1045,6 +1045,111 @@ pub(crate) fn compare_residency(
     })
 }
 
+// ── the budget gate (#270) ───────────────────────────────────────────────────
+
+/// A report's total judged against a budget: core's `Budget::check`, the verdict
+/// `microvm cost --max-cost` renders.
+#[pyclass(frozen, name = "BudgetVerdict", module = "microvms")]
+pub struct PyBudgetVerdict {
+    inner: cost::BudgetVerdict,
+}
+
+#[pymethods]
+impl PyBudgetVerdict {
+    /// The ceiling, as the caller wrote it.
+    #[getter]
+    fn max_usd(&self) -> PyEstimatedUsd {
+        PyEstimatedUsd::wrap(self.inner.budget().max)
+    }
+
+    /// `"warn"` or `"abort"`: what the caller said a breach does.
+    #[getter]
+    fn on_breach(&self) -> &'static str {
+        self.inner.budget().on_breach.as_str()
+    }
+
+    /// The total's floor: the whole estimate unless `is_lower_bound`.
+    #[getter]
+    fn floor(&self) -> PyEstimatedUsd {
+        PyEstimatedUsd::wrap(self.inner.floor())
+    }
+
+    /// Whether the floor is a lower bound, because a line is unpriced.
+    #[getter]
+    fn is_lower_bound(&self) -> bool {
+        self.inner.is_lower_bound()
+    }
+
+    /// `"exact"` or `"lower-bound"`.
+    #[getter]
+    fn basis(&self) -> &'static str {
+        self.inner.basis()
+    }
+
+    /// The phases whose lines are unpriced, sorted.
+    #[getter]
+    fn unpriced_phases(&self) -> Vec<&'static str> {
+        self.inner.unpriced_phases().to_vec()
+    }
+
+    /// Whether the floor is over the ceiling. At the ceiling is within it.
+    #[getter]
+    fn breached(&self) -> bool {
+        self.inner.breached()
+    }
+
+    /// Whether the caller's judgement refuses the report: breached, under `"abort"`.
+    #[getter]
+    fn aborts(&self) -> bool {
+        self.inner.aborts()
+    }
+
+    /// How far over the ceiling the floor is, when breached; at least that much for a lower
+    /// bound.
+    #[getter]
+    fn overage(&self) -> Option<PyEstimatedUsd> {
+        self.inner.overage().map(PyEstimatedUsd::wrap)
+    }
+
+    /// One line for a human, the one `microvm cost --max-cost` prints.
+    fn render(&self) -> String {
+        self.inner.render()
+    }
+
+    /// Core's JSON shape for the verdict, as a dict: `maxUsd`, `onBreach`, `basis`, `breached`,
+    /// `overageAtLeastUsd`.
+    fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        json_to_dict(py, &self.inner.to_json())
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "BudgetVerdict(basis={:?}, breached={}, aborts={})",
+            self.inner.basis(),
+            self.inner.breached(),
+            self.inner.aborts()
+        )
+    }
+}
+
+/// Judges `report`'s total against a ceiling of `max_usd` (a decimal string, such as
+/// `"1.50"`), with `on_breach` (`"warn"` or `"abort"`) saying what a breach does.
+///
+/// `on_breach` has no default, because a breach of a lower-bound total has already been
+/// exceeded by an unknown margin, and whether that warns or refuses is the caller's call.
+/// Core's `Budget::check`, the gate `microvm cost --max-cost` applies.
+#[pyfunction]
+pub(crate) fn check_budget(
+    report: &PyCostReport,
+    max_usd: &str,
+    on_breach: &str,
+) -> PyCoreResult<PyBudgetVerdict> {
+    let budget = cost::Budget::new(cost::EstimatedUsd::parse(max_usd)?, on_breach.parse()?);
+    Ok(PyBudgetVerdict {
+        inner: budget.check(&report.inner),
+    })
+}
+
 /// Why the image build has no price, as the reason that lands on the line item.
 #[pyfunction]
 pub(crate) fn build_unpriced_reason() -> &'static str {

@@ -23,6 +23,7 @@ import { test } from 'node:test';
 
 import {
   buildUnpricedReason,
+  checkBudget,
   compareResidency,
   costConstants,
   Duration,
@@ -731,3 +732,53 @@ test('a zero duration is accepted because a phase can genuinely not happen', () 
   assert.equal(Duration.measured(0).seconds, 0);
   assert.equal(Duration.projected(0).seconds, 0);
 });
+
+// -- the budget gate (#270) ---------------------------------------------------
+
+function lowerBoundReport() {
+  // An hour running plus a built image, whose build line is unpriced.
+  return runReport(SizeClass.defaultClass(), { running: Duration.measured(3600), imageGb: 2 });
+}
+
+test('a breach aborts only when the caller said abort', () => {
+  // Core's `Budget::check`: the judgement is the caller's, and a lower bound says so. The
+  // ceiling is a tenth of a cent under the floor, so both judgements breach and only "abort"
+  // refuses; the image build is unpriced, so the overage is "at least".
+  const report = lowerBoundReport();
+  const floor = report.total.floor.amount;
+  const [whole, fraction = ''] = floor.split('.');
+  const scaled = BigInt(whole + fraction.padEnd(6, '0').slice(0, 6)) - 1000n;
+  const ceiling = `${scaled / 1000000n}.${(scaled % 1000000n).toString().padStart(6, '0')}`;
+  const warned = checkBudget(report, ceiling, 'warn');
+  const aborted = checkBudget(report, ceiling, 'abort');
+  for (const verdict of [warned, aborted]) {
+    assert.equal(verdict.breached, true);
+    assert.equal(verdict.isLowerBound, true);
+    assert.equal(verdict.basis, 'lower-bound');
+    assert.deepEqual(verdict.unpricedPhases, ['image-build']);
+    assert.ok(verdict.render().includes('by at least'), verdict.render());
+  }
+  assert.equal(warned.aborts, false);
+  assert.equal(aborted.aborts, true);
+  const json = JSON.parse(aborted.toJson());
+  assert.equal(json.onBreach, 'abort');
+  assert.equal(json.basis, 'lower-bound');
+  assert.equal(json.breached, true);
+});
+
+test('a ceiling at the floor is within and names the lower bound', () => {
+  const report = lowerBoundReport();
+  const verdict = checkBudget(report, report.total.floor.amount, 'abort');
+  assert.equal(verdict.breached, false);
+  assert.equal(verdict.aborts, false);
+  assert.equal(verdict.overage, null);
+  assert.ok(verdict.render().includes('that floor is a lower bound'), verdict.render());
+});
+
+test('a budget takes a judgement and a decimal or refuses', () => {
+  const report = lowerBoundReport();
+  for (const [maxUsd, onBreach] of [['1.00', 'fail'], ['1.00', 'Warn'], ['a dollar', 'warn'], ['-1', 'warn']]) {
+    assert.throws(() => checkBudget(report, maxUsd, onBreach), `${maxUsd} ${onBreach} was accepted`);
+  }
+});
+

@@ -152,6 +152,41 @@ export declare class BearerToken {
   toString(): string
 }
 
+/**
+ * A report's total judged against a budget: core's `Budget::check`, the verdict
+ * `microvm cost --max-cost` renders.
+ */
+export declare class BudgetVerdict {
+  /** The ceiling, as the caller wrote it. */
+  get maxUsd(): EstimatedUsd
+  /** `"warn"` or `"abort"`: what the caller said a breach does. */
+  get onBreach(): string
+  /** The total's floor: the whole estimate unless `isLowerBound`. */
+  get floor(): EstimatedUsd
+  /** Whether the floor is a lower bound, because a line is unpriced. */
+  get isLowerBound(): boolean
+  /** `"exact"` or `"lower-bound"`. */
+  get basis(): string
+  /** The phases whose lines are unpriced, sorted. */
+  get unpricedPhases(): Array<string>
+  /** Whether the floor is over the ceiling. At the ceiling is within it. */
+  get breached(): boolean
+  /** Whether the caller's judgement refuses the report: breached, under `"abort"`. */
+  get aborts(): boolean
+  /**
+   * How far over the ceiling the floor is, when breached; at least that much for a lower
+   * bound.
+   */
+  get overage(): EstimatedUsd | null
+  /** One line for a human, the one `microvm cost --max-cost` prints. */
+  render(): string
+  /**
+   * Core's JSON shape for the verdict, as a JSON **string**: `maxUsd`, `onBreach`, `basis`,
+   * `breached`, `overageAtLeastUsd`.
+   */
+  toJson(): string
+}
+
 /** A timeout for the `ready` or `validate` image-build hook: 1..=3600 seconds. */
 export declare class BuildHookTimeout {
   /** A build-family timeout, or a refusal naming both ceilings. */
@@ -1380,6 +1415,16 @@ export interface BuildImageOptions {
 
 /** Why the image build has no price, as the reason that lands on the line item. */
 export declare function buildUnpricedReason(): string
+
+/**
+ * Judges `report`'s total against a ceiling of `maxUsd` (a decimal string, such as `"1.50"`),
+ * with `onBreach` (`"warn"` or `"abort"`) saying what a breach does.
+ *
+ * `onBreach` has no default, because a breach of a lower-bound total has already been exceeded
+ * by an unknown margin, and whether that warns or refuses is the caller's call. Core's
+ * `Budget::check`, the gate `microvm cost --max-cost` applies.
+ */
+export declare function checkBudget(report: CostReport, maxUsd: string, onBreach: string): BudgetVerdict
 
 /** The warm-pool argument, with its own counter-argument attached. */
 export declare function compareResidency(size: SizeClass, holdSeconds: number, cycles?: number | undefined | null, rates?: RateTable | undefined | null): ResidencyComparison
