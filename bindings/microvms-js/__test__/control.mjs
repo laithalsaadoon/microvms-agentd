@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { AgentVm, ControlPlane, Region, Sandbox } from '../index.js';
+import { AgentVm, ControlPlane, Region, Sandbox, agentConstants } from '../index.js';
 import { codeOf } from './support/sse.mjs';
 
 process.env.AWS_ACCESS_KEY_ID = 'AKIDEXAMPLE';
@@ -112,6 +112,25 @@ test('an agent VM launch takes the launch env and the ready timeout', async () =
     vm.launch({ imageIdentifier: 'arn:image', shell: true, launchEnv: big }),
     /launch env contributed/,
   );
+});
+
+test('an agent VM takes its default agents and its refusal from core', async () => {
+  // With no agents named it carries the list `agentConstants()` publishes from the core, and a
+  // call before `launch` meets the core's refusal word for word, so a binding that wrote its own
+  // list or message and let it drift would fail here.
+  //
+  // **Falsification**: default to `[CoreSpec::new(Agent::Codex)]` in `AgentVm.create` instead of
+  // the core's list, and the VM carries codex where the constants say claude-code; refuse with a
+  // message of the binding's own in `require_session`, and the refusal reads differently.
+  const published = JSON.parse(agentConstants()).defaultAgents;
+  assert.deepEqual(published, ['claude-code']);
+  const vm = await AgentVm.create(region());
+  assert.deepEqual(vm.agents().map((spec) => spec.agent), published);
+  await assert.rejects(vm.prompt('claude-code', 'a task'), (error) => {
+    assert.equal(codeOf(error), 'ERR_PRECONDITION');
+    assert.equal(error.message, 'this agent VM has not been launched; call `launch` first.');
+    return true;
+  });
 });
 
 test('terminate waits for a boolean or a number of seconds', async () => {

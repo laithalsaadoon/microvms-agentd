@@ -39,6 +39,7 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | BIND-2 | waived | waived | waived | 3 | 7 | waived |
 | BIND-3 | waived | waived | waived | 1 | 1 | waived |
 | BIND-4 | waived | waived | waived | 1 | 1 | waived |
+| BIND-5 | waived | waived | waived | 2 | 2 | waived |
 | BIND-6 | 1 | 1 | 1 | 5 | 7 | 1 |
 | BIND-7 | 1 | 1 | 1 | 4 | 4 | 1 |
 | BIND-8 | 1 | 1 | 1 | 4 | 2 | 1 |
@@ -477,6 +478,17 @@ The JavaScript binding shall deposit a thin idiomatic wrapper over microvms-core
 - **test:** `crates/microvms-cli/tests/dependency_direction.rs`
 - **impl:** `bindings/microvms-js/src/lib.rs`
 - **live:** waived: the wrapper makes no AWS call of its own; core's calls are the live tier's
+
+## BIND-5
+
+The language bindings layer shall preserve the cost honesty rules, exposing provenance-labelled durations, estimate-typed dollars, and the distinct Unpriced value.
+
+- **model:** waived: a property of the bindings' cost types, which have no states to explore
+- **gherkin:** waived: no behavior to script: each binding's suite asserts the shut doors directly, the coercions, the missing constructor and the absent usd key
+- **fuzz:** waived: there is no input stream; the rule is over each binding's type surface, which the suites enumerate spelling by spelling
+- **test:** `bindings/microvms-js/__test__/smoke.mjs`, `bindings/microvms-py/tests/test_smoke.py`
+- **impl:** `bindings/microvms-js/src/cost.rs`, `bindings/microvms-py/src/cost.rs`
+- **live:** waived: the bindings' cost types are local values and make no AWS call; the live suite holds core's report through the CLI (COST-1, COST-3, COST-4, COST-10)
 
 ## BIND-6
 
