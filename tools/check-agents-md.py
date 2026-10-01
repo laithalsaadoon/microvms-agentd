@@ -20,8 +20,9 @@ nothing. What counts as a reference, all inside backticks:
 - A task followed by "in `check`" or "in `mise run check`", against the tasks `check`
   depends on, directly or through a task it depends on. The doc says the local gate runs it.
 - The id after `--only` and after `fired:` (`guards:fire -- --only agentd-fs-pop`), against
-  the `id` of each `[[fault]]` in the registry's files (verify/guards/faults/*.toml), read by
-  check-guards-fire.py's loader, so this and `guards:list` can't read different entries.
+  the `id` of each entry the registry holds (verify/guards/faults/*.toml, with a family's rows,
+  a scanner's entries and a test's Falsification block), read by check-guards-fire.py's loader,
+  so this and `guards:list` can't read different entries.
 - A word with a `/` in it (`verify/guards/unregistered.txt`, `src/lib.rs`, `site/authored/`), inline
   only, against the tracked and untracked files git knows, resolved from the doc's own
   directory first and then the root. A `:line` or `:line:col` suffix is dropped first. A glob

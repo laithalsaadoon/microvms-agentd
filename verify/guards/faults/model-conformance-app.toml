@@ -143,23 +143,21 @@ transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = " 
 
 # A row function that stops ranging over one flag (here the advisory deny) still returns rows,
 # and the rows it keeps all agree with the app. The pinned count is what fails.
-[[fault]]
-id = "model-conformance-posture-rows-shrink"
+[[family]]
 guard = "egress_posture_for_answers_every_row_of_the_posture_model"
 run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "egress_posture_for_answers_every_row_of_the_posture_model"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "model-conformance-posture-rows-shrink"
 message = "the posture model returned 46 rows, not the 92"
 transform = { file = "crates/model/src/posture.rs", replace = "                for deny in [false, true] {\n                    let options = Options {\n", with = "                for deny in [false] {\n                    let options = Options {\n" }
 
 # The posture rows answered at another ceiling than TABLE's: same count, and TABLE's rows are no
 # longer among them, which is what `posture::rows()`'s doc says they are.
-[[fault]]
+[[family.fault]]
 id = "model-conformance-posture-table-not-in-rows"
-guard = "egress_posture_for_answers_every_row_of_the_posture_model"
-run = ["cargo", "test", "-p", "model-conformance", "--test", "tables", "--", "--exact", "egress_posture_for_answers_every_row_of_the_posture_model"]
-expect = "test-failed"
-suite = "rust"
 message = "isn't among the rows it exposes"
 transform = { file = "crates/model/src/posture.rs", replace = "                        deny,\n                        specified(options, WIRE_CEILING),\n", with = "                        deny,\n                        specified(options, WIRE_CEILING - 1),\n" }
 

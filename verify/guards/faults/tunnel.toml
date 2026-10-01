@@ -21,22 +21,20 @@ message = "the daemon refuses a seedless identity tunnel rather than relaying it
 transform = { file = "crates/agentd/src/tunnel.rs", replace = "    let Some(material) = material else {\n", with = "    let Some(material) = material else {\n        if port != 0 {\n            relay(socket, port).await;\n            return;\n        }\n" }
 
 # The client reads its own failed check of the reply as a clean end instead of an error.
-[[fault]]
-id = "bind21-client-pin-failure-read-as-a-clean-end"
+[[family]]
 guard = "a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel"
 run = ["cargo", "test", "-p", "microvms-core", "--test", "tunnel_end_to_end", "--", "--exact", "a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "bind21-client-pin-failure-read-as-a-clean-end"
 message = "a reply that doesn't verify must fail the tunnel, not end Closed"
 transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "        Some(identity) => match initiate(&mut socket, identity, guest_port).await? {", with = "        Some(identity) => match initiate(&mut socket, identity, guest_port)\n            .await\n            .unwrap_or(Initiated::Refused(TunnelEnd::Closed))\n        {" }
 
 # The client falls back to a plain relay when the reply doesn't verify.
-[[fault]]
+[[family.fault]]
 id = "bind21-client-pin-failure-downgrades"
-guard = "a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel"
-run = ["cargo", "test", "-p", "microvms-core", "--test", "tunnel_end_to_end", "--", "--exact", "a_reply_that_does_not_verify_against_the_pin_fails_the_tunnel"]
-expect = "test-failed"
-suite = "rust"
 message = "a reply that doesn't verify ends the tunnel rather than relaying"
 transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "        Some(identity) => match initiate(&mut socket, identity, guest_port).await? {\n            Initiated::Transport(verified) => Some(verified),\n            Initiated::Refused(end) => return Ok(Opened::Refused(end)),\n        },", with = "        Some(identity) => match initiate(&mut socket, identity, guest_port).await {\n            Ok(Initiated::Transport(verified)) => Some(verified),\n            Ok(Initiated::Refused(end)) => return Ok(Opened::Refused(end)),\n            Err(_) => None,\n        }," }
 
@@ -105,23 +103,21 @@ message = "a stream cut short must not read as a clean end"
 transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "Some(verified) if verified.daemon_proves_end => TunnelEnd::Truncated { code },", with = "Some(verified) if verified.daemon_proves_end => TunnelEnd::Closed," }
 
 # The same fault, caught by the client crate's own test.
-[[fault]]
-id = "bind23-unproven-end-read-as-closed-edges"
+[[family]]
 guard = "bind_23_a_close_without_the_offered_end_of_stream_is_truncated"
 run = ["cargo", "test", "-p", "microvms-edges", "--test", "tunnel_end_of_stream", "--", "--exact", "bind_23_a_close_without_the_offered_end_of_stream_is_truncated"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "bind23-unproven-end-read-as-closed-edges"
 message = "a close frame alone proves nothing"
 transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "Some(verified) if verified.daemon_proves_end => TunnelEnd::Truncated { code },", with = "Some(verified) if verified.daemon_proves_end => TunnelEnd::Closed," }
 
 # The client ignores the daemon's offer, so every daemon reads as one from before the end of
 # stream and a cut stream ends unproven instead of truncated.
-[[fault]]
+[[family.fault]]
 id = "bind23-daemon-offer-ignored"
-guard = "bind_23_a_close_without_the_offered_end_of_stream_is_truncated"
-run = ["cargo", "test", "-p", "microvms-edges", "--test", "tunnel_end_of_stream", "--", "--exact", "bind_23_a_close_without_the_offered_end_of_stream_is_truncated"]
-expect = "test-failed"
-suite = "rust"
 message = "left: ClosedUnproven"
 transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "let daemon_proves_end = protocol::identity::offers_end_of_stream(&scratch[..offer]);", with = "let daemon_proves_end = protocol::identity::offers_end_of_stream(&scratch[..0]);" }
 
@@ -171,32 +167,26 @@ message = "breaks \"BIND-21"
 transform = { file = "crates/model/src/tunnel.rs", replace = "if from == VmKey::Pinned || variant == Variant::ClientPinOff {", with = "if from == VmKey::Pinned || variant != Variant::ClientPinOff {" }
 
 # A frame opens at any later position: a dropped frame goes unnoticed.
-[[fault]]
-id = "model-tunnel-frames-open-past-their-position"
+[[family]]
 guard = "tunnel::tests::the_specified_tunnel_holds_every_property_against_a_path_attacker"
 run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "tunnel::tests::the_specified_tunnel_holds_every_property_against_a_path_attacker"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "model-tunnel-frames-open-past-their-position"
 message = "breaks \"BIND-24"
 transform = { file = "crates/model/src/tunnel.rs", replace = "&& (seq == client.next_in || variant == Variant::NoNonce);", with = "&& (seq >= client.next_in || variant == Variant::NoNonce);" }
 
 # The client reads a close without the daemon's end of stream as a clean end, as before #342.
-[[fault]]
+[[family.fault]]
 id = "model-tunnel-unproven-close-read-as-clean"
-guard = "tunnel::tests::the_specified_tunnel_holds_every_property_against_a_path_attacker"
-run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "tunnel::tests::the_specified_tunnel_holds_every_property_against_a_path_attacker"]
-expect = "test-failed"
-suite = "rust"
 message = "breaks \"BIND-23"
 transform = { file = "crates/model/src/tunnel.rs", replace = "} else if client.far_offered {\n            End::Truncated", with = "} else if client.far_offered {\n            End::Closed" }
 
 # The daemon closes the guest's connection on a caller end nothing proves, as before #342.
-[[fault]]
+[[family.fault]]
 id = "model-tunnel-cut-upload-closes-the-guest"
-guard = "tunnel::tests::the_specified_tunnel_holds_every_property_against_a_path_attacker"
-run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "tunnel::tests::the_specified_tunnel_holds_every_property_against_a_path_attacker"]
-expect = "test-failed"
-suite = "rust"
 message = "breaks \"AGENTD-20"
 transform = { file = "crates/model/src/tunnel.rs", replace = "        {\n            GuestRead::Reset\n        } else {", with = "        {\n            GuestRead::Eof\n        } else {" }
 
@@ -235,22 +225,20 @@ message = "the launching host's rule says None"
 transform = { file = "crates/agentd/src/tunnel.rs", replace = "let offer = responder.read_message(first, scratch)?;", with = "let offer = responder.read_message(first, scratch).unwrap_or(0);" }
 
 # The daemon's frame read skips a frame that doesn't open instead of failing it.
-[[fault]]
-id = "agentd-tunnel-fuzz-bad-frame-skipped"
+[[family]]
 guard = "tunnel_fuzz::frames_open_in_order_and_the_callers_end_only_after_every_chunk"
 run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "tunnel_fuzz::frames_open_in_order_and_the_callers_end_only_after_every_chunk"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "agentd-tunnel-fuzz-bad-frame-skipped"
 message = "not the caller's next chunk"
 transform = { file = "crates/agentd/src/tunnel.rs", replace = "Err(error) => Inbound::Failed(format!(\"a tunnel frame did not authenticate: {error}\")),", with = "Err(_) => Inbound::Bytes(Vec::new())," }
 
 # A one-byte chunk reads as the end of stream, so the caller's end opens before its chunks.
-[[fault]]
+[[family.fault]]
 id = "agentd-tunnel-fuzz-end-opens-early"
-guard = "tunnel_fuzz::frames_open_in_order_and_the_callers_end_only_after_every_chunk"
-run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "tunnel_fuzz::frames_open_in_order_and_the_callers_end_only_after_every_chunk"]
-expect = "test-failed"
-suite = "rust"
 message = "the caller's end opened before every chunk"
 transform = { file = "crates/protocol/src/identity.rs", replace = "    plaintext.is_empty()\n}", with = "    plaintext.len() < 2\n}" }
 
@@ -265,21 +253,19 @@ message = "right: false"
 transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "let daemon_proves_end = protocol::identity::offers_end_of_stream(&scratch[..offer]);", with = "let daemon_proves_end = protocol::identity::offers_end_of_stream(&protocol::identity::HANDSHAKE_PAYLOAD);" }
 
 # The client's frame read takes a frame that doesn't open as an empty chunk instead of failing.
-[[fault]]
-id = "bind24-fuzz-bad-frame-read-as-a-chunk"
+[[family]]
 guard = "session::tunnel_fuzz::frames_open_in_order_and_the_daemons_end_only_after_every_chunk"
 run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::tunnel_fuzz::frames_open_in_order_and_the_daemons_end_only_after_every_chunk"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "bind24-fuzz-bad-frame-read-as-a-chunk"
 message = "not the guest's next chunk"
 transform = { file = "crates/microvms-edges/src/session/tunnel.rs", replace = "    })?;\n    Ok(if protocol::identity::is_end_of_stream(&scratch[..count]) {", with = "    })\n    .unwrap_or(usize::MAX);\n    if count == usize::MAX {\n        return Ok(Frame::Chunk(0));\n    }\n    Ok(if protocol::identity::is_end_of_stream(&scratch[..count]) {" }
 
 # A one-byte chunk reads as the end of stream, so the daemon's end opens before its chunks.
-[[fault]]
+[[family.fault]]
 id = "bind23-fuzz-end-opens-early"
-guard = "session::tunnel_fuzz::frames_open_in_order_and_the_daemons_end_only_after_every_chunk"
-run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "session::tunnel_fuzz::frames_open_in_order_and_the_daemons_end_only_after_every_chunk"]
-expect = "test-failed"
-suite = "rust"
 message = "the daemon's end opened before every chunk"
 transform = { file = "crates/protocol/src/identity.rs", replace = "    plaintext.is_empty()\n}", with = "    plaintext.len() < 2\n}" }

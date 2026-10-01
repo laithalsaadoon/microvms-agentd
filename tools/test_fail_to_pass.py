@@ -13,6 +13,7 @@ finders are the real ast-grep, so run this through `mise run fail-to-pass:check`
 """
 
 import os
+import re
 import runpy
 import stat
 import subprocess
@@ -28,6 +29,13 @@ TOOL = runpy.run_path(str(SCRIPT))
 SENTINELS = TOOL["SENTINELS"]
 REGISTRY_DIR = TOOL["REGISTRY_DIR"]
 
+# A sentinel is copied for the finders to read. Its Falsification blocks are registry entries
+# naming files this fixture doesn't have, which the fire's loader would refuse, so they're left
+# out of the copy.
+BLOCKS = re.compile(
+    r"^[ \t]*///[ \t]?```falsification[ \t]*\n(?:[ \t]*///.*\n)*?[ \t]*///[ \t]?```[ \t]*\n",
+    re.MULTILINE,
+)
 PRODUCT = "crates/agentd/src/lib.rs"
 TESTS = "crates/agentd/tests/regress.rs"
 BASE_LIB = """\
@@ -138,7 +146,7 @@ class Fixture(unittest.TestCase):
             "changelog.d/.gitkeep": "",
         }
         for path, _ in SENTINELS.values():
-            files[path] = (REPO / path).read_text(encoding="utf-8")
+            files[path] = BLOCKS.sub("", (REPO / path).read_text(encoding="utf-8"))
         for path, text in files.items():
             self.write(path, text)
         git(self.top, "init", "-q", "-b", "main", str(self.root))
@@ -401,20 +409,32 @@ class RegistryShapeTests(unittest.TestCase):
 
     def test_the_build_commands_are_the_registrys(self):
         builds = []
-        for file in sorted((REPO / REGISTRY_DIR).glob("*.toml")):
-            for entry in tomllib.loads(file.read_text()).get("fault", []):
-                run = entry["run"]
-                if (
-                    entry.get("suite") == "bindings"
-                    and run
-                    and isinstance(run[0], list)
-                ):
-                    builds.append(run[0])
+        tables, problems = TOOL["FIRE"]["registry_tables"](REPO)
+        self.assertEqual(problems, [])
+        for entry in (table.data for table in tables):
+            run = entry["run"]
+            if entry.get("suite") == "bindings" and run and isinstance(run[0], list):
+                builds.append(run[0])
         self.assertTrue(builds, "the registry has no bindings entry to compare with")
         known = [TOOL["PY_BUILD"], TOOL["JS_BUILD"]]
         for build in builds:
             if "maturin" in " ".join(build) or "napi" in build:
                 self.assertIn(build, known)
+
+
+class RegistryReaderTests(unittest.TestCase):
+    """The branch's and the base's entries are read with the fire's loader, so a family's rows
+    are entries here as they are to `list` and `fire`."""
+
+    def test_a_familys_rows_are_entries(self):
+        family = (
+            '[[family]]\nguard = "g"\nrun = ["cargo", "test", "--", "--exact", "g"]\n'
+            'expect = "test-failed"\nsuite = "rust"\n\n[[family.fault]]\nid = "row"\n'
+            'transform = { file = "x", replace = "a", with = "b" }\n'
+        )
+        entries = TOOL["registry"]({f"{REGISTRY_DIR}/a.toml": family})
+        self.assertIn("row", entries)
+        self.assertEqual(entries["row"]["guard"], "g")
 
 
 if __name__ == "__main__":

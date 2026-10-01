@@ -3,22 +3,20 @@
 # `Phase::as_str` loses its `const`: nothing in the workspace calls it in a const context, so
 # every build and test here still passes, and a user of the last release who does stops
 # compiling. Only the comparison with that release sees it.
-[[fault]]
-id = "semver-protocol-const-removed"
+[[family]]
 guard = "cargo semver-checks -p microvms-protocol"
 run = ["cargo", "semver-checks", "-p", "microvms-protocol"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "semver-protocol-const-removed"
 message = "Phase::as_str"
 transform = { file = "crates/protocol/src/exec.rs", replace = "keeps this one equal to serde's.\n    pub const fn as_str(self) -> &'static str {", with = "keeps this one equal to serde's.\n    pub fn as_str(self) -> &'static str {" }
 
 # The one allowed lint dropped: the check fails on `StartRequest`'s `#[non_exhaustive]`, which
 # shows it compares with the release on crates.io rather than with the tree itself.
-[[fault]]
+[[family.fault]]
 id = "semver-protocol-allowance-dropped"
-guard = "cargo semver-checks -p microvms-protocol"
-run = ["cargo", "semver-checks", "-p", "microvms-protocol"]
-expect = "exit-nonzero"
-suite = "script"
 message = "struct StartRequest in "
 transform = { file = "crates/protocol/Cargo.toml", replace = "struct_marked_non_exhaustive = \"allow\"\n", with = "" }

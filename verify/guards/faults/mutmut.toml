@@ -97,23 +97,21 @@ transform = { file = "tools/check-mutmut.py", replace = "        if code not in 
 
 # Each run mutated every function of the script: check-guards-fire.py's mutated copy came to 40
 # MB, and mutmut took 22 minutes to write it for a run that tested one function's mutants.
-[[fault]]
-id = "mutmut-unchanged-functions-mutated"
+[[family]]
 guard = "test_check_mutmut.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_the_real_mutmut_counts_an_untested_change_and_agrees_on_the_hashes"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "mutmut-unchanged-functions-mutated"
 message = "FAIL: test_the_real_mutmut_counts_an_untested_change_and_agrees_on_the_hashes ("
 transform = { file = "tools/check-mutmut.py", replace = "                    starts.add(node.lineno)\n", with = "                    pass\n" }
 
 # The sentinel of the marking: the changed function marked instead, so mutmut writes no mutant of
 # it and its count reads as none.
-[[fault]]
+[[family.fault]]
 id = "mutmut-changed-function-marked"
-guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_the_real_mutmut_counts_an_untested_change_and_agrees_on_the_hashes"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_the_real_mutmut_counts_an_untested_change_and_agrees_on_the_hashes ("
 transform = { file = "tools/check-mutmut.py", replace = "if cls else f\"x_{node.name}\") not in keep:\n", with = "if cls else f\"x_{node.name}\") in keep:\n" }
 
@@ -138,23 +136,21 @@ message = "FAIL: test_a_suites_state_doesnt_outlive_a_pass ("
 transform = { file = "tools/check-mutmut.py", replace = "process_isolation = forkserver\n", with = "" }
 
 # mutmut's stop when no test reached a mutant reads as a failed run.
-[[fault]]
-id = "mutmut-none-reached-fails"
+[[family]]
 guard = "test_check_mutmut.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_a_base_no_in_process_test_reached_holds_the_head_to_no_count"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "mutmut-none-reached-fails"
 message = "FAIL: test_a_base_no_in_process_test_reached_holds_the_head_to_no_count ("
 transform = { file = "tools/check-mutmut.py", replace = "    stopped = NONE_REACHED.encode() in ", with = "    stopped = False and NONE_REACHED.encode() in " }
 
 # A base no in-process test reached reads as a count of none, so the change that adds the first
 # such test fails for what it leaves alive.
-[[fault]]
+[[family.fault]]
 id = "mutmut-unreached-base-counts"
-guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_a_base_no_in_process_test_reached_holds_the_head_to_no_count"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_base_no_in_process_test_reached_holds_the_head_to_no_count ("
 transform = { file = "tools/check-mutmut.py", replace = "            elif base and base.total and base.unreached == base.total:\n", with = "            elif False:\n" }
 
@@ -180,22 +176,20 @@ transform = { file = "tools/check-mutmut.py", replace = "    globs = [f\"{module
 
 # The mutated script saved as source: every load in every test compiles it again, which made
 # #495's stats pass 986 s of test time against 244 s for the plain suite.
-[[fault]]
-id = "mutmut-mutants-not-precompiled"
+[[family]]
 guard = "test_check_mutmut.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_the_suites_load_the_mutated_script_compiled_and_show_reads_its_source"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "mutmut-mutants-not-precompiled"
 message = "FAIL: test_the_suites_load_the_mutated_script_compiled_and_show_reads_its_source ("
 transform = { file = "tools/check-mutmut.py", replace = "    generate(python, side, wanted)\n", with = "    pass\n" }
 
 # The compiled script left in place after the run, so a survivor's diff reads bytecode.
-[[fault]]
+[[family.fault]]
 id = "mutmut-source-not-restored"
-guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_the_suites_load_the_mutated_script_compiled_and_show_reads_its_source"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_the_suites_load_the_mutated_script_compiled_and_show_reads_its_source ("
 transform = { file = "tools/check-mutmut.py", replace = "            source.replace(side / \"mutants\" / path)\n", with = "            pass\n" }
 
