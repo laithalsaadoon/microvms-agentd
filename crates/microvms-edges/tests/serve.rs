@@ -2,7 +2,9 @@
 //! The serving loops (#263) against a stand-in daemon and a stand-in upstream: a tunnel that
 //! keeps serving after a refused connection, stops on request and at its limit, and runs over a
 //! direct session; a port-forward that serves two slow requests at once, counts a refusal and
-//! keeps serving, and reaches a direct session's guest port.
+//! keeps serving, and reaches a direct session's guest port; and the SDKs' handles over both,
+//! which stop on request, cut what's left open after a grace or on drop, and list the
+//! connections that didn't end clean.
 
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -510,4 +512,209 @@ async fn a_direct_forward_reaches_the_endpoint_host_at_the_guest_port() {
         [("GET /direct HTTP/1.1".to_string(), false)],
         "a direct session's request carries no proxy credential"
     );
+}
+
+// ── the SDKs' handles ────────────────────────────────────────────────────────
+
+/// **A forward handle serves until stopped, and its report says what it did.**
+#[tokio::test]
+async fn a_forward_handle_serves_until_stopped_and_reports() {
+    use microvms_edges::session::serve::{DEFAULT_BIND, start_forward};
+    let (upstream, _) = upstream(1, 0).await;
+    let handle = start_forward(
+        DEFAULT_BIND,
+        "http://127.0.0.1:9",
+        upstream.port(),
+        None,
+        ServeLimits::default(),
+    )
+    .await
+    .expect("the handle binds");
+    let local = handle.local_address();
+    assert!(local.ip().is_loopback() && local.port() != 0, "{local}");
+    assert!(handle.is_running());
+
+    let answer = get(local, "/handle").await;
+    assert!(answer.contains("200 OK"), "{answer}");
+    handle.request_stop();
+    let summary = tokio::time::timeout(BOUND, handle.finished())
+        .await
+        .expect("the handle stops")
+        .expect("the loop ran");
+    assert_eq!(summary.report.served, 1);
+    assert_eq!(summary.report.stopped, StopReason::Requested);
+    assert!(
+        summary.ended.is_empty(),
+        "a clean exchange lists nothing: {summary:?}"
+    );
+    assert!(!handle.is_running());
+    // Callable again, with the same answer.
+    assert_eq!(handle.finished().await.expect("the loop ran"), summary);
+}
+
+/// **A tunnel handle lists the connection the daemon refused, with its code.**
+#[tokio::test]
+async fn a_tunnel_handle_lists_a_refused_connection() {
+    use microvms_edges::session::serve::{DEFAULT_BIND, EndKind, start_tunnel};
+    let (daemon, _) = stand_in(upper_guest().await, 1).await;
+    let handle = start_tunnel(
+        DEFAULT_BIND,
+        target(daemon, Some(auth())),
+        ServeLimits::default(),
+    )
+    .await
+    .expect("the handle binds");
+    assert!(round_trip(handle.local_address()).await.is_empty());
+    assert_eq!(round_trip(handle.local_address()).await, b"HELLO");
+    handle.request_stop();
+    let summary = tokio::time::timeout(BOUND, handle.finished())
+        .await
+        .expect("the handle stops")
+        .expect("the loop ran");
+    assert_eq!((summary.report.served, summary.report.refused), (2, 1));
+    assert_eq!(summary.ended.len(), 1, "{summary:?}");
+    assert_eq!(summary.ended[0].kind, EndKind::Refused);
+    assert_eq!(summary.ended[0].kind.as_str(), "refused");
+    assert_eq!(
+        summary.ended[0].code,
+        Some(protocol::tunnel::close::NO_LISTENER)
+    );
+    assert!(summary.ended[0].detail.contains("listening"), "{summary:?}");
+}
+
+/// A tunnel handle through a stand-in daemon, and a client connection through it that has
+/// relayed once and stays open.
+async fn a_handle_with_an_open_connection() -> (
+    microvms_edges::session::serve::Serving<microvms_edges::session::serve::TunnelSummary>,
+    TcpStream,
+) {
+    use microvms_edges::session::serve::{DEFAULT_BIND, start_tunnel};
+    let (daemon, _) = stand_in(upper_guest().await, 0).await;
+    let handle = start_tunnel(
+        DEFAULT_BIND,
+        target(daemon, Some(auth())),
+        ServeLimits::default(),
+    )
+    .await
+    .expect("the handle binds");
+    let mut client = TcpStream::connect(handle.local_address())
+        .await
+        .expect("the handle accepts");
+    client.write_all(b"hello").await.expect("written");
+    let mut answer = vec![0_u8; 5];
+    tokio::time::timeout(BOUND, client.read_exact(&mut answer))
+        .await
+        .expect("the answer arrives")
+        .expect("read");
+    assert_eq!(answer, b"HELLO");
+    (handle, client)
+}
+
+/// Whether `client` reaches its end (EOF or a reset) within the bound.
+async fn reaches_its_end(client: &mut TcpStream) -> bool {
+    let mut rest = Vec::new();
+    tokio::time::timeout(BOUND, client.read_to_end(&mut rest))
+        .await
+        .is_ok()
+}
+
+/// **A stop with a grace cuts the connection still open after it, and lists it.**
+#[tokio::test]
+async fn a_stop_with_a_grace_cuts_the_connection_left_open() {
+    use microvms_edges::session::serve::EndKind;
+    let (handle, mut client) = a_handle_with_an_open_connection().await;
+    let summary = tokio::time::timeout(
+        BOUND,
+        handle.stop(Some(std::time::Duration::from_millis(100))),
+    )
+    .await
+    .expect("the grace ends the wait")
+    .expect("the loop ran");
+    assert_eq!((summary.report.served, summary.report.refused), (1, 1));
+    assert_eq!(summary.ended.len(), 1, "{summary:?}");
+    assert_eq!(summary.ended[0].kind, EndKind::Failed);
+    assert!(summary.ended[0].detail.contains("cut"), "{summary:?}");
+    assert!(
+        reaches_its_end(&mut client).await,
+        "the cut client stays open"
+    );
+}
+
+/// **A stop without a grace waits for the open connection, and reports it clean once its
+/// client closes.**
+#[tokio::test]
+async fn a_stop_without_a_grace_waits_for_the_open_connection() {
+    let (handle, client) = a_handle_with_an_open_connection().await;
+    let handle = Arc::new(handle);
+    let stopping = tokio::spawn({
+        let handle = Arc::clone(&handle);
+        async move { handle.stop(None).await }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!(
+        !stopping.is_finished() && handle.is_running(),
+        "the stop didn't wait for the open connection"
+    );
+    drop(client);
+    let summary = tokio::time::timeout(BOUND, stopping)
+        .await
+        .expect("the stop ends once the client closes")
+        .expect("joined")
+        .expect("the loop ran");
+    assert_eq!((summary.report.served, summary.report.refused), (1, 0));
+    assert!(summary.ended.is_empty(), "{summary:?}");
+    assert_eq!(summary.report.stopped, StopReason::Requested);
+}
+
+/// **Dropping a handle cuts its open connection.**
+#[tokio::test]
+async fn dropping_a_handle_cuts_its_open_connection() {
+    let (handle, mut client) = a_handle_with_an_open_connection().await;
+    drop(handle);
+    assert!(
+        reaches_its_end(&mut client).await,
+        "the connection outlived its handle"
+    );
+}
+
+/// **Dropping a handle stops its loop, and the listener closes.**
+#[tokio::test]
+async fn dropping_a_handle_stops_its_loop() {
+    use microvms_edges::session::serve::{DEFAULT_BIND, start_forward};
+    let handle = start_forward(
+        DEFAULT_BIND,
+        "http://127.0.0.1:9",
+        8080,
+        None,
+        ServeLimits::default(),
+    )
+    .await
+    .expect("the handle binds");
+    let local = handle.local_address();
+    drop(handle);
+    let closed = tokio::time::timeout(BOUND, async {
+        while TcpStream::connect(local).await.is_ok() {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await;
+    assert!(
+        closed.is_ok(),
+        "the listener at {local} is still open after its handle dropped"
+    );
+}
+
+/// **The bind address defaults to loopback on a port the OS picks, and a bad one is refused
+/// by name.**
+#[test]
+fn the_bind_address_defaults_to_loopback_and_refuses_a_bad_one() {
+    use microvms_edges::session::serve::{DEFAULT_BIND, bind_address};
+    assert_eq!(bind_address(None).expect("the default"), DEFAULT_BIND);
+    assert!(DEFAULT_BIND.ip().is_loopback() && DEFAULT_BIND.port() == 0);
+    assert_eq!(
+        bind_address(Some("0.0.0.0:8080")).expect("parses"),
+        "0.0.0.0:8080".parse::<SocketAddr>().expect("an address")
+    );
+    let refused = bind_address(Some("localhost")).expect_err("not an address");
+    assert!(refused.to_string().contains("\"localhost\""), "{refused}");
 }

@@ -300,24 +300,31 @@ ts = ["Session.spawn", "ExecProcess", "ExecProcess.kill", "ExecProcess.wait"]
 
 [[capability]]
 id = "tunnel"
-core = "microvms_core::session::tunnel::relay_connection"
+core = ["microvms_core::session::serve::serve_tunnel", "microvms_core::session::serve::start_tunnel"]
 cli = "tunnel"
-py = { exempt = "the accept loop lives in the CLI", issue = "#263" }
-ts = { exempt = "the accept loop lives in the CLI", issue = "#263" }
+py = "Session.tunnel"
+ts = "Session.tunnel"
 
 [[capability]]
 id = "port-forward"
-core = "microvms_core::session::forward::serve_connection"
+core = ["microvms_core::session::serve::serve_forward", "microvms_core::session::serve::start_forward"]
 cli = "port-forward"
-py = { exempt = "the accept loop lives in the CLI", issue = "#263" }
-ts = { exempt = "the accept loop lives in the CLI", issue = "#263" }
+py = "Session.port_forward"
+ts = "Session.portForward"
 
 [[capability]]
 id = "verify-identity"
 core = "microvms_core::session::tunnel::verify_identity"
 cli = "tunnel --verify-identity"
-py = { exempt = "identity is forced off in RunRequest", issue = "#263" }
-ts = { exempt = "identity is forced off in RunRequest", issue = "#263" }
+py = "Session.tunnel"
+ts = "Session.tunnel"
+
+[[capability]]
+id = "tunnel-identity"
+core = "microvms_core::sandbox::Sandbox::tunnel_identity"
+cli = { exempt = "`run --identity`'s envelope carries identityHostSeed and identityVmPublicKey" }
+py = "Sandbox.tunnel_identity"
+ts = "Sandbox.tunnelIdentity"
 
 [[capability]]
 id = "shell"
@@ -936,6 +943,11 @@ py = ["Sandbox.run(egress)", "egress_posture_for(egress)"]
 id = "launch-deny-egress"
 core = "launch.denyEgress"
 py = ["Sandbox.run(deny_egress)", "egress_posture_for(deny_egress)"]
+
+[[default]]
+id = "launch-identity"
+core = "launch.identity"
+py = "Sandbox.run(identity)"
 
 [[default]]
 id = "launch-shell"

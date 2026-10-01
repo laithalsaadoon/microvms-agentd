@@ -30,6 +30,7 @@ use std::sync::Arc;
 
 use microvms_core::prelude::*;
 use microvms_core::sandbox::Sandbox as CoreSandbox;
+use microvms_core::session::serve;
 use microvms_core::session::{
     CompletionOptions, CompletionPlan, DEFAULT_CLIENT_GRACE, OutputFlow, OutputSink,
     Session as CoreSession, StreamOptions, mint_exec_id,
@@ -1119,6 +1120,65 @@ impl Session {
             // a `[string, string, string]` would have to be hand-written into `index.d.ts`.
             // The order is the contract and the core's array type is what pins it.
             .map(|offered| offered.to_vec()))
+    }
+
+    /// Serves a local TCP port as a tunnel to `guestPort` in the VM, on a background task, and
+    /// resolves at once with its handle: `microvm tunnel`'s loop.
+    ///
+    /// Each local connection gets a WebSocket of its own through the endpoint proxy, and a
+    /// connection the daemon refuses is listed in the report while the tunnel keeps serving.
+    /// With `verifyIdentity` (a `TunnelIdentity`, such as `sandbox.tunnelIdentity()`), each
+    /// connection first proves the far end is the daemon of the VM that identity was launched
+    /// with, and a connection that can't is refused. A separate parameter rather than an
+    /// option, for the reason `buildImage`'s guarded values are: a class in an options object
+    /// can't cross an async call.
+    #[napi]
+    pub async fn tunnel(
+        &self,
+        guest_port: f64,
+        options: Option<crate::serve::ServeOptions>,
+        verify_identity: Option<&crate::serve::TunnelIdentity>,
+    ) -> Result<crate::serve::Tunnel, AsyncError> {
+        let guest_port = crate::numbers::u16_number(guest_port, "guestPort").map_err(js_async)?;
+        let identity = verify_identity.map(|identity| identity.inner.clone());
+        let (bind, limits) = crate::serve::ServeOptions::resolve(options)?;
+        let target = {
+            let live = self.live().await;
+            let session = live.session().map_err(js_async)?;
+            serve::TunnelTarget::for_session(session, guest_port, identity)
+        };
+        let task = serve::start_tunnel(bind, target, limits)
+            .await
+            .map_err(js_async)?;
+        Ok(crate::serve::Tunnel::wrap(task))
+    }
+
+    /// Serves a local port as an HTTP and WebSocket forward to `guestPort` in the VM, on a
+    /// background task, and resolves at once with its handle: `microvm port-forward`'s loop.
+    ///
+    /// Connections are served at once rather than one after another, so a slow request
+    /// doesn't hold the next. A request the endpoint proxy refuses is listed in the report
+    /// with its status while the forward keeps serving.
+    #[napi]
+    pub async fn port_forward(
+        &self,
+        guest_port: f64,
+        options: Option<crate::serve::ServeOptions>,
+    ) -> Result<crate::serve::PortForward, AsyncError> {
+        let guest_port = crate::numbers::u16_number(guest_port, "guestPort").map_err(js_async)?;
+        let (bind, limits) = crate::serve::ServeOptions::resolve(options)?;
+        let (endpoint, auth) = {
+            let live = self.live().await;
+            let session = live.session().map_err(js_async)?;
+            (
+                session.endpoint().to_string(),
+                session.proxy_auth().cloned(),
+            )
+        };
+        let task = serve::start_forward(bind, &endpoint, guest_port, auth, limits)
+            .await
+            .map_err(js_async)?;
+        Ok(crate::serve::PortForward::wrap(task))
     }
 
     /// How many proxy tokens this session has minted, or `null` for a direct session.

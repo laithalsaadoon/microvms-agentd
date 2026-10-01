@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, ErrorKind};
+use crate::identity::TunnelIdentity;
 use crate::region::Region;
 
 /// A VM name's shape: ASCII letters, digits, `-`, `_`, at most 128 bytes, and never a
@@ -166,6 +167,29 @@ impl NameRecord {
         Ok(record)
     }
 
+    /// The record's tunnel identity, when it carries one.
+    ///
+    /// Refuses a record holding one half of the pair, or a half that doesn't decode, rather
+    /// than reading it as unverifiable: the record claims a verifiable VM, and dropping the
+    /// claim would hide that it's broken.
+    pub fn tunnel_identity(&self) -> Result<Option<TunnelIdentity>, Error> {
+        match (&self.identity_host_seed, &self.identity_vm_public_key) {
+            (None, None) => Ok(None),
+            (Some(seed), Some(pin)) => TunnelIdentity::from_encoded_parts(seed, pin).map(Some),
+            _ => Err(Error::invalid_arg(format!(
+                "the record for {:?} carries one half of its tunnel identity and not the other; \
+                 the host seed and the VM public key are a pair",
+                self.name
+            ))),
+        }
+    }
+
+    /// Records `identity`'s pair, or clears it.
+    pub fn set_tunnel_identity(&mut self, identity: Option<&TunnelIdentity>) {
+        self.identity_host_seed = identity.map(TunnelIdentity::host_seed_base64);
+        self.identity_vm_public_key = identity.map(TunnelIdentity::vm_public_key_base64);
+    }
+
     /// The region the VM runs in. A record's region is one this client wrote, so a name it
     /// no longer lists is taken as written rather than refused.
     pub fn region(&self) -> Region {
@@ -267,6 +291,35 @@ mod tests {
             1,
         )
         .expect("ok")
+    }
+
+    /// A record's pair reads back as the identity it was set from; no pair reads as none; half a
+    /// pair, or a half that doesn't decode, is refused by name.
+    #[test]
+    fn a_records_tunnel_identity_is_the_pair_or_nothing() {
+        let identity = crate::identity::LaunchIdentity::from_seeds([7; 32], [9; 32])
+            .expect("valid seeds")
+            .keep();
+        let mut kept = record("ci", "microvm-a");
+        assert!(kept.tunnel_identity().expect("no pair").is_none());
+        kept.set_tunnel_identity(Some(&identity));
+        let read = kept.tunnel_identity().expect("a pair").expect("kept");
+        assert_eq!(read.host_seed(), identity.host_seed());
+        assert_eq!(read.vm_public_key(), identity.vm_public_key());
+
+        let mut torn = kept.clone();
+        torn.identity_host_seed = None;
+        let refused = torn.tunnel_identity().expect_err("half a pair");
+        assert!(refused.to_string().contains("one half"), "{refused}");
+        let mut garbled = kept.clone();
+        garbled.identity_vm_public_key = Some("not base64!".into());
+        assert!(garbled.tunnel_identity().is_err());
+
+        kept.set_tunnel_identity(None);
+        assert_eq!(
+            (kept.identity_host_seed, kept.identity_vm_public_key),
+            (None, None)
+        );
     }
 
     #[test]
