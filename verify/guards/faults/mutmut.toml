@@ -6,7 +6,7 @@
 [[fault]]
 id = "mutmut-growth-passes"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_a_function_whose_survivors_grow_fails_and_shows_each"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_function_whose_survivors_grow_fails_and_shows_each ("
@@ -16,7 +16,7 @@ transform = { file = "tools/check-mutmut.py", replace = "            more = held
 [[fault]]
 id = "mutmut-missing-results-pass"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_no_results_from_a_run_that_passed_fails"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_no_results_from_a_run_that_passed_fails ("
@@ -26,7 +26,7 @@ transform = { file = "tools/check-mutmut.py", replace = "        data = json.loa
 [[fault]]
 id = "mutmut-stray-results-pass"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_results_that_name_another_modules_mutants_fail"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_results_that_name_another_modules_mutants_fail ("
@@ -36,7 +36,7 @@ transform = { file = "tools/check-mutmut.py", replace = "    if strays:\n", with
 [[fault]]
 id = "mutmut-no-verdict-counts"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_a_mutant_the_run_left_without_a_verdict_fails"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_mutant_the_run_left_without_a_verdict_fails ("
@@ -47,7 +47,7 @@ transform = { file = "tools/check-mutmut.py", replace = "        if code in UNRE
 [[fault]]
 id = "mutmut-hashes-not-mutmuts"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_function_hashes_are_mutmuts"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_function_hashes_are_mutmuts ("
@@ -57,7 +57,7 @@ transform = { file = "tools/check-mutmut.py", replace = "DUMP = {\"annotate_fiel
 [[fault]]
 id = "mutmut-pragma-reason-unchecked"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_each_changed_scripts_bare_pragma_fails_before_mutmut_runs"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_each_changed_scripts_bare_pragma_fails_before_mutmut_runs ("
@@ -68,7 +68,7 @@ transform = { file = "tools/check-mutmut.py", replace = "        and not REASONE
 [[fault]]
 id = "mutmut-scripts-pathspec-empty"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_the_jobs_steps_ask_the_script_and_run_it_as_these_cases_do"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_the_jobs_steps_ask_the_script_and_run_it_as_these_cases_do ("
@@ -79,7 +79,7 @@ transform = { file = "tools/check-mutmut.py", replace = "SCRIPTS = \":(glob)tool
 [[fault]]
 id = "mutmut-dropped-suite-passes"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_a_suite_that_stops_naming_its_script_fails"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_suite_that_stops_naming_its_script_fails ("
@@ -89,7 +89,7 @@ transform = { file = "tools/check-mutmut.py", replace = "        elif script.bas
 [[fault]]
 id = "mutmut-unnamed-code-caught"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_an_exit_code_mutmut_doesnt_name_fails"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_an_exit_code_mutmut_doesnt_name_fails ("
@@ -100,7 +100,7 @@ transform = { file = "tools/check-mutmut.py", replace = "        if code not in 
 [[fault]]
 id = "mutmut-unchanged-functions-mutated"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_the_real_mutmut_counts_an_untested_change_and_agrees_on_the_hashes"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_the_real_mutmut_counts_an_untested_change_and_agrees_on_the_hashes ("
@@ -111,7 +111,7 @@ transform = { file = "tools/check-mutmut.py", replace = "                    sta
 [[fault]]
 id = "mutmut-changed-function-marked"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_the_real_mutmut_counts_an_untested_change_and_agrees_on_the_hashes"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_the_real_mutmut_counts_an_untested_change_and_agrees_on_the_hashes ("
@@ -121,7 +121,7 @@ transform = { file = "tools/check-mutmut.py", replace = "if cls else f\"x_{node.
 [[fault]]
 id = "mutmut-stats-mark-reaches-children"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_a_suite_that_runs_its_script_from_another_directory_is_measured"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_suite_that_runs_its_script_from_another_directory_is_measured ("
@@ -131,7 +131,7 @@ transform = { file = "tools/check-mutmut.py", replace = "    env[\"PYTHONPATH\"]
 [[fault]]
 id = "mutmut-pass-state-shared"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_a_suites_state_doesnt_outlive_a_pass"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_suites_state_doesnt_outlive_a_pass ("
@@ -141,7 +141,7 @@ transform = { file = "tools/check-mutmut.py", replace = "process_isolation = for
 [[fault]]
 id = "mutmut-none-reached-fails"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_a_base_no_in_process_test_reached_holds_the_head_to_no_count"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_base_no_in_process_test_reached_holds_the_head_to_no_count ("
@@ -152,7 +152,7 @@ transform = { file = "tools/check-mutmut.py", replace = "    stopped = NONE_REAC
 [[fault]]
 id = "mutmut-unreached-base-counts"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_a_base_no_in_process_test_reached_holds_the_head_to_no_count"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_base_no_in_process_test_reached_holds_the_head_to_no_count ("
@@ -162,7 +162,7 @@ transform = { file = "tools/check-mutmut.py", replace = "            elif base a
 [[fault]]
 id = "mutmut-base-for-every-function"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_a_changed_function_none_survives_in_isnt_measured_on_the_base"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_changed_function_none_survives_in_isnt_measured_on_the_base ("
@@ -172,7 +172,7 @@ transform = { file = "tools/check-mutmut.py", replace = "                survive
 [[fault]]
 id = "mutmut-glob-misses-the-function"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_each_side_mutates_only_the_changed_functions_with_their_suites"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_each_side_mutates_only_the_changed_functions_with_their_suites ("
@@ -183,7 +183,7 @@ transform = { file = "tools/check-mutmut.py", replace = "    globs = [f\"{module
 [[fault]]
 id = "mutmut-mutants-not-precompiled"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_the_suites_load_the_mutated_script_compiled_and_show_reads_its_source"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_the_suites_load_the_mutated_script_compiled_and_show_reads_its_source ("
@@ -193,7 +193,7 @@ transform = { file = "tools/check-mutmut.py", replace = "    generate(python, si
 [[fault]]
 id = "mutmut-source-not-restored"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_the_suites_load_the_mutated_script_compiled_and_show_reads_its_source"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_the_suites_load_the_mutated_script_compiled_and_show_reads_its_source ("
@@ -203,7 +203,7 @@ transform = { file = "tools/check-mutmut.py", replace = "            source.repl
 [[fault]]
 id = "mutmut-generation-failure-unchecked"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_mutants_that_cant_be_generated_fail_with_what_was_said"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_mutants_that_cant_be_generated_fail_with_what_was_said ("
@@ -213,7 +213,7 @@ transform = { file = "tools/check-mutmut.py", replace = "    if done.returncode:
 [[fault]]
 id = "mutmut-budget-ignored"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_a_new_functions_survivor_fails_though_the_budget_stopped_the_run"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_new_functions_survivor_fails_though_the_budget_stopped_the_run ("
@@ -223,7 +223,7 @@ transform = { file = "tools/check-mutmut.py", replace = "                if late
 [[fault]]
 id = "mutmut-stopped-run-unread"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_a_function_the_budget_left_short_of_its_count_is_undecided_and_named"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_function_the_budget_left_short_of_its_count_is_undecided_and_named ("
@@ -233,7 +233,7 @@ transform = { file = "tools/check-mutmut.py", replace = "        if code is None
 [[fault]]
 id = "mutmut-undecided-reads-decided"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_more_than_a_partial_base_count_is_undecided"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_more_than_a_partial_base_count_is_undecided ("
@@ -243,7 +243,7 @@ transform = { file = "tools/check-mutmut.py", replace = "            if (more an
 [[fault]]
 id = "mutmut-shard-ignores-load"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_the_heaviest_function_goes_to_the_lightest_shard"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_the_heaviest_function_goes_to_the_lightest_shard ("
@@ -253,7 +253,7 @@ transform = { file = "tools/check-mutmut.py", replace = "        lightest = load
 [[fault]]
 id = "mutmut-detect-ignores-shard"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_the_jobs_steps_ask_the_script_and_run_it_as_these_cases_do"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_the_jobs_steps_ask_the_script_and_run_it_as_these_cases_do ("
@@ -263,7 +263,7 @@ transform = { file = "tools/check-mutmut.py", replace = "                k == 0\
 [[fault]]
 id = "mutmut-progress-silent"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_progress_prints_each_function_as_its_verdicts_arrive"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_progress_prints_each_function_as_its_verdicts_arrive ("
@@ -274,7 +274,7 @@ transform = { file = "tools/check-mutmut.py", replace = "                if line
 [[fault]]
 id = "mutmut-timeout-uncapped"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_each_side_mutates_only_the_changed_functions_with_their_suites"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_each_side_mutates_only_the_changed_functions_with_their_suites ("
@@ -285,7 +285,7 @@ transform = { file = "tools/check-mutmut.py", replace = "timeout_multiplier = 4\
 [[fault]]
 id = "mutmut-stats-failure-not-retried"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_a_stats_pass_that_fails_runs_again_over_the_source"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_stats_pass_that_fails_runs_again_over_the_source ("
@@ -295,7 +295,7 @@ transform = { file = "tools/check-mutmut.py", replace = "        and STATS_FAILE
 [[fault]]
 id = "mutmut-base-share-unbounded"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_the_base_gets_what_the_head_left_of_the_budget"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_the_base_gets_what_the_head_left_of_the_budget ("
@@ -305,7 +305,7 @@ transform = { file = "tools/check-mutmut.py", replace = "else args.budget - (tim
 [[fault]]
 id = "mutmut-rerun-share-unbounded"
 guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py", "-k", "test_a_rerun_gets_what_the_failed_run_left_of_the_share"]
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_rerun_gets_what_the_failed_run_left_of_the_share ("
