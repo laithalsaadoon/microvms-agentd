@@ -186,7 +186,7 @@ run = [
 
 ["ci:fuzz-cli-core"]
 description = "fuzz.yml's `cli-core` job: the CLI's closed-output harness and core's wrap, ignore-rule and context-hash harnesses under libFuzzer, side by side. Needs a nightly toolchain"
-# `+nightly`, because `rust-toolchain.toml` pins stable and libFuzzer needs `-Z`. One harness
+# `+nightly`, because `rust-toolchain.toml` pins a stable release and libFuzzer needs `-Z`. One harness
 # of each crate for one input first, which builds the crate's fuzz binaries for all of its
 # harnesses before any of them fuzzes. Then one harness a vCPU, each with its output in a log
 # of its own, printed whole once all have ended: a failed harness's outside a collapsed group,

@@ -58,19 +58,19 @@ transform = { file = "tools/check-ci-parity.py", replace = "MISE_RUN = re.compil
 
 [[family.fault]]
 id = "ci-parity-rust-channel"
-message = "rust: .github/workflows/ci.yml job `security` installs 'beta', and rust-toolchain.toml says stable"
-transform = { file = ".github/workflows/ci.yml", replace = "          toolchain: stable\n          components: clippy\n      - uses: ./.github/actions/mise\n      - run: mise run ci:security\n", with = "          toolchain: beta\n          components: clippy\n      - uses: ./.github/actions/mise\n      - run: mise run ci:security\n" }
+message = "rust: .github/workflows/ci.yml job `security` installs 'beta', and rust-toolchain.toml says"
+transform = { file = ".github/workflows/ci.yml", replace = "          toolchain: 1.99.0\n          components: clippy\n      - uses: ./.github/actions/mise\n      - run: mise run ci:security\n", with = "          toolchain: beta\n          components: clippy\n      - uses: ./.github/actions/mise\n      - run: mise run ci:security\n" }
 
 [[family.fault]]
 id = "ci-parity-rust-mise"
-message = "rust: mise.toml pins rust = 'beta', and rust-toolchain.toml says stable"
-transform = { file = "mise.toml", replace = "rust = \"stable\"\n", with = "rust = \"beta\"\n" }
+message = "rust: mise.toml pins rust = 'beta', and rust-toolchain.toml says"
+transform = { file = "mise.toml", replace = "rust = { version = \"1.99.0\",", with = "rust = { version = \"beta\"," }
 
 # The floor: a toolchain file with no channel holds the inputs to nothing.
 [[family.fault]]
 id = "ci-parity-rust-floor"
 message = "rust: rust-toolchain.toml has no [toolchain] channel"
-transform = { file = "rust-toolchain.toml", replace = "channel = \"stable\"\n", with = "" }
+transform = { file = "rust-toolchain.toml", replace = "channel = \"1.99.0\"\n", with = "" }
 
 # The sentinel: the toolchain step matcher finding nothing compares nothing.
 [[family.fault]]
