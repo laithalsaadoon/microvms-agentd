@@ -58,7 +58,8 @@ message = "the replay never makes"
 transform = { file = "crates/model-conformance/tests/client_lifecycle.rs", replace = "next == wanted && verdict(completed) == Verdict::Issued", with = "next == wanted && verdict(completed) == Verdict::Ignored" }
 
 # The key floor: a model property that loses its key leaves the replay's claim with nothing to
-# back it, and trace:check can't see that while verify/spec/traced/STATE.toml lists no STATE key (#302).
+# back it. trace:check's model layer sees that too now that STATE-8 is traced (#302); this names
+# the replay's claim that lost its backing.
 [[fault]]
 id = "model-conformance-client-unkeyed-property"
 guard = "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"
@@ -87,8 +88,8 @@ guard = "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"
 run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"]
 expect = "test-failed"
 suite = "rust"
-message = "no safety property of the client model is named for [\"STATE-12\"]"
-transform = { file = "crates/model-conformance/tests/client_lifecycle.rs", replace = "/// It's the sandbox's side of the model's keyed properties: STATE-3 (", with = "/// It's the sandbox's side of the model's keyed properties: STATE-12, STATE-3 (" }
+message = "no safety property of the client model is named for [\"BIND-1\"]"
+transform = { file = "crates/model-conformance/tests/client_lifecycle.rs", replace = "/// It's the sandbox's side of the model's keyed properties, each", with = "/// It's the sandbox's side of the model's keyed properties, BIND-1's, each" }
 
 # The key check on empty input: a source with no tests claims no key, and says so.
 [[fault]]
@@ -143,26 +144,26 @@ suite = "rust"
 message = "the client model's keyed safety properties aren't the ones KEYED names"
 transform = [
   { file = "crates/model/src/client.rs", replace = "                \"STATE-8 a resume completion drops the proxy token\",\n", with = "                \"a resume completion drops the proxy token\",\n" },
-  { file = "crates/model/src/client.rs", replace = "always(\"the installed token is never replaced\"", with = "always(\"STATE-8 the installed token is never replaced\"" },
+  { file = "crates/model/src/client.rs", replace = "                \"STATE-7 the installed token is never replaced\",\n", with = "                \"STATE-8 the installed token is never replaced\",\n" },
 ]
 
 # A claim check-trace.py credits and the scan used to miss: a test inside a nested `mod`
-# whose doc names STATE-12, which no property backs.
+# whose doc names BIND-1, a binding rule no client-model property will ever back.
 [[fault]]
 id = "model-conformance-client-claim-in-nested-mod"
 guard = "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"
 run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"]
 expect = "test-failed"
 suite = "rust"
-message = "no safety property of the client model is named for [\"STATE-12\"]"
-transform = { file = "crates/model-conformance/tests/client_lifecycle.rs", replace = "/// Every requirement key either spec defines.\n", with = "mod window {\n    /// STATE-12: a resume past the window is refused.\n    #[test]\n    fn a_closed_window_refuses() {}\n}\n\n/// Every requirement key either spec defines.\n" }
+message = "no safety property of the client model is named for [\"BIND-1\"]"
+transform = { file = "crates/model-conformance/tests/client_lifecycle.rs", replace = "/// Every requirement key either spec defines.\n", with = "mod window {\n    /// BIND-1: a resume past the window is refused.\n    #[test]\n    fn a_closed_window_refuses() {}\n}\n\n/// Every requirement key either spec defines.\n" }
 
-# The same, for a name check-trace.py's `ident` pattern reads: `fn test_state_12_...`.
+# The same, for a name check-trace.py's `ident` pattern reads: `fn test_bind_1_...`.
 [[fault]]
 id = "model-conformance-client-claim-by-test-prefix"
 guard = "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"
 run = ["cargo", "test", "-p", "model-conformance", "--test", "client_lifecycle", "--", "--exact", "the_keys_the_replay_backs_name_safety_properties_of_the_client_model"]
 expect = "test-failed"
 suite = "rust"
-message = "no safety property of the client model is named for [\"STATE-12\"]"
-transform = { file = "crates/model-conformance/tests/client_lifecycle.rs", replace = "/// Every requirement key either spec defines.\n", with = "#[test]\nfn test_state_12_a_closed_window_refuses() {}\n\n/// Every requirement key either spec defines.\n" }
+message = "no safety property of the client model is named for [\"BIND-1\"]"
+transform = { file = "crates/model-conformance/tests/client_lifecycle.rs", replace = "/// Every requirement key either spec defines.\n", with = "#[test]\nfn test_bind_1_a_closed_window_refuses() {}\n\n/// Every requirement key either spec defines.\n" }

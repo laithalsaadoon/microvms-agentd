@@ -13,8 +13,9 @@
 //! field a `Measured` value could be written into.
 
 use microvms_core::cost::{
-    CalendarDate, DEFAULT_ESTIMATE_LABEL, DEFAULT_RUN_LABEL, DurationP, EstimatedUsd, PlanUsage,
-    RunUsage, compare_residency, estimate_run, pinned_rates, run_report,
+    Budget, CalendarDate, DEFAULT_ESTIMATE_LABEL, DEFAULT_RUN_LABEL, DurationP, EstimatedUsd,
+    OnBreach as CoreOnBreach, PlanUsage, RunUsage, compare_residency, estimate_run, pinned_rates,
+    run_report,
 };
 use microvms_core::prelude::*;
 use serde_json::{Map, Value};
@@ -117,7 +118,7 @@ pub fn cost<O: std::io::Write, E: std::io::Write>(
         comparison_json = comparison.to_json()?;
     }
 
-    // ── the budget gate (#77) ─────────────────────────────────────────────
+    // ── the budget gate (#77), core's `Budget` since #270 ──────────────────
     //
     // Checked against `Total::floor()`, which is the whole estimate when every line
     // priced and a *lower bound* otherwise (COST-4). The design consequence rides
@@ -139,90 +140,25 @@ pub fn cost<O: std::io::Write, E: std::io::Write>(
             ))
             .suggest("--on-breach <warn|abort> is required beside --max-cost"));
         };
-        let budget = EstimatedUsd::parse(max_cost).map_err(|error| {
+        let max = EstimatedUsd::parse(max_cost).map_err(|error| {
             crate::exit::classify(&error).suggest(format!("--max-cost was {max_cost:?}"))
         })?;
-        // The caller's own figure, echoed at the scale they typed it (`1.50` stays
-        // `1.50`), where `amount_string` would restate it at report precision.
-        let budget_figure = budget.amount().to_string();
-
-        let total = report.total();
-        let floor = total.floor();
-        let breached = floor > budget;
-        let unpriced = total.unpriced_phase_names();
-        let caveat = if unpriced.is_empty() {
-            String::new()
-        } else {
-            format!(
-                " — and {} line(s) are unpriced ({}), so the true figure is larger by an \
-                 unknown margin",
-                unpriced.len(),
-                unpriced.join(", ")
-            )
+        let on_breach = match on_breach {
+            crate::cli::OnBreach::Warn => CoreOnBreach::Warn,
+            crate::cli::OnBreach::Abort => CoreOnBreach::Abort,
         };
-        let overage = if breached {
-            Some(EstimatedUsd::new(floor.amount() - budget.amount()).amount_string())
-        } else {
-            None
-        };
+        // Core's verdict (#270): the comparison, its basis and every rendering of it, so a
+        // binding's budget gate answers the same.
+        let verdict = Budget::new(max, on_breach).check(&report);
+        budget_text = verdict.render();
+        budget_dense = verdict.render_dense();
+        budget_json = verdict.to_json();
 
-        budget_text = if breached {
-            let at_least = if unpriced.is_empty() { "" } else { "at least " };
-            format!(
-                "budget: the {} total ${} exceeds --max-cost ${} by {at_least}${}{caveat}",
-                if unpriced.is_empty() {
-                    "estimated"
-                } else {
-                    "priced-floor"
-                },
-                floor.amount_string(),
-                budget.amount_string(),
-                overage.as_deref().unwrap_or_default(),
-            )
-        } else if unpriced.is_empty() {
-            format!(
-                "budget: the estimated total ${} is within --max-cost ${}",
-                floor.amount_string(),
-                budget_figure
-            )
-        } else {
-            // An under-budget verdict from a lower bound proves nothing, and a line
-            // that said "within budget" without this half would be the report lying
-            // by omission — the exact figure COST-4 exists to keep honest.
-            format!(
-                "budget: the priced floor ${} is within --max-cost ${}, but that floor is a \
-                 lower bound{caveat}",
-                floor.amount_string(),
-                budget_figure
-            )
-        };
-        budget_dense = format!(
-            "budget\t{}\t{}\t{}\t{}",
-            budget_figure,
-            if unpriced.is_empty() {
-                "exact"
-            } else {
-                "lower-bound"
-            },
-            if breached { "breached" } else { "within" },
-            overage.as_deref().unwrap_or("-"),
-        );
-        budget_json = serde_json::json!({
-            "maxUsd": budget_figure,
-            "onBreach": match on_breach {
-                crate::cli::OnBreach::Warn => "warn",
-                crate::cli::OnBreach::Abort => "abort",
-            },
-            "basis": if unpriced.is_empty() { "exact" } else { "lower-bound" },
-            "breached": breached,
-            "overageAtLeastUsd": overage,
-        });
-
-        if breached {
+        if verdict.breached() {
             // `warn` rather than `progress`, so `--quiet` does not swallow it: the
             // same reasoning as the staleness warning above, for a bigger figure.
             ctx.out.warn(&budget_text);
-            if on_breach == crate::cli::OnBreach::Abort {
+            if verdict.aborts() {
                 breach_exit = Some(crate::exit::Exit::Precondition);
             }
         }

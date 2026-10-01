@@ -65,12 +65,14 @@ def drive_suspend_resume(cli: Cli, launched: Envelope, results: Results) -> None
 
     print("  suspending")
     suspended = cli.call("suspend", microvm_id, "--region", cli.region)
-    results.eq("suspend reached SUSPENDED", suspended.data.get("state"), "SUSPENDED")
+    results.eq(
+        "STATE-6 suspend reached SUSPENDED", suspended.data.get("state"), "SUSPENDED"
+    )
     time.sleep(SUSPEND_WINDOW_SEC)
 
     print("  resuming")
     resumed = cli.call("resume", microvm_id, "--region", cli.region)
-    results.eq("resume reached RUNNING", resumed.data.get("state"), "RUNNING")
+    results.eq("STATE-7 resume reached RUNNING", resumed.data.get("state"), "RUNNING")
     # The endpoint the service reported, which is measured not to change across a cycle.
     # Asserting it makes that measurement a fact this suite depends on rather than an
     # assumption either client encodes.
