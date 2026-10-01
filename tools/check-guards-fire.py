@@ -1722,7 +1722,9 @@ def check_pass(
     ok = True
     for fault in selected:
         key = command_key(fault)
-        runs = board.get(key, counts[key])
+        # In worker order, not the order the workers finished in: which run is red first, what
+        # the run prints and the log's order don't then depend on which worker was faster.
+        runs = sorted(board.get(key, counts[key]), key=lambda run: run[4])
         if key not in printed:
             printed.add(key)
             print(
