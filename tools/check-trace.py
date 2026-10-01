@@ -646,7 +646,7 @@ def untraced(
     if whole:
         problems += [
             f"{key} is defined in a spec, but no file in {rel(TRACED_DIR)}/ lists it: list it "
-            f"in {rel(TRACED_DIR / (key.rsplit('-', 1)[0] + '.toml'))} with each layer, or a "
+            f"in {rel(TRACED_DIR / (key.rpartition('-')[0] + '.toml'))} with each layer, or a "
             "waiver and its reason"
             for key in sentences
             if key not in traced

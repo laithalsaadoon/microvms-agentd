@@ -949,34 +949,12 @@ class TracedFiles(unittest.TestCase):
         )
 
 
-class OverTheTree(unittest.TestCase):
-    """`main` over the real tree, with some of its globals replaced."""
-
-    def run_main(self, globals_: dict) -> tuple[int, str]:
-        """`main --check` over the real tree with some of its globals replaced: its exit code
-        and its stderr."""
-        stderr = io.StringIO()
-        with (
-            mock.patch.dict(TRACE["main"].__globals__, globals_),
-            mock.patch.object(sys, "argv", ["check-trace.py", "--check"]),
-            contextlib.redirect_stdout(io.StringIO()),
-            contextlib.redirect_stderr(stderr),
-        ):
-            code = TRACE["main"]()
-        return code, stderr.getvalue()
-
-    def real(self) -> dict:
-        sentences = TRACE["spec_keys"]()
-        return load_traced(
-            TRACE["TRACED_DIR"], {key.rsplit("-", 1)[0] for key in sentences}
-        )
-
-    def seeded(self) -> dict[str, str]:
-        """The real specs' sentences and one more, TRAP-99, which no traced file lists."""
-        return {**TRACE["spec_keys"](), "TRAP-99": "A seeded requirement."}
+def seeded_sentences() -> dict[str, str]:
+    """The real specs' sentences and one more, TRAP-99, which no traced file lists."""
+    return {**TRACE["spec_keys"](), "TRAP-99": "A seeded requirement."}
 
 
-class ReadPastRefusals(OverTheTree):
+class ReadPastRefusals(unittest.TestCase):
     """A refused traced file fails the run without hiding the rest: the other files' entries,
     the layers and the threat table are still held, and its problems print first."""
 
@@ -1016,6 +994,25 @@ class ReadPastRefusals(OverTheTree):
         self.assertIn(line, layer_floors({}, traced("CLI-8")))
         self.assertNotIn(line, layer_floors({}, traced("CLI-8"), whole=False))
 
+    def run_main(self, globals_: dict) -> tuple[int, str]:
+        """`main --check` over the real tree with some of its globals replaced: its exit code
+        and its stderr."""
+        stderr = io.StringIO()
+        with (
+            mock.patch.dict(TRACE["main"].__globals__, globals_),
+            mock.patch.object(sys, "argv", ["check-trace.py", "--check"]),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(stderr),
+        ):
+            code = TRACE["main"]()
+        return code, stderr.getvalue()
+
+    def real(self) -> dict:
+        sentences = TRACE["spec_keys"]()
+        return load_traced(
+            TRACE["TRACED_DIR"], {key.rsplit("-", 1)[0] for key in sentences}
+        )
+
     def test_a_refused_file_prints_first_and_the_other_entries_are_still_held(self):
         # The refused file gives up no entry, as `read_traced` leaves it.
         entries = {
@@ -1041,7 +1038,7 @@ class ReadPastRefusals(OverTheTree):
 
     def test_a_stale_doc_is_reported_beside_another_problem(self):
         # The seeded key, traced with no layer: a problem, and a matrix row the doc lacks.
-        sentences = self.seeded()
+        sentences = seeded_sentences()
         entries = self.real()
         entries["TRAP-99"] = Traced("#1", {}, "verify/spec/traced/TRAP.toml")
         code, err = self.run_main(
@@ -1058,14 +1055,16 @@ class ReadPastRefusals(OverTheTree):
         )
 
 
-class EveryKeyIsTraced(OverTheTree):
+class EveryKeyIsTraced(unittest.TestCase):
     """Every key a spec defines is listed in its group's file, with a layer no waiver takes
     away: the rule the ratchet's untraced category is enforced by."""
 
+    run_main = ReadPastRefusals.run_main
+    real = ReadPastRefusals.real
     untraced = staticmethod(TRACE["untraced"])
 
     def test_a_spec_key_no_file_lists_fails_naming_the_file_that_would(self):
-        sentences = self.seeded()
+        sentences = seeded_sentences()
         code, err = self.run_main({"spec_keys": lambda: sentences})
         self.assertEqual(code, 1)
         # The only problem: the matrix renders listed keys, so the doc isn't stale.
