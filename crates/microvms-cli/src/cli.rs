@@ -325,6 +325,31 @@ pub enum Command {
     /// exist in v1) and an identity granted the Terraform stack's `logs_read_policy_arn`.
     Logs(LogsArgs),
 
+    /// List an image's versions: each one's build state, whether `RunMicrovm` launches it, and
+    /// what it was built with.
+    ///
+    /// `status` is `ACTIVE` (launchable) or `INACTIVE` (refused by `RunMicrovm`); `image-set-status`
+    /// changes it. The configuration is the service's readback of the create call, the one
+    /// place a built image reports its base version and size class.
+    #[command(name = "image-versions")]
+    ImageVersions(ImageVersionsArgs),
+
+    /// Retire an image version (`INACTIVE`) or restore it (`ACTIVE`), and read the change back.
+    ///
+    /// The canary and rollback lever: an `INACTIVE` version is refused by `RunMicrovm`, while
+    /// VMs already running from it keep running and its readback stays, where deleting a version
+    /// is irreversible. The command fails when the readback doesn't carry the status asked for,
+    /// so a 200 the service didn't apply doesn't read as a rollback.
+    #[command(name = "image-set-status")]
+    ImageSetStatus(ImageSetStatusArgs),
+
+    /// List an image version's builds, one per Graviton generation, or read one with `--build-id`.
+    ///
+    /// A failed build's reason lives on its build, not on its version. `--build-id` adds the
+    /// snapshot sizes, the only sizes the service reports for anything it builds.
+    #[command(name = "image-builds")]
+    ImageBuilds(ImageBuildsArgs),
+
     /// What a run cost, or what a plan will cost. Every figure labelled.
     ///
     /// Dollars are estimates derived from published rates and never an invoice — only Cost
@@ -1935,6 +1960,52 @@ pub struct LogsArgs {
 }
 
 #[derive(Args, Debug)]
+pub struct ImageVersionsArgs {
+    /// The image: its ARN, or its name, which is looked up in the account.
+    #[arg(value_name = "IMAGE")]
+    pub image: String,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct ImageSetStatusArgs {
+    /// The image: its ARN, or its name, which is looked up in the account.
+    #[arg(value_name = "IMAGE")]
+    pub image: String,
+
+    /// The version, as `image-versions` lists it (a custom image's read `1.0`, `2.0`, ...).
+    #[arg(value_name = "VERSION")]
+    pub image_version: String,
+
+    /// `ACTIVE` to make the version launchable, `INACTIVE` to have `RunMicrovm` refuse it.
+    #[arg(value_name = "STATUS", value_parser = version_status())]
+    pub status: microvms_core::control::ops::VersionStatus,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct ImageBuildsArgs {
+    /// The image: its ARN, or its name, which is looked up in the account.
+    #[arg(value_name = "IMAGE")]
+    pub image: String,
+
+    /// The version whose builds to list.
+    #[arg(value_name = "VERSION")]
+    pub image_version: String,
+
+    /// Read this one build, with its snapshot sizes, rather than listing them all.
+    #[arg(long, value_name = "BUILD_ID")]
+    pub build_id: Option<String>,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
 pub struct CostArgs {
     /// Treat the durations as a plan rather than as timings.
     ///
@@ -2344,6 +2415,15 @@ fn number_of_seconds(raw: &str) -> Result<f64, String> {
         .map_err(|_| format!("{raw:?} is not a number of seconds"))
 }
 
+/// The version statuses, published as the parameter's domain from core's own list and parsed
+/// by core's `FromStr`, so the manifest's `choices` and the parse can't disagree with the model.
+fn version_status()
+-> impl clap::builder::TypedValueParser<Value = microvms_core::control::ops::VersionStatus> {
+    use clap::builder::TypedValueParser as _;
+    clap::builder::PossibleValuesParser::new(microvms_core::constants::IMAGE_VERSION_STATUSES)
+        .try_map(|status| status.parse::<microvms_core::control::ops::VersionStatus>())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2609,6 +2689,9 @@ mod tests {
                 "history",
                 "names",
                 "logs",
+                "image-versions",
+                "image-set-status",
+                "image-builds",
                 "cost",
                 "doctor",
                 "manifest",
