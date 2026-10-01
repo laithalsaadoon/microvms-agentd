@@ -10,7 +10,7 @@ run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p",
 expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_function_whose_survivors_grow_fails_and_shows_each ("
-transform = { file = "tools/check-mutmut.py", replace = "            if len(head.counted) > before:\n", with = "            if False:\n" }
+transform = { file = "tools/check-mutmut.py", replace = "            more = held and len(head.counted) > before\n", with = "            more = False\n" }
 
 # The floor: a run that wrote no results reads as a script with nothing to mutate.
 [[fault]]
@@ -177,3 +177,105 @@ expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_each_side_mutates_only_the_changed_functions_with_their_suites ("
 transform = { file = "tools/check-mutmut.py", replace = "    globs = [f\"{module_name(p)}.{k}*\" for p, keys", with = "    globs = [f\"{module_name(p)}.{k}__mutmut_*\" for p, keys" }
+
+# The mutated script saved as source: every load in every test compiles it again, which made
+# #495's stats pass 986 s of test time against 244 s for the plain suite.
+[[fault]]
+id = "mutmut-mutants-not-precompiled"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_suites_load_the_mutated_script_compiled_and_show_reads_its_source ("
+transform = { file = "tools/check-mutmut.py", replace = "    generate(python, side, wanted)\n", with = "    pass\n" }
+
+# The compiled script left in place after the run, so a survivor's diff reads bytecode.
+[[fault]]
+id = "mutmut-source-not-restored"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_suites_load_the_mutated_script_compiled_and_show_reads_its_source ("
+transform = { file = "tools/check-mutmut.py", replace = "            source.replace(side / \"mutants\" / path)\n", with = "            pass\n" }
+
+# Mutants that can't be generated read as a script with nothing to mutate.
+[[fault]]
+id = "mutmut-generation-failure-unchecked"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_mutants_that_cant_be_generated_fail_with_what_was_said ("
+transform = { file = "tools/check-mutmut.py", replace = "    if done.returncode:\n", with = "    if False:\n" }
+
+# The budget never stops a run, so a job's wall time follows its mutants.
+[[fault]]
+id = "mutmut-budget-ignored"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_new_functions_survivor_fails_though_the_budget_stopped_the_run ("
+transform = { file = "tools/check-mutmut.py", replace = "                if late:\n", with = "                if False:\n" }
+
+# A run the budget stopped reads as a failed one, so every big change fails at its budget.
+[[fault]]
+id = "mutmut-stopped-run-unread"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_function_the_budget_left_short_of_its_count_is_undecided_and_named ("
+transform = { file = "tools/check-mutmut.py", replace = "        if code is None and stopped:\n", with = "        if False:\n" }
+
+# A count the budget left short reads as decided: a partial base count holds a head to it.
+[[fault]]
+id = "mutmut-undecided-reads-decided"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_more_than_a_partial_base_count_is_undecided ("
+transform = { file = "tools/check-mutmut.py", replace = "            if (more and base and base.unrun) or (held and not more and head.unrun):\n", with = "            if False:\n" }
+
+# Every function goes to the first shard, which then measures the whole change alone.
+[[fault]]
+id = "mutmut-shard-ignores-load"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_heaviest_function_goes_to_the_lightest_shard ("
+transform = { file = "tools/check-mutmut.py", replace = "        lightest = load.index(min(load))\n", with = "        lightest = 0\n" }
+
+# Every shard answers that it has something to measure, so each sets up a toolchain for nothing.
+[[fault]]
+id = "mutmut-detect-ignores-shard"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_jobs_steps_ask_the_script_and_run_it_as_these_cases_do ("
+transform = { file = "tools/check-mutmut.py", replace = "                k == 0\n", with = "                True\n" }
+
+# A slow run prints nothing until it ends.
+[[fault]]
+id = "mutmut-progress-silent"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_progress_prints_each_function_as_its_verdicts_arrive ("
+transform = { file = "tools/check-mutmut.py", replace = "                if lines != printed:\n", with = "                if False:\n" }
+
+# mutmut's own per-mutant limit, 15 times its tests' time: one hung mutant of a function the
+# whole fire suite reaches held a worker for close to an hour.
+[[fault]]
+id = "mutmut-timeout-uncapped"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_each_side_mutates_only_the_changed_functions_with_their_suites ("
+transform = { file = "tools/check-mutmut.py", replace = "timeout_multiplier = 4\n", with = "" }

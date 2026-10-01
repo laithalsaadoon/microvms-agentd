@@ -52,9 +52,11 @@ What it does:
      mutants for them into the script the suites load, and `mutmut run <module>.<function>*`
      names the ones it runs. The glob matches the function's own name as well as its mutants,
      which is how mutmut finds the tests to run clean: with `__mutmut_*` in it, it found none and
-     ran every suite clean. A change pays for what it touched.
-     The base run measures only the functions some mutant survives in on the head, since one
-     none survives in can't have more than its base had.
+     ran every suite clean. A change pays for what it touched. The mutants are generated before
+     mutmut runs and the mutated script saved compiled (`GENERATE`), so no load in a suite
+     compiles them again. The base run measures only the functions some mutant survives in on
+     the head, since one none survives in can't have more than its base had. While mutmut runs,
+     each function's count of mutants run and survived prints as it moves.
   6. Reads each function's verdicts from mutmut's results (`mutants/<script>.meta`) and counts
      the mutants whose tests passed or ran out of time. A test run a signal ended, other than the
      one mutmut's timeout sends, is caught: its tests didn't pass. One no test reached in-process
@@ -64,25 +66,38 @@ What it does:
      base's suites didn't measure, or that no in-process test reached on the base, has no base
      count, and isn't held to one.
 
+`--shard k/N` measures shard k's share of the changed functions, heaviest first (by syntax
+nodes, which track mutants) onto the lightest shard, each with its base, so a shard's verdict
+needs no other's. `--budget SECONDS` bounds a run: the head side's mutmut gets `HEAD_SHARE` of
+it, the base side what's left, and each is stopped when its share runs out. A mutant a stopped
+run didn't reach has no verdict, and a function with one is decided by what its counts already
+settle: survivors only grow with the mutants left, and so does a base's count, so a head count
+above a whole base count fails, a new function with a survivor fails, and a head count no
+higher than a partial base count passes. Any other function is undecided: it passes, and the
+run names it.
+
 It fails rather than read a count from nothing: mutmut exiting non-zero while a changed function
 has mutants, a results file that's missing or names a mutant not of its script, a mutant left
 without a verdict or with an exit code mutmut doesn't name, and a function hash that isn't the
 one mutmut recorded, which would mean the functions read as changed aren't the ones mutmut sees.
 
 `--detect` stops after step 1 and prints `python=true` or `python=false`, for CI's first step to
-append to `$GITHUB_OUTPUT` before it installs anything. It needs nothing but git, so the runner's
-`python3` runs it.
+append to `$GITHUB_OUTPUT` before it installs anything: with `--shard k/N`, shard 0 answers true
+whenever a script changed, since it reports what no shard measures, and another when it has a
+changed function. It needs nothing but git, so the runner's `python3` runs it.
 
 mutmut runs from this repository's locked `dev` group (`uv run --locked --project <repo>
 mutmut`), the environment the unit suites run in. `--mutmut PATH` names another executable (the
-unit tests hand it a fake), `--jobs N` is mutmut's `--max-children`, and `--keep` leaves the
-scratch directory for `mutmut browse` (its worktrees go with `git worktree remove`).
+unit tests hand it a fake) and `--python PATH` another interpreter for `GENERATE`; `--jobs N` is
+mutmut's `--max-children`, and `--keep` leaves the scratch directory for `mutmut browse` (its
+worktrees go with `git worktree remove`).
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
+import dataclasses
 import hashlib
 import io
 import json
@@ -93,6 +108,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import tokenize
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -105,6 +121,8 @@ SCRIPTS = ":(glob)tools/*.py"
 PATHSPEC = ("--", SCRIPTS)
 SUITE = re.compile(r"^tools/test_[^/]*\.py$")
 MUTMUT = ["uv", "run", "--locked", "--project", str(HOME), "mutmut"]
+# The interpreter of the environment mutmut runs in, which runs `GENERATE`.
+PYTHON = ["uv", "run", "--locked", "--project", str(HOME), "python"]
 
 # mutmut 3.8.0's names for its exit codes (`status_by_exit_code` in `mutmut/stats.py`), less
 # its 35, "suspicious", which nothing in 3.8.0 assigns. mutmut calls any code its table lacks
@@ -188,6 +206,7 @@ pytest_add_cli_args =
     no:cacheprovider
 use_git_change_detection = false
 process_isolation = forkserver
+timeout_multiplier = 4
 """
 # What marks a function mutmut isn't to touch in the copy of a script it reads: every function
 # the run doesn't mutate gets it on its header, so mutmut neither writes that function's mutants
@@ -211,8 +230,40 @@ if os.environ.get("MUTANT_UNDER_TEST") == "stats":
 # stops with exit 1 and every mutant unrun: the verdict "no tests" for each. Only the changed
 # functions are trampolined, so a change whose functions no in-process test calls ends this way.
 NONE_REACHED = "could not find any test case for any mutant"
+# Writes each script's mutants the way `mutmut run` does (its own `create_mutants_for_file`),
+# then saves the mutated script as compiled code under its own name, newer than its source, so
+# `mutmut run` takes it as already generated. Python runs a file that starts with the bytecode
+# magic number as compiled code, through `runpy.run_path` and as `python <script>` alike, so no
+# load compiles it again. check-guards-fire.py with the twelve functions #495 changes has 1,306
+# mutants, and its mutated source took 6 to 8 s to compile, once for every load in every test:
+# the stats pass took 986 s of test time against 244 s for the plain suite, and each mutant's
+# tests paid it again. The mutated source stays beside it, which `restore` puts back for `mutmut
+# show`. A suite that reads its script as text reads bytecode in a run, and fails mutmut's stats
+# pass: it copies the script with `read_bytes`, as test_check_mutmut.py's CI case does.
+GENERATE = """
+import importlib.util, marshal, os, sys
+from pathlib import Path
+import mutmut.__main__ as mutmut
+
+for path in map(Path, sys.argv[1:]):
+    out = Path("mutants") / path
+    made = mutmut.create_mutants_for_file(path, out)
+    if made.error:
+        raise made.error
+    source = out.read_bytes()
+    out.with_name(out.name + ".source").write_bytes(source)
+    code = compile(source, str(out.resolve()), "exec")
+    out.write_bytes(importlib.util.MAGIC_NUMBER + bytes(12) + marshal.dumps(code))
+    newer = path.stat().st_mtime_ns + 10**9
+    os.utime(out, ns=(newer, newer))
+"""
+# How often a run's progress is read and printed, and the share of `--budget` the head side gets
+# before it's stopped; the base side has the rest.
+POLL = 60
+HEAD_SHARE = 0.6
 # The end of mutmut's log a failure prints, and the scratch directory's name.
 TAIL = 40
+SPINNER = re.compile("[\u2800-\u28ff] ")
 PREFIX = "check-mutmut-"
 
 
@@ -333,6 +384,8 @@ class Script:
     on_base: list[str]
     head_suites: list[str] = field(default_factory=list)
     base_suites: list[str] = field(default_factory=list)
+    # Each function's weight, which `shard` balances.
+    weights: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -343,6 +396,8 @@ class Tally:
     total: int = 0
     counted: list[tuple[str, str]] = field(default_factory=list)
     unreached: int = 0
+    # Mutants the run's budget stopped it before, which have no verdict.
+    unrun: int = 0
 
 
 def plan(
@@ -362,6 +417,7 @@ def plan(
         )
         functions = [k for k, h in head_hashes.items() if base_hashes.get(k) != h]
         script = Script(change, functions, [k for k in functions if k in base_hashes])
+        script.weights = weights(head)
         if functions:
             script.head_suites = suites(root, None, module_name(change.path))
             if change.base:
@@ -440,15 +496,49 @@ def prepare(
     )
 
 
-def run_mutmut(mutmut: list[str], side: Path, globs: list[str], jobs: list[str]) -> int:
-    """mutmut over `globs` in `side`, its output in `side/mutmut.log`; its exit code. Every
-    Python it starts imports `SITE` first."""
+def progress(side: Path, wanted: dict[str, list[str]]) -> list[str]:
+    """One line for each function of `wanted` with mutants: how many have a verdict, of how
+    many, and how many survived. Empty while mutmut hasn't written its results."""
+    lines = []
+    for path, keys in wanted.items():
+        try:
+            verdicts = json.loads((side / "mutants" / f"{path}.meta").read_bytes())
+            verdicts = verdicts["exit_code_by_key"]
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        for key in keys:
+            mine = [
+                code
+                for name, code in verdicts.items()
+                if name.startswith(f"{module_name(path)}.{key}__mutmut_")
+            ]
+            if mine:
+                done = sum(code is not None for code in mine)
+                lines.append(
+                    f"{shown(key)} {done} of {len(mine)} run, {mine.count(0)} survived"
+                )
+    return lines
+
+
+def run_mutmut(
+    mutmut: list[str],
+    side: Path,
+    wanted: dict[str, list[str]],
+    jobs: list[str],
+    seconds: float | None,
+) -> tuple[int, bool]:
+    """mutmut over `wanted` in `side`, its output in `side/mutmut.log`: its exit code, and
+    whether it was stopped after `seconds`. Every Python it starts imports `SITE` first. Each
+    function's progress prints as it moves, a line at most every `POLL` seconds."""
     (side / "site").mkdir()
     (side / "site" / "sitecustomize.py").write_text(SITE)
     env = clean_env()
     env["PYTHONPATH"] = os.pathsep.join(
         filter(None, [str(side / "site"), env.get("PYTHONPATH")])
     )
+    globs = [f"{module_name(p)}.{k}*" for p, keys in wanted.items() for k in keys]
+    printed: list[str] = []
+    deadline = None if seconds is None else time.monotonic() + seconds
     with (side / "mutmut.log").open("w") as log:
         proc = subprocess.Popen(
             [*mutmut, "run", *jobs, *globs],
@@ -459,7 +549,29 @@ def run_mutmut(mutmut: list[str], side: Path, globs: list[str], jobs: list[str])
             start_new_session=True,
         )
         try:
-            return proc.wait()
+            while True:
+                left = None if deadline is None else deadline - time.monotonic()
+                try:
+                    return proc.wait(
+                        timeout=POLL if left is None else max(0, min(POLL, left))
+                    ), False
+                except subprocess.TimeoutExpired:
+                    pass
+                lines = progress(side, wanted)
+                if lines != printed:
+                    printed = lines
+                    print(
+                        f"check-mutmut: {side.name}: {'; '.join(lines)}",
+                        file=sys.stderr,
+                    )
+                if deadline is None:
+                    continue
+                # `>` instead reads the same: a deadline met exactly and one just passed
+                # can't be told apart.
+                late = time.monotonic() >= deadline  # pragma: no mutate (ties)
+                if late:
+                    os.killpg(proc.pid, signal.SIGTERM)
+                    return proc.wait(), True
         finally:
             # A signal or an error here ends mutmut's session, its workers with it.
             if proc.poll() is None:
@@ -490,11 +602,15 @@ def results(side: Path, path: str) -> dict:
     return data
 
 
-def tally(data: dict, path: str, key: str) -> Tally:
-    """Count one function's mutants from its script's results. One without a verdict fails."""
+def tally(data: dict, path: str, key: str, stopped: bool = False) -> Tally:
+    """Count one function's mutants from its script's results. One without a verdict fails,
+    unless the run was `stopped` at its budget, which leaves it unrun."""
     out = Tally()
     for name, code in data["exit_code_by_key"].items():
         if not name.startswith(f"{module_name(path)}.{key}__mutmut_"):
+            continue
+        if code is None and stopped:
+            out.unrun += 1
             continue
         if code in UNREAD:
             raise Failure(
@@ -530,24 +646,55 @@ def check_hashes(data: dict, path: str, source: bytes) -> None:
 
 
 def log_tail(side: Path) -> str:
-    """The end of mutmut's log, each spinner redraw a line of its own."""
+    """The end of mutmut's log, each redraw a line of its own, without its spinner's frames: a
+    braille dot pattern and the step it's on, which filled the whole tail of a run that failed in
+    its stats pass."""
     lines = (side / "mutmut.log").read_bytes().decode(errors="replace").splitlines()
-    return "\n".join([line for line in lines if line.strip()][-TAIL:])
+    kept = [line for line in lines if line.strip() and not SPINNER.match(line)]
+    return "\n".join(kept[-TAIL:])
+
+
+def generate(python: list[str], side: Path, wanted: dict[str, list[str]]) -> None:
+    """Write each script's mutants, saved compiled (`GENERATE`)."""
+    done = subprocess.run(
+        [*python, "-c", GENERATE, *wanted],
+        cwd=side,
+        capture_output=True,
+        text=True,
+    )
+    if done.returncode:
+        raise Failure(
+            f"generating the mutants in {side} exited {done.returncode}:\n"
+            f"{done.stdout}{done.stderr}".rstrip()
+        )
+
+
+def restore(side: Path, wanted: dict[str, list[str]]) -> None:
+    """Put each mutated script's source back where its compiled code was, for `mutmut show`."""
+    for path in wanted:
+        source = side / "mutants" / f"{path}.source"
+        if source.exists():
+            source.replace(side / "mutants" / path)
 
 
 def measure(
     mutmut: list[str],
+    python: list[str],
     root: Path,
     commit: str,
     side: Path,
     wanted: dict[str, list[str]],
     selected: list[str],
     jobs: list[str],
+    seconds: float | None = None,
 ) -> dict[tuple[str, str], Tally]:
     """Mutate the `wanted` functions of each script at `commit`, and tally each one."""
     prepare(root, commit, side, wanted, selected)
-    globs = [f"{module_name(p)}.{k}*" for p, keys in wanted.items() for k in keys]
-    code = run_mutmut(mutmut, side, globs, jobs)
+    generate(python, side, wanted)
+    try:
+        code, budget = run_mutmut(mutmut, side, wanted, jobs, seconds)
+    finally:
+        restore(side, wanted)
     failed = Failure(
         f"mutmut exited {code} in {side}; the end of its log:\n{log_tail(side)}"
     )
@@ -558,14 +705,19 @@ def measure(
         if stopped:
             for found in data.values():
                 found["exit_code_by_key"] = dict.fromkeys(found["exit_code_by_key"], 33)
-        out = {(p, k): tally(data[p], p, k) for p, keys in wanted.items() for k in keys}
+        out = {
+            (p, k): tally(data[p], p, k, budget)
+            for p, keys in wanted.items()
+            for k in keys
+        }
     except Failure:
-        if code:
+        if code and not budget:
             raise failed from None
         raise
     # mutmut refuses names that match no mutant, which is the right answer when no changed
-    # function has anything to mutate. Any other failure stands.
-    if code and not stopped and any(t.total for t in out.values()):
+    # function has anything to mutate. Any other failure stands, but a run its budget stopped
+    # ends with whatever code the signal leaves.
+    if code and not budget and not stopped and any(t.total for t in out.values()):
         raise failed
     for path in wanted:
         check_hashes(data[path], path, (side / path).read_bytes())
@@ -591,32 +743,43 @@ def verdict(
     bases: dict[tuple[str, str], Tally],
 ) -> int:
     """Print each changed function's count against its base count; 1 when one grew."""
-    grew = []
+    grew, undecided = [], []
     for script in measured:
         print(f"  {script.change.path}, measured by {', '.join(script.head_suites)}:")
         for key in script.functions:
             head = heads[(script.change.path, key)]
             base = bases.get((script.change.base, key))
             before = len(base.counted) if base else 0
+            held = True
             if key not in script.on_base:
                 origin = "new"
             elif base and base.total and base.unreached == base.total:
                 # Adding the first test that reaches a function in-process can't fail a change
                 # for what that test leaves alive: the base had no count to hold it to.
-                origin = "no in-process test reached it on the base"
-                before = len(head.counted)
+                origin, held = "no in-process test reached it on the base", False
+            elif base and base.unrun:
+                origin = f"at least {before} on the base, {base.unrun} not run within the budget"
             elif base:
                 origin = f"{before} on the base"
             elif script.base_suites and not head.counted:
                 origin = "none survive, so the base isn't measured"
             else:
-                origin, before = "not measured on the base", len(head.counted)
+                origin, held = "not measured on the base", False
             line = f"    {shown(key)}: {len(head.counted)} of {head.total} survive ({origin})"
             if head.unreached:
                 line += (
                     f", and {head.unreached} no in-process test reached aren't counted"
                 )
-            if len(head.counted) > before:
+            if head.unrun:
+                line += f", and {head.unrun} weren't run within the budget"
+            more = held and len(head.counted) > before
+            # A run the budget stopped decides what its counts already settle: survivors only
+            # grow with the mutants left, and so does the base's count, so more than a whole
+            # base count fails, and no more than a partial one passes. The rest is undecided.
+            if (more and base and base.unrun) or (held and not more and head.unrun):
+                line += ": NOT DECIDED within the budget"
+                undecided.append(f"{shown(key)} in {script.change.path}")
+            elif more:
                 line += ": MORE"
                 grew.append((script.change.path, key, head.counted, before))
             print(line)
@@ -629,11 +792,78 @@ def verdict(
         )
         for name, status in counted:
             print(f"\n  {name}: {status}\n{show(mutmut, side, name)}", file=sys.stderr)
+    if undecided:
+        print(
+            f"check-mutmut: the budget ran out before {len(undecided)} changed functions were"
+            f" decided, and they pass undecided: {', '.join(undecided)}"
+        )
     if not grew:
         print(
             "check-mutmut: no changed function has more surviving mutants than on the base"
         )
     return 1 if grew else 0
+
+
+def weights(source: str | bytes) -> dict[str, int]:
+    """Each function mutmut mutates, by its key, with its count of syntax nodes: the measure of
+    how many mutants it has that `shard` balances on, since counting them takes mutmut."""
+    out = {}
+
+    def visit(body: list[ast.stmt], cls: str | None = None) -> None:
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                key = f"xǁ{cls}ǁ{node.name}" if cls else f"x_{node.name}"
+                out[key] = sum(1 for _ in ast.walk(node))
+            elif isinstance(node, ast.ClassDef):
+                visit(node.body, f"{cls}.{node.name}" if cls else node.name)
+
+    visit(ast.parse(source).body)
+    return out
+
+
+def shard(measured: list[Script], k: int, n: int) -> list[Script]:
+    """The scripts of shard `k` of `n`, each with its share of the changed functions: heaviest
+    first onto the lightest shard, a tie in weight to the function first in path and key order
+    and a tie in load to the lower shard. Each function's head and base runs in its shard, so a
+    shard's verdict needs no other's."""
+    if n == 1:
+        return measured
+    items = sorted(
+        (
+            (-s.weights[key], s.change.path, key)
+            for s in measured
+            for key in s.functions
+        ),
+    )
+    mine = set()
+    # Every shard starts from one load, so which load it is doesn't change the split.
+    load = [0] * n  # pragma: no mutate (any one starting load is the same split)
+    for weight, path, key in items:
+        lightest = load.index(min(load))
+        load[lightest] -= weight
+        if lightest == k:
+            mine.add((path, key))
+    out = []
+    for script in measured:
+        functions = [
+            key for key in script.functions if (script.change.path, key) in mine
+        ]
+        if functions:
+            on_base = [key for key in script.on_base if key in functions]
+            out.append(
+                dataclasses.replace(script, functions=functions, on_base=on_base)
+            )
+    print(
+        f"check-mutmut: shard {k} of {n} measures {sum(len(s.functions) for s in out)} of"
+        f" {sum(len(s.functions) for s in measured)} changed functions",
+        file=sys.stderr,
+    )
+    return out
+
+
+def measurable(scripts: list[Script]) -> list[Script]:
+    """The scripts with a changed function and a suite that names them."""
+    return [s for s in scripts if s.functions and s.head_suites]
 
 
 def gate(
@@ -642,13 +872,12 @@ def gate(
     scripts, problems = plan(root, merge_base, found)
     if problems:
         raise Failure("\n  ".join(["a no-mutate pragma needs its reason:", *problems]))
-    measured = []
     for script in scripts:
         path, module = script.change.path, module_name(script.change.path)
         if not script.functions:
             print(f"check-mutmut: {path}: no function changed, so nothing to mutate")
         elif script.head_suites:
-            measured.append(script)
+            pass
         elif script.base_suites:
             raise Failure(
                 f"{', '.join(script.base_suites)} loaded {script.change.base} under its module name"
@@ -660,10 +889,15 @@ def gate(
                 f"check-mutmut: {path}: no suite loads it as `{module}`, so its"
                 f" {len(script.functions)} changed functions aren't mutated"
             )
+    measured = shard(measurable(scripts), *args.shard)
     if not measured:
         return 0
     mutmut = [args.mutmut] if args.mutmut else MUTMUT
+    python = [args.python] if args.python else PYTHON
     jobs = ["--max-children", args.jobs] if args.jobs else []
+    # Each side's share of the budget counts from when its mutmut starts, and the base gets
+    # what the head left of it.
+    head_seconds = None if args.budget is None else args.budget * HEAD_SHARE
     work = Path(tempfile.mkdtemp(prefix=PREFIX))
     # CI cancelling the job sends SIGTERM, and unwinding through `finally` removes the worktrees.
     previous = signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
@@ -675,8 +909,22 @@ def gate(
         )
         head = {s.change.path: s.functions for s in measured}
         head_suites = sorted({x for s in measured for x in s.head_suites})
+        begun = time.monotonic()
         heads = measure(
-            mutmut, root, snapshot(root, work), work / "head", head, head_suites, jobs
+            mutmut,
+            python,
+            root,
+            snapshot(root, work),
+            work / "head",
+            head,
+            head_suites,
+            jobs,
+            head_seconds,
+        )
+        left = (
+            None
+            if args.budget is None
+            else max(0, args.budget - (time.monotonic() - begun))
         )
         # The base run mutates the changed functions the base has and its suites measured, and
         # of those only the ones some mutant survives in here: a function none survives in has
@@ -693,7 +941,15 @@ def gate(
             {x for s in measured if s.change.base in on_base for x in s.base_suites}
         )
         bases = on_base and measure(
-            mutmut, root, merge_base, work / "base", on_base, base_suites, jobs
+            mutmut,
+            python,
+            root,
+            merge_base,
+            work / "base",
+            on_base,
+            base_suites,
+            jobs,
+            left,
         )
         return verdict(mutmut, work / "head", measured, heads, bases or {})
     finally:
@@ -709,13 +965,30 @@ def gate(
             shutil.rmtree(work)
 
 
+def shard_spec(text: str) -> tuple[int, int]:
+    """`k/N`, with 0 <= k < N."""
+    parts = text.split("/")
+    if not (
+        len(parts) == 2
+        and all(part.isascii() and part.isdigit() for part in parts)
+        and int(parts[0]) < int(parts[1])
+    ):
+        raise argparse.ArgumentTypeError(
+            f"--shard takes k/N with 0 <= k < N; got {text}"
+        )
+    return int(parts[0]), int(parts[1])
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--base", default="origin/main")
     parser.add_argument("--root")
     parser.add_argument("--detect", action="store_true")
     parser.add_argument("--mutmut")
+    parser.add_argument("--python")
     parser.add_argument("--jobs")
+    parser.add_argument("--shard", type=shard_spec, default=(0, 1))
+    parser.add_argument("--budget", type=float)
     parser.add_argument("--keep", action="store_true")
     args = parser.parse_args(argv)
     try:
@@ -729,7 +1002,14 @@ def main(argv: list[str] | None = None) -> int:
                 or f"no script changes against {args.base}",
                 file=sys.stderr,
             )
-            print(f"python={str(bool(found)).lower()}")
+            # Shard 0 runs whenever a script changed, since it reports what no shard measures;
+            # another runs when it has a changed function to measure.
+            k, n = args.shard
+            runs = bool(found) and (
+                k == 0
+                or bool(shard(measurable(plan(root, merge_base, found)[0]), k, n))
+            )
+            print(f"python={str(runs).lower()}")
             return 0
         if not found:
             print(f"check-mutmut: no script in tools/ changed against {args.base}")
