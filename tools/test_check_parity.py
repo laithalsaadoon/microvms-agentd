@@ -385,14 +385,15 @@ class RuleTests(FixtureCase):
         `parity-check-takes-a-gap` (the refusal is dropped, and both gaps pass).
         """
         self.table = TRACKED
-        gap = "an exemption with an issue is a parity gap"
-        problems = self.problems()
-        for where in ("file-exists: cli", "type Sandbox: ts: region"):
-            self.assertTrue(
-                any(problem.startswith(f"{where}: {gap}") for problem in problems),
-                f"{where}: {problems}",
-            )
-        self.assertEqual(len(problems), 2, problems)
+        gap = (
+            "an exemption with an issue is a parity gap, and parity-gap is enforced at zero "
+            "(verify/ratchet/decisions.toml): give the surface the capability, or drop the "
+            "issue and say why the surface won't have it"
+        )
+        self.assertEqual(
+            sorted(self.problems()),
+            [f"file-exists: cli: {gap}", f"type Sandbox: ts: region: {gap}"],
+        )
 
     def test_an_empty_griffe_dump_fails_on_the_sentinels(self):
         self.griffe["members"] = []

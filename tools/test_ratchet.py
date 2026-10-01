@@ -1441,8 +1441,14 @@ class ParityGapTests(unittest.TestCase):
         # The floor: with parity-gap enforced at zero (#280), a table the collector read nothing
         # from would pass as every gap closed.
         scope = self.scope_with('[flag_groups]\nconnection = ["name"]\n')
-        with self.assertRaisesRegex(SystemExit, "printed no exemption for"):
+        with self.assertRaises(SystemExit) as raised:
             RATCHET["parity_gaps"](scope)
+        self.assertEqual(
+            str(raised.exception),
+            f"check-parity.py --exemptions printed no exemption for {scope.parity_table}: a "
+            "capability table with none is one the collector didn't read, and every gap in it "
+            "would read as closed",
+        )
 
     def test_a_scope_without_a_table_has_no_gaps(self):
         # The throwaway workspaces the other collector tests build have no table.
