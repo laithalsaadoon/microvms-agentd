@@ -56,7 +56,6 @@ mod manifest;
 mod provision;
 mod render;
 mod seam;
-mod sync;
 mod tui;
 
 use std::process::ExitCode;

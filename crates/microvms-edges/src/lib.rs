@@ -36,6 +36,7 @@ pub mod provision;
 #[cfg(test)]
 mod provision_fuzz;
 pub mod session;
+pub mod workspace;
 
 /// The version of the daemon release `provision` fetches by default.
 ///
