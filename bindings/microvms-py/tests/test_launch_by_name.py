@@ -71,3 +71,15 @@ def test_an_image_arn_goes_straight_to_the_launch() -> None:
         "arn:aws:lambda:us-east-1:123456789012:microvm-image:wanted-image"
     )
     assert "for RunMicrovm" in message, message
+
+
+def test_identity_on_run_reaches_the_launch_request() -> None:
+    """`identity=True` reaches the core's request (#263): the core refuses a stable client
+    token with an identity, locally, and the same launch without one reaches its first call."""
+    arn = "arn:aws:lambda:us-east-1:123456789012:microvm-image:wanted-image"
+    stable = {"image_identifier": arn, "client_token": "ct-1", "agent_token": "tok"}
+    sandbox = microvms.Sandbox(microvms.Region.us_east_1())
+    with pytest.raises(microvms.InvalidArgError, match="identity=false"):
+        sandbox.run(identity=True, **stable)
+    with pytest.raises(microvms.CredentialsError, match="for RunMicrovm"):
+        microvms.Sandbox(microvms.Region.us_east_1()).run(identity=False, **stable)

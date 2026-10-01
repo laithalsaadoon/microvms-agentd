@@ -372,6 +372,16 @@ pub enum Command {
     /// never `$0.00`.
     Cost(CostArgs),
 
+    /// The egress posture `run` with these options would report, without launching.
+    ///
+    /// Takes `run`'s egress flags, its microvm.toml and its region, merged as `run` merges them,
+    /// and answers core's `egress_posture_for`: one of `open`, `unsealed`, `best-effort` or
+    /// `sealed`, or the refusal the launch would raise. No AWS call and no credentials, so a
+    /// script can tell before a build whether a no-network task is satisfiable. Only `sealed`
+    /// is network isolation, and no launch option answers it.
+    #[command(name = "egress-posture")]
+    EgressPosture(EgressPostureArgs),
+
     /// Check every prerequisite and say which one is wrong.
     ///
     /// The command that saves an hour on a first attempt. Credentials, the region the
@@ -1497,6 +1507,29 @@ pub struct KeepaliveArgs {
 
     #[command(flatten)]
     pub attach: AttachFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+/// `egress-posture`'s arguments: `run`'s egress flags, config and region, with `run`'s
+/// parse attributes, so a command line that `run` refuses is refused here the same way.
+#[derive(Args, Debug)]
+pub struct EgressPostureArgs {
+    /// As `run --egress`: request the managed INTERNET_EGRESS connector.
+    #[arg(long, conflicts_with = "egress_network_connectors")]
+    pub egress: bool,
+
+    /// As `run --egress-network-connector`: an existing VPC network connector ARN. Repeatable.
+    #[arg(long = "egress-network-connector", value_name = "ARN")]
+    pub egress_network_connectors: Vec<String>,
+
+    /// As `run --deny-egress`: the advisory proxy variables. Not isolation.
+    #[arg(long, conflicts_with = "egress")]
+    pub deny_egress: bool,
+
+    #[command(flatten)]
+    pub config: ConfigFlags,
 
     #[command(flatten)]
     pub region: RegionFlags,
@@ -2916,6 +2949,7 @@ mod tests {
                 "image-set-status",
                 "image-builds",
                 "cost",
+                "egress-posture",
                 "doctor",
                 "manifest",
                 "constants",

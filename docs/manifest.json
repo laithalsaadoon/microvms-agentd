@@ -25,6 +25,7 @@
         "autoResume": false,
         "denyEgress": false,
         "egress": false,
+        "identity": false,
         "loggingDisabled": false,
         "maxDurationSeconds": 3600,
         "maxIdleSeconds": 600,
@@ -3966,6 +3967,90 @@
         ],
         "responseType": "microvm.cost",
         "summary": "What a run cost, or what a plan will cost. Every figure labelled",
+        "supportsJson": true
+      },
+      {
+        "alternateResponse": null,
+        "name": "egress-posture",
+        "parameters": [
+          {
+            "choices": null,
+            "default": null,
+            "help": "As `run --egress`: request the managed INTERNET_EGRESS connector",
+            "name": "egress",
+            "positional": false,
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "As `run --egress-network-connector`: an existing VPC network connector ARN. Repeatable",
+            "name": "egress-network-connector",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "As `run --deny-egress`: the advisory proxy variables. Not isolation",
+            "name": "deny-egress",
+            "positional": false,
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Read this project config file instead of ./microvm.toml",
+            "name": "config",
+            "positional": false,
+            "required": false,
+            "type": "path"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Ignore any microvm.toml, even a malformed one. Flags and defaults apply",
+            "name": "no-config",
+            "positional": false,
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "choices": [
+              "us-east-1",
+              "us-east-2",
+              "us-west-2",
+              "eu-west-1",
+              "ap-northeast-1"
+            ],
+            "default": null,
+            "help": "AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1",
+            "name": "region",
+            "positional": false,
+            "required": false,
+            "type": "enum"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Use a region this client has not seen carry MicroVMs. Costs you the diagnostic",
+            "name": "unlisted-region",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "responseKeys": [
+          "posture",
+          "detail",
+          "region",
+          "configPath"
+        ],
+        "responseType": "microvm.egress-posture",
+        "summary": "The egress posture `run` with these options would report, without launching",
         "supportsJson": true
       },
       {

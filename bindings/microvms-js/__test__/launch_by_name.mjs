@@ -70,3 +70,26 @@ test('an image ARN goes straight to the launch', async () => {
   );
   assert.match(message, /for RunMicrovm/);
 });
+
+test('identity on run reaches the launch request', async () => {
+  // #263: the core refuses a stable client token with an identity, locally, and the same launch
+  // without one reaches its first call.
+  const stable = {
+    imageIdentifier: 'arn:aws:lambda:us-east-1:123456789012:microvm-image:wanted-image',
+    clientToken: 'ct-1',
+    agentToken: 'tok',
+  };
+  const sandbox = await Sandbox.create(Region.usEast1());
+  await assert.rejects(sandbox.run({ ...stable, identity: true }), (error) => {
+    assert.equal(codeOf(error), 'ERR_INVALID_ARG', error.message);
+    assert.match(error.message, /identity=false/);
+    return true;
+  });
+  const plain = await Sandbox.create(Region.usEast1());
+  await assert.rejects(plain.run({ ...stable, identity: false }), (error) => {
+    assert.equal(codeOf(error), 'ERR_CREDENTIALS', error.message);
+    assert.match(error.message, /for RunMicrovm/);
+    return true;
+  });
+  assert.equal(await plain.tunnelIdentity(), null);
+});

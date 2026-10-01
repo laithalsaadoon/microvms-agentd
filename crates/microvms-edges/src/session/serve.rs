@@ -16,6 +16,8 @@
 //! hold the browser's next one behind it, which the CLI's port-forward used to do. When the
 //! loop stops accepting, it waits for the connections already open to end: a task still
 //! relaying holds bytes the local client is waiting for, and dropping it would cut them short.
+//! Only an SDK handle cuts them, when its caller's `stop` gives a grace that runs out or the
+//! handle is dropped.
 //!
 //! # A direct session serves too
 //!
@@ -25,10 +27,12 @@
 //! port ([`super::forward::direct_url`]), since there is no proxy to route it by header.
 
 use std::future::Future;
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
 use tokio::net::TcpListener;
+use tokio::sync::{oneshot, watch};
 use tokio::task::JoinSet;
 
 use microvms_app::error::{Error, ErrorKind};
@@ -139,6 +143,29 @@ pub async fn serve_tunnel<F>(
     target: TunnelTarget,
     limits: ServeLimits,
     stop: impl Future<Output = ()>,
+    on_end: F,
+) -> TunnelReport
+where
+    F: FnMut(TunnelConnection),
+{
+    tunnel_loop(
+        listener,
+        target,
+        limits,
+        stop,
+        std::future::pending(),
+        on_end,
+    )
+    .await
+}
+
+/// [`serve_tunnel`], cutting the connections still open once `cut` resolves after the stop.
+async fn tunnel_loop<F>(
+    listener: TcpListener,
+    target: TunnelTarget,
+    limits: ServeLimits,
+    stop: impl Future<Output = ()>,
+    cut: impl Future<Output = ()>,
     mut on_end: F,
 ) -> TunnelReport
 where
@@ -157,6 +184,7 @@ where
         &listener,
         limits,
         stop,
+        cut,
         |stream, _| {
             let target = Arc::clone(&target);
             async move {
@@ -232,6 +260,31 @@ pub async fn serve_forward<F>(
     auth: Option<Arc<ProxyAuth>>,
     limits: ServeLimits,
     stop: impl Future<Output = ()>,
+    on_notice: F,
+) -> Result<ForwardReport, Error>
+where
+    F: FnMut(ForwardNotice),
+{
+    forward_loop(
+        listener,
+        spec,
+        auth,
+        limits,
+        stop,
+        std::future::pending(),
+        on_notice,
+    )
+    .await
+}
+
+/// [`serve_forward`], cutting the connections still open once `cut` resolves after the stop.
+async fn forward_loop<F>(
+    listener: TcpListener,
+    spec: ForwardSpec,
+    auth: Option<Arc<ProxyAuth>>,
+    limits: ServeLimits,
+    stop: impl Future<Output = ()>,
+    cut: impl Future<Output = ()>,
     mut on_notice: F,
 ) -> Result<ForwardReport, Error>
 where
@@ -252,6 +305,7 @@ where
         &listener,
         limits,
         stop,
+        cut,
         |stream, _| {
             let (spec, auth, client) = (Arc::clone(&spec), auth.clone(), Arc::clone(&client));
             async move {
@@ -285,15 +339,301 @@ where
     Ok(report)
 }
 
+// ── the SDKs' handles ────────────────────────────────────────────────────────
+
+/// Where an SDK's tunnel or forward listens unless told otherwise: loopback, on a port the OS
+/// picks. Loopback because a forward carries the VM's credentials to whoever connects.
+pub const DEFAULT_BIND: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0));
+
+/// A local address to listen on: `bind` when given, [`DEFAULT_BIND`] otherwise.
+pub fn bind_address(bind: Option<&str>) -> Result<SocketAddr, Error> {
+    match bind {
+        None => Ok(DEFAULT_BIND),
+        Some(bind) => bind.parse().map_err(|err| {
+            Error::new(
+                ErrorKind::InvalidArg,
+                format!("{bind:?} is not a local address to listen on, such as 127.0.0.1:0: {err}"),
+            )
+        }),
+    }
+}
+
+/// How a connection that didn't end clean ended, as a handle's report lists it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EndKind {
+    /// The daemon refused the tunnel, or the proxy refused the exchange.
+    Refused,
+    /// A verified tunnel ended without the daemon's end of stream (#342).
+    Truncated,
+    /// A verified tunnel ended into a daemon from before the end of stream (#342).
+    Unproven,
+    /// The connection failed with an error.
+    Failed,
+}
+
+impl EndKind {
+    /// The wire spelling the bindings report.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            EndKind::Refused => "refused",
+            EndKind::Truncated => "truncated",
+            EndKind::Unproven => "unproven",
+            EndKind::Failed => "failed",
+        }
+    }
+}
+
+/// One connection that didn't end clean. A clean end is only counted, so a long-lived handle's
+/// report grows with its failures, not with its traffic.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConnectionEnd {
+    pub peer: SocketAddr,
+    pub kind: EndKind,
+    /// The close code or the HTTP status, when the end carried one.
+    pub code: Option<u16>,
+    /// The daemon's reason, the forwarder's explanation, or the error.
+    pub detail: String,
+}
+
+impl ConnectionEnd {
+    /// A tunnel connection's end, unless it was clean.
+    pub fn of_tunnel(connection: &TunnelConnection) -> Option<Self> {
+        let (kind, code, detail) = match &connection.end {
+            Ok(TunnelEnd::Closed) => return None,
+            Ok(TunnelEnd::ClosedUnproven) => (EndKind::Unproven, None, String::new()),
+            Ok(TunnelEnd::Truncated { code }) => (EndKind::Truncated, *code, String::new()),
+            Ok(TunnelEnd::Refused { code, reason }) => {
+                (EndKind::Refused, Some(*code), reason.clone())
+            }
+            Err(error) => (EndKind::Failed, None, error.to_string()),
+        };
+        Some(Self {
+            peer: connection.peer,
+            kind,
+            code,
+            detail,
+        })
+    }
+
+    /// A forwarded connection's refusal or failure; its other events aren't ends worth listing.
+    pub fn of_forward(notice: &ForwardNotice) -> Option<Self> {
+        match notice {
+            ForwardNotice::Event {
+                peer,
+                event:
+                    ForwardEvent::Refused {
+                        status,
+                        explanation,
+                    },
+            } => Some(Self {
+                peer: *peer,
+                kind: EndKind::Refused,
+                code: Some(*status),
+                detail: explanation.clone(),
+            }),
+            ForwardNotice::Event { .. } => None,
+            ForwardNotice::Failed { peer, error } => Some(Self {
+                peer: *peer,
+                kind: EndKind::Failed,
+                code: None,
+                detail: error.to_string(),
+            }),
+        }
+    }
+}
+
+/// What a tunnel handle did: the loop's report, and each connection that didn't end clean.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TunnelSummary {
+    pub report: TunnelReport,
+    pub ended: Vec<ConnectionEnd>,
+}
+
+/// What a port-forward handle did: the loop's report, and each connection that didn't end
+/// clean.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ForwardSummary {
+    pub report: ForwardReport,
+    pub ended: Vec<ConnectionEnd>,
+}
+
+type Outcome<S> = Result<S, (ErrorKind, String)>;
+
+/// A serving loop on a background task: the SDKs' tunnel and port-forward handles.
+///
+/// Dropping it stops the loop and cuts the connections still open, so no relay outlives the
+/// handle that owns it: a relay carries the VM's credentials to whoever connected.
+pub struct Serving<S> {
+    local: SocketAddr,
+    stop: Mutex<Option<oneshot::Sender<()>>>,
+    cut: Mutex<Option<oneshot::Sender<()>>>,
+    outcome: Arc<Mutex<Option<Outcome<S>>>>,
+    done: watch::Receiver<bool>,
+}
+
+impl<S: Clone + Send + 'static> Serving<S> {
+    /// Runs `serving` on the current tokio runtime, handing it the stop and the cut futures.
+    /// Panics outside a runtime, like `tokio::spawn`.
+    fn spawn<Fut>(
+        local: SocketAddr,
+        serving: impl FnOnce(oneshot::Receiver<()>, oneshot::Receiver<()>) -> Fut,
+    ) -> Self
+    where
+        Fut: Future<Output = Result<S, Error>> + Send + 'static,
+    {
+        let (stop_tx, stop_rx) = oneshot::channel();
+        let (cut_tx, cut_rx) = oneshot::channel();
+        let (done_tx, done_rx) = watch::channel(false);
+        let outcome = Arc::new(Mutex::new(None));
+        let written = Arc::clone(&outcome);
+        let serving = serving(stop_rx, cut_rx);
+        tokio::spawn(async move {
+            let result = serving
+                .await
+                .map_err(|error| (error.kind(), error.to_string()));
+            *written.lock().unwrap_or_else(PoisonError::into_inner) = Some(result);
+            done_tx.send_replace(true);
+        });
+        Self {
+            local,
+            stop: Mutex::new(Some(stop_tx)),
+            cut: Mutex::new(Some(cut_tx)),
+            outcome,
+            done: done_rx,
+        }
+    }
+
+    /// The address the loop listens on, with the port the OS picked for a port 0.
+    pub fn local_address(&self) -> SocketAddr {
+        self.local
+    }
+
+    /// Whether the loop is still serving, or waiting for its open connections to end.
+    pub fn is_running(&self) -> bool {
+        !*self.done.borrow()
+    }
+
+    /// Asks the loop to stop accepting. Idempotent; [`Self::finished`] waits for it, and for the
+    /// connections still open.
+    pub fn request_stop(&self) {
+        signal(&self.stop);
+    }
+
+    /// Stops accepting and waits for the connections still open to end, cutting the ones
+    /// still open after `grace` when it's given, and returns what the loop did.
+    ///
+    /// Without a grace, a client that keeps its connection open keeps this waiting: the
+    /// relay holds bytes that client may still be reading, so the loop won't cut it unasked.
+    pub async fn stop(&self, grace: Option<Duration>) -> Result<S, Error> {
+        self.request_stop();
+        if let Some(grace) = grace {
+            if let Ok(outcome) = tokio::time::timeout(grace, self.finished()).await {
+                return outcome;
+            }
+            signal(&self.cut);
+        }
+        self.finished().await
+    }
+
+    /// Waits for the loop to end and returns what it did. Callable any number of times.
+    pub async fn finished(&self) -> Result<S, Error> {
+        let mut done = self.done.clone();
+        // The sender drops only after writing the outcome, so an error here still means done.
+        let _ = done.wait_for(|finished| *finished).await;
+        self.outcome
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .expect("the loop records its outcome before signalling done")
+            .map_err(|(kind, message)| Error::new(kind, message))
+    }
+}
+
+/// Sends a handle's stop or cut, once.
+fn signal(sender: &Mutex<Option<oneshot::Sender<()>>>) {
+    if let Some(sender) = sender.lock().unwrap_or_else(PoisonError::into_inner).take() {
+        let _ = sender.send(());
+    }
+}
+
+/// A handle's stop or cut future: the sender's `send`, or its drop.
+async fn signalled(signal: oneshot::Receiver<()>) {
+    let _ = signal.await;
+}
+
+/// Binds `bind` and starts a tunnel to `target` on the current tokio runtime: the SDKs'
+/// `Session.tunnel`.
+pub async fn start_tunnel(
+    bind: SocketAddr,
+    target: TunnelTarget,
+    limits: ServeLimits,
+) -> Result<Serving<TunnelSummary>, Error> {
+    let listener =
+        super::forward::bind(&ForwardSpec::new(bind, target.guest_port, &target.endpoint)).await?;
+    let local = local_address(&listener)?;
+    Ok(Serving::spawn(local, move |stop, cut| async move {
+        let mut ended = Vec::new();
+        let report = tunnel_loop(
+            listener,
+            target,
+            limits,
+            signalled(stop),
+            signalled(cut),
+            |connection| ended.extend(ConnectionEnd::of_tunnel(&connection)),
+        )
+        .await;
+        Ok(TunnelSummary { report, ended })
+    }))
+}
+
+/// Binds `bind` and starts a port-forward to `guest_port` behind `endpoint` on the current
+/// tokio runtime: the SDKs' `Session.port_forward`. `auth` is `None` for a direct session.
+pub async fn start_forward(
+    bind: SocketAddr,
+    endpoint: &str,
+    guest_port: u16,
+    auth: Option<Arc<ProxyAuth>>,
+    limits: ServeLimits,
+) -> Result<Serving<ForwardSummary>, Error> {
+    let spec = ForwardSpec::new(bind, guest_port, endpoint);
+    let listener = super::forward::bind(&spec).await?;
+    let local = local_address(&listener)?;
+    Ok(Serving::spawn(local, move |stop, cut| async move {
+        let mut ended = Vec::new();
+        let report = forward_loop(
+            listener,
+            spec,
+            auth,
+            limits,
+            signalled(stop),
+            signalled(cut),
+            |notice| ended.extend(ConnectionEnd::of_forward(&notice)),
+        )
+        .await?;
+        Ok(ForwardSummary { report, ended })
+    }))
+}
+
+fn local_address(listener: &TcpListener) -> Result<SocketAddr, Error> {
+    listener.local_addr().map_err(|err| {
+        Error::new(
+            ErrorKind::Unexpected,
+            format!("the listener has no address: {err}"),
+        )
+    })
+}
+
 /// The accept loop both serving loops share: accept until stopped, a task per connection, then
-/// wait for the open ones. Answers why it stopped and how many connections it accepted.
+/// wait for the open ones, cutting them if `cut` resolves first. Answers why it stopped and how
+/// many connections it accepted.
 ///
 /// `spawn` makes a connection's task. `ended` takes each connection's result as its task ends,
-/// on this task; a task that panicked or was cancelled reads as an error.
+/// on this task; a task that panicked or was cut reads as an error.
 async fn serve<T, Fut>(
     listener: &TcpListener,
     limits: ServeLimits,
     stop: impl Future<Output = ()>,
+    cut: impl Future<Output = ()>,
     mut spawn: impl FnMut(tokio::net::TcpStream, SocketAddr) -> Fut,
     mut ended: impl FnMut(SocketAddr, Result<T, Error>),
 ) -> (StopReason, u32)
@@ -311,6 +651,13 @@ where
          joined: Result<(tokio::task::Id, Result<T, Error>), tokio::task::JoinError>| {
             let (id, result) = match joined {
                 Ok((id, result)) => (id, result),
+                Err(error) if error.is_cancelled() => (
+                    error.id(),
+                    Err(Error::new(
+                        ErrorKind::Unexpected,
+                        "the connection was cut when its loop stopped",
+                    )),
+                ),
                 Err(error) => (
                     error.id(),
                     Err(Error::new(
@@ -349,9 +696,20 @@ where
             },
         }
     };
-    // Drained rather than abandoned: see the module docs.
-    while let Some(joined) = tasks.join_next_with_id().await {
-        finish(&mut peers, joined);
+    // Drained rather than abandoned (see the module docs), until the caller cuts what's left.
+    let mut cut = std::pin::pin!(cut);
+    let mut cutting = false;
+    loop {
+        tokio::select! {
+            joined = tasks.join_next_with_id() => match joined {
+                Some(joined) => finish(&mut peers, joined),
+                None => break,
+            },
+            () = &mut cut, if !cutting => {
+                cutting = true;
+                tasks.abort_all();
+            }
+        }
     }
     (stopped, served)
 }
@@ -439,5 +797,105 @@ mod tests {
             report.count(&event);
         }
         assert_eq!((report.refused, report.upgrades), (1, 2), "{report:?}");
+    }
+
+    /// Each end but a clean one is listed with its kind, its code and its reason; a forward's
+    /// events other than a refusal aren't ends.
+    #[test]
+    fn each_end_but_a_clean_one_is_listed_with_its_kind() {
+        let peer: SocketAddr = "127.0.0.1:5000".parse().expect("an address");
+        let tunnel = |end| ConnectionEnd::of_tunnel(&TunnelConnection { peer, end });
+        let listed = |end: Option<ConnectionEnd>| {
+            end.map(|end| (end.peer, end.kind.as_str(), end.code, end.detail))
+        };
+        assert_eq!(tunnel(Ok(TunnelEnd::Closed)), None);
+        assert_eq!(
+            listed(tunnel(Ok(TunnelEnd::ClosedUnproven))),
+            Some((peer, "unproven", None, String::new()))
+        );
+        assert_eq!(
+            listed(tunnel(Ok(TunnelEnd::Truncated { code: Some(1006) }))),
+            Some((peer, "truncated", Some(1006), String::new()))
+        );
+        assert_eq!(
+            listed(tunnel(Ok(TunnelEnd::Refused {
+                code: 4502,
+                reason: "nothing is listening".into(),
+            }))),
+            Some((peer, "refused", Some(4502), "nothing is listening".into()))
+        );
+        let failed = listed(tunnel(Err(Error::new(ErrorKind::Unexpected, "a reset"))));
+        assert!(
+            matches!(&failed, Some((_, "failed", None, detail)) if detail.contains("a reset")),
+            "{failed:?}"
+        );
+
+        let forward = |event| ConnectionEnd::of_forward(&ForwardNotice::Event { peer, event });
+        assert_eq!(
+            listed(forward(ForwardEvent::Refused {
+                status: 403,
+                explanation: "out of scope".into(),
+            })),
+            Some((peer, "refused", Some(403), "out of scope".into()))
+        );
+        assert_eq!(
+            forward(ForwardEvent::Forwarded {
+                status: 200,
+                upgraded: false,
+            }),
+            None
+        );
+        let failed = listed(ConnectionEnd::of_forward(&ForwardNotice::Failed {
+            peer,
+            error: Error::new(ErrorKind::Unexpected, "a reset"),
+        }));
+        assert!(
+            matches!(&failed, Some((_, "failed", None, detail)) if detail.contains("a reset")),
+            "{failed:?}"
+        );
+    }
+
+    /// A connection's task that panics reads as ended abnormally, and one the caller cuts
+    /// reads as cut: the two are the caller's to tell apart.
+    #[tokio::test]
+    async fn a_panicked_connection_and_a_cut_one_are_told_apart() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("a free port");
+        let local = listener.local_addr().expect("bound");
+        let (cut, cut_rx) = oneshot::channel::<()>();
+        tokio::spawn(async move {
+            let _first = tokio::net::TcpStream::connect(local).await;
+            let _second = tokio::net::TcpStream::connect(local).await;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let _ = cut.send(());
+            std::future::pending::<()>().await;
+        });
+        let mut accepted = 0;
+        let mut ended = Vec::new();
+        let serving = serve(
+            &listener,
+            ServeLimits {
+                max_connections: Some(2),
+            },
+            std::future::pending(),
+            signalled(cut_rx),
+            |stream, _| {
+                accepted += 1;
+                let panics = accepted == 1;
+                async move {
+                    let _held = stream;
+                    assert!(!panics, "the first connection's task panics");
+                    std::future::pending::<Result<(), Error>>().await
+                }
+            },
+            |_, result| ended.push(result.expect_err("neither ends clean").to_string()),
+        );
+        let (stopped, served) = tokio::time::timeout(Duration::from_secs(10), serving)
+            .await
+            .expect("the cut ends the drain");
+        assert_eq!((stopped, served), (StopReason::Limit, 2));
+        assert_eq!(ended.len(), 2, "{ended:?}");
+        let panicked = ended.iter().filter(|end| end.contains("ended abnormally"));
+        let cut = ended.iter().filter(|end| end.contains("was cut"));
+        assert_eq!((panicked.count(), cut.count()), (1, 1), "{ended:?}");
     }
 }

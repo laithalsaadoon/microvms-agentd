@@ -30,6 +30,7 @@ mod build;
 mod closed_output;
 mod config;
 mod doctor;
+mod egress_posture;
 mod exec;
 mod exit_codes;
 mod files;

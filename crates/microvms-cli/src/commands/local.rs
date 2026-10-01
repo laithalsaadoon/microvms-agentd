@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-//! `ls`, `history`, `logs`, `manifest`, `constants`, `dockerfile` — the commands that touch no
-//! account.
+//! `ls`, `history`, `logs`, `egress-posture`, `manifest`, `constants`, `dockerfile`: the
+//! commands that touch no account.
 //!
 //! Grouped by that property rather than by shape, because it is the property the behavioral
 //! thinness guard cares about: `tests/thinness.rs` asserts that every command *not* in this
@@ -15,7 +15,7 @@
 
 use serde_json::{Map, Value, json};
 
-use crate::cli::{DockerfileArgs, HistoryArgs, LogsArgs, LsArgs, NamesArgs};
+use crate::cli::{DockerfileArgs, EgressPostureArgs, HistoryArgs, LogsArgs, LsArgs, NamesArgs};
 use crate::commands::{Ctx, Rendered, response_type};
 use crate::exit::CliError;
 use crate::seam::state_dir;
@@ -848,6 +848,70 @@ pub fn logs<O: std::io::Write, E: std::io::Write>(
     );
     let dense = format!("{group}\t{tail}\t{requires}");
     Ok(Rendered::ok(kind, data, text, dense))
+}
+
+/// `egress-posture`: the posture `run` with these options would report (#269), from core's
+/// `egress_posture_for`, with no AWS call.
+///
+/// The options go through `run`'s own merge rather than a copy of it: `run`'s command line is
+/// parsed for its defaults, the egress flags, config and region are set on it, and
+/// `merge_config` applies microvm.toml and refuses what it refuses, so a file's `deny-egress`
+/// or `region` counts here exactly as it would at launch. Then core derives the posture from
+/// the merged knobs and the region `run` would launch in, the call `run` makes before its
+/// first AWS call.
+pub fn egress_posture<O: std::io::Write, E: std::io::Write>(
+    ctx: &mut Ctx<'_, O, E>,
+    args: &EgressPostureArgs,
+) -> Result<Rendered, CliError> {
+    use clap::Parser as _;
+    let parsed = crate::cli::Cli::try_parse_from(["microvm", "run"]).map_err(|error| {
+        CliError::new(
+            crate::exit::Exit::Unexpected,
+            format!("egress-posture could not parse `run`'s defaults: {error}"),
+        )
+    })?;
+    let crate::cli::Command::Run(mut run) = parsed.command else {
+        return Err(CliError::new(
+            crate::exit::Exit::Unexpected,
+            "egress-posture parsed a `run` invocation and got a different command back: a \
+             dispatch defect in this binary, not anything the caller did",
+        ));
+    };
+    run.egress = args.egress;
+    run.egress_network_connectors = args.egress_network_connectors.clone();
+    run.deny_egress = args.deny_egress;
+    run.config = args.config.clone();
+    run.region = args.region.clone();
+    let merged = crate::commands::lifecycle::merge_config(&run, ctx.env)?;
+    let launch = &merged.args;
+    let region = launch.region.resolve(ctx.env)?;
+    let posture = microvms_core::control::egress_posture_for(
+        launch.egress,
+        &launch.egress_network_connectors,
+        launch.deny_egress,
+        Some(&region),
+    )?;
+
+    let mut data = Map::new();
+    data.insert("posture".into(), json!(posture.as_str()));
+    data.insert("detail".into(), json!(posture.describe()));
+    data.insert("region".into(), json!(region.as_str()));
+    data.insert(
+        "configPath".into(),
+        json!(
+            merged
+                .config_path
+                .as_ref()
+                .map(|path| path.display().to_string())
+        ),
+    );
+    let (kind, _) = response_type("egress-posture");
+    Ok(Rendered::ok(
+        kind,
+        data,
+        crate::render::egress_line(posture),
+        posture.as_str().to_string(),
+    ))
 }
 
 /// The whole command surface, derived from the clap tree.

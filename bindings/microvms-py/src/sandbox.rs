@@ -544,7 +544,9 @@ struct ImageRequestArgs<'a> {
     build_role_arn: &'a str,
     size: Option<PySizeClass>,
     base_image: Option<PyBaseImage>,
+    base_image_version: Option<String>,
     dockerfile: Option<String>,
+    project_files: Option<microvms_core::control::ProjectFiles>,
     repair_guest_identity: bool,
     inherit_workdir: bool,
     run_hook_timeout: Option<PyRunHookTimeout>,
@@ -553,6 +555,16 @@ struct ImageRequestArgs<'a> {
     log_group: Option<String>,
     log_stream: Option<String>,
     token_scope: Option<String>,
+}
+
+/// `project_dir`'s one manifest+lockfile pair, read by core's rule, the one the CLI's
+/// `--project` uses (#264).
+fn project_files(
+    dir: Option<std::path::PathBuf>,
+) -> PyCoreResult<Option<microvms_core::control::ProjectFiles>> {
+    dir.map(microvms_core::control::read_project_files)
+        .transpose()
+        .map_err(crate::errors::CoreError)
 }
 
 /// The core request for `build_image`'s keywords: each one set on core's own request type,
@@ -570,7 +582,9 @@ fn create_image_request(args: ImageRequestArgs<'_>) -> CreateImageRequest {
     if let Some(base) = args.base_image {
         request.base_image = base.inner;
     }
+    request.base_image_version = args.base_image_version;
     request.dockerfile = args.dockerfile;
+    request.project_files = args.project_files;
     request.repair_guest_identity = args.repair_guest_identity;
     request.inherit_workdir = args.inherit_workdir;
     if let Some(timeout) = args.run_hook_timeout {
@@ -806,6 +820,21 @@ impl PySandbox {
         })
     }
 
+    /// The tunnel identity a launch with `identity=True` generated, or that an adopted
+    /// record carried; `None` otherwise.
+    ///
+    /// Holds the host's secret half: pass it to `Session.tunnel(verify_identity=...)`, and
+    /// store it only where the agent token goes.
+    #[getter]
+    fn tunnel_identity(&self) -> Option<crate::serve::PyTunnelIdentity> {
+        self.read(|sandbox| {
+            sandbox
+                .tunnel_identity()
+                .cloned()
+                .map(crate::serve::PyTunnelIdentity::from)
+        })
+    }
+
     /// The session, once launched.
     ///
     /// A new wrapper each call, all reaching the same session under the same lock. There is
@@ -822,6 +851,11 @@ impl PySandbox {
     ///
     /// Every local guard runs **before** the call, which matters because the create happens
     /// after the caller's artifact upload: a rejection AWS raises costs the upload first.
+    ///
+    /// `base_image_version` pins the managed base to one version, a value
+    /// `managed_base_versions` lists. `project_dir` bakes the directory's one
+    /// manifest+lockfile pair into an environment layer, by the rule the CLI's `--project`
+    /// uses; a directory without exactly one pair raises `PreconditionError` before any call.
     ///
     /// # What is deliberately not a parameter
     ///
@@ -852,7 +886,9 @@ impl PySandbox {
         build_role_arn,
         size=None,
         base_image=None,
+        base_image_version=None,
         dockerfile=None,
+        project_dir=None,
         repair_guest_identity=false,
         inherit_workdir=false,
         run_hook_timeout=None,
@@ -877,7 +913,9 @@ impl PySandbox {
         build_role_arn: &str,
         size: Option<PySizeClass>,
         base_image: Option<PyBaseImage>,
+        base_image_version: Option<String>,
         dockerfile: Option<String>,
+        project_dir: Option<std::path::PathBuf>,
         repair_guest_identity: bool,
         inherit_workdir: bool,
         run_hook_timeout: Option<PyRunHookTimeout>,
@@ -894,7 +932,9 @@ impl PySandbox {
             build_role_arn,
             size,
             base_image,
+            base_image_version,
             dockerfile,
+            project_files: project_files(project_dir)?,
             repair_guest_identity,
             inherit_workdir,
             run_hook_timeout,
@@ -939,7 +979,8 @@ impl PySandbox {
     /// Dockerfile's `COPY` lines read, taken as `docker build` takes it:
     /// `Dockerfile.dockerignore`, else `.dockerignore`, is honoured, and symlinks are skipped
     /// with a line in `warnings`. `base_image` defaults to
-    /// `BaseImage.from_dockerfile(dockerfile)`. `wait_timeout` is the build wait in seconds
+    /// `BaseImage.from_dockerfile(dockerfile)`. `base_image_version` and `project_dir` are
+    /// `build_image`'s, and both join the name's hash. `wait_timeout` is the build wait in seconds
     /// (45 minutes by default). Every local check runs before the first AWS call.
     #[pyo3(signature = (
         *,
@@ -952,6 +993,8 @@ impl PySandbox {
         s3_key_prefix=None,
         size=None,
         base_image=None,
+        base_image_version=None,
+        project_dir=None,
         force=false,
         tags=None,
         wait_timeout=None,
@@ -972,6 +1015,8 @@ impl PySandbox {
         s3_key_prefix: Option<String>,
         size: Option<PySizeClass>,
         base_image: Option<PyBaseImage>,
+        base_image_version: Option<String>,
+        project_dir: Option<std::path::PathBuf>,
         force: bool,
         tags: Option<std::collections::BTreeMap<String, String>>,
         wait_timeout: Option<f64>,
@@ -990,6 +1035,7 @@ impl PySandbox {
             request.size = size.inner;
         }
         request.base_image = base_image.map(|base| base.inner);
+        request.base_image_version = base_image_version;
         request.force = force;
         if let Some(tags) = tags {
             request.tags = tags;
@@ -1000,6 +1046,9 @@ impl PySandbox {
         let ensured = self.detached(py, move |sandbox| {
             if let Some(dir) = context_dir {
                 request.context = Some(microvms_core::control::BuildContext::from_dir(dir)?);
+            }
+            if let Some(dir) = project_dir {
+                request.project_files = Some(microvms_core::control::read_project_files(dir)?);
             }
             runtime::block_on_detached(sandbox.ensure_image(request))
         })?;
@@ -1017,7 +1066,9 @@ impl PySandbox {
         build_role_arn,
         size=None,
         base_image=None,
+        base_image_version=None,
         dockerfile=None,
+        project_dir=None,
         repair_guest_identity=false,
         inherit_workdir=false,
         run_hook_timeout=None,
@@ -1040,7 +1091,9 @@ impl PySandbox {
         build_role_arn: &str,
         size: Option<PySizeClass>,
         base_image: Option<PyBaseImage>,
+        base_image_version: Option<String>,
         dockerfile: Option<String>,
+        project_dir: Option<std::path::PathBuf>,
         repair_guest_identity: bool,
         inherit_workdir: bool,
         run_hook_timeout: Option<PyRunHookTimeout>,
@@ -1057,7 +1110,9 @@ impl PySandbox {
             build_role_arn,
             size,
             base_image,
+            base_image_version,
             dockerfile,
+            project_files: project_files(project_dir)?,
             repair_guest_identity,
             inherit_workdir,
             run_hook_timeout,
@@ -1102,6 +1157,7 @@ impl PySandbox {
         build_role_arn,
         base_image=None,
         dockerfile=None,
+        project_dir=None,
         inherit_workdir=false,
     ))]
     #[allow(
@@ -1119,6 +1175,7 @@ impl PySandbox {
         build_role_arn: &str,
         base_image: Option<PyBaseImage>,
         dockerfile: Option<String>,
+        project_dir: Option<std::path::PathBuf>,
         inherit_workdir: bool,
     ) -> PyCoreResult<Bound<'py, PyBytes>> {
         let mut request = CreateImageRequest::new(name, binary, code_artifact_uri, build_role_arn);
@@ -1126,6 +1183,7 @@ impl PySandbox {
             request.base_image = base.inner;
         }
         request.dockerfile = dockerfile;
+        request.project_files = project_files(project_dir)?;
         request.inherit_workdir = inherit_workdir;
         let bytes = self.read(|sandbox| sandbox.build_artifact_for(&request));
         Ok(PyBytes::new(py, &bytes.map_err(crate::errors::CoreError)?))
@@ -1147,6 +1205,11 @@ impl PySandbox {
     /// outbound traffic. For no egress, pass existing VPC connector ARNs through
     /// `egress_network_connectors`, using a VPC without an internet gateway or NAT
     /// gateway. `deny_egress` sets advisory proxy variables that workloads can bypass.
+    ///
+    /// `identity=True` generates a tunnel identity and delivers the VM's half with the
+    /// launch, so `Session.tunnel(port, verify_identity=sandbox.tunnel_identity)` can prove
+    /// the far end is this VM's daemon.
+    ///
     /// # What the core refuses here, and this file does not
     ///
     /// A second `run` on one sandbox, with **zero** control-plane calls: the agent token is
@@ -1166,6 +1229,7 @@ impl PySandbox {
         agent_token=None,
         client_token=None,
         launch_env=None,
+        identity=false,
         egress=false,
         egress_network_connectors=None,
         deny_egress=false,
@@ -1206,6 +1270,7 @@ impl PySandbox {
         // locally before the launch. Not a doc comment: a doc comment on a function
         // parameter is a compile error.
         launch_env: Option<std::collections::HashMap<String, String>>,
+        identity: bool,
         egress: bool,
         egress_network_connectors: Option<Vec<String>>,
         // `deny_egress` is the advisory in-guest deny: proxy variables pointed at a black
@@ -1244,10 +1309,7 @@ impl PySandbox {
             agent_token,
             client_token,
             launch_env: launch_env.unwrap_or(defaults.launch_env),
-            // The tunnel identity is a CLI/daemon surface (`microvm tunnel
-            // --verify-identity`); the bindings keep the default (off) until a
-            // binding-level verify API exists to consume the material.
-            identity: defaults.identity,
+            identity,
             egress,
             egress_network_connectors: egress_network_connectors.unwrap_or_default(),
             deny_egress,

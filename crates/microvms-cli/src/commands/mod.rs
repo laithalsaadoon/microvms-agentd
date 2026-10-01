@@ -107,7 +107,7 @@ pub struct Ctx<'a, O: Write, E: Write> {
 /// command added without an entry fails rather than shipping undescribed. That check is the
 /// only thing that keeps this table from being the hand-maintained artifact the manifest is
 /// forbidden to be.
-pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 35] = [
+pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 36] = [
     (
         "run",
         "microvm.run",
@@ -501,6 +501,11 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 35] = [
     // whether the compared total was exact or a lower bound, because a verdict from
     // a floor is a different claim than a verdict from a whole estimate.
     ("cost", "microvm.cost", &["report", "comparison", "budget"]),
+    (
+        "egress-posture",
+        "microvm.egress-posture",
+        &["posture", "detail", "region", "configPath"],
+    ),
     ("doctor", "microvm.doctor", &["checks", "ok"]),
     (
         "manifest",

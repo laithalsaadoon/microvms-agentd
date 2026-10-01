@@ -111,7 +111,6 @@ crates/microvms-cli/src/commands/cost.rs::a_lower_bound_verdict_carries_the_unkn
 crates/microvms-cli/src/commands/cost.rs::a_negative_duration_is_refused_rather_than_silently_dropped
 crates/microvms-cli/src/commands/cost.rs::a_zero_sized_image_does_not_launch
 crates/microvms-cli/src/commands/cost.rs::an_abort_breach_reports_err_precondition_with_the_report_intact
-crates/microvms-cli/src/commands/lifecycle.rs::a_project_dir_that_cannot_key_a_layer_is_refused_naming_the_remedy
 crates/microvms-cli/src/commands/local.rs::a_watch_is_ledger_only_and_the_output_says_which_calls_it_makes
 crates/microvms-cli/src/commands/local.rs::logs_pins_the_tail_command_to_the_resolved_region
 crates/microvms-cli/src/commands/local.rs::the_stanza_carries_the_daemon_lines_the_default_build_bakes

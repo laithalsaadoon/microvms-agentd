@@ -98,6 +98,7 @@ pub mod process;
 pub mod provision;
 pub mod region;
 pub mod sandbox;
+pub mod serve;
 pub mod session;
 
 use napi_derive::napi;
