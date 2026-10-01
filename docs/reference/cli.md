@@ -784,6 +784,8 @@ The exit code comes from the failure class and nothing else. The CLI adds the su
 
 `--memory` accepts exactly `512`, `1024`, `2048`, `4096`, `8192`, the five documented size-class baselines. `crates/microvms-cli/src/cli.rs:372-384`.
 
+The open spelling is a request rather than a class: `--cpus` and `--memory-mib`, on `run`, `build`, `cost` and `agent-up` in place of `--memory`, go to core's `SizeClass::from_request`, which picks the smallest class whose baseline covers them (`--memory-mib 1500` selects 2048), as the SDKs' `SizeClass.from_request` does. A request no class covers is refused before any AWS call, naming the largest class. `SizeRequestFlags` in `crates/microvms-cli/src/cli.rs`.
+
 `--region` accepts exactly `us-east-1`, `us-east-2`, `us-west-2`, `eu-west-1`, `ap-northeast-1`, the five regions measured to carry MicroVMs. `eu-central-1` is excluded on measurement. `crates/microvms-cli/src/cli.rs:423-435`.
 
 The escape hatch is a separate flag rather than a permissive parser. `--unlisted-region <NAME>` conflicts with `--region` and carries its cost in its help text, so a reader of a command line can see that someone opted in. `crates/microvms-cli/src/cli.rs:33-39`.

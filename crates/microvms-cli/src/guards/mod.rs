@@ -43,5 +43,6 @@ mod parity;
 mod run;
 mod run_dir;
 mod seconds;
+mod size;
 mod support;
 mod thinness;

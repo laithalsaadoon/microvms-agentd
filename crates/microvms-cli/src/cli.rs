@@ -416,6 +416,17 @@ pub enum MemoryMib {
 }
 
 impl MemoryMib {
+    /// The variant for a core class. Infallible: the five variants are the five classes.
+    pub fn from_class(class: SizeClass) -> Self {
+        match class {
+            SizeClass::Mib512 => MemoryMib::Mib512,
+            SizeClass::Mib1024 => MemoryMib::Mib1024,
+            SizeClass::Mib2048 => MemoryMib::Mib2048,
+            SizeClass::Mib4096 => MemoryMib::Mib4096,
+            SizeClass::Mib8192 => MemoryMib::Mib8192,
+        }
+    }
+
     /// The core class this baseline selects. Infallible: the mapping is exhaustive.
     pub fn size_class(self) -> SizeClass {
         match self {
@@ -443,6 +454,41 @@ pub fn memory_from_mib(mib: u32) -> Option<MemoryMib> {
         4096 => Some(MemoryMib::Mib4096),
         8192 => Some(MemoryMib::Mib8192),
         _ => None,
+    }
+}
+
+/// `--cpus` and `--memory-mib`: a resource request, sized by core's `SizeClass::from_request`
+/// into the smallest class whose baseline covers it, in place of naming a class with
+/// `--memory` (#269). The SDKs' `SizeClass.from_request` is the same call, so a harness that
+/// sizes a task by its CPUs and memory gets the same class from either.
+#[derive(Args, Clone, Debug, Default)]
+pub struct SizeRequestFlags {
+    /// vCPUs the workload needs, instead of --memory: the smallest size class whose baseline
+    /// covers the request is used. Takes a fraction (0.5) and combines with --memory-mib.
+    ///
+    /// Zero is no requirement. A request no class covers is refused before any AWS call,
+    /// naming the largest class.
+    #[arg(long, value_name = "VCPUS", conflicts_with = "memory")]
+    pub cpus: Option<f64>,
+
+    /// MiB of memory the workload needs, instead of --memory: any figure, which selects the
+    /// smallest class whose baseline covers it (1500 selects 2048). Combines with --cpus.
+    #[arg(long, value_name = "MIB", conflicts_with = "memory")]
+    pub memory_mib: Option<u32>,
+}
+
+impl SizeRequestFlags {
+    /// Whether either request flag was given.
+    pub fn requested(&self) -> bool {
+        self.cpus.is_some() || self.memory_mib.is_some()
+    }
+
+    /// The class `memory` names, or core's answer to the request when one was made.
+    pub fn resolve(&self, memory: MemoryMib) -> Result<MemoryMib, microvms_core::Error> {
+        if !self.requested() {
+            return Ok(memory);
+        }
+        SizeClass::from_request(self.cpus, self.memory_mib).map(MemoryMib::from_class)
     }
 }
 
@@ -803,6 +849,9 @@ pub struct RunArgs {
     #[arg(long, value_enum, default_value = "2048")]
     pub memory: MemoryMib,
 
+    #[command(flatten)]
+    pub size: SizeRequestFlags,
+
     /// A Dockerfile to use instead of the library's default. Its FROM must match the base.
     #[arg(long)]
     pub dockerfile: Option<PathBuf>,
@@ -1048,6 +1097,9 @@ pub struct BuildArgs {
     /// Baseline MiB, selecting a documented size class.
     #[arg(long, value_enum, default_value = "2048")]
     pub memory: MemoryMib,
+
+    #[command(flatten)]
+    pub size: SizeRequestFlags,
 
     /// A Dockerfile to use instead of the library's default.
     #[arg(long)]
@@ -2029,6 +2081,9 @@ pub struct CostArgs {
     #[arg(long, value_enum, default_value = "2048")]
     pub memory: MemoryMib,
 
+    #[command(flatten)]
+    pub size: SizeRequestFlags,
+
     /// Seconds the VM spent, or will spend, RUNNING.
     ///
     /// Billed at baseline whether or not anything is executing — there is no free I/O wait,
@@ -2244,6 +2299,9 @@ pub struct AgentUpArgs {
     /// 2048, which fits peaky agent sessions (see `docs/AGENT-VMS.md`).
     #[arg(long, value_enum, default_value = "1024")]
     pub memory: MemoryMib,
+
+    #[command(flatten)]
+    pub size: SizeRequestFlags,
 
     /// How long the Bedrock bearer token lives, in hours. Default and ceiling 12.
     #[arg(long, default_value_t = 12, value_name = "HOURS")]
@@ -3546,6 +3604,41 @@ mod tests {
                 Some(microvms_core::session::DEFAULT_EXEC_WAIT),
                 "{command} --timeout"
             );
+        }
+    }
+
+    /// **`--cpus` and `--memory-mib` replace `--memory` on every command that sizes a VM
+    /// (#269),** and either alone, or both, parse beside the rest of the command.
+    ///
+    /// **Falsification**: drop `conflicts_with = "memory"` from `--cpus` and the `--memory`
+    /// rows parse.
+    #[test]
+    fn the_size_request_flags_replace_memory_on_every_sizing_command() {
+        let rows: [(&str, Vec<&str>); 4] = [
+            ("run", vec!["--no-config"]),
+            ("build", vec![]),
+            ("cost", vec![]),
+            ("agent-up", vec!["--vm-name", "box"]),
+        ];
+        for (command, rest) in rows {
+            let parse = |extra: &[&str]| {
+                Cli::try_parse_from(
+                    ["microvm", command]
+                        .into_iter()
+                        .chain(rest.iter().copied())
+                        .chain(extra.iter().copied()),
+                )
+            };
+            for flag in ["--cpus", "--memory-mib"] {
+                let both = parse(&[flag, "2", "--memory", "4096"]).expect_err("beside --memory");
+                assert_eq!(
+                    both.kind(),
+                    clap::error::ErrorKind::ArgumentConflict,
+                    "{command} {flag}"
+                );
+            }
+            parse(&["--cpus", "0.5", "--memory-mib", "1500"])
+                .unwrap_or_else(|error| panic!("{command}: {}", error.render()));
         }
     }
 

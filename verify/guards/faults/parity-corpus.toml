@@ -72,7 +72,7 @@ run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact
 expect = "test-failed"
 suite = "rust"
 message = "gives the fakes tier area \"egress\", which it has no handler for"
-transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 3] = [\"cost\", \"egress\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 3] = [\"image-name\", \"error\", \"names\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 2] = [\"cost\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 4] = [\"image-name\", \"error\", \"names\", \"egress\"];\n" }
+transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 4] = [\"cost\", \"egress\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 3] = [\"image-name\", \"error\", \"names\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 3] = [\"cost\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 4] = [\"image-name\", \"error\", \"names\", \"egress\"];\n" }
 
 [[fault]]
 id = "parity-cli-area-dropped"
@@ -81,7 +81,7 @@ run = ["cargo", "test", "-p", "microvms-cli", "--test", "parity_cases", "--", "-
 expect = "test-failed"
 suite = "rust"
 message = "the cli runner has no handler for area \"egress\""
-transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 3] = [\"cost\", \"egress\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 3] = [\"image-name\", \"error\", \"names\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 2] = [\"cost\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 3] = [\"image-name\", \"error\", \"names\"];\n" }
+transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 4] = [\"cost\", \"egress\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 3] = [\"image-name\", \"error\", \"names\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 3] = [\"cost\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 3] = [\"image-name\", \"error\", \"names\"];\n" }
 
 [[fault]]
 id = "parity-cli-area-in-both-tiers"
@@ -90,7 +90,7 @@ run = ["cargo", "test", "-p", "microvms-cli", "--test", "parity_cases", "--", "-
 expect = "test-failed"
 suite = "rust"
 message = "area \"egress\" is both this cli runner's and another's"
-transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 3] = [\"cost\", \"egress\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 3] = [\"image-name\", \"error\", \"names\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 3] = [\"cost\", \"egress\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 4] = [\"image-name\", \"error\", \"names\", \"egress\"];\n" }
+transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 4] = [\"cost\", \"egress\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 3] = [\"image-name\", \"error\", \"names\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 4] = [\"cost\", \"egress\", \"size-class\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 4] = [\"image-name\", \"error\", \"names\", \"egress\"];\n" }
 
 # A skip that doesn't name its issue or trace id fails the reader, in every runner.
 
