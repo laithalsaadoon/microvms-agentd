@@ -625,7 +625,8 @@ assert session.egress_posture == posture
 ```
 
 Node spells these `egressPostureFor(egress, connectors, denyEgress, region)` and
-`await session.egressPosture()`. Advertise network isolation, such as Harbor's
+`await session.egressPosture()`. From a shell, `microvm egress-posture` takes `run`'s egress
+flags, microvm.toml and region, and answers the same function in `data.posture`. Advertise network isolation, such as Harbor's
 `disable_internet` capability, only when the launch would be `sealed`, and reject a
 no-network task otherwise. No launch option answers `sealed` today: the client cannot
 see a VPC's routes, so a VPC connector alone reports `unsealed`. A session that did not
