@@ -107,7 +107,7 @@ pub struct Ctx<'a, O: Write, E: Write> {
 /// command added without an entry fails rather than shipping undescribed. That check is the
 /// only thing that keeps this table from being the hand-maintained artifact the manifest is
 /// forbidden to be.
-pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 36] = [
+pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 37] = [
     (
         "run",
         "microvm.run",
@@ -380,6 +380,18 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 36] = [
             // Where the record was written. The agent token is in that file and nowhere
             // in this envelope.
             "statePath",
+        ],
+    ),
+    (
+        "adopt",
+        "microvm.adopt",
+        &[
+            "microvmId",
+            "state",
+            "endpoint",
+            "imageArn",
+            "stateReason",
+            "idleWindowSec",
         ],
     ),
     (

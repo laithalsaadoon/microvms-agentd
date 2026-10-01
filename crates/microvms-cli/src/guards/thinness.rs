@@ -198,6 +198,14 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
             Door::ControlPlane,
         ),
         (
+            "adopt",
+            Command::Adopt(crate::cli::AdoptArgs {
+                attach: attach_flags(),
+                region: region_flags(),
+            }),
+            Door::ControlPlane,
+        ),
+        (
             "health",
             Command::Health(HealthArgs {
                 attach: attach_flags(),

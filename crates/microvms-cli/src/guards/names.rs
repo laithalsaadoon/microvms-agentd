@@ -330,6 +330,7 @@ async fn a_region_flag_that_disagrees_with_the_names_record_is_refused_before_an
         (vec!["exec", "true", "--name", "x"], typed),
         (vec!["shell", "--name", "x"], typed),
         (vec!["wait", "--name", "x"], typed),
+        (vec!["adopt", "--name", "x"], typed),
         (vec!["agent-up", "--vm-name", "x"], typed),
         (vec!["attach", "--from", &record, "--name", "y"], typed),
         (vec!["suspend", "x"], typed),

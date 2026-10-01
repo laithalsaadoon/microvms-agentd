@@ -563,7 +563,8 @@ was bootstrapped by the launch that made it, so an adopted sandbox refuses `run`
 re-sends a run-hook payload (STATE-3), and dropping it prints no leak warning: the
 launching record owns the teardown. A VM adopted while already SUSPENDED has no suspend
 time this client saw, so the service answers a late resume. The `endpoint` must match the
-one `GetMicrovm` reports.
+one `GetMicrovm` reports. From a shell, `microvm adopt` (the triple or `--name`) runs the
+same adopt and reports the state it read, writing nothing.
 
 These launch options make a launch step safe to retry. `Sandbox.run(wait=False)` returns
 once `RunMicrovm` is accepted and `wait_until_running()` finishes the wait later. The CLI's

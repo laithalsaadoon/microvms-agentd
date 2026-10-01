@@ -248,6 +248,16 @@ pub enum Command {
     /// the same Noise KK handshake `tunnel --verify-identity` runs, against the pinned VM key.
     Attach(AttachArgs),
 
+    /// Adopt a MicroVM this invocation didn't launch, through core's lifecycle guards, and
+    /// report what they read.
+    ///
+    /// Core's `Sandbox::adopt`, as the SDKs' `Sandbox.adopt`: the VM's lifecycle is read from
+    /// the service, and a triple whose endpoint isn't the one the service reports for its id,
+    /// an empty agent token, or a state this client doesn't know is refused. So it answers
+    /// whether a `--name` record or a pasted triple still addresses the VM it says. Writes
+    /// nothing; `attach` registers a name.
+    Adopt(AdoptArgs),
+
     /// Tunnel arbitrary TCP to a guest port, so `psql` or `ssh` here reaches a server in the VM.
     ///
     /// Where `port-forward` speaks HTTP, this speaks bytes: each local connection becomes a
@@ -1503,6 +1513,15 @@ pub struct WaitArgs {
     #[arg(long, default_value = "300", value_parser = parse_seconds)]
     pub timeout: std::time::Duration,
 
+    #[command(flatten)]
+    pub attach: AttachFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct AdoptArgs {
     #[command(flatten)]
     pub attach: AttachFlags,
 
@@ -2846,7 +2865,7 @@ mod tests {
     /// The subcommands, named as the manifest and the response table name them.
     ///
     /// The block after `exec` is the attached one (`wait`, `health`, `keepalive`, `ack`, `kill`, `ps`, `stdin`, `cp`,
-    /// `exists`, `tunnel`, `port-forward`, and `shell` beside it), and their position is asserted rather than incidental,
+    /// `exists`, `adopt`, `tunnel`, `port-forward`, and `shell` beside it), and their position is asserted rather than incidental,
     /// because `--help`'s reading order is the only documentation of which commands need the
     /// identifier triple (`shell` sits with them because it addresses a running VM, though its
     /// credential is the minted shell token rather than the agent token). `history` and `names`
@@ -2877,6 +2896,7 @@ mod tests {
                 "exists",
                 "sync",
                 "attach",
+                "adopt",
                 "tunnel",
                 "port-forward",
                 "shell",

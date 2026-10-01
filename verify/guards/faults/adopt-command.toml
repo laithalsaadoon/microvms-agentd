@@ -1,0 +1,23 @@
+# ── `microvm adopt`, core's `Sandbox::adopt` on the CLI (#269) ──────────────────────────
+
+# The envelope reports a guess instead of the lifecycle the adopted sandbox read.
+[[fault]]
+id = "cli-adopt-reports-the-flags"
+guard = "guards::adopt::adopt_reports_what_cores_sandbox_read"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::adopt::adopt_reports_what_cores_sandbox_read"]
+expect = "test-failed"
+suite = "rust"
+message = "the service's lifecycle and idle policy, as the sandbox holds them"
+note = "crates/microvms-cli/src/guards/adopt.rs::adopt_reports_what_cores_sandbox_read"
+transform = { file = "crates/microvms-cli/src/commands/attached.rs", replace = "    let state = sandbox.lifecycle().as_str();\n", with = "    let state = \"RUNNING\";\n" }
+
+# The triple's endpoint never reaches core, so a mismatched one adopts.
+[[fault]]
+id = "cli-adopt-passes-no-endpoint"
+guard = "guards::adopt::adopt_refuses_a_triple_whose_endpoint_disagrees_with_the_service"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::adopt::adopt_refuses_a_triple_whose_endpoint_disagrees_with_the_service"]
+expect = "test-failed"
+suite = "rust"
+message = "the id and endpoint came from different records"
+note = "crates/microvms-cli/src/guards/adopt.rs::adopt_refuses_a_triple_whose_endpoint_disagrees_with_the_service"
+transform = { file = "crates/microvms-cli/src/commands/attached.rs", replace = "        &attach.microvm_id,\n        attach.endpoint,\n", with = "        &attach.microvm_id,\n        String::new(),\n" }
