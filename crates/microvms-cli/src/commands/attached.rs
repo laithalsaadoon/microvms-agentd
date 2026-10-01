@@ -37,6 +37,7 @@ use std::ops::ControlFlow;
 use std::time::Duration;
 
 use microvms_core::session::{EndReason, ExecEvent, Session, StreamOptions};
+use microvms_core::workspace;
 use microvms_core::{Error, ErrorKind};
 use serde_json::{Map, Value, json};
 
@@ -1400,12 +1401,11 @@ impl Direction {
 /// crate precisely so that nothing else has to — including the guest, whose base image may have no
 /// `tar` binary at all.
 ///
-/// The local side is an archive *file*, and that half is a genuine limitation. Neither this crate
-/// nor `microvms-core` can pack or unpack: `session/files.rs:112` declines to add the `tar` crate
-/// because Rust's standard library has no equivalent of Python tarfile's `data` filter, and "an
-/// extraction that looked safe and was not is worse than none". Adding one *here* would be worse
-/// still — the daemon's confined extractor is currently the only extractor in the system, and a
-/// second one in the client is a second set of member rules to keep in step.
+/// The local side is an archive *file*, moved as bytes. `cp` packs and unpacks nothing: an
+/// upload's members reach the daemon's confined extractor unexamined, and a download is written as
+/// the daemon sent it. Core's guarded extraction (`microvms_core::workspace`, what `run <DIR>`
+/// brings artifacts back through) is for a tree whose files a caller selects; `cp --tar` is for
+/// the archive itself.
 ///
 /// So: `microvm cp vm:/workspace out.tar --tar` archives a tree, `tar xf out.tar` unpacks it
 /// locally, and `microvm cp out.tar vm:/restored --tar` puts it back. Members are stored relative
@@ -1566,196 +1566,22 @@ fn resolve_paths(src: &str, dst: &str) -> Result<(Direction, String, String), Cl
 
 // ── sync ─────────────────────────────────────────────────────────────────────
 
-/// A [`crate::sync::SyncError`] as the `ERR_SYNC` row — the same mapping `run <DIR>` uses,
-/// spelled here because `lifecycle.rs`'s copy is private to it and the message is the row's
-/// contract, not either command's.
-fn sync_failure(error: crate::sync::SyncError) -> CliError {
-    CliError::new(Exit::Sync, error.to_string())
-        .suggest("the failure is on this machine's filesystem; the platform was not involved")
-}
-
-/// What one sync pass did, for the envelope and the watch loop's running totals.
-struct SyncPass {
-    uploaded_bytes: usize,
-    uploaded_members: usize,
-    deleted: usize,
-    /// No manifest was found (or `--full` ignored it), so the whole tree travelled.
-    full: bool,
-    /// The manifest already matched the tree; nothing travelled at all.
-    unchanged: bool,
-    /// The tree as this pass left it in the guest — the next pass's baseline.
-    manifest: crate::sync::Manifest,
-}
-
-/// The guest's manifest, or `None` when no sync has written one (or it does not parse).
-///
-/// A manifest that fails to parse is treated as absent rather than as an error: it means a
-/// different version (or a workload) wrote that path, and the safe reading of "I cannot
-/// tell what is over there" is the same as "nothing is over there" — a full upload, which
-/// re-establishes a manifest this build understands.
-async fn remote_manifest<O: std::io::Write, E: std::io::Write>(
+/// The progress line for the deletions a guest's manifest ordered that core's sync pass
+/// refused to run: the manifest is the VM's word, so a path that isn't a plain relative one is
+/// skipped, not executed, and saying so beats a silent skip.
+fn report_refusals<O: std::io::Write, E: std::io::Write>(
     ctx: &mut Ctx<'_, O, E>,
-    session: &Session,
-) -> Result<Option<crate::sync::Manifest>, CliError> {
-    match session.download_file(crate::sync::MANIFEST_PATH).await {
-        Ok(bytes) => match serde_json::from_slice::<crate::sync::Manifest>(&bytes) {
-            Ok(manifest) => Ok(Some(manifest)),
-            Err(error) => {
-                ctx.out.progress(&format!(
-                    "the guest manifest does not parse ({error}); syncing the whole tree"
-                ));
-                Ok(None)
-            }
-        },
-        Err(error) if error.wire_kind() == Some(microvms_core::WireKind::NotFound) => Ok(None),
-        Err(error) => Err(error.into()),
-    }
-}
-
-/// Whether a deletion path from the guest manifest is safe to hand to an in-guest `rm`.
-///
-/// The manifest is read *from the VM*, and the VM is where untrusted work runs — the same
-/// trust asymmetry [`crate::sync::extract_artifacts`] documents for the returned archive.
-/// A workload that rewrites the manifest to claim `../../etc/passwd` or `/root/.ssh` was
-/// synced would otherwise get this CLI to order that deletion on its behalf. Only a
-/// relative path with no `..` and no empty component qualifies; anything else is skipped
-/// like a hostile archive member, not executed.
-fn deletable(path: &str) -> bool {
-    !path.is_empty()
-        && !path.starts_with('/')
-        && !path.contains('\\')
-        && path
-            .split('/')
-            .all(|component| !component.is_empty() && component != "..")
-}
-
-/// How long past the in-guest `rm`'s own `timeout_sec` a sync pass waits for its answer.
-///
-/// Thirty seconds, the figure this pass has always used. It isn't core's
-/// `DEFAULT_CLIENT_GRACE` (sixty): that margin covers an exec the daemon has to escalate from
-/// SIGTERM to SIGKILL, and a pass under `sync --watch` holds the next one while it waits.
-/// Changing it is a behavior change of its own, so it stays a recorded decision.
-const SYNC_DELETE_GRACE: Duration = Duration::from_secs(30);
-
-/// One incremental pass: hash, diff, upload what changed, delete what vanished, and
-/// rewrite the guest manifest. `remote` is the baseline; `None` means upload everything.
-async fn sync_pass<O: std::io::Write, E: std::io::Write>(
-    ctx: &mut Ctx<'_, O, E>,
-    session: &Session,
-    dir: &std::path::Path,
-    remote: Option<crate::sync::Manifest>,
-    delete_timeout: Duration,
-) -> Result<SyncPass, CliError> {
-    let local = crate::sync::manifest(dir).map_err(sync_failure)?;
-    let full = remote.is_none();
-    let baseline = remote.unwrap_or_default();
-    let delta = crate::sync::diff(&local, &baseline);
-
-    if delta.is_empty() && !full {
-        return Ok(SyncPass {
-            uploaded_bytes: 0,
-            uploaded_members: 0,
-            deleted: 0,
-            full: false,
-            unchanged: true,
-            manifest: local,
-        });
-    }
-
-    let mut uploaded_bytes = 0usize;
-    let mut uploaded_members = 0usize;
-    if !delta.upload.is_empty() {
-        let packed = crate::sync::pack_paths(dir, &delta.upload).map_err(sync_failure)?;
+    pass: &workspace::SyncPass,
+) {
+    if pass.refused_deletions > 0 {
         ctx.out.progress(&format!(
-            "uploading {} member(s) ({} bytes) to vm:{}",
-            packed.members,
-            packed.archive.len(),
-            crate::sync::REMOTE_WORKDIR,
-        ));
-        session
-            .upload_tar(crate::sync::REMOTE_WORKDIR, &packed.archive)
-            .await?;
-        uploaded_bytes = packed.archive.len();
-        uploaded_members = packed.members;
-    }
-
-    let mut deleted = 0usize;
-    let doomed: Vec<&String> = delta.delete.iter().filter(|path| deletable(path)).collect();
-    if doomed.len() < delta.delete.len() {
-        ctx.out.progress(&format!(
-            "skipping {} manifest deletion path(s) that are not plain relative paths — \
-             the manifest is the VM's word, and a path that points outside /workspace is \
-             refused, not executed",
-            delta.delete.len() - doomed.len(),
+            "skipping {} manifest deletion path(s) that are not plain relative paths: the \
+             manifest is the VM's word, and a path that points outside {} is refused, not \
+             executed",
+            pass.refused_deletions,
+            workspace::REMOTE_WORKDIR,
         ));
     }
-    if !doomed.is_empty() {
-        ctx.out.progress(&format!(
-            "removing {} deleted path(s) in the VM",
-            doomed.len()
-        ));
-        let mut command: Vec<String> = vec!["rm".into(), "-rf".into(), "--".into()];
-        command.extend(doomed.iter().map(|path| (*path).clone()));
-        let exec_id = format!(
-            "microvm-sync-rm-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|epoch| epoch.as_nanos())
-                .unwrap_or_default(),
-        );
-        let result = session
-            .run_sync(
-                microvms_core::protocol::exec::StartRequest::new(exec_id, command)
-                    .with_cwd(Some(crate::sync::REMOTE_WORKDIR.into()))
-                    .with_timeout_sec(Some(delete_timeout.as_secs_f64())),
-                sync_client_wait(delete_timeout),
-            )
-            .await?;
-        match result.outcome {
-            Some(outcome) if outcome.exit_code == Some(0) => deleted = doomed.len(),
-            outcome => {
-                return Err(CliError::new(
-                    Exit::ExecFailed,
-                    format!(
-                        "the in-guest removal of {} deleted path(s) failed: {}. The uploaded \
-                         members landed; the guest manifest was left as it was, so the next \
-                         sync will order these deletions again.",
-                        doomed.len(),
-                        outcome
-                            .map(|outcome| {
-                                let detail = outcome.stderr.trim();
-                                if detail.is_empty() {
-                                    format!("exit {:?}", outcome.exit_code)
-                                } else {
-                                    detail.to_string()
-                                }
-                            })
-                            .unwrap_or_else(|| "still running at the deadline".into()),
-                    ),
-                ));
-            }
-        }
-    }
-
-    let body = serde_json::to_vec(&local).map_err(|error| {
-        CliError::new(
-            Exit::Unexpected,
-            format!("the manifest will not serialize: {error}"),
-        )
-    })?;
-    session
-        .upload_file(crate::sync::MANIFEST_PATH, &body, None)
-        .await?;
-
-    Ok(SyncPass {
-        uploaded_bytes,
-        uploaded_members,
-        deleted,
-        full,
-        unchanged: false,
-        manifest: local,
-    })
 }
 
 /// Whether a watch event under `root` can affect what a sync would upload.
@@ -1774,8 +1600,8 @@ pub(crate) fn watch_relevant(root: &std::path::Path, path: &std::path::Path) -> 
     };
     relative.components().all(|component| {
         let name = component.as_os_str();
-        name != crate::sync::MANIFEST_NAME
-            && ![".git", "target", "node_modules", ".venv"]
+        name != workspace::MANIFEST_NAME
+            && !workspace::SKIPPED_DIRS
                 .iter()
                 .any(|skipped| name == *skipped)
     })
@@ -1888,7 +1714,7 @@ pub async fn sync<O: std::io::Write, E: std::io::Write>(
                 "{} is not a directory. `sync` moves a project tree; a single file is \
                  `microvm cp <file> vm:{}/<file>`.",
                 args.dir.display(),
-                crate::sync::REMOTE_WORKDIR,
+                workspace::REMOTE_WORKDIR,
             ),
         ));
     }
@@ -1905,15 +1731,14 @@ pub async fn sync<O: std::io::Write, E: std::io::Write>(
         None
     };
 
-    let baseline = if args.full {
-        None
-    } else {
-        remote_manifest(ctx, &session).await?
-    };
-    let first = sync_pass(ctx, &session, &args.dir, baseline, args.timeout).await?;
+    // Core's one-shot sync: the guest's manifest as the baseline, or none with --full.
+    let first = session
+        .sync_dir(&workspace::DiskTree, &args.dir, args.full, args.timeout)
+        .await?;
+    report_refusals(ctx, &first);
 
     let mut passes = 1usize;
-    let mut totals = SyncPass { ..first };
+    let mut totals = first;
     if let Some((_watcher, mut events)) = watch {
         let root = WatchRoot::new(&args.dir);
         report_pass(ctx, &totals);
@@ -1941,7 +1766,15 @@ pub async fn sync<O: std::io::Write, E: std::io::Write>(
                 continue;
             }
             let baseline = std::mem::take(&mut totals.manifest);
-            let pass = sync_pass(ctx, &session, &args.dir, Some(baseline), args.timeout).await?;
+            let pass = session
+                .sync_pass(
+                    &workspace::DiskTree,
+                    &args.dir,
+                    Some(baseline),
+                    args.timeout,
+                )
+                .await?;
+            report_refusals(ctx, &pass);
             passes += 1;
             report_pass(ctx, &pass);
             totals.uploaded_bytes += pass.uploaded_bytes;
@@ -1954,7 +1787,7 @@ pub async fn sync<O: std::io::Write, E: std::io::Write>(
 
     let mut data = Map::new();
     data.insert("microvmId".into(), json!(microvm_id));
-    data.insert("workdir".into(), json!(crate::sync::REMOTE_WORKDIR));
+    data.insert("workdir".into(), json!(workspace::REMOTE_WORKDIR));
     data.insert("uploadedBytes".into(), json!(totals.uploaded_bytes));
     data.insert("uploadedMembers".into(), json!(totals.uploaded_members));
     data.insert("deleted".into(), json!(totals.deleted));
@@ -1977,13 +1810,13 @@ pub async fn sync<O: std::io::Write, E: std::io::Write>(
         format!(
             "{} is already what vm:{} holds — nothing uploaded (0 bytes)",
             args.dir.display(),
-            crate::sync::REMOTE_WORKDIR,
+            workspace::REMOTE_WORKDIR,
         )
     } else {
         format!(
             "synced {} -> vm:{} ({} member(s), {} bytes uploaded, {} deleted{})",
             args.dir.display(),
-            crate::sync::REMOTE_WORKDIR,
+            workspace::REMOTE_WORKDIR,
             totals.uploaded_members,
             totals.uploaded_bytes,
             totals.deleted,
@@ -1998,7 +1831,10 @@ pub async fn sync<O: std::io::Write, E: std::io::Write>(
 }
 
 /// One progress line per pass, so a `--watch` session reads as a log of what moved.
-fn report_pass<O: std::io::Write, E: std::io::Write>(ctx: &mut Ctx<'_, O, E>, pass: &SyncPass) {
+fn report_pass<O: std::io::Write, E: std::io::Write>(
+    ctx: &mut Ctx<'_, O, E>,
+    pass: &workspace::SyncPass,
+) {
     if pass.unchanged {
         ctx.out.progress("unchanged — nothing uploaded (0 bytes)");
     } else {
@@ -2981,15 +2817,6 @@ pub async fn shell<O: std::io::Write, E: std::io::Write>(
 #[allow(unused_imports, reason = "named in the documentation above")]
 use ErrorKind as _DocsOnly;
 
-/// How long the client waits for a sync's `rm`: the daemon's own budget plus the grace for the
-/// answer to come back, so the daemon's deadline, not the client's, is what ends a slow one.
-///
-/// A function of its own so the arithmetic has a test: the sync guards run a 60 s budget
-/// against a daemon that answers at once, so nothing else would notice a `-` for the `+`.
-fn sync_client_wait(budget: Duration) -> Duration {
-    budget + SYNC_DELETE_GRACE
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3272,19 +3099,5 @@ mod tests {
         assert_eq!(rendered.data["outcome"]["exit_code"], 0);
         assert_eq!(rendered.data["outcome"]["timed_out"], true);
         assert_eq!(rendered.data["stdout"], "partial report");
-    }
-
-    /// A sync's `rm` waits its budget plus the delete grace, with no floor of its own: the
-    /// daemon's deadline is the budget, so a zero one is the daemon's to refuse.
-    ///
-    /// **Falsification**: `verify/guards/faults/seconds-flags.toml` entry `cli-sync-client-wait` turns the
-    /// `+` into a `-`, cargo-mutants' own mutant, and the 60 s row reads 30 s.
-    #[test]
-    fn a_sync_waits_its_budget_plus_the_delete_grace() {
-        assert_eq!(
-            sync_client_wait(Duration::from_secs(60)),
-            Duration::from_secs(90)
-        );
-        assert_eq!(sync_client_wait(Duration::ZERO), Duration::from_secs(30));
     }
 }

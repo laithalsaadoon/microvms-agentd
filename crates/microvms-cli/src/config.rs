@@ -247,8 +247,8 @@ fn validate(path: &Path, config: &ProjectConfig) -> Result<(), ConfigError> {
     }
     if let Some(globs) = &config.artifacts {
         for glob in globs {
-            if let Err(error) = globset::Glob::new(glob) {
-                problems.push(format!("artifacts glob {glob:?} does not compile: {error}"));
+            if let Err(error) = microvms_core::workspace::check_glob(glob) {
+                problems.push(error.to_string());
             }
         }
     }

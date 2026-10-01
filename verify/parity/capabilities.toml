@@ -251,7 +251,7 @@ ts = "Session.downloadTar"
 
 [[capability]]
 id = "sync-directory"
-core = { exempt = "pack, diff and safe extraction live in the CLI", issue = "#260" }
+core = "microvms_core::session::Session::sync_pass"
 cli = "sync"
 py = { exempt = "no directory transfer", issue = "#260" }
 ts = { exempt = "no directory transfer", issue = "#260" }

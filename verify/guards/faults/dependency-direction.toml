@@ -53,18 +53,24 @@ run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", 
 expect = "test-failed"
 suite = "rust"
 message = "Listed but unused: [\"reqwest\"]"
-transform = { file = "verify/arch/placement.toml", replace = "[microvms-cli.drift]\nnormal = [\"const-hex\", \"globset\", \"sha2\", \"tar\"]\n", with = "[microvms-cli.drift]\nnormal = [\"const-hex\", \"globset\", \"sha2\", \"tar\", \"reqwest\"]\n" }
+transform = { file = "verify/arch/placement.toml", replace = "[microvms-cli]\nnormal = [\"microvms-core\", \"clap\", \"ratatui\", \"serde\", \"serde_json\", \"tokio\", \"toml\", \"unicode-width\"]\n", with = "[microvms-cli]\nnormal = [\"microvms-core\", \"clap\", \"ratatui\", \"serde\", \"serde_json\", \"tokio\", \"toml\", \"unicode-width\"]\n\n[microvms-cli.drift]\nnormal = [\"reqwest\"]\n" }
 
 # The records readers' floors: a reader that finds no drift, or no placement decision, allows the
-# CLI none of it, so the CLI's exact set fails naming each crate it read nothing for.
+# CLI none of it, so the CLI's exact set fails naming each crate it read nothing for. No crate
+# carries drift since #260, so the drift floor's fault seeds a record and the crate it allows, then
+# breaks the reader.
 [[fault]]
 id = "deps-drift-floor"
 guard = "each_adapter_depends_on_exactly_its_allowed_set"
 run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "each_adapter_depends_on_exactly_its_allowed_set"]
 expect = "test-failed"
 suite = "rust"
-message = "Outside the set: [\"const-hex\", \"globset\", \"sha2\", \"tar\"]"
-transform = { file = "crates/microvms-cli/tests/dependency_direction.rs", replace = "let Some(drift) = table.get(\"drift\") else", with = "let Some(drift) = table.get(\"drifts\") else" }
+message = "Outside the set: [\"tar\"]"
+transform = [
+  { file = "verify/arch/placement.toml", replace = "[microvms-cli]\nnormal = [\"microvms-core\", \"clap\", \"ratatui\", \"serde\", \"serde_json\", \"tokio\", \"toml\", \"unicode-width\"]\n", with = "[microvms-cli]\nnormal = [\"microvms-core\", \"clap\", \"ratatui\", \"serde\", \"serde_json\", \"tokio\", \"toml\", \"unicode-width\"]\n\n[microvms-cli.drift]\nnormal = [\"tar\"]\n" },
+  { file = "crates/microvms-cli/Cargo.toml", replace = "[dependencies]\n", with = "[dependencies]\ntar = \"0.4.46\"\n" },
+  { file = "crates/microvms-cli/tests/dependency_direction.rs", replace = "let Some(drift) = table.get(\"drift\") else", with = "let Some(drift) = table.get(\"drifts\") else" },
+]
 
 [[fault]]
 id = "deps-decisions-floor"
@@ -93,7 +99,7 @@ expect = "test-failed"
 suite = "rust"
 note = "crates/microvms-cli/tests/dependency_direction.rs::every_set_and_placement_record_belongs_to_a_crate_held_here"
 message = "which names microvms-edges, a crate with no set"
-transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"port-impl\", \"adapter-logic\"]\n", with = "enforced = [\"port-impl\", \"adapter-logic\"]\n\n[[decision]]\ncategory = \"placement\"\nkey = \"microvms-edges -> reqwest\"\nreason = \"seeded\"\n" }
+transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"port-impl\", \"adapter-logic\", \"placement\"]\n", with = "enforced = [\"port-impl\", \"adapter-logic\", \"placement\"]\n\n[[decision]]\ncategory = \"placement\"\nkey = \"microvms-edges -> reqwest\"\nreason = \"seeded\"\n" }
 
 [[fault]]
 id = "deps-record-in-set"
@@ -110,8 +116,8 @@ guard = "every_set_and_placement_record_belongs_to_a_crate_held_here"
 run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "every_set_and_placement_record_belongs_to_a_crate_held_here"]
 expect = "test-failed"
 suite = "rust"
-message = "the placement record \"microvms-cli -> tar\" is written twice, the second time as a decision"
-transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"port-impl\", \"adapter-logic\"]\n", with = "enforced = [\"port-impl\", \"adapter-logic\"]\n\n[[decision]]\ncategory = \"placement\"\nkey = \"microvms-cli -> tar\"\nreason = \"seeded\"\n" }
+message = "the placement record \"microvms-cli -> notify\" is written twice, the second time as a decision"
+transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"port-impl\", \"adapter-logic\", \"placement\"]\n", with = "enforced = [\"port-impl\", \"adapter-logic\", \"placement\"]\n\n[[decision]]\ncategory = \"placement\"\nkey = \"microvms-cli -> notify\"\nreason = \"seeded\"\n" }
 
 [[fault]]
 id = "deps-record-shape"
@@ -148,7 +154,7 @@ run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", 
 expect = "test-failed"
 suite = "rust"
 message = "[microvms-cli.drift] in verify/arch/placement.toml takes only normal and build lists, not [\"dev\"]"
-transform = { file = "verify/arch/placement.toml", replace = "[microvms-cli.drift]\nnormal = [\"const-hex\", \"globset\", \"sha2\", \"tar\"]\n", with = "[microvms-cli.drift]\nnormal = [\"const-hex\", \"globset\", \"sha2\", \"tar\"]\ndev = [\"tempfile\"]\n" }
+transform = { file = "verify/arch/placement.toml", replace = "[microvms-cli]\nnormal = [\"microvms-core\", \"clap\", \"ratatui\", \"serde\", \"serde_json\", \"tokio\", \"toml\", \"unicode-width\"]\n", with = "[microvms-cli]\nnormal = [\"microvms-core\", \"clap\", \"ratatui\", \"serde\", \"serde_json\", \"tokio\", \"toml\", \"unicode-width\"]\n\n[microvms-cli.drift]\ndev = [\"tempfile\"]\n" }
 
 [[fault]]
 id = "deps-domain-tokio"
