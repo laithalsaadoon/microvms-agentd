@@ -1481,6 +1481,11 @@ pub async fn build<O: std::io::Write, E: std::io::Write>(
             base_image_version: args.base_image_version.as_deref(),
             log_group: args.log_group.as_deref(),
             log_stream: args.log_stream.as_deref(),
+            tags: &args.tags,
+            base_image: args.base_image.as_deref(),
+            inherit_workdir: args.inherit_workdir,
+            run_hook_timeout: args.run_hook_timeout_sec,
+            build_hook_timeout: args.build_hook_timeout_sec,
         },
     )?;
 
@@ -1655,6 +1660,17 @@ struct BuildSpec<'a> {
     /// The caller's log-stream **prefix**; core appends the per-build discriminator and
     /// the resolved exact name comes back on the image for the envelope to report.
     pub log_stream: Option<&'a str>,
+    /// `build --tag`'s pairs, in the order given (#264). `run` passes none, and none of the
+    /// options below, for the reason it pins no base: they describe a durable image.
+    pub tags: &'a [(String, String)],
+    /// `build --base-image`: the managed base's name, paired with the Dockerfile's `FROM`.
+    pub base_image: Option<&'a str>,
+    /// `build --inherit-workdir`, which core refuses when nothing declares a `WORKDIR`.
+    pub inherit_workdir: bool,
+    /// `build --run-hook-timeout-sec`, or `None` for core's default.
+    pub run_hook_timeout: Option<microvms_core::RunHookTimeout>,
+    /// `build --build-hook-timeout-sec`, or `None` for core's default.
+    pub build_hook_timeout: Option<microvms_core::BuildHookTimeout>,
 }
 
 /// The create request for `run`'s arguments.
@@ -1684,6 +1700,11 @@ fn build_request<'a, O: std::io::Write, E: std::io::Write>(
             // `microvm run` in a configured project.
             log_group: args.log_group.as_deref(),
             log_stream: args.log_stream.as_deref(),
+            tags: &[],
+            base_image: None,
+            inherit_workdir: false,
+            run_hook_timeout: None,
+            build_hook_timeout: None,
         },
     )
 }
@@ -1707,6 +1728,11 @@ fn build_request_from<O: std::io::Write, E: std::io::Write>(
         base_image_version,
         log_group,
         log_stream,
+        tags,
+        base_image,
+        inherit_workdir,
+        run_hook_timeout,
+        build_hook_timeout,
     } = spec;
     // No binary only beside a caller's --artifact-uri (#249). The image is built from their
     // object, and nothing reads these bytes: `upload_artifact` returns before building an
@@ -1769,6 +1795,35 @@ fn build_request_from<O: std::io::Write, E: std::io::Write>(
     }
     if let Some(dir) = project {
         request.project_files = Some(read_project_files(dir)?);
+    }
+    if let Some(base_name) = base_image {
+        // The registry reference is the Dockerfile's own `FROM`, through core's pairing, so the
+        // two halves of the base can't disagree. clap requires --dockerfile or --artifact-uri
+        // beside --base-image; with the URI no Dockerfile is built here, and only the name
+        // reaches the wire.
+        let mut base = match request.dockerfile.as_deref() {
+            Some(text) => microvms_core::control::BaseImage::from_dockerfile(text)?,
+            None => microvms_core::control::BaseImage::al2023(),
+        };
+        base.name = base_name.to_string();
+        request.base_image = base;
+    }
+    for (key, value) in tags {
+        // The service takes a map, so a repeated key would keep one value and drop the other
+        // with nothing said.
+        if request.tags.insert(key.clone(), value.clone()).is_some() {
+            return Err(Error::new(
+                ErrorKind::InvalidArg,
+                format!("the tag key {key:?} is given twice; an image carries one value per key"),
+            ));
+        }
+    }
+    request.inherit_workdir = inherit_workdir;
+    if let Some(timeout) = run_hook_timeout {
+        request.run_hook_timeout = timeout;
+    }
+    if let Some(timeout) = build_hook_timeout {
+        request.build_hook_timeout = timeout;
     }
     Ok(request)
 }

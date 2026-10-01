@@ -72,6 +72,11 @@ fn reuse_args(binary: &std::path::Path) -> BuildArgs {
         reuse: true,
         s3_key_prefix: None,
         force: false,
+        tags: Vec::new(),
+        base_image: None,
+        inherit_workdir: false,
+        run_hook_timeout_sec: None,
+        build_hook_timeout_sec: None,
         port: None,
         region: region_flags(),
         infra: InfraFlags::default(),
@@ -572,6 +577,11 @@ async fn a_plain_build_never_lists_and_reports_reused_false() {
         reuse: false,
         s3_key_prefix: None,
         force: false,
+        tags: Vec::new(),
+        base_image: None,
+        inherit_workdir: false,
+        run_hook_timeout_sec: None,
+        build_hook_timeout_sec: None,
         port: None,
         region: region_flags(),
         infra: InfraFlags::default(),
@@ -634,6 +644,11 @@ async fn a_locally_refused_dockerfile_costs_no_upload_and_no_call() {
         reuse: false,
         s3_key_prefix: None,
         force: false,
+        tags: Vec::new(),
+        base_image: None,
+        inherit_workdir: false,
+        run_hook_timeout_sec: None,
+        build_hook_timeout_sec: None,
         port: None,
         region: region_flags(),
         infra: InfraFlags::default(),
@@ -721,6 +736,11 @@ async fn a_daemon_that_is_not_an_aarch64_elf_costs_no_upload_and_no_call() {
             reuse: false,
             s3_key_prefix: None,
             force: false,
+            tags: Vec::new(),
+            base_image: None,
+            inherit_workdir: false,
+            run_hook_timeout_sec: None,
+            build_hook_timeout_sec: None,
             port: None,
             region: region_flags(),
             infra: InfraFlags::default(),
@@ -828,6 +848,11 @@ async fn a_pinned_base_image_version_reaches_the_create_body_from_the_build_flag
         reuse: false,
         s3_key_prefix: None,
         force: false,
+        tags: Vec::new(),
+        base_image: None,
+        inherit_workdir: false,
+        run_hook_timeout_sec: None,
+        build_hook_timeout_sec: None,
         port: None,
         region: region_flags(),
         infra: InfraFlags::default(),
@@ -903,6 +928,11 @@ async fn a_build_log_stream_reaches_the_wire_suffixed_and_the_envelope_reports_i
         reuse: false,
         s3_key_prefix: None,
         force: false,
+        tags: Vec::new(),
+        base_image: None,
+        inherit_workdir: false,
+        run_hook_timeout_sec: None,
+        build_hook_timeout_sec: None,
         port: None,
         region: region_flags(),
         infra: InfraFlags::default(),
@@ -984,6 +1014,11 @@ async fn a_build_without_logging_flags_emits_no_logging_member_and_a_null_stream
         reuse: false,
         s3_key_prefix: None,
         force: false,
+        tags: Vec::new(),
+        base_image: None,
+        inherit_workdir: false,
+        run_hook_timeout_sec: None,
+        build_hook_timeout_sec: None,
         port: None,
         region: region_flags(),
         infra: InfraFlags::default(),
@@ -1005,4 +1040,222 @@ async fn a_build_without_logging_flags_emits_no_logging_member_and_a_null_stream
         rendered.data["buildLogGroup"], "/aws/lambda-microvms/img",
         "no configured group means the derived default"
     );
+}
+
+/// `build` over `argv` after `microvm build <binary> --name img --region us-east-1`, parsed by
+/// clap, against a transport that answers one create and a ready poll.
+async fn build_with_flags(
+    binary: &std::path::Path,
+    argv: &[&str],
+) -> (
+    Result<crate::commands::Rendered, crate::exit::CliError>,
+    Arc<ScriptedTransport>,
+) {
+    use clap::Parser as _;
+    let binary = binary.to_string_lossy().to_string();
+    let head = [
+        "microvm",
+        "build",
+        binary.as_str(),
+        "--name",
+        "img",
+        "--region",
+        "us-east-1",
+    ];
+    let full = [head.as_slice(), argv].concat();
+    let cli =
+        crate::cli::Cli::try_parse_from(&full).unwrap_or_else(|error| panic!("{full:?}: {error}"));
+    let transport = Arc::new(ScriptedTransport::new());
+    transport
+        .answer("CreateMicrovmImage", 201, &created("img"))
+        .answer("GetMicrovmImage", 200, &image_in("img", "CREATED"));
+    let seam = ScriptedSeam {
+        transport: Arc::clone(&transport),
+        clock: Arc::new(YieldingClock::default()),
+    };
+    let (result, _) = dispatch_with(&seam, &cli.command, full_infra()).await;
+    (result, transport)
+}
+
+/// **#264 slice D: `build`'s image options reach the create call.** Two tags (one whose value
+/// holds an `=`), a custom managed base paired with the Dockerfile's `FROM`, `--inherit-workdir`
+/// over a Dockerfile that declares a `WORKDIR`, and both hook timeouts: each is on the
+/// `CreateMicrovmImage` body in the model's members, the hook timeouts in their own families.
+/// `inherit_workdir` has no wire member; it is the local check the next guard holds.
+///
+/// **Falsification**, run 2026-09-30, registered in verify/guards/faults/build-options.toml.
+/// Drop the tags (`cli-build-tags-dropped`): red on `the tags reach the create body`. Keep the
+/// default base (`cli-build-base-image-ignored`): red on `the base the flag names`. Drop either
+/// hook timeout (`cli-build-run-hook-timeout-dropped`, `cli-build-build-hook-timeout-dropped`):
+/// red on its family's member.
+#[tokio::test]
+async fn the_build_image_options_reach_the_create_body() {
+    let binary = FakeBinary::new("build-options");
+    let dockerfile = TempDir::new("build-options-dockerfile");
+    let path = dockerfile.0.join("Dockerfile");
+    let text = microvms_core::control::wrap_dockerfile(
+        "FROM public.ecr.aws/docker/library/python:3.12-slim\nWORKDIR /work\n",
+        &microvms_core::control::WrapOptions::default(),
+    )
+    .expect("a task Dockerfile core can wrap");
+    std::fs::write(&path, text).expect("writes");
+    let path = path.to_string_lossy().to_string();
+
+    let (result, transport) = build_with_flags(
+        &binary.0,
+        &[
+            "--dockerfile",
+            &path,
+            "--tag",
+            "team=x",
+            "--tag",
+            "query=a=b",
+            "--base-image",
+            "custom-base",
+            "--inherit-workdir",
+            "--run-hook-timeout-sec",
+            "45",
+            "--build-hook-timeout-sec",
+            "900",
+        ],
+    )
+    .await;
+    result.unwrap_or_else(|error| panic!("the build succeeds: {}", error.message));
+    let body = transport.first_body("CreateMicrovmImage");
+    assert_eq!(
+        body["tags"],
+        serde_json::json!({"team": "x", "query": "a=b"}),
+        "the tags reach the create body: {body}"
+    );
+    assert_eq!(
+        body["baseImageArn"], "arn:aws:lambda:us-east-1:aws:microvm-image:custom-base",
+        "the base the flag names: {body}"
+    );
+    assert_eq!(
+        body["hooks"]["microvmHooks"]["runTimeoutInSeconds"], 45,
+        "the run family's timeout: {body}"
+    );
+    assert_eq!(
+        body["hooks"]["microvmImageHooks"]["readyTimeoutInSeconds"], 900,
+        "the build family's timeout: {body}"
+    );
+}
+
+/// **#264 slice D: `--inherit-workdir` over an image that declares no `WORKDIR` is refused
+/// before the upload**, with core's message and no call. The derived default Dockerfile sets
+/// none and neither does the managed base, so an exec with no cwd would run in `/`. A repeated
+/// `--tag` key is refused the same way, rather than one of its values dropped.
+///
+/// **Falsification**, run 2026-09-30, registered in verify/guards/faults/build-options.toml.
+/// Send `inherit_workdir: false` whatever the flag says (`cli-build-inherit-workdir-dropped`):
+/// red on `nothing declares a WORKDIR`. Let a repeated key through
+/// (`cli-build-tag-key-repeated`): red on `a repeated tag key`.
+#[tokio::test]
+async fn a_build_refuses_an_inherit_workdir_or_a_tag_it_cannot_keep_before_any_call() {
+    let binary = FakeBinary::new("build-refusals");
+    let rows: [(&str, &[&str], &str); 2] = [
+        (
+            "nothing declares a WORKDIR",
+            &["--inherit-workdir"],
+            "nothing to inherit",
+        ),
+        (
+            "a repeated tag key",
+            &["--tag", "team=x", "--tag", "team=y"],
+            "is given twice",
+        ),
+    ];
+    for (label, argv, message) in rows {
+        let (result, transport) = build_with_flags(&binary.0, argv).await;
+        let Err(error) = result else {
+            panic!(
+                "{label}: refused, but the build ran: {:?}",
+                transport.calls()
+            );
+        };
+        assert_eq!(error.exit, Exit::InvalidArg, "{label}: {}", error.message);
+        assert!(
+            error.message.contains(message),
+            "{label}: {}",
+            error.message
+        );
+        assert_eq!(transport.calls(), Vec::<String>::new(), "{label}: no call");
+        assert_eq!(
+            transport.uploads(),
+            Vec::<String>::new(),
+            "{label}: no upload"
+        );
+    }
+}
+
+/// **#264 slice D: a bad tag or hook timeout is refused at parse time, through core's own
+/// checks**, and `--base-image` needs a Dockerfile or an artifact to pair with. Each value is
+/// refused by the parser before anything is read, with the text of core's `require_valid_tags`,
+/// `RunHookTimeout` or `BuildHookTimeout`, so the CLI and the bindings refuse the same values the
+/// same way. The legal edges parse.
+///
+/// **Falsification**, run 2026-09-30, registered in verify/guards/faults/build-options.toml.
+/// Parse a tag without core's check (`cli-tag-parse-unchecked`): red on `an empty key`.
+#[test]
+fn a_bad_tag_or_hook_timeout_is_refused_at_parse_time() {
+    use clap::Parser as _;
+    let long_key = format!("{}=v", "k".repeat(129));
+    let refused: [(&str, Vec<&str>, &str); 7] = [
+        ("no `=`", vec!["--tag", "team"], "no `=`"),
+        (
+            "an empty key",
+            vec!["--tag", "=x"],
+            "TagKey requires at least 1 character",
+        ),
+        (
+            "a long key",
+            vec!["--tag", &long_key],
+            "over the TagKey ceiling",
+        ),
+        (
+            "a run hook past its ceiling",
+            vec!["--run-hook-timeout-sec", "61"],
+            "microvmHooks timeout of 61s",
+        ),
+        (
+            "a zero build hook",
+            vec!["--build-hook-timeout-sec", "0"],
+            "microvmImageHooks timeout of 0s",
+        ),
+        (
+            "a fractional hook",
+            vec!["--run-hook-timeout-sec", "1.5"],
+            "not a whole number",
+        ),
+        (
+            "a base with nothing to pair",
+            vec!["--base-image", "custom-base"],
+            "--dockerfile",
+        ),
+    ];
+    for (label, flags, message) in refused {
+        let argv = [["microvm", "build", "agentd"].as_slice(), &flags].concat();
+        let error = crate::cli::Cli::try_parse_from(&argv)
+            .map(|_| ())
+            .expect_err(label);
+        assert!(error.to_string().contains(message), "{label}: {error}");
+    }
+    for flags in [
+        vec!["--tag", "team="],
+        vec![
+            "--run-hook-timeout-sec",
+            "60",
+            "--build-hook-timeout-sec",
+            "3600",
+        ],
+        vec![
+            "--base-image",
+            "custom-base",
+            "--artifact-uri",
+            "s3://c/t.zip",
+        ],
+    ] {
+        let argv = [["microvm", "build", "agentd"].as_slice(), &flags].concat();
+        crate::cli::Cli::try_parse_from(&argv).unwrap_or_else(|error| panic!("{flags:?}: {error}"));
+    }
 }

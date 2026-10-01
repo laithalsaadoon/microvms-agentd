@@ -387,6 +387,7 @@ def run_suite(args: argparse.Namespace) -> int:
                 Path(tmp) / "project",
                 aws.client("logs"),
                 aws.client("s3"),
+                aws.client(SERVICE),
                 results,
             )
             # Version skew (#298) beside them: this tree's CLI builds an image around the

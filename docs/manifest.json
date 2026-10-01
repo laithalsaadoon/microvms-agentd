@@ -661,6 +661,51 @@
           {
             "choices": null,
             "default": null,
+            "help": "A tag on the image, repeatable. Split at the first `=`, so a VALUE may hold one, and checked against the model's `TagKey` and `TagValue` at parse time; an empty VALUE is legal. A KEY given twice is refused rather than one of its values dropped",
+            "name": "tag",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "The managed base image `baseImageArn` names, instead of `al2023-1`",
+            "name": "base-image",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Rely on the image's `WORKDIR`: an exec with no cwd runs there",
+            "name": "inherit-workdir",
+            "positional": false,
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "The timeout of the `run`, `resume`, `suspend` and `terminate` hooks, in whole seconds",
+            "name": "run-hook-timeout-sec",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "The timeout of the `ready` and `validate` build hooks, in whole seconds",
+            "name": "build-hook-timeout-sec",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
             "help": "Reuse an existing image whose build inputs match, instead of building",
             "name": "reuse",
             "positional": false,
