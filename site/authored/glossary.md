@@ -222,10 +222,13 @@ token. See [Embedding](/internals/embedding/).
 
 ### `--reuse`
 
-The `build --project` flag that names the image after a content hash of the project's dependency files
-and skips the build when an image of that name already exists. The lockfile is the identity: an edit
-to `uv.lock` alone moved the hash and produced a new image, while unchanged files answered in under a
-second with `reused: true`. See [Platform](/internals/platform/).
+The `build` flag that builds through core's `ensure_image`: the image is named `<name>-<hash12>`, the
+hash over the daemon, the Dockerfile, the project's dependency files, the base image and the size
+class. A ready image under that name is returned with `reused: true` and nothing uploaded, one still
+building is waited on, a failed one is deleted and rebuilt, and otherwise the artifact is uploaded to
+`s3://<bucket>/[<prefix>/]<name>/artifact.zip` and the image built. The lockfile is part of the
+identity: an edit to `uv.lock` alone moved the hash and produced a new image, while unchanged files
+answered in under a second with `reused: true`. See [Platform](/internals/platform/).
 
 ### `runHookPayload`
 

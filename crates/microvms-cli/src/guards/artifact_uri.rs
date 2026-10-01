@@ -9,7 +9,7 @@ use microvms_core::testing::YieldingClock;
 
 use super::support::{
     FakeBinary, ScriptedSeam, ScriptedTransport, TempDir, build_args_without_binary, dispatch_with,
-    full_infra, list_images_body, region_flags, run_args_for_image, script_prov_build,
+    full_infra, region_flags, run_args_for_image, script_prov_build,
 };
 use crate::cli::{BuildArgs, Command, InfraFlags, MemoryMib, RunArgs};
 use crate::seam::Infra;
@@ -19,8 +19,10 @@ use crate::seam::Infra;
 /// and any upload before it are on the record, and those are all these guards read.
 fn scripted_create_stop() -> Arc<ScriptedTransport> {
     let transport = Arc::new(ScriptedTransport::new());
+    // `GetMicrovmImage` answers 404 for `run`'s ensure (#258): the name is free, so it builds
+    // and the create is where it stops.
     transport
-        .answer("ListMicrovmImages", 200, &list_images_body(&[], None))
+        .answer("GetMicrovmImage", 404, r#"{"message": "Image not found"}"#)
         .answer("CreateMicrovmImage", 400, r#"{"message": "scripted stop"}"#);
     transport
 }
@@ -40,6 +42,13 @@ fn artifact_uri_build_args(binary: &std::path::Path, artifact_uri: Option<&str>)
         log_group: None,
         log_stream: None,
         reuse: false,
+        s3_key_prefix: None,
+        force: false,
+        tags: Vec::new(),
+        base_image: None,
+        inherit_workdir: false,
+        run_hook_timeout_sec: None,
+        build_hook_timeout_sec: None,
         port: None,
         region: region_flags(),
         infra: InfraFlags::default(),
@@ -176,28 +185,35 @@ async fn a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucke
 /// when there's no bucket (`cli-bucket-build-uploads`): red on `build:` with no upload recorded.
 #[tokio::test]
 async fn a_bucket_without_an_artifact_uri_uploads_to_the_derived_key() {
-    const DERIVED: &str = "s3://a-bucket/img.zip";
     let binary = FakeBinary::new("bucket-only-bin");
     let ledgers = TempDir::new("bucket-only-ledger");
+    // `build --name img` keeps the name it was given; `run`'s build is an ensure (#258), whose
+    // name is `img-<hash12>` and whose key is `<name>/artifact.zip`.
     let arms = [
         (
             "build",
             Command::Build(artifact_uri_build_args(&binary.0, None)),
+            "s3://a-bucket/img.zip",
         ),
         (
             "run",
             Command::Run(artifact_uri_run_args(&binary.0, ledgers.0.clone(), None).into()),
+            "/artifact.zip",
         ),
     ];
-    for (arm, command) in arms {
+    for (arm, command, derived) in arms {
         let (uploads, uri, stderr) = upload_record(&command, full_infra()).await;
-        assert_eq!(
-            uploads,
-            vec![DERIVED.to_string()],
-            "{arm}: a bucket and no --artifact-uri uploads to the derived key"
+        assert!(
+            uploads.len() == 1 && uploads[0].ends_with(derived),
+            "{arm}: a bucket and no --artifact-uri uploads to the derived key: {uploads:?}"
+        );
+        assert!(
+            uploads[0].starts_with("s3://a-bucket/img"),
+            "{arm}: in the bucket, under the name: {uploads:?}"
         );
         assert_eq!(
-            uri, DERIVED,
+            uri,
+            uploads[0].as_str(),
             "{arm}: the create call names the uploaded key"
         );
         assert!(

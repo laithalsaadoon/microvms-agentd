@@ -52,7 +52,7 @@ ts = "Sandbox.buildArtifact"
 [[capability]]
 id = "ensure-image"
 core = "microvms_core::sandbox::Sandbox::ensure_image"
-cli = { exempt = "`build --reuse` re-implements reuse instead of calling core", issue = "#258" }
+cli = "build --reuse"
 py = "Sandbox.ensure_image"
 ts = "Sandbox.ensureImage"
 
@@ -649,10 +649,10 @@ ts = "NameRegistry.releaseByVm"
 
 [[capability]]
 id = "import-record"
-core = { exempt = "the authenticated probe lives in the CLI", issue = "#270" }
+core = ["microvms_core::names::import", "microvms_core::names::probe", "microvms_core::names::import_probed"]
 cli = "attach"
-py = { exempt = "NameRecord.from_dict plus put, no probe", issue = "#270" }
-ts = { exempt = "NameRecord.fromObject plus put, no probe", issue = "#270" }
+py = "NameRegistry.import_record"
+ts = "NameRegistry.importRecord"
 
 # ── cost ─────────────────────────────────────────────────────────────────────
 

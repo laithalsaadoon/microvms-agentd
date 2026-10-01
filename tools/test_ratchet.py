@@ -1932,8 +1932,6 @@ DENY = "#![deny(clippy::disallowed_methods, clippy::disallowed_types)]"
 LINT_EXCEPTIONS = {
     # The CLI's composition root, which hands core's process lookup to every handler.
     ("crates/microvms-cli/src/main.rs", "clippy::disallowed_methods"): 1,
-    # `put_via_aws_cli`, which #258 deletes.
-    ("crates/microvms-cli/src/seam.rs", "clippy::disallowed_types"): 1,
     # The one door to AWS: `production_plane` and `production_session`, each holding one call
     # to a core constructor. Not the whole `impl CoreSeam for AwsSeam`, which would turn the
     # transport and environment bans off for every line of it.

@@ -1020,6 +1020,14 @@ pub struct QuickstartArgs {
 }
 
 #[derive(Args, Debug)]
+// `--base-image` requires one of the group. `multiple(true)` keeps the group from making its
+// members conflict: `artifact_uri`'s own `conflicts_with_all` is the one refusal of the pair, and
+// a second one here would hide that refusal from its guard.
+#[command(group(
+    clap::ArgGroup::new("base_image_source")
+        .args(["dockerfile", "artifact_uri"])
+        .multiple(true)
+))]
 pub struct BuildArgs {
     /// The aarch64 agentd binary to bake in as the image CMD.
     ///
@@ -1101,23 +1109,70 @@ pub struct BuildArgs {
     #[arg(long)]
     pub repair_identity: bool,
 
+    /// A tag on the image, repeatable. Split at the first `=`, so a VALUE may hold one, and
+    /// checked against the model's `TagKey` and `TagValue` at parse time; an empty VALUE is
+    /// legal. A KEY given twice is refused rather than one of its values dropped.
+    #[arg(long = "tag", value_name = "KEY=VALUE", value_parser = parse_tag)]
+    pub tags: Vec<(String, String)>,
+
+    /// The managed base image `baseImageArn` names, instead of `al2023-1`.
+    ///
+    /// Its registry reference is the --dockerfile's first `FROM`, taken whole (a digest pin
+    /// kept), so the two can't disagree. With --artifact-uri no Dockerfile is built here and
+    /// only the name is sent. Requires one of the two, because the derived default
+    /// Dockerfile's `FROM` is `al2023-1`'s.
+    #[arg(long, value_name = "NAME", requires = "base_image_source")]
+    pub base_image: Option<String>,
+
+    /// Rely on the image's `WORKDIR`: an exec with no cwd runs there.
+    ///
+    /// Refused before the upload when nothing declares one, neither the --dockerfile nor the
+    /// base, because most public ARM64 bases leave it empty and every relative path would
+    /// then resolve against `/`.
+    #[arg(long)]
+    pub inherit_workdir: bool,
+
+    /// The timeout of the `run`, `resume`, `suspend` and `terminate` hooks, in whole seconds.
+    ///
+    /// The service caps this family far below the build family, and core's `RunHookTimeout`
+    /// refuses a value past the cap at parse time, naming both ceilings. Omitted, core's
+    /// default.
+    #[arg(long, value_name = "SECONDS", value_parser = parse_run_hook_timeout)]
+    pub run_hook_timeout_sec: Option<microvms_core::RunHookTimeout>,
+
+    /// The timeout of the `ready` and `validate` build hooks, in whole seconds.
+    ///
+    /// Core's `BuildHookTimeout` refuses a value past the service's cap at parse time.
+    /// Omitted, core's default.
+    #[arg(long, value_name = "SECONDS", value_parser = parse_build_hook_timeout)]
+    pub build_hook_timeout_sec: Option<microvms_core::BuildHookTimeout>,
+
     /// Reuse an existing image whose build inputs match, instead of building.
     ///
-    /// Computes a sha256 over the build inputs (the daemon binary's bytes and the
-    /// Dockerfile), derives the image name `<name>-<hash12>`, and checks the account's
-    /// image listing for that exact name: a hit skips the build entirely and reports the
-    /// existing image with `reused: true`; a miss builds under the derived name.
+    /// Core's `ensure_image` (#258): the image is named `<name>-<hash12>`, the hash over the
+    /// daemon, the Dockerfile, the --project pair, the base image, a pinned
+    /// --base-image-version and the --memory size class. A ready image under that name is
+    /// reused with `reused: true` and nothing uploaded; one still building is waited on; a
+    /// failed one is deleted and rebuilt; otherwise the artifact is uploaded to
+    /// `s3://<bucket>/[<--s3-key-prefix>/]<name>/artifact.zip` and the image built.
     ///
     /// Why the hash is in the name: recreating an image under a previously-used fixed
     /// name can serve a stale snapshot (measured — the same hazard class as the
     /// clientToken replay in docs/PLATFORM.md). Keying the name to the content hash gives
     /// both properties at once: unchanged inputs reuse their image, changed inputs get a
-    /// fresh name and therefore a fresh build. The match is on binary+Dockerfile (plus
-    /// the --project pair when given); `--memory` isn't part of it, so a reused image keeps
-    /// its size class. Refused with --artifact-uri: the hash covers only local inputs, and an
-    /// image built from your object under that name would answer a later plain --reuse.
+    /// fresh name and therefore a fresh build. Refused with --artifact-uri: the hash covers
+    /// only local inputs, and an image built from your object under that name would answer a
+    /// later plain --reuse.
     #[arg(long, conflicts_with = "artifact_uri")]
     pub reuse: bool,
+
+    /// Under --reuse, a key prefix inside the bucket for the artifact.
+    #[arg(long, value_name = "PREFIX", requires = "reuse")]
+    pub s3_key_prefix: Option<String>,
+
+    /// Under --reuse, delete a ready image under the derived name and build it afresh.
+    #[arg(long, requires = "reuse")]
+    pub force: bool,
 
     /// The daemon's port inside the guest.
     #[arg(long)]
@@ -2412,6 +2467,38 @@ fn parse_env_pair(pair: &str) -> Result<(String, String), String> {
         ));
     }
     Ok((key.to_string(), value.to_string()))
+}
+
+/// `build --tag`'s KEY=VALUE, split at the first `=` and held to core's `TagKey` and
+/// `TagValue` (`require_valid_tags`), so a bad tag is refused before the build rather than as
+/// a `ValidationException` after the upload.
+fn parse_tag(pair: &str) -> Result<(String, String), String> {
+    let Some((key, value)) = pair.split_once('=') else {
+        return Err(format!(
+            "no `=` in {pair:?}: --tag takes KEY=VALUE. A tag with an empty value is \
+             `--tag {pair}=`."
+        ));
+    };
+    let tag = std::collections::BTreeMap::from([(key.to_string(), value.to_string())]);
+    microvms_core::control::require_valid_tags(&tag).map_err(|error| error.to_string())?;
+    Ok((key.to_string(), value.to_string()))
+}
+
+/// Whole seconds for a hook timeout, as the integer the model's hook members are.
+fn hook_seconds(raw: &str) -> Result<u32, String> {
+    raw.parse::<u32>().map_err(|_| {
+        format!("{raw:?} is not a whole number of seconds: a hook timeout is an integer")
+    })
+}
+
+/// `build --run-hook-timeout-sec`, through core's `RunHookTimeout`.
+fn parse_run_hook_timeout(raw: &str) -> Result<microvms_core::RunHookTimeout, String> {
+    microvms_core::RunHookTimeout::try_new(hook_seconds(raw)?).map_err(|error| error.to_string())
+}
+
+/// `build --build-hook-timeout-sec`, through core's `BuildHookTimeout`.
+fn parse_build_hook_timeout(raw: &str) -> Result<microvms_core::BuildHookTimeout, String> {
+    microvms_core::BuildHookTimeout::try_new(hook_seconds(raw)?).map_err(|error| error.to_string())
 }
 
 /// A flag's seconds, as a duration, refused when they can't be one.
