@@ -753,15 +753,19 @@ class BudgetTests(unittest.TestCase):
         self.assertLess(took, 25, "the head ran past its share")
 
     def test_progress_prints_each_function_as_its_verdicts_arrive(self):
+        # Two changed functions, on one line in script order; the fake leaves the last
+        # verdict, mul's, out of its first results.
         repo = self.repo()
-        repo.commit({"tools/calc.py": calc("1 0 1", "return b + a")})
+        both = calc("1 0 1", "return b + a").replace(
+            "# fake: 1\n    return a * b", "# fake: 1\n    return b * a"
+        )
+        repo.commit({"tools/calc.py": both})
         with mock.patch.dict(script_globals("run_mutmut"), {"POLL": 0.2}):
             code, out, err = repo.run(env={"FAKE_MUTMUT_STEP": "1.5"})
         self.assertEqual(code, 0, out + err)
-        self.assertIn("check-mutmut: head: add 2 of 3 run, 1 survived\n", err)
-        self.assertEqual(
-            err.count("check-mutmut: head: add 2 of 3 run, 1 survived\n"), 1
-        )
+        line = "check-mutmut: head: add 3 of 3 run, 1 survived; mul 0 of 1 run, 0 survived\n"
+        self.assertIn(line, err)
+        self.assertEqual(err.count(line), 1)
 
 
 class RunTests(unittest.TestCase):
