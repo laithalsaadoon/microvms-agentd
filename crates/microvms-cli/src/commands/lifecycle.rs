@@ -713,7 +713,11 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
     }
     if let Some(image) = sandbox.image() {
         outcome.image_identifier = Some(image.identifier.clone());
-        ledger.record_image(&image.identifier, &image.name);
+        // A reused image is someone else's too (D-I2), so the ledger never lists it as this
+        // run's to tear down.
+        if !outcome.image_reused {
+            ledger.record_image(&image.identifier, &image.name);
+        }
     }
     // A launch from an existing image reports that image, as the ARN core resolved and sent,
     // rather than the per-invocation default a build would have used (measured 2026-09-12: a
@@ -749,7 +753,14 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
     // Runs however the block above ended, which is CLI-6. Recorded as leaked *before* the
     // delete is attempted — the other order loses the identifier when the process dies inside
     // the call, which is exactly the interrupt case.
-    let teardown = tear_down(ctx, &mut sandbox, &mut ledger, args.keep).await;
+    let teardown = tear_down(
+        ctx,
+        &mut sandbox,
+        &mut ledger,
+        args.keep,
+        !outcome.image_reused,
+    )
+    .await;
     outcome.kept = args.keep;
     outcome.leaked = ledger.record.leaked.clone();
 
@@ -761,7 +772,10 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
     // every append swallows its failures — this is the teardown path.
     if let Some(vm) = sandbox.microvm() {
         let history = History::for_vm(&ledger_root, &vm.id);
-        if building && let Some(image) = sandbox.image() {
+        if building
+            && !outcome.image_reused
+            && let Some(image) = sandbox.image()
+        {
             history.append(Event::ImageBuilt {
                 image_identifier: image.identifier.clone(),
                 image_name: image.name.clone(),
@@ -1030,22 +1044,59 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
             // Resolved by the caller: the typed positional, the config file's `binary`,
             // or the provisioning chain — whichever won, the path is real by here. None
             // only beside a caller's --artifact-uri, which needs no daemon bytes (#249).
-            ctx.out.progress(&format!("building image {name} ({size})"));
             let request = build_request(ctx, args, name, size, daemon_binary)?;
-            // Before the upload, so a request core itself would refuse costs zero transport
-            // calls — the guards inside `build_image` run after the S3 PUT (issue #47).
-            sandbox.preflight(&request)?;
-            upload_artifact(ctx, sandbox, &request, args.artifact_uri.as_deref()).await?;
-            let image = sandbox.build_image(request).await?;
-            let identifier = image.identifier.clone();
-            outcome.image_identifier = Some(identifier.clone());
-            outcome.build_seconds = started.elapsed().as_secs_f64();
-            ledger.record_image(&identifier, name);
-            ctx.out.progress(&format!(
-                "image {identifier} built in {:.0}s",
-                outcome.build_seconds
-            ));
-            identifier
+            match (args.artifact_uri.as_deref(), ctx.infra.bucket.clone()) {
+                // The caller's own object: built under the name as given, no upload (#249).
+                (Some(caller_uri), _) => {
+                    ctx.out.progress(&format!("building image {name} ({size})"));
+                    // Before the build, so a request core itself would refuse costs zero
+                    // transport calls (issue #47).
+                    sandbox.preflight(&request)?;
+                    upload_artifact(ctx, sandbox, &request, Some(caller_uri)).await?;
+                    let image = sandbox.build_image(request).await?;
+                    let identifier = image.identifier.clone();
+                    outcome.image_identifier = Some(identifier.clone());
+                    outcome.build_seconds = started.elapsed().as_secs_f64();
+                    ledger.record_image(&identifier, name);
+                    ctx.out.progress(&format!(
+                        "image {identifier} built in {:.0}s",
+                        outcome.build_seconds
+                    ));
+                    identifier
+                }
+                // Core's content-addressed build (#258): `<name>-<hash12>`, reused when ready,
+                // and uploaded by core only when a build is needed. `build_request_from`
+                // refused a run with neither a URI nor a bucket, so the bucket is here.
+                (None, bucket) => {
+                    let bucket = bucket.unwrap_or_default();
+                    ctx.out
+                        .progress(&format!("ensuring the image for {name} ({size})"));
+                    let dockerfile = sandbox.dockerfile_for(&request);
+                    let ensure = microvms_core::control::EnsureImageRequest::from_create(
+                        request, dockerfile, bucket,
+                    );
+                    let ensured = sandbox.ensure_image(ensure).await?;
+                    let identifier = ensured.image.identifier.clone();
+                    outcome.image_identifier = Some(identifier.clone());
+                    outcome.image_name = Some(ensured.image.name.clone());
+                    outcome.image_reused = ensured.reused;
+                    outcome.build_seconds = started.elapsed().as_secs_f64();
+                    if ensured.reused {
+                        // D-I2: found, not built, so not this run's to list or delete.
+                        ctx.out.progress(&format!(
+                            "reusing {identifier}: the build inputs are unchanged, and this run \
+                             leaves the image in place"
+                        ));
+                    } else {
+                        ledger.record_image(&identifier, &ensured.image.name);
+                        ctx.out.progress(&format!(
+                            "image {identifier} built in {:.0}s",
+                            outcome.build_seconds
+                        ));
+                    }
+                    identifier
+                }
+            }
         }
     };
 
@@ -1236,6 +1287,7 @@ async fn tear_down<O: std::io::Write, E: std::io::Write>(
     sandbox: &mut Sandbox,
     ledger: &mut Ledger,
     keep: bool,
+    delete_image: bool,
 ) -> TeardownReport {
     if keep {
         ctx.out
@@ -1246,13 +1298,16 @@ async fn tear_down<O: std::io::Write, E: std::io::Write>(
     // Recorded outstanding *first*, cleared only for what a delete reported gone.
     ledger.mark_outstanding();
     ctx.out.progress("tearing down");
-    let report = sandbox
-        .terminate(
-            TeardownOpts::default()
-                .deleting_image()
-                .deleting_log_group(),
-        )
-        .await;
+    // Only an image this run built (D-I2): one it found and reused is another run's too, and
+    // its log group with it.
+    let opts = if delete_image {
+        TeardownOpts::default()
+            .deleting_image()
+            .deleting_log_group()
+    } else {
+        TeardownOpts::default()
+    };
+    let report = sandbox.terminate(opts).await;
 
     // The VM's own identifier leaves the outstanding list when the terminate was accepted:
     // core puts it in `undeleted` only when the call *failed*, so "accepted" is the honest
@@ -1412,8 +1467,8 @@ pub async fn build<O: std::io::Write, E: std::io::Write>(
             .unwrap_or_else(|| format!("microvm-cli-{}", epoch_secs()))
     };
 
-    let sandbox = ctx.seam.open_sandbox(region, args.port).await?;
-    let mut request = build_request_from(
+    let mut sandbox = ctx.seam.open_sandbox(region, args.port).await?;
+    let request = build_request_from(
         ctx,
         BuildSpec {
             name: &seed,
@@ -1426,62 +1481,53 @@ pub async fn build<O: std::io::Write, E: std::io::Write>(
             base_image_version: args.base_image_version.as_deref(),
             log_group: args.log_group.as_deref(),
             log_stream: args.log_stream.as_deref(),
+            tags: &args.tags,
+            base_image: args.base_image.as_deref(),
+            inherit_workdir: args.inherit_workdir,
+            run_hook_timeout: args.run_hook_timeout_sec,
+            build_hook_timeout: args.build_hook_timeout_sec,
         },
     )?;
 
-    let name;
     if args.reuse {
-        let hash = sandbox.artifact_content_hash_for(&request);
-        name = format!("{seed}-{}", &hash[..12]);
-        // The derived name replaces the seed in the name, the token label and the derived
-        // artifact key. clap refuses --reuse with --artifact-uri (#249), so from a command
-        // line the `is_none()` test below always holds; it only guards a hand-built `BuildArgs`.
-        request.name = name.clone();
-        request.token_scope = Some(name.clone());
-        if args.artifact_uri.is_none()
-            && let Some(bucket) = ctx.infra.bucket.as_deref()
-        {
-            request.code_artifact_uri = format!("s3://{bucket}/{name}.zip");
-        }
+        // Core's content-addressed build (#258): the name, the decision after each
+        // describe, the upload and the create race are `Sandbox::ensure_image`'s. clap
+        // refuses --reuse with --artifact-uri (#249), and `build_request_from` a build with
+        // neither a URI nor a bucket, so the bucket is here.
+        let bucket = ctx.infra.bucket.clone().unwrap_or_default();
+        let dockerfile = sandbox.dockerfile_for(&request);
+        let mut ensure =
+            microvms_core::control::EnsureImageRequest::from_create(request, dockerfile, bucket);
+        ensure.s3_key_prefix = args.s3_key_prefix.clone();
+        ensure.force = args.force;
         ctx.out.progress(&format!(
-            "checking for an existing image named {name} (content hash {})",
-            &hash[..12]
+            "ensuring the image for {seed} ({size}): reused when its build inputs are unchanged"
         ));
-        if let Some(existing) = sandbox.find_image_by_name(&name).await? {
+        let ensured = sandbox.ensure_image(ensure).await?;
+        if ensured.reused {
             ctx.out.progress(&format!(
-                "reusing {} — the build inputs are unchanged, so no build was started",
-                existing.image_arn
-            ));
-            // The derived default group and a null stream, whatever the flags said: no
-            // build ran, so no stream was resolved, and the group the *original* build
-            // wrote to is not observable from a listing — the reuse identity is
-            // binary+Dockerfile+project files only, so the earlier build's logging config
-            // may differ.
-            return Ok(render_build(
-                &existing.image_arn,
-                &name,
-                size,
-                true,
-                &format!(
-                    "{}/{name}",
-                    microvms_core::control::image::BUILD_LOG_GROUP_PREFIX
-                ),
-                None,
-                agentd.as_ref(),
+                "reusing {}: the build inputs are unchanged, so no build was started",
+                ensured.image.identifier
             ));
         }
-        ctx.out
-            .progress(&format!("no image named {name}; building it"));
-    } else {
-        name = seed;
+        return Ok(render_build(
+            &ensured.image.identifier,
+            &ensured.image.name,
+            size,
+            ensured.reused,
+            &ensured.image.build_log_group(),
+            ensured.image.log_stream.as_deref(),
+            &ensured.artifact_uri,
+            agentd.as_ref(),
+        ));
     }
 
-    let mut sandbox = sandbox;
-    ctx.out.progress(&format!("building image {name} ({size})"));
+    ctx.out.progress(&format!("building image {seed} ({size})"));
     // Before the upload, for the reason `run`'s build arm gives: a locally-refused request
     // must cost zero transport calls (issue #47).
     sandbox.preflight(&request)?;
-    upload_artifact(ctx, &sandbox, &request, args.artifact_uri.as_deref()).await?;
+    upload_artifact(ctx, &mut sandbox, &request, args.artifact_uri.as_deref()).await?;
+    let artifact_uri = request.code_artifact_uri.clone();
     let image = sandbox.build_image(request).await?;
     Ok(render_build(
         &image.identifier,
@@ -1490,6 +1536,7 @@ pub async fn build<O: std::io::Write, E: std::io::Write>(
         false,
         &image.build_log_group(),
         image.log_stream.as_deref(),
+        &artifact_uri,
         agentd.as_ref(),
     ))
 }
@@ -1515,9 +1562,12 @@ fn agentd_report(agentd: Option<&crate::provision::Resolved>) -> serde_json::Val
 /// carry different keys.
 ///
 /// `reused` is always present — `false` for a plain build — so a consumer never has to
-/// guard against a missing key. `size` on a reused image is the *requested* class, and
-/// the text says so: the class an existing image was created with is not observable from
-/// the listing, and `--memory` is deliberately not part of the reuse identity.
+/// guard against a missing key. `size` is the requested class, which under `--reuse` is the
+/// reused image's too: the size class is part of the name `ensure_image` derives (#258).
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one per envelope key the built and the reused outcomes share"
+)]
 fn render_build(
     identifier: &str,
     name: &str,
@@ -1525,6 +1575,7 @@ fn render_build(
     reused: bool,
     build_log_group: &str,
     log_stream: Option<&str>,
+    artifact_uri: &str,
     agentd: Option<&crate::provision::Resolved>,
 ) -> Rendered {
     let mut data = Map::new();
@@ -1541,6 +1592,7 @@ fn render_build(
     data.insert("logStream".into(), json!(log_stream));
     data.insert("size".into(), json!(size.to_string()));
     data.insert("reused".into(), json!(reused));
+    data.insert("artifactUri".into(), json!(artifact_uri));
     data.insert("agentd".into(), agentd_report(agentd));
 
     let (kind, _) = response_type("build");
@@ -1548,15 +1600,12 @@ fn render_build(
     let mut lines = vec![format!("image: {identifier}"), format!("name: {name}")];
     if reused {
         lines.push(
-            "reused: yes — the content hash matched an existing image; nothing was built"
+            "reused: yes, the build inputs match an existing image and nothing was built"
                 .to_string(),
         );
-        lines.push(format!(
-            "size: {size} (requested; a reused image keeps the class it was created with)"
-        ));
-    } else {
-        lines.push(format!("size: {size}"));
     }
+    lines.push(format!("size: {size}"));
+    lines.push(format!("artifact: {artifact_uri}"));
     lines.push(format!("build log group: {build_log_group}"));
     if let Some(stream) = log_stream {
         lines.push(format!(
@@ -1611,6 +1660,17 @@ struct BuildSpec<'a> {
     /// The caller's log-stream **prefix**; core appends the per-build discriminator and
     /// the resolved exact name comes back on the image for the envelope to report.
     pub log_stream: Option<&'a str>,
+    /// `build --tag`'s pairs, in the order given (#264). `run` passes none, and none of the
+    /// options below, for the reason it pins no base: they describe a durable image.
+    pub tags: &'a [(String, String)],
+    /// `build --base-image`: the managed base's name, paired with the Dockerfile's `FROM`.
+    pub base_image: Option<&'a str>,
+    /// `build --inherit-workdir`, which core refuses when nothing declares a `WORKDIR`.
+    pub inherit_workdir: bool,
+    /// `build --run-hook-timeout-sec`, or `None` for core's default.
+    pub run_hook_timeout: Option<microvms_core::RunHookTimeout>,
+    /// `build --build-hook-timeout-sec`, or `None` for core's default.
+    pub build_hook_timeout: Option<microvms_core::BuildHookTimeout>,
 }
 
 /// The create request for `run`'s arguments.
@@ -1640,6 +1700,11 @@ fn build_request<'a, O: std::io::Write, E: std::io::Write>(
             // `microvm run` in a configured project.
             log_group: args.log_group.as_deref(),
             log_stream: args.log_stream.as_deref(),
+            tags: &[],
+            base_image: None,
+            inherit_workdir: false,
+            run_hook_timeout: None,
+            build_hook_timeout: None,
         },
     )
 }
@@ -1663,6 +1728,11 @@ fn build_request_from<O: std::io::Write, E: std::io::Write>(
         base_image_version,
         log_group,
         log_stream,
+        tags,
+        base_image,
+        inherit_workdir,
+        run_hook_timeout,
+        build_hook_timeout,
     } = spec;
     // No binary only beside a caller's --artifact-uri (#249). The image is built from their
     // object, and nothing reads these bytes: `upload_artifact` returns before building an
@@ -1677,8 +1747,9 @@ fn build_request_from<O: std::io::Write, E: std::io::Write>(
         })?,
         None => Vec::new(),
     };
-    // Either the caller already uploaded, or a bucket was given and the artifact goes to a
-    // derived key. See `seam::CoreSeam::put_artifact` for why the upload is not core's.
+    // Either the caller already uploaded, or a bucket was given and core uploads the artifact:
+    // to `s3://<bucket>/<name>.zip` for a named build, or to the key an ensure derives, which
+    // replaces this one (#258).
     let uri = match (artifact_uri, ctx.infra.bucket.as_deref()) {
         (Some(uri), _) => uri.to_string(),
         (None, Some(bucket)) => format!("s3://{bucket}/{name}.zip"),
@@ -1686,9 +1757,8 @@ fn build_request_from<O: std::io::Write, E: std::io::Write>(
             return Err(Error::new(
                 ErrorKind::Precondition,
                 "no --artifact-uri and no --bucket. CreateMicrovmImage names an artifact that \
-                 must already be in S3, and the create path this command uses does not upload \
-                 it; an S3 client in this CLI would give it a second path to AWS. Either pass --bucket (the artifact is uploaded with the \
-                 `aws` CLI) or upload it yourself and pass --artifact-uri.",
+                 must already be in S3. Pass --bucket (or set $MICROVM_BUCKET) and the artifact \
+                 is uploaded there, or upload it yourself and pass --artifact-uri.",
             ));
         }
     };
@@ -1725,6 +1795,35 @@ fn build_request_from<O: std::io::Write, E: std::io::Write>(
     }
     if let Some(dir) = project {
         request.project_files = Some(read_project_files(dir)?);
+    }
+    if let Some(base_name) = base_image {
+        // The registry reference is the Dockerfile's own `FROM`, through core's pairing, so the
+        // two halves of the base can't disagree. clap requires --dockerfile or --artifact-uri
+        // beside --base-image; with the URI no Dockerfile is built here, and only the name
+        // reaches the wire.
+        let mut base = match request.dockerfile.as_deref() {
+            Some(text) => microvms_core::control::BaseImage::from_dockerfile(text)?,
+            None => microvms_core::control::BaseImage::al2023(),
+        };
+        base.name = base_name.to_string();
+        request.base_image = base;
+    }
+    for (key, value) in tags {
+        // The service takes a map, so a repeated key would keep one value and drop the other
+        // with nothing said.
+        if request.tags.insert(key.clone(), value.clone()).is_some() {
+            return Err(Error::new(
+                ErrorKind::InvalidArg,
+                format!("the tag key {key:?} is given twice; an image carries one value per key"),
+            ));
+        }
+    }
+    request.inherit_workdir = inherit_workdir;
+    if let Some(timeout) = run_hook_timeout {
+        request.run_hook_timeout = timeout;
+    }
+    if let Some(timeout) = build_hook_timeout {
+        request.build_hook_timeout = timeout;
     }
     Ok(request)
 }
@@ -1838,7 +1937,7 @@ fn read_project_files(dir: &std::path::Path) -> Result<ProjectFiles, Error> {
 /// (#249).
 async fn upload_artifact<O: std::io::Write, E: std::io::Write>(
     ctx: &mut Ctx<'_, O, E>,
-    sandbox: &Sandbox,
+    sandbox: &mut Sandbox,
     request: &CreateImageRequest,
     caller_uri: Option<&str>,
 ) -> Result<(), Error> {
@@ -1857,15 +1956,13 @@ async fn upload_artifact<O: std::io::Write, E: std::io::Write>(
         // lean on its caller for that.
         return Ok(());
     }
-    let bytes = sandbox.build_artifact_for(request)?;
     ctx.out.progress(&format!(
-        "uploading {} bytes of artifact to {}",
-        bytes.len(),
+        "uploading the artifact to {}",
         request.code_artifact_uri
     ));
-    ctx.seam
-        .put_artifact(&request.code_artifact_uri, bytes)
-        .await
+    // Core's upload, through the build services `ensure_image` uses (#258): the S3 PUT is
+    // signed with the credentials every other call here uses, and retried.
+    sandbox.upload_artifact_for(request).await
 }
 
 // ── the shared start request ─────────────────────────────────────────────────

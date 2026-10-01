@@ -17,7 +17,7 @@ run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact
 expect = "test-failed"
 suite = "rust"
 message = "run: a caller-supplied --artifact-uri must not be uploaded over"
-transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "upload_artifact(ctx, sandbox, &request, args.artifact_uri.as_deref())", with = "upload_artifact(ctx, sandbox, &request, None)" }
+transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "upload_artifact(ctx, sandbox, &request, Some(caller_uri))", with = "upload_artifact(ctx, sandbox, &request, None)" }
 
 [[fault]]
 id = "cli-artifact-uri-build-arm"
@@ -26,7 +26,7 @@ run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact
 expect = "test-failed"
 suite = "rust"
 message = "build: a caller-supplied --artifact-uri must not be uploaded over"
-transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "upload_artifact(ctx, &sandbox, &request, args.artifact_uri.as_deref())", with = "upload_artifact(ctx, &sandbox, &request, None)" }
+transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "upload_artifact(ctx, &mut sandbox, &request, args.artifact_uri.as_deref())", with = "upload_artifact(ctx, &mut sandbox, &request, None)" }
 
 # The obvious break, deleting the `if let Some(bucket)` guard, leaves `{bucket}` unbound and
 # is a compile error. `.or(Some("none"))` keeps the binding and the type, so the line prints

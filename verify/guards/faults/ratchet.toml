@@ -41,7 +41,7 @@ run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
 message = "stale decision: [subprocess] crates/agentd/src/exec.rs: Command::new(gone) decides a finding the tree doesn't have"
-transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"port-impl\", \"adapter-logic\", \"placement\"]\n", with = "enforced = [\"port-impl\", \"adapter-logic\", \"placement\"]\n\n[[decision]]\ncategory = \"subprocess\"\nkey = \"crates/agentd/src/exec.rs: Command::new(gone)\"\nreason = \"seeded\"\n" }
+transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\"]\n", with = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\"]\n\n[[decision]]\ncategory = \"subprocess\"\nkey = \"crates/agentd/src/exec.rs: Command::new(gone)\"\nreason = \"seeded\"\n" }
 
 [[fault]]
 id = "ratchet-enforced-with-drift"
@@ -49,8 +49,8 @@ guard = "verify/ratchet/decisions.toml"
 run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
-message = "subprocess is enforced by each crate's clippy.toml as a disallowed type (#285), so it can't carry drift"
-transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"port-impl\", \"adapter-logic\", \"placement\"]\n", with = "enforced = [\"port-impl\", \"adapter-logic\", \"placement\", \"subprocess\"]\n" }
+message = "parity-gap is enforced by tools/check-parity.py refusing an exemption with an issue, once #280 closes the last gap, so it can't carry drift"
+transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\"]\n", with = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\", \"parity-gap\"]\n" }
 
 # The decisions reader's floor: one that read no decision would turn every decided finding into
 # drift on both trees and compare them equal.
@@ -144,7 +144,7 @@ run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
 message = "new drift: [port-impl] crates/microvms-cli/src/seam.rs: TokenMinter for CopiedMinter."
-transform = { file = "crates/microvms-cli/src/seam.rs", replace = "/// `aws s3 cp - <uri>`, with the artifact on the child's stdin.\n", with = "struct CopiedMinter;\n\nimpl microvms_core::session::TokenMinter for CopiedMinter {}\n\n/// `aws s3 cp - <uri>`, with the artifact on the child's stdin.\n" }
+transform = { file = "crates/microvms-cli/src/seam.rs", replace = "/// The region every ARN in a request is derived for.\n", with = "struct CopiedMinter;\n\nimpl microvms_core::session::TokenMinter for CopiedMinter {}\n\n/// The region every ARN in a request is derived for.\n" }
 
 # Rule 1 compares with the merge base of HEAD and `--base`, not the ref's tip: main can move
 # past a pull request's merge while its job runs.

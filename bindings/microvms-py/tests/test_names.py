@@ -11,11 +11,13 @@ from __future__ import annotations
 import json
 import os
 import stat
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 import microvms
+from conftest import SseServer
 
 CANARY = "names-canary-token-7c1f"
 ENDPOINT = "https://mvm-1.example.invalid"
@@ -155,3 +157,64 @@ def test_an_unlaunched_sandbox_has_nothing_to_name(tmp_path: Path) -> None:
         microvms.NameRecord.for_sandbox("ci", sandbox)
     with pytest.raises(microvms.PreconditionError):
         microvms.NameRegistry(tmp_path).register("ci", sandbox)
+
+
+# -- import: a record this registry didn't write (#270) -----------------------
+
+
+def served_record(server: SseServer, name: str = "ci") -> microvms.NameRecord:
+    return microvms.NameRecord(
+        name, "microvm-a", server.endpoint, CANARY, microvms.Region.us_east_1()
+    )
+
+
+def test_an_import_writes_only_after_the_vm_answers_with_the_records_token(
+    tmp_path: Path, sse_server: Callable[..., SseServer]
+) -> None:
+    """Core's `names::import`: a refused token writes nothing, an answered one registers the
+    record, and a second import of the same VM refreshes it (#270)."""
+    registry = microvms.NameRegistry(tmp_path)
+    refusing = sse_server([[b"unauthorized"]], 401)
+    with pytest.raises(microvms.CredentialsError):
+        registry.import_record(
+            served_record(refusing),
+            microvms.Session.direct(refusing.endpoint, CANARY),
+        )
+    assert registry.get("ci") is None
+
+    answering = sse_server([[b""], [b""]], 200)
+    record_ = served_record(answering)
+    session = microvms.Session.direct(answering.endpoint, CANARY)
+    assert registry.import_record(record_, session) is False
+    found = registry.get("ci")
+    assert found is not None and found.agent_token == CANARY
+    assert registry.import_record(record_, session) is True
+
+
+def test_an_import_refuses_a_session_attached_with_another_token(
+    tmp_path: Path, sse_server: Callable[..., SseServer]
+) -> None:
+    """The probe proves the token its session carries, so another token proves nothing."""
+    registry = microvms.NameRegistry(tmp_path)
+    server = sse_server([[b""]], 200)
+    with pytest.raises(microvms.InvalidArgError):
+        registry.import_record(
+            served_record(server),
+            microvms.Session.direct(server.endpoint, "not-the-record's"),
+        )
+    assert registry.get("ci") is None
+
+
+def test_an_import_refuses_a_name_another_vm_holds(
+    tmp_path: Path, sse_server: Callable[..., SseServer]
+) -> None:
+    """A name is a promise: another VM's record under it is refused, and left as it was."""
+    registry = microvms.NameRegistry(tmp_path)
+    registry.put(record("ci", "microvm-holder"))
+    server = sse_server([[b""]], 200)
+    with pytest.raises(microvms.PreconditionError):
+        registry.import_record(
+            served_record(server), microvms.Session.direct(server.endpoint, CANARY)
+        )
+    held = registry.get("ci")
+    assert held is not None and held.microvm_id == "microvm-holder"

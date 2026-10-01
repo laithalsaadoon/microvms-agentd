@@ -38,13 +38,11 @@ TABLE = ROOT / "verify" / "parity" / "capabilities.toml"
 SURFACE = "py"
 SURFACES = ("core", "cli", "py", "ts")
 SENTINEL = "wrap-dockerfile/sentinel"
-CASE_KEYS = {"capability", "input", "expect", "ignore", "known_drift", "skip"}
-ISSUE = re.compile(r"#[1-9][0-9]*")
+CASE_KEYS = {"capability", "input", "expect", "ignore", "skip"}
 # A skip ends by naming the issue or trace id that holds the gap, such as `(IMAGE-12)`.
 SKIP_REFERENCE = re.compile(r".*\((#[1-9][0-9]*|[A-Z]+-[1-9][0-9]*)\)", re.DOTALL)
 BUILD_ROLE = "arn:aws:iam::123456789012:role/build"
 IMAGE_ARN = "arn:aws:lambda:us-east-1:123456789012:microvm-image:img"
-MISSING = object()
 
 
 @dataclass
@@ -55,7 +53,6 @@ class Case:
     input: dict[str, Any]
     expect: dict[str, Any]
     ignore: list[str] = field(default_factory=list)
-    known_drift: dict[str, dict[str, Any]] = field(default_factory=dict)
     skip: dict[str, str] = field(default_factory=dict)
 
     def binary(self) -> bytes:
@@ -76,6 +73,13 @@ def read_case(path: Path, area: str) -> Case:
     raw = json.loads(path.read_bytes())
     if not isinstance(raw, dict):
         raise ValueError(f"{case_id}: a case is a JSON object")
+    if "known_drift" in raw:
+        # The ratchet enforces parity-drift, so no case marks a surface as disagreeing (#258).
+        raise ValueError(
+            f"{case_id}: a known_drift marker is refused, because parity-drift is enforced "
+            "(verify/ratchet/decisions.toml): make the surface give the case's answer, or skip "
+            "it with the issue or trace id that holds the gap"
+        )
     unknown = set(raw) - CASE_KEYS
     if unknown:
         raise ValueError(f"{case_id}: unknown keys {sorted(unknown)}")
@@ -89,27 +93,6 @@ def read_case(path: Path, area: str) -> Case:
         isinstance(p, str) and p for p in ignore
     ):
         raise ValueError(f"{case_id}: ignore must be an array of paths")
-    drifts = raw.get("known_drift", {})
-    if not isinstance(drifts, dict):
-        raise ValueError(f"{case_id}: known_drift must be an object")
-    for surface, drift in drifts.items():
-        if surface not in SURFACES:
-            raise ValueError(f"{case_id}: known_drift names no surface {surface!r}")
-        if not isinstance(drift, dict) or set(drift) != {"issue", "keys"}:
-            raise ValueError(
-                f"{case_id}: known_drift.{surface} has exactly issue and keys"
-            )
-        if not isinstance(drift["issue"], str) or not ISSUE.fullmatch(drift["issue"]):
-            raise ValueError(f'{case_id}: known_drift.{surface}.issue must be "#N"')
-        keys = drift["keys"]
-        if (
-            not isinstance(keys, list)
-            or not keys
-            or not all(isinstance(k, str) and k for k in keys)
-        ):
-            raise ValueError(
-                f"{case_id}: known_drift.{surface}.keys must be a non-empty array"
-            )
     skips = raw.get("skip", {})
     if not isinstance(skips, dict):
         raise ValueError(f"{case_id}: skip must be an object")
@@ -123,8 +106,6 @@ def read_case(path: Path, area: str) -> Case:
                 f"{case_id}: skip.{surface} ends by naming its issue or trace id, as `(#N)` "
                 "or `(IMAGE-12)`"
             )
-        if surface in drifts:
-            raise ValueError(f"{case_id}: {surface} is both skipped and known to drift")
     return Case(
         case_id,
         area,
@@ -132,7 +113,6 @@ def read_case(path: Path, area: str) -> Case:
         raw["input"],
         raw["expect"],
         ignore,
-        drifts,
         skips,
     )
 
@@ -166,17 +146,7 @@ def read_cases(directory: Path) -> tuple[list[Case], list[str]]:
 def decide(case: Case, row: dict[str, Any]) -> str | None:
     """`None` to run the case, or the reason to skip it. Raises on an inconsistent case."""
     cell = row[SURFACE]
-    drift = case.known_drift.get(SURFACE)
     if isinstance(cell, dict):
-        if drift is not None:
-            # The table records the gap and the case measures it: run, and expect the drift.
-            if cell.get("issue") == drift["issue"]:
-                return None
-            raise ValueError(
-                f"{case.id}: known_drift.{SURFACE} names {drift['issue']}, but the table exempts "
-                f"{SURFACE} from {case.capability!r} with issue {cell.get('issue')!r}; a drift "
-                "on an exempt surface names the issue that closes the gap"
-            )
         if SURFACE in case.skip:
             raise ValueError(
                 f"{case.id}: skip.{SURFACE} repeats what the table already says"
@@ -186,14 +156,6 @@ def decide(case: Case, row: dict[str, Any]) -> str | None:
 
 
 # ── judging ──────────────────────────────────────────────────────────────────
-
-
-def lookup(value: Any, path: str) -> Any:
-    for key in path.split("."):
-        if not isinstance(value, dict) or key not in value:
-            return MISSING
-        value = value[key]
-    return value
 
 
 def remove(value: Any, path: str) -> None:
@@ -237,21 +199,6 @@ def judge(case: Case, answer: dict[str, Any]) -> None:
         remove(expect, path)
         remove(actual, path)
     problems = []
-    drift = case.known_drift.get(SURFACE)
-    if drift is not None:
-        for key in drift["keys"]:
-            got, want = lookup(actual, key), lookup(expect, key)
-            both_missing = got is MISSING and want is MISSING
-            if both_missing or (
-                got is not MISSING and want is not MISSING and same(got, want)
-            ):
-                problems.append(
-                    f"{case.id}: {SURFACE} now agrees at {key}; remove known_drift "
-                    f"({SURFACE}, {key}, {drift['issue']})"
-                )
-        for key in drift["keys"]:
-            remove(expect, key)
-            remove(actual, key)
     if not same(actual, expect):
         problems.append(
             f"{case.id}: {SURFACE} answered\n  {json.dumps(actual, sort_keys=True)}\n"

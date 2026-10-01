@@ -27,7 +27,6 @@ runners restate the same rules. This file is the contract all of them follow.
   "input": { "size_mib": 2048, "running_seconds": 0 },
   "expect": { "label": "estimate" },
   "ignore": ["staleness"],
-  "known_drift": { "py": { "issue": "#255", "keys": ["label"] } },
   "skip": { "ts": "why no offline call can answer this case there (IMAGE-12)" }
 }
 ```
@@ -38,26 +37,15 @@ runners restate the same rules. This file is the contract all of them follow.
   string), `wire_kind` (the daemon status class, `null` for a local refusal) and `retryable`;
   only the facets it names are compared.
 - `ignore` lists dot paths to leave out on both sides, such as the clock-dependent `staleness`.
-- `known_drift` marks a surface that disagrees today, with the issue that fixes it and the dot
-  paths where it disagrees. Each of those paths must differ from `expect` and everything else
-  must match. A path that starts agreeing fails with "now agrees; remove known_drift", so the
-  fixing change removes the marker (pytest's `xfail(strict=True)`, in every runner). A marked
-  path only has to differ, so the corpus doesn't pin today's wrong answer; the surface's own
-  suite does (for `build --reuse`'s name, the CLI's reuse guards). A path
-  covers everything under it: marking `items` leaves every line item uncompared on that
-  surface, so mark the narrowest path the drift reaches, and give the inputs a drift hides
-  their own case where the surface's defaults don't get in the way.
+- No key marks a surface as disagreeing. Every runner refuses a `known_drift` key, because the
+  ratchet enforces parity-drift (#258): a surface gives the case's answer, or `skip` names it.
 - `skip` names a surface the row names but no offline call can reach for this case, with the
   reason. The reason ends by naming the issue or trace id that holds the gap, as `(#N)` or
   `(IMAGE-12)`.
 
-A marker's issue and a skip's reference are checked for their shape here. The ratchet counts
-both as `parity-drift` (#320): one finding per marked path, keyed
-`<area>/<case>/<surface>: known_drift <path>`, and one per skip, `<area>/<case>/<surface>: skip`.
-So a change can't add a marker or a skip the merge base doesn't have, and the change that fixes
-a surface deletes its marker and edits nothing else. A skip no open issue will close is a
-decision in `verify/ratchet/decisions.toml`, with the trace id it cites in its reason. A marker
-is counted beside the table's exemption for the same gap, not instead of it.
+A skip's reference is checked for its shape here. The ratchet counts each skip as
+`parity-drift` (#320), keyed `<area>/<case>/<surface>: skip`, and enforces the category, so every
+skip is a decision in `verify/ratchet/decisions.toml`, with the trace id it cites in its reason.
 
 Numbers compare by value, and nothing else is coerced.
 
@@ -65,10 +53,7 @@ Numbers compare by value, and nothing else is coerced.
 
 - A surface the row names runs the case, unless `skip` names it.
 - A surface the row exempts is skipped, and the runner prints the exemption's reason (the Rust
-  runners write it straight to stderr, so it shows in a passing `cargo test`). When the
-  exemption has an `issue` and `known_drift` names that same issue for the surface, the surface
-  runs the case anyway and must disagree where the marker says: the table records the gap, and
-  the case measures it.
+  runners write it straight to stderr, so it shows in a passing `cargo test`).
 - A runner fails on a case it has to run in an area it has no handler for, so a surface can't
   drop out of the corpus without the table saying so.
 
@@ -96,9 +81,8 @@ refusal regresses the case fails on a connection error rather than a signed requ
   `launched` and the label out, so each case holds core's defaults (#255): the launch core
   infers from the plan, and `DEFAULT_ESTIMATE_LABEL`, which core's runner passes since core
   takes no optional arguments. Every case passes `suspend_resume_cycles` to every surface: the
-  CLI's `--cycles` defaults to 1 and the bindings' `suspend_resume_cycles` to 0, and no case
-  holds that drift yet, because a marker needs the issue that decides which default is right
-  (#300, surface defaults).
+  CLI's `--cycles` defaults to 1 and the bindings' `suspend_resume_cycles` to 0, so no case
+  leans on either default (#300, surface defaults).
 - `error`: a daemon status answered to one call, as the error's code, wire kind and
   retryability.
 - `egress`: a launch's egress options, refused or classified.

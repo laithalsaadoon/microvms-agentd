@@ -61,13 +61,11 @@ const TABLE = join(ROOT, 'verify', 'parity', 'capabilities.toml');
 const SURFACE = 'ts';
 const SURFACES = ['core', 'cli', 'py', 'ts'];
 const SENTINEL = 'wrap-dockerfile/sentinel';
-const CASE_KEYS = new Set(['capability', 'input', 'expect', 'ignore', 'known_drift', 'skip']);
-const ISSUE = /^#[1-9][0-9]*$/;
+const CASE_KEYS = new Set(['capability', 'input', 'expect', 'ignore', 'skip']);
 // A skip ends by naming the issue or trace id that holds the gap, such as `(IMAGE-12)`.
 const SKIP_REFERENCE = /\((#[1-9][0-9]*|[A-Z]+-[1-9][0-9]*)\)$/;
 const BUILD_ROLE = 'arn:aws:iam::123456789012:role/build';
 const IMAGE_ARN = 'arn:aws:lambda:us-east-1:123456789012:microvm-image:img';
-const MISSING = Symbol('missing');
 
 /** Each row's cells by surface: a name (string or array) or `{exempt, issue}`.
  *
@@ -101,6 +99,14 @@ function readCase(path, area, name) {
   const id = `${area}/${name}`;
   const raw = JSON.parse(readFileSync(path, 'utf8'));
   if (!isObject(raw)) throw new Error(`${id}: a case is a JSON object`);
+  if ('known_drift' in raw) {
+    // The ratchet enforces parity-drift, so no case marks a surface as disagreeing (#258).
+    throw new Error(
+      `${id}: a known_drift marker is refused, because parity-drift is enforced ` +
+        `(verify/ratchet/decisions.toml): make the surface give the case's answer, or skip it ` +
+        'with the issue or trace id that holds the gap',
+    );
+  }
   const unknown = Object.keys(raw).filter((key) => !CASE_KEYS.has(key));
   if (unknown.length) throw new Error(`${id}: unknown keys ${JSON.stringify(unknown)}`);
   if (typeof raw.capability !== 'string') throw new Error(`${id}: capability must be a string`);
@@ -110,21 +116,6 @@ function readCase(path, area, name) {
   const ignore = raw.ignore ?? [];
   if (!Array.isArray(ignore) || !ignore.every(isPath)) {
     throw new Error(`${id}: ignore must be an array of paths`);
-  }
-  const drifts = raw.known_drift ?? {};
-  if (!isObject(drifts)) throw new Error(`${id}: known_drift must be an object`);
-  for (const [surface, drift] of Object.entries(drifts)) {
-    if (!SURFACES.includes(surface)) throw new Error(`${id}: known_drift names no surface ${surface}`);
-    const keys = Object.keys(drift ?? {}).sort();
-    if (!isObject(drift) || keys.join() !== 'issue,keys') {
-      throw new Error(`${id}: known_drift.${surface} has exactly issue and keys`);
-    }
-    if (typeof drift.issue !== 'string' || !ISSUE.test(drift.issue)) {
-      throw new Error(`${id}: known_drift.${surface}.issue must be "#N"`);
-    }
-    if (!Array.isArray(drift.keys) || !drift.keys.length || !drift.keys.every(isPath)) {
-      throw new Error(`${id}: known_drift.${surface}.keys must be a non-empty array`);
-    }
   }
   const skips = raw.skip ?? {};
   if (!isObject(skips)) throw new Error(`${id}: skip must be an object`);
@@ -138,7 +129,6 @@ function readCase(path, area, name) {
         `${id}: skip.${surface} ends by naming its issue or trace id, as \`(#N)\` or \`(IMAGE-12)\``,
       );
     }
-    if (surface in drifts) throw new Error(`${id}: ${surface} is both skipped and known to drift`);
   }
   return {
     id,
@@ -147,7 +137,6 @@ function readCase(path, area, name) {
     input: raw.input,
     expect: raw.expect,
     ignore,
-    knownDrift: drifts,
     skip: skips,
   };
 }
@@ -187,17 +176,7 @@ function readCases(directory) {
 /** `null` to run the case, or the reason to skip it. Throws on an inconsistent case. */
 function decide(testCase, row) {
   const cell = row[SURFACE];
-  const drift = testCase.knownDrift[SURFACE];
   if (isObject(cell)) {
-    if (drift) {
-      // The table records the gap and the case measures it: run, and expect the drift.
-      if (cell.issue === drift.issue) return null;
-      throw new Error(
-        `${testCase.id}: known_drift.${SURFACE} names ${drift.issue}, but the table exempts ` +
-          `${SURFACE} from ${testCase.capability} with issue ${cell.issue}; a drift on an ` +
-          'exempt surface names the issue that closes the gap',
-      );
-    }
     if (SURFACE in testCase.skip) {
       throw new Error(`${testCase.id}: skip.${SURFACE} repeats what the table already says`);
     }
@@ -207,14 +186,6 @@ function decide(testCase, row) {
 }
 
 // ── judging ──────────────────────────────────────────────────────────────────
-
-function lookup(value, path) {
-  for (const key of path.split('.')) {
-    if (!isObject(value) || !(key in value)) return MISSING;
-    value = value[key];
-  }
-  return value;
-}
 
 function remove(value, path) {
   const parts = path.split('.');
@@ -243,21 +214,6 @@ function judge(testCase, answer) {
     remove(actual, path);
   }
   const problems = [];
-  const drift = testCase.knownDrift[SURFACE];
-  if (drift) {
-    for (const key of drift.keys) {
-      if (isDeepStrictEqual(lookup(actual, key), lookup(expect, key))) {
-        problems.push(
-          `${testCase.id}: ${SURFACE} now agrees at ${key}; remove known_drift ` +
-            `(${SURFACE}, ${key}, ${drift.issue})`,
-        );
-      }
-    }
-    for (const key of drift.keys) {
-      remove(expect, key);
-      remove(actual, key);
-    }
-  }
   if (!isDeepStrictEqual(actual, expect)) {
     problems.push(
       `${testCase.id}: ${SURFACE} answered\n  ${JSON.stringify(actual)}\nexpected\n  ` +
