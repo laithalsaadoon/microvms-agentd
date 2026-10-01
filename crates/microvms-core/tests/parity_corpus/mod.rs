@@ -34,14 +34,18 @@ pub const SENTINEL: &str = "wrap-dockerfile/sentinel";
 pub const CLI_PROCESS_AREAS: [&str; 3] = ["cost", "egress", "wrap-dockerfile"];
 pub const CLI_FAKE_AREAS: [&str; 3] = ["image-name", "error", "names"];
 
-const CASE_KEYS: [&str; 6] = [
-    "capability",
-    "input",
-    "expect",
-    "ignore",
-    "known_drift",
-    "skip",
-];
+const CASE_KEYS: [&str; 5] = ["capability", "input", "expect", "ignore", "skip"];
+
+/// The refusal of a `known_drift` marker. The ratchet enforces parity-drift, so no case may mark
+/// a surface as disagreeing: the surface gives the case's answer, or the case skips it with the
+/// reference that holds the gap (#258).
+fn refuse_known_drift(id: &str) -> String {
+    format!(
+        "{id}: a known_drift marker is refused, because parity-drift is enforced \
+         (verify/ratchet/decisions.toml): make the surface give the case's answer, or skip it \
+         with the issue or trace id that holds the gap"
+    )
+}
 
 /// The repository root: both crates that include this file sit two levels below it.
 pub fn repo_root() -> PathBuf {
@@ -63,15 +67,6 @@ pub fn table_path() -> PathBuf {
         .join("capabilities.toml")
 }
 
-/// A surface the corpus is known to disagree with, and the issue that fixes it.
-#[derive(Clone, Debug)]
-pub struct Drift {
-    pub issue: String,
-    /// Dot paths into the answer. Each one must differ from `expect`; everything else must
-    /// match.
-    pub keys: Vec<String>,
-}
-
 #[derive(Clone, Debug)]
 pub struct Case {
     /// `<area>/<name>`, without `.json`.
@@ -81,7 +76,6 @@ pub struct Case {
     pub input: Value,
     pub expect: Value,
     pub ignore: Vec<String>,
-    pub known_drift: BTreeMap<String, Drift>,
     pub skip: BTreeMap<String, String>,
 }
 
@@ -166,10 +160,7 @@ impl Case {
 #[derive(Clone, Debug)]
 enum Cell {
     Named,
-    Exempt {
-        reason: String,
-        issue: Option<String>,
-    },
+    Exempt { reason: String },
 }
 
 /// The capability table, read only for what the corpus needs: each row's cell per surface.
@@ -198,10 +189,6 @@ fn read_table(path: &Path) -> BTreeMap<String, BTreeMap<String, Cell>> {
                         .and_then(toml::Value::as_str)
                         .unwrap_or_else(|| panic!("{id}/{surface} is a table with no exempt"))
                         .to_string(),
-                    issue: exempt
-                        .get("issue")
-                        .and_then(toml::Value::as_str)
-                        .map(str::to_string),
                 },
                 Some(toml::Value::String(_) | toml::Value::Array(_)) => Cell::Named,
                 other => panic!("{id}/{surface} is neither a name nor an exemption: {other:?}"),
@@ -228,8 +215,8 @@ fn is_trace(text: &str) -> bool {
     })
 }
 
-/// Whether a skip's reason ends by naming what holds the gap: `(#N)` or `(TRACE-N)`. Like a
-/// marker's issue, only the shape is checked; review holds the reference.
+/// Whether a skip's reason ends by naming what holds the gap: `(#N)` or `(TRACE-N)`. Only the
+/// shape is checked; review holds the reference.
 fn names_its_reference(reason: &str) -> bool {
     reason
         .strip_suffix(')')
@@ -247,6 +234,9 @@ fn read_case(path: &Path, area: &str, name: &str) -> Result<Case, String> {
         .as_object()
         .ok_or_else(|| format!("{id}: a case is a JSON object"))?;
     for key in object.keys() {
+        if key == "known_drift" {
+            return Err(refuse_known_drift(&id));
+        }
         if !CASE_KEYS.contains(&key.as_str()) {
             return Err(format!(
                 "{id}: unknown key {key:?} (a case has {CASE_KEYS:?})"
@@ -281,49 +271,6 @@ fn read_case(path: &Path, area: &str, name: &str) -> Result<Case, String> {
             .collect::<Result<_, _>>()?,
         Some(_) => return Err(format!("{id}: ignore must be an array of paths")),
     };
-    let mut known_drift = BTreeMap::new();
-    if let Some(drifts) = object.get("known_drift") {
-        let drifts = drifts
-            .as_object()
-            .ok_or_else(|| format!("{id}: known_drift must be an object"))?;
-        for (surface, drift) in drifts {
-            if !SURFACES.contains(&surface.as_str()) {
-                return Err(format!("{id}: known_drift names no surface {surface:?}"));
-            }
-            let issue = drift
-                .get("issue")
-                .and_then(Value::as_str)
-                .filter(|issue| is_issue(issue))
-                .ok_or_else(|| format!("{id}: known_drift.{surface}.issue must be \"#N\""))?;
-            let keys: Vec<String> = drift
-                .get("keys")
-                .and_then(Value::as_array)
-                .filter(|keys| !keys.is_empty())
-                .ok_or_else(|| {
-                    format!("{id}: known_drift.{surface}.keys must be a non-empty array")
-                })?
-                .iter()
-                .map(|key| {
-                    key.as_str()
-                        .filter(|key| !key.is_empty())
-                        .map(str::to_string)
-                        .ok_or_else(|| format!("{id}: known_drift.{surface}.keys holds a non-path"))
-                })
-                .collect::<Result<_, _>>()?;
-            if drift.as_object().is_some_and(|drift| drift.len() != 2) {
-                return Err(format!(
-                    "{id}: known_drift.{surface} has exactly issue and keys"
-                ));
-            }
-            known_drift.insert(
-                surface.clone(),
-                Drift {
-                    issue: issue.to_string(),
-                    keys,
-                },
-            );
-        }
-    }
     let mut skip = BTreeMap::new();
     if let Some(skips) = object.get("skip") {
         let skips = skips
@@ -343,11 +290,6 @@ fn read_case(path: &Path, area: &str, name: &str) -> Result<Case, String> {
                      `(IMAGE-12)`"
                 ));
             }
-            if known_drift.contains_key(surface) {
-                return Err(format!(
-                    "{id}: {surface} is both skipped and known to drift"
-                ));
-            }
             skip.insert(surface.clone(), reason.to_string());
         }
     }
@@ -358,7 +300,6 @@ fn read_case(path: &Path, area: &str, name: &str) -> Result<Case, String> {
         input,
         expect,
         ignore,
-        known_drift,
         skip,
     })
 }
@@ -510,7 +451,7 @@ impl Run {
         self.to_run.clone()
     }
 
-    /// Compares one answer with the case's `expect`, under its `ignore` and `known_drift`.
+    /// Compares one answer with the case's `expect`, under its `ignore`.
     ///
     /// An answer to an error case is `{"error": {"code", "wire_kind", "retryable"}}`, and only
     /// the facets `expect.error` names are compared, so a refusal case can assert its code alone.
@@ -562,26 +503,15 @@ impl Run {
 }
 
 fn decide(case: &Case, row: &BTreeMap<String, Cell>, surface: &str) -> Result<Decision, String> {
-    let drift = case.known_drift.get(surface);
     match &row[surface] {
-        Cell::Exempt { reason, issue } => match drift {
-            // The table records the gap and the case measures it: run, and expect the drift.
-            Some(drift) if issue.as_deref() == Some(drift.issue.as_str()) => Ok(Decision::Run),
-            Some(drift) => Err(format!(
-                "{}: known_drift.{surface} names {}, but the table exempts {surface} from {:?} \
-                 with issue {issue:?}; a drift on an exempt surface names the issue that closes \
-                 the gap",
-                case.id, drift.issue, case.capability
-            )),
-            None if case.skip.contains_key(surface) => Err(format!(
-                "{}: skip.{surface} repeats what the table already says",
-                case.id
-            )),
-            None => Ok(Decision::Skip(format!(
-                "the table exempts {surface} from {:?}: {reason}",
-                case.capability
-            ))),
-        },
+        Cell::Exempt { .. } if case.skip.contains_key(surface) => Err(format!(
+            "{}: skip.{surface} repeats what the table already says",
+            case.id
+        )),
+        Cell::Exempt { reason, .. } => Ok(Decision::Skip(format!(
+            "the table exempts {surface} from {:?}: {reason}",
+            case.capability
+        ))),
         Cell::Named => Ok(match case.skip.get(surface) {
             Some(reason) => Decision::Skip(reason.clone()),
             None => Decision::Run,
@@ -613,20 +543,6 @@ fn compare(case: &Case, surface: &str, answer: Value) -> Vec<String> {
         remove(&mut actual, path);
     }
     let mut problems = Vec::new();
-    if let Some(drift) = case.known_drift.get(surface) {
-        for key in &drift.keys {
-            if same_at(&actual, &expect, key) {
-                problems.push(format!(
-                    "{}: {surface} now agrees at {key}; remove known_drift ({surface}, {key}, {})",
-                    case.id, drift.issue
-                ));
-            }
-        }
-        for key in &drift.keys {
-            remove(&mut expect, key);
-            remove(&mut actual, key);
-        }
-    }
     if !same(&actual, &expect) {
         problems.push(format!(
             "{}: {surface} answered\n      {actual}\n    expected\n      {expect}",
@@ -634,11 +550,6 @@ fn compare(case: &Case, surface: &str, answer: Value) -> Vec<String> {
         ));
     }
     problems
-}
-
-fn get<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
-    path.split('.')
-        .try_fold(value, |value, key| value.as_object()?.get(key))
 }
 
 fn remove(value: &mut Value, path: &str) {
@@ -653,14 +564,6 @@ fn remove(value: &mut Value, path: &str) {
     }
     if let Some(object) = at.as_object_mut() {
         object.remove(last);
-    }
-}
-
-fn same_at(left: &Value, right: &Value, path: &str) -> bool {
-    match (get(left, path), get(right, path)) {
-        (None, None) => true,
-        (Some(left), Some(right)) => same(left, right),
-        _ => false,
     }
 }
 

@@ -258,6 +258,12 @@ impl Names {
         self.store.path_of(name)
     }
 
+    /// The store itself, for core's name rules that take one (`names::holder`,
+    /// `names::import_probed`).
+    pub fn store(&self) -> &FileNameStore {
+        &self.store
+    }
+
     /// The record registered under `name`, or `None`. For the collision checks only (`run
     /// --vm-name`, `attach`'s holder check, `agent-up`'s fresh-or-refresh choice); a command
     /// that goes on to use the record reads it through [`Names::resolve`].

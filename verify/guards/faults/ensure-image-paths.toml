@@ -11,3 +11,62 @@ suite = "rust"
 message = "one name for one agent image"
 note = "crates/microvms-app/src/agents/mod.rs::the_two_step_name_is_the_name_ensure_gives_and_it_covers_the_size"
 transform = { file = "crates/microvms-app/src/agents/mod.rs", replace = "    crate::control::ensure::ensured_image_name(&stem, &identity)\n        .unwrap_or_else(|_| format!(\"{stem}-{}\", &identity[..12]))\n", with = "    let _ = &identity;\n    format!(\"{stem}-{}\", &sandbox.artifact_content_hash_for(request)[..12])\n" }
+
+# A FAILED image under the derived name handed back as reused, the CLI's own reuse before #258:
+# `build --reuse` then reports `reused: true` with no delete and no create.
+[[fault]]
+id = "cli-reuse-returns-a-failed-image"
+guard = "guards::build::a_reuse_build_over_a_failed_image_deletes_it_and_builds"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::build::a_reuse_build_over_a_failed_image_deletes_it_and_builds"]
+expect = "test-failed"
+suite = "rust"
+message = "the failed image is deleted"
+note = "crates/microvms-cli/src/guards/build.rs::a_reuse_build_over_a_failed_image_deletes_it_and_builds"
+transform = { file = "crates/microvms-app/src/control/ensure.rs", replace = "        (Found::Ready, true) | (Found::Failed, _) => Plan::Delete,\n", with = "        (Found::Ready, true) => Plan::Delete,\n        (Found::Failed, _) => Plan::Reuse,\n" }
+
+# The `aws s3 cp` upload back in the CLI: with the upload moved into core, subprocess has no
+# drift left and is enforced, so the ratchet refuses a new one outright.
+[[fault]]
+id = "ratchet-subprocess-enforced-cli-aws"
+guard = "verify/ratchet/decisions.toml"
+run = ["./tools/ratchet.py", "--base", "HEAD"]
+expect = "exit-nonzero"
+suite = "script"
+message = "subprocess is enforced by each crate's clippy.toml as a disallowed type (#285), so it can't carry drift"
+transform = { file = "crates/microvms-cli/src/seam.rs", replace = "/// The region every ARN in a request is derived for.\n", with = "fn put_via_aws_cli() {\n    let _ = tokio::process::Command::new(\"aws\");\n}\n\n/// The region every ARN in a request is derived for.\n" }
+
+# D-I2: `run` hands `tear_down` a delete whatever its ensure said, so a run that reused an image
+# deletes it from under the run that is launching from it.
+[[fault]]
+id = "cli-run-deletes-a-reused-image"
+guard = "guards::build::a_run_deletes_the_image_it_built_and_never_one_it_reused"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::build::a_run_deletes_the_image_it_built_and_never_one_it_reused"]
+expect = "test-failed"
+suite = "rust"
+message = "the reused image is not deleted"
+note = "crates/microvms-cli/src/guards/build.rs::a_run_deletes_the_image_it_built_and_never_one_it_reused"
+transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "        args.keep,\n        !outcome.image_reused,\n    )\n", with = "        args.keep,\n        true,\n    )\n" }
+
+# D-I2: the image the sandbox holds goes on the ledger whatever the ensure said, so a reused
+# image is listed as this run's for the operator to delete.
+[[fault]]
+id = "cli-run-lists-a-reused-image"
+guard = "guards::build::a_run_deletes_the_image_it_built_and_never_one_it_reused"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::build::a_run_deletes_the_image_it_built_and_never_one_it_reused"]
+expect = "test-failed"
+suite = "rust"
+message = "the ledger does not name the reused image"
+note = "crates/microvms-cli/src/guards/build.rs::a_run_deletes_the_image_it_built_and_never_one_it_reused"
+transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "        if !outcome.image_reused {\n            ledger.record_image(&image.identifier, &image.name);\n        }\n", with = "        ledger.record_image(&image.identifier, &image.name);\n" }
+
+# D-I2: `imageBuilt` written for every building run, so the history says a run built the image it
+# found and reused.
+[[fault]]
+id = "cli-run-history-says-a-reused-image-was-built"
+guard = "guards::build::a_run_deletes_the_image_it_built_and_never_one_it_reused"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::build::a_run_deletes_the_image_it_built_and_never_one_it_reused"]
+expect = "test-failed"
+suite = "rust"
+message = "the history does not say it was built"
+note = "crates/microvms-cli/src/guards/build.rs::a_run_deletes_the_image_it_built_and_never_one_it_reused"
+transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "        if building\n            && !outcome.image_reused\n            && let Some(image) = sandbox.image()\n", with = "        if building\n            && let Some(image) = sandbox.image()\n" }

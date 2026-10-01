@@ -628,6 +628,17 @@ export declare class NameRegistry {
    * terminate, so no name outlives its VM.
    */
   releaseByVm(microvmId: string): Array<string>
+  /**
+   * Registers a record this registry didn't write, once the VM has answered one
+   * authenticated request with the record's token; resolves with whether it refreshed a
+   * record of the same VM.
+   *
+   * `session` must be attached with the record's endpoint and token (`Session.attach` from
+   * its fields). A name held by another VM, or by an unreadable file, is refused before any
+   * request, and a probe the daemon refuses writes nothing. Core's `names::import`, the rule
+   * `microvm attach` applies.
+   */
+  importRecord(record: NameRecord, session: Session): Promise<boolean>
 }
 
 /** The pinned rate table, and everything it says about itself. */

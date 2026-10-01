@@ -4,6 +4,7 @@ and a VM importing the locked dependency with no egress."""
 
 from __future__ import annotations
 
+import os
 import secrets
 import time
 from pathlib import Path
@@ -65,9 +66,26 @@ PROJECT_PROBE = (
 )
 PROJECT_LOCKED_ATTRS = "attrs 26.1.0"
 
+#: The tag `build --tag` puts on the project image (#264), valued with the run's prefix so the
+#: readback can't match another run's image.
+PROJECT_TAG_KEY = "microvm-conformance"
+#: Hook timeouts longer than core's defaults, so `--run-hook-timeout-sec` and
+#: `--build-hook-timeout-sec` reach a real create without making the build any likelier to time
+#: out. The readback isn't asserted: a version's hooks block omits members on a real response
+#: (`MicrovmImageVersionSummaryWire` in crates/microvms-app/src/control/ops.rs), so the
+#: service accepting the create is what this run measures.
+PROJECT_RUN_HOOK_TIMEOUT_SEC = "45"
+PROJECT_BUILD_HOOK_TIMEOUT_SEC = "120"
+
 
 def drive_project_build(
-    cli: Cli, binary: Path, project: Path, logs: Any, results: Results
+    cli: Cli,
+    binary: Path,
+    project: Path,
+    logs: Any,
+    s3: Any,
+    plane: Any,
+    results: Results,
 ) -> None:
     """`build --project --reuse` twice, then a launch proving the layer (issue #74).
 
@@ -82,13 +100,17 @@ def drive_project_build(
     Three properties, in the order the issue states them. The **name** is the content
     hash: `<prefix>-<12 hex>`, derived from the daemon bytes, the Dockerfile, and the
     manifest+lockfile pair. The **reuse**: a second build with identical files reports
-    `reused: true` and the same name, costing a listing rather than a build. The
+    `reused: true` and the same name, costing a describe rather than a build, and leaves
+    the artifact core uploaded to `s3://<bucket>/<name>/artifact.zip` untouched (#258). The
     **layer**: a VM launched from the image — with no `--egress`, so nothing could be
     installed at launch — imports the locked dependency from the venv the build wrote.
     The lockfile-edit half (a changed lock is a new name and a fresh build) is the pure
     function `the_content_hash_keys_on_the_lockfile` pins in core and was run live once
     by hand (2026-09-02, `docs/PLATFORM.md`); it is not repeated here because it is a
     second three-minute build for a property the unit test states exactly.
+
+    The build also carries `build --tag` and both hook timeouts (#264), so their create is
+    exercised against the real service, and the image reads the tag back.
 
     `--keep` and an explicit `terminate --delete-image`, so the teardown is asserted
     rather than trusted. The service-created log group is deleted here, under the same
@@ -109,6 +131,12 @@ def drive_project_build(
         prefix,
         "--memory",
         str(BASELINE_MEMORY_MIB),
+        "--tag",
+        f"{PROJECT_TAG_KEY}={prefix}",
+        "--run-hook-timeout-sec",
+        PROJECT_RUN_HOOK_TIMEOUT_SEC,
+        "--build-hook-timeout-sec",
+        PROJECT_BUILD_HOOK_TIMEOUT_SEC,
         "--region",
         cli.region,
     )
@@ -134,6 +162,29 @@ def drive_project_build(
         f"reused={built.data.get('reused')!r} in {build_seconds:.0f}s",
     )
 
+    # `build --reuse` is core's `ensure_image` (#258): the artifact went to the image's
+    # content-addressed key, through core's signed upload.
+    bucket = os.environ.get("MICROVM_BUCKET", "")
+    key = f"{name}/artifact.zip"
+    first_head = artifact_head(s3, bucket, key)
+    results.check(
+        "build --reuse put the project artifact at its content-addressed key (#258)",
+        built.data.get("artifactUri") == f"s3://{bucket}/{key}"
+        and isinstance(first_head, dict),
+        f"artifactUri={built.data.get('artifactUri')!r} head={first_head!r}",
+    )
+
+    # `build --tag` and both hook timeouts went on that create (#264): the service took them,
+    # and the image reads its tag back.
+    described = plane.get_microvm_image(
+        imageIdentifier=str(built.data["imageIdentifier"])
+    )
+    results.eq(
+        "build --tag reaches the image, read back by GetMicrovmImage (#264)",
+        (described.get("tags") or {}).get(PROJECT_TAG_KEY),
+        prefix,
+    )
+
     started = time.monotonic()
     again = cli.call(*build_args, timeout=5 * 60)
     reuse_seconds = time.monotonic() - started
@@ -142,6 +193,17 @@ def drive_project_build(
         again.data.get("reused") is True and again.data.get("imageName") == name,
         f"reused={again.data.get('reused')!r} name={again.data.get('imageName')!r} "
         f"in {reuse_seconds:.1f}s",
+    )
+    second_head = artifact_head(s3, bucket, key)
+    results.check(
+        "a reused project build uploads nothing and names the same image (#258)",
+        again.data.get("imageIdentifier") == built.data.get("imageIdentifier")
+        and isinstance(first_head, dict)
+        and isinstance(second_head, dict)
+        and first_head.get("ETag") == second_head.get("ETag")
+        and first_head.get("LastModified") == second_head.get("LastModified"),
+        f"image {built.data.get('imageIdentifier')!r} -> "
+        f"{again.data.get('imageIdentifier')!r}, head {first_head!r} -> {second_head!r}",
     )
 
     image = str(built.data["imageIdentifier"])
@@ -213,3 +275,33 @@ def drive_project_build(
                 bool(groups) and not failures,
                 f"groups={groups!r} failures={failures!r}",
             )
+        # The artifact core uploaded, which nothing reuses once the image is gone.
+        try:
+            prefix = f"{name}/"
+            listed = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+            doomed = [item["Key"] for item in listed.get("Contents") or []]
+            if doomed:
+                s3.delete_objects(
+                    Bucket=bucket, Delete={"Objects": [{"Key": key} for key in doomed]}
+                )
+            left = s3.list_objects_v2(Bucket=bucket, Prefix=prefix).get("KeyCount", 0)
+            results.check(
+                "the suite deleted the project build's S3 artifact (#258)",
+                bool(name) and left == 0,
+                f"deleted={doomed!r} remaining={left}",
+            )
+        except Exception as exc:  # noqa: BLE001 - the error class is the finding
+            results.check(
+                "the suite deleted the project build's S3 artifact (#258)",
+                False,
+                type(exc).__name__,
+            )
+
+
+def artifact_head(s3: Any, bucket: str, key: str) -> dict[str, Any] | str:
+    """The object's ETag and LastModified, or the error class that says why there are none."""
+    try:
+        head = s3.head_object(Bucket=bucket, Key=key)
+    except Exception as exc:  # noqa: BLE001 - the error class is the finding
+        return type(exc).__name__
+    return {"ETag": head.get("ETag"), "LastModified": str(head.get("LastModified"))}

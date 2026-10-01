@@ -197,15 +197,14 @@ when it's stale.
 A bug in behavior the surfaces share, such as a refusal one surface lets through,
 is a case in `verify/parity/cases/` (`verify/parity/cases/README.md` has the
 format), not a test and a seeded fault in each language: core, the CLI, Python
-and TypeScript each run every case against its one `expect`. When main marks the
-wrong surface with `known_drift`, the marker is the failing-first proof, because
-every runner fails a marked path that starts agreeing ("now agrees; remove
-known_drift"), so the fix changes core, deletes the marker, and adds nothing
-else. When the corpus has no case for the bug yet, the fix adds one, and the pull
-request shows the wrong surface's runner failing it on the merge base with only
-the case file applied; review holds that. The ratchet counts each marker as
-parity drift, so a pull request can't add one. The runners' own seeded faults
-prove each runner can fail, so a case needs no fault of its own.
+and TypeScript each run every case against its one `expect`. The fix adds the
+case, and the pull request shows the wrong surface's runner failing it on the
+merge base with only the case file applied. Review holds that for now, because
+`tools/fail-to-pass.py` doesn't yet read a parity case file. No case marks a
+surface as disagreeing: the ratchet enforces parity drift, so every runner
+refuses a `known_drift` marker, and a skip takes a decision in
+`verify/ratchet/decisions.toml`. The runners' own seeded faults prove each runner
+can fail, so a case needs no fault of its own.
 
 Each driving adapter's `clippy.toml` bans a subprocess (`std::process::Command`,
 `tokio::process::Command`) and a direct environment read (`std::env::var`,

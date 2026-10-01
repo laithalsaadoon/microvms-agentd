@@ -11,8 +11,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { AgentVm, NameRecord, NameRegistry, Region, Sandbox } from '../index.js';
-import { codeOf } from './support/sse.mjs';
+import { AgentVm, NameRecord, NameRegistry, Region, Sandbox, Session } from '../index.js';
+import { codeOf, startSseServer } from './support/sse.mjs';
 
 process.env.AWS_ACCESS_KEY_ID = 'AKIDEXAMPLE';
 process.env.AWS_SECRET_ACCESS_KEY = 'secret';
@@ -153,3 +153,67 @@ test('an unlaunched sandbox has nothing to name', async () => {
     return /no VM to name/.test(error.message);
   });
 });
+
+// -- import: a record this registry didn't write (#270) -----------------------
+
+const servedRecord = (server, name = 'ci') =>
+  new NameRecord(name, 'microvm-a', server.endpoint, CANARY, Region.usEast1());
+
+test('an import writes only after the VM answers with the record token', () =>
+  withDir(async (dir) => {
+    // Core's `names::import`: a refused token writes nothing, an answered one registers the
+    // record, and a second import of the same VM refreshes it (#270).
+    const registry = new NameRegistry(dir);
+    const refusing = await startSseServer([['unauthorized']], { status: 401 });
+    try {
+      await assert.rejects(
+        registry.importRecord(servedRecord(refusing), Session.direct(refusing.endpoint, CANARY)),
+        (error) => codeOf(error) === 'ERR_CREDENTIALS',
+      );
+    } finally {
+      await refusing.close();
+    }
+    assert.equal(registry.get('ci'), null);
+
+    const answering = await startSseServer([[''], ['']]);
+    try {
+      const session = Session.direct(answering.endpoint, CANARY);
+      assert.equal(await registry.importRecord(servedRecord(answering), session), false);
+      assert.equal(registry.get('ci').agentToken(), CANARY);
+      assert.equal(await registry.importRecord(servedRecord(answering), session), true);
+    } finally {
+      await answering.close();
+    }
+  }));
+
+test('an import refuses a session attached with another token', () =>
+  withDir(async (dir) => {
+    const registry = new NameRegistry(dir);
+    const server = await startSseServer([['']]);
+    try {
+      await assert.rejects(
+        registry.importRecord(servedRecord(server), Session.direct(server.endpoint, 'other')),
+        (error) => codeOf(error) === 'ERR_INVALID_ARG',
+      );
+    } finally {
+      await server.close();
+    }
+    assert.equal(registry.get('ci'), null);
+  }));
+
+test('an import refuses a name another VM holds', () =>
+  withDir(async (dir) => {
+    const registry = new NameRegistry(dir);
+    registry.put(record('ci', 'microvm-holder'));
+    const server = await startSseServer([['']]);
+    try {
+      await assert.rejects(
+        registry.importRecord(servedRecord(server), Session.direct(server.endpoint, CANARY)),
+        (error) => codeOf(error) === 'ERR_PRECONDITION',
+      );
+    } finally {
+      await server.close();
+    }
+    assert.equal(registry.get('ci').microvmId, 'microvm-holder');
+  }));
+
