@@ -485,7 +485,7 @@ ts = "Image.buildLogGroup"
 [[capability]]
 id = "wrap-dockerfile"
 core = "microvms_core::control::artifact::wrap_dockerfile"
-cli = { exempt = "`dockerfile` prints the default stanza only", issue = "#269" }
+cli = "dockerfile --wrap"
 py = "wrap_dockerfile"
 ts = "wrapDockerfile"
 
@@ -550,7 +550,7 @@ ts = "AgentVm.imageName"
 [[capability]]
 id = "agent-dockerfile"
 core = "microvms_core::agents::dockerfile"
-cli = { exempt = "`dockerfile` prints the default stanza only, not an agent VM's", issue = "#269" }
+cli = "dockerfile --agent"
 py = "AgentVm.dockerfile"
 ts = "AgentVm.dockerfile"
 
