@@ -256,6 +256,27 @@ pub fn launch_request_for(
     request
 }
 
+/// The agents a VM carries when its caller names none: Claude Code alone, with its profile's
+/// defaults.
+///
+/// One list for every surface that takes an optional set (both bindings' constructors and
+/// adopters), so the default can't differ between them.
+pub fn default_specs() -> Vec<AgentSpec> {
+    vec![AgentSpec::new(Agent::ClaudeCode)]
+}
+
+/// The session of the launched VM `sandbox` addresses, or the refusal a call made before
+/// `launch` meets: [`AgentVm`]'s own, and a binding's that holds the sandbox apart from the
+/// specs.
+pub fn launched_session(sandbox: &Sandbox) -> Result<&Session, Error> {
+    sandbox.session().ok_or_else(|| {
+        Error::new(
+            ErrorKind::Precondition,
+            "this agent VM has not been launched; call `launch` first.",
+        )
+    })
+}
+
 /// The egress posture every agent VM launches with (AGENT-9).
 ///
 /// Derived from the launch request rather than asserted, so the CLI's `agent-up` envelope
@@ -880,12 +901,7 @@ impl AgentVm {
     }
 
     fn require_session(&self) -> Result<&Session, Error> {
-        self.sandbox.session().ok_or_else(|| {
-            Error::new(
-                ErrorKind::Precondition,
-                "this agent VM has not been launched; call `launch` first.",
-            )
-        })
+        launched_session(&self.sandbox)
     }
 
     /// [`install_access`] on this VM's session.
@@ -1307,6 +1323,36 @@ mod tests {
             Region::UsEast1,
             Arc::new(crate::control::fake::TestClock::new()),
         ))
+    }
+
+    /// The default agents are Claude Code alone, a set `AgentVm::new` accepts (#266).
+    #[test]
+    fn the_default_agents_are_claude_code_alone() {
+        let specs = default_specs();
+        assert_eq!(
+            specs.iter().map(|spec| spec.agent).collect::<Vec<_>>(),
+            [Agent::ClaudeCode]
+        );
+        AgentVm::new(sandbox(), specs).expect("the default set is a valid one");
+    }
+
+    /// A call before `launch` is `ERR_PRECONDITION` naming the remedy, from the one place both
+    /// `AgentVm` and the bindings read it (#266).
+    #[tokio::test]
+    async fn a_call_before_launch_is_refused_with_the_remedy() {
+        let fresh = sandbox();
+        let error = launched_session(&fresh).expect_err("nothing launched");
+        assert_eq!(error.kind(), ErrorKind::Precondition);
+        assert_eq!(
+            error.to_string(),
+            "this agent VM has not been launched; call `launch` first."
+        );
+        let vm = AgentVm::new(sandbox(), default_specs()).expect("a valid set");
+        let through_the_vm = vm
+            .install_access(&access())
+            .await
+            .expect_err("nothing launched");
+        assert_eq!(through_the_vm.to_string(), error.to_string());
     }
 
     /// `AgentVm::adopt` checks the specs before any call, and adopts with the lifecycle the
