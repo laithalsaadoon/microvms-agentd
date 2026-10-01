@@ -445,14 +445,14 @@ ts = "ControlPlane.deleteImage"
 [[capability]]
 id = "image-versions"
 core = "microvms_core::control::ControlPlane::list_image_versions"
-cli = { exempt = "no command", issue = "#264" }
+cli = "image-versions"
 py = "ControlPlane.list_image_versions"
 ts = "ControlPlane.listImageVersions"
 
 [[capability]]
 id = "set-image-version-status"
 core = "microvms_core::control::ControlPlane::set_image_version_status"
-cli = { exempt = "no command", issue = "#264" }
+cli = "image-set-status"
 py = "ControlPlane.set_image_version_status"
 ts = "ControlPlane.setImageVersionStatus"
 
@@ -462,7 +462,7 @@ core = [
   "microvms_core::control::ControlPlane::list_image_builds",
   "microvms_core::control::ControlPlane::get_image_build",
 ]
-cli = { exempt = "no command", issue = "#264" }
+cli = ["image-builds", "image-builds --build-id"]
 py = ["ControlPlane.list_image_builds", "ControlPlane.get_image_build"]
 ts = ["ControlPlane.listImageBuilds", "ControlPlane.getImageBuild"]
 

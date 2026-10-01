@@ -9,6 +9,7 @@ sidebar:
 ```bash
 microvm doctor --binary ./agentd          # every prerequisite, and the binary's architecture
 microvm logs <image-name>                 # the build log group and the command that reads it
+microvm image-builds <image> <version>    # each build's state and the reason a failed one gives
 microvm history <microvm-id-or-name>      # what was asked, and what the platform said back
 ```
 
@@ -34,7 +35,7 @@ Then build the Dockerfile locally under arm64 with `docker buildx build --platfo
 
 ## 3. Where the reason lives
 
-A failed build's `stateReason` lives on the build record, and nowhere else. `GetMicrovmImage` reports `CREATE_FAILED` and structurally cannot say why; `ListMicrovmImageVersions` reports `FAILED` with a null reason; `ListMicrovmImageBuilds` carries the sentence. Expect a list: each failed version had two builds, one per chipset generation, with the same reason. `GetMicrovmImage`'s `latestFailedImageVersion` names which version to ask about.
+A failed build's `stateReason` lives on the build record, and nowhere else. `GetMicrovmImage` reports `CREATE_FAILED` and structurally cannot say why; `ListMicrovmImageVersions` reports `FAILED` with a null reason; `ListMicrovmImageBuilds` carries the sentence. Expect a list: each failed version had two builds, one per chipset generation, with the same reason. `GetMicrovmImage`'s `latestFailedImageVersion` names which version to ask about. `microvm image-versions <image>` lists the versions, `microvm image-builds <image> <version>` lists that version's builds with their reasons, and `--build-id <id>` reads one build with its `snapshotBuild`.
 
 Observed reasons, worth reading for how much they vary:
 
