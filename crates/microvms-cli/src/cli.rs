@@ -147,6 +147,14 @@ pub enum Command {
     /// naming it.
     Exec(ExecArgs),
 
+    /// Wait until a kept MicroVM answers: RUNNING, and then its daemon.
+    ///
+    /// Finishes a `run --keep --no-wait`. From PENDING it waits for RUNNING up to --timeout
+    /// and then for the daemon to answer; from RUNNING, for the daemon alone. Any other state
+    /// is refused, because a suspended or terminated VM isn't starting. The VM is named the
+    /// way the attached commands name one: `--name`, or the triple `run` printed.
+    Wait(WaitArgs),
+
     /// Ask a running MicroVM's daemon whether it is up, and what its identity repair did.
     ///
     /// The one unauthenticated route: the platform forwards no external traffic until the run
@@ -917,6 +925,16 @@ pub struct RunArgs {
     #[arg(long)]
     pub keep: bool,
 
+    /// Return once the launch is accepted, with the VM still PENDING, instead of waiting for
+    /// RUNNING and for its daemon. `microvm wait` finishes the launch later.
+    ///
+    /// The envelope carries the identifiers a later command needs (the endpoint, the agent
+    /// token and the MicroVM id), and `--vm-name` registers the name as usual. Requires
+    /// --keep, since a VM torn down on the way out has nothing to wait for, and refuses an
+    /// exec (--exec or `exec` in microvm.toml) and sync mode, which need the VM answering.
+    #[arg(long, requires = "keep", conflicts_with = "exec")]
+    pub no_wait: bool,
+
     /// Generate a per-VM identity, so `tunnel --verify-identity` can prove the far end.
     ///
     /// The launch generates two x25519 seeds and delivers the VM's seed plus this host's
@@ -1437,6 +1455,20 @@ pub struct ExistsArgs {
     /// The absolute path in the guest.
     #[arg(value_name = "PATH")]
     pub path: String,
+
+    #[command(flatten)]
+    pub attach: AttachFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct WaitArgs {
+    /// How long to wait for RUNNING, in seconds. The daemon wait after it is core's own
+    /// bootstrap bound.
+    #[arg(long, default_value = "300", value_parser = parse_seconds)]
+    pub timeout: std::time::Duration,
 
     #[command(flatten)]
     pub attach: AttachFlags,
@@ -2780,7 +2812,7 @@ mod tests {
 
     /// The subcommands, named as the manifest and the response table name them.
     ///
-    /// The block after `exec` is the attached one (`health`, `keepalive`, `ack`, `kill`, `ps`, `stdin`, `cp`,
+    /// The block after `exec` is the attached one (`wait`, `health`, `keepalive`, `ack`, `kill`, `ps`, `stdin`, `cp`,
     /// `exists`, `tunnel`, `port-forward`, and `shell` beside it), and their position is asserted rather than incidental,
     /// because `--help`'s reading order is the only documentation of which commands need the
     /// identifier triple (`shell` sits with them because it addresses a running VM, though its
@@ -2801,6 +2833,7 @@ mod tests {
                 "agent-up",
                 "agent-prompt",
                 "exec",
+                "wait",
                 "health",
                 "keepalive",
                 "ack",
@@ -3604,6 +3637,7 @@ mod tests {
             (Command::Exec(args), "--timeout-sec") => args.timeout_sec,
             (Command::Exec(args), "--client-grace") => args.client_grace,
             (Command::Run(args), "--timeout") => Some(args.timeout),
+            (Command::Wait(args), "--timeout") => Some(args.timeout),
             (Command::Sync(args), "--timeout") => Some(args.timeout),
             (Command::Suspend(args), "--timeout") => Some(args.timeout),
             (Command::Resume(args), "--timeout") => Some(args.timeout),
@@ -3648,6 +3682,40 @@ mod tests {
         }
     }
 
+    /// **`wait --timeout` defaults to core's `DEFAULT_RUNNING_TIMEOUT` (#269),** the bound a
+    /// launch's own RUNNING wait takes, for the reason the exec waits' row above gives.
+    ///
+    /// **Falsification**: change `wait`'s `default_value = "300"` to `"301"` and the parse
+    /// reads 301s where core waits 300s.
+    #[test]
+    fn the_wait_timeout_defaults_to_the_cores_running_wait() {
+        let cli = Cli::try_parse_from(["microvm", "wait", "--name", "box"]).expect("parses");
+        assert_eq!(
+            parsed_seconds(&cli.command, "--timeout"),
+            Some(microvms_core::sandbox::DEFAULT_RUNNING_TIMEOUT),
+        );
+    }
+
+    /// **`run --no-wait` needs `--keep` and refuses `--exec` at parse time (#269).** A VM torn
+    /// down on the way out has nothing to wait for later, and an exec needs the VM answering,
+    /// so either combination is a caller's mistake that should cost nothing.
+    ///
+    /// **Falsification**: drop `requires = "keep"` from `--no-wait` and the bare row parses.
+    #[test]
+    fn run_no_wait_needs_keep_and_refuses_an_exec() {
+        let parse = |rest: &[&str]| {
+            Cli::try_parse_from(["microvm", "run", "--no-config"].iter().chain(rest))
+        };
+        let bare = parse(&["--no-wait"]).expect_err("--no-wait without --keep");
+        assert_eq!(bare.kind(), clap::error::ErrorKind::MissingRequiredArgument);
+        let exec = parse(&["--keep", "--no-wait", "--exec", "true"]).expect_err("an exec");
+        assert_eq!(exec.kind(), clap::error::ErrorKind::ArgumentConflict);
+        let Command::Run(args) = parse(&["--keep", "--no-wait"]).expect("parses").command else {
+            panic!("a run parses as a run");
+        };
+        assert!(args.no_wait && args.keep);
+    }
+
     /// **#268.** Every flag that takes seconds refuses, at parse time, a value that isn't a
     /// duration: non-finite, negative, too large for one, or not a number. Zero, a fraction and
     /// a whole figure parse to exactly that duration, and those rows are also what keep the
@@ -3668,11 +3736,12 @@ mod tests {
         let attached = ["--endpoint", "https://mvm-1.example", "--agent-token", "t"];
         let with_id =
             |rest: &[&'static str]| [&attached[..], &["--microvm-id", "mvm-1"], rest].concat();
-        let flags: [(&str, Vec<&str>, &str); 13] = [
+        let flags: [(&str, Vec<&str>, &str); 14] = [
             ("exec", with_id(&["true"]), "--timeout"),
             ("exec", with_id(&["true"]), "--timeout-sec"),
             ("exec", with_id(&["--complete", "true"]), "--client-grace"),
             ("run", vec!["--no-config"], "--timeout"),
+            ("wait", with_id(&[]), "--timeout"),
             ("sync", with_id(&["."]), "--timeout"),
             ("suspend", vec!["mvm-1"], "--timeout"),
             ("resume", vec!["mvm-1"], "--timeout"),

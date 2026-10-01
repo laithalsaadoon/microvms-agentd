@@ -65,6 +65,9 @@ pub struct RunOutcome {
     pub build_seconds: f64,
     pub running_seconds: f64,
     pub kept: bool,
+    /// `run --no-wait` returned with the VM still PENDING (#269), so the human view says how
+    /// to finish the launch. Not an envelope key: the caller who passed the flag knows.
+    pub pending: bool,
     /// The local name `--vm-name` registered, or `None` — present in the envelope either
     /// way, so a consumer never guards against a missing key.
     pub vm_name: Option<String>,
@@ -203,6 +206,15 @@ impl RunOutcome {
             if let (Some(id), Some(endpoint), Some(token)) =
                 (&self.microvm_id, &self.endpoint, &self.agent_token)
             {
+                if self.pending {
+                    lines.push(match &self.vm_name {
+                        Some(name) => format!("  finish the launch: microvm wait --name {name}"),
+                        None => format!(
+                            "  finish the launch: microvm wait --endpoint {endpoint} \
+                             --agent-token {token} --microvm-id {id}"
+                        ),
+                    });
+                }
                 lines.push(format!(
                     "  exec against it: microvm exec '<cmd>' --endpoint {endpoint} \
                      --agent-token {token} --microvm-id {id}"

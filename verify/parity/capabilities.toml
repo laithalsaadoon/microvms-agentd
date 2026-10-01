@@ -31,7 +31,7 @@ ts = "Sandbox.create"
 [[capability]]
 id = "wait-until-running"
 core = "microvms_core::sandbox::Sandbox::wait_until_running"
-cli = { exempt = "`run` always waits for RUNNING; there's no launch-now-finish-later flag", issue = "#269" }
+cli = ["run --no-wait", "wait"]
 py = "Sandbox.wait_until_running"
 ts = "Sandbox.waitUntilRunning"
 
@@ -160,7 +160,7 @@ ts = "Session.health"
 [[capability]]
 id = "wait-until-ready"
 core = "microvms_core::session::Session::wait_until_ready"
-cli = { exempt = "`run` waits for the daemon inside core's launch and `health` is one probe; a standalone wait is `wait`", issue = "#269" }
+cli = "wait"
 py = "Session.wait_until_ready"
 ts = "Session.waitUntilReady"
 
@@ -854,6 +854,11 @@ py = "ControlPlane.wait_for_state(timeout)"
 id = "lifecycle-poll"
 core = "lifecyclePollIntervalSeconds"
 py = "ControlPlane.wait_for_state(poll_interval)"
+
+[[default]]
+id = "running-wait"
+core = "launchTimeoutSeconds"
+cli = "wait --timeout"
 
 [[default]]
 id = "ready-wait"
