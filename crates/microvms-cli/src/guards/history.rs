@@ -496,9 +496,6 @@ async fn a_resume_polls_the_thawed_daemon_and_lands_its_hook_observations() {
                 .build();
             Box::pin(async move { built })
         }
-        fn put_artifact(&self, _uri: &str, _bytes: Vec<u8>) -> BoxFuture<'_, Result<(), Error>> {
-            Box::pin(async move { Ok(()) })
-        }
     }
 
     let dir = TempDir::new("history-resume-hooks");

@@ -407,9 +407,8 @@ async fn fresh<O: std::io::Write, E: std::io::Write>(
     let Some(bucket) = ctx.infra.bucket.clone() else {
         return Err(CliError::new(
             Exit::Precondition,
-            "no --bucket and no $MICROVM_BUCKET. The agent image's artifact is uploaded to a \
-             derived key in that bucket (`aws s3 cp`); the agent image path does not upload, \
-             and an S3 client in this CLI would be a second path to AWS.",
+            "no --bucket and no $MICROVM_BUCKET. The agent image's artifact is uploaded to \
+             `s3://<bucket>/<image-name>/artifact.zip` when the image has to be built.",
         ));
     };
     let region = args.region.resolve(ctx.env)?;
@@ -471,13 +470,17 @@ async fn fresh<O: std::io::Write, E: std::io::Write>(
     ));
     let sandbox = ctx.seam.open_sandbox(region.clone(), args.port).await?;
     let mut vm = AgentVm::new(sandbox, specs.clone())?;
-    let mut request = vm.image_request(
+    let build_role_arn = ctx.infra.build_role_arn.clone().unwrap_or_default();
+    // The name `ensure_image` gives the image, for the envelope and the ledger (AGENT-3).
+    let image_name = vm
+        .image_request(binary.clone(), build_role_arn.clone(), size)?
+        .name;
+    let image = AgentImage {
         binary,
-        ctx.infra.build_role_arn.clone().unwrap_or_default(),
+        build_role_arn,
         size,
-    )?;
-    request.code_artifact_uri = format!("s3://{bucket}/{}.zip", request.name);
-    let image_name = request.name.clone();
+        bucket,
+    };
 
     let mut ledger = Ledger::new(region.as_str(), root);
     let region_name = region.as_str().to_string();
@@ -492,7 +495,7 @@ async fn fresh<O: std::io::Write, E: std::io::Write>(
             &region,
             &mut vm,
             &mut ledger,
-            request,
+            image,
             ttl,
             packed.as_ref(),
         ));
@@ -625,6 +628,14 @@ async fn fresh<O: std::io::Write, E: std::io::Write>(
     .render())
 }
 
+/// What the agent image is ensured from.
+struct AgentImage {
+    binary: Vec<u8>,
+    build_role_arn: String,
+    size: microvms_core::SizeClass,
+    bucket: String,
+}
+
 /// The billable half of the fresh path: image (built or reused), launch, upload, token,
 /// install. Returns the image ARN, whether it was reused, and the token's expiry.
 #[allow(clippy::too_many_arguments)]
@@ -634,42 +645,31 @@ async fn launch_and_provision<O: std::io::Write, E: std::io::Write>(
     region: &microvms_core::Region,
     vm: &mut AgentVm,
     ledger: &mut Ledger,
-    request: microvms_core::control::CreateImageRequest,
+    image: AgentImage,
     ttl: Duration,
     packed: Option<&microvms_core::workspace::Packed>,
 ) -> Result<(String, bool, u64), Error> {
-    let name = request.name.clone();
+    ctx.out.progress(
+        "ensuring the agent image: reused when the daemon, the agents and their versions are \
+         unchanged, built otherwise (several minutes, server-side, once per agent set)",
+    );
+    // Core's content-addressed build (#258): reused when ready, waited on while building,
+    // rebuilt when failed, and uploaded by core only when a build is needed.
+    let ensured = vm
+        .ensure_image(
+            image.binary,
+            image.build_role_arn,
+            image.size,
+            image.bucket,
+            None,
+        )
+        .await?;
+    let (image_arn, reused) = (ensured.image.identifier.clone(), ensured.reused);
     ctx.out.progress(&format!(
-        "checking for an existing image named {name} (content-hash keyed, like build --reuse)"
+        "{} {image_arn}",
+        if reused { "reusing" } else { "built" }
     ));
-    let (image_arn, reused) = match vm.sandbox().find_image_by_name(&name).await? {
-        Some(existing) => {
-            ctx.out.progress(&format!(
-                "reusing {} — the daemon, the agents, and their versions are unchanged",
-                existing.image_arn
-            ));
-            (existing.image_arn, true)
-        }
-        None => {
-            ctx.out.progress(&format!(
-                "building image {name} — several minutes, server-side, once per agent set"
-            ));
-            // Before the upload, so a request core itself refuses costs zero transport calls.
-            vm.sandbox().preflight(&request)?;
-            let bytes = vm.sandbox().build_artifact_for(&request)?;
-            ctx.out.progress(&format!(
-                "uploading {} bytes of artifact to {}",
-                bytes.len(),
-                request.code_artifact_uri
-            ));
-            ctx.seam
-                .put_artifact(&request.code_artifact_uri, bytes)
-                .await?;
-            let image = vm.build(request).await?;
-            (image.identifier.clone(), false)
-        }
-    };
-    ledger.record_image(&image_arn, &name);
+    ledger.record_image(&image_arn, &ensured.image.name);
 
     let mut launch = vm.launch_request(&image_arn, ctx.infra.execution_role_arn.clone());
     launch.max_idle_sec = args.max_idle_sec;
