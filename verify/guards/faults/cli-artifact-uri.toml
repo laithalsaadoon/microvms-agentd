@@ -167,3 +167,36 @@ expect = "exit-nonzero"
 suite = "script"
 message = "a hidden image that won't delete: failed []"
 transform = { file = "conformance/lanes/caller_artifact.py", replace = "        by_arn = caller_artifact_image_state(plane, arn)\n        if by_arn is not None and arn:\n", with = "        by_arn = None\n        if by_arn is not None and arn:\n" }
+
+# #258: the section copies from the key `run` used before its build went through `ensure_image`,
+# which the self-test's account doesn't hold, so the copy fails as it did live.
+[[fault]]
+id = "conformance-caller-artifact-derived-key"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/caller_artifact.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  the caller-artifact driver and cleanup fail exactly where each account misleads them"
+transform = { file = "conformance/lanes/caller_artifact.py", replace = "            CopySource={\"Bucket\": source[0], \"Key\": source[1]},\n", with = "            CopySource={\"Bucket\": bucket, \"Key\": f\"{launched.data['imageName']}.zip\"},\n" }
+
+# #258: a run that reports no artifact URI passes the section's own check, so only the empty
+# #249 checks say anything went wrong.
+[[fault]]
+id = "conformance-caller-artifact-source-unchecked"
+guard = "conformance/run_rs.py --self-test: conformance/selftest/caller_artifact.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  the caller-artifact driver and cleanup fail exactly where each account misleads them"
+transform = { file = "conformance/lanes/caller_artifact.py", replace = "            source is not None,\n", with = "            True,\n" }
+
+# #258: `run --artifact-uri` leaves the caller's URI off its envelope.
+[[fault]]
+id = "cli-run-caller-artifact-uri-unreported"
+guard = "guards::artifact_uri::a_run_from_a_caller_artifact_reports_its_uri"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::artifact_uri::a_run_from_a_caller_artifact_reports_its_uri"]
+expect = "test-failed"
+suite = "rust"
+message = "the run reports the caller's URI"
+note = "crates/microvms-cli/src/guards/artifact_uri.rs::a_run_from_a_caller_artifact_reports_its_uri"
+transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "                    outcome.artifact_uri = Some(caller_uri.to_string());\n", with = "" }

@@ -827,6 +827,9 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
         if let Some(name) = &outcome.image_name {
             failure = failure.with_data("imageName", json!(name));
         }
+        if let Some(uri) = &outcome.artifact_uri {
+            failure = failure.with_data("artifactUri", json!(uri));
+        }
         if !teardown.undeleted.is_empty() {
             failure = failure.with_data("undeleted", json!(teardown.undeleted));
         }
@@ -1049,6 +1052,7 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
                 // The caller's own object: built under the name as given, no upload (#249).
                 (Some(caller_uri), _) => {
                     ctx.out.progress(&format!("building image {name} ({size})"));
+                    outcome.artifact_uri = Some(caller_uri.to_string());
                     // Before the build, so a request core itself would refuse costs zero
                     // transport calls (issue #47).
                     sandbox.preflight(&request)?;
@@ -1080,6 +1084,7 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
                     outcome.image_identifier = Some(identifier.clone());
                     outcome.image_name = Some(ensured.image.name.clone());
                     outcome.image_reused = ensured.reused;
+                    outcome.artifact_uri = Some(ensured.artifact_uri.clone());
                     outcome.build_seconds = started.elapsed().as_secs_f64();
                     if ensured.reused {
                         // D-I2: found, not built, so not this run's to list or delete.

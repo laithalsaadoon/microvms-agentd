@@ -96,6 +96,11 @@ pub struct RunOutcome {
     /// nothing (#258). A reused image isn't this run's: the teardown leaves it and the ledger
     /// doesn't list it.
     pub image_reused: bool,
+    /// The `s3://` URI of the artifact the image was built from: the caller's `--artifact-uri`,
+    /// or the content-addressed key the build arm's ensure uploaded to or found (#258). `None`
+    /// for `run --image`, which builds nothing. A consumer reads the object from here rather
+    /// than deriving the key, which the ensure owns.
+    pub artifact_uri: Option<String>,
 }
 
 impl RunOutcome {
@@ -148,6 +153,7 @@ impl RunOutcome {
         // (what was requested) and reads as a seal when it is not one.
         data.insert("egressPosture".into(), json!(self.egress_posture.as_str()));
         data.insert("imageReused".into(), json!(self.image_reused));
+        data.insert("artifactUri".into(), json!(self.artifact_uri));
         data
     }
 

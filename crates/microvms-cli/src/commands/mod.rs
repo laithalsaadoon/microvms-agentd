@@ -136,6 +136,9 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 33] = [
             // Whether the build found the content-addressed image built and built nothing
             // (#258); a reused image is left in place at teardown.
             "imageReused",
+            // The artifact the image was built from, as an s3:// URI: the caller's
+            // --artifact-uri or the key the ensure used (#258); null for `run --image`.
+            "artifactUri",
             // What each config-mergeable knob resolved to, as {value, source} with source
             // one of flag/config/default — and which file supplied the config values
             // (null when none did). Issue #73: a caller who stopped passing flags reads
@@ -179,6 +182,9 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 33] = [
             // Whether the build found the content-addressed image built and built nothing
             // (#258); a reused image is left in place at teardown.
             "imageReused",
+            // The artifact the image was built from, as an s3:// URI: the caller's
+            // --artifact-uri or the key the ensure used (#258); null for `run --image`.
+            "artifactUri",
             "resolvedConfig",
             "configPath",
             "sync",
