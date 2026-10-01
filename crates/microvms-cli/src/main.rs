@@ -507,6 +507,7 @@ async fn handle<O: std::io::Write, E: std::io::Write>(
         Command::ImageSetStatus(args) => commands::image::set_status(ctx, args).await,
         Command::ImageBuilds(args) => commands::image::builds(ctx, args).await,
         Command::Cost(args) => commands::cost::cost(ctx, args),
+        Command::EgressPosture(args) => commands::local::egress_posture(ctx, args),
         Command::Doctor(args) => commands::doctor::doctor(ctx, args).await,
         Command::Manifest => commands::local::manifest(ctx),
         Command::Constants(_) => commands::local::constants(ctx),

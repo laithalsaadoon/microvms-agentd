@@ -1,0 +1,33 @@
+# ── `microvm egress-posture`, core's `egress_posture_for` on the CLI (#269) ─────────────
+
+# `--deny-egress` never reaches `run`'s merge, so the command answers `unsealed` for it.
+[[fault]]
+id = "cli-egress-posture-drops-deny-egress"
+guard = "guards::egress_posture::egress_posture_answers_cores_posture_for_runs_flags"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::egress_posture::egress_posture_answers_cores_posture_for_runs_flags"]
+expect = "test-failed"
+suite = "rust"
+message = "core's posture for these options"
+note = "crates/microvms-cli/src/guards/egress_posture.rs::egress_posture_answers_cores_posture_for_runs_flags"
+transform = { file = "crates/microvms-cli/src/commands/local.rs", replace = "    run.deny_egress = args.deny_egress;\n", with = "    let _ = args.deny_egress;\n" }
+
+# The posture is derived from the flags alone, so microvm.toml is read and ignored.
+[[fault]]
+id = "cli-egress-posture-skips-the-merge"
+guard = "guards::egress_posture::egress_posture_reads_runs_config_file"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::egress_posture::egress_posture_reads_runs_config_file"]
+expect = "test-failed"
+suite = "rust"
+message = "the file's deny-egress, as run merges it"
+note = "crates/microvms-cli/src/guards/egress_posture.rs::egress_posture_reads_runs_config_file"
+transform = { file = "crates/microvms-cli/src/commands/local.rs", replace = "    let launch = &merged.args;\n", with = "    let _ = &merged.args;\n    let launch = &run;\n" }
+
+# The process tier asks `egress-posture` for an open launch whatever the case says.
+[[fault]]
+id = "parity-cli-egress-posture-adds-egress"
+guard = "the_cli_process_answers_the_shared_case_corpus"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "parity_cases", "--", "--exact", "the_cli_process_answers_the_shared_case_corpus"]
+expect = "test-failed"
+suite = "rust"
+message = "egress/posture-deny-egress-is-best-effort"
+transform = { file = "crates/microvms-cli/tests/parity_cases.rs", replace = "        \"egress-posture-for\" => vec![\"--json\", \"egress-posture\"],\n", with = "        \"egress-posture-for\" => vec![\"--json\", \"egress-posture\", \"--egress\"],\n" }

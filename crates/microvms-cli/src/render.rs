@@ -215,13 +215,15 @@ impl RunOutcome {
         // Unconditional, and that is the point: the run that read as sealed printed nothing
         // about its network at all. The line names the mechanism, not a verdict, because
         // "egress: false" as a verdict is the defect (docs/TRUST.md, **Egress**).
-        lines.push(format!(
-            "egress: {} — {}",
-            self.egress_posture.as_str(),
-            self.egress_posture.describe()
-        ));
+        lines.push(egress_line(self.egress_posture));
         lines.join("\n")
     }
+}
+
+/// The human line for an egress posture, which `run` and `egress-posture` both print: the
+/// label and what it means, never a bare verdict.
+pub fn egress_line(posture: microvms_core::control::EgressPosture) -> String {
+    format!("egress: {} — {}", posture.as_str(), posture.describe())
 }
 
 // ── doctor ──────────────────────────────────────────────────────────────────
