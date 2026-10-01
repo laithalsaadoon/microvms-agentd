@@ -389,6 +389,42 @@ type OutputCallback = napi::threadsafe_function::ThreadsafeFunction<
     false,
 >;
 
+/// One file `downloadDir` wrote.
+#[napi(object)]
+pub struct DownloadedFile {
+    /// The file's path under the local directory, as the archive named it.
+    pub path: String,
+    /// The file's size in bytes.
+    pub size: i64,
+}
+
+/// How `syncDir` should behave.
+#[napi(object)]
+#[derive(Default)]
+pub struct SyncDirOptions {
+    /// Ignore the manifest the last sync left in the VM and upload everything.
+    pub full: Option<bool>,
+    /// The in-VM removal's deadline, in seconds. Default: core's, 60.
+    pub delete_timeout: Option<f64>,
+}
+
+/// What one `syncDir` did.
+#[napi(object)]
+pub struct SyncReport {
+    /// The uploaded archive's size, 0 when nothing travelled.
+    pub uploaded_bytes: i64,
+    /// How many members the upload carried: the changed ones, or every one when `full`.
+    pub uploaded_members: i64,
+    /// How many paths gone locally were removed in the VM.
+    pub deleted: i64,
+    /// Deletions the VM's manifest ordered that weren't plain relative paths, so weren't run.
+    pub refused_deletions: i64,
+    /// No manifest was read (`full: true`, or none in the VM), so the whole tree travelled.
+    pub full: bool,
+    /// The VM already held the tree as it is, so nothing travelled.
+    pub unchanged: bool,
+}
+
 /// The line range `downloadFile` reads, 1-based and inclusive. Both absent reads the file.
 #[napi(object)]
 #[derive(Default)]
@@ -905,6 +941,83 @@ impl Session {
             .await
             .map_err(js_async)?
             .into())
+    }
+
+    /// Brings the files of a directory in the VM back under `localDir`: the regular files
+    /// `globs` select, and nothing else.
+    ///
+    /// The daemon packs `remote`, and the archive describes the VM's filesystem, where
+    /// untrusted work runs, so core writes only regular-file members that match a glob, never
+    /// under `.git` whatever the globs say, and never outside `localDir`. A symlink, a special
+    /// file or a `../` member is skipped, not refused. `['**']` brings every regular file back.
+    /// Resolves to what was written; a local directory that can't be written to rejects with
+    /// `ERR_INVALID_ARG`.
+    #[napi]
+    pub async fn download_dir(
+        &self,
+        remote: String,
+        local_dir: String,
+        globs: Vec<String>,
+    ) -> Result<Vec<DownloadedFile>, AsyncError> {
+        let live = self.live().await;
+        let session = live.session().map_err(js_async)?;
+        let written = session
+            .download_dir(
+                &microvms_core::workspace::DiskTree,
+                &remote,
+                &globs,
+                std::path::Path::new(&local_dir),
+            )
+            .await
+            .map_err(js_async)?;
+        Ok(written
+            .into_iter()
+            .map(|file| DownloadedFile {
+                path: file.path,
+                size: file.bytes as i64,
+            })
+            .collect())
+    }
+
+    /// Syncs `localDir` into the VM's `/workspace` once, uploading only what changed.
+    ///
+    /// Core's one pass, `microvm sync`'s: the local tree is hashed and diffed against the
+    /// manifest the last sync left in the VM, the changed members travel as one archive, the
+    /// paths gone locally are removed in the VM with one `rm` whose deadline is
+    /// `deleteTimeout` seconds (core's default when omitted), and the manifest is rewritten.
+    /// `full: true` ignores the manifest and uploads everything. `.git`, `target`,
+    /// `node_modules` and `.venv` never travel. A tree over the daemon's budgets rejects with
+    /// `ERR_INVALID_ARG` before anything is sent.
+    #[napi]
+    pub async fn sync_dir(
+        &self,
+        local_dir: String,
+        options: Option<SyncDirOptions>,
+    ) -> Result<SyncReport, AsyncError> {
+        let options = options.unwrap_or_default();
+        let delete_timeout = match options.delete_timeout {
+            Some(seconds) => seconds_async(seconds)?,
+            None => microvms_core::workspace::DEFAULT_SYNC_DELETE_TIMEOUT,
+        };
+        let live = self.live().await;
+        let session = live.session().map_err(js_async)?;
+        let pass = session
+            .sync_dir(
+                &microvms_core::workspace::DiskTree,
+                std::path::Path::new(&local_dir),
+                options.full.unwrap_or_default(),
+                delete_timeout,
+            )
+            .await
+            .map_err(js_async)?;
+        Ok(SyncReport {
+            uploaded_bytes: pass.uploaded_bytes as i64,
+            uploaded_members: pass.uploaded_members as i64,
+            deleted: pass.deleted as i64,
+            refused_deletions: pass.refused_deletions as i64,
+            full: pass.full,
+            unchanged: pass.unchanged,
+        })
     }
 
     /// Whether a path exists, distinguishing absence from every other refusal.

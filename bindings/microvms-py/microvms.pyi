@@ -517,6 +517,23 @@ class Detached:
         """
 
 @final
+class DownloadedFile:
+    """
+    One file `Session.download_dir` wrote, relative to the local directory.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def path(self, /) -> str:
+        """
+        The file's path under the local directory, as the archive named it.
+        """
+    @property
+    def size(self, /) -> int:
+        """
+        The file's size in bytes.
+        """
+
+@final
 class Duration:
     """
     Seconds, plus how we know them.
@@ -2373,6 +2390,18 @@ class Session:
         control plane's job and it happens inside every request (TRAP-9), so a caller
         handing a token in would be handing in one that expires.
         """
+    def download_dir(self, /, remote: str, local_dir: str |PathLike[str], globs: Sequence[str]) -> list[DownloadedFile]:
+        """
+        Brings the files of a directory in the VM back under `local_dir`: the regular files
+        `globs` select, and nothing else.
+        
+        The daemon packs `remote`, and the archive describes the VM's filesystem, where
+        untrusted work runs, so core writes only regular-file members that match a glob, never
+        under `.git` whatever the globs say, and never outside `local_dir`. A symlink, a special
+        file or a `../` member is skipped, not refused. `["**"]` brings every regular file back.
+        Returns what was written. A local directory that can't be written to raises
+        `InvalidArgError`.
+        """
     def download_file(self, /, path: str, *, start_line: int |None = None, end_line: int |None = None) -> bytes:
         """
         Reads one file, or lines `start_line` through `end_line` of it.
@@ -2528,6 +2557,18 @@ class Session:
         `proc.gaps` and keeps both going. `offset`, `reconnect`, `max_reconnects` and
         `idle_timeout` are `ExecHandle.stream()`'s.
         """
+    def sync_dir(self, /, local_dir: str |PathLike[str], *, full: bool = False, delete_timeout: float |None = None) -> SyncReport:
+        """
+        Syncs `local_dir` into the VM's `/workspace` once, uploading only what changed.
+        
+        Core's one pass, `microvm sync`'s: the local tree is hashed and diffed against the
+        manifest the last sync left in the VM, the changed members travel as one archive, the
+        paths gone locally are removed in the VM with one `rm` whose deadline is
+        `delete_timeout` (core's default when `None`), and the manifest is rewritten. `full=True`
+        ignores the manifest and uploads everything. `.git`, `target`, `node_modules` and
+        `.venv` never travel. A tree over the daemon's budgets raises `InvalidArgError` before
+        anything is sent.
+        """
     def upload_file(self, /, path: str, data: bytes, *, mode: str |None = None) -> None:
         """
         Writes one file, creating parents. `mode` is an **octal string** (`"0755"`), which
@@ -2629,6 +2670,44 @@ class StdinAck:
     def exec_id(self, /) -> str: ...
     @property
     def written(self, /) -> int: ...
+
+@final
+class SyncReport:
+    """
+    What one `Session.sync_dir` did.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def deleted(self, /) -> int:
+        """
+        How many paths gone locally were removed in the VM.
+        """
+    @property
+    def full(self, /) -> bool:
+        """
+        No manifest was read (`full=True`, or none in the VM), so the whole tree travelled.
+        """
+    @property
+    def refused_deletions(self, /) -> int:
+        """
+        How many deletions the VM's manifest ordered that weren't plain relative paths, and so
+        weren't run: the manifest is the VM's word.
+        """
+    @property
+    def unchanged(self, /) -> bool:
+        """
+        The VM already held the tree as it is, so nothing travelled.
+        """
+    @property
+    def uploaded_bytes(self, /) -> int:
+        """
+        The uploaded archive's size, 0 when nothing travelled.
+        """
+    @property
+    def uploaded_members(self, /) -> int:
+        """
+        How many members the upload carried: the changed ones, or every one when `full`.
+        """
 
 @final
 class TeardownReport:

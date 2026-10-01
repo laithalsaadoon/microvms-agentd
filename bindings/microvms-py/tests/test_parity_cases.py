@@ -337,6 +337,12 @@ def daemon_status(case: Case, servers: Callable[..., SseServer]) -> dict[str, An
             session.health()
         elif case.capability == "upload-file":
             session.upload_file(case.input["path"], b"parity")
+        elif case.capability == "sync-directory":
+            # `full`, so no manifest read: the whole tree travels and its upload meets the
+            # status.
+            with tempfile.TemporaryDirectory() as tree:
+                (Path(tree) / "upload.bin").write_bytes(b"parity")
+                session.sync_dir(tree, full=True)
         else:
             raise AssertionError(
                 f"{case.id}: no Python handler for {case.capability!r} in error"

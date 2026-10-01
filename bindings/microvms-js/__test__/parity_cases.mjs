@@ -347,6 +347,15 @@ async function daemonStatus(testCase) {
         await session.health();
       } else if (testCase.capability === 'upload-file') {
         await session.uploadFile(testCase.input.path, new Uint8Array(Buffer.from('parity')));
+      } else if (testCase.capability === 'sync-directory') {
+        // `full`, so no manifest read: the whole tree travels and its upload meets the status.
+        const tree = mkdtempSync(join(tmpdir(), 'parity-sync-'));
+        try {
+          writeFileSync(join(tree, 'upload.bin'), 'parity');
+          await session.syncDir(tree, { full: true });
+        } finally {
+          rmSync(tree, { recursive: true, force: true });
+        }
       } else {
         throw new Error(`${testCase.id}: no TypeScript handler for ${testCase.capability} in error`);
       }
