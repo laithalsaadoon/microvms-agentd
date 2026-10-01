@@ -827,18 +827,17 @@ def rust_target(root: Path, path: str) -> tuple[str, list[str], list[str]] | str
     return name, flags, modules + ([] if last == "mod.rs" else [Path(last).stem])
 
 
-def block_files(root: Path) -> list[str]:
-    """The tracked and untracked `.rs` files with a Falsification block's opening fence in them.
-    A `git grep` that fails, rather than finding nothing, is refused: a file it didn't read would
-    hide its blocks' entries."""
+def block_files(root: Path) -> tuple[list[str], str | None]:
+    """The tracked and untracked `.rs` files with a Falsification block's opening fence in them,
+    and why there are none to read when `git grep` fails rather than finds nothing: a file it
+    didn't read would hide its blocks' entries, so the failure is the registry's problem, and
+    a reader of the registry reports it beside its own."""
     argv = ["grep", "--untracked", "-l", "-E", BLOCK_GREP, "--", "*.rs"]
     found = git(root, *argv, check=False)  # pragma: no mutate (None works as False)
     # Exit 1 is no file matching.
     if found.returncode not in (0, 1):
-        raise SystemExit(
-            f"guards: `git grep` for Falsification blocks failed: {found.stderr.strip()}"
-        )
-    return sorted(found.stdout.splitlines())
+        return [], f"`git grep` for Falsification blocks failed: {found.stderr.strip()}"
+    return sorted(found.stdout.splitlines()), None
 
 
 def fenced_blocks(lines: list[str]) -> list[tuple[int, int | None, str]]:
@@ -933,7 +932,9 @@ def falsification_entries(root: Path) -> tuple[list[Table], list[str]]:
     `expect` is `test-failed`, and `note` is the note's key, so the census ties the note to
     its entry by construction. The entries follow the registry's files, by file and line, each
     numbered by its opening fence's line."""
-    files = block_files(root)
+    files, refused = block_files(root)
+    if refused:
+        return [], [refused]
     if not files:
         return [], []
     tables: list[Table] = []

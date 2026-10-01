@@ -2380,21 +2380,26 @@ class FalsificationPieces(unittest.TestCase):
             with self.subTest(body=body):
                 self.assertEqual(table(close, body), want)
 
-    def test_block_files_lists_untracked_files_and_refuses_a_failed_grep(self):
+    def test_block_files_lists_untracked_files_and_names_a_failed_grep(self):
         repo = Repo(self, {"a.rs": "/// ```falsification\n", "b.rs": "fn x() {}\n"})
         (repo.root / "c.rs").write_text("    ///```falsification\n")
         (repo.root / "d.txt").write_text("/// ```falsification\n")
         files = fire_module()["block_files"]
-        self.assertEqual(files(repo.root), ["a.rs", "c.rs"])
+        self.assertEqual(files(repo.root), (["a.rs", "c.rs"], None))
         (repo.root / "a.rs").write_text("fn x() {}\n")
         (repo.root / "c.rs").unlink()
-        self.assertEqual(files(repo.root), [])
+        self.assertEqual(files(repo.root), ([], None))
+        # A tree that isn't a repository is the registry's problem, not the end of its reader:
+        # check-ci-parity.py reads the registry of the root it's handed.
         with tempfile.TemporaryDirectory() as elsewhere:
-            with self.assertRaisesRegex(
-                SystemExit,
-                r"^guards: `git grep` for Falsification blocks failed: fatal: ",
-            ):
-                files(Path(elsewhere))
+            found, why = files(Path(elsewhere))
+            self.assertEqual(found, [])
+            self.assertRegex(
+                why, r"^`git grep` for Falsification blocks failed: fatal: "
+            )
+            self.assertEqual(
+                fire_module()["falsification_entries"](Path(elsewhere)), ([], [why])
+            )
 
 
 # One test file per shape a block takes, read through `falsification_entries` in-process.
