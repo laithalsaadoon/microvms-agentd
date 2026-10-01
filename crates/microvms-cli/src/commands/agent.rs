@@ -412,7 +412,7 @@ async fn fresh<O: std::io::Write, E: std::io::Write>(
         ));
     };
     let region = args.region.resolve(ctx.env)?;
-    let size = args.memory.size_class();
+    let size = args.size.resolve(args.memory)?.size_class();
     let specs = specs_from(args);
 
     // The daemon binary: the caller's, or this CLI's own release asset, the same chain
@@ -901,6 +901,7 @@ mod tests {
             codex_version: Some("0.50.0".into()),
             project: None,
             memory: crate::cli::MemoryMib::Mib1024,
+            size: crate::cli::SizeRequestFlags::default(),
             token_ttl_hours: 12,
             max_idle_sec: 600,
             suspended_sec: 600,
