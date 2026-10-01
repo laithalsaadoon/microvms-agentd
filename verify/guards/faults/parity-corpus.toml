@@ -32,33 +32,27 @@ suite = "rust"
 message = "no case ran in area \"cost\" on cli"
 transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub fn cases_dir() -> PathBuf {\n    repo_root().join(\"verify\").join(\"parity\").join(\"cases\")\n}\n", with = "pub fn cases_dir() -> PathBuf {\n    let empty = std::env::temp_dir().join(format!(\"parity-empty-{}\", std::process::id()));\n    std::fs::create_dir_all(&empty).expect(\"an empty corpus directory\");\n    empty\n}\n" }
 
-[[fault]]
-id = "parity-core-loader-returns-nothing"
+[[family]]
 guard = "core_answers_the_shared_case_corpus"
 run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "parity-core-loader-returns-nothing"
 message = "the sentinel wrap-dockerfile/sentinel.json wasn't loaded"
 transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "                        Ok(case) => cases.push(case),\n", with = "                        Ok(_) => {}\n" }
 
-[[fault]]
+[[family.fault]]
 id = "parity-core-no-handler"
-guard = "core_answers_the_shared_case_corpus"
-run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]
-expect = "test-failed"
-suite = "rust"
 message = "the core runner has no handler for area \"size-class\""
 transform = { file = "crates/microvms-core/tests/parity_cases.rs", replace = "const AREAS: [&str; 7] = [\n    \"image-name\",\n    \"cost\",\n    \"error\",\n    \"egress\",\n    \"names\",\n    \"size-class\",\n    \"wrap-dockerfile\",\n];\n", with = "const AREAS: [&str; 6] = [\n    \"image-name\",\n    \"cost\",\n    \"error\",\n    \"egress\",\n    \"names\",\n    \"wrap-dockerfile\",\n];\n" }
 
 # The issue's regression: `wrap_dockerfile` stops ending the task's last line before the stanza.
 # Core, Python and TypeScript each fail the case (the binding entries are in the bindings section).
 
-[[fault]]
+[[family.fault]]
 id = "parity-core-wrap-newline"
-guard = "core_answers_the_shared_case_corpus"
-run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]
-expect = "test-failed"
-suite = "rust"
 message = "pip install pytestCOPY agentd"
 transform = { file = "crates/microvms-app/src/control/artifact.rs", replace = "    wrapped.push_str(task);\n    if !task.ends_with('\\n') {\n        wrapped.push('\\n');\n    }\n", with = "    wrapped.push_str(task);\n" }
 
@@ -74,42 +68,38 @@ suite = "rust"
 message = "gives the fakes tier area \"egress\", which it has no handler for"
 transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 3] = [\"cost\", \"egress\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 3] = [\"image-name\", \"error\", \"names\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 2] = [\"cost\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 4] = [\"image-name\", \"error\", \"names\", \"egress\"];\n" }
 
-[[fault]]
-id = "parity-cli-area-dropped"
+[[family]]
 guard = "the_cli_process_answers_the_shared_case_corpus"
 run = ["cargo", "test", "-p", "microvms-cli", "--test", "parity_cases", "--", "--exact", "the_cli_process_answers_the_shared_case_corpus"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "parity-cli-area-dropped"
 message = "the cli runner has no handler for area \"egress\""
 transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 3] = [\"cost\", \"egress\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 3] = [\"image-name\", \"error\", \"names\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 2] = [\"cost\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 3] = [\"image-name\", \"error\", \"names\"];\n" }
 
-[[fault]]
+[[family.fault]]
 id = "parity-cli-area-in-both-tiers"
-guard = "the_cli_process_answers_the_shared_case_corpus"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "parity_cases", "--", "--exact", "the_cli_process_answers_the_shared_case_corpus"]
-expect = "test-failed"
-suite = "rust"
 message = "area \"egress\" is both this cli runner's and another's"
 transform = { file = "crates/microvms-core/tests/parity_corpus/mod.rs", replace = "pub const CLI_PROCESS_AREAS: [&str; 3] = [\"cost\", \"egress\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 3] = [\"image-name\", \"error\", \"names\"];\n", with = "pub const CLI_PROCESS_AREAS: [&str; 3] = [\"cost\", \"egress\", \"wrap-dockerfile\"];\npub const CLI_FAKE_AREAS: [&str; 4] = [\"image-name\", \"error\", \"names\", \"egress\"];\n" }
 
 # A skip that doesn't name its issue or trace id fails the reader, in every runner.
 
-[[fault]]
-id = "parity-core-skip-without-reference"
+[[family]]
 guard = "core_answers_the_shared_case_corpus"
 run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "parity-core-skip-without-reference"
 message = "image-name/ensure-image-name: skip.py ends by naming its issue or trace id"
 transform = { file = "verify/parity/cases/image-name/ensure-image-name.json", replace = "so no offline call answers it (IMAGE-12)\",\n", with = "so no offline call answers it\",\n" }
 
 # A known_drift marker, which every runner refuses now that parity-drift is enforced (#258).
-[[fault]]
+[[family.fault]]
 id = "parity-core-refuses-known-drift"
-guard = "core_answers_the_shared_case_corpus"
-run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]
-expect = "test-failed"
-suite = "rust"
 message = "size-class/cpu-only: a known_drift marker is refused"
 transform = { file = "verify/parity/cases/size-class/cpu-only.json", replace = "  \"capability\": \"size-from-request\",\n", with = "  \"capability\": \"size-from-request\",\n  \"known_drift\": { \"py\": { \"issue\": \"#255\", \"keys\": [\"baseline_mib\"] } },\n" }
 
@@ -118,12 +108,8 @@ transform = { file = "verify/parity/cases/size-class/cpu-only.json", replace = "
 # binding entries are in the bindings section); the second reads a torn file as a free name, and
 # the refusal stops naming the file to inspect.
 
-[[fault]]
+[[family.fault]]
 id = "parity-core-names-region"
-guard = "core_answers_the_shared_case_corpus"
-run = ["cargo", "test", "-p", "microvms-core", "--test", "parity_cases", "--", "--exact", "core_answers_the_shared_case_corpus"]
-expect = "test-failed"
-suite = "rust"
 message = "the fake has no answer queued for GetMicrovm"
 transform = { file = "crates/microvms-domain/src/names.rs", replace = "        && expected.as_str() != record.region\n", with = "        && expected.as_str() != record.region\n        && false\n" }
 

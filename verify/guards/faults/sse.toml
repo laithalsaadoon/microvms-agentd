@@ -36,20 +36,18 @@ transform = { file = "crates/microvms-app/src/session/sse_fuzz.rs", replace = "/
 # #297a review round 1 (the falsifier's faults): a gap that ends before it starts panics the
 # decoder, and a scan that doesn't back up misses a terminator split across two feeds. The
 # harness used to build neither.
-[[fault]]
-id = "sse-fuzz-gap-backwards"
+[[family]]
 guard = "session::sse_fuzz::hostile_stream_bytes_stay_bounded_and_every_event_round_trips"
 run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::sse_fuzz::hostile_stream_bytes_stay_bounded_and_every_event_round_trips"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "sse-fuzz-gap-backwards"
 message = "attempt to subtract with overflow"
 transform = { file = "crates/microvms-app/src/session/sse.rs", replace = "            Ok(Some(ExecEvent::Gap {\n", with = "            let _span = payload.to - payload.from;\n            Ok(Some(ExecEvent::Gap {\n" }
 
-[[fault]]
+[[family.fault]]
 id = "sse-fuzz-straddle-missed"
-guard = "session::sse_fuzz::hostile_stream_bytes_stay_bounded_and_every_event_round_trips"
-run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::sse_fuzz::hostile_stream_bytes_stay_bounded_and_every_event_round_trips"]
-expect = "test-failed"
-suite = "rust"
 message = "BIND-22: the chunks yield each piece's frames"
 transform = { file = "crates/microvms-app/src/session/sse.rs", replace = "            let from = self.scanned.saturating_sub(MAX_TERMINATOR_LEN - 1);", with = "            let from = self.scanned;" }

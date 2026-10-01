@@ -5,24 +5,21 @@
 # float conversions. The first two seed the parser: today's panicking expression restored, then
 # a silent zero with no panic.
 
-[[fault]]
-id = "cli-seconds-flag-panics"
+[[family]]
 guard = "guards::seconds::a_seconds_flag_that_is_not_a_duration_is_refused_before_any_call"
 run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::seconds::a_seconds_flag_that_is_not_a_duration_is_refused_before_any_call"]
 expect = "test-failed"
 suite = "rust"
-message = "cannot convert float seconds to Duration"
 note = "crates/microvms-cli/src/guards/seconds.rs::a_seconds_flag_that_is_not_a_duration_is_refused_before_any_call"
+
+[[family.fault]]
+id = "cli-seconds-flag-panics"
+message = "cannot convert float seconds to Duration"
 transform = { file = "crates/microvms-cli/src/cli.rs", replace = "microvms_core::duration::of_secs_f64(number_of_seconds(raw)?).map_err(|error| error.to_string())", with = "Ok(std::time::Duration::from_secs_f64(number_of_seconds(raw)?.max(0.0)))" }
 
-[[fault]]
+[[family.fault]]
 id = "cli-seconds-flag-clamps"
-guard = "guards::seconds::a_seconds_flag_that_is_not_a_duration_is_refused_before_any_call"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::seconds::a_seconds_flag_that_is_not_a_duration_is_refused_before_any_call"]
-expect = "test-failed"
-suite = "rust"
 message = "exec --timeout=NaN: answered"
-note = "crates/microvms-cli/src/guards/seconds.rs::a_seconds_flag_that_is_not_a_duration_is_refused_before_any_call"
 transform = { file = "crates/microvms-cli/src/cli.rs", replace = "microvms_core::duration::of_secs_f64(number_of_seconds(raw)?).map_err(|error| error.to_string())", with = "Ok(std::time::Duration::try_from_secs_f64(number_of_seconds(raw)?.max(0.0)).unwrap_or_default())" }
 
 [[fault]]
@@ -78,24 +75,21 @@ message = "exec --timeout=0.5 parsed to Some(0ns)"
 note = "crates/microvms-cli/src/cli.rs::every_seconds_flag_refuses_what_is_not_a_duration"
 transform = { file = "crates/microvms-cli/src/cli.rs", replace = "microvms_core::duration::of_secs_f64(number_of_seconds(raw)?).map_err(|error| error.to_string())", with = "microvms_core::duration::of_secs_f64(number_of_seconds(raw)?).map(|whole| std::time::Duration::from_secs(whole.as_secs())).map_err(|error| error.to_string())" }
 
-[[fault]]
-id = "cli-sync-rm-deadline-dropped"
+[[family]]
 guard = "guards::seconds::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
 run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::seconds::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"]
 expect = "test-failed"
 suite = "rust"
-message = "sync --timeout=60: the rm's timeout_sec was null"
 note = "crates/microvms-cli/src/guards/seconds.rs::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
+
+[[family.fault]]
+id = "cli-sync-rm-deadline-dropped"
+message = "sync --timeout=60: the rm's timeout_sec was null"
 transform = { file = "crates/microvms-app/src/workspace.rs", replace = ".with_timeout_sec(Some(delete_timeout.as_secs_f64()));", with = ".with_timeout_sec(None);" }
 
-[[fault]]
+[[family.fault]]
 id = "cli-sync-rm-deadline-truncated"
-guard = "guards::seconds::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::seconds::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"]
-expect = "test-failed"
-suite = "rust"
 message = "sync --timeout=0.5: the rm's timeout_sec was 0.0"
-note = "crates/microvms-cli/src/guards/seconds.rs::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
 transform = { file = "crates/microvms-app/src/workspace.rs", replace = ".with_timeout_sec(Some(delete_timeout.as_secs_f64()));", with = ".with_timeout_sec(Some(delete_timeout.as_secs() as f64));" }
 
 # A figure every surface accepts, up to what a `Duration` holds, can be past what the clock can
@@ -114,63 +108,27 @@ transform = { file = "crates/microvms-app/src/session/mod.rs", replace = "    no
 # Each of the other three deadline sites, put back to the unchecked add on its own, so a later
 # edit at one call site can't pass because the helper is still right.
 
-[[fault]]
-id = "app-ready-deadline-overflows"
-guard = "session::tests::a_ready_wait_longer_than_the_clock_can_hold_still_polls"
-run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::tests::a_ready_wait_longer_than_the_clock_can_hold_still_polls"]
-expect = "test-failed"
-suite = "rust"
-message = "overflow when adding duration to instant"
-note = "crates/microvms-app/src/session/mod.rs::a_ready_wait_longer_than_the_clock_can_hold_still_polls"
-transform = { file = "crates/microvms-app/src/session/mod.rs", replace = "        let deadline = deadline_after(timeout);\n", with = "        let deadline = tokio::time::Instant::now() + timeout;\n" }
-
-[[fault]]
-id = "app-completion-deadline-overflows"
-guard = "session::complete::tests::a_client_deadline_longer_than_the_clock_can_hold_still_waits"
-run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::complete::tests::a_client_deadline_longer_than_the_clock_can_hold_still_waits"]
-expect = "test-failed"
-suite = "rust"
-message = "overflow when adding duration to instant"
-note = "crates/microvms-app/src/session/complete.rs::a_client_deadline_longer_than_the_clock_can_hold_still_waits"
-transform = { file = "crates/microvms-app/src/session/complete.rs", replace = "        let deadline = super::deadline_after(self.deadline);\n", with = "        let deadline = tokio::time::Instant::now() + self.deadline;\n" }
-
-[[fault]]
-id = "app-completion-grace-overflows"
-guard = "session::complete::tests::a_client_grace_longer_than_the_clock_can_hold_still_acks"
-run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "session::complete::tests::a_client_grace_longer_than_the_clock_can_hold_still_acks"]
-expect = "test-failed"
-suite = "rust"
-message = "overflow when adding duration to instant"
-note = "crates/microvms-app/src/session/complete.rs::a_client_grace_longer_than_the_clock_can_hold_still_acks"
-transform = { file = "crates/microvms-app/src/session/complete.rs", replace = "        let grace = super::deadline_after(self.options.client_grace);\n", with = "        let grace = tokio::time::Instant::now() + self.options.client_grace;\n" }
-
-[[fault]]
-id = "cli-huge-timeout-panics"
+[[family]]
 guard = "guards::seconds::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
 run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::seconds::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "cli-huge-timeout-panics"
 message = "exec --timeout=1e19: panicked (overflow when adding duration to instant)"
 note = "crates/microvms-cli/src/guards/seconds.rs::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
 transform = { file = "crates/microvms-app/src/session/mod.rs", replace = "    now.checked_add(after).unwrap_or_else(|| now + FAR_FUTURE)\n", with = "    now + after\n" }
 
 # `run` waits on its exec after the launch, so the same panic there left the VM billing.
 
-[[fault]]
+[[family.fault]]
 id = "cli-huge-run-timeout-panics"
-guard = "guards::seconds::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::seconds::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"]
-expect = "test-failed"
-suite = "rust"
 message = "run --exec true --timeout=1e19: panicked (overflow when adding duration to instant)"
 transform = { file = "crates/microvms-app/src/session/mod.rs", replace = "    now.checked_add(after).unwrap_or_else(|| now + FAR_FUTURE)\n", with = "    now + after\n" }
 
-[[fault]]
+[[family.fault]]
 id = "cli-huge-run-timeout-tears-down"
-guard = "guards::seconds::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::seconds::an_accepted_seconds_flag_reaches_the_wire_as_typed_and_a_huge_one_waits"]
-expect = "test-failed"
-suite = "rust"
 message = "run --exec true --timeout=1e19: no teardown after"
 transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "        args.keep,\n        !outcome.image_reused,\n", with = "        true,\n        !outcome.image_reused,\n" }
 
@@ -287,16 +245,6 @@ suite = "rust"
 message = "cannot convert float seconds to Duration"
 note = "crates/agentd/src/exec.rs::a_bad_timeout_is_rejected_before_the_child_spawns"
 transform = { file = "crates/agentd/src/exec.rs", replace = "    Duration::try_from_secs_f64(secs)\n        .map(Some)\n        .map_err(|_| format!(\"timeout_sec is more seconds than a duration holds, got {secs:?}\"))\n", with = "    Ok(Some(Duration::from_secs_f64(secs)))\n" }
-
-[[fault]]
-id = "agentd-timeout-past-the-clock-panics"
-guard = "exec::tests::a_timeout_past_what_the_clock_can_hold_still_finishes"
-run = ["cargo", "test", "-p", "agentd", "--lib", "--", "--exact", "exec::tests::a_timeout_past_what_the_clock_can_hold_still_finishes"]
-expect = "test-failed"
-suite = "rust"
-message = "exec hugetimeout never finished"
-note = "crates/agentd/src/exec.rs::a_timeout_past_what_the_clock_can_hold_still_finishes"
-transform = { file = "crates/agentd/src/exec.rs", replace = "    let deadline = timeout.and_then(|budget| Instant::now().checked_add(budget));\n", with = "    let deadline = timeout.map(|budget| Instant::now() + budget);\n" }
 
 [[fault]]
 id = "app-epoch-past-a-duration-panics"

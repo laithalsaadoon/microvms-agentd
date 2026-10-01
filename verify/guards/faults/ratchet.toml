@@ -23,32 +23,26 @@ transform = { file = "tools/ratchet.py", replace = "    return unexplained\n", w
 
 # A decision taken away (here, re-keyed so it no longer covers its finding) is drift the base
 # didn't have, since each tree is measured with its own decisions.
-[[fault]]
-id = "ratchet-decision-taken-away"
+[[family]]
 guard = "verify/ratchet/decisions.toml"
 run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "ratchet-decision-taken-away"
 message = "new drift: [subprocess] crates/microvms-cli/src/commands/doctor.rs: std::process::Command::new(\"terraform\")"
 transform = { file = "verify/ratchet/decisions.toml", replace = "key = \"crates/microvms-cli/src/commands/doctor.rs: std::process::Command::new(\\\"terraform\\\")\"\n", with = "key = \"crates/microvms-cli/src/commands/doctor.rs: std::process::Command::new(\\\"terraformed\\\")\"\n" }
 
 # Rule 2 and rule 4 on the real tree: a decision nothing matches, and drift in a category listed
 # as enforced.
-[[fault]]
+[[family.fault]]
 id = "ratchet-stale-decision"
-guard = "verify/ratchet/decisions.toml"
-run = ["./tools/ratchet.py", "--base", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
 message = "stale decision: [subprocess] crates/agentd/src/exec.rs: Command::new(gone) decides a finding the tree doesn't have"
 transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\"]\n", with = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\"]\n\n[[decision]]\ncategory = \"subprocess\"\nkey = \"crates/agentd/src/exec.rs: Command::new(gone)\"\nreason = \"seeded\"\n" }
 
-[[fault]]
+[[family.fault]]
 id = "ratchet-enforced-with-drift"
-guard = "verify/ratchet/decisions.toml"
-run = ["./tools/ratchet.py", "--base", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
 message = "parity-gap is enforced by tools/check-parity.py refusing an exemption with an issue, once #280 closes the last gap, so it can't carry drift"
 transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\"]\n", with = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\", \"parity-gap\"]\n" }
 
@@ -97,41 +91,37 @@ transform = { file = "tools/ratchet.py", replace = "    if current != text:\n", 
 
 # Placement is `HELD`: dependency_direction.rs computes it and holds its decisions to the tree, so
 # rule 2 leaves them alone here, and the sentinel doesn't call its collector empty.
-[[fault]]
-id = "ratchet-held-decisions"
+[[family]]
 guard = "tools/ratchet.py"
 run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "ratchet-held-decisions"
 message = "stale decision: [placement] microvms-cli -> notify"
 transform = { file = "tools/ratchet.py", replace = "    decided = Counter(\n        (d[\"category\"], d[\"key\"])\n        for d in head.decisions[\"decisions\"]\n        if d[\"category\"] not in HELD\n    )\n", with = "    decided = Counter((d[\"category\"], d[\"key\"]) for d in head.decisions[\"decisions\"])\n" }
 
-[[fault]]
+[[family.fault]]
 id = "ratchet-held-sentinel"
-guard = "tools/ratchet.py"
-run = ["./tools/ratchet.py", "--base", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
 message = "sentinel: the placement collector found nothing"
 transform = { file = "tools/ratchet.py", replace = "        if category in HELD:\n            continue\n", with = "" }
 
 # What placement is held to here: the base's record. On the real tree, a crate added to a set the
 # base has and drift the base doesn't have both fail, with no collector reading a manifest.
-[[fault]]
-id = "ratchet-placement-set-grew"
+[[family]]
 guard = "verify/arch/placement.toml"
 run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "ratchet-placement-set-grew"
 message = "set grew: verify/arch/placement.toml adds reqwest to [microvms-py] normal"
 transform = { file = "verify/arch/placement.toml", replace = "normal = [\"microvms-core\", \"microvms-protocol\", \"serde_json\", \"pyo3\", \"tokio\"]", with = "normal = [\"microvms-core\", \"microvms-protocol\", \"serde_json\", \"pyo3\", \"tokio\", \"reqwest\"]" }
 
-[[fault]]
+[[family.fault]]
 id = "ratchet-placement-drift-grew"
-guard = "verify/arch/placement.toml"
-run = ["./tools/ratchet.py", "--base", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
 message = "new drift: [placement] microvms-cli -> reqwest. A crate's drift in verify/arch/placement.toml can only shrink"
 transform = { file = "verify/arch/placement.toml", replace = "[microvms-cli]\nnormal = [\"microvms-core\", \"clap\", \"ratatui\", \"serde\", \"serde_json\", \"tokio\", \"toml\", \"unicode-width\"]\n", with = "[microvms-cli]\nnormal = [\"microvms-core\", \"clap\", \"ratatui\", \"serde\", \"serde_json\", \"tokio\", \"toml\", \"unicode-width\"]\n\n[microvms-cli.drift]\nnormal = [\"reqwest\"]\n" }
 
@@ -160,57 +150,39 @@ transform = { file = "tools/ratchet.py", replace = "        [\"git\", \"-C\", st
 
 # A refusal takes out only the rules that read what it refused, so one bad input doesn't hide a
 # finding in another category: each part of that, reverted, fails its test.
-[[fault]]
-id = "ratchet-collector-refusal-unreads-everything"
+[[family]]
 guard = "test_ratchet.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "RefusalTests"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "ratchet-collector-refusal-unreads-everything"
 message = "FAIL: test_a_collector_refusal_leaves_the_other_collectors_running ("
 transform = { file = "tools/ratchet.py", replace = "            refused.append(Refusal(str(error), frozenset(categories)))\n", with = "            refused.append(Refusal(str(error), EVERY))\n" }
 
-[[fault]]
+[[family.fault]]
 id = "ratchet-decision-refusal-unreads-everything"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "RefusalTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_refused_decision_leaves_only_its_category_unread ("
 transform = { file = "tools/ratchet.py", replace = "        own = frozenset([named]) if named in CATEGORIES else EVERY\n", with = "        own = EVERY\n" }
 
-[[fault]]
+[[family.fault]]
 id = "ratchet-unread-category-held"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "RefusalTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_an_unread_category_gets_no_rule_and_the_rest_are_held ("
 transform = { file = "tools/ratchet.py", replace = "        if category in skipped:\n            continue\n", with = "" }
 
-[[fault]]
+[[family.fault]]
 id = "ratchet-refused-placement-holds-rule-3"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "RefusalTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_refused_placement_file_skips_rule_3_alone ("
 transform = { file = "tools/ratchet.py", replace = "    if \"placement\" in head.unread:\n        return failures\n", with = "" }
 
-[[fault]]
+[[family.fault]]
 id = "ratchet-summary-counts-unread"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "RefusalTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_the_summary_marks_an_unread_category_instead_of_counting_it ("
 transform = { file = "tools/ratchet.py", replace = "        if category in head.unread or category in untrusted:\n", with = "        if False:\n" }
 
-[[fault]]
+[[family.fault]]
 id = "ratchet-sentinel-ends-the-run"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "RefusalTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_sentinel_failure_is_printed_first_and_the_tree_is_still_held ("
 transform = { file = "tools/ratchet.py", replace = "        if args.command == \"snapshot\":\n            return 1\n    head = read_tree(REPO)\n", with = "        return 1\n    head = read_tree(REPO)\n" }
 

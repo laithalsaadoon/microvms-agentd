@@ -18,95 +18,65 @@ transform = { file = "bindings/microvms-js/src/exec.rs", replace = "#[napi]\nimp
 # The index.d.ts anchors below are @napi-rs/cli 3.10.5's text. A CLI release that writes the member
 # differently fails the stale diff first, and the regenerate it forces fails `guards:list` on these
 # anchors in the same change, so they're refreshed together rather than going stale unseen.
-[[fault]]
-id = "dts-consumer-empty-class"
+[[family]]
 guard = "tools/check-dts-consumer.py"
 run = ["./tools/check-dts-consumer.py"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "dts-consumer-empty-class"
 message = "TS2504"
 transform = { file = "bindings/microvms-js/index.d.ts", replace = "export declare class ExecStream {\n\n  [globalThis.Symbol.asyncIterator](): globalThis.__NapiRsAsyncGenerator<ExecStream, StreamEvent, void, undefined>\n}\n", with = "export declare class ExecStream {}\n" }
 
 # A member that yields `any` type-checks every loop; the probe's `@ts-expect-error` goes unused.
-[[fault]]
+[[family.fault]]
 id = "dts-consumer-any-yield"
-guard = "tools/check-dts-consumer.py"
-run = ["./tools/check-dts-consumer.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "TS2578"
 transform = { file = "bindings/microvms-js/index.d.ts", replace = "__NapiRsAsyncGenerator<ExecStream, StreamEvent, void, undefined>", with = "__NapiRsAsyncGenerator<ExecStream, any, void, undefined>" }
 
-[[fault]]
+[[family.fault]]
 id = "dts-consumer-empty-dts"
-guard = "tools/check-dts-consumer.py"
-run = ["./tools/check-dts-consumer.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "is not a module"
 argv_fault = ["--dts", "verify/parity/fixtures/empty.d.ts"]
 
-[[fault]]
+[[family.fault]]
 id = "dts-consumer-no-probes"
-guard = "tools/check-dts-consumer.py"
-run = ["./tools/check-dts-consumer.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "no type probes under"
 argv_fault = ["--probes", "{empty_dir}"]
 
-[[fault]]
+[[family.fault]]
 id = "dts-consumer-no-control"
-guard = "tools/check-dts-consumer.py"
-run = ["./tools/check-dts-consumer.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "has no @ts-expect-error control"
 transform = { file = "bindings/microvms-js/__test__/types/stream.ts", replace = "    // @ts-expect-error: an event is a StreamEvent, so this fails unless the stream yields `any`\n    const wrong: number = event\n    void wrong\n", with = "" }
 
 # #262 review round 1 (the falsifier's faults). A probe that names the directive only in prose has
 # no control, so a member yielding `any` passed; `@ts-nocheck` drops every diagnostic in the file,
 # so the original empty class passed; and a `.mts` probe was never compiled, with no word.
-[[fault]]
+[[family.fault]]
 id = "dts-consumer-control-in-prose"
-guard = "tools/check-dts-consumer.py"
-run = ["./tools/check-dts-consumer.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "has no @ts-expect-error control"
 transform = [
   { file = "bindings/microvms-js/__test__/types/stream.ts", replace = "    // @ts-expect-error: an event is a StreamEvent, so this fails unless the stream yields `any`\n    const wrong: number = event\n    void wrong\n", with = "    // the @ts-expect-error control lived here\n" },
   { file = "bindings/microvms-js/index.d.ts", replace = "__NapiRsAsyncGenerator<ExecStream, StreamEvent, void, undefined>", with = "__NapiRsAsyncGenerator<ExecStream, any, void, undefined>" },
 ]
 
-[[fault]]
+[[family.fault]]
 id = "dts-consumer-nocheck"
-guard = "tools/check-dts-consumer.py"
-run = ["./tools/check-dts-consumer.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "turns type-checking off (@ts-nocheck)"
 transform = [
   { file = "bindings/microvms-js/__test__/types/stream.ts", replace = "// SPDX-License-Identifier: Apache-2.0\n", with = "// SPDX-License-Identifier: Apache-2.0\n// @ts-nocheck\n" },
   { file = "bindings/microvms-js/index.d.ts", replace = "export declare class ExecStream {\n\n  [globalThis.Symbol.asyncIterator](): globalThis.__NapiRsAsyncGenerator<ExecStream, StreamEvent, void, undefined>\n}\n", with = "export declare class ExecStream {}\n" },
 ]
 
-[[fault]]
+[[family.fault]]
 id = "dts-consumer-stray-probe"
-guard = "tools/check-dts-consumer.py"
-run = ["./tools/check-dts-consumer.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "isn't compiled: a probe is a *.ts file directly under"
 patch = "verify/guards/faults/dts-consumer-stray-probe.patch"
 
 # A `--listFiles` parse that reads nothing, so the check can't say what tsc compiled.
-[[fault]]
+[[family.fault]]
 id = "dts-consumer-lists-nothing"
-guard = "tools/check-dts-consumer.py"
-run = ["./tools/check-dts-consumer.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "tsc didn't read"
 transform = { file = "tools/check-dts-consumer.py", replace = "and line.strip().endswith(\".ts\")", with = "and line.strip().endswith(\".tsx\")" }
 
@@ -114,23 +84,21 @@ transform = { file = "tools/check-dts-consumer.py", replace = "and line.strip().
 # install runs under `tools/npx_cache.py`'s lock, and a tsc npx didn't install is refused by name.
 # Dropping the lock (the cache is still named, so only the lock goes) lets the fake npx find it
 # free.
-[[fault]]
-id = "dts-consumer-npx-lock-dropped"
+[[family]]
 guard = "test_check_dts_consumer.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_dts_consumer.py"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "dts-consumer-npx-lock-dropped"
 message = "FAIL: test_tsc_is_located_with_the_npx_lock_held ("
 transform = { file = "tools/check-dts-consumer.py", replace = "    with npx_cache.held(\"dts-consumer\", ConsumerError) as cache:\n", with = "    with __import__(\"contextlib\").nullcontext(Path(os.environ[\"npm_config_cache\"])) as cache:\n" }
 
 # `command -v tsc` falls through to the next tsc on PATH when npx's tree has none, and without the
 # prefix check that compiler runs.
-[[fault]]
+[[family.fault]]
 id = "dts-consumer-tsc-outside-npx"
-guard = "test_check_dts_consumer.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_dts_consumer.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_tsc_outside_the_npx_cache_is_refused ("
 transform = { file = "tools/check-dts-consumer.py", replace = "    if not tsc.resolve().is_relative_to(npx_dir.resolve()):\n", with = "    if False:\n" }
 
@@ -147,21 +115,19 @@ transform = { file = "tools/check-dts-consumer.py", replace = "    if not tsc.re
 # An `EstimatedUsd` shaped as a plain number field accepts the object literal lib.rs names. The
 # source-side entry drops the attribute and rebuilds; the last moves core's ceiling under the
 # literal, which the binding's const assertion refuses at build time.
-[[fault]]
-id = "dts-consumer-hook-timeouts-structural"
+[[family]]
 guard = "tools/check-dts-consumer.py"
 run = ["./tools/check-dts-consumer.py"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "dts-consumer-hook-timeouts-structural"
 message = "hooks.ts(22,3): error TS2578"
 transform = { file = "bindings/microvms-js/index.d.ts", replace = "  get maxSecs(): 60\n", with = "  get maxSecs(): number\n" }
 
-[[fault]]
+[[family.fault]]
 id = "dts-consumer-usd-object-literal"
-guard = "tools/check-dts-consumer.py"
-run = ["./tools/check-dts-consumer.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "hooks.ts(32,3): error TS2578"
 transform = { file = "bindings/microvms-js/index.d.ts", replace = "  get amount(): string\n  /** The figure at display precision: two places at a dollar or more, six below. */\n  get displayAmount(): string\n", with = "  amount: number\n" }
 
