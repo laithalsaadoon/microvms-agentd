@@ -6,6 +6,7 @@ The only section that needs Bedrock."""
 from __future__ import annotations
 
 import json
+import os
 import re
 import secrets
 import sys
@@ -19,8 +20,8 @@ from harness.envelope import Envelope, KindError
 from harness.redact import agent_output_summary, exception_summary
 from harness.results import Results
 
-#: The sixteen names `drive_agent_vm` records, in the order it records them. A tuple
-#: rather than sixteen literals at the call sites because the section has a failure
+#: The names `drive_agent_vm` records, in the order it records them. A tuple
+#: rather than a literal at each call site because the section has a failure
 #: mode the others do not: `agent-up` itself can fail before any VM exists (no Bedrock
 #: access in the account, an expired credential chain), and the header's rule is that
 #: nothing here is ever recorded SKIP. So a failed `agent-up` records every one of these
@@ -43,6 +44,8 @@ AGENT_VM_CHECKS = (
     "the agent VM and its image were deleted",
     "terminate released the agent VM's name",
     "the suite deleted the agent image's log group",
+    "agent-up's artifact is at the image's content-addressed key (#258)",
+    "the suite deleted the agent image's S3 artifact (#258)",
 )
 
 
@@ -229,11 +232,11 @@ def drive_background_agents(
 
 
 def drive_agent_vm(
-    cli: Cli, binary: Path, state_dir: Path, logs: Any, results: Results
+    cli: Cli, binary: Path, state_dir: Path, logs: Any, s3: Any, results: Results
 ) -> None:
     """`agent-up` and `agent-prompt` (`docs/AGENT-VMS.md`), live, both profiles.
 
-    Sixteen original checks plus twelve background checks against a VM this section
+    The checks in `AGENT_VM_CHECKS` plus the background checks, against a VM this section
     launches and terminates itself, from an image this section builds (or reuses)
     itself: the agent image is derived from the
     profile set and the daemon bytes, so no launch from the suite's image can carry a
@@ -327,6 +330,21 @@ def drive_agent_vm(
     image_name = str(up.data.get("imageName") or "")
     microvm_id = str(up.data.get("microvmId") or "")
     first_expiry = up.data.get("credentialExpiresAt")
+    # `agent-up` ensures its image through core (#258): the artifact lives at
+    # `s3://<bucket>/<name>/artifact.zip`, uploaded by the build that made the image, a
+    # reused one's included.
+    bucket = os.environ.get("MICROVM_BUCKET", "")
+    artifact_prefix = f"{image_name}/"
+    try:
+        listed = s3.list_objects_v2(Bucket=bucket, Prefix=artifact_prefix)
+        keys = [item.get("Key") for item in listed.get("Contents") or []]
+    except Exception as exc:  # noqa: BLE001 - the error class is the finding
+        keys = [f"error: {type(exc).__name__}"]
+    results.check(
+        AGENT_VM_CHECKS[16],
+        bool(image_name) and keys == [f"{artifact_prefix}artifact.zip"],
+        f"bucket={bucket!r} keys={keys!r}",
+    )
     try:
         results.check(
             AGENT_VM_CHECKS[0],
@@ -586,3 +604,22 @@ def drive_agent_vm(
                 bool(groups) and not failures,
                 f"groups={groups!r} failures={failures!r}",
             )
+        # The artifact the image was built from, which terminate doesn't delete: the image is
+        # gone, so nothing reuses it.
+        try:
+            stale = s3.list_objects_v2(Bucket=bucket, Prefix=artifact_prefix)
+            doomed = [item["Key"] for item in stale.get("Contents") or []]
+            if doomed:
+                s3.delete_objects(
+                    Bucket=bucket, Delete={"Objects": [{"Key": key} for key in doomed]}
+                )
+            left = s3.list_objects_v2(Bucket=bucket, Prefix=artifact_prefix).get(
+                "KeyCount", 0
+            )
+            results.check(
+                AGENT_VM_CHECKS[17],
+                bool(image_name) and left == 0,
+                f"deleted={doomed!r} remaining={left}",
+            )
+        except Exception as exc:  # noqa: BLE001 - the error class is the finding
+            results.check(AGENT_VM_CHECKS[17], False, type(exc).__name__)

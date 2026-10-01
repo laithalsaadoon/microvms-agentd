@@ -112,10 +112,6 @@ impl CoreSeam for PanickingSeam {
     ) -> BoxFuture<'_, Result<Session, Error>> {
         panic!("this command must not attach a session")
     }
-
-    fn put_artifact(&self, _uri: &str, _bytes: Vec<u8>) -> BoxFuture<'_, Result<(), Error>> {
-        panic!("this command must not upload an artifact")
-    }
 }
 
 /// What a command needs to attach to a VM it did not launch.
@@ -153,27 +149,6 @@ pub trait CoreSeam: Send + Sync {
         region: Region,
         attach: Attach,
     ) -> BoxFuture<'_, Result<Session, Error>>;
-
-    /// Puts `bytes` at `uri`, or explains why it cannot.
-    ///
-    /// # The one capability core does not have, and why this is not a workaround
-    ///
-    /// `CreateMicrovmImage` names an artifact that must already be in S3, and the create
-    /// path of `microvms-core` this CLI's `build` uses does not put it there: it takes the
-    /// URI of an artifact already uploaded (`CreateImageRequest::code_artifact_uri`). Core's
-    /// one uploading path is `Sandbox::ensure_image`, which `build` does not route through. An
-    /// `aws-sdk-s3` in *this* crate's manifest would be a second path to AWS inside the CLI,
-    /// which is the thing CLI-2 forbids and the thinness guard would fail on.
-    ///
-    /// So the production implementation shells out to the `aws` CLI. That is a deliberate
-    /// choice with a property worth stating: the `aws` binary cannot reach the control plane
-    /// on this path, because the only argv this crate ever builds is `s3 cp` and the static
-    /// guard forbids the operation strings an `aws lambda …` reach-around would have to
-    /// name. `doctor` reports whether the binary is present, so the failure is diagnosed
-    /// before a build rather than during one.
-    ///
-    /// A caller who has already uploaded passes `--artifact-uri` and never reaches this.
-    fn put_artifact(&self, uri: &str, bytes: Vec<u8>) -> BoxFuture<'_, Result<(), Error>>;
 }
 
 /// The production seam.
@@ -245,77 +220,6 @@ impl CoreSeam for AwsSeam {
                 .build()
         })
     }
-
-    fn put_artifact(&self, uri: &str, bytes: Vec<u8>) -> BoxFuture<'_, Result<(), Error>> {
-        let uri = uri.to_string();
-        Box::pin(async move { put_via_aws_cli(&uri, bytes).await })
-    }
-}
-
-/// `aws s3 cp - <uri>`, with the artifact on the child's stdin.
-///
-/// Stdin rather than a temporary file: the artifact carries the daemon binary, and a
-/// world-readable temp file holding the thing that will run inside the VM is a worse default
-/// than a pipe. Every failure names the URI and the remedy, because "upload failed" without
-/// the bucket is unactionable.
-#[expect(
-    clippy::disallowed_types,
-    reason = "drift recorded in verify/ratchet/drift.json; #258 moves the upload into core and deletes this"
-)]
-async fn put_via_aws_cli(uri: &str, bytes: Vec<u8>) -> Result<(), Error> {
-    use tokio::io::AsyncWriteExt as _;
-    use tokio::process::Command;
-
-    let mut child = Command::new("aws")
-        .args(["s3", "cp", "-", uri])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|error| {
-            Error::new(
-                ErrorKind::Precondition,
-                format!(
-                    "could not run `aws s3 cp - {uri}`: {error}. microvms-core builds the \
-                     artifact bytes and its create path does not upload them, and adding an S3 \
-                     client to this CLI would give it a second path to AWS. Either install the AWS CLI, or upload the artifact yourself \
-                     and pass --artifact-uri."
-                ),
-            )
-            .with_source(error)
-        })?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(&bytes).await.map_err(|error| {
-            Error::new(
-                ErrorKind::Platform,
-                format!("could not write the artifact to `aws s3 cp - {uri}`: {error}"),
-            )
-            .with_source(error)
-        })?;
-        stdin.shutdown().await.ok();
-    }
-
-    let output = child.wait_with_output().await.map_err(|error| {
-        Error::new(
-            ErrorKind::Platform,
-            format!("`aws s3 cp - {uri}` did not complete: {error}"),
-        )
-        .with_source(error)
-    })?;
-    if output.status.success() {
-        return Ok(());
-    }
-    let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    Err(Error::new(
-        ErrorKind::Platform,
-        format!(
-            "`aws s3 cp - {uri}` exited {}: {detail}. The artifact has to be in S3 before \
-             CreateMicrovmImage, and the service's own rejection would arrive *after* the \
-             upload — which is why this is checked here.",
-            output.status.code().unwrap_or(-1),
-        ),
-    ))
 }
 
 /// The region every ARN in a request is derived for.

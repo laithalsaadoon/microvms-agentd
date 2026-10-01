@@ -289,8 +289,33 @@ suite = "bindings"
 message = "image-name/ensure-image-name: skip.ts ends by naming its issue or trace id"
 transform = { file = "verify/parity/cases/image-name/ensure-image-name.json", replace = "so no offline call answers it (IMAGE-12)\"\n", with = "so no offline call answers it\"\n" }
 
+# A known_drift marker, which every runner refuses now that parity-drift is enforced (#258).
+[[fault]]
+id = "parity-py-refuses-known-drift"
+guard = "bindings/microvms-py/tests/test_parity_cases.py::test_the_corpus_plans_cleanly"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_parity_cases.py::test_the_corpus_plans_cleanly"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "size-class/cpu-only: a known_drift marker is refused"
+transform = { file = "verify/parity/cases/size-class/cpu-only.json", replace = "  \"capability\": \"size-from-request\",\n", with = "  \"capability\": \"size-from-request\",\n  \"known_drift\": { \"py\": { \"issue\": \"#255\", \"keys\": [\"baseline_mib\"] } },\n" }
+
+[[fault]]
+id = "parity-ts-refuses-known-drift"
+guard = "the corpus plans cleanly"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/parity_cases.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "size-class/cpu-only: a known_drift marker is refused"
+transform = { file = "verify/parity/cases/size-class/cpu-only.json", replace = "  \"capability\": \"size-from-request\",\n", with = "  \"capability\": \"size-from-request\",\n  \"known_drift\": { \"py\": { \"issue\": \"#255\", \"keys\": [\"baseline_mib\"] } },\n" }
+
 # The one case that compares a binding's suspended lines: a binding that drops the cycles or
-# the suspended seconds it's given fails it, under the same #255 markers as the others.
+# the suspended seconds it's given fails it.
 
 [[fault]]
 id = "parity-py-cycles-dropped"
