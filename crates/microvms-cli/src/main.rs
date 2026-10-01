@@ -482,6 +482,7 @@ async fn handle<O: std::io::Write, E: std::io::Write>(
         // attached module because its one AWS call is the same door the others use: the
         // probe that proves the triple is live before anything is written.
         Command::Attach(args) => commands::attached::attach_vm(ctx, args).await,
+        Command::Adopt(args) => commands::attached::adopt(ctx, args).await,
         // The second command that races the interrupt, and the only one for which the
         // interrupt is the *expected* ending rather than an abort: a tunnel runs until the
         // caller stops it. See `attached::port_forward` on why that exits 0.

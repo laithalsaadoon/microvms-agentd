@@ -24,6 +24,7 @@
 
 #![cfg(test)]
 
+mod adopt;
 mod artifact_uri;
 mod attach;
 mod build;

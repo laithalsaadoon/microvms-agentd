@@ -44,6 +44,7 @@ from lanes.files import drive_config_and_sync, drive_file_transfer
 from lanes.image_versions import drive_image_versions
 from lanes.keepalive import drive_idle_keepalive, drive_keepalive_helper
 from lanes.lifecycle import (
+    drive_adopt,
     drive_build_logging,
     drive_health,
     drive_identity_per_vm,
@@ -191,6 +192,8 @@ def run_suite(args: argparse.Namespace) -> int:
 
             run_section(results, "exec", drive_exec, cli, launched, results)
             run_section(results, "health", drive_health, cli, launched, results)
+            # `adopt` (#269) reads the suite's VM through core's guards and launches nothing.
+            run_section(results, "adopt", drive_adopt, cli, launched, results)
             # Platform posture (#154, #155) on the suite's own connector-less VM: the pins
             # are the measured facts, and two of them are designed to go red the day the
             # platform starts honouring an omitted egress connector. Needs `iam:Get/List`
