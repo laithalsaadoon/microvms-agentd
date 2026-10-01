@@ -1948,6 +1948,7 @@ LINT_EXCEPTIONS = {
     ("crates/microvms-cli/src/guards/history.rs", "clippy::disallowed_methods"): 1,
     ("crates/microvms-cli/src/guards/support.rs", "clippy::disallowed_methods"): 3,
     ("crates/microvms-cli/src/guards/support.rs", "clippy::disallowed_types"): 3,
+    ("crates/microvms-cli/src/guards/wait.rs", "clippy::disallowed_methods"): 1,
     # `doctor`'s `terraform output`, a subprocess decision.
     ("crates/microvms-cli/src/commands/doctor.rs", "clippy::disallowed_types"): 1,
     # Each binding's name store, the one place it composes core's process lookup.

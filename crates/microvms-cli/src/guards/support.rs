@@ -491,6 +491,7 @@ pub(super) fn run_args_for_image(identifier: &str, state_dir: std::path::PathBuf
         user: None,
         group: None,
         keep: false,
+        no_wait: false,
         identity: false,
         vm_name: None,
         timeout: Duration::from_secs(30),

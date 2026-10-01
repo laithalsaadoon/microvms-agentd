@@ -1306,6 +1306,32 @@ impl Sandbox {
         Ok(session)
     }
 
+    /// Waits until the VM this sandbox addresses answers, whatever a launch still has to wait
+    /// for: from PENDING, [`Sandbox::wait_until_running`] with `running_timeout` (RUNNING, then
+    /// the daemon); from RUNNING, the daemon alone, up to
+    /// [`crate::session::DEFAULT_BOOTSTRAP_TIMEOUT`].
+    ///
+    /// The shape for a process that adopted a VM another one launched without waiting: it can't
+    /// know which of the two waits is left, and the lifecycle [`Sandbox::adopt`] read from the
+    /// service says. Any other lifecycle is refused, because a suspended or terminated VM isn't
+    /// on its way to answering.
+    pub async fn wait_until_ready(
+        &mut self,
+        running_timeout: Duration,
+    ) -> Result<&mut Session, Error> {
+        if self.lifecycle == Lifecycle::Running {
+            self.refuse_detached("wait until ready")?;
+            let session = self.session.as_mut().ok_or_else(|| {
+                Error::new(ErrorKind::Precondition, "a RUNNING sandbox with no session")
+            })?;
+            session
+                .wait_until_ready(crate::session::DEFAULT_BOOTSTRAP_TIMEOUT)
+                .await?;
+            return Ok(session);
+        }
+        self.wait_until_running(running_timeout).await
+    }
+
     // ── adopt (STATE-3, with the lifecycle read from the service) ────────────
 
     /// A sandbox for a VM another process launched, rebuilt from its private record.
@@ -2898,6 +2924,91 @@ mod tests {
         let suspend = sandbox.suspend().await.expect_err("STATE-5");
         assert!(suspend.to_string().contains("STATE-5"), "{suspend}");
         assert_eq!(recorder.operations(), vec!["GetMicrovm"]);
+    }
+
+    /// A sandbox adopted in `state` whose plane and session are scripted: `GetMicrovm` answers
+    /// `state` and then RUNNING, and the daemon answers every health poll.
+    async fn adopted_with_a_daemon(
+        state: &str,
+    ) -> (
+        Sandbox,
+        Arc<FakeControlPlane>,
+        Arc<crate::testing::HealthyDaemon>,
+    ) {
+        let recorder = Arc::new(FakeControlPlane::new());
+        let daemon = crate::testing::HealthyDaemon::new();
+        let plane = crate::control::ControlPlane::from_ports(
+            Arc::clone(&recorder) as Arc<dyn crate::control::transport::Transport>,
+            Region::UsEast1,
+            Arc::new(TestClock::new()),
+            Arc::new(crate::testing::SequenceEntropy::new()),
+            Arc::new(crate::testing::TestAdapters::new().with_backend(daemon.clone())),
+        );
+        recorder
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response(state, None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("RUNNING", None)),
+            )
+            .answer(
+                "CreateMicrovmAuthToken",
+                Answer::ok(fake::auth_token_response("proxy-token")),
+            );
+        let sandbox = Sandbox::adopt(plane, "mvm-abc123", ADOPT_ENDPOINT, ADOPT_TOKEN)
+            .await
+            .expect("adopts");
+        (sandbox, recorder, daemon)
+    }
+
+    /// **`wait_until_ready` finishes whichever wait is left (#269):** from an adopted PENDING VM,
+    /// RUNNING and then the daemon; from an adopted RUNNING one, the daemon alone, with no
+    /// further control-plane read.
+    ///
+    /// **Falsification**: drop the RUNNING branch from `Sandbox::wait_until_ready`, and the
+    /// RUNNING VM is refused as not PENDING.
+    #[tokio::test]
+    async fn wait_until_ready_finishes_whichever_wait_is_left() {
+        let (mut pending, recorder, daemon) = adopted_with_a_daemon("PENDING").await;
+        pending
+            .wait_until_ready(Duration::from_secs(60))
+            .await
+            .expect("RUNNING, then the daemon");
+        assert_eq!(pending.lifecycle(), Lifecycle::Running);
+        assert_eq!(pending.bootstrap_count(), 1);
+        assert_eq!(daemon.polls(), 1);
+        assert_eq!(
+            recorder.call_count("GetMicrovm"),
+            2,
+            "the adopt's read and the wait's"
+        );
+
+        let (mut running, recorder, daemon) = adopted_with_a_daemon("RUNNING").await;
+        running
+            .wait_until_ready(Duration::from_secs(60))
+            .await
+            .expect("the daemon answers");
+        assert_eq!(daemon.polls(), 1);
+        assert_eq!(
+            recorder.call_count("GetMicrovm"),
+            1,
+            "RUNNING needs no second read"
+        );
+    }
+
+    /// A VM that isn't on its way to answering is refused, with no daemon poll.
+    #[tokio::test]
+    async fn wait_until_ready_refuses_a_suspended_vm() {
+        let (mut suspended, _, daemon) = adopted_with_a_daemon("SUSPENDED").await;
+        let error = suspended
+            .wait_until_ready(Duration::from_secs(60))
+            .await
+            .expect_err("a suspended VM isn't starting");
+        assert_eq!(error.kind(), ErrorKind::InvalidArg, "{error}");
+        assert!(error.to_string().contains("SUSPENDED"), "{error}");
+        assert_eq!(daemon.polls(), 0);
     }
 
     /// A VM adopted while PENDING finishes through `wait_until_running`, which counts the

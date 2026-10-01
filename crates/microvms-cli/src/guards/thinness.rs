@@ -13,7 +13,7 @@ use crate::cli::{
     AckArgs, AttachArgs, AttachFlags, BuildArgs, Cli, Command, CostArgs, CpArgs, DoctorArgs,
     ExecArgs, ExistsArgs, Explicit, HealthArgs, InfraFlags, KeepaliveArgs, LogsArgs, LsArgs,
     MemoryMib, PortForwardArgs, RegionFlags, ResumeArgs, RunArgs, StdinArgs, SuspendArgs,
-    TerminateArgs, TunnelArgs,
+    TerminateArgs, TunnelArgs, WaitArgs,
 };
 use crate::seam::Door;
 
@@ -63,6 +63,7 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 user: None,
                 group: None,
                 keep: false,
+                no_wait: false,
                 identity: false,
                 vm_name: None,
                 timeout: Duration::from_secs(30),
@@ -186,6 +187,15 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 region: region_flags(),
             }),
             Door::AttachSession,
+        ),
+        (
+            "wait",
+            Command::Wait(WaitArgs {
+                timeout: Duration::from_secs(60),
+                attach: attach_flags(),
+                region: region_flags(),
+            }),
+            Door::ControlPlane,
         ),
         (
             "health",
