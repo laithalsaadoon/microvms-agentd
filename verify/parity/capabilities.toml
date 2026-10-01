@@ -687,10 +687,10 @@ ts = "compareResidency"
 
 [[capability]]
 id = "budget-gate"
-core = { exempt = "parts only", issue = "#270" }
+core = ["microvms_core::cost::Budget::new", "microvms_core::cost::Budget::check"]
 cli = "cost --max-cost"
-py = { exempt = "no budget gate", issue = "#270" }
-ts = { exempt = "no budget gate", issue = "#270" }
+py = "check_budget"
+ts = "checkBudget"
 
 [[capability]]
 id = "pinned-rates"

@@ -138,9 +138,10 @@ mod microvms {
     use super::core_version;
     #[pymodule_export]
     use super::cost::{
-        PyAmount, PyCostReport, PyDuration, PyEstimatedUsd, PyLineItem, PyRateTable,
-        PyResidencyComparison, PySizeClass, PyTotal, PyUnpriced, build_unpriced_reason,
-        compare_residency, cost_constants, estimate_run, run_report,
+        PyAmount, PyBudgetVerdict, PyCostReport, PyDuration, PyEstimatedUsd, PyLineItem,
+        PyRateTable, PyResidencyComparison, PySizeClass, PyTotal, PyUnpriced,
+        build_unpriced_reason, check_budget, compare_residency, cost_constants, estimate_run,
+        run_report,
     };
     #[pymodule_export]
     use super::exec::{

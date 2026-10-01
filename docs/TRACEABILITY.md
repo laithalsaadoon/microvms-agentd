@@ -25,7 +25,7 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | AGENTD-17 | 1 | waived | 1 | 2 | 1 | waived |
 | AGENTD-18 | 1 | waived | waived | 1 | 1 | 1 |
 | AGENTD-19 | 1 | waived | waived | 1 | 1 | waived |
-| AGENTD-20 | 1 | waived | 1 | 2 | 1 | waived |
+| AGENTD-20 | 1 | waived | 1 | 3 | 1 | waived |
 | AGENTD-21 | 1 | waived | 1 | 1 | 1 | waived |
 | ARCH-1 | waived | waived | waived | 1 | 2 | waived |
 | ARCH-2 | waived | waived | waived | 1 | 4 | waived |
@@ -38,24 +38,24 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | BIND-2 | waived | waived | waived | 3 | 7 | waived |
 | BIND-3 | waived | waived | waived | 1 | 1 | waived |
 | BIND-4 | waived | waived | waived | 1 | 1 | waived |
-| BIND-6 | 1 | 1 | 1 | 4 | 7 | 1 |
+| BIND-6 | 1 | 1 | 1 | 5 | 7 | 1 |
 | BIND-7 | 1 | 1 | 1 | 4 | 4 | 1 |
 | BIND-8 | 1 | 1 | 1 | 4 | 2 | 1 |
 | BIND-9 | 1 | 1 | 1 | 4 | 2 | 1 |
 | BIND-10 | 1 | 1 | 1 | 5 | 6 | 1 |
-| BIND-11 | 1 | 1 | 1 | 3 | 1 | 1 |
+| BIND-11 | 1 | 1 | 1 | 4 | 1 | 1 |
 | BIND-12 | 1 | 1 | 1 | 5 | 3 | 1 |
-| BIND-13 | 1 | 1 | 1 | 3 | 3 | waived |
+| BIND-13 | 1 | 1 | 1 | 4 | 3 | waived |
 | BIND-14 | waived | 1 | 1 | 3 | 3 | waived |
-| BIND-15 | 1 | 1 | waived | 5 | 6 | 1 |
-| BIND-16 | 1 | 1 | waived | 4 | 5 | 1 |
+| BIND-15 | 1 | 1 | waived | 6 | 6 | 1 |
+| BIND-16 | 1 | 1 | waived | 5 | 5 | 1 |
 | BIND-17 | 1 | 1 | 1 | 2 | 4 | 1 |
-| BIND-18 | 1 | 1 | 1 | 4 | 3 | 1 |
+| BIND-18 | 1 | 1 | 1 | 5 | 3 | 1 |
 | BIND-19 | 1 | 1 | 1 | 2 | 1 | 1 |
 | BIND-20 | 1 | 1 | 1 | 6 | 4 | 1 |
 | BIND-21 | 1 | waived | 1 | 1 | 1 | 1 |
 | BIND-22 | waived | waived | 1 | 1 | 1 | waived |
-| BIND-23 | 1 | waived | 1 | 1 | 1 | 1 |
+| BIND-23 | 1 | waived | 1 | 2 | 1 | 1 |
 | BIND-24 | 1 | waived | 1 | 1 | 1 | waived |
 | CLI-1 | waived | waived | waived | 1 | 2 | waived |
 | CLI-2 | waived | waived | waived | 1 | 5 | waived |
@@ -76,18 +76,30 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | COST-8 | waived | waived | waived | 1 | 1 | waived |
 | COST-9 | waived | waived | waived | 3 | 4 | waived |
 | COST-10 | waived | waived | waived | 4 | 3 | 1 |
-| IMAGE-1 | 1 | 1 | 1 | 1 | 1 | waived |
-| IMAGE-2 | 1 | 1 | 1 | 1 | 2 | 1 |
-| IMAGE-3 | 1 | 1 | 1 | 1 | 2 | waived |
+| IMAGE-1 | 1 | 1 | 1 | 2 | 1 | waived |
+| IMAGE-2 | 1 | 1 | 1 | 2 | 2 | 1 |
+| IMAGE-3 | 1 | 1 | 1 | 2 | 2 | waived |
 | IMAGE-4 | 1 | 1 | 1 | 1 | 2 | 1 |
 | IMAGE-5 | waived | waived | waived | 2 | 2 | waived |
 | IMAGE-6 | waived | 1 | 1 | 2 | 2 | 1 |
 | IMAGE-7 | waived | 1 | 1 | 3 | 5 | 1 |
 | IMAGE-8 | 1 | 1 | 1 | 2 | 4 | 1 |
-| IMAGE-9 | 1 | 1 | waived | 1 | 1 | 1 |
-| IMAGE-10 | 1 | 1 | waived | 1 | 1 | 1 |
+| IMAGE-9 | 1 | 1 | waived | 2 | 1 | 1 |
+| IMAGE-10 | 1 | 1 | waived | 2 | 1 | 1 |
 | IMAGE-11 | 1 | 1 | waived | 1 | 1 | 1 |
 | IMAGE-12 | waived | waived | waived | 2 | 2 | waived |
+| STATE-1 | 1 | waived | waived | 2 | 3 | waived |
+| STATE-2 | 1 | waived | waived | 2 | 4 | waived |
+| STATE-3 | 1 | waived | waived | 2 | 3 | waived |
+| STATE-4 | 1 | waived | waived | 2 | 1 | waived |
+| STATE-5 | 1 | waived | waived | 2 | 6 | waived |
+| STATE-6 | 1 | waived | waived | 2 | 1 | 1 |
+| STATE-7 | 1 | waived | waived | 2 | 5 | 1 |
+| STATE-8 | 1 | waived | waived | 5 | 5 | waived |
+| STATE-9 | 1 | waived | waived | 2 | 1 | waived |
+| STATE-10 | 1 | waived | waived | 2 | 1 | 1 |
+| STATE-11 | 1 | waived | waived | 2 | 3 | waived |
+| STATE-12 | 1 | waived | waived | 2 | 7 | waived |
 | TRAP-1 | waived | waived | waived | 9 | 19 | waived |
 | TRAP-2 | waived | waived | waived | 1 | 5 | waived |
 | TRAP-3 | waived | waived | waived | 1 | 6 | 1 |
@@ -318,7 +330,7 @@ If an identity-verified tunnel whose caller offered the end of stream ends witho
 - **model:** `crates/model/src/tunnel.rs`
 - **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
 - **fuzz:** `crates/agentd/src/tunnel_fuzz.rs`
-- **test:** `crates/agentd/tests/tunnel_relay.rs`, `crates/microvms-edges/tests/tunnel_end_of_stream.rs`
+- **test:** `crates/agentd/tests/tunnel_relay.rs`, `crates/microvms-edges/tests/tunnel_end_of_stream.rs`, `crates/model-conformance/tests/tunnel_end_of_stream.rs`
 - **impl:** `crates/agentd/src/tunnel.rs`
 - **live:** waived: a live run can't cut the endpoint proxy's connection mid-stream or withhold one frame, so no live check presents a caller end without its end of stream; the relay tests drive the daemon's real route
 
@@ -461,7 +473,7 @@ The microvms-core shall report a finished exec's POSIX exit code as 124 when a d
 - **model:** `crates/model/src/run.rs`
 - **gherkin:** `crates/microvms-core/tests/features/run_to_completion.feature`
 - **fuzz:** `crates/microvms-core/tests/run_to_completion_fuzz.rs`
-- **test:** `bindings/microvms-js/__test__/run_to_completion.mjs`, `bindings/microvms-py/tests/test_run_to_completion.py`, `crates/microvms-app/src/session/exec.rs`, `crates/microvms-core/tests/live_run_to_completion.rs`
+- **test:** `bindings/microvms-js/__test__/run_to_completion.mjs`, `bindings/microvms-py/tests/test_run_to_completion.py`, `crates/microvms-app/src/session/exec.rs`, `crates/microvms-core/tests/live_run_to_completion.rs`, `crates/model-conformance/tests/tables.rs`
 - **impl:** `bindings/microvms-js/src/exec.rs`, `bindings/microvms-js/src/session.rs`, `bindings/microvms-py/src/exec.rs`, `bindings/microvms-py/src/session.rs`, `crates/microvms-app/src/session/complete.rs`, `crates/microvms-app/src/session/exec.rs`, `crates/microvms-cli/src/commands/attached.rs`
 - **live:** `conformance/lanes/sessions.py`
 
@@ -516,7 +528,7 @@ The microvms-core shall derive a launch's egress posture from its launch options
 - **model:** `crates/model/src/posture.rs`
 - **gherkin:** `crates/microvms-core/tests/features/egress_posture.feature`
 - **fuzz:** `crates/microvms-app/src/control/posture_fuzz.rs`
-- **test:** `bindings/microvms-js/__test__/egress_posture.mjs`, `bindings/microvms-py/tests/test_egress_posture.py`, `crates/microvms-app/src/control/connector.rs`
+- **test:** `bindings/microvms-js/__test__/egress_posture.mjs`, `bindings/microvms-py/tests/test_egress_posture.py`, `crates/microvms-app/src/control/connector.rs`, `crates/model-conformance/tests/tables.rs`
 - **impl:** `crates/microvms-app/src/control/connector.rs`
 - **live:** `conformance/lanes/posture.py`
 
@@ -538,7 +550,7 @@ When a caller asks for the egress posture of a set of launch options, the microv
 - **model:** `crates/model/src/posture.rs`
 - **gherkin:** `crates/microvms-core/tests/features/egress_posture.feature`
 - **fuzz:** `crates/microvms-app/src/control/posture_fuzz.rs`
-- **test:** `bindings/microvms-js/__test__/egress_posture.mjs`, `bindings/microvms-py/tests/test_egress_posture.py`, `crates/microvms-app/src/control/connector.rs`
+- **test:** `bindings/microvms-js/__test__/egress_posture.mjs`, `bindings/microvms-py/tests/test_egress_posture.py`, `crates/microvms-app/src/control/connector.rs`, `crates/model-conformance/tests/tables.rs`
 - **impl:** `crates/microvms-app/src/control/connector.rs`, `crates/microvms-app/src/sandbox.rs`, `crates/microvms-cli/src/commands/lifecycle.rs`
 - **live:** waived: a pure function that makes no AWS call; its refusals precede any call, so the service never sees them (zero calls asserted by the Gherkin scenarios and the fuzz harness)
 
@@ -560,7 +572,7 @@ When a caller asks for a preflight, the microvms-core shall report whether the r
 - **model:** `crates/model/src/preflight.rs`
 - **gherkin:** `crates/microvms-core/tests/features/request_and_preflight.feature`
 - **fuzz:** waived: the outcome space (3 region x 2 credential x 3 service worlds) is enumerated exhaustively by the Stateright model; there is no input stream to fuzz
-- **test:** `bindings/microvms-js/__test__/request_and_preflight.mjs`, `bindings/microvms-py/tests/test_request_and_preflight.py`, `crates/microvms-app/src/preflight.rs`, `crates/microvms-cli/src/guards/doctor.rs`, `crates/microvms-core/tests/live_preflight.rs`
+- **test:** `bindings/microvms-js/__test__/request_and_preflight.mjs`, `bindings/microvms-py/tests/test_request_and_preflight.py`, `crates/microvms-app/src/preflight.rs`, `crates/microvms-cli/src/guards/doctor.rs`, `crates/microvms-core/tests/live_preflight.rs`, `crates/model-conformance/tests/tables.rs`
 - **impl:** `bindings/microvms-js/src/preflight.rs`, `bindings/microvms-py/src/preflight.rs`, `crates/microvms-app/src/control/image.rs`, `crates/microvms-app/src/control/transport.rs`, `crates/microvms-app/src/preflight.rs`, `crates/microvms-domain/src/preflight.rs`
 - **live:** `conformance/lanes/local.py`
 
@@ -571,7 +583,7 @@ The microvms-core shall not make a billable or mutating AWS call during a prefli
 - **model:** `crates/model/src/preflight.rs`
 - **gherkin:** `crates/microvms-core/tests/features/request_and_preflight.feature`
 - **fuzz:** waived: the outcome space (3 region x 2 credential x 3 service worlds) is enumerated exhaustively by the Stateright model; there is no input stream to fuzz
-- **test:** `bindings/microvms-js/__test__/request_and_preflight.mjs`, `bindings/microvms-py/tests/test_request_and_preflight.py`, `crates/microvms-app/src/preflight.rs`, `crates/microvms-core/tests/live_preflight.rs`
+- **test:** `bindings/microvms-js/__test__/request_and_preflight.mjs`, `bindings/microvms-py/tests/test_request_and_preflight.py`, `crates/microvms-app/src/preflight.rs`, `crates/microvms-core/tests/live_preflight.rs`, `crates/model-conformance/tests/tables.rs`
 - **impl:** `bindings/microvms-js/src/preflight.rs`, `bindings/microvms-py/src/preflight.rs`, `crates/microvms-app/src/control/image.rs`, `crates/microvms-app/src/preflight.rs`, `crates/microvms-domain/src/preflight.rs`
 - **live:** `conformance/lanes/local.py`
 
@@ -593,7 +605,7 @@ If a fetched agentd release asset fails its attestation or SHA256SUMS verificati
 - **model:** `crates/model/src/provision.rs`
 - **gherkin:** `crates/microvms-core/tests/features/provision.feature`
 - **fuzz:** `crates/microvms-edges/src/provision_fuzz.rs`
-- **test:** `bindings/microvms-js/__test__/provision.mjs`, `crates/microvms-app/src/provision.rs`, `crates/microvms-edges/src/provision.rs`, `crates/microvms-edges/src/provision/release.rs`
+- **test:** `bindings/microvms-js/__test__/provision.mjs`, `crates/microvms-app/src/provision.rs`, `crates/microvms-edges/src/provision.rs`, `crates/microvms-edges/src/provision/release.rs`, `crates/model-conformance/tests/tables.rs`
 - **impl:** `crates/microvms-app/src/provision.rs`, `crates/microvms-edges/src/provision.rs`, `crates/microvms-edges/src/provision/release.rs`
 - **live:** `conformance/lanes/quickstart.py`
 
@@ -648,7 +660,7 @@ If the far end of an identity-verified tunnel whose daemon offered the end of st
 - **model:** `crates/model/src/tunnel.rs`
 - **gherkin:** waived: no Gherkin tier drives the tunnel: its tests speak the WebSocket and Noise wire themselves, which a scenario would only restate
 - **fuzz:** `crates/microvms-edges/src/session/tunnel_fuzz.rs`
-- **test:** `crates/microvms-edges/tests/tunnel_end_of_stream.rs`
+- **test:** `crates/microvms-edges/tests/tunnel_end_of_stream.rs`, `crates/model-conformance/tests/tunnel_end_of_stream.rs`
 - **impl:** `crates/microvms-edges/src/session/tunnel.rs`
 - **live:** `conformance/lanes/tunnel.py`
 
@@ -879,7 +891,7 @@ The microvms-core shall emit the agentd stanza of a wrapped task Dockerfile and 
 - **model:** `crates/model/src/wrap.rs`
 - **gherkin:** `crates/microvms-core/tests/features/wrap_dockerfile.feature`
 - **fuzz:** `crates/microvms-core/tests/wrap_fuzz.rs`
-- **test:** `crates/microvms-app/src/control/artifact.rs`
+- **test:** `crates/microvms-app/src/control/artifact.rs`, `crates/model-conformance/tests/tables.rs`
 - **impl:** `crates/microvms-app/src/control/artifact.rs`
 - **live:** waived: a pure function of Dockerfile text; it makes no AWS call
 
@@ -890,7 +902,7 @@ When a caller wraps a task Dockerfile, the microvms-core shall end the result wi
 - **model:** `crates/model/src/wrap.rs`
 - **gherkin:** `crates/microvms-core/tests/features/wrap_dockerfile.feature`
 - **fuzz:** `crates/microvms-core/tests/wrap_fuzz.rs`
-- **test:** `crates/microvms-app/src/control/artifact.rs`
+- **test:** `crates/microvms-app/src/control/artifact.rs`, `crates/model-conformance/tests/tables.rs`
 - **impl:** `crates/microvms-app/src/control/artifact.rs`, `crates/microvms-cli/src/commands/local.rs`
 - **live:** `conformance/lanes/ensure_image.py`
 
@@ -901,7 +913,7 @@ If a task Dockerfile has no FROM, ends inside an unfinished instruction, or sets
 - **model:** `crates/model/src/wrap.rs`
 - **gherkin:** `crates/microvms-core/tests/features/wrap_dockerfile.feature`
 - **fuzz:** `crates/microvms-core/tests/wrap_fuzz.rs`
-- **test:** `crates/microvms-app/src/control/artifact.rs`
+- **test:** `crates/microvms-app/src/control/artifact.rs`, `crates/model-conformance/tests/tables.rs`
 - **impl:** `crates/microvms-app/src/control/artifact.rs`, `crates/microvms-cli/src/commands/local.rs`
 - **live:** waived: a pure function of Dockerfile text; it makes no AWS call
 
@@ -967,7 +979,7 @@ When a describe finds the ensured image ready or building and the caller has not
 - **model:** `crates/model/src/image.rs`
 - **gherkin:** `crates/microvms-core/tests/features/ensure_image.feature`
 - **fuzz:** waived: the input space is two callers interleaved against the platform, which crates/model/src/image.rs checks exhaustively; the decision table is ten rows, all pinned by the_plan_table
-- **test:** `crates/microvms-app/src/control/ensure.rs`
+- **test:** `crates/microvms-app/src/control/ensure.rs`, `crates/model-conformance/tests/tables.rs`
 - **impl:** `crates/microvms-app/src/control/ensure.rs`
 - **live:** `conformance/lanes/ensure_image.py`
 
@@ -978,7 +990,7 @@ If the ensured image has failed or the caller forces a rebuild, then the microvm
 - **model:** `crates/model/src/image.rs`
 - **gherkin:** `crates/microvms-core/tests/features/ensure_image.feature`
 - **fuzz:** waived: the input space is two callers interleaved against the platform, which crates/model/src/image.rs checks exhaustively; the decision table is ten rows, all pinned by the_plan_table
-- **test:** `crates/microvms-app/src/control/ensure.rs`
+- **test:** `crates/microvms-app/src/control/ensure.rs`, `crates/model-conformance/tests/tables.rs`
 - **impl:** `crates/microvms-app/src/control/ensure.rs`
 - **live:** `conformance/lanes/ensure_image.py`
 
@@ -1003,6 +1015,138 @@ The language bindings layer shall expose ensure_image as a thin wrapper that ret
 - **test:** `bindings/microvms-js/__test__/ensure.mjs`, `bindings/microvms-py/tests/test_ensure_image.py`
 - **impl:** `bindings/microvms-js/src/sandbox.rs`, `bindings/microvms-py/src/sandbox.rs`
 - **live:** waived: the conformance section drives core's ensure_image, which each binding forwards unchanged
+
+## STATE-1
+
+When a launch request is accepted, the microvms-core shall transition the lifecycle to PENDING and record the image as existing.
+
+- **model:** `crates/model/src/client.rs`
+- **gherkin:** waived: the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths
+- **fuzz:** waived: the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz
+- **test:** `crates/microvms-app/src/sandbox.rs`, `crates/model-conformance/tests/client_lifecycle.rs`
+- **impl:** `bindings/microvms-js/src/sandbox.rs`, `bindings/microvms-py/src/sandbox.rs`, `crates/microvms-app/src/sandbox.rs`
+- **live:** waived: PENDING between an accepted launch and the hook's report is the client's own record, which a live run sees only as `run` returning; the replay checks it after every call
+
+## STATE-2
+
+When the platform reports that the run hook answered with a success status, the microvms-core shall mark the lifecycle RUNNING and the agent token installed.
+
+- **model:** `crates/model/src/client.rs`
+- **gherkin:** waived: the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths
+- **fuzz:** waived: the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz
+- **test:** `crates/microvms-app/src/sandbox.rs`, `crates/model-conformance/tests/client_lifecycle.rs`
+- **impl:** `bindings/microvms-js/src/sandbox.rs`, `bindings/microvms-py/src/sandbox.rs`, `crates/microvms-app/src/sandbox.rs`, `crates/microvms-cli/src/commands/lifecycle.rs`
+- **live:** waived: a live run sees the hook's report only as `run` returning with a daemon that answers (AGENTD-2's live check); the client's RUNNING-and-installed record is checked by the replay after every call
+
+## STATE-3
+
+The microvms-core shall install the agent token at most once per VM lifetime.
+
+- **model:** `crates/model/src/client.rs`
+- **gherkin:** waived: the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths
+- **fuzz:** waived: the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz
+- **test:** `crates/microvms-app/src/sandbox.rs`, `crates/model-conformance/tests/client_lifecycle.rs`
+- **impl:** `bindings/microvms-js/src/sandbox.rs`, `bindings/microvms-py/src/sandbox.rs`, `crates/microvms-app/src/sandbox.rs`
+- **live:** waived: the client offers one launch per `Sandbox`; a second install is the daemon's refusal, which AGENTD-3's live check asserts
+
+## STATE-4
+
+While the lifecycle is RUNNING, the microvms-core shall accept a suspend request and transition the lifecycle to SUSPENDING.
+
+- **model:** `crates/model/src/client.rs`
+- **gherkin:** waived: the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths
+- **fuzz:** waived: the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz
+- **test:** `crates/microvms-app/src/sandbox.rs`, `crates/model-conformance/tests/client_lifecycle.rs`
+- **impl:** `crates/microvms-app/src/sandbox.rs`
+- **live:** waived: SUSPENDING is the client's record while the platform suspends, and `suspend` returns only once it reads SUSPENDED (STATE-6's live check); the replay checks the transition after every call
+
+## STATE-5
+
+The microvms-core shall not issue a suspend call while the lifecycle is not RUNNING.
+
+- **model:** `crates/model/src/client.rs`
+- **gherkin:** waived: the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths
+- **fuzz:** waived: the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz
+- **test:** `crates/microvms-app/src/sandbox.rs`, `crates/model-conformance/tests/client_lifecycle.rs`
+- **impl:** `bindings/microvms-js/src/control.rs`, `bindings/microvms-js/src/sandbox.rs`, `bindings/microvms-py/src/control.rs`, `bindings/microvms-py/src/sandbox.rs`, `crates/microvms-app/src/sandbox.rs`, `crates/microvms-cli/src/commands/lifecycle.rs`
+- **live:** waived: a refusal before any call never reaches the service; the model and its replay against `Sandbox` hold it, and the app's tests drive it
+
+## STATE-6
+
+When the platform reports suspension complete, the microvms-core shall mark the lifecycle SUSPENDED.
+
+- **model:** `crates/model/src/client.rs`
+- **gherkin:** waived: the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths
+- **fuzz:** waived: the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz
+- **test:** `crates/microvms-app/src/sandbox.rs`, `crates/model-conformance/tests/client_lifecycle.rs`
+- **impl:** `crates/microvms-app/src/sandbox.rs`
+- **live:** `conformance/lanes/suspend.py`
+
+## STATE-7
+
+While the lifecycle is SUSPENDED, the microvms-core shall accept a resume request, reuse the installed agent token, and transition the lifecycle to RUNNING without re-delivering a run-hook payload.
+
+- **model:** `crates/model/src/client.rs`
+- **gherkin:** waived: the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths
+- **fuzz:** waived: the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz
+- **test:** `crates/microvms-app/src/sandbox.rs`, `crates/model-conformance/tests/client_lifecycle.rs`
+- **impl:** `bindings/microvms-js/src/control.rs`, `bindings/microvms-js/src/sandbox.rs`, `bindings/microvms-py/src/control.rs`, `bindings/microvms-py/src/sandbox.rs`, `crates/microvms-app/src/sandbox.rs`
+- **live:** `conformance/lanes/suspend.py`
+
+## STATE-8
+
+When a resume completes, the microvms-core shall invalidate the cached proxy token.
+
+- **model:** `crates/model/src/client.rs`
+- **gherkin:** waived: the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths
+- **fuzz:** waived: the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz
+- **test:** `bindings/microvms-py/tests/test_session.py`, `crates/microvms-app/src/sandbox.rs`, `crates/microvms-app/src/session/mod.rs`, `crates/microvms-app/src/session/proxy.rs`, `crates/model-conformance/tests/client_lifecycle.rs`
+- **impl:** `bindings/microvms-js/src/session.rs`, `bindings/microvms-py/src/session.rs`, `crates/microvms-app/src/sandbox.rs`, `crates/microvms-app/src/session/mod.rs`, `crates/microvms-app/src/session/proxy.rs`
+- **live:** waived: the proxy token cache is client state no live response shows; the replay checks it after every call, and the app's tests check the next request mints
+
+## STATE-9
+
+When a terminate request is accepted, the microvms-core shall transition the lifecycle to TERMINATING and record the VM as terminated.
+
+- **model:** `crates/model/src/client.rs`
+- **gherkin:** waived: the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths
+- **fuzz:** waived: the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz
+- **test:** `crates/microvms-app/src/sandbox.rs`, `crates/model-conformance/tests/client_lifecycle.rs`
+- **impl:** `crates/microvms-app/src/sandbox.rs`
+- **live:** waived: TERMINATING is the client's record while the platform terminates, and the live terminate checks read TERMINATED (STATE-10's); the replay checks the transition after every call
+
+## STATE-10
+
+When the platform reports termination complete, the microvms-core shall mark the lifecycle TERMINATED.
+
+- **model:** `crates/model/src/client.rs`
+- **gherkin:** waived: the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths
+- **fuzz:** waived: the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz
+- **test:** `crates/microvms-app/src/sandbox.rs`, `crates/model-conformance/tests/client_lifecycle.rs`
+- **impl:** `crates/microvms-app/src/sandbox.rs`
+- **live:** `conformance/lanes/sessions.py`
+
+## STATE-11
+
+The microvms-core shall not return a terminated VM to RUNNING.
+
+- **model:** `crates/model/src/client.rs`
+- **gherkin:** waived: the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths
+- **fuzz:** waived: the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz
+- **test:** `crates/microvms-app/src/sandbox.rs`, `crates/model-conformance/tests/client_lifecycle.rs`
+- **impl:** `bindings/microvms-js/src/sandbox.rs`, `bindings/microvms-py/src/sandbox.rs`, `crates/microvms-app/src/sandbox.rs`
+- **live:** waived: a refusal before any call never reaches the service; the model and its replay against `Sandbox` hold it, and the app's tests drive it
+
+## STATE-12
+
+If a resume is attempted after the launch-time suspended window has elapsed, then the microvms-core shall reject the resume with an error naming the elapsed suspended window.
+
+- **model:** `crates/model/src/client.rs`
+- **gherkin:** waived: the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths
+- **fuzz:** waived: the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz
+- **test:** `crates/microvms-app/src/sandbox.rs`, `crates/model-conformance/tests/client_lifecycle.rs`
+- **impl:** `bindings/microvms-js/src/control.rs`, `bindings/microvms-js/src/sandbox.rs`, `bindings/microvms-py/src/control.rs`, `bindings/microvms-py/src/sandbox.rs`, `crates/microvms-app/src/control/ops.rs`, `crates/microvms-app/src/sandbox.rs`, `crates/microvms-cli/src/commands/lifecycle.rs`
+- **live:** waived: the window is launch-time `suspendedDurationSeconds`, and the refusal comes before any call once the client's clock passes it; the model, its replay and the app's tests drive that clock, which a live run can only wait out
 
 ## TRAP-1
 

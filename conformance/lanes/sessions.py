@@ -453,7 +453,7 @@ def drive_lifecycle_by_id(
                     f"leaked={torn.data.get('leaked')!r}",
                 )
                 results.eq(
-                    "terminate --wait-sec waits for TERMINATED",
+                    "STATE-10 terminate --wait-sec waits for TERMINATED",
                     torn.data.get("state"),
                     "TERMINATED",
                 )
