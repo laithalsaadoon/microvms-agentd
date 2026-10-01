@@ -7,135 +7,95 @@
 
 # The tracker rule's section: a body with no Follow-ups passes once the script stops requiring
 # it.
-[[fault]]
-id = "pr-body-follow-ups-required"
+[[family]]
 guard = "test_check_pr_body.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_pr_body.py"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "pr-body-follow-ups-required"
 message = "FAIL: test_a_body_without_follow_ups_fails ("
 transform = { file = "tools/check-pr-body.py", replace = 'REQUIRED = ("What and why", "Evidence", "Guards", "Follow-ups")', with = 'REQUIRED = ("What and why", "Evidence", "Guards")' }
 
 # A section left as the template gave it holds only a comment, and a comment isn't content.
-[[fault]]
+[[family.fault]]
 id = "pr-body-comment-counts"
-guard = "test_check_pr_body.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_pr_body.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_section_holding_only_the_template_comment_fails ("
 transform = { file = "tools/check-pr-body.py", replace = '    text = COMMENT.sub("", text.replace("\r\n", "\n").replace("\r", "\n"))', with = '    text = text.replace("\r\n", "\n").replace("\r", "\n")' }
 
 # A `## ` a code block quotes isn't a heading, so a quoted section doesn't stand in for one.
-[[fault]]
+[[family.fault]]
 id = "pr-body-code-block"
-guard = "test_check_pr_body.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_pr_body.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_heading_in_a_code_block_is_not_a_section ("
 transform = { file = "tools/check-pr-body.py", replace = 'FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")', with = 'FENCE = re.compile(r"(?!)")' }
 
 # The size rule: past the cap with no `Size:` line passes once the rule never trips.
-[[fault]]
+[[family.fault]]
 id = "pr-body-size-unchecked"
-guard = "test_check_pr_body.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_pr_body.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_over_the_cap_without_a_size_line_fails ("
 transform = { file = "tools/check-pr-body.py", replace = "    if total > SOFT_CAP and not has_size_line(text):\n", with = "    if False:\n" }
 
 # The size rule's floor: a counter that finds no product file passes every change.
-[[fault]]
+[[family.fault]]
 id = "pr-body-product-floor"
-guard = "test_check_pr_body.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_pr_body.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_over_the_cap_without_a_size_line_fails ("
 transform = { file = "tools/check-pr-body.py", replace = '    return path.startswith(PRODUCT_DIRS) and CHANGELOG["is_shipped"](path)', with = "    return False" }
 
 # The generated type surfaces are the stub generator's and the napi build's lines, not code
 # anyone splits.
-[[fault]]
+[[family.fault]]
 id = "pr-body-generated-surfaces"
-guard = "test_check_pr_body.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_pr_body.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_the_generated_surfaces_do_not_count ("
 transform = { file = "tools/check-pr-body.py", replace = 'PRODUCT_DIRS = tuple(p for p in CHANGELOG["SHIPPED"] if p.endswith("/"))', with = 'PRODUCT_DIRS = tuple(CHANGELOG["SHIPPED"])' }
 
 # A `Size:` in a comment is the template's instruction or a draft, not a reason given.
-[[fault]]
+[[family.fault]]
 id = "pr-body-size-line-anywhere"
-guard = "test_check_pr_body.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_pr_body.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_size_line_in_a_comment_or_a_code_block_does_not_count ("
 transform = { file = "tools/check-pr-body.py", replace = "    return any(line is not None and SIZE.match(line) for line in prose_lines(text))\n", with = "    return any(SIZE.match(line) for line in text.splitlines())\n" }
 
 # The figure the docs state is the one the script holds.
-[[fault]]
+[[family.fault]]
 id = "pr-body-cap-docs"
-guard = "test_check_pr_body.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_pr_body.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_the_docs_state_the_cap_the_script_holds ("
 transform = { file = "tools/check-pr-body.py", replace = "SOFT_CAP = 400\n", with = "SOFT_CAP = 500\n" }
 
 # The Dependabot skip is one exact login: a skip that took every bot login would pass
 # bonk-ai's pull requests with no sections.
-[[fault]]
+[[family.fault]]
 id = "pr-body-dependabot-only"
-guard = "test_check_pr_body.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_pr_body.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_the_dependabot_skip_is_for_dependabot_only ("
 transform = { file = "tools/check-pr-body.py", replace = "    if author == DEPENDABOT:\n", with = "    if author and author.endswith(\"[bot]\"):\n" }
 
 # CI's run reads the event: one that stopped reading it would hold only the template, and pass
 # every pull request.
-[[fault]]
+[[family.fault]]
 id = "pr-body-event-ignored"
-guard = "test_check_pr_body.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_pr_body.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_pull_request_events_body_is_checked ("
 transform = { file = "tools/check-pr-body.py", replace = "        pull = read_event(args.event)\n", with = "        pull = None\n" }
 
 # The body's floor: an empty or null body is a body with no section, not nothing to check.
-[[fault]]
+[[family.fault]]
 id = "pr-body-empty-body"
-guard = "test_check_pr_body.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_pr_body.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_null_or_empty_body_fails ("
 transform = { file = "tools/check-pr-body.py", replace = '        return check_body(root, pull.get("body") or "", author, args.base)', with = '        return check_body(root, pull["body"], author, args.base) if pull.get("body") else 0' }
 
 # The template every body starts from drops a section the script requires, on this tree.
-[[fault]]
-id = "pr-body-template-section"
+[[family]]
 guard = "tools/check-pr-body.py"
 run = ["env", "-u", "GITHUB_EVENT_PATH", "./tools/check-pr-body.py"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "pr-body-template-section"
 message = "has no `## Follow-ups`, which every pull request's body needs"
 transform = { file = ".github/PULL_REQUEST_TEMPLATE.md", replace = "## Follow-ups\n", with = "## Later\n" }
 
 # The sentinel: the template's own headings, which a heading reader that stopped matching loses.
-[[fault]]
+[[family.fault]]
 id = "pr-body-heading-sentinel"
-guard = "tools/check-pr-body.py"
-run = ["env", "-u", "GITHUB_EVENT_PATH", "./tools/check-pr-body.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "has no `## What and why`"
 transform = { file = "tools/check-pr-body.py", replace = 'HEADING = re.compile(r"^ {0,3}(#{1,6})', with = 'HEADING = re.compile(r"^ {0,3}(#{7})' }
 

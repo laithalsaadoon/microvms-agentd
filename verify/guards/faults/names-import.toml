@@ -13,21 +13,19 @@ message = "nothing written"
 note = "crates/microvms-app/src/names.rs::an_import_writes_only_after_the_vm_answers_with_the_records_token"
 transform = { file = "crates/microvms-app/src/names.rs", replace = "    let probed = probe(session, record).await?;\n", with = "    store.put(record)?;\n    let probed = probe(session, record).await?;\n" }
 
-[[fault]]
-id = "app-probe-trusts-any-session"
+[[family]]
 guard = "names::tests::a_probe_is_of_one_record_and_its_write_takes_only_that_one"
 run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "names::tests::a_probe_is_of_one_record_and_its_write_takes_only_that_one"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "app-probe-trusts-any-session"
 message = "another token"
 transform = { file = "crates/microvms-app/src/names.rs", replace = "    if session.endpoint() != record.endpoint || session.agent_token() != record.agent_token {\n", with = "    if session.endpoint() != record.endpoint {\n" }
 
-[[fault]]
+[[family.fault]]
 id = "app-import-takes-another-probe"
-guard = "names::tests::a_probe_is_of_one_record_and_its_write_takes_only_that_one"
-run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "names::tests::a_probe_is_of_one_record_and_its_write_takes_only_that_one"]
-expect = "test-failed"
-suite = "rust"
 message = "the probe of another VM"
 transform = { file = "crates/microvms-app/src/names.rs", replace = "    if probed.microvm_id != record.microvm_id\n", with = "    if false\n" }
 

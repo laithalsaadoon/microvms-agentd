@@ -1,42 +1,32 @@
 # ── a caller's --artifact-uri (#249) ─────────────────────────────────────────
 
-[[fault]]
-id = "cli-artifact-uri-not-uploaded-over"
+[[family]]
 guard = "guards::artifact_uri::a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucket"
 run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::artifact_uri::a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucket"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "cli-artifact-uri-not-uploaded-over"
 message = "build: a caller-supplied --artifact-uri must not be uploaded over"
 note = "crates/microvms-cli/src/guards/artifact_uri.rs::a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucket"
 transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "    if caller_uri.is_some() {\n", with = "    if caller_uri.is_some() && ctx.infra.bucket.is_none() {\n" }
 
-[[fault]]
+[[family.fault]]
 id = "cli-artifact-uri-run-arm"
-guard = "guards::artifact_uri::a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucket"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::artifact_uri::a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucket"]
-expect = "test-failed"
-suite = "rust"
 message = "run: a caller-supplied --artifact-uri must not be uploaded over"
 transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "upload_artifact(ctx, sandbox, &request, Some(caller_uri))", with = "upload_artifact(ctx, sandbox, &request, None)" }
 
-[[fault]]
+[[family.fault]]
 id = "cli-artifact-uri-build-arm"
-guard = "guards::artifact_uri::a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucket"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::artifact_uri::a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucket"]
-expect = "test-failed"
-suite = "rust"
 message = "build: a caller-supplied --artifact-uri must not be uploaded over"
 transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "upload_artifact(ctx, &mut sandbox, &request, args.artifact_uri.as_deref())", with = "upload_artifact(ctx, &mut sandbox, &request, None)" }
 
 # The obvious break, deleting the `if let Some(bucket)` guard, leaves `{bucket}` unbound and
 # is a compile error. `.or(Some("none"))` keeps the binding and the type, so the line prints
 # with no bucket and the test is what goes red.
-[[fault]]
+[[family.fault]]
 id = "cli-artifact-uri-no-bucket-quiet"
-guard = "guards::artifact_uri::a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucket"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::artifact_uri::a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucket"]
-expect = "test-failed"
-suite = "rust"
 message = "no bucket: with no bucket there's none to call unused"
 transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "        if let Some(bucket) = ctx.infra.bucket.as_deref() {\n", with = "        if let Some(bucket) = ctx.infra.bucket.as_deref().or(Some(\"none\")) {\n" }
 
@@ -71,99 +61,77 @@ suite = "rust"
 message = "build, the derived key: a caller-supplied --artifact-uri must not be uploaded over"
 transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "    if caller_uri.is_some() {\n", with = "    if caller_uri.is_some_and(|uri| ctx.infra.bucket.as_deref().map(|b| format!(\"s3://{b}/{}.zip\", request.name)).as_deref() != Some(uri)) {\n" }
 
-[[fault]]
-id = "cli-run-artifact-uri-refuses-dockerfile"
+[[family]]
 guard = "guards::artifact_uri::artifact_uri_refuses_the_local_artifact_inputs_at_parse_time"
 run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::artifact_uri::artifact_uri_refuses_the_local_artifact_inputs_at_parse_time"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "cli-run-artifact-uri-refuses-dockerfile"
 message = "run --artifact-uri --dockerfile must not parse"
 note = "crates/microvms-cli/src/guards/artifact_uri.rs::artifact_uri_refuses_the_local_artifact_inputs_at_parse_time"
 transform = { file = "crates/microvms-cli/src/cli.rs", replace = "    #[arg(long, value_name = \"S3_URI\", conflicts_with = \"dockerfile\")]\n", with = "    #[arg(long, value_name = \"S3_URI\")]\n" }
 
-[[fault]]
+[[family.fault]]
 id = "cli-build-artifact-uri-refuses-dockerfile"
-guard = "guards::artifact_uri::artifact_uri_refuses_the_local_artifact_inputs_at_parse_time"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::artifact_uri::artifact_uri_refuses_the_local_artifact_inputs_at_parse_time"]
-expect = "test-failed"
-suite = "rust"
 message = "build --artifact-uri --dockerfile must not parse"
 transform = { file = "crates/microvms-cli/src/cli.rs", replace = "conflicts_with_all = [\"dockerfile\", \"project\"]", with = "conflicts_with_all = [\"project\"]" }
 
-[[fault]]
+[[family.fault]]
 id = "cli-build-artifact-uri-refuses-project"
-guard = "guards::artifact_uri::artifact_uri_refuses_the_local_artifact_inputs_at_parse_time"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::artifact_uri::artifact_uri_refuses_the_local_artifact_inputs_at_parse_time"]
-expect = "test-failed"
-suite = "rust"
 message = "build --artifact-uri --project must not parse"
 transform = { file = "crates/microvms-cli/src/cli.rs", replace = "conflicts_with_all = [\"dockerfile\", \"project\"]", with = "conflicts_with_all = [\"dockerfile\"]" }
 
-[[fault]]
-id = "cli-artifact-uri-build-no-provision"
+[[family]]
 guard = "guards::artifact_uri::a_caller_artifact_uri_provisions_no_daemon"
 run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::artifact_uri::a_caller_artifact_uri_provisions_no_daemon"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "cli-artifact-uri-build-no-provision"
 message = "this invocation must not fetch"
 note = "crates/microvms-cli/src/guards/artifact_uri.rs::a_caller_artifact_uri_provisions_no_daemon"
 transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "        // No fetch beside a caller's --artifact-uri, for the reason `run` gives (#249).\n        None if args.artifact_uri.is_some() => None,\n", with = "" }
 
-[[fault]]
+[[family.fault]]
 id = "cli-artifact-uri-run-no-provision"
-guard = "guards::artifact_uri::a_caller_artifact_uri_provisions_no_daemon"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::artifact_uri::a_caller_artifact_uri_provisions_no_daemon"]
-expect = "test-failed"
-suite = "rust"
 message = "this invocation must not fetch"
 transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "            // daemon as the image's (#249). `build_request_from` takes no binary here.\n            None if args.artifact_uri.is_some() => None,\n", with = "            // daemon as the image's (#249). `build_request_from` takes no binary here.\n" }
 
 # The live section's two checks, through the self-test's probes: a sentinel the check stops
 # reading lets an overwrite pass, and a report with nothing in it must still fail.
-[[fault]]
-id = "conformance-caller-artifact-gaps"
+[[family]]
 guard = "conformance/run_rs.py --self-test: conformance/selftest/caller_artifact.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "conformance-caller-artifact-gaps"
 message = "FAIL  each caller-artifact check fails on the one gap it is about"
 transform = { file = "conformance/lanes/caller_artifact.py", replace = "    marked = (after.get(\"Metadata\") or {}).get(\"conformance-sentinel\") == sentinel\n", with = "    marked = True\n" }
 
-[[fault]]
+[[family.fault]]
 id = "conformance-caller-artifact-empty"
-guard = "conformance/run_rs.py --self-test: conformance/selftest/caller_artifact.py"
-run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL  the caller-artifact checks fail on an empty report"
 transform = { file = "conformance/lanes/caller_artifact.py", replace = "    present = bool(before) and bool(after) and bool(sentinel)\n", with = "    present = True\n" }
 
 # Round 1: the driver and its cleanup, through the self-test's fake account. A build run with the
 # bucket dropped from its environment passes on the unfixed CLI, a check that stops reading the
 # build's stderr can't tell, and a cleanup that ignores the build's ARN trusts an empty listing.
-[[fault]]
+[[family.fault]]
 id = "conformance-caller-artifact-driver-bucket"
-guard = "conformance/run_rs.py --self-test: conformance/selftest/caller_artifact.py"
-run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL  the caller-artifact driver and cleanup fail exactly where each account misleads them"
 transform = { file = "conformance/lanes/caller_artifact.py", replace = "            proc = cli.run_process(argv, 50 * 60)\n", with = "            proc = cli.run_process(argv, 50 * 60, {k: v for k, v in os.environ.items() if k != \"MICROVM_BUCKET\"})\n" }
 
-[[fault]]
+[[family.fault]]
 id = "conformance-caller-artifact-stderr-unread"
-guard = "conformance/run_rs.py --self-test: conformance/selftest/caller_artifact.py"
-run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL  each caller-artifact check fails on the one gap it is about"
 transform = { file = "conformance/lanes/caller_artifact.py", replace = "        report.get(\"saidUnused\") is True,\n", with = "        True,\n" }
 
-[[fault]]
+[[family.fault]]
 id = "conformance-caller-artifact-arn-ignored"
-guard = "conformance/run_rs.py --self-test: conformance/selftest/caller_artifact.py"
-run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
-expect = "exit-nonzero"
-suite = "script"
 message = "a hidden image that won't delete: failed []"
 transform = { file = "conformance/lanes/caller_artifact.py", replace = "        by_arn = caller_artifact_image_state(plane, arn)\n        if by_arn is not None and arn:\n", with = "        by_arn = None\n        if by_arn is not None and arn:\n" }

@@ -48,39 +48,29 @@ transform = { file = "crates/model/src/exec_start.rs", replace = "Layering::Spec
 # The daemon model's token properties (#305), one per key the trace credits to it: each fault
 # changes one response of the model, and only that key's property reports a counterexample
 # (stateright names the first one it finds).
-[[fault]]
-id = "model-agentd-2-first-bootstrap-refused"
+[[family]]
 guard = "tests::correct_deployment_satisfies_every_property"
 run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "tests::correct_deployment_satisfies_every_property"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "model-agentd-2-first-bootstrap-refused"
 message = "\"AGENTD-2 the first bootstrap installs its token\" counterexample"
 transform = { file = "crates/model/src/lib.rs", replace = "                        next.boot = Boot::Ready { token, by: from };\n                        Response::Ok\n", with = "                        next.boot = Boot::Ready { token, by: from };\n                        Response::Conflict\n" }
 
-[[fault]]
+[[family.fault]]
 id = "model-agentd-4-replay-refused"
-guard = "tests::correct_deployment_satisfies_every_property"
-run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "tests::correct_deployment_satisfies_every_property"]
-expect = "test-failed"
-suite = "rust"
 message = "\"AGENTD-4 a bootstrap presenting the installed token is accepted\" counterexample"
 transform = { file = "crates/model/src/lib.rs", replace = "                    } if installed == token => Response::Ok,\n", with = "                    } if installed == token => Response::Conflict,\n" }
 
-[[fault]]
+[[family.fault]]
 id = "model-agentd-5-wrong-token-unavailable"
-guard = "tests::correct_deployment_satisfies_every_property"
-run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "tests::correct_deployment_satisfies_every_property"]
-expect = "test-failed"
-suite = "rust"
 message = "\"AGENTD-5 a control request presenting another token is refused\" counterexample"
 transform = { file = "crates/model/src/lib.rs", replace = "                Some(installed) if installed != token => Response::Unauthorized,\n", with = "                Some(installed) if installed != token => Response::Unavailable,\n" }
 
-[[fault]]
+[[family.fault]]
 id = "model-agentd-6-poll-refused"
-guard = "tests::correct_deployment_satisfies_every_property"
-run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "tests::correct_deployment_satisfies_every_property"]
-expect = "test-failed"
-suite = "rust"
 message = "\"AGENTD-6 a control request presenting the installed token is accepted\" counterexample"
 transform = { file = "crates/model/src/lib.rs", replace = "                        ControlOp::ExecPoll(_) => Response::Ok,\n", with = "                        ControlOp::ExecPoll(_) => Response::Unauthorized,\n" }
 
@@ -89,71 +79,49 @@ transform = { file = "crates/model/src/lib.rs", replace = "                     
 # (they come first in the list, and stateright reports the first).
 
 # An accepted launch records no image.
-[[fault]]
-id = "model-client-state-1-no-image"
+[[family]]
 guard = "client::tests::a_guarded_client_satisfies_every_property"
 run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "client::tests::a_guarded_client_satisfies_every_property"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "model-client-state-1-no-image"
 message = "\"STATE-1 an accepted launch leaves the VM PENDING with its image recorded\" counterexample"
 transform = { file = "crates/model/src/client.rs", replace = "next.image_exists = true;", with = "next.image_exists = last.image_exists;" }
 
 # A successful hook installs no token.
-[[fault]]
+[[family.fault]]
 id = "model-client-state-2-token-not-installed"
-guard = "client::tests::a_guarded_client_satisfies_every_property"
-run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "client::tests::a_guarded_client_satisfies_every_property"]
-expect = "test-failed"
-suite = "rust"
 message = "\"STATE-2 a successful hook leaves the VM RUNNING with its token installed\" counterexample"
 transform = { file = "crates/model/src/client.rs", replace = "next.token_installed = true;", with = "next.token_installed = last.token_installed;" }
 
 # An accepted suspend jumps straight to SUSPENDED.
-[[fault]]
+[[family.fault]]
 id = "model-client-state-4-suspend-skips-suspending"
-guard = "client::tests::a_guarded_client_satisfies_every_property"
-run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "client::tests::a_guarded_client_satisfies_every_property"]
-expect = "test-failed"
-suite = "rust"
 message = "\"STATE-4 an accepted suspend leaves the VM SUSPENDING\" counterexample"
 transform = { file = "crates/model/src/client.rs", replace = "next.vm_state = VmState::Suspending;", with = "next.vm_state = VmState::Suspended;" }
 
 # A reported suspension leaves the VM SUSPENDING.
-[[fault]]
+[[family.fault]]
 id = "model-client-state-6-suspension-stays-suspending"
-guard = "client::tests::a_guarded_client_satisfies_every_property"
-run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "client::tests::a_guarded_client_satisfies_every_property"]
-expect = "test-failed"
-suite = "rust"
 message = "\"STATE-6 a reported suspension leaves the VM SUSPENDED\" counterexample"
 transform = { file = "crates/model/src/client.rs", replace = "next.vm_state = VmState::Suspended;", with = "next.vm_state = VmState::Suspending;\n                    next.cycles += 0;" }
 
 # A completed resume leaves the VM SUSPENDED.
-[[fault]]
+[[family.fault]]
 id = "model-client-state-7-resume-stays-suspended"
-guard = "client::tests::a_guarded_client_satisfies_every_property"
-run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "client::tests::a_guarded_client_satisfies_every_property"]
-expect = "test-failed"
-suite = "rust"
 message = "\"STATE-7 a completed resume leaves the VM RUNNING\" counterexample"
 transform = { file = "crates/model/src/client.rs", replace = "next.vm_state = VmState::Running;\n                    next.resume_in_flight = false;", with = "next.resume_in_flight = false;" }
 
 # An accepted terminate jumps straight to TERMINATED.
-[[fault]]
+[[family.fault]]
 id = "model-client-state-9-terminate-skips-terminating"
-guard = "client::tests::a_guarded_client_satisfies_every_property"
-run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "client::tests::a_guarded_client_satisfies_every_property"]
-expect = "test-failed"
-suite = "rust"
 message = "\"STATE-9 an accepted terminate leaves the VM TERMINATING and recorded terminated\" counterexample"
 transform = { file = "crates/model/src/client.rs", replace = "next.vm_state = VmState::Terminating;", with = "next.vm_state = VmState::Terminated;" }
 
 # A reported termination leaves the VM TERMINATING.
-[[fault]]
+[[family.fault]]
 id = "model-client-state-10-termination-stays-terminating"
-guard = "client::tests::a_guarded_client_satisfies_every_property"
-run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "client::tests::a_guarded_client_satisfies_every_property"]
-expect = "test-failed"
-suite = "rust"
 message = "\"STATE-10 a reported termination leaves the VM TERMINATED\" counterexample"
 transform = { file = "crates/model/src/client.rs", replace = "next.vm_state = VmState::Terminated;", with = "next.vm_state = VmState::Terminating;" }

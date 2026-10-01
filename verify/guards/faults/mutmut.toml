@@ -3,177 +3,115 @@
 # repos hand the gate a fake mutmut's verdicts (and, for the hashes, the real mutmut's).
 
 # The ratchet itself: a changed function whose survivors grow reads as a pass.
-[[fault]]
-id = "mutmut-growth-passes"
+[[family]]
 guard = "test_check_mutmut.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "mutmut-growth-passes"
 message = "FAIL: test_a_function_whose_survivors_grow_fails_and_shows_each ("
 transform = { file = "tools/check-mutmut.py", replace = "            if len(head.counted) > before:\n", with = "            if False:\n" }
 
 # The floor: a run that wrote no results reads as a script with nothing to mutate.
-[[fault]]
+[[family.fault]]
 id = "mutmut-missing-results-pass"
-guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_no_results_from_a_run_that_passed_fails ("
 transform = { file = "tools/check-mutmut.py", replace = "        data = json.loads(meta.read_bytes())\n", with = "        data = json.loads(meta.read_bytes()) if meta.exists() else {\"exit_code_by_key\": {}}\n" }
 
 # Results that name another module's mutants read as this script's.
-[[fault]]
+[[family.fault]]
 id = "mutmut-stray-results-pass"
-guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_results_that_name_another_modules_mutants_fail ("
 transform = { file = "tools/check-mutmut.py", replace = "    if strays:\n", with = "    if False:\n" }
 
 # A mutant the run never finished reads as one of the statuses mutmut gives a verdict.
-[[fault]]
+[[family.fault]]
 id = "mutmut-no-verdict-counts"
-guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_mutant_the_run_left_without_a_verdict_fails ("
 transform = { file = "tools/check-mutmut.py", replace = "        if code in UNREAD:\n", with = "        if False:\n" }
 
 # The sentinel: hashes that aren't mutmut's make the changed functions read here not the ones
 # mutmut mutates. The case that holds them to mutmut's own function sees it.
-[[fault]]
+[[family.fault]]
 id = "mutmut-hashes-not-mutmuts"
-guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_function_hashes_are_mutmuts ("
 transform = { file = "tools/check-mutmut.py", replace = "DUMP = {\"annotate_fields\": False}\n", with = "DUMP = {\"annotate_fields\": True}\n" }
 
 # A pragma with no reason passes.
-[[fault]]
+[[family.fault]]
 id = "mutmut-pragma-reason-unchecked"
-guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_each_changed_scripts_bare_pragma_fails_before_mutmut_runs ("
 transform = { file = "tools/check-mutmut.py", replace = "        and not REASONED.search(token.string)\n", with = "        and False\n" }
 
 # A pathspec that matches nothing: every change reads as no script changed, and CI's first step
 # answers `false`.
-[[fault]]
+[[family.fault]]
 id = "mutmut-scripts-pathspec-empty"
-guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_the_jobs_steps_ask_the_script_and_run_it_as_these_cases_do ("
 transform = { file = "tools/check-mutmut.py", replace = "SCRIPTS = \":(glob)tools/*.py\"\n", with = "SCRIPTS = \":(glob)tools/*.pyx\"\n" }
 
 # A suite that stops loading its script under mutmut's name stops the script's measurement, and
 # that reads as a script nothing measures.
-[[fault]]
+[[family.fault]]
 id = "mutmut-dropped-suite-passes"
-guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_suite_that_stops_naming_its_script_fails ("
 transform = { file = "tools/check-mutmut.py", replace = "        elif script.base_suites:\n", with = "        elif False:\n" }
 
 # An exit code mutmut doesn't name reads as a caught mutant instead of a count that can't be read.
-[[fault]]
+[[family.fault]]
 id = "mutmut-unnamed-code-caught"
-guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_an_exit_code_mutmut_doesnt_name_fails ("
 transform = { file = "tools/check-mutmut.py", replace = "        if code not in STATUS and -code not in SIGNALS:\n", with = "        if False:\n" }
 
 # Each run mutated every function of the script: check-guards-fire.py's mutated copy came to 40
 # MB, and mutmut took 22 minutes to write it for a run that tested one function's mutants.
-[[fault]]
+[[family.fault]]
 id = "mutmut-unchanged-functions-mutated"
-guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_the_real_mutmut_counts_an_untested_change_and_agrees_on_the_hashes ("
 transform = { file = "tools/check-mutmut.py", replace = "                    starts.add(node.lineno)\n", with = "                    pass\n" }
 
 # The sentinel of the marking: the changed function marked instead, so mutmut writes no mutant of
 # it and its count reads as none.
-[[fault]]
+[[family.fault]]
 id = "mutmut-changed-function-marked"
-guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_the_real_mutmut_counts_an_untested_change_and_agrees_on_the_hashes ("
 transform = { file = "tools/check-mutmut.py", replace = "if cls else f\"x_{node.name}\") not in keep:\n", with = "if cls else f\"x_{node.name}\") in keep:\n" }
 
 # A suite that runs its script from another directory fails mutmut's stats pass.
-[[fault]]
+[[family.fault]]
 id = "mutmut-stats-mark-reaches-children"
-guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_suite_that_runs_its_script_from_another_directory_is_measured ("
 transform = { file = "tools/check-mutmut.py", replace = "    env[\"PYTHONPATH\"] = os.pathsep.join(\n", with = "    env[\"UNUSED\"] = os.pathsep.join(\n" }
 
 # A suite's state from one pass reaches the next.
-[[fault]]
+[[family.fault]]
 id = "mutmut-pass-state-shared"
-guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_suites_state_doesnt_outlive_a_pass ("
 transform = { file = "tools/check-mutmut.py", replace = "process_isolation = forkserver\n", with = "" }
 
 # mutmut's stop when no test reached a mutant reads as a failed run.
-[[fault]]
+[[family.fault]]
 id = "mutmut-none-reached-fails"
-guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_base_no_in_process_test_reached_holds_the_head_to_no_count ("
 transform = { file = "tools/check-mutmut.py", replace = "    stopped = NONE_REACHED.encode() in ", with = "    stopped = False and NONE_REACHED.encode() in " }
 
 # A base no in-process test reached reads as a count of none, so the change that adds the first
 # such test fails for what it leaves alive.
-[[fault]]
+[[family.fault]]
 id = "mutmut-unreached-base-counts"
-guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_base_no_in_process_test_reached_holds_the_head_to_no_count ("
 transform = { file = "tools/check-mutmut.py", replace = "            elif base and base.total and base.unreached == base.total:\n", with = "            elif False:\n" }
 
 # The base measures every changed function it has, including the ones none survives in.
-[[fault]]
+[[family.fault]]
 id = "mutmut-base-for-every-function"
-guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_changed_function_none_survives_in_isnt_measured_on_the_base ("
 transform = { file = "tools/check-mutmut.py", replace = "                survived := [k for k in s.on_base if heads[(s.change.path, k)].counted]\n", with = "                survived := list(s.on_base)\n" }
 
 # The glob that names only mutants, which leaves mutmut no tests to run clean but every suite.
-[[fault]]
+[[family.fault]]
 id = "mutmut-glob-misses-the-function"
-guard = "test_check_mutmut.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_each_side_mutates_only_the_changed_functions_with_their_suites ("
 transform = { file = "tools/check-mutmut.py", replace = "    globs = [f\"{module_name(p)}.{k}*\" for p, keys", with = "    globs = [f\"{module_name(p)}.{k}__mutmut_*\" for p, keys" }
