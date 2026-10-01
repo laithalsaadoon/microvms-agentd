@@ -18,7 +18,11 @@ from lanes.posture import EXECUTION_ROLE_ACTION_PREFIX, execution_role_actions
 from lanes.quickstart import digest_record_agrees
 
 from selftest.caller_artifact import check_caller_artifact_section
-from selftest.closed_output import check_bdd_outcome, check_closing_reader_helper
+from selftest.closed_output import (
+    check_bdd_outcome,
+    check_cli8_attribution,
+    check_closing_reader_helper,
+)
 from selftest.cost import check_cost_checks
 from selftest.ensure_image import check_ensure_image_section
 from selftest.harness import check_run_section
@@ -50,6 +54,7 @@ def self_test() -> int:
         results = Results()
         check_log_privacy(cli, results, Path(tmp))
         check_closing_reader_helper(results)
+        check_cli8_attribution(results)
         check_run_section(results)
         check_terminate_fallback(results)
         check_bdd_outcome(results)

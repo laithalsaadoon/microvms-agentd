@@ -1,0 +1,31 @@
+# ── CLI-8's live attribution of the run's VM, offline (#216) ───────────────────────────
+
+# The window counts listing entries again, so the run's VM on two pages reads as two launches.
+[[fault]]
+id = "conformance-cli8-counts-listing-entries"
+guard = "conformance/selftest/closed_output.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  CLI-8's window names a VM listed on two pages once"
+transform = { file = "conformance/lanes/closed_output.py", replace = "    return {\n        item[\"microvmId\"]\n        for item in items\n", with = "    return {\n        (item[\"microvmId\"], id(item))\n        for item in items\n" }
+
+# The image is matched as a substring again, so an image that only starts with the suite's counts.
+[[fault]]
+id = "conformance-cli8-image-substring"
+guard = "conformance/selftest/closed_output.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  CLI-8's window names a VM listed on two pages once"
+transform = { file = "conformance/lanes/closed_output.py", replace = "        and (item.get(\"imageArn\") or \"\").rsplit(\":\", 1)[-1] == image_name\n", with = "        and image_name in (item.get(\"imageArn\") or \"\")\n" }
+
+# The history reader reads nothing, so the check can't name the run's VM.
+[[fault]]
+id = "conformance-cli8-history-unread"
+guard = "conformance/selftest/closed_output.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  CLI-8 reads the run's VM from its history, and no history as none"
+transform = { file = "conformance/lanes/closed_output.py", replace = "        for path in sorted(history.glob(\"*.jsonl\"))\n", with = "        for path in sorted(history.glob(\"*.json\"))\n" }

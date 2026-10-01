@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 import boto3
 from harness.cli import Cli, attach_args
@@ -65,6 +66,55 @@ def run_with_closing_reader(
     )
 
 
+def run_history_vms(state_dir: Path) -> dict[str, list[dict[str, Any]]]:
+    """The VMs a `run` recorded in its own history, each with its events, in id order.
+
+    `run` writes `<state-dir>/history/<vm-id>.jsonl` for the VM it launched whatever its
+    stdout did, and keeps the file after a clean teardown, when the ledger record is deleted.
+    So this is the run's own account of which VM was its, which no listing of the account
+    gives. A state directory with no history reads as no VM, which the caller fails on.
+    """
+    history = Path(state_dir) / "history"
+    if not history.is_dir():
+        return {}
+    return {
+        path.stem: [
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        for path in sorted(history.glob("*.jsonl"))
+    }
+
+
+def launched_in_window(
+    items: list[dict[str, Any]],
+    image_name: str,
+    shared: str,
+    earliest: datetime,
+    latest: datetime,
+) -> set[str]:
+    """The distinct VMs from `image_name`, other than `shared`, that started in the window.
+
+    A set of ids rather than a count of listing entries: measured 2026-10-01, us-east-1, API
+    2025-09-09, one paginated `ListMicrovms` taken while other VMs were changing state
+    returned the same VM on two of its pages (CloudTrail shows the check's two `GetMicrovm`
+    calls for that one id), and counting entries read one launch as two. The image is the
+    ARN's last colon segment, compared whole, so an image whose name only starts with the
+    suite's isn't counted. The window is
+    bounded at both ends: the suite runs one section at a time, so a VM started between the
+    run's start and its exit is the run's or a second launch it made.
+    """
+    return {
+        item["microvmId"]
+        for item in items
+        if item.get("microvmId") != shared
+        and (item.get("imageArn") or "").rsplit(":", 1)[-1] == image_name
+        and item.get("startedAt") is not None
+        and earliest <= item["startedAt"] <= latest
+    }
+
+
 def drive_closed_output(cli: Cli, launched: Envelope, results: Results) -> None:
     """CLI-8 and CLI-9 (#216) through a real VM: a stdout reader that leaves early.
 
@@ -75,8 +125,10 @@ def drive_closed_output(cli: Cli, launched: Envelope, results: Results) -> None:
 
     CLI-8: a `run` that launches and tears down, with stdout closed before its only write,
     still tears the VM down and exits with its own outcome — success — rather than a failure
-    that would invite a retry and a second launch. That VM is its own, found afterwards by
-    image and launch time, and is terminated here if the run left it alive.
+    that would invite a retry and a second launch. Its VM is the one its own history under
+    `--state-dir` names, since its stdout is gone; the account's listing must show that VM and
+    no other from the suite image started while the run ran, which is what catches a second
+    launch. Each one still alive afterwards is terminated here.
 
     No run may panic or die by signal (CLI-7). About one launch of cost on top of the shared VM.
     """
@@ -157,23 +209,35 @@ def drive_closed_output(cli: Cli, launched: Envelope, results: Results) -> None:
             run.returncode,
             0,
         )
+        launched_until = datetime.now(timezone.utc)
         plane = boto3.Session(region_name=cli.region).client(SERVICE)
-        shared = str(launched.data.get("microvmId") or "")
-        earliest = launched_after - timedelta(seconds=5)
-        mine = [
-            item["microvmId"]
-            for page in plane.get_paginator("list_microvms").paginate()
-            for item in page.get("items", [])
-            if item.get("microvmId") != shared
-            and image.rsplit(":", 1)[-1] in (item.get("imageArn") or "")
-            and item.get("startedAt") is not None
-            and item["startedAt"] >= earliest
-        ]
-        states = {vm: plane.get_microvm(microvmIdentifier=vm)["state"] for vm in mine}
+        history = run_history_vms(Path(state_dir))
+        own = next(iter(history)) if len(history) == 1 else None
+        recorded = own is not None and any(
+            event.get("event") == "launched" for event in history[own]
+        )
+        window = launched_in_window(
+            [
+                item
+                for page in plane.get_paginator("list_microvms").paginate()
+                for item in page.get("items", [])
+            ],
+            image.rsplit(":", 1)[-1],
+            str(launched.data.get("microvmId") or ""),
+            launched_after - timedelta(seconds=5),
+            launched_until + timedelta(seconds=5),
+        )
+        states = {
+            vm: plane.get_microvm(microvmIdentifier=vm)["state"]
+            for vm in sorted(window | ({own} if own else set()))
+        }
         results.check(
             "CLI-8 a run with a closed stdout still tore its VM down",
-            len(mine) == 1 and set(states.values()) <= {"TERMINATING", "TERMINATED"},
-            f"{len(mine)} VM(s) launched by the run, states={sorted(states.values())}",
+            recorded
+            and window == {own}
+            and states.get(own) in {"TERMINATING", "TERMINATED"},
+            f"history names {sorted(history)}, the run's window holds {sorted(window)}, "
+            f"states={states}",
         )
         for vm, state in states.items():
             if state not in {"TERMINATING", "TERMINATED"}:
