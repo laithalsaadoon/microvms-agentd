@@ -955,6 +955,11 @@ class TracedFiles(unittest.TestCase):
         )
 
 
+def seeded_sentences() -> dict[str, str]:
+    """The real specs' sentences and one more, TRAP-99, which no traced file lists."""
+    return {**TRACE["spec_keys"](), "TRAP-99": "A seeded requirement."}
+
+
 class ReadPastRefusals(unittest.TestCase):
     """A refused traced file fails the run without hiding the rest: the other files' entries,
     the layers and the threat table are still held, and its problems print first."""
@@ -1015,8 +1020,9 @@ class ReadPastRefusals(unittest.TestCase):
         )
 
     def test_a_refused_file_prints_first_and_the_other_entries_are_still_held(self):
+        # The refused file gives up no entry, as `read_traced` leaves it.
         entries = {
-            **self.real(),
+            **{k: v for k, v in self.real().items() if not k.startswith("IMAGE-")},
             "CLI-99": Traced("#1", {}, "verify/spec/traced/CLI.toml"),
         }
         refusal = "verify/spec/traced/IMAGE.toml doesn't parse: Expected ']'"
@@ -1031,21 +1037,100 @@ class ReadPastRefusals(unittest.TestCase):
             "spec",
             lines,
         )
-        # The matrix reads every file, so nothing is compared with the doc.
+        # The matrix reads every file, so nothing is compared with the doc, and the keys no
+        # file lists wait for a whole load: the refused file's keys would all read as unlisted.
         self.assertFalse(any("is stale" in line for line in lines), lines)
+        self.assertFalse(any("is defined in a spec" in line for line in lines), lines)
 
     def test_a_stale_doc_is_reported_beside_another_problem(self):
+        # The seeded key, traced with no layer: a problem, and a matrix row the doc lacks.
+        sentences = seeded_sentences()
         entries = self.real()
-        untraced = sorted(set(TRACE["spec_keys"]()) - set(entries))[0]
-        entries[untraced] = Traced("#1", {}, "verify/spec/traced/X.toml")
+        entries["TRAP-99"] = Traced("#1", {}, "verify/spec/traced/TRAP.toml")
+        code, err = self.run_main(
+            {
+                "spec_keys": lambda: sentences,
+                "read_traced": lambda directory, groups, root=ROOT: (entries, []),
+            }
+        )
+        self.assertEqual(code, 1)
+        self.assertRegex(err, r"trace: TRAP-99 has no \w+ layer")
+        self.assertIn(
+            "trace: docs/TRACEABILITY.md is stale: run ./tools/check-trace.py --write",
+            err,
+        )
+
+
+class EveryKeyIsTraced(unittest.TestCase):
+    """Every key a spec defines is listed in its group's file, with a layer no waiver takes
+    away: the rule the ratchet's untraced category is enforced by."""
+
+    run_main = ReadPastRefusals.run_main
+    real = ReadPastRefusals.real
+    untraced = staticmethod(TRACE["untraced"])
+
+    def test_a_spec_key_no_file_lists_fails_naming_the_file_that_would(self):
+        sentences = seeded_sentences()
+        code, err = self.run_main({"spec_keys": lambda: sentences})
+        self.assertEqual(code, 1)
+        # The only problem: the matrix renders listed keys, so the doc isn't stale.
+        self.assertEqual(
+            err.splitlines(),
+            [
+                "trace: TRAP-99 is defined in a spec, but no file in verify/spec/traced/ "
+                "lists it: list it in verify/spec/traced/TRAP.toml with each layer, or a "
+                "waiver and its reason"
+            ],
+        )
+
+    def test_a_key_that_waives_every_layer_fails(self):
+        entries = self.real()
+        layers = TRACE["LAYERS"]
+        entries["CLI-9"] = Traced(
+            "#216", dict.fromkeys(layers, "seeded"), "verify/spec/traced/CLI.toml"
+        )
         code, err = self.run_main(
             {"read_traced": lambda directory, groups, root=ROOT: (entries, [])}
         )
         self.assertEqual(code, 1)
-        self.assertRegex(err, rf"trace: {untraced} has no \w+ layer")
         self.assertIn(
-            "trace: docs/TRACEABILITY.md is stale: run ./tools/check-trace.py --write",
-            err,
+            "trace: verify/spec/traced/CLI.toml: CLI-9 waives every layer, so no layer "
+            "checks it: trace at least one",
+            err.splitlines(),
+        )
+
+    def test_one_layer_left_unwaived_is_traced(self):
+        layers = TRACE["LAYERS"]
+        entries = {
+            "CLI-9": Traced(
+                "#216",
+                dict.fromkeys(layers[1:], "seeded"),
+                "verify/spec/traced/CLI.toml",
+            )
+        }
+        self.assertEqual(self.untraced({"CLI-9": ""}, entries), [])
+
+    def test_the_unlisted_keys_wait_for_a_whole_load(self):
+        # A refused file's keys would all read as unlisted, repeating its refusal; a key that
+        # waives every layer is still reported, since its entry loaded.
+        layers = TRACE["LAYERS"]
+        entries = {
+            "CLI-9": Traced(
+                "#216", dict.fromkeys(layers, "seeded"), "verify/spec/traced/CLI.toml"
+            )
+        }
+        waived = "verify/spec/traced/CLI.toml: CLI-9 waives every layer, so no layer checks it: trace at least one"
+        self.assertEqual(
+            self.untraced({"CLI-9": "", "IMAGE-8": ""}, entries, whole=False), [waived]
+        )
+        self.assertEqual(
+            self.untraced({"CLI-9": "", "IMAGE-8": ""}, entries),
+            [
+                waived,
+                "IMAGE-8 is defined in a spec, but no file in verify/spec/traced/ lists it: "
+                "list it in verify/spec/traced/IMAGE.toml with each layer, or a waiver and "
+                "its reason",
+            ],
         )
 
 
