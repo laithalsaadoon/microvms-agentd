@@ -205,9 +205,8 @@ pub enum Command {
     ///
     /// `cp ./local vm:/remote` writes, `cp vm:/remote ./local` reads. `--tar` moves a whole
     /// directory tree instead of one file: the `vm:` side is then a directory the daemon packs or
-    /// extracts, and the local side is a `.tar` file — because neither this binary nor
-    /// `microvms-core` carries a tar library, which keeps the daemon's confined extractor the only
-    /// extractor in the system.
+    /// extracts, and the local side is a `.tar` file moved as bytes, never packed or unpacked
+    /// here, so the daemon's confined extractor is the one that unpacks an upload.
     Cp(CpArgs),
 
     /// Sync a project directory into a running MicroVM's /workspace, uploading only what changed.
@@ -1630,13 +1629,12 @@ pub struct CpArgs {
     /// /v1/fs/tar` extracts into one through the confined extractor. So `cp vm:/workspace
     /// out.tar --tar` archives a tree, and `cp out.tar vm:/restored --tar` recreates it.
     ///
-    /// The **local** side is a `.tar` **file**, and that asymmetry is a real limitation rather
-    /// than a choice: `crates/microvms-app/src/session/files.rs:112` declines to add a tar library
-    /// because Rust's standard library has no equivalent of Python tarfile's `data` filter,
-    /// and "an extraction that looked safe and was not is worse than none". This binary
-    /// declines for the same reason plus a stronger one — the daemon's extractor is currently
-    /// the *only* extractor in the system, and a second one here would be a second set of
-    /// member rules to keep in step. Unpack a downloaded archive with your own `tar xf`.
+    /// The **local** side is a `.tar` **file**, moved as bytes: an upload's archive reaches the
+    /// daemon unexamined, so its confined extractor is the one that runs (and the one the
+    /// hostile-archive checks test), and a download is written as the daemon sent it. Unpack one
+    /// with your own `tar xf`. To bring a tree's files back unpacked, `run <DIR>`'s artifacts go
+    /// through core's guarded extraction, which writes only glob-selected regular files, never
+    /// under `.git` and never outside the destination.
     ///
     /// Members are stored relative to the packed directory, so they land flattened under the
     /// destination: a `link` inside `/workspace` extracts to `<dest>/link`. That is what makes

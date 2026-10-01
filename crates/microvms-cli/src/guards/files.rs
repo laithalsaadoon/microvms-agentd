@@ -166,7 +166,9 @@ async fn a_download_writes_the_raw_bytes_to_the_local_path() {
 /// would have written it — built by the same hasher the command runs, because the guard's
 /// question is the *transport* consequence of a matching manifest, not the hashing.
 fn manifest_body_for(dir: &std::path::Path) -> String {
-    let manifest = crate::sync::manifest(dir).expect("the tree manifests");
+    let manifest =
+        microvms_core::workspace::LocalTree::manifest(&microvms_core::workspace::DiskTree, dir)
+            .expect("the tree manifests");
     String::from_utf8(serde_json::to_vec(&manifest).expect("serializes")).expect("utf8")
 }
 
@@ -215,7 +217,7 @@ async fn a_second_sync_of_an_unchanged_tree_sends_no_archive() {
 ///
 /// The 404 is the daemon's honest "nothing there", and the command's answer is the whole
 /// contract in one request log: tar the tree up, then persist its description. The
-/// manifest travels to [`crate::sync::MANIFEST_PATH`] — inside the workspace, so a
+/// manifest travels to [`microvms_core::workspace::MANIFEST_PATH`], inside the workspace, so a
 /// workload that wipes the workspace also wipes the description of it.
 #[tokio::test]
 async fn a_first_sync_uploads_everything_and_writes_the_guest_manifest() {
@@ -262,7 +264,7 @@ async fn a_first_sync_uploads_everything_and_writes_the_guest_manifest() {
         "the manifest lands beside the tree it describes: {}",
         requests[2].path
     );
-    let written: crate::sync::Manifest =
+    let written: microvms_core::workspace::Manifest =
         serde_json::from_slice(&requests[2].body).expect("the written manifest parses");
     assert!(written.files.contains_key("app.py"), "{written:?}");
 }
@@ -281,7 +283,9 @@ async fn an_edit_uploads_only_the_change_and_deletes_what_vanished() {
 
     // The guest manifest: `same.txt` current, `edited.txt` stale, `removed.txt` present
     // remotely and absent locally.
-    let mut remote = crate::sync::manifest(&dir.0).expect("manifests");
+    let mut remote =
+        microvms_core::workspace::LocalTree::manifest(&microvms_core::workspace::DiskTree, &dir.0)
+            .expect("manifests");
     remote
         .files
         .insert("edited.txt".into(), "0".repeat(64))
@@ -298,12 +302,16 @@ async fn an_edit_uploads_only_the_change_and_deletes_what_vanished() {
         .reply(200, &poll_body("acked", "0", "", false)) // rm acked
         .reply(200, ""); // the manifest write
 
-    let (result, _, _) = against_daemon(&script, &sync_command(&dir.0, |_| {})).await;
+    let (result, _, stderr) = against_daemon(&script, &sync_command(&dir.0, |_| {})).await;
     let rendered = result.expect("an incremental sync succeeds");
 
     assert_eq!(rendered.data["uploadedMembers"], 1);
     assert_eq!(rendered.data["deleted"], 1);
     assert_eq!(rendered.data["full"], false);
+    assert!(
+        !stderr.contains("skipping"),
+        "a plain deletion refused nothing, so nothing is named: {stderr}"
+    );
 
     let requests = script.requests();
     let archive = &requests[1].body;
@@ -336,13 +344,13 @@ async fn an_edit_uploads_only_the_change_and_deletes_what_vanished() {
 /// **A hostile guest manifest cannot order deletions outside the workspace.**
 ///
 /// The manifest is read *from the VM*, and the VM is where untrusted work runs — the same
-/// trust direction [`crate::sync::extract_artifacts`] defends on the download path. A
+/// trust direction [`microvms_core::workspace::LocalTree::extract`] defends on the download path. A
 /// workload that rewrites the manifest to claim `../../etc/passwd` and `/root/.ssh/key`
 /// were synced is asking this CLI to run `rm -rf` on them on its behalf. Both are
 /// filtered before the exec is built; with no legitimate deletion left, **no exec starts
 /// at all**.
 ///
-/// **Falsification** — drop the `deletable` filter in `sync_pass` and this goes red at
+/// **Falsification**: drop the `deletable` filter in core's `Session::sync_pass` and this goes red at
 /// the unauthorized `POST /v1/exec/start`: the script holds no reply for an exec, so the
 /// scripted daemon panics with "ran out of replies" naming that request. Done on
 /// 2026-09-01; failed exactly there; restored.
@@ -351,7 +359,9 @@ async fn a_hostile_guest_manifest_cannot_order_deletions_outside_the_workspace()
     let dir = TempDir::new("sync-hostile-manifest");
     std::fs::write(dir.0.join("kept.txt"), b"still here").expect("writes");
 
-    let mut remote = crate::sync::manifest(&dir.0).expect("manifests");
+    let mut remote =
+        microvms_core::workspace::LocalTree::manifest(&microvms_core::workspace::DiskTree, &dir.0)
+            .expect("manifests");
     remote
         .files
         .insert("../../etc/passwd".into(), "2".repeat(64));

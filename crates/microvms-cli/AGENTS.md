@@ -27,8 +27,8 @@ belongs in a lower layer (root `AGENTS.md`, Architecture).
   seconds flag gets a row in `cli::tests::every_seconds_flag_refuses_what_is_not_a_duration`,
   since the ban doesn't see a silent zero spelled another way.
 - Known drift still lives here and each item has an issue: the `aws` upload in `seam.rs`
-  (#258), and directory sync's `tar`, `globset`, `sha2` and `const-hex` (#260). Move work
-  down; don't add to that list. A port implemented here (a `TokenMinter`, a `NameStore`)
+  (#258). Move work down; don't add to that list. Directory sync is core's
+  (`microvms_core::workspace`), and this crate calls it. A port implemented here (a `TokenMinter`, a `NameStore`)
   fails `ratchet:check`: use the edges' or the app's.
 
 Tests: `cargo test -p microvms-cli`. Live behavior goes through `conformance/run_rs.py`.

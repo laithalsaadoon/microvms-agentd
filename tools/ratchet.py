@@ -37,8 +37,9 @@ nothing else, and a change that adds drift fails whatever else it edits.
   one, which a reviewer sees with its reason, in any category but untraced. Two identical
   findings in one file share a key, so the key is decided once per occurrence.
 - `verify/arch/placement.toml`: each adapter's and layer's allowed set, and in a crate's
-  `drift` table its placement drift: the CLI's directory sync crates, which #260 moves below
-  it. Placement is `HELD` (below), so its drift is that record rather than a finding.
+  `drift` table its placement drift, work that belongs below it (none since #260 moved
+  directory sync into core). Placement is `HELD` (below), so its drift is that record rather
+  than a finding.
 
 Keys never carry a line number, so moving code inside a file changes nothing.
 
@@ -303,8 +304,8 @@ CATEGORIES = (*COLLECTED, *NOT_COLLECTED)
 
 #: Where each category's rule goes once the category is empty (rule 4).
 PROMOTE = {
-    # dependency_direction.rs already holds every set exactly, the CLI's drift included, so once
-    # #260 clears that drift the promotion is only listing the category.
+    # dependency_direction.rs holds every set exactly, drift tables included, so with #260's
+    # drift gone the promotion was only listing the category.
     "placement": "crates/microvms-cli/tests/dependency_direction.rs, which holds every set exactly (#260)",
     "subprocess": "each crate's clippy.toml as a disallowed type (#285)",
     # These two stay in the ratchet's own ast-grep rules: once enforced, the collector is the

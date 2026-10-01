@@ -145,7 +145,6 @@ crates/microvms-cli/src/history.rs::unseen_hook_observations_append_once_and_a_r
 crates/microvms-cli/src/ledger.rs::clear_refuses_to_remove_a_ledger_that_still_names_a_live_resource
 crates/microvms-cli/src/render.rs::a_launch_with_no_exec_still_states_its_egress_posture
 crates/microvms-cli/src/render.rs::the_dense_cost_rendering_is_three_fields_and_no_total
-crates/microvms-cli/src/sync.rs::extraction_never_writes_under_the_local_git
 crates/microvms-cli/tests/dependency_direction.rs::each_layer_declares_exactly_the_features_it_is_allowed
 crates/microvms-cli/tests/exit_codes.rs::a_failure_with_progress_enabled_writes_one_json_document_on_stdout
 crates/microvms-cli/tests/exit_codes.rs::every_locally_reachable_row_exits_with_its_own_integer_and_code
