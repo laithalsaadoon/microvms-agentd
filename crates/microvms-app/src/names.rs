@@ -339,11 +339,39 @@ mod tests {
         let error = probe(&session, &stranger).await.expect_err("another token");
         assert_eq!(error.kind(), ErrorKind::InvalidArg, "{error}");
 
+        // The proof is of one triple: another id, endpoint or token each refuses the write.
+        let mut other_endpoint = record("ci", "mvm-1");
+        other_endpoint.endpoint = "https://other.example".into();
+        let mut other_token = record("ci", "mvm-1");
+        other_token.agent_token = "another-token".into();
+        for (row, other) in [
+            ("the probe of another VM", record("ci", "mvm-2")),
+            ("another endpoint", other_endpoint),
+            ("another token", other_token),
+        ] {
+            let (answering, _, _) = session_with(answered(200));
+            let probed = probe(&answering, &record("ci", "mvm-1"))
+                .await
+                .expect("probed");
+            let store = Memory::default();
+            let error = import_probed(&store, &other, probed).expect_err(row);
+            assert_eq!(error.kind(), ErrorKind::InvalidArg, "{row}: {error}");
+            assert!(
+                store.get("ci").expect("reads").is_none(),
+                "{row}: nothing written"
+            );
+        }
+    }
+
+    /// A proof's `Debug` names the VM it was of and never the token, a bearer credential.
+    #[tokio::test]
+    async fn a_probes_debug_names_the_vm_and_redacts_the_token() {
+        let (session, _, _) = session_with(answered(200));
         let probed = probe(&session, &record("ci", "mvm-1"))
             .await
             .expect("probed");
-        let error = import_probed(&Memory::default(), &record("ci", "mvm-2"), probed)
-            .expect_err("the probe of another VM");
-        assert_eq!(error.kind(), ErrorKind::InvalidArg, "{error}");
+        let shown = format!("{probed:?}");
+        assert!(shown.contains("mvm-1"), "{shown}");
+        assert!(!shown.contains("agent-token-abcdef"), "{shown}");
     }
 }
