@@ -96,14 +96,15 @@ impl CoreSeam for RecordingSessionSeam {
         region: Region,
         attach: Attach,
     ) -> BoxFuture<'_, Result<Session, Error>> {
+        // Attached with the triple it was handed, as the production seam is: core's probe
+        // proves the token a session carries, and refuses one attached with another (#270).
+        let built = Session::builder(attach.endpoint.clone(), attach.agent_token.clone())
+            .with_backend(Arc::clone(&self.script) as Arc<dyn microvms_core::session::HttpBackend>)
+            .build();
         self.seen
             .lock()
             .expect("not poisoned")
             .push((attach, region.as_str().to_string()));
-        let backend = Arc::clone(&self.script) as Arc<dyn microvms_core::session::HttpBackend>;
-        let built = Session::builder("https://mvm-1.example", "agent-token")
-            .with_backend(backend)
-            .build();
         Box::pin(async move { built })
     }
 

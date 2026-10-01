@@ -1568,6 +1568,17 @@ class NameRegistry:
         The record registered as `name`, or `None`. A file that exists but does not parse
         raises rather than reading as free: its name stays taken until someone inspects it.
         """
+    def import_record(self, /, record: NameRecord, session: Session) -> bool:
+        """
+        Registers a record this registry didn't write, once the VM has answered one
+        authenticated request with the record's token; returns whether it refreshed a record of
+        the same VM.
+        
+        `session` must be attached with the record's endpoint and token (`Session.attach` from
+        its fields). A name held by another VM, or by an unreadable file, is refused before any
+        request, and a probe the daemon refuses writes nothing. Core's `names::import`, the rule
+        `microvm attach` applies.
+        """
     def list(self, /) -> list[NameRecord]:
         """
         Every readable record, sorted by name.
