@@ -1,0 +1,65 @@
+# ── importing a name record: core writes only after the record's token answers (#270) ──
+# `names::import` refuses a taken name before any request, probes over a session attached with
+# the record's own token, and writes only with that probe's proof. Each entry breaks one link,
+# in core and through each binding's `import_record`.
+
+[[fault]]
+id = "app-import-writes-before-the-probe"
+guard = "names::tests::an_import_writes_only_after_the_vm_answers_with_the_records_token"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "names::tests::an_import_writes_only_after_the_vm_answers_with_the_records_token"]
+expect = "test-failed"
+suite = "rust"
+message = "nothing written"
+note = "crates/microvms-app/src/names.rs::an_import_writes_only_after_the_vm_answers_with_the_records_token"
+transform = { file = "crates/microvms-app/src/names.rs", replace = "    let probed = probe(session, record).await?;\n", with = "    store.put(record)?;\n    let probed = probe(session, record).await?;\n" }
+
+[[fault]]
+id = "app-probe-trusts-any-session"
+guard = "names::tests::a_probe_is_of_one_record_and_its_write_takes_only_that_one"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "names::tests::a_probe_is_of_one_record_and_its_write_takes_only_that_one"]
+expect = "test-failed"
+suite = "rust"
+message = "another token"
+transform = { file = "crates/microvms-app/src/names.rs", replace = "    if session.endpoint() != record.endpoint || session.agent_token() != record.agent_token {\n", with = "    if session.endpoint() != record.endpoint {\n" }
+
+[[fault]]
+id = "app-import-takes-another-probe"
+guard = "names::tests::a_probe_is_of_one_record_and_its_write_takes_only_that_one"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "names::tests::a_probe_is_of_one_record_and_its_write_takes_only_that_one"]
+expect = "test-failed"
+suite = "rust"
+message = "the probe of another VM"
+transform = { file = "crates/microvms-app/src/names.rs", replace = "    if probed.microvm_id != record.microvm_id\n", with = "    if false\n" }
+
+[[fault]]
+id = "app-import-overwrites-a-taken-name"
+guard = "names::tests::an_import_refuses_a_taken_name_before_any_request"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "names::tests::an_import_refuses_a_taken_name_before_any_request"]
+expect = "test-failed"
+suite = "rust"
+message = "the recorder ran out of replies at GET /v1/fs/file"
+transform = { file = "crates/microvms-app/src/names.rs", replace = "        Ok(Some(existing)) => NameHolder::Other(Some(existing.microvm_id)),\n", with = "        Ok(Some(_)) => NameHolder::Free,\n" }
+
+[[fault]]
+id = "py-import-record-skips-the-probe"
+guard = "bindings/microvms-py/tests/test_names.py::test_an_import_writes_only_after_the_vm_answers_with_the_records_token"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_names.py::test_an_import_writes_only_after_the_vm_answers_with_the_records_token"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "DID NOT RAISE"
+transform = { file = "bindings/microvms-py/src/names.rs", replace = "            crate::runtime::block_on_detached(microvms_core::names::import(\n                &store, &record, session,\n            ))\n", with = "            let _ = session;\n            store.put(&record).map(|()| microvms_core::names::Imported { replaced: false })\n" }
+
+[[fault]]
+id = "ts-import-record-skips-the-probe"
+guard = "an import writes only after the VM answers with the record token"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/names.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "Missing expected rejection"
+transform = { file = "bindings/microvms-js/src/names.rs", replace = "        let imported = microvms_core::names::import(\n            &self.store,\n            &record.inner,\n            live.session().map_err(js_async)?,\n        )\n        .await\n        .map_err(js_async)?;\n", with = "        let _ = live.session().map_err(js_async)?;\n        self.store.put(&record.inner).map_err(js_async)?;\n        let imported = microvms_core::names::Imported { replaced: false };\n" }

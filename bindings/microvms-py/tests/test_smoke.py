@@ -41,7 +41,7 @@ def report() -> microvms.CostReport:
 
 
 def test_estimated_usd_refuses_float() -> None:
-    """`float(usd)` raises. COST-2's whole point at the binding boundary.
+    """BIND-5: `float(usd)` raises. COST-2's whole point at the binding boundary.
 
     **Falsification** — add `def __float__` to `PyEstimatedUsd` (a `__float__` returning
     `self.inner.amount().to_f64()`) and this test goes green-to-red in one line. It is the
@@ -100,7 +100,7 @@ def test_the_amount_is_an_exact_string_a_caller_converts_deliberately() -> None:
 
 
 def test_duration_has_no_constructor_at_all() -> None:
-    """`Duration(...)` raises for **every** argument shape: there is no `__new__`.
+    """BIND-5: `Duration(...)` raises for **every** argument shape: there is no `__new__`.
 
     One rung stronger than `cost.py`, where `Duration(3600)` was a `TypeError` from a
     keyword-only field with no default. Here there is nothing to call wrong.
@@ -208,7 +208,7 @@ def test_unpriced_is_distinct_from_zero_dollars() -> None:
 
 
 def test_an_unpriced_line_omits_the_usd_key_entirely() -> None:
-    """No `usd` key at all — not a null.
+    """BIND-5: no `usd` key at all, not a null.
 
     `cli.py`'s own rule, and the one arithmetic the cost module exists to not enable: a null
     is summed as zero by anything permissive.
