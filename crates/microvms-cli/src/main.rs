@@ -466,6 +466,7 @@ async fn handle<O: std::io::Write, E: std::io::Write>(
         Command::AgentPrompt(args) => commands::agent::prompt(ctx, args).await,
         // The attached block: five commands, one door. See `commands/attached.rs`.
         Command::Exec(args) => commands::attached::exec(ctx, args).await,
+        Command::Wait(args) => commands::lifecycle::wait(ctx, args).await,
         Command::Health(args) => commands::attached::health(ctx, args).await,
         Command::Keepalive(args) => commands::attached::keepalive(ctx, args, interrupt).await,
         Command::Ack(args) => commands::attached::ack(ctx, args).await,
@@ -507,6 +508,7 @@ async fn handle<O: std::io::Write, E: std::io::Write>(
         Command::ImageSetStatus(args) => commands::image::set_status(ctx, args).await,
         Command::ImageBuilds(args) => commands::image::builds(ctx, args).await,
         Command::Cost(args) => commands::cost::cost(ctx, args),
+        Command::EgressPosture(args) => commands::local::egress_posture(ctx, args),
         Command::Doctor(args) => commands::doctor::doctor(ctx, args).await,
         Command::Manifest => commands::local::manifest(ctx),
         Command::Constants(_) => commands::local::constants(ctx),

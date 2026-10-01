@@ -89,6 +89,7 @@ pub mod ensure;
 pub mod image;
 pub mod microvm;
 pub mod ops;
+pub mod project;
 pub mod services;
 pub mod token;
 pub mod transport;

@@ -64,6 +64,7 @@ fn reuse_args(binary: &std::path::Path) -> BuildArgs {
         artifact_uri: None,
         name: Some("coding-agents".into()),
         memory: MemoryMib::Mib2048,
+        size: crate::cli::SizeRequestFlags::default(),
         dockerfile: None,
         project: None,
         repair_identity: false,
@@ -251,6 +252,8 @@ struct RunTrace {
     uploads: Vec<String>,
     ledgers: Vec<serde_json::Value>,
     history: Vec<serde_json::Value>,
+    /// The failure envelope's `data`.
+    failure: serde_json::Value,
 }
 
 /// `run --name img` of `binary` over `transport`, whose launch fails fast (the VM reports
@@ -284,12 +287,13 @@ async fn run_trace(binary: &std::path::Path, transport: &Arc<ScriptedTransport>)
     args.image = None;
     args.binary = Some(binary.to_path_buf());
     let (result, _) = dispatch_with(&seam, &Command::Run(Box::new(args)), full_infra()).await;
-    assert!(result.is_err(), "the scripted VM never reaches RUNNING");
+    let failure = result.expect_err("the scripted VM never reaches RUNNING");
     RunTrace {
         calls: transport.calls(),
         uploads: transport.uploads(),
         ledgers: crate::ledger::read_all(&state.0),
         history: crate::history::read_events(&state.0, "mvm-abc123"),
+        failure: crate::envelope::error(&failure)["data"].clone(),
     }
 }
 
@@ -303,13 +307,17 @@ async fn run_trace(binary: &std::path::Path, transport: &Arc<ScriptedTransport>)
 /// from under the other run, and a ledger naming it would send the operator to delete it too.
 /// Each run's terminate is refused, so its ledger survives the teardown to be read.
 ///
-/// **Falsification**, run 2026-09-30. Three breaks, each registered in
+/// Both runs also report the artifact the image was built from, the ensure's key, which the
+/// live caller-artifact section copies (#258).
+///
+/// **Falsification**, run 2026-09-30 and 2026-10-01. Four breaks, each registered in
 /// verify/guards/faults/ensure-image-paths.toml. Delete the image whatever the ensure said
 /// (`cli-run-deletes-a-reused-image`): red on `the reused image is not deleted`. Record the
 /// image on the ledger whatever the ensure said (`cli-run-lists-a-reused-image`): red on `the
 /// ledger does not name the reused image`. Write `imageBuilt` for a reused image
 /// (`cli-run-history-says-a-reused-image-was-built`): red on `the history does not say it was
-/// built`.
+/// built`. Leave the ensure's URI off the run (`cli-run-artifact-uri-unreported`): red on `the
+/// run reports the artifact it built from`.
 #[tokio::test]
 async fn a_run_deletes_the_image_it_built_and_never_one_it_reused() {
     let binary = FakeBinary::new("run-reuse");
@@ -335,6 +343,12 @@ async fn a_run_deletes_the_image_it_built_and_never_one_it_reused() {
         built.uploads,
         [key.as_str()],
         "the build uploads its artifact"
+    );
+    assert_eq!(
+        built.failure["artifactUri"],
+        key.as_str(),
+        "the run reports the artifact it built from: {}",
+        built.failure
     );
     assert_eq!(
         built
@@ -378,6 +392,12 @@ async fn a_run_deletes_the_image_it_built_and_never_one_it_reused() {
         reused.uploads,
         Vec::<String>::new(),
         "a reuse uploads nothing"
+    );
+    assert_eq!(
+        reused.failure["artifactUri"],
+        key.as_str(),
+        "a reuse reports the artifact the found image was built from: {}",
+        reused.failure
     );
     assert!(
         !reused.calls.iter().any(|call| call == "CreateMicrovmImage"),
@@ -569,6 +589,7 @@ async fn a_plain_build_never_lists_and_reports_reused_false() {
         artifact_uri: None,
         name: Some("img".into()),
         memory: MemoryMib::Mib2048,
+        size: crate::cli::SizeRequestFlags::default(),
         dockerfile: None,
         project: None,
         repair_identity: false,
@@ -636,6 +657,7 @@ async fn a_locally_refused_dockerfile_costs_no_upload_and_no_call() {
         artifact_uri: None,
         name: Some("refused".into()),
         memory: MemoryMib::Mib2048,
+        size: crate::cli::SizeRequestFlags::default(),
         dockerfile: Some(dockerfile_path.clone()),
         project: None,
         repair_identity: false,
@@ -728,6 +750,7 @@ async fn a_daemon_that_is_not_an_aarch64_elf_costs_no_upload_and_no_call() {
             artifact_uri: None,
             name: Some("wrong-arch".into()),
             memory: MemoryMib::Mib2048,
+            size: crate::cli::SizeRequestFlags::default(),
             dockerfile: None,
             project: None,
             repair_identity: false,
@@ -840,6 +863,7 @@ async fn a_pinned_base_image_version_reaches_the_create_body_from_the_build_flag
         artifact_uri: None,
         name: Some("img".into()),
         memory: MemoryMib::Mib2048,
+        size: crate::cli::SizeRequestFlags::default(),
         dockerfile: None,
         project: None,
         repair_identity: false,
@@ -920,6 +944,7 @@ async fn a_build_log_stream_reaches_the_wire_suffixed_and_the_envelope_reports_i
         artifact_uri: None,
         name: Some("img".into()),
         memory: MemoryMib::Mib2048,
+        size: crate::cli::SizeRequestFlags::default(),
         dockerfile: None,
         project: None,
         repair_identity: false,
@@ -1006,6 +1031,7 @@ async fn a_build_without_logging_flags_emits_no_logging_member_and_a_null_stream
         artifact_uri: None,
         name: Some("img".into()),
         memory: MemoryMib::Mib2048,
+        size: crate::cli::SizeRequestFlags::default(),
         dockerfile: None,
         project: None,
         repair_identity: false,

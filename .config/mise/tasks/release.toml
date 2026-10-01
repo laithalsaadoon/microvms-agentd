@@ -127,9 +127,12 @@ description = "Every changelog.d/ fragment is well named and builds, and a branc
 # author; a push to main sets neither, and main against its own merge base changes nothing. The
 # author goes through the environment, not into the command, because a login is the pull
 # request's input. The unit tests run first, for `trace:check`'s reason: they build throwaway
-# repos and run the real script over them.
+# repos and run the real script over them. Each case runs the script through `uv run --script`,
+# so under xdist the workers build its environment at once; with an empty `UV_CACHE_DIR` the
+# suite passed twice that way (2026-10-01, d23489c2, 16 vCPUs), and took about 5 s against
+# 17 s under `unittest`.
 run = [
-  "uv run --locked python -m unittest discover -s tools -p 'test_changelog.py'",
+  "uv run --locked pytest -n auto -q -p no:cacheprovider tools/test_changelog.py",
   './tools/changelog.py check ${PR_BASE:+--base "$PR_BASE"} ${PR_AUTHOR:+--author "$PR_AUTHOR"}',
 ]
 

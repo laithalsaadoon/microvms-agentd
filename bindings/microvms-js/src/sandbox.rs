@@ -375,8 +375,14 @@ pub struct BuildImageOptions {
     /// The build role, which must grant logs on `/aws/lambda-microvms/*`.
     pub build_role_arn: String,
     pub base_image: Option<BaseImageInput>,
+    /// Pins the managed base to one version, a value `managedBaseVersions` lists.
+    pub base_image_version: Option<String>,
     /// A caller-supplied Dockerfile, checked against the base image's `FROM`.
     pub dockerfile: Option<String>,
+    /// A directory whose one manifest+lockfile pair bakes an environment layer, by the rule
+    /// the CLI's `--project` uses. A directory without exactly one pair is refused before any
+    /// call.
+    pub project_dir: Option<String>,
     /// Whether to repair guest identity. A boolean, not a capability list — see above.
     pub repair_guest_identity: Option<bool>,
     /// Whether the daemon should inherit the image's `WORKDIR`. Refused when nothing declares
@@ -433,13 +439,13 @@ pub struct ManagedBaseVersion {
 }
 
 impl BuildImageOptions {
-    /// The core request, with the guarded values applied.
+    /// The core request, with the guarded values applied, and `projectDir`'s pair read.
     fn into_request(
         self,
         size: Option<&SizeClass>,
         run_hook_timeout: Option<&RunHookTimeout>,
         build_hook_timeout: Option<&BuildHookTimeout>,
-    ) -> CreateImageRequest {
+    ) -> Result<CreateImageRequest, microvms_core::Error> {
         let mut request = CreateImageRequest::new(
             self.name,
             self.binary.to_vec(),
@@ -452,7 +458,11 @@ impl BuildImageOptions {
         if let Some(base) = self.base_image {
             request.base_image = base.into_core();
         }
+        request.base_image_version = self.base_image_version;
         request.dockerfile = self.dockerfile;
+        if let Some(dir) = self.project_dir {
+            request.project_files = Some(microvms_core::control::read_project_files(dir)?);
+        }
         request.repair_guest_identity = self.repair_guest_identity.unwrap_or(false);
         request.inherit_workdir = self.inherit_workdir.unwrap_or(false);
         if let Some(timeout) = run_hook_timeout {
@@ -467,7 +477,7 @@ impl BuildImageOptions {
         request.log_group = self.log_group;
         request.log_stream = self.log_stream;
         request.token_scope = self.token_scope;
-        request
+        Ok(request)
     }
 }
 
@@ -494,6 +504,10 @@ pub struct EnsureImageOptions {
     /// The build role.
     pub build_role_arn: String,
     pub base_image: Option<BaseImageInput>,
+    /// `buildImage`'s `baseImageVersion`; it joins the name's hash.
+    pub base_image_version: Option<String>,
+    /// `buildImage`'s `projectDir`; the pair joins the name's hash.
+    pub project_dir: Option<String>,
     /// Delete what exists under the name and build afresh.
     pub force: Option<bool>,
     pub tags: Option<std::collections::HashMap<String, String>>,
@@ -562,6 +576,10 @@ pub struct RunOptions {
     /// Shares the token's 4096-byte payload budget; the core refuses an over-ceiling
     /// payload before the launch, naming the byte count.
     pub launch_env: Option<std::collections::HashMap<String, String>>,
+    /// Generate a tunnel identity and deliver the VM's half with the launch, so
+    /// `session.tunnel(port, {}, await sandbox.tunnelIdentity())` can prove the far end is
+    /// this VM's daemon.
+    pub identity: Option<bool>,
     /// Request the managed INTERNET_EGRESS connector. Omission does not block egress.
     pub egress: Option<bool>,
     /// Existing VPC network connector ARNs. For no egress, use a VPC without an
@@ -835,6 +853,21 @@ impl Sandbox {
             .map(|window| window.as_secs_f64())
     }
 
+    /// The tunnel identity a launch with `identity: true` generated, or that an adopted record
+    /// carried; `null` otherwise.
+    ///
+    /// Holds the host's secret half: pass it to `session.tunnel(...)`, and store it only
+    /// where the agent token goes.
+    #[napi]
+    pub async fn tunnel_identity(&self) -> Option<crate::serve::TunnelIdentity> {
+        self.inner
+            .lock()
+            .await
+            .tunnel_identity()
+            .cloned()
+            .map(crate::serve::TunnelIdentity::from)
+    }
+
     /// The session, once launched.
     ///
     /// A new wrapper each call, all reaching the same session under the same lock. There is no
@@ -862,7 +895,9 @@ impl Sandbox {
         run_hook_timeout: Option<&RunHookTimeout>,
         build_hook_timeout: Option<&BuildHookTimeout>,
     ) -> Result<Image, AsyncError> {
-        let request = options.into_request(size, run_hook_timeout, build_hook_timeout);
+        let request = options
+            .into_request(size, run_hook_timeout, build_hook_timeout)
+            .map_err(js_async)?;
         let mut guard = self.inner.lock().await;
         let image = guard.build_image(request).await.map_err(js_async)?;
         Ok(Image::wrap(image))
@@ -898,6 +933,7 @@ impl Sandbox {
             request.size = size.inner;
         }
         request.base_image = options.base_image.map(BaseImageInput::into_core);
+        request.base_image_version = options.base_image_version;
         request.force = options.force.unwrap_or(false);
         if let Some(tags) = options.tags {
             request.tags = tags.into_iter().collect::<BTreeMap<_, _>>();
@@ -908,6 +944,10 @@ impl Sandbox {
         if let Some(dir) = options.context_dir {
             request.context =
                 Some(microvms_core::control::BuildContext::from_dir(dir).map_err(js_async)?);
+        }
+        if let Some(dir) = options.project_dir {
+            request.project_files =
+                Some(microvms_core::control::read_project_files(dir).map_err(js_async)?);
         }
         let mut guard = self.inner.lock().await;
         let ensured = guard.ensure_image(request).await.map_err(js_async)?;
@@ -927,7 +967,9 @@ impl Sandbox {
         run_hook_timeout: Option<&RunHookTimeout>,
         build_hook_timeout: Option<&BuildHookTimeout>,
     ) -> Result<napi::bindgen_prelude::Buffer, AsyncError> {
-        let request = options.into_request(size, run_hook_timeout, build_hook_timeout);
+        let request = options
+            .into_request(size, run_hook_timeout, build_hook_timeout)
+            .map_err(js_async)?;
         let guard = self.inner.lock().await;
         Ok(guard.build_artifact_for(&request).map_err(js_async)?.into())
     }
@@ -943,7 +985,9 @@ impl Sandbox {
         run_hook_timeout: Option<&RunHookTimeout>,
         build_hook_timeout: Option<&BuildHookTimeout>,
     ) -> Result<(), AsyncError> {
-        let request = options.into_request(size, run_hook_timeout, build_hook_timeout);
+        let request = options
+            .into_request(size, run_hook_timeout, build_hook_timeout)
+            .map_err(js_async)?;
         let guard = self.inner.lock().await;
         guard.preflight(&request).map_err(js_async)
     }
@@ -1001,10 +1045,7 @@ impl Sandbox {
             agent_token: options.agent_token,
             client_token: options.client_token,
             launch_env: options.launch_env.unwrap_or(defaults.launch_env),
-            // The tunnel identity is a CLI/daemon surface (`microvm tunnel
-            // --verify-identity`); the bindings keep the default (off) until a
-            // binding-level verify API exists to consume the material.
-            identity: defaults.identity,
+            identity: options.identity.unwrap_or(defaults.identity),
             egress: options.egress.unwrap_or(defaults.egress),
             egress_network_connectors: options.egress_network_connectors.unwrap_or_default(),
             deny_egress: options.deny_egress.unwrap_or(defaults.deny_egress),

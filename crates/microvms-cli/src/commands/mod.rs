@@ -107,7 +107,7 @@ pub struct Ctx<'a, O: Write, E: Write> {
 /// command added without an entry fails rather than shipping undescribed. That check is the
 /// only thing that keeps this table from being the hand-maintained artifact the manifest is
 /// forbidden to be.
-pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 34] = [
+pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 36] = [
     (
         "run",
         "microvm.run",
@@ -136,6 +136,9 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 34] = [
             // Whether the build found the content-addressed image built and built nothing
             // (#258); a reused image is left in place at teardown.
             "imageReused",
+            // The artifact the image was built from, as an s3:// URI: the caller's
+            // --artifact-uri or the key the ensure used (#258); null for `run --image`.
+            "artifactUri",
             // What each config-mergeable knob resolved to, as {value, source} with source
             // one of flag/config/default — and which file supplied the config values
             // (null when none did). Issue #73: a caller who stopped passing flags reads
@@ -179,6 +182,9 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 34] = [
             // Whether the build found the content-addressed image built and built nothing
             // (#258); a reused image is left in place at teardown.
             "imageReused",
+            // The artifact the image was built from, as an s3:// URI: the caller's
+            // --artifact-uri or the key the ensure used (#258); null for `run --image`.
+            "artifactUri",
             "resolvedConfig",
             "configPath",
             "sync",
@@ -273,6 +279,11 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 34] = [
             "notes",
             "synthesized",
         ],
+    ),
+    (
+        "wait",
+        "microvm.wait",
+        &["microvmId", "state", "from", "endpoint"],
     ),
     (
         "health",
@@ -496,6 +507,11 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 34] = [
     // whether the compared total was exact or a lower bound, because a verdict from
     // a floor is a different claim than a verdict from a whole estimate.
     ("cost", "microvm.cost", &["report", "comparison", "budget"]),
+    (
+        "egress-posture",
+        "microvm.egress-posture",
+        &["posture", "detail", "region", "configPath"],
+    ),
     ("doctor", "microvm.doctor", &["checks", "ok"]),
     (
         "manifest",

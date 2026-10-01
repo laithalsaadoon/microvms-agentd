@@ -396,6 +396,33 @@ class ByteStream:
         """
 
 @final
+class ConnectionEnd:
+    """
+    A connection that didn't end clean.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def code(self, /) -> int |None:
+        """
+        The close code or the HTTP status, when the end carried one.
+        """
+    @property
+    def detail(self, /) -> str:
+        """
+        The daemon's reason, the forwarder's explanation, or the error.
+        """
+    @property
+    def kind(self, /) -> str:
+        """
+        `"refused"`, `"truncated"`, `"unproven"`, or `"failed"`.
+        """
+    @property
+    def peer(self, /) -> str:
+        """
+        The local client's address, `host:port`.
+        """
+
+@final
 class ControlPlane:
     """
     MicroVM lifecycle by ID (get, list, suspend, resume, terminate, and wait) and image
@@ -581,6 +608,23 @@ class Detached:
     def to_dict(self, /) -> dict:
         """
         Every field, token included, as a JSON-safe dict for a private store.
+        """
+
+@final
+class DownloadedFile:
+    """
+    One file `Session.download_dir` wrote, relative to the local directory.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def path(self, /) -> str:
+        """
+        The file's path under the local directory, as the archive named it.
+        """
+    @property
+    def size(self, /) -> int:
+        """
+        The file's size in bytes.
         """
 
 @final
@@ -1608,6 +1652,15 @@ class NameRecord:
         The record as a JSON-safe dict with the CLI registry's camelCase keys, **agent token
         included** — the form to store privately and read back with `from_dict`.
         """
+    @property
+    def tunnel_identity(self, /) -> TunnelIdentity |None:
+        """
+        The VM's tunnel identity, when it was launched with `identity=True`; `None` otherwise.
+        
+        Raises when the record carries one half of the pair, or a half that doesn't decode: the
+        record claims a verifiable VM, and reading it as unverifiable would hide that it's
+        broken. Holds the host's secret half, which stays out of this record's repr.
+        """
 
 @final
 class NameRegistry:
@@ -1719,6 +1772,76 @@ class OutputGap:
         """
         `"stdout"` or `"stderr"`: the side of the output that followed the gap, whose log has
         the hole. `None` when the stream ended on the gap, with nothing after it to name one.
+        """
+
+@final
+class PortForward:
+    """
+    A running port-forward. Use as a context manager, or call `stop()`.
+    
+    Keep a reference: dropping this object stops the forward and cuts its open connections.
+    """
+    def __enter__(self, /) -> PortForward: ...
+    def __exit__(self, /, exc_type: Any |None = None, exc_value: Any |None = None, traceback: Any |None = None) -> bool:
+        """
+        Stops the forward, waiting for its open connections. An error stopping it doesn't mask
+        an exception already in flight.
+        """
+    def __repr__(self, /) -> str: ...
+    @property
+    def local_address(self, /) -> str:
+        """
+        The local address to connect to, `host:port`, with the port the OS picked.
+        """
+    @property
+    def running(self, /) -> bool:
+        """
+        Whether the forward is still serving.
+        """
+    def stop(self, /, timeout: float |None = None) -> PortForwardReport:
+        """
+        Stops accepting, waits for the connections still open to end, and returns the report.
+        
+        With `timeout`, connections still open after that many seconds are cut and listed as
+        `"failed"`. Without it, a client that keeps its connection open keeps this waiting.
+        Callable again, with the same report.
+        """
+
+@final
+class PortForwardReport:
+    """
+    What a stopped port-forward did.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def ended(self, /) -> list[ConnectionEnd]:
+        """
+        Each connection that didn't end clean, in the order they ended.
+        """
+    @property
+    def proxy_token_mints(self, /) -> int:
+        """
+        Proxy tokens the session minted by the time the forward stopped.
+        """
+    @property
+    def refused(self, /) -> int:
+        """
+        Exchanges the endpoint proxy refused, a 403 or a 502 among them.
+        """
+    @property
+    def served(self, /) -> int:
+        """
+        Connections accepted.
+        """
+    @property
+    def stopped(self, /) -> str:
+        """
+        Why it stopped: `"stopped"`, `"limit"`, or `"listener-failed: <why>"`.
+        """
+    @property
+    def upgrades(self, /) -> int:
+        """
+        Exchanges that upgraded, a WebSocket among them.
         """
 
 @final
@@ -2131,7 +2254,7 @@ class Sandbox:
         """
         How many times the token has been installed. Never above one (STATE-3).
         """
-    def build_artifact(self, /, *, name: str, binary: Sequence[int], code_artifact_uri: str, build_role_arn: str, base_image: BaseImage |None = None, dockerfile: str |None = None, inherit_workdir: bool = False) -> bytes:
+    def build_artifact(self, /, *, name: str, binary: Sequence[int], code_artifact_uri: str, build_role_arn: str, base_image: BaseImage |None = None, dockerfile: str |None = None, project_dir: str |PathLike[str] |None = None, inherit_workdir: bool = False) -> bytes:
         """
         The artifact bytes to upload to `code_artifact_uri`.
         
@@ -2139,12 +2262,17 @@ class Sandbox:
         as [`Self::build_image`] so the bytes a caller puts in the bucket are the bytes the
         build will receive.
         """
-    def build_image(self, /, *, name: str, binary: Sequence[int], code_artifact_uri: str, build_role_arn: str, size: SizeClass |None = None, base_image: BaseImage |None = None, dockerfile: str |None = None, repair_guest_identity: bool = False, inherit_workdir: bool = False, run_hook_timeout: RunHookTimeout |None = None, build_hook_timeout: BuildHookTimeout |None = None, tags: dict[str, str] |None = None, log_group: str |None = None, log_stream: str |None = None, token_scope: str |None = None) -> Image:
+    def build_image(self, /, *, name: str, binary: Sequence[int], code_artifact_uri: str, build_role_arn: str, size: SizeClass |None = None, base_image: BaseImage |None = None, base_image_version: str |None = None, dockerfile: str |None = None, project_dir: str |PathLike[str] |None = None, repair_guest_identity: bool = False, inherit_workdir: bool = False, run_hook_timeout: RunHookTimeout |None = None, build_hook_timeout: BuildHookTimeout |None = None, tags: dict[str, str] |None = None, log_group: str |None = None, log_stream: str |None = None, token_scope: str |None = None) -> Image:
         """
         Builds an image and waits for it to become usable.
         
         Every local guard runs **before** the call, which matters because the create happens
         after the caller's artifact upload: a rejection AWS raises costs the upload first.
+        
+        `base_image_version` pins the managed base to one version, a value
+        `managed_base_versions` lists. `project_dir` bakes the directory's one
+        manifest+lockfile pair into an environment layer, by the rule the CLI's `--project`
+        uses; a directory without exactly one pair raises `PreconditionError` before any call.
         
         # What is deliberately not a parameter
         
@@ -2184,7 +2312,7 @@ class Sandbox:
         """
         The proxy endpoint, once launched.
         """
-    def ensure_image(self, /, *, name_prefix: str, binary: Sequence[int], dockerfile: str, s3_bucket: str, build_role_arn: str, context_dir: str |PathLike[str] |None = None, s3_key_prefix: str |None = None, size: SizeClass |None = None, base_image: BaseImage |None = None, force: bool = False, tags: dict[str, str] |None = None, wait_timeout: float |None = None) -> EnsuredImage:
+    def ensure_image(self, /, *, name_prefix: str, binary: Sequence[int], dockerfile: str, s3_bucket: str, build_role_arn: str, context_dir: str |PathLike[str] |None = None, s3_key_prefix: str |None = None, size: SizeClass |None = None, base_image: BaseImage |None = None, base_image_version: str |None = None, project_dir: str |PathLike[str] |None = None, force: bool = False, tags: dict[str, str] |None = None, wait_timeout: float |None = None) -> EnsuredImage:
         """
         Builds or reuses the content-addressed image for a task: one call from build inputs
         to a ready image.
@@ -2207,7 +2335,8 @@ class Sandbox:
         Dockerfile's `COPY` lines read, taken as `docker build` takes it:
         `Dockerfile.dockerignore`, else `.dockerignore`, is honoured, and symlinks are skipped
         with a line in `warnings`. `base_image` defaults to
-        `BaseImage.from_dockerfile(dockerfile)`. `wait_timeout` is the build wait in seconds
+        `BaseImage.from_dockerfile(dockerfile)`. `base_image_version` and `project_dir` are
+        `build_image`'s, and both join the name's hash. `wait_timeout` is the build wait in seconds
         (45 minutes by default). Every local check runs before the first AWS call.
         """
     @staticmethod
@@ -2254,7 +2383,7 @@ class Sandbox:
         """
         The VM id, once launched.
         """
-    def preflight(self, /, *, name: str, binary: Sequence[int], code_artifact_uri: str, build_role_arn: str, size: SizeClass |None = None, base_image: BaseImage |None = None, dockerfile: str |None = None, repair_guest_identity: bool = False, inherit_workdir: bool = False, run_hook_timeout: RunHookTimeout |None = None, build_hook_timeout: BuildHookTimeout |None = None, tags: dict[str, str] |None = None, log_group: str |None = None, log_stream: str |None = None, token_scope: str |None = None) -> None:
+    def preflight(self, /, *, name: str, binary: Sequence[int], code_artifact_uri: str, build_role_arn: str, size: SizeClass |None = None, base_image: BaseImage |None = None, base_image_version: str |None = None, dockerfile: str |None = None, project_dir: str |PathLike[str] |None = None, repair_guest_identity: bool = False, inherit_workdir: bool = False, run_hook_timeout: RunHookTimeout |None = None, build_hook_timeout: BuildHookTimeout |None = None, tags: dict[str, str] |None = None, log_group: str |None = None, log_stream: str |None = None, token_scope: str |None = None) -> None:
         """
         Every local guard `build_image` runs, with zero calls: raises the refusal `build_image`
         would, so a caller who uploads its own artifact checks the request before paying for
@@ -2277,7 +2406,7 @@ class Sandbox:
         token survived the freeze, and re-delivering it would hit the daemon's one-shot
         bootstrap and be refused — a 409 that reads like a broken VM.
         """
-    def run(self, /, *, image_identifier: str |None = None, image_version: str |None = None, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, launch_env: dict[str, str] |None = None, egress: bool = False, egress_network_connectors: Sequence[str] |None = None, deny_egress: bool = False, shell: bool = False, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None, ready_timeout: float |None = None, token_scope: str |None = None, wait: bool = True, log_group: str |None = None, log_stream: str |None = None, disable_logging: bool = False) -> Session:
+    def run(self, /, *, image_identifier: str |None = None, image_version: str |None = None, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, launch_env: dict[str, str] |None = None, identity: bool = False, egress: bool = False, egress_network_connectors: Sequence[str] |None = None, deny_egress: bool = False, shell: bool = False, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None, ready_timeout: float |None = None, token_scope: str |None = None, wait: bool = True, log_group: str |None = None, log_stream: str |None = None, disable_logging: bool = False) -> Session:
         """
         Launches a MicroVM, waits for RUNNING and for its daemon to answer, and returns its
         session.
@@ -2295,6 +2424,11 @@ class Sandbox:
         outbound traffic. For no egress, pass existing VPC connector ARNs through
         `egress_network_connectors`, using a VPC without an internet gateway or NAT
         gateway. `deny_egress` sets advisory proxy variables that workloads can bypass.
+        
+        `identity=True` generates a tunnel identity and delivers the VM's half with the
+        launch, so `Session.tunnel(port, verify_identity=sandbox.tunnel_identity)` can prove
+        the far end is this VM's daemon.
+        
         # What the core refuses here, and this file does not
         
         A second `run` on one sandbox, with **zero** control-plane calls: the agent token is
@@ -2374,6 +2508,15 @@ class Sandbox:
         Set by the platform reporting RUNNING, not by the launch call: the run hook is what
         delivers the token, and a launch that died during startup delivered nothing.
         """
+    @property
+    def tunnel_identity(self, /) -> TunnelIdentity |None:
+        """
+        The tunnel identity a launch with `identity=True` generated, or that an adopted
+        record carried; `None` otherwise.
+        
+        Holds the host's secret half: pass it to `Session.tunnel(verify_identity=...)`, and
+        store it only where the agent token goes.
+        """
     def wait_until_running(self, /, *, timeout: float |None = None) -> Session:
         """
         Finishes a `run(wait=False)`: waits for RUNNING and for the daemon to answer, and
@@ -2451,6 +2594,18 @@ class Session:
         control plane's job and it happens inside every request (TRAP-9), so a caller
         handing a token in would be handing in one that expires.
         """
+    def download_dir(self, /, remote: str, local_dir: str |PathLike[str], globs: Sequence[str]) -> list[DownloadedFile]:
+        """
+        Brings the files of a directory in the VM back under `local_dir`: the regular files
+        `globs` select, and nothing else.
+        
+        The daemon packs `remote`, and the archive describes the VM's filesystem, where
+        untrusted work runs, so core writes only regular-file members that match a glob, never
+        under `.git` whatever the globs say, and never outside `local_dir`. A symlink, a special
+        file or a `../` member is skipped, not refused. `["**"]` brings every regular file back.
+        Returns what was written. A local directory that can't be written to raises
+        `InvalidArgError`.
+        """
     def download_file(self, /, path: str, *, start_line: int |None = None, end_line: int |None = None) -> bytes:
         """
         Reads one file, or lines `start_line` through `end_line` of it.
@@ -2524,6 +2679,16 @@ class Session:
     def port(self, /) -> int:
         """
         The port the proxy token is scoped to.
+        """
+    def port_forward(self, /, guest_port: int, *, bind: str |None = None, max_connections: int |None = None) -> PortForward:
+        """
+        Serves a local port as an HTTP and WebSocket forward to `guest_port` in the VM, on a
+        background task, and returns its handle at once: `microvm port-forward`'s loop.
+        
+        Connections are served at once rather than one after another, so a slow request
+        doesn't hold the next. A request the endpoint proxy refuses is listed in the report
+        with its status while the forward keeps serving. `bind` and `max_connections` are
+        `tunnel`'s. Dropping the handle stops the forward.
         """
     def procs(self, /) -> list[ProcGroup]:
         """
@@ -2605,6 +2770,34 @@ class Session:
         range, since the wire can't say which side lost the bytes; `"event"` records it on
         `proc.gaps` and keeps both going. `offset`, `reconnect`, `max_reconnects` and
         `idle_timeout` are `ExecHandle.stream()`'s.
+        """
+    def sync_dir(self, /, local_dir: str |PathLike[str], *, full: bool = False, delete_timeout: float |None = None) -> SyncReport:
+        """
+        Syncs `local_dir` into the VM's `/workspace` once, uploading only what changed.
+        
+        Core's one pass, `microvm sync`'s: the local tree is hashed and diffed against the
+        manifest the last sync left in the VM, the changed members travel as one archive, the
+        paths gone locally are removed in the VM with one `rm` whose deadline is
+        `delete_timeout` (core's default when `None`), and the manifest is rewritten. `full=True`
+        ignores the manifest and uploads everything. `.git`, `target`, `node_modules` and
+        `.venv` never travel. A tree over the daemon's budgets raises `InvalidArgError` before
+        anything is sent.
+        """
+    def tunnel(self, /, guest_port: int, *, bind: str |None = None, verify_identity: TunnelIdentity |None = None, max_connections: int |None = None) -> Tunnel:
+        """
+        Serves a local TCP port as a tunnel to `guest_port` in the VM, on a background task,
+        and returns its handle at once: `microvm tunnel`'s loop.
+        
+        Each local connection gets a WebSocket of its own through the endpoint proxy, and a
+        connection the daemon refuses is listed in the report while the tunnel keeps serving.
+        `bind` is a `host:port` to listen on, loopback on a port the OS picks by default, and
+        the handle's `local_address` says which. `max_connections` stops accepting after that
+        many. With `verify_identity` (a `TunnelIdentity`, such as `Sandbox.tunnel_identity`),
+        each connection first proves the far end is the daemon of the VM that identity was
+        launched with, and a connection that can't is refused.
+        
+        The tunnel carries this session's credentials to whoever connects, so bind beyond
+        loopback only on a network you trust. Dropping the handle stops the tunnel.
         """
     def upload_file(self, /, path: str, data: bytes, *, mode: str |None = None) -> None:
         """
@@ -2709,6 +2902,44 @@ class StdinAck:
     def written(self, /) -> int: ...
 
 @final
+class SyncReport:
+    """
+    What one `Session.sync_dir` did.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def deleted(self, /) -> int:
+        """
+        How many paths gone locally were removed in the VM.
+        """
+    @property
+    def full(self, /) -> bool:
+        """
+        No manifest was read (`full=True`, or none in the VM), so the whole tree travelled.
+        """
+    @property
+    def refused_deletions(self, /) -> int:
+        """
+        How many deletions the VM's manifest ordered that weren't plain relative paths, and so
+        weren't run: the manifest is the VM's word.
+        """
+    @property
+    def unchanged(self, /) -> bool:
+        """
+        The VM already held the tree as it is, so nothing travelled.
+        """
+    @property
+    def uploaded_bytes(self, /) -> int:
+        """
+        The uploaded archive's size, 0 when nothing travelled.
+        """
+    @property
+    def uploaded_members(self, /) -> int:
+        """
+        How many members the upload carried: the changed ones, or every one when `full`.
+        """
+
+@final
 class TeardownReport:
     """
     What a teardown did, and what it left behind.
@@ -2794,6 +3025,111 @@ class Total:
         """
         Why each unpriced line could not be priced, in report order. Empty for an exact
         total.
+        """
+
+@final
+class Tunnel:
+    """
+    A running tunnel. Use as a context manager, or call `stop()`.
+    
+    Keep a reference: dropping this object stops the tunnel and cuts its open connections.
+    """
+    def __enter__(self, /) -> Tunnel: ...
+    def __exit__(self, /, exc_type: Any |None = None, exc_value: Any |None = None, traceback: Any |None = None) -> bool:
+        """
+        Stops the tunnel, waiting for its open connections. An error stopping it doesn't mask
+        an exception already in flight.
+        """
+    def __repr__(self, /) -> str: ...
+    @property
+    def local_address(self, /) -> str:
+        """
+        The local address to connect to, `host:port`, with the port the OS picked.
+        """
+    @property
+    def running(self, /) -> bool:
+        """
+        Whether the tunnel is still serving.
+        """
+    def stop(self, /, timeout: float |None = None) -> TunnelReport:
+        """
+        Stops accepting, waits for the connections still open to end, and returns the report.
+        
+        With `timeout`, connections still open after that many seconds are cut and listed as
+        `"failed"`. Without it, a client that keeps its connection open keeps this waiting.
+        Callable again, with the same report.
+        """
+
+@final
+class TunnelIdentity:
+    """
+    What a launcher keeps to verify its VM: the host's secret seed and the VM's public key,
+    both base64.
+    
+    From `Sandbox.tunnel_identity` after a `run(identity=True)`, from a `NameRecord`, or built
+    from the two values `microvm run --identity` prints. Holds a secret: `host_seed` stays out
+    of `repr`; store it only where the agent token goes.
+    """
+    def __eq__(self, other: object, /) -> bool: ...
+    def __new__(cls, /, host_seed: str, vm_public_key: str) -> TunnelIdentity:
+        """
+        Rebuilds the pair from its base64 spellings. Refuses a value that doesn't decode, or a
+        seed or key of the wrong length.
+        """
+    def __repr__(self, /) -> str: ...
+    @property
+    def host_seed(self, /) -> str:
+        """
+        The host's secret half, base64. Store only privately; never in repr.
+        """
+    @property
+    def vm_public_key(self, /) -> str:
+        """
+        The VM's public key, base64: the pin. Safe to print and compare.
+        """
+
+@final
+class TunnelReport:
+    """
+    What a stopped tunnel did.
+    """
+    def __repr__(self, /) -> str: ...
+    @property
+    def ended(self, /) -> list[ConnectionEnd]:
+        """
+        Each connection that didn't end clean, in the order they ended.
+        """
+    @property
+    def proxy_token_mints(self, /) -> int:
+        """
+        Proxy tokens the session minted by the time the tunnel stopped.
+        """
+    @property
+    def refused(self, /) -> int:
+        """
+        Connections the daemon refused, or that failed with an error.
+        """
+    @property
+    def served(self, /) -> int:
+        """
+        Connections accepted.
+        """
+    @property
+    def stopped(self, /) -> str:
+        """
+        Why it stopped: `"stopped"`, `"limit"`, or `"listener-failed: <why>"`.
+        """
+    @property
+    def truncated(self, /) -> int:
+        """
+        Verified connections that ended without the daemon's end of stream, so their stream may
+        have been cut short.
+        """
+    @property
+    def unproven(self, /) -> int:
+        """
+        Verified connections into a daemon from before the end of stream, whose end nothing
+        proved.
         """
 
 @final

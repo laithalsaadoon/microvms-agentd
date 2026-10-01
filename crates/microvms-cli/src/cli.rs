@@ -147,6 +147,14 @@ pub enum Command {
     /// naming it.
     Exec(ExecArgs),
 
+    /// Wait until a kept MicroVM answers: RUNNING, and then its daemon.
+    ///
+    /// Finishes a `run --keep --no-wait`. From PENDING it waits for RUNNING up to --timeout
+    /// and then for the daemon to answer; from RUNNING, for the daemon alone. Any other state
+    /// is refused, because a suspended or terminated VM isn't starting. The VM is named the
+    /// way the attached commands name one: `--name`, or the triple `run` printed.
+    Wait(WaitArgs),
+
     /// Ask a running MicroVM's daemon whether it is up, and what its identity repair did.
     ///
     /// The one unauthenticated route: the platform forwards no external traffic until the run
@@ -364,6 +372,16 @@ pub enum Command {
     /// never `$0.00`.
     Cost(CostArgs),
 
+    /// The egress posture `run` with these options would report, without launching.
+    ///
+    /// Takes `run`'s egress flags, its microvm.toml and its region, merged as `run` merges them,
+    /// and answers core's `egress_posture_for`: one of `open`, `unsealed`, `best-effort` or
+    /// `sealed`, or the refusal the launch would raise. No AWS call and no credentials, so a
+    /// script can tell before a build whether a no-network task is satisfiable. Only `sealed`
+    /// is network isolation, and no launch option answers it.
+    #[command(name = "egress-posture")]
+    EgressPosture(EgressPostureArgs),
+
     /// Check every prerequisite and say which one is wrong.
     ///
     /// The command that saves an hour on a first attempt. Credentials, the region the
@@ -423,6 +441,17 @@ pub enum MemoryMib {
 }
 
 impl MemoryMib {
+    /// The variant for a core class. Infallible: the five variants are the five classes.
+    pub fn from_class(class: SizeClass) -> Self {
+        match class {
+            SizeClass::Mib512 => MemoryMib::Mib512,
+            SizeClass::Mib1024 => MemoryMib::Mib1024,
+            SizeClass::Mib2048 => MemoryMib::Mib2048,
+            SizeClass::Mib4096 => MemoryMib::Mib4096,
+            SizeClass::Mib8192 => MemoryMib::Mib8192,
+        }
+    }
+
     /// The core class this baseline selects. Infallible: the mapping is exhaustive.
     pub fn size_class(self) -> SizeClass {
         match self {
@@ -450,6 +479,41 @@ pub fn memory_from_mib(mib: u32) -> Option<MemoryMib> {
         4096 => Some(MemoryMib::Mib4096),
         8192 => Some(MemoryMib::Mib8192),
         _ => None,
+    }
+}
+
+/// `--cpus` and `--memory-mib`: a resource request, sized by core's `SizeClass::from_request`
+/// into the smallest class whose baseline covers it, in place of naming a class with
+/// `--memory` (#269). The SDKs' `SizeClass.from_request` is the same call, so a harness that
+/// sizes a task by its CPUs and memory gets the same class from either.
+#[derive(Args, Clone, Debug, Default)]
+pub struct SizeRequestFlags {
+    /// vCPUs the workload needs, instead of --memory: the smallest size class whose baseline
+    /// covers the request is used. Takes a fraction (0.5) and combines with --memory-mib.
+    ///
+    /// Zero is no requirement. A request no class covers is refused before any AWS call,
+    /// naming the largest class.
+    #[arg(long, value_name = "VCPUS", conflicts_with = "memory")]
+    pub cpus: Option<f64>,
+
+    /// MiB of memory the workload needs, instead of --memory: any figure, which selects the
+    /// smallest class whose baseline covers it (1500 selects 2048). Combines with --cpus.
+    #[arg(long, value_name = "MIB", conflicts_with = "memory")]
+    pub memory_mib: Option<u32>,
+}
+
+impl SizeRequestFlags {
+    /// Whether either request flag was given.
+    pub fn requested(&self) -> bool {
+        self.cpus.is_some() || self.memory_mib.is_some()
+    }
+
+    /// The class `memory` names, or core's answer to the request when one was made.
+    pub fn resolve(&self, memory: MemoryMib) -> Result<MemoryMib, microvms_core::Error> {
+        if !self.requested() {
+            return Ok(memory);
+        }
+        SizeClass::from_request(self.cpus, self.memory_mib).map(MemoryMib::from_class)
     }
 }
 
@@ -810,6 +874,9 @@ pub struct RunArgs {
     #[arg(long, value_enum, default_value = "2048")]
     pub memory: MemoryMib,
 
+    #[command(flatten)]
+    pub size: SizeRequestFlags,
+
     /// A Dockerfile to use instead of the library's default. Its FROM must match the base.
     #[arg(long)]
     pub dockerfile: Option<PathBuf>,
@@ -916,6 +983,16 @@ pub struct RunArgs {
     /// Leave the VM and image running. You are then paying for them.
     #[arg(long)]
     pub keep: bool,
+
+    /// Return once the launch is accepted, with the VM still PENDING, instead of waiting for
+    /// RUNNING and for its daemon. `microvm wait` finishes the launch later.
+    ///
+    /// The envelope carries the identifiers a later command needs (the endpoint, the agent
+    /// token and the MicroVM id), and `--vm-name` registers the name as usual. Requires
+    /// --keep, since a VM torn down on the way out has nothing to wait for, and refuses an
+    /// exec (--exec or `exec` in microvm.toml) and sync mode, which need the VM answering.
+    #[arg(long, requires = "keep", conflicts_with = "exec")]
+    pub no_wait: bool,
 
     /// Generate a per-VM identity, so `tunnel --verify-identity` can prove the far end.
     ///
@@ -1063,6 +1140,9 @@ pub struct BuildArgs {
     /// Baseline MiB, selecting a documented size class.
     #[arg(long, value_enum, default_value = "2048")]
     pub memory: MemoryMib,
+
+    #[command(flatten)]
+    pub size: SizeRequestFlags,
 
     /// A Dockerfile to use instead of the library's default.
     #[arg(long)]
@@ -1432,11 +1512,48 @@ pub struct KeepaliveArgs {
     pub region: RegionFlags,
 }
 
+/// `egress-posture`'s arguments: `run`'s egress flags, config and region, with `run`'s
+/// parse attributes, so a command line that `run` refuses is refused here the same way.
+#[derive(Args, Debug)]
+pub struct EgressPostureArgs {
+    /// As `run --egress`: request the managed INTERNET_EGRESS connector.
+    #[arg(long, conflicts_with = "egress_network_connectors")]
+    pub egress: bool,
+
+    /// As `run --egress-network-connector`: an existing VPC network connector ARN. Repeatable.
+    #[arg(long = "egress-network-connector", value_name = "ARN")]
+    pub egress_network_connectors: Vec<String>,
+
+    /// As `run --deny-egress`: the advisory proxy variables. Not isolation.
+    #[arg(long, conflicts_with = "egress")]
+    pub deny_egress: bool,
+
+    #[command(flatten)]
+    pub config: ConfigFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
 #[derive(Args, Debug)]
 pub struct ExistsArgs {
     /// The absolute path in the guest.
     #[arg(value_name = "PATH")]
     pub path: String,
+
+    #[command(flatten)]
+    pub attach: AttachFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct WaitArgs {
+    /// How long to wait for RUNNING, in seconds. The daemon wait after it is core's own
+    /// bootstrap bound.
+    #[arg(long, default_value = "300", value_parser = parse_seconds)]
+    pub timeout: std::time::Duration,
 
     #[command(flatten)]
     pub attach: AttachFlags,
@@ -2095,6 +2212,9 @@ pub struct CostArgs {
     #[arg(long, value_enum, default_value = "2048")]
     pub memory: MemoryMib,
 
+    #[command(flatten)]
+    pub size: SizeRequestFlags,
+
     /// Seconds the VM spent, or will spend, RUNNING.
     ///
     /// Billed at baseline whether or not anything is executing — there is no free I/O wait,
@@ -2310,6 +2430,9 @@ pub struct AgentUpArgs {
     /// 2048, which fits peaky agent sessions (see `docs/AGENT-VMS.md`).
     #[arg(long, value_enum, default_value = "1024")]
     pub memory: MemoryMib,
+
+    #[command(flatten)]
+    pub size: SizeRequestFlags,
 
     /// How long the Bedrock bearer token lives, in hours. Default and ceiling 12.
     #[arg(long, default_value_t = 12, value_name = "HOURS")]
@@ -2780,7 +2903,7 @@ mod tests {
 
     /// The subcommands, named as the manifest and the response table name them.
     ///
-    /// The block after `exec` is the attached one (`health`, `keepalive`, `ack`, `kill`, `ps`, `stdin`, `cp`,
+    /// The block after `exec` is the attached one (`wait`, `health`, `keepalive`, `ack`, `kill`, `ps`, `stdin`, `cp`,
     /// `exists`, `tunnel`, `port-forward`, and `shell` beside it), and their position is asserted rather than incidental,
     /// because `--help`'s reading order is the only documentation of which commands need the
     /// identifier triple (`shell` sits with them because it addresses a running VM, though its
@@ -2801,6 +2924,7 @@ mod tests {
                 "agent-up",
                 "agent-prompt",
                 "exec",
+                "wait",
                 "health",
                 "keepalive",
                 "ack",
@@ -2825,6 +2949,7 @@ mod tests {
                 "image-set-status",
                 "image-builds",
                 "cost",
+                "egress-posture",
                 "doctor",
                 "manifest",
                 "constants",
@@ -3604,6 +3729,7 @@ mod tests {
             (Command::Exec(args), "--timeout-sec") => args.timeout_sec,
             (Command::Exec(args), "--client-grace") => args.client_grace,
             (Command::Run(args), "--timeout") => Some(args.timeout),
+            (Command::Wait(args), "--timeout") => Some(args.timeout),
             (Command::Sync(args), "--timeout") => Some(args.timeout),
             (Command::Suspend(args), "--timeout") => Some(args.timeout),
             (Command::Resume(args), "--timeout") => Some(args.timeout),
@@ -3648,6 +3774,75 @@ mod tests {
         }
     }
 
+    /// **`wait --timeout` defaults to core's `DEFAULT_RUNNING_TIMEOUT` (#269),** the bound a
+    /// launch's own RUNNING wait takes, for the reason the exec waits' row above gives.
+    ///
+    /// **Falsification**: change `wait`'s `default_value = "300"` to `"301"` and the parse
+    /// reads 301s where core waits 300s.
+    #[test]
+    fn the_wait_timeout_defaults_to_the_cores_running_wait() {
+        let cli = Cli::try_parse_from(["microvm", "wait", "--name", "box"]).expect("parses");
+        assert_eq!(
+            parsed_seconds(&cli.command, "--timeout"),
+            Some(microvms_core::sandbox::DEFAULT_RUNNING_TIMEOUT),
+        );
+    }
+
+    /// **`run --no-wait` needs `--keep` and refuses `--exec` at parse time (#269).** A VM torn
+    /// down on the way out has nothing to wait for later, and an exec needs the VM answering,
+    /// so either combination is a caller's mistake that should cost nothing.
+    ///
+    /// **Falsification**: drop `requires = "keep"` from `--no-wait` and the bare row parses.
+    #[test]
+    fn run_no_wait_needs_keep_and_refuses_an_exec() {
+        let parse = |rest: &[&str]| {
+            Cli::try_parse_from(["microvm", "run", "--no-config"].iter().chain(rest))
+        };
+        let bare = parse(&["--no-wait"]).expect_err("--no-wait without --keep");
+        assert_eq!(bare.kind(), clap::error::ErrorKind::MissingRequiredArgument);
+        let exec = parse(&["--keep", "--no-wait", "--exec", "true"]).expect_err("an exec");
+        assert_eq!(exec.kind(), clap::error::ErrorKind::ArgumentConflict);
+        let Command::Run(args) = parse(&["--keep", "--no-wait"]).expect("parses").command else {
+            panic!("a run parses as a run");
+        };
+        assert!(args.no_wait && args.keep);
+    }
+
+    /// **`--cpus` and `--memory-mib` replace `--memory` on every command that sizes a VM
+    /// (#269),** and either alone, or both, parse beside the rest of the command.
+    ///
+    /// **Falsification**: drop `conflicts_with = "memory"` from `--cpus` and the `--memory`
+    /// rows parse.
+    #[test]
+    fn the_size_request_flags_replace_memory_on_every_sizing_command() {
+        let rows: [(&str, Vec<&str>); 4] = [
+            ("run", vec!["--no-config"]),
+            ("build", vec![]),
+            ("cost", vec![]),
+            ("agent-up", vec!["--vm-name", "box"]),
+        ];
+        for (command, rest) in rows {
+            let parse = |extra: &[&str]| {
+                Cli::try_parse_from(
+                    ["microvm", command]
+                        .into_iter()
+                        .chain(rest.iter().copied())
+                        .chain(extra.iter().copied()),
+                )
+            };
+            for flag in ["--cpus", "--memory-mib"] {
+                let both = parse(&[flag, "2", "--memory", "4096"]).expect_err("beside --memory");
+                assert_eq!(
+                    both.kind(),
+                    clap::error::ErrorKind::ArgumentConflict,
+                    "{command} {flag}"
+                );
+            }
+            parse(&["--cpus", "0.5", "--memory-mib", "1500"])
+                .unwrap_or_else(|error| panic!("{command}: {}", error.render()));
+        }
+    }
+
     /// **#268.** Every flag that takes seconds refuses, at parse time, a value that isn't a
     /// duration: non-finite, negative, too large for one, or not a number. Zero, a fraction and
     /// a whole figure parse to exactly that duration, and those rows are also what keep the
@@ -3668,11 +3863,12 @@ mod tests {
         let attached = ["--endpoint", "https://mvm-1.example", "--agent-token", "t"];
         let with_id =
             |rest: &[&'static str]| [&attached[..], &["--microvm-id", "mvm-1"], rest].concat();
-        let flags: [(&str, Vec<&str>, &str); 13] = [
+        let flags: [(&str, Vec<&str>, &str); 14] = [
             ("exec", with_id(&["true"]), "--timeout"),
             ("exec", with_id(&["true"]), "--timeout-sec"),
             ("exec", with_id(&["--complete", "true"]), "--client-grace"),
             ("run", vec!["--no-config"], "--timeout"),
+            ("wait", with_id(&[]), "--timeout"),
             ("sync", with_id(&["."]), "--timeout"),
             ("suspend", vec!["mvm-1"], "--timeout"),
             ("resume", vec!["mvm-1"], "--timeout"),

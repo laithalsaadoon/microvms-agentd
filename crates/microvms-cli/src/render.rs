@@ -65,6 +65,9 @@ pub struct RunOutcome {
     pub build_seconds: f64,
     pub running_seconds: f64,
     pub kept: bool,
+    /// `run --no-wait` returned with the VM still PENDING (#269), so the human view says how
+    /// to finish the launch. Not an envelope key: the caller who passed the flag knows.
+    pub pending: bool,
     /// The local name `--vm-name` registered, or `None` — present in the envelope either
     /// way, so a consumer never guards against a missing key.
     pub vm_name: Option<String>,
@@ -96,6 +99,11 @@ pub struct RunOutcome {
     /// nothing (#258). A reused image isn't this run's: the teardown leaves it and the ledger
     /// doesn't list it.
     pub image_reused: bool,
+    /// The `s3://` URI of the artifact the image was built from: the caller's `--artifact-uri`,
+    /// or the content-addressed key the build arm's ensure uploaded to or found (#258). `None`
+    /// for `run --image`, which builds nothing. A consumer reads the object from here rather
+    /// than deriving the key, which the ensure owns.
+    pub artifact_uri: Option<String>,
 }
 
 impl RunOutcome {
@@ -148,6 +156,7 @@ impl RunOutcome {
         // (what was requested) and reads as a seal when it is not one.
         data.insert("egressPosture".into(), json!(self.egress_posture.as_str()));
         data.insert("imageReused".into(), json!(self.image_reused));
+        data.insert("artifactUri".into(), json!(self.artifact_uri));
         data
     }
 
@@ -197,6 +206,15 @@ impl RunOutcome {
             if let (Some(id), Some(endpoint), Some(token)) =
                 (&self.microvm_id, &self.endpoint, &self.agent_token)
             {
+                if self.pending {
+                    lines.push(match &self.vm_name {
+                        Some(name) => format!("  finish the launch: microvm wait --name {name}"),
+                        None => format!(
+                            "  finish the launch: microvm wait --endpoint {endpoint} \
+                             --agent-token {token} --microvm-id {id}"
+                        ),
+                    });
+                }
                 lines.push(format!(
                     "  exec against it: microvm exec '<cmd>' --endpoint {endpoint} \
                      --agent-token {token} --microvm-id {id}"
@@ -215,13 +233,15 @@ impl RunOutcome {
         // Unconditional, and that is the point: the run that read as sealed printed nothing
         // about its network at all. The line names the mechanism, not a verdict, because
         // "egress: false" as a verdict is the defect (docs/TRUST.md, **Egress**).
-        lines.push(format!(
-            "egress: {} — {}",
-            self.egress_posture.as_str(),
-            self.egress_posture.describe()
-        ));
+        lines.push(egress_line(self.egress_posture));
         lines.join("\n")
     }
+}
+
+/// The human line for an egress posture, which `run` and `egress-posture` both print: the
+/// label and what it means, never a bare verdict.
+pub fn egress_line(posture: microvms_core::control::EgressPosture) -> String {
+    format!("egress: {} — {}", posture.as_str(), posture.describe())
 }
 
 // ── doctor ──────────────────────────────────────────────────────────────────

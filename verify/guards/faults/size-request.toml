@@ -1,0 +1,57 @@
+# ── `--cpus` and `--memory-mib`, core's `SizeClass::from_request` on the CLI (#269) ──────
+
+# `run`'s merge stops counting a request as typed, so the file's `memory` wins over it.
+[[fault]]
+id = "cli-run-size-request-loses-to-the-file"
+guard = "guards::size::a_size_request_on_run_is_cores_class_and_beats_the_files_memory"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::size::a_size_request_on_run_is_cores_class_and_beats_the_files_memory"]
+expect = "test-failed"
+suite = "rust"
+message = "the request's class, over the file's 8192"
+note = "crates/microvms-cli/src/guards/size.rs::a_size_request_on_run_is_cores_class_and_beats_the_files_memory"
+transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "        args.explicit.memory || args.size.requested(),\n", with = "        args.explicit.memory,\n" }
+
+# The request is dropped: `--memory`'s class is used whatever `--cpus` and `--memory-mib` say.
+[[fault]]
+id = "cli-size-request-ignored"
+guard = "guards::size::cost_prices_the_class_core_picks_for_a_request"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::size::cost_prices_the_class_core_picks_for_a_request"]
+expect = "test-failed"
+suite = "rust"
+message = "the class core picks for the request"
+note = "crates/microvms-cli/src/guards/size.rs::cost_prices_the_class_core_picks_for_a_request"
+transform = { file = "crates/microvms-cli/src/cli.rs", replace = "        SizeClass::from_request(self.cpus, self.memory_mib).map(MemoryMib::from_class)\n", with = "        let _ = SizeClass::from_request;\n        Ok(memory)\n" }
+
+# `build` sizes the request after the daemon's provisioning fetch, which the guards refuse.
+[[fault]]
+id = "cli-build-sizes-after-provisioning"
+guard = "guards::size::a_request_no_class_covers_is_refused_before_any_door"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::size::a_request_no_class_covers_is_refused_before_any_door"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/microvms-cli/src/guards/size.rs::a_request_no_class_covers_is_refused_before_any_door"
+transform = [
+  { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "    // Before the provisioning fetch, so a request no class covers costs nothing.\n    let size = args.size.resolve(args.memory)?.size_class();\n    ctx.infra.require(&[\"build_role_arn\"])?;\n", with = "    ctx.infra.require(&[\"build_role_arn\"])?;\n" },
+  { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "    let seed = if args.reuse {\n", with = "    let size = args.size.resolve(args.memory)?.size_class();\n    let seed = if args.reuse {\n" },
+]
+
+# `--cpus` parses beside `--memory`, and one of the two is silently dropped.
+[[fault]]
+id = "cli-cpus-beside-memory"
+guard = "cli::tests::the_size_request_flags_replace_memory_on_every_sizing_command"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "cli::tests::the_size_request_flags_replace_memory_on_every_sizing_command"]
+expect = "test-failed"
+suite = "rust"
+message = "beside --memory"
+note = "crates/microvms-cli/src/cli.rs::the_size_request_flags_replace_memory_on_every_sizing_command"
+transform = { file = "crates/microvms-cli/src/cli.rs", replace = "    #[arg(long, value_name = \"VCPUS\", conflicts_with = \"memory\")]\n", with = "    #[arg(long, value_name = \"VCPUS\")]\n" }
+
+# The process tier's size handler drops the request, so every case reads the default class.
+[[fault]]
+id = "parity-cli-size-class-drops-the-request"
+guard = "the_cli_process_answers_the_shared_case_corpus"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "parity_cases", "--", "--exact", "the_cli_process_answers_the_shared_case_corpus"]
+expect = "test-failed"
+suite = "rust"
+message = "size-class/cpu-only"
+transform = { file = "crates/microvms-cli/tests/parity_cases.rs", replace = "            args.extend([flag.to_string(), number(case, key)]);\n", with = "            let _ = (flag, number(case, key));\n" }

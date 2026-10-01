@@ -3,6 +3,7 @@
 //! build context read from a directory.
 
 pub mod context;
+pub mod project;
 pub mod services;
 pub mod transport;
 

@@ -596,6 +596,14 @@ export declare class NameRecord {
   /** Seconds since the epoch when the name was registered. */
   get at(): number
   get egressPosture(): string | null
+  /**
+   * The VM's tunnel identity, when it was launched with `identity: true`; `null` otherwise.
+   *
+   * Throws when the record carries one half of the pair, or a half that doesn't decode: the
+   * record claims a verifiable VM, and reading it as unverifiable would hide that it's
+   * broken. A method, like `agentToken()`, because it holds the host's secret half.
+   */
+  tunnelIdentity(): TunnelIdentity | null
   /** The record without its secrets. */
   toString(): string
 }
@@ -639,6 +647,28 @@ export declare class NameRegistry {
    * `microvm attach` applies.
    */
   importRecord(record: NameRecord, session: Session): Promise<boolean>
+}
+
+/**
+ * A running port-forward. Call `stop()` when done; a garbage-collected handle stops the
+ * forward and cuts its open connections.
+ */
+export declare class PortForward {
+  /** The local address to connect to, `host:port`, with the port the OS picked. */
+  get localAddress(): string
+  /** Whether the forward is still serving. */
+  get running(): boolean
+  /**
+   * Stops accepting, waits for the connections still open to end, and resolves with the
+   * report.
+   *
+   * With `timeout` (seconds), connections still open after it are cut and listed as
+   * `"failed"`. Without it, a client that keeps its connection open keeps this waiting.
+   * Callable again, with the same report.
+   */
+  stop(timeout?: number | undefined | null): Promise<PortForwardReport>
+  /** The handle without its credentials. */
+  toString(): string
 }
 
 /** The pinned rate table, and everything it says about itself. */
@@ -863,6 +893,14 @@ export declare class Sandbox {
    * window; `GetMicrovm` also returns the service's idle policy.
    */
   suspendedWindowSecondsAsync(): Promise<number | null>
+  /**
+   * The tunnel identity a launch with `identity: true` generated, or that an adopted record
+   * carried; `null` otherwise.
+   *
+   * Holds the host's secret half: pass it to `session.tunnel(...)`, and store it only
+   * where the agent token goes.
+   */
+  tunnelIdentity(): Promise<TunnelIdentity | null>
   /**
    * The session, once launched.
    *
@@ -1104,6 +1142,30 @@ export declare class Session {
    * before the start reject with `ERR_INVALID_ARG` before any request.
    */
   downloadFile(path: string, options?: DownloadFileOptions | undefined | null): Promise<Buffer>
+  /**
+   * Brings the files of a directory in the VM back under `localDir`: the regular files
+   * `globs` select, and nothing else.
+   *
+   * The daemon packs `remote`, and the archive describes the VM's filesystem, where
+   * untrusted work runs, so core writes only regular-file members that match a glob, never
+   * under `.git` whatever the globs say, and never outside `localDir`. A symlink, a special
+   * file or a `../` member is skipped, not refused. `['**']` brings every regular file back.
+   * Resolves to what was written; a local directory that can't be written to rejects with
+   * `ERR_INVALID_ARG`.
+   */
+  downloadDir(remote: string, localDir: string, globs: Array<string>): Promise<Array<DownloadedFile>>
+  /**
+   * Syncs `localDir` into the VM's `/workspace` once, uploading only what changed.
+   *
+   * Core's one pass, `microvm sync`'s: the local tree is hashed and diffed against the
+   * manifest the last sync left in the VM, the changed members travel as one archive, the
+   * paths gone locally are removed in the VM with one `rm` whose deadline is
+   * `deleteTimeout` seconds (core's default when omitted), and the manifest is rewritten.
+   * `full: true` ignores the manifest and uploads everything. `.git`, `target`,
+   * `node_modules` and `.venv` never travel. A tree over the daemon's budgets rejects with
+   * `ERR_INVALID_ARG` before anything is sent.
+   */
+  syncDir(localDir: string, options?: SyncDirOptions | undefined | null): Promise<SyncReport>
   /** Whether a path exists, distinguishing absence from every other refusal. */
   fileExists(path: string): Promise<boolean>
   /**
@@ -1155,6 +1217,28 @@ export declare class Session {
    * The middle string **contains the credential**. Same rule as `connectHeaders`.
    */
   connectSubprotocols(port: number): Promise<Array<string> | null>
+  /**
+   * Serves a local TCP port as a tunnel to `guestPort` in the VM, on a background task, and
+   * resolves at once with its handle: `microvm tunnel`'s loop.
+   *
+   * Each local connection gets a WebSocket of its own through the endpoint proxy, and a
+   * connection the daemon refuses is listed in the report while the tunnel keeps serving.
+   * With `verifyIdentity` (a `TunnelIdentity`, such as `sandbox.tunnelIdentity()`), each
+   * connection first proves the far end is the daemon of the VM that identity was launched
+   * with, and a connection that can't is refused. A separate parameter rather than an
+   * option, for the reason `buildImage`'s guarded values are: a class in an options object
+   * can't cross an async call.
+   */
+  tunnel(guestPort: number, options?: ServeOptions | undefined | null, verifyIdentity?: TunnelIdentity | undefined | null): Promise<Tunnel>
+  /**
+   * Serves a local port as an HTTP and WebSocket forward to `guestPort` in the VM, on a
+   * background task, and resolves at once with its handle: `microvm port-forward`'s loop.
+   *
+   * Connections are served at once rather than one after another, so a slow request
+   * doesn't hold the next. A request the endpoint proxy refuses is listed in the report
+   * with its status while the forward keeps serving.
+   */
+  portForward(guestPort: number, options?: ServeOptions | undefined | null): Promise<PortForward>
   /**
    * How many proxy tokens this session has minted, or `null` for a direct session.
    *
@@ -1225,6 +1309,50 @@ export declare class Total {
   /** Why each unpriced line could not be priced, in report order. */
   get unpricedReasons(): Array<string>
   /** `at least ~$X (estimated), plus N unpriced (...)`. */
+  toString(): string
+}
+
+/**
+ * A running tunnel. Call `stop()` when done; a garbage-collected handle stops the tunnel and
+ * cuts its open connections.
+ */
+export declare class Tunnel {
+  /** The local address to connect to, `host:port`, with the port the OS picked. */
+  get localAddress(): string
+  /** Whether the tunnel is still serving. */
+  get running(): boolean
+  /**
+   * Stops accepting, waits for the connections still open to end, and resolves with the
+   * report.
+   *
+   * With `timeout` (seconds), connections still open after it are cut and listed as
+   * `"failed"`. Without it, a client that keeps its connection open keeps this waiting.
+   * Callable again, with the same report.
+   */
+  stop(timeout?: number | undefined | null): Promise<TunnelReport>
+  /** The handle without its credentials. */
+  toString(): string
+}
+
+/**
+ * What a launcher keeps to verify its VM: the host's secret seed and the VM's public key,
+ * both base64.
+ *
+ * From `sandbox.tunnelIdentity()` after a `run({ identity: true })`, from a `NameRecord`, or
+ * built from the two values `microvm run --identity` prints. Holds a secret: `hostSeed()` is a
+ * method rather than a getter so it's never read by accident, and `toString()` leaves it out.
+ */
+export declare class TunnelIdentity {
+  /**
+   * Rebuilds the pair from its base64 spellings. Refuses a value that doesn't decode, or a
+   * seed or key of the wrong length.
+   */
+  constructor(hostSeed: string, vmPublicKey: string)
+  /** The host's secret half, base64. Store only privately. */
+  hostSeed(): string
+  /** The VM's public key, base64: the pin. Safe to print and compare. */
+  get vmPublicKey(): string
+  /** The pair without its secret. */
   toString(): string
 }
 
@@ -1395,8 +1523,16 @@ export interface BuildImageOptions {
   /** The build role, which must grant logs on `/aws/lambda-microvms/*`. */
   buildRoleArn: string
   baseImage?: BaseImageInput
+  /** Pins the managed base to one version, a value `managedBaseVersions` lists. */
+  baseImageVersion?: string
   /** A caller-supplied Dockerfile, checked against the base image's `FROM`. */
   dockerfile?: string
+  /**
+   * A directory whose one manifest+lockfile pair bakes an environment layer, by the rule
+   * the CLI's `--project` uses. A directory without exactly one pair is refused before any
+   * call.
+   */
+  projectDir?: string
   /** Whether to repair guest identity. A boolean, not a capability list — see above. */
   repairGuestIdentity?: boolean
   /**
@@ -1477,6 +1613,18 @@ export interface CompletionRequest {
   clientGraceSec?: number
 }
 
+/** A connection that didn't end clean. */
+export interface ConnectionEnd {
+  /** The local client's address, `host:port`. */
+  peer: string
+  /** `"refused"`, `"truncated"`, `"unproven"`, or `"failed"`. */
+  kind: string
+  /** The close code or the HTTP status, when the end carried one. */
+  code?: number
+  /** The daemon's reason, the forwarder's explanation, or the error. */
+  detail: string
+}
+
 /**
  * The core crate's version, for a `doctor` or `manifest` command to report.
  *
@@ -1513,6 +1661,14 @@ export interface DetachedObject {
   region: string
   port: number
   agentToken: string
+}
+
+/** One file `downloadDir` wrote. */
+export interface DownloadedFile {
+  /** The file's path under the local directory, as the archive named it. */
+  path: string
+  /** The file's size in bytes. */
+  size: number
 }
 
 /** The line range `downloadFile` reads, 1-based and inclusive. Both absent reads the file. */
@@ -1579,6 +1735,10 @@ export interface EnsureImageOptions {
   /** The build role. */
   buildRoleArn: string
   baseImage?: BaseImageInput
+  /** `buildImage`'s `baseImageVersion`; it joins the name's hash. */
+  baseImageVersion?: string
+  /** `buildImage`'s `projectDir`; the pair joins the name's hash. */
+  projectDir?: string
   /** Delete what exists under the name and build afresh. */
   force?: boolean
   tags?: Record<string, string>
@@ -2169,6 +2329,22 @@ export interface PlanUsageOptions {
   label?: string
 }
 
+/** What a stopped port-forward did. */
+export interface PortForwardReport {
+  /** Connections accepted. */
+  served: number
+  /** Exchanges the endpoint proxy refused, a 403 or a 502 among them. */
+  refused: number
+  /** Exchanges that upgraded, a WebSocket among them. */
+  upgrades: number
+  /** Proxy tokens the session minted by the time the forward stopped. */
+  proxyTokenMints: number
+  /** Why it stopped: `"stopped"`, `"limit"`, or `"listener-failed: <why>"`. */
+  stopped: string
+  /** Each connection that didn't end clean, in the order they ended. */
+  ended: Array<ConnectionEnd>
+}
+
 /**
  * Whether a harness can launch in `region` (default: `$AWS_REGION`, `$AWS_DEFAULT_REGION`,
  * then us-east-1), checked before it queues work.
@@ -2370,6 +2546,12 @@ export interface RunOptions {
    * payload before the launch, naming the byte count.
    */
   launchEnv?: Record<string, string>
+  /**
+   * Generate a tunnel identity and deliver the VM's half with the launch, so
+   * `session.tunnel(port, {}, await sandbox.tunnelIdentity())` can prove the far end is
+   * this VM's daemon.
+   */
+  identity?: boolean
   /** Request the managed INTERNET_EGRESS connector. Omission does not block egress. */
   egress?: boolean
   /**
@@ -2464,6 +2646,18 @@ export interface RunUsageOptions {
   launched?: boolean
   /** What the report is of. Left out, `"run"`: the core's label, the one `microvm cost` uses. */
   label?: string
+}
+
+/** Where a tunnel or a port-forward listens, and when it stops on its own. */
+export interface ServeOptions {
+  /**
+   * A `host:port` to listen on. Default: loopback, on a port the OS picks; the handle's
+   * `localAddress` says which. Bind beyond loopback only on a network you trust: whoever
+   * connects reaches the VM with this session's credentials.
+   */
+  bind?: string
+  /** Stop accepting after this many connections. Default: serve until stopped. */
+  maxConnections?: number
 }
 
 /**
@@ -2580,6 +2774,30 @@ export interface StreamOptionsInput {
   idleTimeout?: number
 }
 
+/** How `syncDir` should behave. */
+export interface SyncDirOptions {
+  /** Ignore the manifest the last sync left in the VM and upload everything. */
+  full?: boolean
+  /** The in-VM removal's deadline, in seconds. Default: core's, 60. */
+  deleteTimeout?: number
+}
+
+/** What one `syncDir` did. */
+export interface SyncReport {
+  /** The uploaded archive's size, 0 when nothing travelled. */
+  uploadedBytes: number
+  /** How many members the upload carried: the changed ones, or every one when `full`. */
+  uploadedMembers: number
+  /** How many paths gone locally were removed in the VM. */
+  deleted: number
+  /** Deletions the VM's manifest ordered that weren't plain relative paths, so weren't run. */
+  refusedDeletions: number
+  /** No manifest was read (`full: true`, or none in the VM), so the whole tree travelled. */
+  full: boolean
+  /** The VM already held the tree as it is, so nothing travelled. */
+  unchanged: boolean
+}
+
 /**
  * What a teardown should delete beyond the VM itself.
  *
@@ -2637,6 +2855,30 @@ export interface TeardownReport {
   failures: Array<string>
   /** Whether anything a caller asked for was left behind. */
   leaked: boolean
+}
+
+/** What a stopped tunnel did. */
+export interface TunnelReport {
+  /** Connections accepted. */
+  served: number
+  /** Connections the daemon refused, or that failed with an error. */
+  refused: number
+  /**
+   * Verified connections that ended without the daemon's end of stream, so their stream
+   * may have been cut short.
+   */
+  truncated: number
+  /**
+   * Verified connections into a daemon from before the end of stream, whose end nothing
+   * proved.
+   */
+  unproven: number
+  /** Proxy tokens the session minted by the time the tunnel stopped. */
+  proxyTokenMints: number
+  /** Why it stopped: `"stopped"`, `"limit"`, or `"listener-failed: <why>"`. */
+  stopped: string
+  /** Each connection that didn't end clean, in the order they ended. */
+  ended: Array<ConnectionEnd>
 }
 
 /** How `waitForState` polls. */

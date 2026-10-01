@@ -1306,6 +1306,32 @@ impl Sandbox {
         Ok(session)
     }
 
+    /// Waits until the VM this sandbox addresses answers, whatever a launch still has to wait
+    /// for: from PENDING, [`Sandbox::wait_until_running`] with `running_timeout` (RUNNING, then
+    /// the daemon); from RUNNING, the daemon alone, up to
+    /// [`crate::session::DEFAULT_BOOTSTRAP_TIMEOUT`].
+    ///
+    /// The shape for a process that adopted a VM another one launched without waiting: it can't
+    /// know which of the two waits is left, and the lifecycle [`Sandbox::adopt`] read from the
+    /// service says. Any other lifecycle is refused, because a suspended or terminated VM isn't
+    /// on its way to answering.
+    pub async fn wait_until_ready(
+        &mut self,
+        running_timeout: Duration,
+    ) -> Result<&mut Session, Error> {
+        if self.lifecycle == Lifecycle::Running {
+            self.refuse_detached("wait until ready")?;
+            let session = self.session.as_mut().ok_or_else(|| {
+                Error::new(ErrorKind::Precondition, "a RUNNING sandbox with no session")
+            })?;
+            session
+                .wait_until_ready(crate::session::DEFAULT_BOOTSTRAP_TIMEOUT)
+                .await?;
+            return Ok(session);
+        }
+        self.wait_until_running(running_timeout).await
+    }
+
     // ── adopt (STATE-3, with the lifecycle read from the service) ────────────
 
     /// A sandbox for a VM another process launched, rebuilt from its private record.
@@ -1404,7 +1430,9 @@ impl Sandbox {
     /// A [`crate::names::NameRecord`] for this VM, to register under `name`.
     ///
     /// The egress posture is left unknown: the sandbox does not keep its launch request, and
-    /// a record must not claim a network it cannot vouch for.
+    /// a record must not claim a network it cannot vouch for. The tunnel identity is kept when
+    /// the sandbox holds one, launched with it or adopted from a record that carried it: a
+    /// record without it can't verify the VM later, which is what the pair is for (#263).
     pub fn name_record(&self, name: &str) -> Result<crate::names::NameRecord, Error> {
         let Some(vm) = self.microvm() else {
             return Err(Error::new(
@@ -1422,28 +1450,38 @@ impl Sandbox {
             ));
         };
         // Stamped on the plane's clock, the one every other time this sandbox reads comes from.
-        crate::names::NameRecord::new_at(
+        let mut record = crate::names::NameRecord::new_at(
             name,
             vm.id.as_str(),
             vm.endpoint.as_str(),
             session.agent_token(),
             self.control.region().as_str(),
             self.control.clock().unix_now().as_secs(),
-        )
+        )?;
+        record.set_tunnel_identity(self.tunnel_identity.as_ref());
+        Ok(record)
     }
 
     /// [`Sandbox::adopt`] from a [`crate::names::NameRecord`] kept in any store.
+    ///
+    /// Keeps the record's tunnel identity, so [`Sandbox::tunnel_identity`] and a later
+    /// [`Sandbox::name_record`] carry it. A record holding one half of the pair, or a pair that
+    /// doesn't decode, is refused before any AWS call rather than adopted without it: the
+    /// record claims a verifiable VM, and dropping the claim would hide that it's broken.
     pub async fn adopt_record(
         control: ControlPlane,
         record: crate::names::NameRecord,
     ) -> Result<Self, Error> {
-        Self::adopt(
+        let identity = record.tunnel_identity()?;
+        let mut sandbox = Self::adopt(
             control,
             record.microvm_id,
             record.endpoint,
             record.agent_token,
         )
-        .await
+        .await?;
+        sandbox.tunnel_identity = identity;
+        Ok(sandbox)
     }
 
     /// Hands the VM off to another process and returns what that process needs to adopt it.
@@ -2774,6 +2812,56 @@ mod tests {
         );
     }
 
+    /// **A record's tunnel identity survives adoption and naming** (#263).
+    ///
+    /// `adopt_record` used to drop the pair and `name_record` never wrote it, so a VM named
+    /// through the SDKs lost what `tunnel --verify-identity` needs to check it. A record with
+    /// half the pair is refused before any AWS call.
+    #[tokio::test]
+    async fn a_records_tunnel_identity_survives_adoption_and_naming() {
+        let identity = crate::identity::LaunchIdentity::from_seeds([7; 32], [9; 32])
+            .expect("valid seeds")
+            .keep();
+        let mut record = crate::names::NameRecord::new_at(
+            "ci",
+            "mvm-abc123",
+            ADOPT_ENDPOINT,
+            ADOPT_TOKEN,
+            "us-east-1",
+            1_767_225_600,
+        )
+        .expect("record");
+        record.identity_host_seed = Some(identity.host_seed_base64());
+        record.identity_vm_public_key = Some(identity.vm_public_key_base64());
+
+        let (plane, recorder, _) = adopt_plane();
+        recorder.answer(
+            "GetMicrovm",
+            Answer::ok(fake::microvm_response("RUNNING", None)),
+        );
+        let sandbox = Sandbox::adopt_record(plane, record.clone())
+            .await
+            .expect("adopts");
+        let kept = sandbox
+            .tunnel_identity()
+            .expect("the record's pair is kept");
+        assert_eq!(kept.host_seed_base64(), identity.host_seed_base64());
+        assert_eq!(kept.vm_public_key_base64(), identity.vm_public_key_base64());
+        let named = sandbox.name_record("again").expect("names");
+        assert_eq!(named.identity_host_seed, record.identity_host_seed);
+        assert_eq!(named.identity_vm_public_key, record.identity_vm_public_key);
+
+        let (plane, recorder, _) = adopt_plane();
+        let mut torn = record;
+        torn.identity_vm_public_key = None;
+        let refused = Sandbox::adopt_record(plane, torn)
+            .await
+            .expect_err("half a pair is refused");
+        assert_eq!(refused.kind(), ErrorKind::InvalidArg);
+        assert!(refused.to_string().contains("one half"), "{refused}");
+        assert!(recorder.calls().is_empty(), "refused before any AWS call");
+    }
+
     /// Suspend, resume, and terminate all work through an adopted handle with the usual
     /// guards, and nothing about the launch is re-delivered (STATE-7).
     #[tokio::test]
@@ -2898,6 +2986,91 @@ mod tests {
         let suspend = sandbox.suspend().await.expect_err("STATE-5");
         assert!(suspend.to_string().contains("STATE-5"), "{suspend}");
         assert_eq!(recorder.operations(), vec!["GetMicrovm"]);
+    }
+
+    /// A sandbox adopted in `state` whose plane and session are scripted: `GetMicrovm` answers
+    /// `state` and then RUNNING, and the daemon answers every health poll.
+    async fn adopted_with_a_daemon(
+        state: &str,
+    ) -> (
+        Sandbox,
+        Arc<FakeControlPlane>,
+        Arc<crate::testing::HealthyDaemon>,
+    ) {
+        let recorder = Arc::new(FakeControlPlane::new());
+        let daemon = crate::testing::HealthyDaemon::new();
+        let plane = crate::control::ControlPlane::from_ports(
+            Arc::clone(&recorder) as Arc<dyn crate::control::transport::Transport>,
+            Region::UsEast1,
+            Arc::new(TestClock::new()),
+            Arc::new(crate::testing::SequenceEntropy::new()),
+            Arc::new(crate::testing::TestAdapters::new().with_backend(daemon.clone())),
+        );
+        recorder
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response(state, None)),
+            )
+            .answer(
+                "GetMicrovm",
+                Answer::ok(fake::microvm_response("RUNNING", None)),
+            )
+            .answer(
+                "CreateMicrovmAuthToken",
+                Answer::ok(fake::auth_token_response("proxy-token")),
+            );
+        let sandbox = Sandbox::adopt(plane, "mvm-abc123", ADOPT_ENDPOINT, ADOPT_TOKEN)
+            .await
+            .expect("adopts");
+        (sandbox, recorder, daemon)
+    }
+
+    /// **`wait_until_ready` finishes whichever wait is left (#269):** from an adopted PENDING VM,
+    /// RUNNING and then the daemon; from an adopted RUNNING one, the daemon alone, with no
+    /// further control-plane read.
+    ///
+    /// **Falsification**: drop the RUNNING branch from `Sandbox::wait_until_ready`, and the
+    /// RUNNING VM is refused as not PENDING.
+    #[tokio::test]
+    async fn wait_until_ready_finishes_whichever_wait_is_left() {
+        let (mut pending, recorder, daemon) = adopted_with_a_daemon("PENDING").await;
+        pending
+            .wait_until_ready(Duration::from_secs(60))
+            .await
+            .expect("RUNNING, then the daemon");
+        assert_eq!(pending.lifecycle(), Lifecycle::Running);
+        assert_eq!(pending.bootstrap_count(), 1);
+        assert_eq!(daemon.polls(), 1);
+        assert_eq!(
+            recorder.call_count("GetMicrovm"),
+            2,
+            "the adopt's read and the wait's"
+        );
+
+        let (mut running, recorder, daemon) = adopted_with_a_daemon("RUNNING").await;
+        running
+            .wait_until_ready(Duration::from_secs(60))
+            .await
+            .expect("the daemon answers");
+        assert_eq!(daemon.polls(), 1);
+        assert_eq!(
+            recorder.call_count("GetMicrovm"),
+            1,
+            "RUNNING needs no second read"
+        );
+    }
+
+    /// A VM that isn't on its way to answering is refused, with no daemon poll.
+    #[tokio::test]
+    async fn wait_until_ready_refuses_a_suspended_vm() {
+        let (mut suspended, _, daemon) = adopted_with_a_daemon("SUSPENDED").await;
+        let error = suspended
+            .wait_until_ready(Duration::from_secs(60))
+            .await
+            .expect_err("a suspended VM isn't starting");
+        assert_eq!(error.kind(), ErrorKind::InvalidArg, "{error}");
+        assert!(error.to_string().contains("SUSPENDED"), "{error}");
+        assert_eq!(daemon.polls(), 0);
     }
 
     /// A VM adopted while PENDING finishes through `wait_until_running`, which counts the

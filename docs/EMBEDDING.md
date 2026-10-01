@@ -47,6 +47,14 @@ upload. `sandbox.preflight(...)` takes the same keywords and runs those guards
 alone, with no AWS call, so the upload is only paid for a request the build will
 accept: call it, then `build_artifact` and your upload, then `build_image`.
 
+`base_image_version=` pins the managed base to one version, a value
+`managed_base_versions` lists. `project_dir=` bakes a directory's one
+manifest+lockfile pair into an environment layer, by the rule `microvm build
+--project` uses, and a directory without exactly one pair is refused before any
+call. `build_image`, `preflight` and `ensure_image` take both, where both join
+`ensure_image`'s name hash, and `build_artifact` takes `project_dir`, because the
+pair enters the artifact. Node spells them `baseImageVersion` and `projectDir`.
+
 `wrap_dockerfile` keeps the task text verbatim and appends the stanza the
 default `microvm build` bakes, rendered by the same function, so the two cannot
 drift: `wrap_dockerfile("FROM x\n")` *is* the default Dockerfile for a base
@@ -558,7 +566,9 @@ time this client saw, so the service answers a late resume. The `endpoint` must 
 one `GetMicrovm` reports.
 
 These launch options make a launch step safe to retry. `Sandbox.run(wait=False)` returns
-once `RunMicrovm` is accepted and `wait_until_running()` finishes the wait later. A
+once `RunMicrovm` is accepted and `wait_until_running()` finishes the wait later. The CLI's
+spelling is `run --keep --no-wait`, and `microvm wait` finishes it from another process,
+from PENDING or RUNNING, through core's `Sandbox::wait_until_ready`. A
 persisted `client_token` with an explicit `agent_token` makes a retried launch adopt the
 VM the first attempt made; if that VM idle-suspended in between, the launch resumes it
 rather than reporting a startup death (`docs/PLATFORM.md`, "A client-token retry after a
@@ -615,7 +625,8 @@ assert session.egress_posture == posture
 ```
 
 Node spells these `egressPostureFor(egress, connectors, denyEgress, region)` and
-`await session.egressPosture()`. Advertise network isolation, such as Harbor's
+`await session.egressPosture()`. From a shell, `microvm egress-posture` takes `run`'s egress
+flags, microvm.toml and region, and answers the same function in `data.posture`. Advertise network isolation, such as Harbor's
 `disable_internet` capability, only when the launch would be `sealed`, and reject a
 no-network task otherwise. No launch option answers `sealed` today: the client cannot
 see a VPC's routes, so a VPC connector alone reports `unsealed`. A session that did not
@@ -719,7 +730,13 @@ class LambdaMicrovmEnvironment:  # the harness's environment base class
     def download_file(self, source, target):
         open(target, "wb").write(self.session.download_file(source))
 
-    # upload_dir / download_dir: session.upload_tar / session.download_tar
+    def upload_dir(self, source):
+        # Into /workspace, and only what changed since the last pass travels.
+        self.session.sync_dir(source)
+
+    def download_dir(self, source, target, globs=("**",)):
+        # Regular files only, never under .git, never outside target: the archive is the VM's.
+        return self.session.download_dir(source, target, list(globs))
 
     def stop(self):
         # The image stays: the next trial of this task reuses it (see below).

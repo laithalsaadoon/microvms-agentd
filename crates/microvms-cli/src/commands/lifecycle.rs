@@ -67,14 +67,14 @@
 use microvms_core::workspace::LocalTree as _;
 use std::time::Duration;
 
-use microvms_core::control::{ControlPlane, CreateImageRequest, ProjectFiles, WaitOpts};
+use microvms_core::control::{ControlPlane, CreateImageRequest, WaitOpts};
 use microvms_core::sandbox::{
     DEFAULT_LIFECYCLE_TIMEOUT, RunRequest, Sandbox, TeardownOpts, TeardownReport,
 };
 use microvms_core::{Error, ErrorKind};
 use serde_json::{Map, json};
 
-use crate::cli::{BuildArgs, ResumeArgs, RunArgs, SuspendArgs, TerminateArgs};
+use crate::cli::{BuildArgs, ResumeArgs, RunArgs, SuspendArgs, TerminateArgs, WaitArgs};
 use crate::commands::{Ctx, Rendered, response_type};
 use crate::exit::Exit;
 use crate::history::{Event, History};
@@ -236,7 +236,13 @@ pub fn merge_config(
     let memory_config = config.memory.map(|mib| {
         crate::cli::memory_from_mib(mib).expect("config::load validated the memory domain")
     });
-    let memory = crate::config::pick(args.explicit.memory, args.memory, memory_config);
+    // `--cpus` and `--memory-mib` are a typed choice of class too (#269), so they win over the
+    // file as a typed `--memory` does, with core sizing the request.
+    let memory = crate::config::pick(
+        args.explicit.memory || args.size.requested(),
+        args.size.resolve(args.memory)?,
+        memory_config,
+    );
     report(
         "memory",
         json!(memory.value.size_class().baseline_mib()),
@@ -494,6 +500,21 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
         Some(path) if path.is_dir() => Some(path.clone()),
         _ => None,
     };
+    // `--no-wait` returns at acceptance (#269), and an exec or a synced tree needs the VM
+    // answering. Clap refuses `--exec` beside it; this catches the two spellings it can't see,
+    // an `exec` from microvm.toml and a directory positional, before anything is packed.
+    if args.no_wait && (args.exec.is_some() || sync_dir.is_some()) {
+        let what = if sync_dir.is_some() {
+            "sync mode, which uploads the tree to a VM that answers"
+        } else {
+            "an exec (from microvm.toml), which needs a VM that answers"
+        };
+        return Err(crate::exit::CliError::new(
+            Exit::InvalidArg,
+            format!("--no-wait returns while the VM is still PENDING, so it can't take {what}."),
+        )
+        .suggest("drop --no-wait, or launch with it and run the work after `microvm wait`"));
+    }
     let mut packed: Option<microvms_core::workspace::Packed> = None;
     if let Some(dir) = &sync_dir {
         args.binary = None; // the positional was a directory, not a binary to build from
@@ -827,6 +848,9 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
         if let Some(name) = &outcome.image_name {
             failure = failure.with_data("imageName", json!(name));
         }
+        if let Some(uri) = &outcome.artifact_uri {
+            failure = failure.with_data("artifactUri", json!(uri));
+        }
         if !teardown.undeleted.is_empty() {
             failure = failure.with_data("undeleted", json!(teardown.undeleted));
         }
@@ -904,9 +928,14 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
             crate::exit::CliError::new(
                 Exit::Precondition,
                 format!(
-                    "the VM launched and is RUNNING, but its name could not be registered: \
+                    "the VM launched and is {}, but its name could not be registered: \
                      {error}. Address it by the identifiers below; they are in this \
                      envelope's data.",
+                    if outcome.pending {
+                        "PENDING"
+                    } else {
+                        "RUNNING"
+                    },
                 ),
             )
             .with_data("microvmId", json!(record.microvm_id))
@@ -1049,6 +1078,7 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
                 // The caller's own object: built under the name as given, no upload (#249).
                 (Some(caller_uri), _) => {
                     ctx.out.progress(&format!("building image {name} ({size})"));
+                    outcome.artifact_uri = Some(caller_uri.to_string());
                     // Before the build, so a request core itself would refuse costs zero
                     // transport calls (issue #47).
                     sandbox.preflight(&request)?;
@@ -1080,6 +1110,7 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
                     outcome.image_identifier = Some(identifier.clone());
                     outcome.image_name = Some(ensured.image.name.clone());
                     outcome.image_reused = ensured.reused;
+                    outcome.artifact_uri = Some(ensured.artifact_uri.clone());
                     outcome.build_seconds = started.elapsed().as_secs_f64();
                     if ensured.reused {
                         // D-I2: found, not built, so not this run's to list or delete.
@@ -1157,6 +1188,19 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
             .progress(&format!("resolved image name {identifier} to {resolved}"));
     }
     accepted?;
+    if args.no_wait {
+        // `--no-wait` (#269): the VM is PENDING. Its identifiers go on the envelope now, and
+        // `microvm wait` finishes the launch from them in core, as this run would have.
+        outcome.pending = true;
+        outcome.running_seconds = run_started.elapsed().as_secs_f64();
+        record_launch(sandbox, ledger, outcome);
+        ctx.out.progress(&format!(
+            "microvm {} accepted and PENDING at {}; `microvm wait` finishes the launch",
+            outcome.microvm_id.as_deref().unwrap_or_default(),
+            outcome.endpoint.as_deref().unwrap_or_default(),
+        ));
+        return Ok(());
+    }
     // RUNNING and then the daemon answering, both in core (#254).
     let session = sandbox.wait_until_running(ready_timeout).await?;
     // Read off the session and the sandbox rather than remembered from the request, because
@@ -1253,7 +1297,17 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
         }
     }
     outcome.running_seconds = run_started.elapsed().as_secs_f64();
-    outcome.endpoint = Some(endpoint.clone());
+    record_launch(sandbox, ledger, outcome);
+    ctx.out.progress(&format!("microvm RUNNING at {endpoint}"));
+    Ok(())
+}
+
+/// The identifiers a later command addresses the launched VM by, read off the sandbox: the
+/// endpoint the service reported, the agent token, the identity pair, and the id.
+fn record_launch(sandbox: &Sandbox, ledger: &mut Ledger, outcome: &mut RunOutcome) {
+    outcome.endpoint = sandbox
+        .session()
+        .map(|session| session.endpoint().to_string());
     // The token the sandbox minted (or was given): without it the envelope's
     // agentToken is null and `run --keep` hands the caller a VM they cannot
     // exec into — the first live run found exactly that, as a bootstrap
@@ -1272,8 +1326,6 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
         outcome.microvm_id = Some(vm.id.clone());
         ledger.record_microvm(&vm.id);
     }
-    ctx.out.progress(&format!("microvm RUNNING at {endpoint}"));
-    Ok(())
 }
 
 /// Tears the VM down on the way out, however the block ended, and names what leaked.
@@ -1414,6 +1466,8 @@ pub async fn build<O: std::io::Write, E: std::io::Write>(
     args: &BuildArgs,
 ) -> Result<Rendered, crate::exit::CliError> {
     let region = args.region.resolve(ctx.env)?;
+    // Before the provisioning fetch, so a request no class covers costs nothing.
+    let size = args.size.resolve(args.memory)?.size_class();
     ctx.infra.require(&["build_role_arn"])?;
     // The same provisioning chain as `run` (`provision.rs`), for the same reason: the
     // caller's intent is "an image with the daemon in it", and which bytes that means is
@@ -1454,7 +1508,6 @@ pub async fn build<O: std::io::Write, E: std::io::Write>(
             Some(path)
         }
     };
-    let size = args.memory.size_class();
     let seed = if args.reuse {
         // A stable stem: see the function docs on why the epoch default would make
         // `--reuse` a flag that always misses.
@@ -1794,7 +1847,7 @@ fn build_request_from<O: std::io::Write, E: std::io::Write>(
         })?);
     }
     if let Some(dir) = project {
-        request.project_files = Some(read_project_files(dir)?);
+        request.project_files = Some(microvms_core::control::read_project_files(dir)?);
     }
     if let Some(base_name) = base_image {
         // The registry reference is the Dockerfile's own `FROM`, through core's pairing, so the
@@ -1826,106 +1879,6 @@ fn build_request_from<O: std::io::Write, E: std::io::Write>(
         request.build_hook_timeout = timeout;
     }
     Ok(request)
-}
-
-/// Reads the one manifest+lockfile pair `--project` names into [`ProjectFiles`].
-///
-/// Exactly one ecosystem, and both halves of its pair, because each miss has a different
-/// remedy and the error should name it:
-///
-/// * **No pair at all** — the directory is not a project this feature understands; the
-///   message lists all three pairs it looked for.
-/// * **A manifest without its lockfile** — the environment layer is *keyed on the
-///   lockfile* (#74), so there is nothing to key on; the message names the command that
-///   writes one (`uv lock`, `npm install --package-lock-only`, `cargo generate-lockfile`).
-/// * **A lockfile without its manifest** — the install step reads both, so the layer
-///   could never build; most likely a partial copy.
-/// * **Two ecosystems at once** — one image bakes one layer; the caller has to say which,
-///   and no flag exists yet to say it with, so the refusal names both findings rather
-///   than picking one silently.
-fn read_project_files(dir: &std::path::Path) -> Result<ProjectFiles, Error> {
-    use microvms_core::control::Ecosystem;
-
-    let mut found = Vec::new();
-    for ecosystem in Ecosystem::ALL {
-        let manifest = dir.join(ecosystem.manifest_name());
-        let lockfile = dir.join(ecosystem.lockfile_name());
-        match (manifest.is_file(), lockfile.is_file()) {
-            (true, true) => found.push(ecosystem),
-            (true, false) => {
-                let write_one = match ecosystem {
-                    Ecosystem::Uv => "uv lock",
-                    Ecosystem::Npm => "npm install --package-lock-only",
-                    Ecosystem::Cargo => "cargo generate-lockfile",
-                };
-                return Err(Error::new(
-                    ErrorKind::Precondition,
-                    format!(
-                        "{} has {} but no {} — the environment layer is keyed on the \
-                         lockfile, so there is nothing to key on. Write one with `{write_one}` \
-                         and rebuild.",
-                        dir.display(),
-                        ecosystem.manifest_name(),
-                        ecosystem.lockfile_name(),
-                    ),
-                ));
-            }
-            (false, true) => {
-                return Err(Error::new(
-                    ErrorKind::Precondition,
-                    format!(
-                        "{} has {} but no {} — the install step reads both, so the layer \
-                         could never build. This usually means a partial copy of the project.",
-                        dir.display(),
-                        ecosystem.lockfile_name(),
-                        ecosystem.manifest_name(),
-                    ),
-                ));
-            }
-            (false, false) => {}
-        }
-    }
-    match found.as_slice() {
-        [ecosystem] => {
-            let read = |name: &str| {
-                std::fs::read(dir.join(name)).map_err(|error| {
-                    Error::new(
-                        ErrorKind::Precondition,
-                        format!("could not read {}: {error}", dir.join(name).display()),
-                    )
-                    .with_source(error)
-                })
-            };
-            Ok(ProjectFiles {
-                ecosystem: *ecosystem,
-                manifest: read(ecosystem.manifest_name())?,
-                lockfile: read(ecosystem.lockfile_name())?,
-            })
-        }
-        [] => Err(Error::new(
-            ErrorKind::Precondition,
-            format!(
-                "{} has no dependency files --project understands. It looks for one \
-                 manifest+lockfile pair: pyproject.toml+uv.lock, \
-                 package.json+package-lock.json, or Cargo.toml+Cargo.lock.",
-                dir.display(),
-            ),
-        )),
-        several => Err(Error::new(
-            ErrorKind::Precondition,
-            format!(
-                "{} has dependency files for more than one ecosystem ({}), and one image \
-                 bakes one environment layer. Point --project at the directory that owns \
-                 the layer you want baked.",
-                dir.display(),
-                several
-                    .iter()
-                    .map(|ecosystem| ecosystem.lockfile_name())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            ),
-        )),
-    }
 }
 
 /// Puts the artifact where the create request says it is, unless the caller already did.
@@ -2242,6 +2195,49 @@ pub async fn resume<O: std::io::Write, E: std::io::Write>(
         data,
         format!("{} is RUNNING at {}", microvm_id, running.endpoint),
         format!("{}\tRUNNING\t{}", microvm_id, running.endpoint),
+    ))
+}
+
+/// `wait`: finishes a `run --keep --no-wait` (#269), or any launch another process accepted.
+///
+/// Adopted through core's `Sandbox::adopt`, over the seam's control plane, so the lifecycle it
+/// starts from is the service's answer rather than a guess, and core's
+/// `Sandbox::wait_until_ready` picks the wait that's left: RUNNING and then the daemon from
+/// PENDING, the daemon alone from RUNNING. A suspended or terminated VM is refused there.
+pub async fn wait<O: std::io::Write, E: std::io::Write>(
+    ctx: &mut Ctx<'_, O, E>,
+    args: &WaitArgs,
+) -> Result<Rendered, crate::exit::CliError> {
+    let (attach, region) =
+        crate::commands::attached::resolve_attach(ctx, &args.region, &args.attach)?;
+    let mut plane = ctx.seam.control_plane(region).await?;
+    if let Some(port) = attach.port {
+        plane = plane.with_port(port)?;
+    }
+    let microvm_id = attach.microvm_id.clone();
+    let mut sandbox =
+        Sandbox::adopt(plane, &microvm_id, attach.endpoint, attach.agent_token).await?;
+    let from = sandbox.lifecycle();
+    ctx.out
+        .progress(&format!("{microvm_id} is {from}; waiting for it to answer"));
+    let endpoint = sandbox
+        .wait_until_ready(args.timeout)
+        .await?
+        .endpoint()
+        .to_string();
+
+    let mut data = Map::new();
+    data.insert("microvmId".into(), json!(microvm_id));
+    data.insert("state".into(), json!(sandbox.lifecycle().as_str()));
+    // Which wait was left: PENDING waited for RUNNING and the daemon, RUNNING for the daemon.
+    data.insert("from".into(), json!(from.as_str()));
+    data.insert("endpoint".into(), json!(endpoint));
+    let (kind, _) = response_type("wait");
+    Ok(Rendered::ok(
+        kind,
+        data,
+        format!("{microvm_id} is RUNNING and its daemon answers at {endpoint}"),
+        format!("{microvm_id}\tRUNNING\t{endpoint}"),
     ))
 }
 
@@ -2749,68 +2745,5 @@ mod tests {
         assert_eq!(from_run.timeout_sec, from_exec.timeout_sec);
         assert!(from_run.exec_id.starts_with("x-"), "{}", from_run.exec_id);
         assert!(from_exec.exec_id.starts_with("x-"), "{}", from_exec.exec_id);
-    }
-
-    /// **#74, `--project` detection.** A directory with exactly one manifest+lockfile pair
-    /// reads as that ecosystem, and both files' bytes come back verbatim.
-    #[test]
-    fn a_project_dir_with_one_pair_reads_as_its_ecosystem() {
-        let dir = tempfile::tempdir().expect("a temp dir");
-        std::fs::write(dir.path().join("pyproject.toml"), b"[project]").expect("writes");
-        std::fs::write(dir.path().join("uv.lock"), b"version = 1").expect("writes");
-
-        let files = read_project_files(dir.path()).expect("one pair, one ecosystem");
-        assert_eq!(
-            files.ecosystem,
-            microvms_core::control::Ecosystem::Uv,
-            "uv is the pair on disk"
-        );
-        assert_eq!(files.manifest, b"[project]");
-        assert_eq!(files.lockfile, b"version = 1");
-    }
-
-    /// **#74, the refusals — each names its remedy.** A manifest without its lockfile has
-    /// nothing to key the layer on, and the message names the command that writes one. A
-    /// lockfile without its manifest could never install. No pair at all lists what was
-    /// looked for. Two ecosystems at once names both, because picking one silently bakes
-    /// a layer the caller did not choose.
-    ///
-    /// **Falsification** — run 2026-08-31: `(true, false)` was flipped to also push
-    /// instead of refusing, and the manifest-without-lockfile assertion went red on the
-    /// missing `uv lock` remedy; restored.
-    #[test]
-    fn a_project_dir_that_cannot_key_a_layer_is_refused_naming_the_remedy() {
-        let dir = tempfile::tempdir().expect("a temp dir");
-        let error = read_project_files(dir.path()).expect_err("nothing to detect");
-        let message = error.to_string();
-        assert!(message.contains("pyproject.toml+uv.lock"), "{message}");
-        assert!(
-            message.contains("package.json+package-lock.json"),
-            "{message}"
-        );
-        assert!(message.contains("Cargo.toml+Cargo.lock"), "{message}");
-
-        // A manifest alone: the layer is keyed on the lockfile, so the remedy is to
-        // write one.
-        std::fs::write(dir.path().join("pyproject.toml"), b"[project]").expect("writes");
-        let error = read_project_files(dir.path()).expect_err("no lockfile to key on");
-        let message = error.to_string();
-        assert!(message.contains("uv lock"), "{message}");
-        assert!(message.contains("keyed on the lockfile"), "{message}");
-
-        // A lockfile alone: the install step reads both.
-        std::fs::remove_file(dir.path().join("pyproject.toml")).expect("removes");
-        std::fs::write(dir.path().join("uv.lock"), b"version = 1").expect("writes");
-        let error = read_project_files(dir.path()).expect_err("no manifest to install with");
-        assert!(error.to_string().contains("partial copy"), "{}", error);
-
-        // Two ecosystems at once: the refusal names both lockfiles.
-        std::fs::write(dir.path().join("pyproject.toml"), b"[project]").expect("writes");
-        std::fs::write(dir.path().join("package.json"), b"{}").expect("writes");
-        std::fs::write(dir.path().join("package-lock.json"), b"{}").expect("writes");
-        let error = read_project_files(dir.path()).expect_err("two layers, one image");
-        let message = error.to_string();
-        assert!(message.contains("uv.lock"), "{message}");
-        assert!(message.contains("package-lock.json"), "{message}");
     }
 }

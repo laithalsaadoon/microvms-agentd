@@ -36,6 +36,7 @@ fn artifact_uri_build_args(binary: &std::path::Path, artifact_uri: Option<&str>)
         artifact_uri: artifact_uri.map(str::to_string),
         name: Some("img".into()),
         memory: MemoryMib::Mib2048,
+        size: crate::cli::SizeRequestFlags::default(),
         dockerfile: None,
         project: None,
         repair_identity: false,
@@ -172,6 +173,39 @@ async fn a_caller_supplied_artifact_uri_is_never_uploaded_over_even_with_a_bucke
             );
         }
     }
+}
+
+/// **#258: `run --artifact-uri` reports the caller's object as the artifact it built from.**
+/// The envelope's `artifactUri` is where a reader finds the object, whichever arm built it: the
+/// caller's URI here, the ensure's key otherwise (`guards::build`'s D-I2 guard). Read from a
+/// failure envelope, because the scripted create refuses the build, and the URI is on the
+/// record before the create.
+///
+/// **Falsification**, run 2026-10-01, registered in verify/guards/faults/cli-artifact-uri.toml.
+/// Leave the caller's URI off the run (`cli-run-caller-artifact-uri-unreported`): red on `the
+/// run reports the caller's URI`.
+#[tokio::test]
+async fn a_run_from_a_caller_artifact_reports_its_uri() {
+    const THEIRS: &str = "s3://caller-bucket/theirs.zip";
+    let binary = FakeBinary::new("caller-uri-report");
+    let ledgers = TempDir::new("caller-uri-report-ledger");
+    let transport = scripted_create_stop();
+    let seam = ScriptedSeam {
+        transport: Arc::clone(&transport),
+        clock: Arc::new(YieldingClock::default()),
+    };
+    let command = Command::Run(Box::new(artifact_uri_run_args(
+        &binary.0,
+        ledgers.0.clone(),
+        Some(THEIRS),
+    )));
+    let (result, _) = dispatch_with(&seam, &command, full_infra()).await;
+    let failure = result.expect_err("the scripted create refuses every build");
+    assert_eq!(
+        crate::envelope::error(&failure)["data"]["artifactUri"],
+        THEIRS,
+        "the run reports the caller's URI"
+    );
 }
 
 /// **Issue #249: a bucket with no `--artifact-uri` still uploads, to the derived key.** The

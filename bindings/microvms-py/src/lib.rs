@@ -74,7 +74,9 @@ mod provision;
 mod region;
 mod runtime;
 mod sandbox;
+mod serve;
 mod session;
+mod workspace;
 
 use pyo3::prelude::*;
 
@@ -166,10 +168,17 @@ mod microvms {
         PyTeardownReport, egress_posture_for, wrap_dockerfile,
     };
     #[pymodule_export]
+    use super::serve::{
+        PyConnectionEnd, PyPortForward, PyPortForwardReport, PyTunnel, PyTunnelIdentity,
+        PyTunnelReport,
+    };
+    #[pymodule_export]
     use super::session::{
         PyHandlerOutcome, PyHealth, PyHookObservation, PyIdentityStep, PyProcGroup, PySession,
         session_constants,
     };
+    #[pymodule_export]
+    use super::workspace::{PyDownloadedFile, PySyncReport};
 
     #[pymodule_init]
     fn init(module: &pyo3::Bound<'_, pyo3::types::PyModule>) -> pyo3::PyResult<()> {

@@ -31,7 +31,7 @@ ts = "Sandbox.create"
 [[capability]]
 id = "wait-until-running"
 core = "microvms_core::sandbox::Sandbox::wait_until_running"
-cli = { exempt = "`run` always waits for RUNNING; there's no launch-now-finish-later flag", issue = "#269" }
+cli = ["run --no-wait", "wait"]
 py = "Sandbox.wait_until_running"
 ts = "Sandbox.waitUntilRunning"
 
@@ -129,7 +129,7 @@ ts = "Sandbox.preflight"
 [[capability]]
 id = "egress-posture-for"
 core = "microvms_core::control::connector::egress_posture_for"
-cli = { exempt = "reported on the `run` envelope only; the pre-launch checks are retyped in the CLI", issue = "#269" }
+cli = "egress-posture"
 py = "egress_posture_for"
 ts = "egressPostureFor"
 
@@ -160,7 +160,7 @@ ts = "Session.health"
 [[capability]]
 id = "wait-until-ready"
 core = "microvms_core::session::Session::wait_until_ready"
-cli = { exempt = "`run` waits for the daemon inside core's launch and `health` is one probe; a standalone wait is `wait`", issue = "#269" }
+cli = "wait"
 py = "Session.wait_until_ready"
 ts = "Session.waitUntilReady"
 
@@ -253,8 +253,15 @@ ts = "Session.downloadTar"
 id = "sync-directory"
 core = "microvms_core::session::Session::sync_pass"
 cli = "sync"
-py = { exempt = "no directory transfer", issue = "#260" }
-ts = { exempt = "no directory transfer", issue = "#260" }
+py = "Session.sync_dir"
+ts = "Session.syncDir"
+
+[[capability]]
+id = "download-dir"
+core = "microvms_core::session::Session::download_dir"
+cli = { exempt = "`run <DIR>`'s artifacts come back through it, and `cp --tar` moves the archive itself" }
+py = "Session.download_dir"
+ts = "Session.downloadDir"
 
 [[capability]]
 id = "keep-awake"
@@ -293,24 +300,31 @@ ts = ["Session.spawn", "ExecProcess", "ExecProcess.kill", "ExecProcess.wait"]
 
 [[capability]]
 id = "tunnel"
-core = "microvms_core::session::tunnel::relay_connection"
+core = ["microvms_core::session::serve::serve_tunnel", "microvms_core::session::serve::start_tunnel"]
 cli = "tunnel"
-py = { exempt = "the accept loop lives in the CLI", issue = "#263" }
-ts = { exempt = "the accept loop lives in the CLI", issue = "#263" }
+py = "Session.tunnel"
+ts = "Session.tunnel"
 
 [[capability]]
 id = "port-forward"
-core = "microvms_core::session::forward::serve_connection"
+core = ["microvms_core::session::serve::serve_forward", "microvms_core::session::serve::start_forward"]
 cli = "port-forward"
-py = { exempt = "the accept loop lives in the CLI", issue = "#263" }
-ts = { exempt = "the accept loop lives in the CLI", issue = "#263" }
+py = "Session.port_forward"
+ts = "Session.portForward"
 
 [[capability]]
 id = "verify-identity"
 core = "microvms_core::session::tunnel::verify_identity"
 cli = "tunnel --verify-identity"
-py = { exempt = "identity is forced off in RunRequest", issue = "#263" }
-ts = { exempt = "identity is forced off in RunRequest", issue = "#263" }
+py = "Session.tunnel"
+ts = "Session.tunnel"
+
+[[capability]]
+id = "tunnel-identity"
+core = "microvms_core::sandbox::Sandbox::tunnel_identity"
+cli = { exempt = "`run --identity`'s envelope carries identityHostSeed and identityVmPublicKey" }
+py = "Sandbox.tunnel_identity"
+ts = "Sandbox.tunnelIdentity"
 
 [[capability]]
 id = "shell"
@@ -718,7 +732,7 @@ ts = "buildUnpricedReason"
 [[capability]]
 id = "size-from-request"
 core = "microvms_core::sizing::SizeClass::from_request"
-cli = { exempt = "`--memory` is a closed set of classes", issue = "#269" }
+cli = ["run --cpus", "run --memory-mib", "build --cpus", "build --memory-mib", "cost --cpus", "cost --memory-mib", "agent-up --cpus", "agent-up --memory-mib"]
 py = "SizeClass.from_request"
 ts = "SizeClass.fromRequest"
 
@@ -849,6 +863,11 @@ core = "lifecyclePollIntervalSeconds"
 py = "ControlPlane.wait_for_state(poll_interval)"
 
 [[default]]
+id = "running-wait"
+core = "launchTimeoutSeconds"
+cli = "wait --timeout"
+
+[[default]]
 id = "ready-wait"
 core = "readyTimeoutSeconds"
 py = "Session.wait_until_ready(timeout)"
@@ -924,6 +943,11 @@ py = ["Sandbox.run(egress)", "egress_posture_for(egress)"]
 id = "launch-deny-egress"
 core = "launch.denyEgress"
 py = ["Sandbox.run(deny_egress)", "egress_posture_for(deny_egress)"]
+
+[[default]]
+id = "launch-identity"
+core = "launch.identity"
+py = "Sandbox.run(identity)"
 
 [[default]]
 id = "launch-shell"
@@ -1007,8 +1031,13 @@ py = "Sandbox.ensure_image(force)"
 
 [[default]]
 id = "sync-delete-budget"
-exempt = "how long a sync pass's in-guest delete may take; directory sync is CLI code until #260 moves it into core, which then owns the figure"
+core = "syncDeleteTimeoutSeconds"
 cli = "sync --timeout"
+
+[[default]]
+id = "sync-full"
+exempt = "whether this sync ignores the VM's manifest: an argument of the call, with no default anywhere else"
+py = "Session.sync_dir(full)"
 
 [[default]]
 id = "watch-interval"

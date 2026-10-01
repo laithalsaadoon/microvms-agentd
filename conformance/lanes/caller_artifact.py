@@ -35,9 +35,24 @@ CALLER_ARTIFACT_BUCKET_SET = (
     "the caller-artifact build ran with the suite's bucket set and said it went unused "
     "(issue #249)"
 )
+CALLER_ARTIFACT_SOURCE = "the suite's run reports the artifact it built from (#258)"
 CALLER_ARTIFACT_IMAGE_GONE = "the caller-artifact image is deleted"
 CALLER_ARTIFACT_OBJECT_GONE = "the caller-artifact S3 object is deleted"
 CALLER_ARTIFACT_GROUP_GONE = "the caller-artifact build log group is deleted"
+
+
+def run_artifact(launched: Envelope) -> tuple[str, str] | None:
+    """The bucket and key of the artifact the suite's `run` built from, off its envelope.
+
+    `run` reports it as `artifactUri` (#258). The key is the ensure's, so it's read here rather
+    than derived: the section once copied `<imageName>.zip`, `run`'s key before its build went
+    through `ensure_image`, and the copy failed on a key that no longer existed.
+    """
+    uri = launched.data.get("artifactUri")
+    if not isinstance(uri, str) or not uri.startswith("s3://"):
+        return None
+    bucket, _, key = uri.removeprefix("s3://").partition("/")
+    return (bucket, key) if bucket and key else None
 
 
 def caller_artifact_checks(report: dict[str, Any], results: Results) -> None:
@@ -111,10 +126,11 @@ def drive_caller_artifact(
     The suite exports `MICROVM_BUCKET` for every call, which is the shell the issue is about:
     the bucket is set without any `--bucket` flag. The caller's object is a copy of the
     artifact the suite's own `run` uploaded, written under a key of this section's with a
-    sentinel in its metadata. The build passes no `--dockerfile`, so the CLI's own artifact
-    would differ from the copy (the suite's run used the conformance Dockerfile), and an
-    overwrite changes the ETag as well as dropping the sentinel. It passes no binary either,
-    since the caller's object holds the daemon and the CLI provisions none beside it.
+    sentinel in its metadata; the source is the URI the run reports, never a key derived here.
+    The build passes no `--dockerfile`, so the CLI's own artifact would differ from the copy
+    (the suite's run used the conformance Dockerfile), and an overwrite changes the ETag as
+    well as dropping the sentinel. It passes no binary either, since the caller's object holds
+    the daemon and the CLI provisions none beside it.
 
     The build runs without `--quiet`, the one call in the suite that does, because its
     stderr is the evidence the bucket was in effect: the fixed CLI prints one line naming the
@@ -136,10 +152,20 @@ def drive_caller_artifact(
     report: dict[str, Any] = {"uri": uri, "sentinel": nonce, "bucket": bucket}
     arn = None
     try:
+        source = run_artifact(launched)
+        results.check(
+            CALLER_ARTIFACT_SOURCE,
+            source is not None,
+            f"artifactUri={launched.data.get('artifactUri')!r}",
+        )
+        if source is None:
+            # No object to copy, so the #249 checks read an empty report and fail.
+            caller_artifact_checks(report, results)
+            return
         s3.copy_object(
             Bucket=bucket,
             Key=key,
-            CopySource={"Bucket": bucket, "Key": f"{launched.data['imageName']}.zip"},
+            CopySource={"Bucket": source[0], "Key": source[1]},
             Metadata={"conformance-sentinel": nonce},
             MetadataDirective="REPLACE",
         )

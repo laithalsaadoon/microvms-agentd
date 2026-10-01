@@ -13,6 +13,7 @@ of the subprocess rule the ratchet counts (#285), and they run real clippy the s
 
 import contextlib
 import functools
+import inspect
 import io
 import json
 import os
@@ -32,6 +33,11 @@ from unittest import mock
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 RATCHET = runpy.run_path(str(HERE / "ratchet.py"), run_name="tools.ratchet")
+# The script's own namespace, which its functions read their globals from. mutmut wraps each
+# function of a script it mutates in a trampoline defined in its own module, so under mutmut
+# a function's `__globals__` are mutmut's and a patch to them reaches nothing the script
+# reads. `inspect.unwrap` gives back the script's own function.
+RATCHET_GLOBALS = inspect.unwrap(RATCHET["main"]).__globals__
 HISTORY = runpy.run_path(
     str(HERE / "ratchet-history.py"), run_name="tools.ratchet-history"
 )
@@ -383,7 +389,7 @@ def not_collected_yet():
     """The ratchet's globals with one category defined but not collected, as parity-gap was
     until #271. Nothing is in `NOT_COLLECTED` today, so the tests of that path plant one."""
     return mock.patch.dict(
-        parse_decisions.__globals__,
+        RATCHET_GLOBALS,
         {
             "NOT_COLLECTED": {"later-gap": "until its collector lands"},
             "CATEGORIES": (*RATCHET["COLLECTED"], "later-gap"),
@@ -651,7 +657,7 @@ class RefusalTests(unittest.TestCase):
         stdout, stderr = io.StringIO(), io.StringIO()
         with (
             mock.patch.dict(
-                RATCHET["main"].__globals__,
+                RATCHET_GLOBALS,
                 {
                     "check_sentinel": lambda scope: broken,
                     "read_tree": lambda scope: head,
@@ -1948,6 +1954,7 @@ LINT_EXCEPTIONS = {
     ("crates/microvms-cli/src/guards/history.rs", "clippy::disallowed_methods"): 1,
     ("crates/microvms-cli/src/guards/support.rs", "clippy::disallowed_methods"): 3,
     ("crates/microvms-cli/src/guards/support.rs", "clippy::disallowed_types"): 3,
+    ("crates/microvms-cli/src/guards/wait.rs", "clippy::disallowed_methods"): 1,
     # `doctor`'s `terraform output`, a subprocess decision.
     ("crates/microvms-cli/src/commands/doctor.rs", "clippy::disallowed_types"): 1,
     # Each binding's name store, the one place it composes core's process lookup.
@@ -3502,7 +3509,7 @@ class BaseTests(unittest.TestCase):
     def read_base(self, root, ref="HEAD"):
         # The repository's scope names its real crates; the throwaway tree has two.
         scope = {"repo_scope": lambda tree: Scope(root=tree, adapters=("adapter",))}
-        with mock.patch.dict(read_base.__globals__, scope):
+        with mock.patch.dict(RATCHET_GLOBALS, scope):
             return read_base(root, ref, ref)
 
     def test_the_base_is_measured_from_its_commit_not_the_working_tree(self):

@@ -212,6 +212,14 @@ pub mod control {
         pub use microvms_edges::control::context::from_dir;
     }
 
+    pub mod project {
+        //! A project directory's dependency files: the pairing rule, and reading the pair
+        //! from a directory (#74, #264).
+        pub use microvms_app::control::project::*;
+        pub use microvms_edges::control::project::read_project_files;
+    }
+    pub use project::read_project_files;
+
     pub mod services {
         //! The STS and S3 calls `ensure_image` makes, and their SigV4 implementation.
         pub use microvms_app::control::services::*;
