@@ -459,8 +459,9 @@ const LOCAL_ONLY: [(&str, &str); 8] = [
     ),
     (
         "dockerfile",
-        "renders microvms_core::control::default_dockerfile to stdout; the stanza is a string \
-         built from compile-time constants and no account is involved",
+        "renders one of core's Dockerfiles to stdout (the default stanza, a wrapped task \
+         Dockerfile, an agent image's): strings built from compile-time constants and the \
+         caller's own file, and no account is involved",
     ),
 ];
 
@@ -621,6 +622,11 @@ async fn no_local_command_touches_a_seam_door() {
             from: None,
             port: 9000,
             workdir: Some("/workspace".into()),
+            wrap: None,
+            inherit_workdir: false,
+            agent: Vec::new(),
+            claude_version: None,
+            codex_version: None,
         }),
     ];
     for command in &commands {
