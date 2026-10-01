@@ -67,7 +67,7 @@ traced requirement is missing a layer. Requirements are defined in
 | CLI-5 | waived | waived | waived | 4 | 4 | waived |
 | CLI-6 | waived | waived | waived | 5 | 6 | waived |
 | CLI-7 | 1 | 1 | 1 | 3 | 8 | 1 |
-| CLI-8 | 1 | 1 | 1 | 2 | 3 | 1 |
+| CLI-8 | 1 | 1 | 1 | 2 | 3 | 2 |
 | CLI-9 | 1 | 1 | 1 | 2 | 3 | 1 |
 | COST-1 | waived | waived | waived | 1 | 3 | 1 |
 | COST-2 | waived | waived | waived | 2 | 3 | waived |
@@ -786,7 +786,7 @@ If the reader of stdout or stderr closes after a command has started, then the C
 - **fuzz:** `crates/microvms-cli/src/closed_output_fuzz.rs`
 - **test:** `crates/microvms-cli/src/closed_output_fuzz.rs`, `crates/microvms-cli/src/guards/closed_output.rs`
 - **impl:** `crates/microvms-cli/src/closed_output.rs`, `crates/microvms-cli/src/envelope.rs`, `crates/microvms-cli/src/main.rs`
-- **live:** `conformance/lanes/closed_output.py`
+- **live:** `conformance/lanes/closed_output.py`, `conformance/selftest/closed_output.py`
 
 ## CLI-9
 

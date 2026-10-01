@@ -681,6 +681,18 @@ and `maximumDurationInSeconds`; the same VM carried `terminatedAt` once TERMINAT
 suspend reached SUSPENDED in about 1.2 s and a resume reached RUNNING in about 1.2 to
 1.3 s (two samples each, one-second polling).
 
+## A paginated `ListMicrovms` can return one VM on two of its pages
+
+Measured 2026-10-01, us-east-1, API 2025-09-09, live (wave 4 on 47d5cca), from CloudTrail.
+The CLI-8 check listed the account at 08:34:37 UTC through `ListMicrovms` and its
+`nextToken` pages while the suite's other VMs were changing state, and the listing held
+`microvm-5f158136-92b9-3e32-82f1-4906393d24ca` twice: the check's two `GetMicrovm` calls
+that followed, at 08:34:38 (request IDs `0d5a0c2b-2791-4f87-9d9a-f3e506e0d45d` and
+`10b67570-ad1c-4484-a2f1-045de44a8377`), both name that id. Listed again later, with every
+VM TERMINATED, the account held each VM once. A reader that counts a listing's entries
+counts such a VM twice, so a count dedupes by `microvmId`. What moved between the pages,
+the order or the boundaries, was not measured.
+
 ## Per-VM `logging` delivers a VM's logs to the caller's group
 
 Measured 2026-09-24, us-east-1, API 2025-09-09, live. `RunMicrovm` with
