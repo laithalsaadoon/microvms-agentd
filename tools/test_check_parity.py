@@ -15,6 +15,7 @@ mise task, on a POSIX host (the npx lock cases use fcntl, as the TypeDoc run nee
 import contextlib
 import copy
 import fcntl
+import inspect
 import io
 import json
 import os
@@ -31,6 +32,11 @@ from unittest import mock
 
 SCRIPT = Path(__file__).with_name("check-parity.py")
 PARITY = runpy.run_path(str(SCRIPT), run_name="tools.check-parity")
+# The script's own namespace, which its functions read their globals from. mutmut wraps each
+# function of a script it mutates in a trampoline defined in its own module, so under mutmut
+# a function's `__globals__` are mutmut's and a patch to them reaches nothing the script
+# reads. `inspect.unwrap` gives back the script's own function.
+PARITY_GLOBALS = inspect.unwrap(PARITY["main"]).__globals__
 
 TABLE = """
 [flag_groups]
@@ -404,7 +410,7 @@ class RuleTests(FixtureCase):
             out = io.StringIO()
             with (
                 mock.patch.dict(
-                    PARITY["main"].__globals__,
+                    PARITY_GLOBALS,
                     {
                         "read_json": lambda path: (
                             self.core if path.name == "core-api.json" else self.manifest
