@@ -142,7 +142,7 @@ class AgentVm:
         Returns the token used, so `expires_at` says when to call this again. Re-runnable
         on a running VM: that call is the credential refresh.
         """
-    def launch(self, /, *, image_identifier: str, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None, image_version: str |None = None, egress_network_connectors: Sequence[str] |None = None, log_group: str |None = None, log_stream: str |None = None, disable_logging: bool = False) -> Session:
+    def launch(self, /, *, image_identifier: str, execution_role_arn: str |None = None, agent_token: str |None = None, client_token: str |None = None, max_idle_sec: int |None = None, suspended_sec: int |None = None, auto_resume: bool = False, max_duration_sec: int |None = None, image_version: str |None = None, egress_network_connectors: Sequence[str] |None = None, log_group: str |None = None, log_stream: str |None = None, disable_logging: bool = False, launch_env: dict[str, str] |None = None, shell: bool = False, ready_timeout: float |None = None) -> Session:
         """
         Launches with egress and waits for the daemon to answer.
         
@@ -155,6 +155,10 @@ class AgentVm:
         
         `image_identifier` is an image ARN or a bare image name; the core resolves a name with
         one `ListMicrovmImages` read and raises `PreconditionError` for a name no image carries.
+        
+        `launch_env`, `shell` and `ready_timeout` mean what they mean on `Sandbox.run`:
+        `ready_timeout` bounds the wait for RUNNING, and the wait for the daemon after it is
+        `session_constants()["defaultReadyTimeoutSeconds"]`.
         """
     def prompt(self, /, agent: str, task: str, *, timeout_sec: float |None = None, exec_id: str |None = None, permission_mode: str = "agent-default", reap_group_on_exit: bool = False) -> ExecHandle:
         """
