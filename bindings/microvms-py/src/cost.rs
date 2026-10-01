@@ -86,7 +86,7 @@ use crate::errors::PyCoreResult;
 /// field that had no default, so `Duration(3600)` raised `TypeError` — here there is
 /// nothing to call, which is one rung stronger.
 #[pyclass(frozen, from_py_object, name = "Duration", module = "microvms")]
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct PyDuration {
     inner: DurationP,
 }
@@ -459,7 +459,7 @@ impl PyTotal {
 /// billed for and naming only the baseline invites a pressure test against a ceiling four
 /// times too low.
 #[pyclass(frozen, from_py_object, name = "SizeClass", module = "microvms")]
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct PySizeClass {
     pub(crate) inner: SizeClass,
 }

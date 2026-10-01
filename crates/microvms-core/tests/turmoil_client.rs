@@ -777,7 +777,7 @@ impl TokenMinter for SimMinter {
         Box::pin(async move {
             if self
                 .failures
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
                     left.checked_sub(1)
                 })
                 .is_ok()

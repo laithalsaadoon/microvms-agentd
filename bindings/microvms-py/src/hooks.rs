@@ -30,7 +30,7 @@ use crate::errors::PyCoreResult;
 /// A distinct class from [`PyBuildHookTimeout`] and deliberately not interchangeable with
 /// it — see the module docs.
 #[pyclass(frozen, from_py_object, name = "RunHookTimeout", module = "microvms")]
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct PyRunHookTimeout {
     pub(crate) inner: RunHookTimeout,
 }
@@ -76,7 +76,7 @@ impl PyRunHookTimeout {
 
 /// A timeout for the `ready` or `validate` image-build hook: 1..=3600 seconds.
 #[pyclass(frozen, from_py_object, name = "BuildHookTimeout", module = "microvms")]
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct PyBuildHookTimeout {
     pub(crate) inner: BuildHookTimeout,
 }
