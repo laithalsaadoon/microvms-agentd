@@ -290,3 +290,23 @@ expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_a_stats_pass_that_fails_runs_again_over_the_source ("
 transform = { file = "tools/check-mutmut.py", replace = "        and STATS_FAILED.encode() in (side / \"mutmut.log\").read_bytes()\n", with = "        and False\n" }
+
+# The base side given the whole budget plus what the head took, rather than what the head left.
+[[fault]]
+id = "mutmut-base-share-unbounded"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_the_base_gets_what_the_head_left_of_the_budget ("
+transform = { file = "tools/check-mutmut.py", replace = "else args.budget - (time.monotonic() - begun)", with = "else args.budget + (time.monotonic() - begun)" }
+
+# A rerun given its side's share plus what the failed run took, rather than what it left.
+[[fault]]
+id = "mutmut-rerun-share-unbounded"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_rerun_gets_what_the_failed_run_left_of_the_share ("
+transform = { file = "tools/check-mutmut.py", replace = "else seconds - (time.monotonic() - begun)", with = "else seconds + (time.monotonic() - begun)" }

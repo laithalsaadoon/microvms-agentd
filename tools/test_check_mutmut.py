@@ -70,6 +70,7 @@ globs = args[2:] if args[:1] == ["--max-children"] else args
 # fails for a suite that reads it as text.
 if os.environ.get("FAKE_MUTMUT_STATS_FAIL") == Path.cwd().name and not Path("failed-once").exists():
     Path("failed-once").touch()
+    time.sleep(float(os.environ.get("FAKE_MUTMUT_STATS_FAIL_AFTER", "0")))
     print("failed to collect stats. runner returned 1")
     sys.exit(1)
 # mutmut's stop when no test reached any mutant, on the side this names.
@@ -654,6 +655,46 @@ class BudgetTests(unittest.TestCase):
             out,
         )
 
+    def test_the_base_gets_what_the_head_left_of_the_budget(self):
+        # The head takes about 7 s of a 20 s budget, so the base is stopped about 20 s in. Given
+        # the budget plus what the head took, it would run until its 30 s sleep ended.
+        repo = self.repo()
+        repo.commit({"tools/calc.py": calc("0 0 1", "return b + a")})
+        started = time.monotonic()
+        code, out, err = repo.run(
+            "--budget", "20", env={"FAKE_MUTMUT_SLOW": "base", "FAKE_MUTMUT_STEP": "6"}
+        )
+        took = time.monotonic() - started
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("    add: 2 of 3 survive (1 on the base): MORE\n", out)
+        self.assertLess(took, 30, "the base ran past what the head left")
+
+    def test_a_rerun_gets_what_the_failed_run_left_of_the_share(self):
+        # The failed stats pass takes 8 s of the head's 18 s share, so the rerun is stopped about
+        # 18 s in; given the share plus those 8 s, about 34 s in.
+        repo = self.repo()
+        repo.commit(
+            {
+                "tools/calc.py": calc()
+                + "\n\ndef sub(a, b):\n    # fake: 1 0 none\n    return a - b\n"
+            }
+        )
+        started = time.monotonic()
+        code, out, err = repo.run(
+            "--budget",
+            "30",
+            env={
+                "FAKE_MUTMUT_STATS_FAIL": "head",
+                "FAKE_MUTMUT_STATS_FAIL_AFTER": "8",
+                "FAKE_MUTMUT_SLOW": "head",
+            },
+        )
+        took = time.monotonic() - started
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("running it again over the source\n", err)
+        self.assertGreater(took, 17, "the rerun was stopped before the share ran out")
+        self.assertLess(took, 27, "the rerun ran past what the failed run left")
+
     def test_a_function_the_budget_left_short_of_its_count_is_undecided_and_named(self):
         repo = self.repo()
         both = calc("1 none", "return b + a").replace(
@@ -879,6 +920,31 @@ class ShardTests(unittest.TestCase):
             ],
         )
         self.assertNotIn("add:", out)
+
+    def test_detect_answers_for_its_shard(self):
+        # Two changed functions of the same weight: add goes to shard 0 and mul to shard 1.
+        repo = Repo(self, {"tools/calc.py": calc(), "tools/test_calc.py": SUITE})
+        both = calc("0", "return b + a").replace("return a * b", "return b * a")
+        repo.commit({"tools/calc.py": both})
+        answers = {}
+        for spec in ("0/4", "1/4", "2/4", "3/4"):
+            code, out, _ = repo.run("--detect", f"--shard={spec}")
+            self.assertEqual(code, 0)
+            answers[spec] = out
+        self.assertEqual(
+            answers,
+            {
+                "0/4": "python=true\n",
+                "1/4": "python=true\n",
+                "2/4": "python=false\n",
+                "3/4": "python=false\n",
+            },
+        )
+        # Shard 0 answers for a changed script no suite names, which no shard measures.
+        lone = Repo(self, {"tools/calc.py": calc(), "tools/test_calc.py": "X = 1\n"})
+        lone.commit({"tools/calc.py": both})
+        self.assertEqual(lone.run("--detect", "--shard=0/4")[1], "python=true\n")
+        self.assertEqual(lone.run("--detect", "--shard=1/4")[1], "python=false\n")
 
     def test_a_shard_spec_outside_its_count_is_refused(self):
         for spec in ("2/2", "-1/2", "1", "a/b", "1/2/3", "١/٢"):
