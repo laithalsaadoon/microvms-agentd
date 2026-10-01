@@ -544,7 +544,9 @@ struct ImageRequestArgs<'a> {
     build_role_arn: &'a str,
     size: Option<PySizeClass>,
     base_image: Option<PyBaseImage>,
+    base_image_version: Option<String>,
     dockerfile: Option<String>,
+    project_files: Option<microvms_core::control::ProjectFiles>,
     repair_guest_identity: bool,
     inherit_workdir: bool,
     run_hook_timeout: Option<PyRunHookTimeout>,
@@ -553,6 +555,16 @@ struct ImageRequestArgs<'a> {
     log_group: Option<String>,
     log_stream: Option<String>,
     token_scope: Option<String>,
+}
+
+/// `project_dir`'s one manifest+lockfile pair, read by core's rule, the one the CLI's
+/// `--project` uses (#264).
+fn project_files(
+    dir: Option<std::path::PathBuf>,
+) -> PyCoreResult<Option<microvms_core::control::ProjectFiles>> {
+    dir.map(microvms_core::control::read_project_files)
+        .transpose()
+        .map_err(crate::errors::CoreError)
 }
 
 /// The core request for `build_image`'s keywords: each one set on core's own request type,
@@ -570,7 +582,9 @@ fn create_image_request(args: ImageRequestArgs<'_>) -> CreateImageRequest {
     if let Some(base) = args.base_image {
         request.base_image = base.inner;
     }
+    request.base_image_version = args.base_image_version;
     request.dockerfile = args.dockerfile;
+    request.project_files = args.project_files;
     request.repair_guest_identity = args.repair_guest_identity;
     request.inherit_workdir = args.inherit_workdir;
     if let Some(timeout) = args.run_hook_timeout {
@@ -823,6 +837,11 @@ impl PySandbox {
     /// Every local guard runs **before** the call, which matters because the create happens
     /// after the caller's artifact upload: a rejection AWS raises costs the upload first.
     ///
+    /// `base_image_version` pins the managed base to one version, a value
+    /// `managed_base_versions` lists. `project_dir` bakes the directory's one
+    /// manifest+lockfile pair into an environment layer, by the rule the CLI's `--project`
+    /// uses; a directory without exactly one pair raises `PreconditionError` before any call.
+    ///
     /// # What is deliberately not a parameter
     ///
     /// A `client_token`. There is no such field on the core's request type and none here:
@@ -852,7 +871,9 @@ impl PySandbox {
         build_role_arn,
         size=None,
         base_image=None,
+        base_image_version=None,
         dockerfile=None,
+        project_dir=None,
         repair_guest_identity=false,
         inherit_workdir=false,
         run_hook_timeout=None,
@@ -877,7 +898,9 @@ impl PySandbox {
         build_role_arn: &str,
         size: Option<PySizeClass>,
         base_image: Option<PyBaseImage>,
+        base_image_version: Option<String>,
         dockerfile: Option<String>,
+        project_dir: Option<std::path::PathBuf>,
         repair_guest_identity: bool,
         inherit_workdir: bool,
         run_hook_timeout: Option<PyRunHookTimeout>,
@@ -894,7 +917,9 @@ impl PySandbox {
             build_role_arn,
             size,
             base_image,
+            base_image_version,
             dockerfile,
+            project_files: project_files(project_dir)?,
             repair_guest_identity,
             inherit_workdir,
             run_hook_timeout,
@@ -939,7 +964,8 @@ impl PySandbox {
     /// Dockerfile's `COPY` lines read, taken as `docker build` takes it:
     /// `Dockerfile.dockerignore`, else `.dockerignore`, is honoured, and symlinks are skipped
     /// with a line in `warnings`. `base_image` defaults to
-    /// `BaseImage.from_dockerfile(dockerfile)`. `wait_timeout` is the build wait in seconds
+    /// `BaseImage.from_dockerfile(dockerfile)`. `base_image_version` and `project_dir` are
+    /// `build_image`'s, and both join the name's hash. `wait_timeout` is the build wait in seconds
     /// (45 minutes by default). Every local check runs before the first AWS call.
     #[pyo3(signature = (
         *,
@@ -952,6 +978,8 @@ impl PySandbox {
         s3_key_prefix=None,
         size=None,
         base_image=None,
+        base_image_version=None,
+        project_dir=None,
         force=false,
         tags=None,
         wait_timeout=None,
@@ -972,6 +1000,8 @@ impl PySandbox {
         s3_key_prefix: Option<String>,
         size: Option<PySizeClass>,
         base_image: Option<PyBaseImage>,
+        base_image_version: Option<String>,
+        project_dir: Option<std::path::PathBuf>,
         force: bool,
         tags: Option<std::collections::BTreeMap<String, String>>,
         wait_timeout: Option<f64>,
@@ -990,6 +1020,7 @@ impl PySandbox {
             request.size = size.inner;
         }
         request.base_image = base_image.map(|base| base.inner);
+        request.base_image_version = base_image_version;
         request.force = force;
         if let Some(tags) = tags {
             request.tags = tags;
@@ -1000,6 +1031,9 @@ impl PySandbox {
         let ensured = self.detached(py, move |sandbox| {
             if let Some(dir) = context_dir {
                 request.context = Some(microvms_core::control::BuildContext::from_dir(dir)?);
+            }
+            if let Some(dir) = project_dir {
+                request.project_files = Some(microvms_core::control::read_project_files(dir)?);
             }
             runtime::block_on_detached(sandbox.ensure_image(request))
         })?;
@@ -1017,7 +1051,9 @@ impl PySandbox {
         build_role_arn,
         size=None,
         base_image=None,
+        base_image_version=None,
         dockerfile=None,
+        project_dir=None,
         repair_guest_identity=false,
         inherit_workdir=false,
         run_hook_timeout=None,
@@ -1040,7 +1076,9 @@ impl PySandbox {
         build_role_arn: &str,
         size: Option<PySizeClass>,
         base_image: Option<PyBaseImage>,
+        base_image_version: Option<String>,
         dockerfile: Option<String>,
+        project_dir: Option<std::path::PathBuf>,
         repair_guest_identity: bool,
         inherit_workdir: bool,
         run_hook_timeout: Option<PyRunHookTimeout>,
@@ -1057,7 +1095,9 @@ impl PySandbox {
             build_role_arn,
             size,
             base_image,
+            base_image_version,
             dockerfile,
+            project_files: project_files(project_dir)?,
             repair_guest_identity,
             inherit_workdir,
             run_hook_timeout,
@@ -1102,6 +1142,7 @@ impl PySandbox {
         build_role_arn,
         base_image=None,
         dockerfile=None,
+        project_dir=None,
         inherit_workdir=false,
     ))]
     #[allow(
@@ -1119,6 +1160,7 @@ impl PySandbox {
         build_role_arn: &str,
         base_image: Option<PyBaseImage>,
         dockerfile: Option<String>,
+        project_dir: Option<std::path::PathBuf>,
         inherit_workdir: bool,
     ) -> PyCoreResult<Bound<'py, PyBytes>> {
         let mut request = CreateImageRequest::new(name, binary, code_artifact_uri, build_role_arn);
@@ -1126,6 +1168,7 @@ impl PySandbox {
             request.base_image = base.inner;
         }
         request.dockerfile = dockerfile;
+        request.project_files = project_files(project_dir)?;
         request.inherit_workdir = inherit_workdir;
         let bytes = self.read(|sandbox| sandbox.build_artifact_for(&request));
         Ok(PyBytes::new(py, &bytes.map_err(crate::errors::CoreError)?))

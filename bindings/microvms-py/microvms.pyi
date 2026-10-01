@@ -2131,7 +2131,7 @@ class Sandbox:
         """
         How many times the token has been installed. Never above one (STATE-3).
         """
-    def build_artifact(self, /, *, name: str, binary: Sequence[int], code_artifact_uri: str, build_role_arn: str, base_image: BaseImage |None = None, dockerfile: str |None = None, inherit_workdir: bool = False) -> bytes:
+    def build_artifact(self, /, *, name: str, binary: Sequence[int], code_artifact_uri: str, build_role_arn: str, base_image: BaseImage |None = None, dockerfile: str |None = None, project_dir: str |PathLike[str] |None = None, inherit_workdir: bool = False) -> bytes:
         """
         The artifact bytes to upload to `code_artifact_uri`.
         
@@ -2139,12 +2139,17 @@ class Sandbox:
         as [`Self::build_image`] so the bytes a caller puts in the bucket are the bytes the
         build will receive.
         """
-    def build_image(self, /, *, name: str, binary: Sequence[int], code_artifact_uri: str, build_role_arn: str, size: SizeClass |None = None, base_image: BaseImage |None = None, dockerfile: str |None = None, repair_guest_identity: bool = False, inherit_workdir: bool = False, run_hook_timeout: RunHookTimeout |None = None, build_hook_timeout: BuildHookTimeout |None = None, tags: dict[str, str] |None = None, log_group: str |None = None, log_stream: str |None = None, token_scope: str |None = None) -> Image:
+    def build_image(self, /, *, name: str, binary: Sequence[int], code_artifact_uri: str, build_role_arn: str, size: SizeClass |None = None, base_image: BaseImage |None = None, base_image_version: str |None = None, dockerfile: str |None = None, project_dir: str |PathLike[str] |None = None, repair_guest_identity: bool = False, inherit_workdir: bool = False, run_hook_timeout: RunHookTimeout |None = None, build_hook_timeout: BuildHookTimeout |None = None, tags: dict[str, str] |None = None, log_group: str |None = None, log_stream: str |None = None, token_scope: str |None = None) -> Image:
         """
         Builds an image and waits for it to become usable.
         
         Every local guard runs **before** the call, which matters because the create happens
         after the caller's artifact upload: a rejection AWS raises costs the upload first.
+        
+        `base_image_version` pins the managed base to one version, a value
+        `managed_base_versions` lists. `project_dir` bakes the directory's one
+        manifest+lockfile pair into an environment layer, by the rule the CLI's `--project`
+        uses; a directory without exactly one pair raises `PreconditionError` before any call.
         
         # What is deliberately not a parameter
         
@@ -2184,7 +2189,7 @@ class Sandbox:
         """
         The proxy endpoint, once launched.
         """
-    def ensure_image(self, /, *, name_prefix: str, binary: Sequence[int], dockerfile: str, s3_bucket: str, build_role_arn: str, context_dir: str |PathLike[str] |None = None, s3_key_prefix: str |None = None, size: SizeClass |None = None, base_image: BaseImage |None = None, force: bool = False, tags: dict[str, str] |None = None, wait_timeout: float |None = None) -> EnsuredImage:
+    def ensure_image(self, /, *, name_prefix: str, binary: Sequence[int], dockerfile: str, s3_bucket: str, build_role_arn: str, context_dir: str |PathLike[str] |None = None, s3_key_prefix: str |None = None, size: SizeClass |None = None, base_image: BaseImage |None = None, base_image_version: str |None = None, project_dir: str |PathLike[str] |None = None, force: bool = False, tags: dict[str, str] |None = None, wait_timeout: float |None = None) -> EnsuredImage:
         """
         Builds or reuses the content-addressed image for a task: one call from build inputs
         to a ready image.
@@ -2207,7 +2212,8 @@ class Sandbox:
         Dockerfile's `COPY` lines read, taken as `docker build` takes it:
         `Dockerfile.dockerignore`, else `.dockerignore`, is honoured, and symlinks are skipped
         with a line in `warnings`. `base_image` defaults to
-        `BaseImage.from_dockerfile(dockerfile)`. `wait_timeout` is the build wait in seconds
+        `BaseImage.from_dockerfile(dockerfile)`. `base_image_version` and `project_dir` are
+        `build_image`'s, and both join the name's hash. `wait_timeout` is the build wait in seconds
         (45 minutes by default). Every local check runs before the first AWS call.
         """
     @staticmethod
@@ -2254,7 +2260,7 @@ class Sandbox:
         """
         The VM id, once launched.
         """
-    def preflight(self, /, *, name: str, binary: Sequence[int], code_artifact_uri: str, build_role_arn: str, size: SizeClass |None = None, base_image: BaseImage |None = None, dockerfile: str |None = None, repair_guest_identity: bool = False, inherit_workdir: bool = False, run_hook_timeout: RunHookTimeout |None = None, build_hook_timeout: BuildHookTimeout |None = None, tags: dict[str, str] |None = None, log_group: str |None = None, log_stream: str |None = None, token_scope: str |None = None) -> None:
+    def preflight(self, /, *, name: str, binary: Sequence[int], code_artifact_uri: str, build_role_arn: str, size: SizeClass |None = None, base_image: BaseImage |None = None, base_image_version: str |None = None, dockerfile: str |None = None, project_dir: str |PathLike[str] |None = None, repair_guest_identity: bool = False, inherit_workdir: bool = False, run_hook_timeout: RunHookTimeout |None = None, build_hook_timeout: BuildHookTimeout |None = None, tags: dict[str, str] |None = None, log_group: str |None = None, log_stream: str |None = None, token_scope: str |None = None) -> None:
         """
         Every local guard `build_image` runs, with zero calls: raises the refusal `build_image`
         would, so a caller who uploads its own artifact checks the request before paying for

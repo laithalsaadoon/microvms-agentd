@@ -1,0 +1,93 @@
+# ── a project directory's dependency files (#74, #264) ─────────────────────────────
+
+# A manifest without its lockfile counted as a pair, so a layer keyed on nothing builds. The rule
+# is core's since #264, shared by the CLI's `--project` and the bindings' `project_dir`.
+[[fault]]
+id = "app-project-manifest-alone-counts"
+guard = "control::project::tests::a_directory_that_cannot_key_a_layer_is_refused_naming_the_remedy"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "control::project::tests::a_directory_that_cannot_key_a_layer_is_refused_naming_the_remedy"]
+expect = "test-failed"
+suite = "rust"
+message = "no lockfile to key on"
+note = "crates/microvms-app/src/control/project.rs::a_directory_that_cannot_key_a_layer_is_refused_naming_the_remedy"
+transform = { file = "crates/microvms-app/src/control/project.rs", replace = "            (true, true) => found.push(ecosystem),\n", with = "            (true, _) => found.push(ecosystem),\n" }
+
+# ── `base_image_version` and `project_dir` on the bindings' image calls (#264, slice E) ──
+
+# The Python pin never put on the request: an illegal one is sent, and refused after the upload.
+[[fault]]
+id = "py-build-image-version-dropped"
+guard = "bindings/microvms-py/tests/test_build_project.py::test_a_bad_pin_is_refused_before_any_call"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_build_project.py::test_a_bad_pin_is_refused_before_any_call"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "DID NOT RAISE"
+transform = { file = "bindings/microvms-py/src/sandbox.rs", replace = "    request.base_image_version = args.base_image_version;\n", with = "" }
+
+# Python's `project_dir` never read: the directory is ignored and no layer is baked.
+[[fault]]
+id = "py-project-dir-dropped"
+guard = "bindings/microvms-py/tests/test_build_project.py::test_a_directory_without_a_pair_is_refused_before_any_call"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_build_project.py::test_a_directory_without_a_pair_is_refused_before_any_call"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "DID NOT RAISE"
+transform = { file = "bindings/microvms-py/src/sandbox.rs", replace = "    dir.map(microvms_core::control::read_project_files)\n", with = "    dir.filter(|_| false).map(microvms_core::control::read_project_files)\n" }
+
+# Python's `ensure_image` drops `project_dir`, so the call goes on toward AWS.
+[[fault]]
+id = "py-ensure-project-dir-dropped"
+guard = "bindings/microvms-py/tests/test_build_project.py::test_ensure_image_refuses_them_before_any_call[project]"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_build_project.py::test_ensure_image_refuses_them_before_any_call[project]"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "FAILED bindings/microvms-py/tests/test_build_project.py::test_ensure_image_refuses_them_before_any_call[project]"
+transform = { file = "bindings/microvms-py/src/sandbox.rs", replace = "            if let Some(dir) = project_dir {\n", with = "            if let Some(dir) = project_dir.filter(|_| false) {\n" }
+
+# The TypeScript pin never put on the request.
+[[fault]]
+id = "ts-build-image-version-dropped"
+guard = "a bad pin is refused before any call"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/build_project.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "Missing expected rejection"
+transform = { file = "bindings/microvms-js/src/sandbox.rs", replace = "        request.base_image_version = self.base_image_version;\n", with = "" }
+
+# TypeScript's `projectDir` never read by `buildImage`'s options.
+[[fault]]
+id = "ts-project-dir-dropped"
+guard = "a directory without a pair is refused before any call"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/build_project.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "Missing expected rejection"
+transform = { file = "bindings/microvms-js/src/sandbox.rs", replace = "        if let Some(dir) = self.project_dir {\n", with = "        if let Some(dir) = self.project_dir.filter(|_| false) {\n" }
+
+# TypeScript's `ensureImage` drops `projectDir`, so the call goes on toward AWS.
+[[fault]]
+id = "ts-ensure-project-dir-dropped"
+guard = "ensureImage refuses the project before any call"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/build_project.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+message = "not ok 7 - ensureImage refuses the project before any call"
+transform = { file = "bindings/microvms-js/src/sandbox.rs", replace = "        if let Some(dir) = options.project_dir {\n", with = "        if let Some(dir) = options.project_dir.filter(|_| false) {\n" }
