@@ -205,6 +205,75 @@ fn the_cli_exports_no_library_target_at_all() {
     assert_eq!(binaries, ["microvm"], "{targets:?}");
 }
 
+/// Whether a capability-table cell names the capability on its surface: a name or a list of
+/// names, rather than an exemption.
+fn implemented(cell: Option<&toml::Value>) -> bool {
+    match cell {
+        Some(toml::Value::String(name)) => !name.is_empty(),
+        Some(toml::Value::Array(names)) => !names.is_empty(),
+        _ => false,
+    }
+}
+
+/// **ARCH-5.** No capability the CLI implements is one core lacks until an issue closes it.
+///
+/// The missing library target above says a binding can't link the CLI. This says nothing a
+/// binding would want is there. `verify/parity/capabilities.toml` names each capability on each
+/// surface, and a `core` exemption with an `issue` on a row whose `cli` cell names a command is
+/// behavior that exists only in the CLI and is owed to core, the layer both bindings wrap. A
+/// `core` exemption without an issue is the table's own decision, the CLI's own contract (its
+/// ledger, its history, its manifest), which no binding needs. `parity:check` holds each cell to
+/// its surface, so a CLI command that does work core lacks shows up here as such a row.
+///
+/// The last ones were `budget-gate` and `import-record`, until #270 moved the budget gate and
+/// attach's probe-then-register into core; before them, directory sync (#260).
+///
+/// **Falsification**: give a row with a CLI command a `core = { exempt = "...", issue = "#N" }`
+/// cell and this fails naming the row.
+#[test]
+fn no_capability_the_cli_implements_is_owed_to_core() {
+    let table: toml::Table = repo_file("verify/parity/capabilities.toml")
+        .parse()
+        .expect("verify/parity/capabilities.toml is TOML");
+    let rows = table
+        .get("capability")
+        .and_then(toml::Value::as_array)
+        .expect("verify/parity/capabilities.toml has [[capability]] rows");
+    let id = |row: &toml::Value| {
+        row.get("id")
+            .and_then(toml::Value::as_str)
+            .unwrap_or("<no id>")
+            .to_string()
+    };
+    // The floor and the sentinel: a read that found no rows, or no row the CLI and core both
+    // implement, would pass while reading nothing.
+    let shared: Vec<String> = rows
+        .iter()
+        .filter(|row| implemented(row.get("cli")) && implemented(row.get("core")))
+        .map(id)
+        .collect();
+    assert!(
+        shared.iter().any(|row| row == "launch"),
+        "no row the CLI and core both implement includes `launch`, so the table wasn't read: {shared:?}"
+    );
+    let owed: Vec<String> = rows
+        .iter()
+        .filter(|row| {
+            implemented(row.get("cli"))
+                && row
+                    .get("core")
+                    .and_then(toml::Value::as_table)
+                    .is_some_and(|cell| cell.contains_key("issue"))
+        })
+        .map(id)
+        .collect();
+    assert!(
+        owed.is_empty(),
+        "the CLI implements {owed:?}, which core lacks until an issue closes it. Nothing a binding \
+         needs lives in the CLI (ARCH-5): the work belongs in core, which both bindings wrap."
+    );
+}
+
 /// The direct dependencies of `name` that are workspace members, of every kind.
 ///
 /// Every kind, dev included: a test-only edge from the domain onto core would still let the

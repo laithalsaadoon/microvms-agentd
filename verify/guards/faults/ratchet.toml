@@ -41,7 +41,7 @@ run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
 message = "stale decision: [subprocess] crates/agentd/src/exec.rs: Command::new(gone) decides a finding the tree doesn't have"
-transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\", \"parity-gap\"]\n", with = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\", \"parity-gap\"]\n\n[[decision]]\ncategory = \"subprocess\"\nkey = \"crates/agentd/src/exec.rs: Command::new(gone)\"\nreason = \"seeded\"\n" }
+transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\", \"parity-gap\", \"untraced\"]\n", with = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\", \"parity-gap\", \"untraced\"]\n\n[[decision]]\ncategory = \"subprocess\"\nkey = \"crates/agentd/src/exec.rs: Command::new(gone)\"\nreason = \"seeded\"\n" }
 
 [[fault]]
 id = "ratchet-enforced-with-drift"

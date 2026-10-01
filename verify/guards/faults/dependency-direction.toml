@@ -99,7 +99,7 @@ expect = "test-failed"
 suite = "rust"
 note = "crates/microvms-cli/tests/dependency_direction.rs::every_set_and_placement_record_belongs_to_a_crate_held_here"
 message = "which names microvms-edges, a crate with no set"
-transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\", \"parity-gap\"]\n", with = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\", \"parity-gap\"]\n\n[[decision]]\ncategory = \"placement\"\nkey = \"microvms-edges -> reqwest\"\nreason = \"seeded\"\n" }
+transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\", \"parity-gap\", \"untraced\"]\n", with = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\", \"parity-gap\", \"untraced\"]\n\n[[decision]]\ncategory = \"placement\"\nkey = \"microvms-edges -> reqwest\"\nreason = \"seeded\"\n" }
 
 [[fault]]
 id = "deps-record-in-set"
@@ -117,7 +117,7 @@ run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", 
 expect = "test-failed"
 suite = "rust"
 message = "the placement record \"microvms-cli -> notify\" is written twice, the second time as a decision"
-transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\", \"parity-gap\"]\n", with = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\", \"parity-gap\"]\n\n[[decision]]\ncategory = \"placement\"\nkey = \"microvms-cli -> notify\"\nreason = \"seeded\"\n" }
+transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\", \"parity-gap\", \"untraced\"]\n", with = "enforced = [\"subprocess\", \"port-impl\", \"adapter-logic\", \"placement\", \"parity-drift\", \"parity-gap\", \"untraced\"]\n\n[[decision]]\ncategory = \"placement\"\nkey = \"microvms-cli -> notify\"\nreason = \"seeded\"\n" }
 
 [[fault]]
 id = "deps-record-shape"
@@ -241,3 +241,34 @@ expect = "test-failed"
 suite = "rust"
 message = "microvms-core must depend on none of the CLI or the bindings"
 transform = { file = "crates/microvms-core/Cargo.toml", replace = "[dev-dependencies]\n", with = "[dev-dependencies]\nmicrovms-cli = { path = \"../microvms-cli\" }\n" }
+
+# ARCH-5 (#307): a capability the CLI implements and core owes, the shape #260 and #270 removed.
+[[fault]]
+id = "deps-arch-5-cli-capability-owed"
+guard = "no_capability_the_cli_implements_is_owed_to_core"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "no_capability_the_cli_implements_is_owed_to_core"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/microvms-cli/tests/dependency_direction.rs::no_capability_the_cli_implements_is_owed_to_core"
+message = "the CLI implements [\"release-names-of-vm\"], which core lacks"
+transform = { file = "verify/parity/capabilities.toml", replace = "core = \"microvms_core::names::NameStore::release_by_vm\"\n", with = "core = { exempt = \"seeded: the release lives in the CLI\", issue = \"#1\" }\n" }
+
+# The sentinel: `launch` stops being a row the CLI and core both implement, as a table read wrong would.
+[[fault]]
+id = "deps-arch-5-table-sentinel"
+guard = "no_capability_the_cli_implements_is_owed_to_core"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "no_capability_the_cli_implements_is_owed_to_core"]
+expect = "test-failed"
+suite = "rust"
+message = "no row the CLI and core both implement includes `launch`"
+transform = { file = "verify/parity/capabilities.toml", replace = "core = \"microvms_core::sandbox::Sandbox::run\"\ncli = \"run\"\n", with = "core = \"microvms_core::sandbox::Sandbox::run\"\ncli = { exempt = \"seeded\" }\n" }
+
+# The floor: a cell reader that recognizes no name reads every row as exempt, and owes nothing.
+[[fault]]
+id = "deps-arch-5-reader-floor"
+guard = "no_capability_the_cli_implements_is_owed_to_core"
+run = ["cargo", "test", "-p", "microvms-cli", "--test", "dependency_direction", "--", "--exact", "no_capability_the_cli_implements_is_owed_to_core"]
+expect = "test-failed"
+suite = "rust"
+message = "no row the CLI and core both implement includes `launch`"
+transform = { file = "crates/microvms-cli/tests/dependency_direction.rs", replace = "Some(toml::Value::String(name)) => !name.is_empty(),", with = "Some(toml::Value::String(name)) => name.is_empty()," }

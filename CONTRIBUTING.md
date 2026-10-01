@@ -172,10 +172,11 @@ a direct dependency outside its crate's set in `verify/arch/placement.toml`, is 
 by `crates/microvms-cli/tests/dependency_direction.rs` instead, which holds each crate to
 its set, its `drift` table there and its placement decisions: a new dependency fails
 there, and so does a fixed one still in the drift table. The ratchet refuses drift the
-base doesn't have there too, and a crate added to a set the base already has. An
-untraced requirement can't be a decision: it gets an entry in its group's file
-(`verify/spec/traced/TRAP.toml` for a TRAP key), with a waiver for any layer it can't
-carry. Each group has its own file, so the changes that trace different groups don't
+base doesn't have there too, and a crate added to a set the base already has. Every
+requirement has an entry in its group's file (`verify/spec/traced/TRAP.toml` for a TRAP
+key), with a waiver for any layer it can't carry: `trace:check` fails on a requirement
+no group file lists or whose entry waives every layer, and an untraced requirement can't
+be a decision. Each group has its own file, so the changes that trace different groups don't
 edit one table; `tools/check-trace.py` loads them all and refuses a key in the wrong
 group's file or listed twice. Moving drift to another file or crate is a move, not new
 drift, when its key keeps its path or its text; a move and a rename at once read as new
