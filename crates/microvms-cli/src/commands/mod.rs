@@ -26,6 +26,7 @@ pub mod agent;
 pub mod attached;
 pub mod cost;
 pub mod doctor;
+pub mod image;
 pub mod lifecycle;
 pub mod local;
 
@@ -106,7 +107,7 @@ pub struct Ctx<'a, O: Write, E: Write> {
 /// command added without an entry fails rather than shipping undescribed. That check is the
 /// only thing that keeps this table from being the hand-maintained artifact the manifest is
 /// forbidden to be.
-pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 30] = [
+pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 33] = [
     (
         "run",
         "microvm.run",
@@ -450,6 +451,24 @@ pub const RESPONSE_TYPES: [(&str, &str, &[&str]); 30] = [
     ),
     ("history", "microvm.history", &["microvmId", "events"]),
     ("names", "microvm.names", &["names", "deleted"]),
+    // The service's readback in its own spelling: `versions` and `version` are
+    // `MicrovmImageVersionSummary`, `builds` is `MicrovmImageBuildSummary` or, with
+    // `--build-id`, the one `GetMicrovmImageBuild` answer with its `snapshotBuild`.
+    (
+        "image-versions",
+        "microvm.image.versions",
+        &["imageArn", "versions"],
+    ),
+    (
+        "image-set-status",
+        "microvm.image.status",
+        &["imageArn", "imageVersion", "status", "version"],
+    ),
+    (
+        "image-builds",
+        "microvm.image.builds",
+        &["imageArn", "imageVersion", "builds"],
+    ),
     (
         "logs",
         "microvm.logs",

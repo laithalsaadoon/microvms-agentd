@@ -663,7 +663,7 @@ pub struct ListImageVersionsResponseWire {
 /// and turn a readable version into a client error. A response-shaped hooks type is the fix
 /// if a caller ever needs it; until then the absence is the honest option, and the test
 /// `a_versions_hooks_block_is_not_read_because_a_real_one_omits_members` pins the reason.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MicrovmImageVersionSummaryWire {
     // ── the model's eight required members ────────────────────────────────────
@@ -757,7 +757,7 @@ pub struct ListImageBuildsResponseWire {
 /// because the model requiring a member is the strongest promise it makes about a
 /// response, and a required member absent from the struct is a member no drift check can
 /// notice going missing.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MicrovmImageBuildSummaryWire {
     pub image_arn: String,
@@ -812,7 +812,7 @@ impl MicrovmImageBuildSummaryWire {
 ///
 /// Every other member is required and identical to the summary's, so the same eight are bare
 /// fields here.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetImageBuildResponseWire {
     pub image_arn: String,
@@ -872,7 +872,7 @@ impl GetImageBuildResponseWire {
 /// a failed build really does answer with a subset (see
 /// [`GetImageBuildResponseWire::snapshot_build`]). A defaulted `0` would be a size claim
 /// nobody made, which is the same distinction `stateReason`'s `None` carries.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SnapshotBuild {
     pub memory_snapshot_size_in_bytes: Option<u64>,

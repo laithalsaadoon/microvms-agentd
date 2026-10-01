@@ -22,6 +22,7 @@ from selftest.closed_output import check_bdd_outcome, check_closing_reader_helpe
 from selftest.cost import check_cost_checks
 from selftest.ensure_image import check_ensure_image_section
 from selftest.harness import check_run_section
+from selftest.image_versions import check_image_versions_section
 from selftest.local import check_doctor_region_lines, check_preflight_lines
 from selftest.names import check_terminate_fallback
 from selftest.posture import check_posture_lines
@@ -57,6 +58,7 @@ def self_test() -> int:
         check_doctor_region_lines(results)
         check_ensure_image_section(results)
         check_caller_artifact_section(results)
+        check_image_versions_section(results)
         check_gh_logged_out(results)
         check_version_skew_helpers(results)
         check_cost_checks(results)
