@@ -8,8 +8,10 @@ the scratch worktree included. The census cases run the real ast-grep, so run th
 `mise run guards:list`.
 """
 
+import contextlib
 import dataclasses
 import fnmatch
+import io
 import json
 import os
 import re
@@ -1831,6 +1833,32 @@ class FireInParallel(unittest.TestCase):
             out.stdout,
         )
         self.assertIn("the tree didn't come back clean after the faults", out.stdout)
+
+    def test_a_commands_runs_are_read_in_worker_order_whichever_finished_first(self):
+        # Worker 2's restored run is red and it finished first, which is how main's push at
+        # 8ebc766 ran the case above: read in the order they finished, the red run came first,
+        # and a check that read one run still saw it, so the seeded fault that narrows the
+        # check to `runs[:1]` didn't fire. Read in worker order, worker 2's comes second.
+        script = fire_module()
+        fault = script["Fault"](
+            id="a1", guard="g1", run=[CARGO], expect="test-failed", suite="rust"
+        )
+        key = script["command_key"](fault)
+        board = script["Board"]([[]], False)
+        green = (0, "test g1 ... ok\n", "test g1 ... ok\n", 0.1, 1)
+        red = (1, "run 5 went red\n", "run 5 went red\n", 0.1, 2)
+        board.done[key] = [red, green]
+        logs: dict[str, str] = {}
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            ok = script["check_pass"](
+                [fault], board, {key: 2}, logs.__setitem__, "restored"
+            )
+        self.assertFalse(ok, "a red restored run passed")
+        self.assertIn("already red: a1: the command exits 1", printed.getvalue())
+        log = logs["a1.restored.log"]
+        self.assertLess(
+            log.index("## worker 1"), log.index("## worker 2"), "the runs out of order"
+        )
 
     def test_jobs_below_one_are_refused(self):
         out = fire_repo(self, entry()).run("fire", "--jobs", "0")
