@@ -28,7 +28,7 @@ from lanes.sessions import run_rust_live
 def drive_file_transfer(
     cli: Cli, launched: Envelope, results: Results, workdir: Path
 ) -> None:
-    """`microvm cp`, `cp --lines` and `cp --tar`, including the four hostile archives.
+    """`microvm cp`, `cp --lines`, `cp --tar` and `exists`, including the four hostile archives.
 
     The symlink pair is the one worth naming: harnesses pack symlinks deliberately, and a
     daemon that refused links would break real uploads — so an in-tree link has to survive
@@ -69,6 +69,18 @@ def drive_file_transfer(
         "read of an absent file is 404",
         "NotFound",
         lambda: cli.call("cp", "vm:/tmp/absent", str(workdir / "absent.txt"), *attach),
+    )
+    # `microvm exists` (#269), core's `file_exists`: the file just written, and the absent one
+    # the read above was refused for.
+    results.eq(
+        "exists reports the written file",
+        cli.call("exists", "/tmp/live.txt", *attach).data.get("exists"),
+        True,
+    )
+    results.eq(
+        "exists reports an absent path as absent",
+        cli.call("exists", "/tmp/absent", *attach).data.get("exists"),
+        False,
     )
 
     # A line window, sliced by the daemon (#265): lines 2 to 4 of a five-line file.

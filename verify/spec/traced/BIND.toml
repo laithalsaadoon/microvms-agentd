@@ -1,6 +1,5 @@
 # The BIND group's traced requirements. The format and the rules are in tools/check-trace.py.
 
-# BIND-5 waits on #255 and #266, which rewrite the cost tests that would name it.
 [BIND-1]
 issue = "#306"
 waive.model = "a property of the workspace's dependency graph, not of a state"
@@ -28,6 +27,13 @@ waive.model = "a property of the crate's dependencies and surface, not of a stat
 waive.gherkin = "no behavior to script: the dependency set and the adapter-logic ratchet check it over manifests and source"
 waive.fuzz = "there is no input stream; the rule is over manifests and source"
 waive.live = "the wrapper makes no AWS call of its own; core's calls are the live tier's"
+
+[BIND-5]
+issue = "#306"
+waive.model = "a property of the bindings' cost types, which have no states to explore"
+waive.gherkin = "no behavior to script: each binding's suite asserts the shut doors directly, the coercions, the missing constructor and the absent usd key"
+waive.fuzz = "there is no input stream; the rule is over each binding's type surface, which the suites enumerate spelling by spelling"
+waive.live = "the bindings' cost types are local values and make no AWS call; the live suite holds core's report through the CLI (COST-1, COST-3, COST-4, COST-10)"
 
 [BIND-6]
 issue = "#222"
