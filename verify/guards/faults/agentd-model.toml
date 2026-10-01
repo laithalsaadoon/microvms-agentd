@@ -83,3 +83,77 @@ expect = "test-failed"
 suite = "rust"
 message = "\"AGENTD-6 a control request presenting the installed token is accepted\" counterexample"
 transform = { file = "crates/model/src/lib.rs", replace = "                        ControlOp::ExecPoll(_) => Response::Ok,\n", with = "                        ControlOp::ExecPoll(_) => Response::Unauthorized,\n" }
+
+# The client model's transition properties (#302), one per STATE-n that names a transition: each
+# fault moves one transition somewhere else, and only its own property reports a counterexample
+# (they come first in the list, and stateright reports the first).
+
+# An accepted launch records no image.
+[[fault]]
+id = "model-client-state-1-no-image"
+guard = "client::tests::a_guarded_client_satisfies_every_property"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "client::tests::a_guarded_client_satisfies_every_property"]
+expect = "test-failed"
+suite = "rust"
+message = "\"STATE-1 an accepted launch leaves the VM PENDING with its image recorded\" counterexample"
+transform = { file = "crates/model/src/client.rs", replace = "next.image_exists = true;", with = "next.image_exists = last.image_exists;" }
+
+# A successful hook installs no token.
+[[fault]]
+id = "model-client-state-2-token-not-installed"
+guard = "client::tests::a_guarded_client_satisfies_every_property"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "client::tests::a_guarded_client_satisfies_every_property"]
+expect = "test-failed"
+suite = "rust"
+message = "\"STATE-2 a successful hook leaves the VM RUNNING with its token installed\" counterexample"
+transform = { file = "crates/model/src/client.rs", replace = "next.token_installed = true;", with = "next.token_installed = last.token_installed;" }
+
+# An accepted suspend jumps straight to SUSPENDED.
+[[fault]]
+id = "model-client-state-4-suspend-skips-suspending"
+guard = "client::tests::a_guarded_client_satisfies_every_property"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "client::tests::a_guarded_client_satisfies_every_property"]
+expect = "test-failed"
+suite = "rust"
+message = "\"STATE-4 an accepted suspend leaves the VM SUSPENDING\" counterexample"
+transform = { file = "crates/model/src/client.rs", replace = "next.vm_state = VmState::Suspending;", with = "next.vm_state = VmState::Suspended;" }
+
+# A reported suspension leaves the VM SUSPENDING.
+[[fault]]
+id = "model-client-state-6-suspension-stays-suspending"
+guard = "client::tests::a_guarded_client_satisfies_every_property"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "client::tests::a_guarded_client_satisfies_every_property"]
+expect = "test-failed"
+suite = "rust"
+message = "\"STATE-6 a reported suspension leaves the VM SUSPENDED\" counterexample"
+transform = { file = "crates/model/src/client.rs", replace = "next.vm_state = VmState::Suspended;", with = "next.vm_state = VmState::Suspending;\n                    next.cycles += 0;" }
+
+# A completed resume leaves the VM SUSPENDED.
+[[fault]]
+id = "model-client-state-7-resume-stays-suspended"
+guard = "client::tests::a_guarded_client_satisfies_every_property"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "client::tests::a_guarded_client_satisfies_every_property"]
+expect = "test-failed"
+suite = "rust"
+message = "\"STATE-7 a completed resume leaves the VM RUNNING\" counterexample"
+transform = { file = "crates/model/src/client.rs", replace = "next.vm_state = VmState::Running;\n                    next.resume_in_flight = false;", with = "next.resume_in_flight = false;" }
+
+# An accepted terminate jumps straight to TERMINATED.
+[[fault]]
+id = "model-client-state-9-terminate-skips-terminating"
+guard = "client::tests::a_guarded_client_satisfies_every_property"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "client::tests::a_guarded_client_satisfies_every_property"]
+expect = "test-failed"
+suite = "rust"
+message = "\"STATE-9 an accepted terminate leaves the VM TERMINATING and recorded terminated\" counterexample"
+transform = { file = "crates/model/src/client.rs", replace = "next.vm_state = VmState::Terminating;", with = "next.vm_state = VmState::Terminated;" }
+
+# A reported termination leaves the VM TERMINATING.
+[[fault]]
+id = "model-client-state-10-termination-stays-terminating"
+guard = "client::tests::a_guarded_client_satisfies_every_property"
+run = ["cargo", "test", "-p", "agentd-model", "--lib", "--", "--exact", "client::tests::a_guarded_client_satisfies_every_property"]
+expect = "test-failed"
+suite = "rust"
+message = "\"STATE-10 a reported termination leaves the VM TERMINATED\" counterexample"
+transform = { file = "crates/model/src/client.rs", replace = "next.vm_state = VmState::Terminated;", with = "next.vm_state = VmState::Terminating;" }
