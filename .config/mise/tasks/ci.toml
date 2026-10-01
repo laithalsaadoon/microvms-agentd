@@ -169,8 +169,10 @@ description = "CI's `semver` job: the published crates' Rust API against their l
 run = [{ task = "semver:check" }]
 
 ["ci:mutmut"]
-description = "CI's `mutmut` job's command: the mutmut ratchet over the change's functions in tools/*.py. The job passes `--base <its base>`"
-run = "./tools/check-mutmut.py"
+description = "CI's `mutmut` job's command: the mutmut ratchet over the change's functions in tools/*.py. The job passes `--base <its base> --shard k/4`"
+# 45 minutes of mutmut a shard, under the job's 60-minute timeout with room for its setup; the
+# head side gets the first 60% of it (the script's `HEAD_SHARE`).
+run = "./tools/check-mutmut.py --budget 2700"
 
 ["ci:build"]
 description = "CI's `build` job: the release build of the daemon for the shipping target, and its size and linkage"

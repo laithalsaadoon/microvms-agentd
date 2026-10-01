@@ -144,7 +144,10 @@ it, so a script's own suite loads it with `runpy.run_path(<path>, run_name="tool
 script no suite loads that way isn't measured, and the job says so. A surviving mutant prints
 with its diff: write the assertion that fails with it in. One no test could tell from the
 original takes a no-mutate pragma on its line, with the reason in parentheses after it, which
-the script requires.
+the script requires. The job runs in four shards, each with its share of the changed functions
+and their base, and each within a budget under the job's timeout; a function a shard's budget
+leaves undecided passes, and the log names it. `mise run mutmut` takes the same `--shard` and
+`--budget` arguments the job hands `ci:mutmut`.
 
 Two kinds of code take `#[cfg_attr(test, mutants::skip)]` rather than an
 exclusion: a new test double behind `cfg(any(test, feature = "test-support"))`
