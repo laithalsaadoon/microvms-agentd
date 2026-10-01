@@ -36,76 +36,60 @@ transform = { file = "tools/changelog.py", replace = "    if author == DEPENDABO
 
 # The shipped set's floor, on this tree: a file listing that comes back empty would leave
 # every change outside the set, and the branch rule would pass over nothing.
-[[fault]]
-id = "changelog-shipped-floor"
+[[family]]
 guard = "tools/changelog.py"
 run = ["./tools/changelog.py", "check", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "changelog-shipped-floor"
 message = "SHIPPED names crates/protocol/src/, which matches no file in the tree"
 transform = { file = "tools/changelog.py", replace = "    files = listing.splitlines()\n", with = "    files = []\n" }
 
 # Its sentinel: a crate whose source moves out from under its SHIPPED path.
-[[fault]]
+[[family.fault]]
 id = "changelog-shipped-path-moved"
-guard = "tools/changelog.py"
-run = ["./tools/changelog.py", "check", "--base", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
 message = "SHIPPED names crates/protocol/source/, which matches no file in the tree"
 transform = { file = "tools/changelog.py", replace = "    \"crates/protocol/src/\",\n", with = "    \"crates/protocol/source/\",\n" }
 
 # NOT_SHIPPED leaves the fuzz harnesses out as test-only, and holds each to its
 # `#[cfg(test)]`: a harness compiled into the daemon is shipped code the exclusion would hide.
-[[fault]]
+[[family.fault]]
 id = "changelog-exclusion-ships"
-guard = "tools/changelog.py"
-run = ["./tools/changelog.py", "check", "--base", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
 message = "NOT_SHIPPED covers crates/agentd/src/exec_start_fuzz.rs, and no `#[cfg(test)] mod exec_start_fuzz;`"
 transform = { file = "crates/agentd/src/lib.rs", replace = "#[cfg(test)]\nmod exec_start_fuzz;\n", with = "mod exec_start_fuzz;\n" }
 
 # NOT_SHIPPED leaves every file under the CLI's guards directory out, and holds each to its own
 # `#![cfg(test)]`, since `guards/mod.rs` declares its modules with no `cfg`: a guard file
 # without one is compiled into the binary, and the exclusion would hide it.
-[[fault]]
+[[family.fault]]
 id = "changelog-guards-file-ships"
-guard = "tools/changelog.py"
-run = ["./tools/changelog.py", "check", "--base", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
 message = "NOT_SHIPPED covers crates/microvms-cli/src/guards/exec.rs, and no `#[cfg(test)] mod exec;`"
 transform = { file = "crates/microvms-cli/src/guards/exec.rs", replace = "\n#![cfg(test)]\n", with = "\n" }
 
 # The file's own `#![cfg(test)]` is what the guards directory rests on: a reader that only took
 # the parent's declaration would refuse every guard file.
-[[fault]]
-id = "changelog-test-only-by-its-own-attribute"
+[[family]]
 guard = "test_changelog.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_changelog.py"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "changelog-test-only-by-its-own-attribute"
 message = "FAIL: test_a_file_that_marks_itself_test_only_needs_no_fragment ("
 transform = { file = "tools/changelog.py", replace = "        if text == \"#![cfg(test)]\":\n            return True\n", with = "        if False:\n            return True\n" }
 
 # Only the file's opening counts: an attribute after an item isn't the file's own.
-[[fault]]
+[[family.fault]]
 id = "changelog-own-attribute-opens-the-file"
-guard = "test_changelog.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_changelog.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_guards_file_with_no_cfg_of_its_own_fails ("
 transform = { file = "tools/changelog.py", replace = "        if text and not text.startswith((\"//\", \"#![\")):\n            break\n", with = "        if text and not text.startswith((\"//\", \"#![\")):\n            continue\n" }
 
 # A `mod.rs` is its directory's module, declared from the directory above: read as a module
 # named `mod`, no parent declares it.
-[[fault]]
+[[family.fault]]
 id = "changelog-mod-rs-named-for-its-directory"
-guard = "test_changelog.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_changelog.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_mod_rs_is_declared_under_its_directorys_name ("
 transform = { file = "tools/changelog.py", replace = "    if path.name == \"mod.rs\":\n", with = "    if False:\n" }

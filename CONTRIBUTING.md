@@ -81,7 +81,11 @@ transform. `tools/fail-to-pass.py`'s docstring has the rules.
 For a new gate, scanner or script check, register the fault that proves it catches its
 failure in its owner's file in `verify/guards/faults/` (a gate's, a crate's, or one
 issue's guards; a new owner starts a file), and show
-`mise run guards:fire -- --only <id>` printing `fired` for it. The registry is
+`mise run guards:fire -- --only <id>` printing `fired` for it. Entries that share a
+guard and a command go in a `[[family]]`, a gate's empty-input, unreadable-input and
+sentinel entries are declared once in a `[[scanner]]`, and a Rust test's Falsification
+note can carry its own entry as a fenced `falsification` block;
+`tools/check-guards-fire.py`'s docstring has each form. The registry is
 split by owner so that pull requests adding guards for different owners don't
 edit one file; an id is still unique across every file. `check` runs
 `guards:list`, which fails when an entry's anchor or patch no longer matches the

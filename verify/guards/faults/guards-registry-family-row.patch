@@ -1,0 +1,16 @@
+diff --git a/verify/guards/faults/guards-registry-family.toml b/verify/guards/faults/guards-registry-family.toml
+new file mode 100644
+--- /dev/null
++++ b/verify/guards/faults/guards-registry-family.toml
+@@ -0,0 +1,11 @@
++# ── an owner whose family row lacks its message ──
++
++[[family]]
++guard = "tools/check-agents-md.py"
++run = ["./tools/check-agents-md.py"]
++expect = "exit-nonzero"
++suite = "script"
++
++[[family.fault]]
++id = "guards-registry-row-without-a-message"
++transform = { file = "AGENTS.md", replace = "# Repository guide\n", with = "# Guide\n" }

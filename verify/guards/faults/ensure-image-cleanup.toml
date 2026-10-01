@@ -3,56 +3,38 @@
 # Each fault takes back one part of finding the run's resources by its prefix, and the
 # self-test's scenario for that part must name the check that then passes on a leak.
 
-[[fault]]
-id = "conformance-ensure-image-cleanup-report-only"
+[[family]]
 guard = "conformance/run_rs.py --self-test: conformance/selftest/ensure_image.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "conformance-ensure-image-cleanup-report-only"
 message = "an empty report and an image that won't delete: failed []"
 transform = { file = "conformance/lanes/ensure_image.py", replace = "        if run_owns(prefix, item.get(\"name\"))\n", with = "        if False\n" }
 
-[[fault]]
+[[family.fault]]
 id = "conformance-ensure-image-cleanup-exact-group"
-guard = "conformance/run_rs.py --self-test: conformance/selftest/ensure_image.py"
-run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
-expect = "exit-nonzero"
-suite = "script"
 message = "an empty report and a hashed log group that won't delete: failed []"
 transform = { file = "conformance/lanes/ensure_image.py", replace = "        if run_owns(prefix, name.removeprefix(SERVICE_LOG_PREFIX))\n", with = "        if name == f\"{SERVICE_LOG_PREFIX}{prefix}\"\n" }
 
-[[fault]]
+[[family.fault]]
 id = "conformance-ensure-image-cleanup-vm-report-only"
-guard = "conformance/run_rs.py --self-test: conformance/selftest/ensure_image.py"
-run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
-expect = "exit-nonzero"
-suite = "script"
 message = "an empty report and a VM that won't terminate: failed []"
 transform = { file = "conformance/lanes/ensure_image.py", replace = "        if run_owns(prefix, image_name_of(item.get(\"imageArn\")))\n", with = "        if False\n" }
 
-[[fault]]
+[[family.fault]]
 id = "conformance-ensure-image-cleanup-arn-ignored"
-guard = "conformance/run_rs.py --self-test: conformance/selftest/ensure_image.py"
-run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
-expect = "exit-nonzero"
-suite = "script"
 message = "a hidden image that won't delete: failed []"
 transform = { file = "conformance/lanes/ensure_image.py", replace = "        by_arn = image_state(plane, arn)\n        if by_arn is not None and arn:\n", with = "        by_arn = None\n        if by_arn is not None and arn:\n" }
 
-[[fault]]
+[[family.fault]]
 id = "conformance-ensure-image-cleanup-one-try"
-guard = "conformance/run_rs.py --self-test: conformance/selftest/ensure_image.py"
-run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
-expect = "exit-nonzero"
-suite = "script"
 message = "an image still CREATING that deletes on a later try: failed ['the ensured image is deleted']"
 transform = { file = "conformance/lanes/ensure_image.py", replace = "        if (not remaining and by_arn is None) or clock() > deadline:\n", with = "        if True:\n" }
 
-[[fault]]
+[[family.fault]]
 id = "conformance-ensure-image-cleanup-other-run"
-guard = "conformance/run_rs.py --self-test: conformance/selftest/ensure_image.py"
-run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
-expect = "exit-nonzero"
-suite = "script"
 message = "another run's image, VM and group kept: False"
 transform = { file = "conformance/lanes/ensure_image.py", replace = "    return bool(name) and (name == prefix or str(name).startswith(f\"{prefix}-\"))\n", with = "    return bool(name) and str(name).startswith(prefix)\n" }

@@ -21,21 +21,19 @@ transform = [
   { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "use std::time::Duration;\n", with = "use std::time::Duration;\n\nuse microvms_core::prelude::ControlPlaneExt as _;\n" },
 ]
 
-[[fault]]
-id = "doctor-region-credentials"
+[[family]]
 guard = "guards::doctor::doctor_asks_every_check_about_the_region_its_flag_names"
 run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::doctor::doctor_asks_every_check_about_the_region_its_flag_names"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "doctor-region-credentials"
 note = "crates/microvms-cli/src/guards/doctor.rs::doctor_asks_every_check_about_the_region_its_flag_names"
 transform = { file = "crates/microvms-cli/src/commands/doctor.rs", replace = "    let region = match resolved {\n        Ok(region) => region.clone(),", with = "    let region = match &crate::seam::resolve_region(None, None, ctx.env) {\n        Ok(region) => region.clone()," }
 
-[[fault]]
+[[family.fault]]
 id = "doctor-region-managed-bases"
-guard = "guards::doctor::doctor_asks_every_check_about_the_region_its_flag_names"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::doctor::doctor_asks_every_check_about_the_region_its_flag_names"]
-expect = "test-failed"
-suite = "rust"
 transform = { file = "crates/microvms-cli/src/commands/doctor.rs", replace = "    let Ok(region) = region else {", with = "    let Ok(region) = &crate::seam::resolve_region(None, None, ctx.env) else {" }
 
 [[fault]]
@@ -75,82 +73,62 @@ transform = { file = "crates/microvms-cli/src/commands/doctor.rs", replace = "  
 # #336: `doctor` resolves its region through `run`'s chain, so a `microvm.toml` `region` sits
 # above the environment, and the region line names the layer that chose it.
 
-[[fault]]
-id = "doctor-region-ignores-config"
+[[family]]
 guard = "guards::doctor::doctor_asks_every_check_about_the_region_run_would_launch_in"
 run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::doctor::doctor_asks_every_check_about_the_region_run_would_launch_in"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "doctor-region-ignores-config"
 message = "left: [\"us-east-1\", \"us-east-1\"]"
 note = "crates/microvms-cli/src/guards/doctor.rs::doctor_asks_every_check_about_the_region_run_would_launch_in"
 transform = { file = "crates/microvms-cli/src/commands/doctor.rs", replace = "    let region = merged.flags.resolve(ctx.env);", with = "    let region = args.region.resolve(ctx.env);" }
 
-[[fault]]
+[[family.fault]]
 id = "doctor-region-names-no-source"
-guard = "guards::doctor::doctor_asks_every_check_about_the_region_run_would_launch_in"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::doctor::doctor_asks_every_check_about_the_region_run_would_launch_in"]
-expect = "test-failed"
-suite = "rust"
 message = "is a known MicroVMs region\""
 transform = { file = "crates/microvms-cli/src/commands/doctor.rs", replace = "    check.detail.push_str(&format!(\"; set by {chosen_by}\"));\n", with = "    let _ = chosen_by;\n" }
 
 # #277's falsifier: a char literal holding a quote used to blank the rest of the line. The
 # operation scan it was written against went with #273, so it's seeded under the print scan, which
 # reads the same lexer.
-[[fault]]
-id = "thinness-char-literal"
+[[family]]
 guard = "no_production_code_writes_with_a_print_macro"
 run = ["cargo", "test", "-p", "microvms-cli", "--test", "thinness", "--", "--exact", "no_production_code_writes_with_a_print_macro"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "thinness-char-literal"
 message = "lifecycle.rs:"
 transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    let _quote = '\"'; print!(\"suspending\");\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
 
 # #277's sentinel: a token walk that records nothing reads every file as clean.
-[[fault]]
+[[family.fault]]
 id = "thinness-seam-sentinel"
-guard = "no_production_code_writes_with_a_print_macro"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "thinness", "--", "--exact", "no_production_code_writes_with_a_print_macro"]
-expect = "test-failed"
-suite = "rust"
 message = "the sentinel failed: src/seam.rs"
 transform = { file = "crates/microvms-cli/tests/thinness.rs", replace = "                        found.push((ident.span().start().line, ident.to_string()));\n", with = "                        let _ = &ident;\n" }
 
 # #273 review round 1 (the falsifier's faults): a print macro spelled with a space or another
 # delimiter, and a nested `#![cfg(test)]` that used to drop the whole file from the scan.
-[[fault]]
+[[family.fault]]
 id = "thinness-print-spaced"
-guard = "no_production_code_writes_with_a_print_macro"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "thinness", "--", "--exact", "no_production_code_writes_with_a_print_macro"]
-expect = "test-failed"
-suite = "rust"
 message = "lifecycle.rs:"
 transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    print! (\"suspending\");\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
 
-[[fault]]
+[[family.fault]]
 id = "thinness-print-braces"
-guard = "no_production_code_writes_with_a_print_macro"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "thinness", "--", "--exact", "no_production_code_writes_with_a_print_macro"]
-expect = "test-failed"
-suite = "rust"
 message = "lifecycle.rs:"
 transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    println! {\"suspending\"};\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
 
-[[fault]]
+[[family.fault]]
 id = "thinness-print-brackets"
-guard = "no_production_code_writes_with_a_print_macro"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "thinness", "--", "--exact", "no_production_code_writes_with_a_print_macro"]
-expect = "test-failed"
-suite = "rust"
 message = "lifecycle.rs:"
 transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    eprintln![\"suspending\"];\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
 
-[[fault]]
+[[family.fault]]
 id = "thinness-nested-test-gate"
-guard = "no_production_code_writes_with_a_print_macro"
-run = ["cargo", "test", "-p", "microvms-cli", "--test", "thinness", "--", "--exact", "no_production_code_writes_with_a_print_macro"]
-expect = "test-failed"
-suite = "rust"
 message = "lifecycle.rs:"
 transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {", with = "    print!(\"suspending\");\n    mod scratch_helpers {\n        #![cfg(test)]\n    }\n    let plane = ctx.seam.control_plane(region).await?;\n    let current = plane.get_microvm(&microvm_id).await?;\n    if current.state != \"RUNNING\" {" }
 
