@@ -12,6 +12,7 @@ ast-grep comes from `mise.toml`, so run this through `mise run trace:check`.
 """
 
 import contextlib
+import inspect
 import io
 import os
 import runpy
@@ -28,6 +29,11 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 SCRIPT = HERE / "check-trace.py"
 TRACE = runpy.run_path(str(SCRIPT), run_name="tools.check-trace")
+# The script's own namespace, which its functions read their globals from. mutmut wraps each
+# function of a script it mutates in a trampoline defined in its own module, so under mutmut
+# a function's `__globals__` are mutmut's and a patch to them reaches nothing the script
+# reads. `inspect.unwrap` gives back the script's own function.
+TRACE_GLOBALS = inspect.unwrap(TRACE["main"]).__globals__
 
 Patterns = TRACE["Patterns"]
 collect = TRACE["collect"]
@@ -994,7 +1000,7 @@ class ReadPastRefusals(unittest.TestCase):
         and its stderr."""
         stderr = io.StringIO()
         with (
-            mock.patch.dict(TRACE["main"].__globals__, globals_),
+            mock.patch.dict(TRACE_GLOBALS, globals_),
             mock.patch.object(sys, "argv", ["check-trace.py", "--check"]),
             contextlib.redirect_stdout(io.StringIO()),
             contextlib.redirect_stderr(stderr),
