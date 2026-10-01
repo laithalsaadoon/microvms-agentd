@@ -570,9 +570,9 @@ const ADAPTERS: [&str; 3] = ["microvms-cli", "microvms-py", "microvms-js"];
 ///
 /// Exact both ways, like the edge assertions above: a crate added to an adapter's manifest
 /// fails, and so does a listed crate the adapter no longer uses, since a stale set or drift entry
-/// allows more than the crate needs. The CLI's drift is directory sync's crates, which #260
-/// moves into core; the change that drops one from the manifest drops it from the drift table.
-/// The bindings carry no drift.
+/// allows more than the crate needs. A drift table records work that belongs below its crate,
+/// and the change that drops a crate from the manifest drops it from the table; no adapter has
+/// one since #260 moved directory sync into core.
 ///
 /// This is the only check that reads the adapters' manifests for the ratchet's placement
 /// category. The ratchet counts the drift and refuses any its base doesn't have; this test holds

@@ -373,6 +373,15 @@ impl CliError {
 /// *suggestion*, which is CLI-shaped rather than library-shaped: the library says what went
 /// wrong, and the CLI says which flag or command addresses it.
 pub fn classify(error: &Error) -> CliError {
+    // A local tree that couldn't be packed, hashed or written to (core's `WorkspaceError`, the
+    // source of its `ERR_INVALID_ARG`) is this CLI's own `ERR_SYNC` row: the failure is on this
+    // machine's filesystem, and a caller branching on `$?` tells it from a refused argument.
+    if std::error::Error::source(error)
+        .is_some_and(|source| source.is::<microvms_core::workspace::WorkspaceError>())
+    {
+        return CliError::new(Exit::Sync, error.to_string())
+            .suggest("the failure is on this machine's filesystem; the platform was not involved");
+    }
     let exit = Exit::for_kind(error.kind());
     let mut classified = CliError {
         exit,

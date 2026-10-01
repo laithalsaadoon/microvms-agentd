@@ -41,7 +41,7 @@ run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
 message = "stale decision: [subprocess] crates/agentd/src/exec.rs: Command::new(gone) decides a finding the tree doesn't have"
-transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"port-impl\", \"adapter-logic\"]\n", with = "enforced = [\"port-impl\", \"adapter-logic\"]\n\n[[decision]]\ncategory = \"subprocess\"\nkey = \"crates/agentd/src/exec.rs: Command::new(gone)\"\nreason = \"seeded\"\n" }
+transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"port-impl\", \"adapter-logic\", \"placement\"]\n", with = "enforced = [\"port-impl\", \"adapter-logic\", \"placement\"]\n\n[[decision]]\ncategory = \"subprocess\"\nkey = \"crates/agentd/src/exec.rs: Command::new(gone)\"\nreason = \"seeded\"\n" }
 
 [[fault]]
 id = "ratchet-enforced-with-drift"
@@ -50,7 +50,7 @@ run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
 message = "subprocess is enforced by each crate's clippy.toml as a disallowed type (#285), so it can't carry drift"
-transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"port-impl\", \"adapter-logic\"]\n", with = "enforced = [\"port-impl\", \"adapter-logic\", \"subprocess\"]\n" }
+transform = { file = "verify/ratchet/decisions.toml", replace = "enforced = [\"port-impl\", \"adapter-logic\", \"placement\"]\n", with = "enforced = [\"port-impl\", \"adapter-logic\", \"placement\", \"subprocess\"]\n" }
 
 # The decisions reader's floor: one that read no decision would turn every decided finding into
 # drift on both trees and compare them equal.
@@ -133,7 +133,7 @@ run = ["./tools/ratchet.py", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
 message = "new drift: [placement] microvms-cli -> reqwest. A crate's drift in verify/arch/placement.toml can only shrink"
-transform = { file = "verify/arch/placement.toml", replace = "[microvms-cli.drift]\nnormal = [\"const-hex\", \"globset\", \"sha2\", \"tar\"]\n", with = "[microvms-cli.drift]\nnormal = [\"const-hex\", \"globset\", \"sha2\", \"tar\", \"reqwest\"]\n" }
+transform = { file = "verify/arch/placement.toml", replace = "[microvms-cli]\nnormal = [\"microvms-core\", \"clap\", \"ratatui\", \"serde\", \"serde_json\", \"tokio\", \"toml\", \"unicode-width\"]\n", with = "[microvms-cli]\nnormal = [\"microvms-core\", \"clap\", \"ratatui\", \"serde\", \"serde_json\", \"tokio\", \"toml\", \"unicode-width\"]\n\n[microvms-cli.drift]\nnormal = [\"reqwest\"]\n" }
 
 # port-impl is enforced (#270): with the CLI's copied minter gone, a port implemented in an
 # adapter again is drift an enforced category can't carry, and fails on the real tree.

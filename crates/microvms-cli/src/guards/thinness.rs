@@ -379,6 +379,34 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
             Door::ControlPlane,
         ),
         (
+            "image-versions",
+            Command::ImageVersions(crate::cli::ImageVersionsArgs {
+                image: "arn:image".into(),
+                region: region_flags(),
+            }),
+            Door::ControlPlane,
+        ),
+        (
+            "image-set-status",
+            Command::ImageSetStatus(crate::cli::ImageSetStatusArgs {
+                image: "arn:image".into(),
+                image_version: "1.0".into(),
+                status: microvms_core::control::ops::VersionStatus::Inactive,
+                region: region_flags(),
+            }),
+            Door::ControlPlane,
+        ),
+        (
+            "image-builds",
+            Command::ImageBuilds(crate::cli::ImageBuildsArgs {
+                image: "arn:image".into(),
+                image_version: "1.0".into(),
+                build_id: None,
+                region: region_flags(),
+            }),
+            Door::ControlPlane,
+        ),
+        (
             "doctor",
             Command::Doctor(DoctorArgs {
                 binary: None,

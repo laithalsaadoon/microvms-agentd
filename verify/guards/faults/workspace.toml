@@ -1,0 +1,40 @@
+# ── core's directory sync pass (#260) ────────────────────────────────────────
+
+[[fault]]
+id = "sync-pass-packs-the-whole-tree"
+guard = "workspace::tests::a_pass_after_one_edit_uploads_that_member_and_deletes_nothing"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "workspace::tests::a_pass_after_one_edit_uploads_that_member_and_deletes_nothing"]
+expect = "test-failed"
+suite = "rust"
+message = "only the edited member travels"
+note = "crates/microvms-app/src/workspace.rs::a_pass_after_one_edit_uploads_that_member_and_deletes_nothing"
+transform = { file = "crates/microvms-app/src/workspace.rs", replace = "            let packed = tree.pack_paths(dir, &delta.upload)?;\n", with = "            let whole: Vec<String> = local.files.keys().cloned().collect();\n            let packed = tree.pack_paths(dir, &whole)?;\n" }
+
+[[fault]]
+id = "sync-pass-deletes-a-hostile-path"
+guard = "workspace::tests::a_hostile_deletion_path_is_refused_not_executed"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "workspace::tests::a_hostile_deletion_path_is_refused_not_executed"]
+expect = "test-failed"
+suite = "rust"
+message = "the rm carries only the deletable path"
+note = "crates/microvms-app/src/workspace.rs::a_hostile_deletion_path_is_refused_not_executed"
+transform = { file = "crates/microvms-app/src/workspace.rs", replace = "            .filter(|path| deletable(path))\n", with = "            .filter(|path| !path.is_empty())\n" }
+
+[[fault]]
+id = "workspace-extract-writes-under-git"
+guard = "workspace::tests::extraction_never_writes_under_the_local_git"
+run = ["cargo", "test", "-p", "microvms-edges", "--lib", "--", "--exact", "workspace::tests::extraction_never_writes_under_the_local_git"]
+expect = "test-failed"
+suite = "rust"
+message = "only the non-git member lands"
+note = "crates/microvms-edges/src/workspace.rs::extraction_never_writes_under_the_local_git"
+transform = { file = "crates/microvms-edges/src/workspace.rs", replace = ".any(|component| component.as_os_str() == \".git\")", with = ".any(|component| component.as_os_str() == \".git-never\")" }
+
+[[fault]]
+id = "sync-dir-reads-the-manifest-when-full"
+guard = "workspace::tests::sync_dir_diffs_against_the_guests_manifest_unless_full"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "workspace::tests::sync_dir_diffs_against_the_guests_manifest_unless_full"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/microvms-app/src/workspace.rs::sync_dir_diffs_against_the_guests_manifest_unless_full"
+transform = { file = "crates/microvms-app/src/workspace.rs", replace = "        let baseline = if full {\n", with = "        let baseline = if full && false {\n" }

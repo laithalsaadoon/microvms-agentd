@@ -1,78 +1,71 @@
 // SPDX-License-Identifier: Apache-2.0
-//! `run <DIR>` sync mode: pack the project up, run in it, bring the artifacts back.
+//! The local half of directory transfer: the walk, the hash, the tar packing and the guarded
+//! extraction behind `microvms_app::workspace::LocalTree` (#260).
 //!
-//! # The daemon extracts uploads; this side extracts only what it chose
+//! The rules (the skip list, the budgets, what a manifest and a diff are, which members an
+//! extraction may write) are the app's `workspace` module; this is the filesystem and `tar`
+//! doing what they say.
 //!
-//! The trust boundary is asymmetric and the code follows it. On the way *in*, the archive
-//! is built here from a tree the caller owns, and the daemon — whose openat2 confinement
-//! is the one extraction surface this workspace hardened (`crates/agentd/src/fs.rs`) — unpacks
-//! it. On the way *out*, the archive describes the VM's filesystem, and the VM is where
-//! untrusted work runs, so `microvms-core` deliberately hands back raw bytes
-//! (`session/files.rs`, `download_tar`) rather than an extraction. This module unpacks
-//! only the members the caller's artifact globs selected, only when they are regular
-//! files, through `unpack_in` — which refuses traversal outside the destination — so a
-//! workload that appends `../../.ssh/authorized_keys` or a symlink member to the archive
-//! gets it silently skipped rather than written.
+//! # Packing is deterministic, budgeted, and skips what can't or shouldn't travel
 //!
-//! # Packing is deterministic, budgeted, and skips what cannot or should not travel
-//!
-//! Members are added in sorted path order, so the same tree produces the same bytes and a
-//! test can assert on them. `.git`, `target`, `node_modules`, and `.venv` are skipped
-//! whole: the daemon's real caps are 512 MiB per request body and 100 000 members
-//! (`crates/agentd/src/config.rs`), a repository's object store and a build tree blow through
-//! both while contributing nothing to a build, and the archive is built in memory — so
-//! the budget is enforced *here*, during the walk, before a byte is allocated, and a tree
-//! over budget is `ERR_SYNC` naming the offending subtree rather than an OOM kill.
-//! Sockets, fifos, and devices are skipped too: `tar` refuses to archive them, the daemon
+//! Members are added in sorted path order, so the same tree produces the same bytes. The
+//! budgets are enforced during the walk, on file sizes, before a byte of archive is
+//! allocated, so an over-budget tree is an error naming the offending path rather than an OOM
+//! kill. Sockets, fifos and devices are skipped: `tar` refuses to archive them, the daemon
 //! refuses to extract them, and a live `puma.sock` under `tmp/` must not refuse the whole
-//! project. Symlinks are preserved as links (`follow_symlinks(false)`): following them
-//! would inline files from outside the tree, which is both a silent size multiplier and
-//! an exfiltration shape.
+//! project. Symlinks are preserved as links (`follow_symlinks(false)`): following them would
+//! inline files from outside the tree, a silent size multiplier and an exfiltration shape.
 
 use std::path::Path;
 
-/// Directory names never packed. `.git` also protects the *extraction* side — see
-/// [`extract_artifacts`] — so removing it here without reading that doc comment would
-/// reopen a hole, not just widen an upload.
-const SKIPPED_DIRS: [&str; 4] = [".git", "target", "node_modules", ".venv"];
+use microvms_app::workspace::{
+    Artifact, LocalTree, MANIFEST_VERSION, MAX_PACK_BYTES, MAX_PACK_MEMBERS, Manifest, Packed,
+    SKIPPED_DIRS, WorkspaceError, within_byte_budget, within_member_budget,
+};
 
-/// The pack's local byte budget: the daemon's `max_body_bytes` (512 MiB). Checked during
-/// the walk, on file sizes, so an over-budget tree is refused before the archive is
-/// allocated — the alternative is building multi-gigabyte tar bytes in a `Vec` and
-/// learning about the cap from the daemon's 413 (or the OOM killer) afterwards.
-const MAX_PACK_BYTES: u64 = 512 * 1024 * 1024;
+/// The real filesystem as a [`LocalTree`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DiskTree;
 
-/// The pack's member budget: the daemon's `max_tar_members`.
-const MAX_PACK_MEMBERS: usize = 100_000;
+impl LocalTree for DiskTree {
+    fn manifest(&self, dir: &Path) -> Result<Manifest, WorkspaceError> {
+        manifest(dir)
+    }
 
-/// Where the synced tree lands in the guest, and the exec's working directory.
-///
-/// `/workspace`: the daemon's `write_tar` creates the root it is given
-/// (`fs.rs`, `Dir::open` runs `create_dir_all`), and core's own tar tests spell it this
-/// way. A constant rather than a flag — a knob would let two invocations against one VM
-/// disagree about where "the project" is.
-pub const REMOTE_WORKDIR: &str = "/workspace";
+    fn pack(&self, dir: &Path) -> Result<Packed, WorkspaceError> {
+        pack(dir)
+    }
 
-/// Why a local pack or unpack failed. The `ERR_SYNC` row's payload.
-#[derive(Debug)]
-pub struct SyncError(pub String);
+    fn pack_paths(&self, dir: &Path, paths: &[String]) -> Result<Packed, WorkspaceError> {
+        pack_paths(dir, paths)
+    }
 
-impl std::fmt::Display for SyncError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
+    fn extract(
+        &self,
+        archive: &[u8],
+        globs: &[String],
+        dir: &Path,
+    ) -> Result<Vec<Artifact>, WorkspaceError> {
+        extract(archive, globs, dir)
     }
 }
 
-/// What the pack produced, for the envelope's `sync` report.
-#[derive(Debug)]
-pub struct Packed {
-    pub archive: Vec<u8>,
-    pub members: usize,
+/// Whether `glob` is a pattern [`LocalTree::extract`] can match with, and why not when it
+/// isn't: the one glob grammar, for a caller that validates globs before a run needs them.
+pub fn check_glob(glob: &str) -> Result<(), WorkspaceError> {
+    compile(glob).map(drop)
+}
+
+/// One glob, compiled, or the refusal every caller reports.
+fn compile(glob: &str) -> Result<globset::Glob, WorkspaceError> {
+    globset::Glob::new(glob).map_err(|error| {
+        WorkspaceError::new(format!("artifacts glob {glob:?} does not compile: {error}"))
+    })
 }
 
 /// Packs `dir` into a tar archive: sorted member order, the skip list applied, budgets
 /// enforced during the walk, symlinks preserved as links rather than followed.
-pub fn pack(dir: &Path) -> Result<Packed, SyncError> {
+fn pack(dir: &Path) -> Result<Packed, WorkspaceError> {
     let mut walk = Walk::default();
     collect(dir, &mut walk)?;
     walk.paths.sort();
@@ -84,12 +77,12 @@ pub fn pack(dir: &Path) -> Result<Packed, SyncError> {
         let relative = path.strip_prefix(dir).expect("collected under dir");
         builder
             .append_path_with_name(path, relative)
-            .map_err(|error| SyncError(format!("packing {}: {error}", path.display())))?;
+            .map_err(|error| WorkspaceError::new(format!("packing {}: {error}", path.display())))?;
         members += 1;
     }
     let archive = builder
         .into_inner()
-        .map_err(|error| SyncError(format!("finishing the archive: {error}")))?;
+        .map_err(|error| WorkspaceError::new(format!("finishing the archive: {error}")))?;
     Ok(Packed { archive, members })
 }
 
@@ -100,18 +93,18 @@ struct Walk {
     bytes: u64,
 }
 
-/// Walks `dir`, collecting every packable entry. Directories are collected too — an
+/// Walks `dir`, collecting every packable entry. Directories are collected too: an
 /// empty directory a build script expects should exist on the other side. Skipped whole:
-/// the [`SKIPPED_DIRS`] names. Skipped individually: sockets, fifos, devices — `tar`
+/// the [`SKIPPED_DIRS`] names. Skipped individually: sockets, fifos, devices, since `tar`
 /// refuses to archive them and the daemon refuses to extract them, so a live socket
 /// under `tmp/` must not refuse the whole project. Budgets are checked as the walk runs,
 /// so an over-budget tree is refused before any archive bytes exist.
-fn collect(dir: &Path, walk: &mut Walk) -> Result<(), SyncError> {
+fn collect(dir: &Path, walk: &mut Walk) -> Result<(), WorkspaceError> {
     let entries = std::fs::read_dir(dir)
-        .map_err(|error| SyncError(format!("reading {}: {error}", dir.display())))?;
+        .map_err(|error| WorkspaceError::new(format!("reading {}: {error}", dir.display())))?;
     for entry in entries {
-        let entry =
-            entry.map_err(|error| SyncError(format!("reading {}: {error}", dir.display())))?;
+        let entry = entry
+            .map_err(|error| WorkspaceError::new(format!("reading {}: {error}", dir.display())))?;
         let path = entry.path();
         if SKIPPED_DIRS
             .iter()
@@ -120,19 +113,19 @@ fn collect(dir: &Path, walk: &mut Walk) -> Result<(), SyncError> {
             continue;
         }
         // `symlink_metadata`, not `metadata`: a symlink to a directory is a link member,
-        // not a tree to descend into — descending would follow the link out of the tree.
+        // not a tree to descend into, and descending would follow the link out of the tree.
         let kind = path
             .symlink_metadata()
-            .map_err(|error| SyncError(format!("reading {}: {error}", path.display())))?;
+            .map_err(|error| WorkspaceError::new(format!("reading {}: {error}", path.display())))?;
         let file_type = kind.file_type();
         if !file_type.is_file() && !file_type.is_dir() && !file_type.is_symlink() {
             continue;
         }
         if file_type.is_file() {
             walk.bytes = walk.bytes.saturating_add(kind.len());
-            if walk.bytes > MAX_PACK_BYTES {
-                return Err(SyncError(format!(
-                    "the tree exceeds the {} MiB upload budget at {} — the daemon refuses \
+            if !within_byte_budget(walk.bytes) {
+                return Err(WorkspaceError::new(format!(
+                    "the tree exceeds the {} MiB upload budget at {}: the daemon refuses \
                      larger bodies. Move build output aside, or run against a smaller \
                      directory ({:?} are already skipped)",
                     MAX_PACK_BYTES / (1024 * 1024),
@@ -142,9 +135,9 @@ fn collect(dir: &Path, walk: &mut Walk) -> Result<(), SyncError> {
             }
         }
         walk.paths.push(path.clone());
-        if walk.paths.len() > MAX_PACK_MEMBERS {
-            return Err(SyncError(format!(
-                "the tree exceeds the {MAX_PACK_MEMBERS}-member upload budget at {} — the \
+        if !within_member_budget(walk.paths.len()) {
+            return Err(WorkspaceError::new(format!(
+                "the tree exceeds the {MAX_PACK_MEMBERS}-member upload budget at {}: the \
                  daemon refuses larger archives ({:?} are already skipped)",
                 path.display(),
                 SKIPPED_DIRS,
@@ -156,43 +149,6 @@ fn collect(dir: &Path, walk: &mut Walk) -> Result<(), SyncError> {
     }
     Ok(())
 }
-
-/// Where the incremental manifest lives in the guest: inside the workspace, deliberately.
-///
-/// The manifest is a cache of what the last sync put in `/workspace`, and a cache must die
-/// with the thing it describes. A workload that wipes the workspace (a clean step, a fresh
-/// checkout) also wipes the manifest, so the next `microvm sync` sees no manifest and does
-/// a full upload instead of trusting a description of files that are gone. Stored outside
-/// the workspace it would survive the wipe and the next sync would skip everything.
-///
-/// The name is excluded from packing and from the deletion diff (see [`diff`]), so the
-/// manifest never deletes itself and a local file of the same name never travels.
-pub const MANIFEST_PATH: &str = "/workspace/.microvm-sync-manifest.json";
-
-/// The manifest's member name relative to the workspace, for the exclusions.
-pub const MANIFEST_NAME: &str = ".microvm-sync-manifest.json";
-
-/// What one sync left in the guest: every member's identity, keyed by relative path.
-///
-/// Paths are `/`-separated on every platform — the manifest crosses machines (a VM synced
-/// from Linux can be resynced from Windows), so the host's separator must not leak into
-/// the keys. Maps are ordered so the serialized form is deterministic and a test can
-/// assert on bytes.
-#[derive(Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Manifest {
-    /// The format version, for a future reader deciding whether it understands this.
-    pub version: u32,
-    /// Regular files: relative path → sha256 of the contents, lowercase hex.
-    pub files: std::collections::BTreeMap<String, String>,
-    /// Symlinks: relative path → link target, verbatim. The target string is the
-    /// identity — two links to different targets are different members.
-    pub symlinks: std::collections::BTreeMap<String, String>,
-    /// Directories, including empty ones a build script expects to exist.
-    pub dirs: std::collections::BTreeSet<String>,
-}
-
-/// The manifest format this build writes.
-const MANIFEST_VERSION: u32 = 1;
 
 /// A path relative to the synced root, `/`-separated regardless of platform.
 fn relative_key(path: &Path, root: &Path) -> String {
@@ -206,14 +162,14 @@ fn relative_key(path: &Path, root: &Path) -> String {
 
 /// Hashes and classifies the tree under `dir` into a [`Manifest`].
 ///
-/// The walk is [`collect`] — the same skip list, the same budgets, the same symlink
-/// stance as [`pack`] — so the manifest describes exactly the set a pack would upload.
+/// The walk is [`collect`], with the same skip list, the same budgets, the same symlink
+/// stance as [`pack`], so the manifest describes exactly the set a pack would upload.
 /// A second walk elsewhere would be a second set of rules to keep in step.
 ///
 /// Files are hashed streaming rather than read whole: the byte budget admits trees up
 /// to 512 MiB, and a `Vec` of the largest admissible file per hash would be an
 /// allocation the archive path never needs.
-pub fn manifest(dir: &Path) -> Result<Manifest, SyncError> {
+fn manifest(dir: &Path) -> Result<Manifest, WorkspaceError> {
     use sha2::{Digest as _, Sha256};
 
     let mut walk = Walk::default();
@@ -227,11 +183,12 @@ pub fn manifest(dir: &Path) -> Result<Manifest, SyncError> {
         let key = relative_key(path, dir);
         let kind = path
             .symlink_metadata()
-            .map_err(|error| SyncError(format!("reading {}: {error}", path.display())))?;
+            .map_err(|error| WorkspaceError::new(format!("reading {}: {error}", path.display())))?;
         let file_type = kind.file_type();
         if file_type.is_symlink() {
-            let target = std::fs::read_link(path)
-                .map_err(|error| SyncError(format!("reading link {}: {error}", path.display())))?;
+            let target = std::fs::read_link(path).map_err(|error| {
+                WorkspaceError::new(format!("reading link {}: {error}", path.display()))
+            })?;
             built
                 .symlinks
                 .insert(key, target.to_string_lossy().into_owned());
@@ -239,14 +196,15 @@ pub fn manifest(dir: &Path) -> Result<Manifest, SyncError> {
             built.dirs.insert(key);
         } else {
             use std::io::Read as _;
-            let mut file = std::fs::File::open(path)
-                .map_err(|error| SyncError(format!("reading {}: {error}", path.display())))?;
+            let mut file = std::fs::File::open(path).map_err(|error| {
+                WorkspaceError::new(format!("reading {}: {error}", path.display()))
+            })?;
             let mut hasher = Sha256::new();
             let mut buffer = [0u8; 64 * 1024];
             loop {
-                let read = file
-                    .read(&mut buffer)
-                    .map_err(|error| SyncError(format!("hashing {}: {error}", path.display())))?;
+                let read = file.read(&mut buffer).map_err(|error| {
+                    WorkspaceError::new(format!("hashing {}: {error}", path.display()))
+                })?;
                 if read == 0 {
                     break;
                 }
@@ -260,79 +218,12 @@ pub fn manifest(dir: &Path) -> Result<Manifest, SyncError> {
     Ok(built)
 }
 
-/// What an incremental sync has to do: which members travel, which remote paths die.
-#[derive(Debug, Default, PartialEq)]
-pub struct Delta {
-    /// Relative paths to pack and upload: new members, changed files, retargeted links.
-    pub upload: Vec<String>,
-    /// Relative paths present remotely and gone locally, deepest first — so a directory's
-    /// contents are named before the directory, and a non-recursive remove would still
-    /// work in order.
-    pub delete: Vec<String>,
-}
-
-impl Delta {
-    /// Nothing to send and nothing to remove: the tree is already what the manifest says.
-    pub fn is_empty(&self) -> bool {
-        self.upload.is_empty() && self.delete.is_empty()
-    }
-}
-
-/// What changed between the tree as it is (`local`) and as the last sync left it
-/// (`remote`).
-///
-/// Identity is category-scoped: a path that was a file and is now a symlink appears in
-/// both the upload set (the new member travels) and nowhere in the delete set — the
-/// upload overwrites the name in place, which is the daemon's own extraction contract
-/// (`crates/agentd/src/fs.rs`: "an upload can legitimately overwrite a name").
-///
-/// [`MANIFEST_NAME`] never appears in either set: the manifest is not a member of the
-/// tree it describes, and without this exclusion every incremental sync would order the
-/// deletion of its own bookkeeping.
-pub fn diff(local: &Manifest, remote: &Manifest) -> Delta {
-    let mut delta = Delta::default();
-    for (path, hash) in &local.files {
-        if remote.files.get(path) != Some(hash) {
-            delta.upload.push(path.clone());
-        }
-    }
-    for (path, target) in &local.symlinks {
-        if remote.symlinks.get(path) != Some(target) {
-            delta.upload.push(path.clone());
-        }
-    }
-    for path in &local.dirs {
-        if !remote.dirs.contains(path) {
-            delta.upload.push(path.clone());
-        }
-    }
-    let lives_on = |path: &String| {
-        local.files.contains_key(path)
-            || local.symlinks.contains_key(path)
-            || local.dirs.contains(path)
-            || path == MANIFEST_NAME
-    };
-    delta.delete.extend(
-        remote
-            .files
-            .keys()
-            .chain(remote.symlinks.keys())
-            .chain(remote.dirs.iter())
-            .filter(|path| !lives_on(path))
-            .cloned(),
-    );
-    delta.upload.sort();
-    // Deepest first: `a/b/c` before `a/b`, so removing in order never needs recursion.
-    delta.delete.sort_by(|a, b| b.cmp(a));
-    delta
-}
-
 /// Packs exactly the named relative paths under `dir`, in sorted member order.
 ///
 /// The selective sibling of [`pack`]: same builder settings, same determinism, but the
-/// member set is the caller's diff rather than a walk — which is the whole incremental
+/// member set is the caller's diff rather than a walk, which is the whole incremental
 /// bet, an archive proportional to the edit rather than to the tree.
-pub fn pack_paths(dir: &Path, paths: &[String]) -> Result<Packed, SyncError> {
+fn pack_paths(dir: &Path, paths: &[String]) -> Result<Packed, WorkspaceError> {
     let mut sorted: Vec<&String> = paths.iter().collect();
     sorted.sort();
     let mut builder = tar::Builder::new(Vec::new());
@@ -342,24 +233,18 @@ pub fn pack_paths(dir: &Path, paths: &[String]) -> Result<Packed, SyncError> {
         let path = dir.join(relative);
         builder
             .append_path_with_name(&path, relative)
-            .map_err(|error| SyncError(format!("packing {}: {error}", path.display())))?;
+            .map_err(|error| WorkspaceError::new(format!("packing {}: {error}", path.display())))?;
         members += 1;
     }
     let archive = builder
         .into_inner()
-        .map_err(|error| SyncError(format!("finishing the archive: {error}")))?;
+        .map_err(|error| WorkspaceError::new(format!("finishing the archive: {error}")))?;
     Ok(Packed { archive, members })
-}
-
-/// One artifact brought back, for the envelope's `sync.artifacts` list.
-pub struct Artifact {
-    pub path: String,
-    pub bytes: u64,
 }
 
 /// Unpacks the glob-selected regular-file members of `archive` into `dir`.
 ///
-/// Everything else — unmatched members, symlinks, hardlinks, specials, directories — is
+/// Everything else (unmatched members, symlinks, hardlinks, specials, directories) is
 /// skipped, not refused: the archive is the VM's word and the globs are the caller's, so
 /// the only members with any business landing locally are the intersection, as plain
 /// files. `unpack_in` anchors the write under `dir` and refuses traversal, which covers
@@ -370,35 +255,31 @@ pub struct Artifact {
 /// is the natural spelling for "bring everything back", and a workload that writes
 /// `.git/hooks/pre-commit` (mode bits land verbatim) or sets `core.sshCommand` in
 /// `.git/config` would execute on the *host*, as the caller, on their next `git` command.
-/// Traversal refusal does not cover this — these are in-tree paths.
-pub fn extract_artifacts(
-    archive: &[u8],
-    globs: &[String],
-    dir: &Path,
-) -> Result<Vec<Artifact>, SyncError> {
+/// Traversal refusal does not cover this: these are in-tree paths.
+fn extract(archive: &[u8], globs: &[String], dir: &Path) -> Result<Vec<Artifact>, WorkspaceError> {
     let mut set = globset::GlobSetBuilder::new();
     for glob in globs {
-        set.add(
-            globset::Glob::new(glob)
-                .map_err(|error| SyncError(format!("artifacts glob {glob:?}: {error}")))?,
-        );
+        set.add(compile(glob)?);
     }
-    let set = set.build().map_err(|error| SyncError(error.to_string()))?;
+    let set = set
+        .build()
+        .map_err(|error| WorkspaceError::new(error.to_string()))?;
 
     let mut out = Vec::new();
     let mut entries = tar::Archive::new(archive);
     let entries = entries
         .entries()
-        .map_err(|error| SyncError(format!("reading the returned archive: {error}")))?;
+        .map_err(|error| WorkspaceError::new(format!("reading the returned archive: {error}")))?;
     for entry in entries {
-        let mut entry =
-            entry.map_err(|error| SyncError(format!("reading the returned archive: {error}")))?;
+        let mut entry = entry.map_err(|error| {
+            WorkspaceError::new(format!("reading the returned archive: {error}"))
+        })?;
         if entry.header().entry_type() != tar::EntryType::Regular {
             continue;
         }
         let path = entry
             .path()
-            .map_err(|error| SyncError(format!("a member's path: {error}")))?
+            .map_err(|error| WorkspaceError::new(format!("a member's path: {error}")))?
             .into_owned();
         // The host's repository is never a write target. See the doc comment: a hook or
         // a config key written here runs on the host, outside the sandbox.
@@ -414,7 +295,7 @@ pub fn extract_artifacts(
         let bytes = entry.size();
         let written = entry
             .unpack_in(dir)
-            .map_err(|error| SyncError(format!("writing {}: {error}", path.display())))?;
+            .map_err(|error| WorkspaceError::new(format!("writing {}: {error}", path.display())))?;
         // `unpack_in` answers false for a member it refused (traversal); a refused member
         // is skipped like an unmatched one rather than failing the run that produced it.
         if written {
@@ -430,6 +311,7 @@ pub fn extract_artifacts(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use microvms_app::workspace::diff;
 
     /// A tree under a temp dir, removed on drop.
     struct TempTree(std::path::PathBuf, #[allow(dead_code)] tempfile::TempDir);
@@ -437,7 +319,7 @@ mod tests {
     impl TempTree {
         fn new(label: &str) -> Self {
             let dir = tempfile::Builder::new()
-                .prefix(&format!("microvm-sync-{label}-"))
+                .prefix(&format!("microvm-workspace-{label}-"))
                 .tempdir()
                 .expect("a temp dir");
             Self(dir.path().to_path_buf(), dir)
@@ -487,22 +369,22 @@ mod tests {
         assert_eq!(member_names(&packed.archive), ["app.rb"]);
     }
 
-    /// A tree over the member budget is refused during the walk, naming the subtree —
+    /// A tree over the member budget is refused during the walk, naming the subtree,
     /// before any archive bytes are allocated.
     #[test]
     fn packing_refuses_an_over_budget_tree_by_name() {
         let tree = TempTree::new("member-budget");
         // Not 100k real files: the budget is a constant, so the test asserts the check
         // through the byte budget instead, with one file whose *reported* size exceeds
-        // it — a sparse file costs nothing on disk.
+        // it: a sparse file costs nothing on disk.
         let big = tree.0.join("huge.bin");
         let file = std::fs::File::create(&big).expect("creates");
         file.set_len(MAX_PACK_BYTES + 1).expect("sparse grow");
         drop(file);
 
         let error = pack(&tree.0).expect_err("over budget");
-        assert!(error.0.contains("huge.bin"), "{error}");
-        assert!(error.0.contains("MiB"), "{error}");
+        assert!(error.to_string().contains("huge.bin"), "{error}");
+        assert!(error.to_string().contains("MiB"), "{error}");
     }
 
     /// `.git` members never land locally, even when the glob matches them.
@@ -511,7 +393,7 @@ mod tests {
     /// and a workload-written `.git/hooks/pre-commit` would run on the *host* at the
     /// caller's next commit.
     ///
-    /// **Falsification** — drop the `.git`-component check from `extract_artifacts` and
+    /// **Falsification**: drop the `.git`-component check from `extract` and
     /// the no-`.git`-write assertion goes red with the hook on disk. Done on 2026-08-28;
     /// failed as stated; restored.
     #[test]
@@ -522,7 +404,7 @@ mod tests {
             (".git/config", b"[core]\n\tsshCommand = /tmp/pwn\n"),
             ("dist/report.txt", b"fine"),
         ]);
-        let got = extract_artifacts(&archive, &["**".into()], &tree.0).expect("extracts");
+        let got = extract(&archive, &["**".into()], &tree.0).expect("extracts");
         assert_eq!(got.len(), 1, "only the non-git member lands");
         assert_eq!(got[0].path, "dist/report.txt");
         assert!(!tree.0.join(".git").exists(), "no .git write, ever");
@@ -603,7 +485,7 @@ mod tests {
             ("dist/report.txt", b"selected"),
             ("secrets.env", b"never asked for"),
         ]);
-        let got = extract_artifacts(&archive, &["dist/**".into()], &tree.0).expect("extracts");
+        let got = extract(&archive, &["dist/**".into()], &tree.0).expect("extracts");
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].path, "dist/report.txt");
         assert!(tree.0.join("dist/report.txt").exists());
@@ -613,7 +495,7 @@ mod tests {
     /// A member that traverses out of the destination is skipped, not written.
     ///
     /// The fixture writes the `..` name into the header's own bytes, because
-    /// `Builder::append_data` refuses to *create* such a member — and an attacker does not
+    /// `Builder::append_data` refuses to *create* such a member, and an attacker does not
     /// use the builder. This is the archive as a hostile daemon would actually send it.
     #[test]
     fn extraction_refuses_traversal_out_of_the_destination() {
@@ -637,7 +519,7 @@ mod tests {
         archive.resize(archive.len().div_ceil(512) * 512, 0);
         archive.extend_from_slice(&[0u8; 1024]);
 
-        let got = extract_artifacts(&archive, &["**".into()], &inner).expect("extracts nothing");
+        let got = extract(&archive, &["**".into()], &inner).expect("extracts nothing");
         assert!(got.is_empty(), "{:?}", got.len());
         assert!(!tree.0.join("escape.txt").exists());
     }
@@ -667,7 +549,7 @@ mod tests {
         assert_eq!(first.symlinks["link.rs"], "src/main.rs");
     }
 
-    /// The manifest walks with the pack's own skip list — what never uploads never
+    /// The manifest walks with the pack's own skip list: what never uploads never
     /// appears, so a skipped directory cannot show up as a deletion either.
     #[test]
     fn a_manifest_skips_what_packing_skips() {
@@ -682,7 +564,7 @@ mod tests {
         assert!(built.dirs.is_empty(), "{:?}", built.dirs);
     }
 
-    /// An unchanged tree diffs to an empty delta — the fact that makes the second sync
+    /// An unchanged tree diffs to an empty delta, the fact that makes the second sync
     /// of an unchanged tree transfer ~0 bytes (issue #71's acceptance line).
     #[test]
     fn an_unchanged_tree_diffs_to_nothing() {
@@ -694,50 +576,58 @@ mod tests {
         assert!(delta.is_empty(), "{delta:?}");
     }
 
-    /// Each change class lands in the right half of the delta: edits and additions
-    /// upload, disappearances delete, and the unchanged member stays home.
+    /// `DiskTree` is these functions behind the port: each method answers what its function
+    /// does, so a caller holding a `&dyn LocalTree` gets the real walk and extraction.
     #[test]
-    fn a_diff_names_changed_new_and_deleted_members_and_nothing_else() {
-        let mut remote = Manifest {
-            version: MANIFEST_VERSION,
-            ..Manifest::default()
-        };
-        remote.files.insert("same.txt".into(), "hash-same".into());
-        remote.files.insert("edited.txt".into(), "hash-old".into());
-        remote.files.insert("removed.txt".into(), "hash-x".into());
-        remote.dirs.insert("gone-dir".into());
-        remote.dirs.insert("gone-dir/nested".into());
-        remote.symlinks.insert("link".into(), "old-target".into());
+    fn the_disk_tree_is_the_walk_the_pack_and_the_extraction() {
+        let tree = TempTree::new("disk-tree");
+        std::fs::create_dir_all(tree.0.join("src")).expect("dir");
+        std::fs::write(tree.0.join("src/main.rs"), b"fn main() {}").expect("file");
+        let port: &dyn LocalTree = &DiskTree;
 
-        let mut local = Manifest {
-            version: MANIFEST_VERSION,
-            ..Manifest::default()
-        };
-        local.files.insert("same.txt".into(), "hash-same".into());
-        local.files.insert("edited.txt".into(), "hash-new".into());
-        local.files.insert("added.txt".into(), "hash-add".into());
-        local.symlinks.insert("link".into(), "new-target".into());
-
-        let delta = diff(&local, &remote);
-        assert_eq!(delta.upload, ["added.txt", "edited.txt", "link"]);
-        // Deepest first, so a non-recursive remove works in this order.
-        assert_eq!(delta.delete, ["removed.txt", "gone-dir/nested", "gone-dir"]);
+        assert_eq!(
+            port.manifest(&tree.0).expect("manifests"),
+            manifest(&tree.0).expect("manifests")
+        );
+        assert_eq!(
+            member_names(&port.pack(&tree.0).expect("packs").archive),
+            ["src", "src/main.rs"]
+        );
+        assert_eq!(
+            member_names(
+                &port
+                    .pack_paths(&tree.0, &["src/main.rs".into()])
+                    .expect("packs")
+                    .archive
+            ),
+            ["src/main.rs"]
+        );
+        let out = TempTree::new("disk-tree-out");
+        let archive = archive_of(&[("dist/app.txt", b"real")]);
+        let written = port
+            .extract(&archive, &["**".into()], &out.0)
+            .expect("extracts");
+        assert_eq!(
+            written,
+            [Artifact {
+                path: "dist/app.txt".into(),
+                bytes: 4
+            }]
+        );
     }
 
-    /// The manifest never orders its own deletion.
-    ///
-    /// It lives in the workspace (see [`MANIFEST_PATH`] on why) and is therefore in the
-    /// remote tree without being in any local one — the one permanent asymmetry the
-    /// diff has to know about.
+    /// A glob the extraction can't compile is refused by name, and one it can passes.
     #[test]
-    fn a_diff_never_deletes_the_manifest_itself() {
-        let mut remote = Manifest::default();
-        remote.files.insert(MANIFEST_NAME.into(), "hash".into());
-        let delta = diff(&Manifest::default(), &remote);
-        assert!(delta.is_empty(), "{delta:?}");
+    fn a_glob_is_checked_with_the_extractions_grammar() {
+        assert_eq!(check_glob("dist/**"), Ok(()));
+        let refused = check_glob("dist/[").expect_err("an unclosed class");
+        assert!(
+            refused.to_string().contains("\"dist/[\" does not compile"),
+            "{refused}"
+        );
     }
 
-    /// A selective pack carries exactly the named members — the archive is proportional
+    /// A selective pack carries exactly the named members: the archive is proportional
     /// to the edit, not to the tree.
     #[test]
     fn packing_selected_paths_carries_them_and_nothing_else() {
@@ -766,7 +656,7 @@ mod tests {
             .expect("appends");
         let archive = builder.into_inner().expect("finishes");
 
-        let got = extract_artifacts(&archive, &["dist/**".into()], &tree.0).expect("extracts");
+        let got = extract(&archive, &["dist/**".into()], &tree.0).expect("extracts");
         assert!(got.is_empty());
         assert!(!tree.0.join("dist/link").exists());
     }

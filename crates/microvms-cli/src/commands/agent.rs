@@ -26,6 +26,7 @@
 //! failure path terminates it and reports the identifiers, exactly as `run` does on an
 //! interrupt (CLI-6). The name is registered last, only over a VM every step succeeded on.
 
+use microvms_core::workspace::LocalTree as _;
 use std::time::Duration;
 
 use microvms_core::agents::{self, AgentSpec, AgentVm, BedrockAccess, PromptOptions};
@@ -244,7 +245,9 @@ pub async fn up<O: std::io::Write, E: std::io::Write>(
     // the same rule `run <DIR>` follows.
     let packed = match &args.project {
         Some(dir) => {
-            let work = crate::sync::pack(dir).map_err(sync_error)?;
+            let work = microvms_core::workspace::DiskTree
+                .pack(dir)
+                .map_err(sync_error)?;
             ctx.out.progress(&format!(
                 "packed {} ({} member(s), {} byte(s))",
                 dir.display(),
@@ -270,7 +273,7 @@ async fn refresh<O: std::io::Write, E: std::io::Write>(
     args: &AgentUpArgs,
     record: NameRecord,
     ttl: Duration,
-    packed: Option<crate::sync::Packed>,
+    packed: Option<microvms_core::workspace::Packed>,
 ) -> Result<Rendered, CliError> {
     if record.microvm_id.is_empty() {
         return Err(CliError::new(
@@ -396,7 +399,7 @@ async fn fresh<O: std::io::Write, E: std::io::Write>(
     args: &AgentUpArgs,
     root: &std::path::Path,
     ttl: Duration,
-    packed: Option<crate::sync::Packed>,
+    packed: Option<microvms_core::workspace::Packed>,
     interrupt: Interrupt<'_>,
 ) -> Result<Rendered, CliError> {
     ctx.infra
@@ -633,7 +636,7 @@ async fn launch_and_provision<O: std::io::Write, E: std::io::Write>(
     ledger: &mut Ledger,
     request: microvms_core::control::CreateImageRequest,
     ttl: Duration,
-    packed: Option<&crate::sync::Packed>,
+    packed: Option<&microvms_core::workspace::Packed>,
 ) -> Result<(String, bool, u64), Error> {
     let name = request.name.clone();
     ctx.out.progress(&format!(

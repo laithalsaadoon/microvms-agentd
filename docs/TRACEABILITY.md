@@ -32,7 +32,7 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | ARCH-3 | waived | waived | waived | 1 | 1 | waived |
 | ARCH-4 | waived | waived | waived | 1 | 1 | waived |
 | ARCH-6 | waived | waived | waived | 1 | 6 | waived |
-| ARCH-7 | waived | waived | waived | 2 | 3 | waived |
+| ARCH-7 | waived | waived | waived | 2 | 4 | waived |
 | ARCH-8 | waived | waived | waived | 1 | 1 | waived |
 | BIND-1 | waived | waived | waived | 1 | 2 | waived |
 | BIND-2 | waived | waived | waived | 3 | 7 | waived |
@@ -396,7 +396,7 @@ The microvms-app shall not depend directly on a crate or a tokio feature that pe
 - **gherkin:** waived: no behavior to script: clippy and the dependency set enforce it at build time
 - **fuzz:** waived: there is no input stream; the rule is over source and manifests
 - **test:** `crates/microvms-app/src/sandbox.rs`, `crates/microvms-cli/tests/dependency_direction.rs`
-- **impl:** `crates/microvms-app/src/lib.rs`, `crates/microvms-core/src/lib.rs`, `crates/microvms-edges/src/lib.rs`
+- **impl:** `crates/microvms-app/src/lib.rs`, `crates/microvms-app/src/workspace.rs`, `crates/microvms-core/src/lib.rs`, `crates/microvms-edges/src/lib.rs`
 - **live:** waived: the app's AWS calls all go through ports, so the live tier exercises the edges' implementations, not this rule
 
 ## ARCH-8

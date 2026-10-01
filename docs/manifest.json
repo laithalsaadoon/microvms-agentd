@@ -3317,6 +3317,186 @@
       },
       {
         "alternateResponse": null,
+        "name": "image-versions",
+        "parameters": [
+          {
+            "choices": null,
+            "default": null,
+            "help": "The image: its ARN, or its name, which is looked up in the account",
+            "name": "image",
+            "positional": true,
+            "required": true,
+            "type": "string"
+          },
+          {
+            "choices": [
+              "us-east-1",
+              "us-east-2",
+              "us-west-2",
+              "eu-west-1",
+              "ap-northeast-1"
+            ],
+            "default": null,
+            "help": "AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1",
+            "name": "region",
+            "positional": false,
+            "required": false,
+            "type": "enum"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Use a region this client has not seen carry MicroVMs. Costs you the diagnostic",
+            "name": "unlisted-region",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "responseKeys": [
+          "imageArn",
+          "versions"
+        ],
+        "responseType": "microvm.image.versions",
+        "summary": "List an image's versions: each one's build state, whether `RunMicrovm` launches it, and what it was built with",
+        "supportsJson": true
+      },
+      {
+        "alternateResponse": null,
+        "name": "image-set-status",
+        "parameters": [
+          {
+            "choices": null,
+            "default": null,
+            "help": "The image: its ARN, or its name, which is looked up in the account",
+            "name": "image",
+            "positional": true,
+            "required": true,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "The version, as `image-versions` lists it (a custom image's read `1.0`, `2.0`, ...)",
+            "name": "image_version",
+            "positional": true,
+            "required": true,
+            "type": "string"
+          },
+          {
+            "choices": [
+              "ACTIVE",
+              "INACTIVE"
+            ],
+            "default": null,
+            "help": "`ACTIVE` to make the version launchable, `INACTIVE` to have `RunMicrovm` refuse it",
+            "name": "status",
+            "positional": true,
+            "required": true,
+            "type": "enum"
+          },
+          {
+            "choices": [
+              "us-east-1",
+              "us-east-2",
+              "us-west-2",
+              "eu-west-1",
+              "ap-northeast-1"
+            ],
+            "default": null,
+            "help": "AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1",
+            "name": "region",
+            "positional": false,
+            "required": false,
+            "type": "enum"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Use a region this client has not seen carry MicroVMs. Costs you the diagnostic",
+            "name": "unlisted-region",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "responseKeys": [
+          "imageArn",
+          "imageVersion",
+          "status",
+          "version"
+        ],
+        "responseType": "microvm.image.status",
+        "summary": "Retire an image version (`INACTIVE`) or restore it (`ACTIVE`), and read the change back",
+        "supportsJson": true
+      },
+      {
+        "alternateResponse": null,
+        "name": "image-builds",
+        "parameters": [
+          {
+            "choices": null,
+            "default": null,
+            "help": "The image: its ARN, or its name, which is looked up in the account",
+            "name": "image",
+            "positional": true,
+            "required": true,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "The version whose builds to list",
+            "name": "image_version",
+            "positional": true,
+            "required": true,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Read this one build, with its snapshot sizes, rather than listing them all",
+            "name": "build-id",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": [
+              "us-east-1",
+              "us-east-2",
+              "us-west-2",
+              "eu-west-1",
+              "ap-northeast-1"
+            ],
+            "default": null,
+            "help": "AWS region. Defaults to $AWS_REGION, then $AWS_DEFAULT_REGION, then us-east-1",
+            "name": "region",
+            "positional": false,
+            "required": false,
+            "type": "enum"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Use a region this client has not seen carry MicroVMs. Costs you the diagnostic",
+            "name": "unlisted-region",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "responseKeys": [
+          "imageArn",
+          "imageVersion",
+          "builds"
+        ],
+        "responseType": "microvm.image.builds",
+        "summary": "List an image version's builds, one per Graviton generation, or read one with `--build-id`",
+        "supportsJson": true
+      },
+      {
+        "alternateResponse": null,
         "name": "cost",
         "parameters": [
           {

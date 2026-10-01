@@ -196,6 +196,20 @@ async fn daemon_status(case: &Case) -> Value {
                 .upload_file(case.input_str("path"), b"parity", None)
                 .await
         }
+        // No baseline, so the whole tree travels and its upload meets the status.
+        "sync-directory" => {
+            let dir = tempfile::tempdir().expect("a temp dir");
+            std::fs::write(dir.path().join("upload.bin"), b"parity").expect("writes");
+            session
+                .sync_pass(
+                    &microvms_core::workspace::DiskTree,
+                    dir.path(),
+                    None,
+                    std::time::Duration::from_secs(60),
+                )
+                .await
+                .map(|_| ())
+        }
         other => panic!("{}: no core handler for {other:?} in error", case.id),
     };
     match result {

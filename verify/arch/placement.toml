@@ -28,10 +28,6 @@
 [microvms-cli]
 normal = ["microvms-core", "clap", "ratatui", "serde", "serde_json", "tokio", "toml", "unicode-width"]
 
-# Directory sync's hashing, globbing and archive crates, which #260 moves into core.
-[microvms-cli.drift]
-normal = ["const-hex", "globset", "sha2", "tar"]
-
 [microvms-py]
 normal = ["microvms-core", "microvms-protocol", "serde_json", "pyo3", "tokio"]
 
