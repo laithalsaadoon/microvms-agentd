@@ -1,6 +1,5 @@
 # The ARCH group's traced requirements. The format and the rules are in tools/check-trace.py.
 
-# ARCH-5 waits on #260: the tar and glob extraction a binding needs still lives in the CLI.
 [ARCH-1]
 issue = "#307"
 waive.model = "a property of the workspace's dependency graph, not of a state"
@@ -28,6 +27,13 @@ waive.model = "a property of the workspace's dependency graph, not of a state"
 waive.gherkin = "no behavior to script: cargo metadata's resolved graph is the evidence, and dependency_direction.rs reads it"
 waive.fuzz = "there is no input stream; the rule is over manifests"
 waive.live = "a dependency edge makes no AWS call"
+
+[ARCH-5]
+issue = "#307"
+waive.model = "a property of the CLI crate's targets and of the capability table, not of a state"
+waive.gherkin = "no behavior to script: cargo metadata and the capability table are the evidence, and dependency_direction.rs reads both"
+waive.fuzz = "there is no input stream; the rule is over the crate's targets and the table"
+waive.live = "a crate's targets and the table's cells make no AWS call"
 
 [ARCH-6]
 issue = "#282"

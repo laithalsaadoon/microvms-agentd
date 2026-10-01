@@ -31,6 +31,7 @@ defined in `verify/spec/core.symspec.json` and `verify/spec/agentd.symspec.json`
 | ARCH-2 | waived | waived | waived | 1 | 4 | waived |
 | ARCH-3 | waived | waived | waived | 1 | 1 | waived |
 | ARCH-4 | waived | waived | waived | 1 | 1 | waived |
+| ARCH-5 | waived | waived | waived | 1 | 1 | waived |
 | ARCH-6 | waived | waived | waived | 1 | 6 | waived |
 | ARCH-7 | waived | waived | waived | 2 | 4 | waived |
 | ARCH-8 | waived | waived | waived | 1 | 1 | waived |
@@ -388,6 +389,17 @@ The microvms-core shall not depend on the CLI crate.
 - **test:** `crates/microvms-cli/tests/dependency_direction.rs`
 - **impl:** `crates/microvms-core/src/lib.rs`
 - **live:** waived: a dependency edge makes no AWS call
+
+## ARCH-5
+
+The CLI crate shall not carry any type or function a language binding needs.
+
+- **model:** waived: a property of the CLI crate's targets and of the capability table, not of a state
+- **gherkin:** waived: no behavior to script: cargo metadata and the capability table are the evidence, and dependency_direction.rs reads both
+- **fuzz:** waived: there is no input stream; the rule is over the crate's targets and the table
+- **test:** `crates/microvms-cli/tests/dependency_direction.rs`
+- **impl:** `crates/microvms-cli/src/main.rs`
+- **live:** waived: a crate's targets and the table's cells make no AWS call
 
 ## ARCH-6
 
