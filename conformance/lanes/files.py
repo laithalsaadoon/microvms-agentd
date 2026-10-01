@@ -14,12 +14,15 @@ production went untested.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from harness.archives import build_hostile_archives
 from harness.cli import Cli, attach_args
 from harness.envelope import Envelope, EnvelopeError, KindError
 from harness.results import Results
+
+from lanes.sessions import run_rust_live
 
 
 def drive_file_transfer(
@@ -188,6 +191,28 @@ def drive_file_transfer(
         "nothing escaped the extraction root",
         "No such file" in listing or "cannot access" in listing,
         repr(listing[:160]),
+    )
+
+    # Core's guarded extraction through `Session::download_dir` (#260): a tree planted in the
+    # VM with a `.git` hook and a symlink out of it, brought back with `["**"]`. The daemon's
+    # packer can't produce a `../` member, so traversal stays with the unit and binding tiers.
+    run_rust_live(
+        cli,
+        launched,
+        results,
+        "live_workspace",
+        "download_dir_writes_only_the_regular_files_of_a_planted_tree",
+        "download_dir writes a planted tree's regular file and not its .git hook or symlink",
+        extra_env={
+            "MICROVM_LIVE_ATTACH": json.dumps(
+                {
+                    "microvmId": str(launched.data["microvmId"]),
+                    "endpoint": str(launched.data["endpoint"]),
+                    "agentToken": str(launched.data["agentToken"]),
+                    "region": cli.region,
+                }
+            )
+        },
     )
 
 

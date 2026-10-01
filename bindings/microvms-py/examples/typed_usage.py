@@ -40,6 +40,7 @@ from microvms import (
     BuildHookTimeout,
     ControlPlane,
     CostReport,
+    DownloadedFile,
     Duration,
     EnsuredImage,
     EstimatedUsd,
@@ -62,6 +63,7 @@ from microvms import (
     Sandbox,
     Session,
     SizeClass,
+    SyncReport,
     Total,
     WindowClosedError,
     core_version,
@@ -402,6 +404,15 @@ def collect_spawned(session: Session) -> tuple[bytes, bytes, int | None]:
     if lost:
         err += b"[%d bytes lost]" % lost
     return out, err, proc.wait(timeout=60).exit_code
+
+
+def move_a_tree(session: Session, project: str, out: str) -> tuple[int, list[str]]:
+    """A project synced in and its build output brought back (#260). Written for the checker."""
+    report = session.sync_dir(project, delete_timeout=60.0)
+    assert_type(report, SyncReport)
+    written = session.download_dir("/workspace/dist", out, ["**"])
+    assert_type(written, list[DownloadedFile])
+    return report.uploaded_members, [file.path for file in written]
 
 
 def main() -> None:

@@ -46,6 +46,7 @@
         "errorOnGap": false,
         "reconnect": true
       },
+      "syncDeleteTimeoutSeconds": 60.0,
       "teardown": {
         "deleteImage": false,
         "deleteLogGroup": false,

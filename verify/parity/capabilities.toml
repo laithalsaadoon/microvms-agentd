@@ -253,8 +253,15 @@ ts = "Session.downloadTar"
 id = "sync-directory"
 core = "microvms_core::session::Session::sync_pass"
 cli = "sync"
-py = { exempt = "no directory transfer", issue = "#260" }
-ts = { exempt = "no directory transfer", issue = "#260" }
+py = "Session.sync_dir"
+ts = "Session.syncDir"
+
+[[capability]]
+id = "download-dir"
+core = "microvms_core::session::Session::download_dir"
+cli = { exempt = "`run <DIR>`'s artifacts come back through it, and `cp --tar` moves the archive itself" }
+py = "Session.download_dir"
+ts = "Session.downloadDir"
 
 [[capability]]
 id = "keep-awake"
@@ -1007,8 +1014,13 @@ py = "Sandbox.ensure_image(force)"
 
 [[default]]
 id = "sync-delete-budget"
-exempt = "how long a sync pass's in-guest delete may take; directory sync is CLI code until #260 moves it into core, which then owns the figure"
+core = "syncDeleteTimeoutSeconds"
 cli = "sync --timeout"
+
+[[default]]
+id = "sync-full"
+exempt = "whether this sync ignores the VM's manifest: an argument of the call, with no default anywhere else"
+py = "Session.sync_dir(full)"
 
 [[default]]
 id = "watch-interval"
