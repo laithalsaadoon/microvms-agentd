@@ -3886,6 +3886,54 @@
             "positional": false,
             "required": false,
             "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "Append the agentd stanza to this task Dockerfile rather than print the default one",
+            "name": "wrap",
+            "positional": false,
+            "required": false,
+            "type": "path"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "With --wrap: the exec working directory is the image's own `WORKDIR`, so one must be declared, by the task or by --workdir",
+            "name": "inherit-workdir",
+            "positional": false,
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "choices": [
+              "claude-code",
+              "codex"
+            ],
+            "default": null,
+            "help": "Print the Dockerfile of an agent VM image carrying this agent, the one `agent-up` builds. Repeatable",
+            "name": "agent",
+            "positional": false,
+            "required": false,
+            "type": "enum"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "With --agent: pin the Claude Code npm package to this version",
+            "name": "claude-version",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "With --agent: pin the Codex npm package to this version",
+            "name": "codex-version",
+            "positional": false,
+            "required": false,
+            "type": "string"
           }
         ],
         "responseKeys": [

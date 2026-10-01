@@ -2146,7 +2146,7 @@ pub struct DockerfileArgs {
     /// Dockerfile *on top of* the base that ARN names, and microvms-core refuses a
     /// Dockerfile whose FROM disagrees with it (`require_matching_from`). Passing a ref
     /// here does not select a base — it only writes the line that has to match one.
-    #[arg(long = "from", value_name = "IMAGE_REF")]
+    #[arg(long = "from", value_name = "IMAGE_REF", conflicts_with = "wrap")]
     pub from: Option<String>,
 
     /// The port agentd listens on inside the guest.
@@ -2158,8 +2158,34 @@ pub struct DockerfileArgs {
     /// Most public ARM64 base images, the managed al2023 base included, declare no
     /// WorkingDir — so without a WORKDIR every relative path in your commands resolves
     /// against `/`, and microvms-core refuses `inherit_workdir` when nothing declares one.
-    #[arg(long, value_name = "DIR")]
+    #[arg(long, value_name = "DIR", conflicts_with = "agent")]
     pub workdir: Option<String>,
+
+    /// Append the agentd stanza to this task Dockerfile rather than print the default one.
+    ///
+    /// The task's own `FROM` stays, and a task whose last `USER` isn't root gets `USER root`
+    /// before the stanza, because the daemon runs as root. Core refuses a Dockerfile with no
+    /// `FROM` or with an unfinished last instruction, which would swallow the stanza.
+    #[arg(long, value_name = "FILE", conflicts_with = "agent")]
+    pub wrap: Option<PathBuf>,
+
+    /// With --wrap: the exec working directory is the image's own `WORKDIR`, so one must be
+    /// declared, by the task or by --workdir.
+    #[arg(long, requires = "wrap")]
+    pub inherit_workdir: bool,
+
+    /// Print the Dockerfile of an agent VM image carrying this agent, the one `agent-up`
+    /// builds. Repeatable.
+    #[arg(long, value_enum, value_name = "AGENT")]
+    pub agent: Vec<AgentArg>,
+
+    /// With --agent: pin the Claude Code npm package to this version.
+    #[arg(long, value_name = "VERSION", requires = "agent")]
+    pub claude_version: Option<String>,
+
+    /// With --agent: pin the Codex npm package to this version.
+    #[arg(long, value_name = "VERSION", requires = "agent")]
+    pub codex_version: Option<String>,
 }
 
 /// The two coding agents `agent-up` can install. Mirrors `microvms_core::agents::Agent`,
