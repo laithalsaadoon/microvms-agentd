@@ -65,7 +65,7 @@ function codeOf(error) {
 
 // -- BIND-5: EstimatedUsd has no numeric door ---------------------------------
 
-test('EstimatedUsd does not coerce to a number', () => {
+test('BIND-5 EstimatedUsd does not coerce to a number', () => {
   const usd = report().total.floor;
   // Four doors, all shut. Each is a separate spelling someone reaches for, and a `valueOf`
   // would open all four at once — which is why they are asserted separately rather than
@@ -108,7 +108,7 @@ test('the amount is an exact string a caller converts deliberately', () => {
 
 // -- BIND-5: provenance cannot be omitted -------------------------------------
 
-test('Duration has no constructor, for any argument shape', () => {
+test('BIND-5 Duration has no constructor, for any argument shape', () => {
   // Every plausible spelling, not just the zero-argument one. A test that checked only
   // `new Duration()` would stay green against a two-parameter constructor taking a
   // provenance string — the exact defect the Python twin's first version had.
@@ -185,7 +185,7 @@ test('the build line is unpriced rather than zero dollars', () => {
   assert.equal(amount.unpriced.reason, buildUnpricedReason());
 });
 
-test('an unpriced line omits the usd key entirely', () => {
+test('BIND-5 an unpriced line omits the usd key entirely', () => {
   // `cli.py`'s own rule. Not a null — a null is summed as zero.
   const build = report().items.filter((item) => item.phase === 'image-build')[0];
   const parsed = JSON.parse(build.toJson());
