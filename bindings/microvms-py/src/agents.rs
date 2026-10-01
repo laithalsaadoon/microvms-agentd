@@ -630,6 +630,10 @@ impl PyAgentVm {
     ///
     /// `image_identifier` is an image ARN or a bare image name; the core resolves a name with
     /// one `ListMicrovmImages` read and raises `PreconditionError` for a name no image carries.
+    ///
+    /// `launch_env`, `shell` and `ready_timeout` mean what they mean on `Sandbox.run`:
+    /// `ready_timeout` bounds the wait for RUNNING, and the wait for the daemon after it is
+    /// `session_constants()["defaultReadyTimeoutSeconds"]`.
     #[pyo3(signature = (
         *,
         image_identifier,
@@ -645,6 +649,9 @@ impl PyAgentVm {
         log_group=None,
         log_stream=None,
         disable_logging=false,
+        launch_env=None,
+        shell=false,
+        ready_timeout=None,
     ))]
     #[allow(
         clippy::too_many_arguments,
@@ -670,10 +677,20 @@ impl PyAgentVm {
         log_group: Option<String>,
         log_stream: Option<String>,
         disable_logging: bool,
+        launch_env: Option<std::collections::HashMap<String, String>>,
+        shell: bool,
+        ready_timeout: Option<f64>,
     ) -> PyCoreResult<PySession> {
         let mut request =
             agents::launch_request_for(&self.specs, image_identifier, execution_role_arn)
                 .with_vpc_egress(egress_network_connectors.unwrap_or_default());
+        if let Some(env) = launch_env {
+            request.launch_env = env;
+        }
+        request.shell = shell;
+        if let Some(timeout) = ready_timeout {
+            request.ready_timeout = seconds(timeout)?;
+        }
         request.image_version = image_version;
         request.logging = crate::sandbox::logging_for(log_group, log_stream, disable_logging)?;
         request.agent_token = agent_token;
