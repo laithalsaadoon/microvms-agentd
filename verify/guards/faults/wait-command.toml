@@ -1,0 +1,66 @@
+# ── `run --no-wait` and `microvm wait`, core's launch-now-finish-later on the CLI (#269) ──
+
+# `run --no-wait` waits anyway: the early return after the accepted launch never fires.
+[[fault]]
+id = "cli-run-no-wait-waits"
+guard = "guards::wait::run_no_wait_returns_at_acceptance_and_wait_finishes_the_launch"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::wait::run_no_wait_returns_at_acceptance_and_wait_finishes_the_launch"]
+expect = "test-failed"
+suite = "rust"
+message = "no wait after the launch"
+note = "crates/microvms-cli/src/guards/wait.rs::run_no_wait_returns_at_acceptance_and_wait_finishes_the_launch"
+transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "    if args.no_wait {\n        // `--no-wait` (#269): the VM is PENDING.", with = "    if args.no_wait && args.exec.is_some() {\n        // `--no-wait` (#269): the VM is PENDING." }
+
+# Core's `wait_until_ready` loses its RUNNING branch, so an adopted RUNNING VM is refused.
+[[fault]]
+id = "app-wait-until-ready-drops-running"
+guard = "sandbox::tests::wait_until_ready_finishes_whichever_wait_is_left"
+run = ["cargo", "test", "-p", "microvms-app", "--lib", "--", "--exact", "sandbox::tests::wait_until_ready_finishes_whichever_wait_is_left"]
+expect = "test-failed"
+suite = "rust"
+message = "the daemon answers"
+note = "crates/microvms-app/src/sandbox.rs::wait_until_ready_finishes_whichever_wait_is_left"
+transform = { file = "crates/microvms-app/src/sandbox.rs", replace = "        if self.lifecycle == Lifecycle::Running {\n            self.refuse_detached(\"wait until ready\")?;", with = "        if self.lifecycle == Lifecycle::Terminated {\n            self.refuse_detached(\"wait until ready\")?;" }
+
+# The same loss, seen through `microvm wait` on a RUNNING VM.
+[[fault]]
+id = "cli-wait-drops-the-running-wait"
+guard = "guards::wait::wait_on_a_running_vm_waits_for_its_daemon_alone"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::wait::wait_on_a_running_vm_waits_for_its_daemon_alone"]
+expect = "test-failed"
+suite = "rust"
+message = "the daemon answers"
+note = "crates/microvms-cli/src/guards/wait.rs::wait_on_a_running_vm_waits_for_its_daemon_alone"
+transform = { file = "crates/microvms-app/src/sandbox.rs", replace = "        if self.lifecycle == Lifecycle::Running {\n            self.refuse_detached(\"wait until ready\")?;", with = "        if self.lifecycle == Lifecycle::Terminated {\n            self.refuse_detached(\"wait until ready\")?;" }
+
+# `run --no-wait` takes an `exec` from microvm.toml and goes on to launch.
+[[fault]]
+id = "cli-run-no-wait-takes-a-config-exec"
+guard = "guards::wait::run_no_wait_refuses_sync_mode_and_a_config_exec_before_any_door"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::wait::run_no_wait_refuses_sync_mode_and_a_config_exec_before_any_door"]
+expect = "test-failed"
+suite = "rust"
+message = "an exec (from microvm.toml)"
+note = "crates/microvms-cli/src/guards/wait.rs::run_no_wait_refuses_sync_mode_and_a_config_exec_before_any_door"
+transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "    if args.no_wait && (args.exec.is_some() || sync_dir.is_some()) {", with = "    if args.no_wait && sync_dir.is_some() {" }
+
+# `wait --timeout` drifts from core's RUNNING wait by a second.
+[[fault]]
+id = "cli-wait-timeout-default-drifts"
+guard = "cli::tests::the_wait_timeout_defaults_to_the_cores_running_wait"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "cli::tests::the_wait_timeout_defaults_to_the_cores_running_wait"]
+expect = "test-failed"
+suite = "rust"
+note = "crates/microvms-cli/src/cli.rs::the_wait_timeout_defaults_to_the_cores_running_wait"
+transform = { file = "crates/microvms-cli/src/cli.rs", replace = "    /// bootstrap bound.\n    #[arg(long, default_value = \"300\", value_parser = parse_seconds)]\n", with = "    /// bootstrap bound.\n    #[arg(long, default_value = \"301\", value_parser = parse_seconds)]\n" }
+
+# `--no-wait` parses without `--keep`.
+[[fault]]
+id = "cli-run-no-wait-without-keep"
+guard = "cli::tests::run_no_wait_needs_keep_and_refuses_an_exec"
+run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "cli::tests::run_no_wait_needs_keep_and_refuses_an_exec"]
+expect = "test-failed"
+suite = "rust"
+message = "--no-wait without --keep"
+note = "crates/microvms-cli/src/cli.rs::run_no_wait_needs_keep_and_refuses_an_exec"
+transform = { file = "crates/microvms-cli/src/cli.rs", replace = "    #[arg(long, requires = \"keep\", conflicts_with = \"exec\")]\n    pub no_wait: bool,", with = "    #[arg(long, conflicts_with = \"exec\")]\n    pub no_wait: bool," }
