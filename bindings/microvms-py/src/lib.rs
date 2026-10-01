@@ -75,6 +75,7 @@ mod region;
 mod runtime;
 mod sandbox;
 mod session;
+mod workspace;
 
 use pyo3::prelude::*;
 
@@ -170,6 +171,8 @@ mod microvms {
         PyHandlerOutcome, PyHealth, PyHookObservation, PyIdentityStep, PyProcGroup, PySession,
         session_constants,
     };
+    #[pymodule_export]
+    use super::workspace::{PyDownloadedFile, PySyncReport};
 
     #[pymodule_init]
     fn init(module: &pyo3::Bound<'_, pyo3::types::PyModule>) -> pyo3::PyResult<()> {

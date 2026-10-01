@@ -138,7 +138,8 @@ For a `Sandbox` named `vm` and its `session`:
 | Read live output as byte streams | `session.spawn(argv)` → `ExecProcess` |
 | Keep the VM awake while an exec runs | `await session.keepAwake({ whileBusy: true })` → `KeepAwake` |
 | Upload input or download results | `session.uploadFile(path, bytes)`, `session.downloadFile(path)` |
-| Transfer a directory | `session.uploadTar(path, tarBytes)`, `session.downloadTar(path)` |
+| Sync a directory in, bring files back | `session.syncDir(localDir)`, `session.downloadDir(path, localDir, ['**'])` |
+| Move a tar archive as bytes | `session.uploadTar(path, tarBytes)`, `session.downloadTar(path)` |
 | Freeze and restore a workspace | `vm.suspend()`, `vm.resume()` |
 
 `runSync` returns a Promise: it starts a command, waits, and acknowledges

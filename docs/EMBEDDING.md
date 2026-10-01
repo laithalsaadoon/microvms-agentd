@@ -719,7 +719,13 @@ class LambdaMicrovmEnvironment:  # the harness's environment base class
     def download_file(self, source, target):
         open(target, "wb").write(self.session.download_file(source))
 
-    # upload_dir / download_dir: session.upload_tar / session.download_tar
+    def upload_dir(self, source):
+        # Into /workspace, and only what changed since the last pass travels.
+        self.session.sync_dir(source)
+
+    def download_dir(self, source, target, globs=("**",)):
+        # Regular files only, never under .git, never outside target: the archive is the VM's.
+        return self.session.download_dir(source, target, list(globs))
 
     def stop(self):
         # The image stays: the next trial of this task reuses it (see below).

@@ -1094,6 +1094,65 @@ impl PySession {
         Ok(PyBytes::new(py, &bytes))
     }
 
+    /// Brings the files of a directory in the VM back under `local_dir`: the regular files
+    /// `globs` select, and nothing else.
+    ///
+    /// The daemon packs `remote`, and the archive describes the VM's filesystem, where
+    /// untrusted work runs, so core writes only regular-file members that match a glob, never
+    /// under `.git` whatever the globs say, and never outside `local_dir`. A symlink, a special
+    /// file or a `../` member is skipped, not refused. `["**"]` brings every regular file back.
+    /// Returns what was written. A local directory that can't be written to raises
+    /// `InvalidArgError`.
+    fn download_dir(
+        &self,
+        py: Python<'_>,
+        remote: &str,
+        local_dir: std::path::PathBuf,
+        globs: Vec<String>,
+    ) -> PyCoreResult<Vec<crate::workspace::PyDownloadedFile>> {
+        let written = self.detached(py, |session| {
+            runtime::block_on_detached(session.download_dir(
+                &microvms_core::workspace::DiskTree,
+                remote,
+                &globs,
+                &local_dir,
+            ))
+        })?;
+        Ok(written.into_iter().map(Into::into).collect())
+    }
+
+    /// Syncs `local_dir` into the VM's `/workspace` once, uploading only what changed.
+    ///
+    /// Core's one pass, `microvm sync`'s: the local tree is hashed and diffed against the
+    /// manifest the last sync left in the VM, the changed members travel as one archive, the
+    /// paths gone locally are removed in the VM with one `rm` whose deadline is
+    /// `delete_timeout` (core's default when `None`), and the manifest is rewritten. `full=True`
+    /// ignores the manifest and uploads everything. `.git`, `target`, `node_modules` and
+    /// `.venv` never travel. A tree over the daemon's budgets raises `InvalidArgError` before
+    /// anything is sent.
+    #[pyo3(signature = (local_dir, *, full=false, delete_timeout=None))]
+    fn sync_dir(
+        &self,
+        py: Python<'_>,
+        local_dir: std::path::PathBuf,
+        full: bool,
+        delete_timeout: Option<f64>,
+    ) -> PyCoreResult<crate::workspace::PySyncReport> {
+        let delete_timeout = delete_timeout
+            .map(seconds)
+            .transpose()?
+            .unwrap_or(microvms_core::workspace::DEFAULT_SYNC_DELETE_TIMEOUT);
+        let pass = self.detached(py, |session| {
+            runtime::block_on_detached(session.sync_dir(
+                &microvms_core::workspace::DiskTree,
+                &local_dir,
+                full,
+                delete_timeout,
+            ))
+        })?;
+        Ok(pass.into())
+    }
+
     /// Whether a path exists, distinguishing absence from every other refusal.
     fn file_exists(&self, py: Python<'_>, path: &str) -> PyCoreResult<bool> {
         Ok(self.detached(py, |session| {
