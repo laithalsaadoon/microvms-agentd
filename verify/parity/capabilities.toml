@@ -2,8 +2,8 @@
 # that surface with a reason. `mise run parity:check` holds it to the surfaces; the rules and the
 # cell forms are in tools/check-parity.py's docstring.
 #
-# An exemption with an `issue` is a gap that issue closes, and the ratchet counts it as
-# parity-gap drift. One without is a decision. Closing a gap deletes its exemption here.
+# An exemption is a decision with its reason. One with an `issue` would be a parity gap, which
+# `parity:check` refuses and the ratchet holds at zero since #280 closed the last one.
 
 [flag_groups]
 # Flags that every command attaching a Session shares, and the infra flags every command that
@@ -66,7 +66,7 @@ ts = "Sandbox.imageExists"
 [[capability]]
 id = "adopt"
 core = "microvms_core::sandbox::Sandbox::adopt"
-cli = { exempt = "the connection flags attach a Session only; no command adopts a Sandbox with its guards", issue = "#269" }
+cli = "adopt"
 py = "Sandbox.adopt"
 ts = "Sandbox.adopt"
 

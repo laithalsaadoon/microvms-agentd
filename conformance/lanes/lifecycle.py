@@ -12,7 +12,7 @@ from typing import Any
 
 from harness.cli import Cli, attach_args
 from harness.constants import BASELINE_MEMORY_MIB
-from harness.envelope import Envelope
+from harness.envelope import Envelope, KindError
 from harness.image import BAKED_WORKDIR
 from harness.results import Results
 
@@ -554,3 +554,36 @@ def drive_launch_without_waiting(
                 gone.data.get("microvmId") == vm_id and not gone.data.get("leaked"),
                 f"leaked={gone.data.get('leaked')}",
             )
+
+
+def drive_adopt(cli: Cli, launched: Envelope, results: Results) -> None:
+    """`microvm adopt` holds a triple to the service through core's `Sandbox::adopt` (#269).
+
+    Read-only, on the suite's own VM: the triple `run --keep` printed adopts with the state the
+    service reports and the endpoint it launched with, and the same id and token with another
+    endpoint is refused before anything reaches the daemon, which is the guard the attached
+    commands don't run.
+    """
+    print("\n-- adopt --")
+    vm_id = str(launched.data["microvmId"])
+    adopted = cli.call("adopt", *attach_args(cli, launched))
+    results.check(
+        "adopt reads the suite VM as RUNNING at the endpoint it launched with",
+        adopted.data.get("microvmId") == vm_id
+        and adopted.data.get("state") == "RUNNING"
+        and adopted.data.get("endpoint") == launched.data.get("endpoint"),
+        f"state={adopted.data.get('state')!r} endpoint={adopted.data.get('endpoint')!r}",
+    )
+    elsewhere = "https://not-this-vm.invalid"
+    try:
+        refused = cli.call("adopt", *attach_args(cli, launched, endpoint=elsewhere))
+        detail = f"adopted state={refused.data.get('state')!r}"
+        code = None
+    except KindError as exc:
+        detail = f"code={exc.code} error={exc.envelope.error!r}"
+        code = exc.code
+    results.check(
+        "adopt refuses the suite VM's id with another endpoint",
+        code == "ERR_INVALID_ARG",
+        detail,
+    )

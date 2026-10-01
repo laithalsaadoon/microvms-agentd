@@ -187,10 +187,10 @@ the two bindings through their stub and declarations). A public function, a
 method of a class the table names, or a command that no row names fails, and so
 does a row naming something a surface doesn't have. A new class and its methods
 aren't held yet; that's the option-level follow-up. Name
-the capability on each surface, or exempt the surface with a reason, and an
-`issue` if a later change closes the gap. The ratchet counts an exemption with
-an issue as parity-gap drift, and a PR can't add drift, so a new function or
-method lands on every surface or is exempted without an issue, as a decision.
+the capability on each surface, or exempt the surface with the reason it won't
+have it. An exemption that names an issue is a parity gap, which `parity:check`
+refuses and the ratchet holds at zero (#280), so a new function or method lands
+on every surface or is exempted as a decision.
 `mise run core-api` regenerates the core snapshot, and `core-api:check` fails
 when it's stale.
 

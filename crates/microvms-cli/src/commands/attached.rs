@@ -114,6 +114,56 @@ pub(crate) async fn attach_in<O: std::io::Write, E: std::io::Write>(
     Ok((session, microvm_id, region))
 }
 
+/// `adopt`: core's `Sandbox::adopt` over the connection flags (#269), reporting what its guards
+/// read.
+///
+/// Over the seam's control plane, so the read is the one door CLI-2 sees. Core does every
+/// check: the id's endpoint against the triple's, the token, and a state it knows. The
+/// envelope is the adopted sandbox's view: the service's lifecycle, the VM's endpoint and
+/// image, and the idle window a keepalive on it would pace against.
+pub async fn adopt<O: std::io::Write, E: std::io::Write>(
+    ctx: &Ctx<'_, O, E>,
+    args: &crate::cli::AdoptArgs,
+) -> Result<Rendered, CliError> {
+    let (attach, region) = resolve_attach(ctx, &args.region, &args.attach)?;
+    let mut plane = ctx.seam.control_plane(region).await?;
+    if let Some(port) = attach.port {
+        plane = plane.with_port(port)?;
+    }
+    let sandbox = microvms_core::sandbox::Sandbox::adopt(
+        plane,
+        &attach.microvm_id,
+        attach.endpoint,
+        attach.agent_token,
+    )
+    .await?;
+    let Some(vm) = sandbox.microvm() else {
+        return Err(CliError::new(
+            Exit::Unexpected,
+            "core adopted a VM and holds none: a defect in this binary, not anything the \
+             caller did",
+        ));
+    };
+    let state = sandbox.lifecycle().as_str();
+    let mut data = Map::new();
+    data.insert("microvmId".into(), json!(vm.id));
+    data.insert("state".into(), json!(state));
+    data.insert("endpoint".into(), json!(vm.endpoint));
+    data.insert("imageArn".into(), json!(vm.image_arn));
+    data.insert("stateReason".into(), json!(vm.state_reason));
+    data.insert(
+        "idleWindowSec".into(),
+        json!(sandbox.idle_window().map(|window| window.as_secs())),
+    );
+    let (kind, _) = response_type("adopt");
+    Ok(Rendered::ok(
+        kind,
+        data,
+        format!("{} is {state} at {}", vm.id, vm.endpoint),
+        format!("{}\t{state}\t{}", vm.id, vm.endpoint),
+    ))
+}
+
 /// The refusal for a legal name this state directory never registered, shared by every
 /// command that reads the registry through [`AttachFlags::name`].
 fn unregistered_name(name: &str, root: &std::path::Path) -> CliError {

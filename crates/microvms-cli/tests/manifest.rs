@@ -48,10 +48,10 @@ fn every_command_the_manifest_lists_is_one_the_binary_routes() {
     let commands = manifest["commands"].as_array().expect("an array");
     assert_eq!(
         commands.len(),
-        36,
-        "the lifecycle seven (quickstart included), the two agent helpers, the attached fifteen \
-         (shell, sync, attach, kill, ps, keepalive, exists, and wait included), the three image \
-         commands, and the local nine (egress-posture included)"
+        37,
+        "the lifecycle seven (quickstart included), the two agent helpers, the attached sixteen \
+         (shell, sync, attach, adopt, kill, ps, keepalive, exists, and wait included), the three \
+         image commands, and the local nine (egress-posture included)"
     );
 
     for command in commands {

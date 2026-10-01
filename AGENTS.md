@@ -155,11 +155,11 @@ capabilities, or `verify/parity/capabilities.toml` says why one doesn't.
   surface adds its row to the table, with the other surfaces implemented, or
   exempted with a reason. `mise run parity:check` fails on a public function, a
   method of a class the table names, or a command, when no row names it, and on
-  a row naming something a surface doesn't have. An exemption with an issue is
-  a gap that issue closes, and the ratchet counts it as parity-gap drift, so
-  closing one deletes its exemption and nothing else. One without an issue is a
-  decision. The script's docstring has the rules; option-level parity
-  (flags, keyword arguments) isn't checked yet.
+  a row naming something a surface doesn't have. An exemption is a decision
+  with its reason: `parity:check` refuses one that names an issue, because that
+  is a parity gap, and the ratchet holds parity-gap at zero (#280). The
+  script's docstring has the rules; option-level parity (flags, keyword
+  arguments) isn't checked yet.
 - Defaults live at or below core. The CLI and the bindings use the constant
   core re-exports from the layer that owns it, and don't add a duration, size
   or retry literal of their own without a decision in `verify/ratchet/decisions.toml`.
