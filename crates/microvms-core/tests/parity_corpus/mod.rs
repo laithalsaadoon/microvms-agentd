@@ -31,7 +31,7 @@ pub const SENTINEL: &str = "wrap-dockerfile/sentinel";
 /// (`crates/microvms-cli/src/guards/parity.rs`). Each tier owns one list and leaves the other's cases
 /// alone. The split is stated once, here, so a tier can't hand an area to the other without the
 /// other one planning it and failing on a case it has no handler for.
-pub const CLI_PROCESS_AREAS: [&str; 3] = ["cost", "egress", "wrap-dockerfile"];
+pub const CLI_PROCESS_AREAS: [&str; 4] = ["cost", "egress", "size-class", "wrap-dockerfile"];
 pub const CLI_FAKE_AREAS: [&str; 3] = ["image-name", "error", "names"];
 
 const CASE_KEYS: [&str; 5] = ["capability", "input", "expect", "ignore", "skip"];

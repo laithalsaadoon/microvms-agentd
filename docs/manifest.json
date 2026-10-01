@@ -131,6 +131,24 @@
           {
             "choices": null,
             "default": null,
+            "help": "vCPUs the workload needs, instead of --memory: the smallest size class whose baseline covers the request is used. Takes a fraction (0.5) and combines with --memory-mib",
+            "name": "cpus",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "MiB of memory the workload needs, instead of --memory: any figure, which selects the smallest class whose baseline covers it (1500 selects 2048). Combines with --cpus",
+            "name": "memory-mib",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
             "help": "A Dockerfile to use instead of the library's default. Its FROM must match the base",
             "name": "dockerfile",
             "positional": false,
@@ -618,6 +636,24 @@
           {
             "choices": null,
             "default": null,
+            "help": "vCPUs the workload needs, instead of --memory: the smallest size class whose baseline covers the request is used. Takes a fraction (0.5) and combines with --memory-mib",
+            "name": "cpus",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "MiB of memory the workload needs, instead of --memory: any figure, which selects the smallest class whose baseline covers it (1500 selects 2048). Combines with --cpus",
+            "name": "memory-mib",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
             "help": "A Dockerfile to use instead of the library's default",
             "name": "dockerfile",
             "positional": false,
@@ -909,6 +945,24 @@
             "positional": false,
             "required": false,
             "type": "enum"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "vCPUs the workload needs, instead of --memory: the smallest size class whose baseline covers the request is used. Takes a fraction (0.5) and combines with --memory-mib",
+            "name": "cpus",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "MiB of memory the workload needs, instead of --memory: any figure, which selects the smallest class whose baseline covers it (1500 selects 2048). Combines with --cpus",
+            "name": "memory-mib",
+            "positional": false,
+            "required": false,
+            "type": "string"
           },
           {
             "choices": null,
@@ -3906,6 +3960,24 @@
             "positional": false,
             "required": false,
             "type": "enum"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "vCPUs the workload needs, instead of --memory: the smallest size class whose baseline covers the request is used. Takes a fraction (0.5) and combines with --memory-mib",
+            "name": "cpus",
+            "positional": false,
+            "required": false,
+            "type": "string"
+          },
+          {
+            "choices": null,
+            "default": null,
+            "help": "MiB of memory the workload needs, instead of --memory: any figure, which selects the smallest class whose baseline covers it (1500 selects 2048). Combines with --cpus",
+            "name": "memory-mib",
+            "positional": false,
+            "required": false,
+            "type": "string"
           },
           {
             "choices": null,

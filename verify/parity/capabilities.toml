@@ -732,7 +732,7 @@ ts = "buildUnpricedReason"
 [[capability]]
 id = "size-from-request"
 core = "microvms_core::sizing::SizeClass::from_request"
-cli = { exempt = "`--memory` is a closed set of classes", issue = "#269" }
+cli = ["run --cpus", "run --memory-mib", "build --cpus", "build --memory-mib", "cost --cpus", "cost --memory-mib", "agent-up --cpus", "agent-up --memory-mib"]
 py = "SizeClass.from_request"
 ts = "SizeClass.fromRequest"
 
