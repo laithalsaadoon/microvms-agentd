@@ -909,6 +909,111 @@ pub fn estimate_run(
     ))
 }
 
+// ── the budget gate (#270) ───────────────────────────────────────────────────
+
+/// A report's total judged against a budget: core's `Budget::check`, the verdict
+/// `microvm cost --max-cost` renders.
+#[napi]
+pub struct BudgetVerdict {
+    inner: cost::BudgetVerdict,
+}
+
+#[napi]
+impl BudgetVerdict {
+    /// The ceiling, as the caller wrote it.
+    #[napi(getter)]
+    pub fn max_usd(&self) -> EstimatedUsd {
+        EstimatedUsd::wrap(self.inner.budget().max)
+    }
+
+    /// `"warn"` or `"abort"`: what the caller said a breach does.
+    #[napi(getter)]
+    pub fn on_breach(&self) -> String {
+        self.inner.budget().on_breach.as_str().to_string()
+    }
+
+    /// The total's floor: the whole estimate unless `isLowerBound`.
+    #[napi(getter)]
+    pub fn floor(&self) -> EstimatedUsd {
+        EstimatedUsd::wrap(self.inner.floor())
+    }
+
+    /// Whether the floor is a lower bound, because a line is unpriced.
+    #[napi(getter)]
+    pub fn is_lower_bound(&self) -> bool {
+        self.inner.is_lower_bound()
+    }
+
+    /// `"exact"` or `"lower-bound"`.
+    #[napi(getter)]
+    pub fn basis(&self) -> String {
+        self.inner.basis().to_string()
+    }
+
+    /// The phases whose lines are unpriced, sorted.
+    #[napi(getter)]
+    pub fn unpriced_phases(&self) -> Vec<String> {
+        self.inner
+            .unpriced_phases()
+            .iter()
+            .map(|phase| (*phase).to_string())
+            .collect()
+    }
+
+    /// Whether the floor is over the ceiling. At the ceiling is within it.
+    #[napi(getter)]
+    pub fn breached(&self) -> bool {
+        self.inner.breached()
+    }
+
+    /// Whether the caller's judgement refuses the report: breached, under `"abort"`.
+    #[napi(getter)]
+    pub fn aborts(&self) -> bool {
+        self.inner.aborts()
+    }
+
+    /// How far over the ceiling the floor is, when breached; at least that much for a lower
+    /// bound.
+    #[napi(getter)]
+    pub fn overage(&self) -> Option<EstimatedUsd> {
+        self.inner.overage().map(EstimatedUsd::wrap)
+    }
+
+    /// One line for a human, the one `microvm cost --max-cost` prints.
+    #[napi]
+    pub fn render(&self) -> String {
+        self.inner.render()
+    }
+
+    /// Core's JSON shape for the verdict, as a JSON **string**: `maxUsd`, `onBreach`, `basis`,
+    /// `breached`, `overageAtLeastUsd`.
+    #[napi]
+    pub fn to_json(&self) -> String {
+        self.inner.to_json().to_string()
+    }
+}
+
+/// Judges `report`'s total against a ceiling of `maxUsd` (a decimal string, such as `"1.50"`),
+/// with `onBreach` (`"warn"` or `"abort"`) saying what a breach does.
+///
+/// `onBreach` has no default, because a breach of a lower-bound total has already been exceeded
+/// by an unknown margin, and whether that warns or refuses is the caller's call. Core's
+/// `Budget::check`, the gate `microvm cost --max-cost` applies.
+#[napi]
+pub fn check_budget(
+    report: &CostReport,
+    max_usd: String,
+    on_breach: String,
+) -> napi::Result<BudgetVerdict, String> {
+    let budget = cost::Budget::new(
+        CoreUsd::parse(&max_usd).map_err(js)?,
+        on_breach.parse().map_err(js)?,
+    );
+    Ok(BudgetVerdict {
+        inner: budget.check(&report.inner),
+    })
+}
+
 /// The warm-pool argument, with its own counter-argument attached.
 #[napi]
 pub fn compare_residency(

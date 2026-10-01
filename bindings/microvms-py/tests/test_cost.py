@@ -750,3 +750,70 @@ def test_a_zero_duration_is_accepted_because_a_phase_can_genuinely_not_happen() 
     """
     assert microvms.Duration.measured(0.0).seconds == 0.0
     assert microvms.Duration.projected(0.0).seconds == 0.0
+
+
+# -- the budget gate (#270) ---------------------------------------------------
+
+
+def lower_bound_report() -> microvms.CostReport:
+    """An hour running plus a built image, whose build line is unpriced."""
+    return microvms.run_report(
+        microvms.SizeClass.default_class(),
+        running=microvms.Duration.measured(3600.0),
+        image_gb=2.0,
+    )
+
+
+def test_a_breach_aborts_only_when_the_caller_said_abort() -> None:
+    """Core's `Budget::check`: the judgement is the caller's, and a lower bound says so (#270).
+
+    The ceiling is a tenth of a cent under the report's floor, so both judgements breach and
+    only `"abort"` refuses. The floor is a lower bound, because the image build is unpriced, so
+    the overage is "at least".
+    """
+    report = lower_bound_report()
+    floor = report.total.floor.amount
+    ceiling = str(Decimal(floor) - Decimal("0.001"))
+    warned = microvms.check_budget(report, ceiling, "warn")
+    aborted = microvms.check_budget(report, ceiling, "abort")
+    for verdict in (warned, aborted):
+        assert verdict.breached
+        assert verdict.is_lower_bound
+        assert verdict.basis == "lower-bound"
+        assert verdict.unpriced_phases == ["image-build"]
+        assert verdict.overage is not None
+        assert Decimal(verdict.overage.amount) == Decimal("0.001")
+        assert "by at least" in verdict.render()
+    assert not warned.aborts
+    assert aborted.aborts
+    assert aborted.to_dict() == {
+        "maxUsd": ceiling,
+        "onBreach": "abort",
+        "basis": "lower-bound",
+        "breached": True,
+        "overageAtLeastUsd": "0.001000",
+    }
+
+
+def test_a_ceiling_at_the_floor_is_within_and_names_the_lower_bound() -> None:
+    """At the ceiling is within it, and a within-budget lower bound still says it is one."""
+    report = lower_bound_report()
+    verdict = microvms.check_budget(report, report.total.floor.amount, "abort")
+    assert not verdict.breached
+    assert not verdict.aborts
+    assert verdict.overage is None
+    assert "that floor is a lower bound" in verdict.render()
+
+
+def test_a_budget_takes_a_judgement_and_a_decimal_or_refuses() -> None:
+    """No default judgement, and the core's refusals: a spelling it doesn't know, a figure that
+    isn't a decimal, and a negative ceiling."""
+    report = lower_bound_report()
+    for max_usd, on_breach in (
+        ("1.00", "fail"),
+        ("1.00", "Warn"),
+        ("a dollar", "warn"),
+        ("-1", "warn"),
+    ):
+        with pytest.raises(microvms.InvalidArgError):
+            microvms.check_budget(report, max_usd, on_breach)

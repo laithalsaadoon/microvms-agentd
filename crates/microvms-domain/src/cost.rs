@@ -2155,6 +2155,221 @@ pub fn compare_residency(
     })
 }
 
+// ── the budget gate (#77, #270) ──────────────────────────────────────────────
+
+/// What a breached budget does: report it, or refuse the plan. There is no default.
+///
+/// The total a budget is compared against is a lower bound whenever a line is unpriced
+/// (COST-4), so a breach found from one has already been exceeded by an unknown margin.
+/// Whether that warrants a warning or a refusal depends on what the caller is gating (a
+/// dashboard wants the report either way, a CI gate wants the refusal), and a default would
+/// quietly make that judgement for them. So [`Budget::new`] takes one, and so does every
+/// surface: `cost --max-cost` requires `--on-breach`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OnBreach {
+    /// Report as usual, with the breach as a warning.
+    Warn,
+    /// Report as usual, then refuse: the budget the caller set does not hold.
+    Abort,
+}
+
+impl OnBreach {
+    /// Every judgement, for a surface that publishes the closed set.
+    pub const ALL: [OnBreach; 2] = [OnBreach::Warn, OnBreach::Abort];
+
+    /// `"warn"` or `"abort"`, the spelling every surface takes and reports.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            OnBreach::Warn => "warn",
+            OnBreach::Abort => "abort",
+        }
+    }
+}
+
+impl FromStr for OnBreach {
+    type Err = Error;
+
+    fn from_str(text: &str) -> Result<OnBreach, Error> {
+        OnBreach::ALL
+            .into_iter()
+            .find(|judgement| judgement.as_str() == text)
+            .ok_or_else(|| {
+                Error::invalid_arg(format!(
+                    "{text:?} is not a judgement on a breach: it's \"warn\" or \"abort\", and \
+                     there is no default, because a breach of a lower-bound total has already \
+                     been exceeded by an unknown margin"
+                ))
+            })
+    }
+}
+
+/// A ceiling on a report's total, and what a breach of it does.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Budget {
+    /// The ceiling, as the caller wrote it ([`EstimatedUsd::parse`] keeps its scale).
+    pub max: EstimatedUsd,
+    /// What a breach does; see [`OnBreach`].
+    pub on_breach: OnBreach,
+}
+
+impl Budget {
+    /// A budget of `max`, whose breach does `on_breach`.
+    pub fn new(max: EstimatedUsd, on_breach: OnBreach) -> Budget {
+        Budget { max, on_breach }
+    }
+
+    /// The verdict on `report`: its total's floor against the ceiling.
+    ///
+    /// The floor is the whole estimate when every line priced and a lower bound otherwise,
+    /// and the verdict says which: a breach of a lower bound is a breach by at least the
+    /// overage, and staying under one proves nothing about the true figure. An empty report
+    /// is an exact zero, not a lower bound: nothing on it is unpriced.
+    pub fn check(&self, report: &CostReport) -> BudgetVerdict {
+        let total = report.total();
+        BudgetVerdict {
+            budget: *self,
+            floor: total.floor(),
+            unpriced: total.unpriced_phase_names(),
+        }
+    }
+}
+
+/// A report's total judged against a [`Budget`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BudgetVerdict {
+    budget: Budget,
+    floor: EstimatedUsd,
+    unpriced: Vec<&'static str>,
+}
+
+impl BudgetVerdict {
+    /// The budget judged against.
+    pub fn budget(&self) -> Budget {
+        self.budget
+    }
+
+    /// The total's floor: the whole estimate when [`Self::is_lower_bound`] is false.
+    pub fn floor(&self) -> EstimatedUsd {
+        self.floor
+    }
+
+    /// Whether the floor is a lower bound, because a line on the report is unpriced.
+    pub fn is_lower_bound(&self) -> bool {
+        !self.unpriced.is_empty()
+    }
+
+    /// The phases whose lines are unpriced, sorted: what the floor leaves out.
+    pub fn unpriced_phases(&self) -> &[&'static str] {
+        &self.unpriced
+    }
+
+    /// Whether the floor is over the ceiling. At the ceiling is within it.
+    pub fn breached(&self) -> bool {
+        self.floor > self.budget.max
+    }
+
+    /// Whether the caller's judgement refuses this report: breached, with
+    /// [`OnBreach::Abort`].
+    pub fn aborts(&self) -> bool {
+        self.breached() && self.budget.on_breach == OnBreach::Abort
+    }
+
+    /// How far the floor is over the ceiling, when it is: at least this much for a lower
+    /// bound.
+    pub fn overage(&self) -> Option<EstimatedUsd> {
+        self.breached()
+            .then(|| EstimatedUsd::new(self.floor.amount() - self.budget.max.amount()))
+    }
+
+    /// `"exact"` or `"lower-bound"`: what the floor is.
+    pub fn basis(&self) -> &'static str {
+        if self.is_lower_bound() {
+            "lower-bound"
+        } else {
+            "exact"
+        }
+    }
+
+    /// One line for a human: the figure, the ceiling, and what an unpriced line leaves open.
+    ///
+    /// An under-budget verdict from a lower bound says so, because "within budget" without
+    /// that half would be the report lying by omission, the figure COST-4 keeps honest.
+    pub fn render(&self) -> String {
+        let floor = self.floor.amount_string();
+        let caveat = if self.unpriced.is_empty() {
+            String::new()
+        } else {
+            format!(
+                ", and {} line(s) are unpriced ({}), so the true figure is larger by an \
+                 unknown margin",
+                self.unpriced.len(),
+                self.unpriced.join(", ")
+            )
+        };
+        match self.overage() {
+            Some(overage) => format!(
+                "budget: the {} total ${floor} exceeds --max-cost ${} by {}${}{caveat}",
+                if self.unpriced.is_empty() {
+                    "estimated"
+                } else {
+                    "priced-floor"
+                },
+                self.budget.max.amount_string(),
+                if self.unpriced.is_empty() {
+                    ""
+                } else {
+                    "at least "
+                },
+                overage.amount_string(),
+            ),
+            None if self.unpriced.is_empty() => format!(
+                "budget: the estimated total ${floor} is within --max-cost ${}",
+                self.max_figure()
+            ),
+            None => format!(
+                "budget: the priced floor ${floor} is within --max-cost ${}, but that floor is \
+                 a lower bound{caveat}",
+                self.max_figure()
+            ),
+        }
+    }
+
+    /// The dense line: `budget`, the ceiling, the basis, `breached` or `within`, and the
+    /// overage or `-`.
+    pub fn render_dense(&self) -> String {
+        format!(
+            "budget\t{}\t{}\t{}\t{}",
+            self.max_figure(),
+            self.basis(),
+            if self.breached() {
+                "breached"
+            } else {
+                "within"
+            },
+            self.overage()
+                .map_or_else(|| "-".to_string(), EstimatedUsd::amount_string),
+        )
+    }
+
+    /// The verdict as JSON: `maxUsd`, `onBreach`, `basis`, `breached` and
+    /// `overageAtLeastUsd`, dollars as strings.
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "maxUsd": self.max_figure(),
+            "onBreach": self.budget.on_breach.as_str(),
+            "basis": self.basis(),
+            "breached": self.breached(),
+            "overageAtLeastUsd": self.overage().map(EstimatedUsd::amount_string),
+        })
+    }
+
+    /// The ceiling at the scale the caller typed it (`1.50` stays `1.50`), where
+    /// [`EstimatedUsd::amount_string`] would restate it at report precision.
+    fn max_figure(&self) -> String {
+        self.budget.max.amount().to_string()
+    }
+}
+
 // ── the report as JSON ───────────────────────────────────────────────────────
 //
 // One shape for every surface: the CLI's `cost --json` report, Python's `to_dict` and
@@ -4810,5 +5025,127 @@ mod tests {
             json["staleness"].as_str().expect("text").contains("days"),
             "{json}"
         );
+    }
+
+    // ── the budget gate (#270) ────────────────────────────────────────────
+
+    /// A report with only priced lines: an hour running at the default size.
+    fn an_exact_report() -> CostReport {
+        running_report(
+            SizeClass::Mib2048,
+            DurationP::Measured(Duration::from_secs(3600)),
+        )
+    }
+
+    /// Each judgement over each side of the ceiling, on an exact total and on a lower bound:
+    /// a breach aborts only under `Abort`, at the ceiling is within, and a lower bound says so
+    /// whichever side it lands on (#270).
+    ///
+    /// **Falsification**: `verify/guards/faults/cost-defaults.toml` entries
+    /// `domain-budget-abort-ignores-the-judgement` (a breach aborts under `Warn` too) and
+    /// `domain-budget-at-the-ceiling-breaches` (`>=` for `>`) each turn a row red.
+    #[test]
+    fn a_budget_verdict_follows_the_judgement_and_the_total_it_was_given() {
+        let exact = an_exact_report();
+        let floor = exact.total().floor();
+        let lower = a_create_and_destroy_report();
+        assert!(lower.total().is_lower_bound());
+        let lower_floor = lower.total().floor();
+        let over = |figure: EstimatedUsd| EstimatedUsd::new(figure.amount() - dec!(0.001));
+        let rows = [
+            (&exact, floor, OnBreach::Abort, false, false, "exact"),
+            (&exact, over(floor), OnBreach::Warn, true, false, "exact"),
+            (&exact, over(floor), OnBreach::Abort, true, true, "exact"),
+            (
+                &lower,
+                over(lower_floor),
+                OnBreach::Warn,
+                true,
+                false,
+                "lower-bound",
+            ),
+            (
+                &lower,
+                over(lower_floor),
+                OnBreach::Abort,
+                true,
+                true,
+                "lower-bound",
+            ),
+            (
+                &lower,
+                lower_floor,
+                OnBreach::Abort,
+                false,
+                false,
+                "lower-bound",
+            ),
+        ];
+        for (report, max, on_breach, breached, aborts, basis) in rows {
+            let verdict = Budget::new(max, on_breach).check(report);
+            let row = format!("{} under {} ({basis})", max.amount(), on_breach.as_str());
+            assert_eq!(verdict.breached(), breached, "breached: {row}");
+            assert_eq!(verdict.aborts(), aborts, "aborts: {row}");
+            assert_eq!(verdict.basis(), basis, "basis: {row}");
+            assert_eq!(verdict.overage().is_some(), breached, "overage: {row}");
+            assert_eq!(verdict.to_json()["breached"], breached, "{row}");
+            assert_eq!(verdict.to_json()["onBreach"], on_breach.as_str(), "{row}");
+        }
+        let breach = Budget::new(over(lower_floor), OnBreach::Warn).check(&lower);
+        assert_eq!(breach.overage(), Some(EstimatedUsd::new(dec!(0.001))));
+        assert!(
+            breach.render().contains("by at least"),
+            "{}",
+            breach.render()
+        );
+        assert!(
+            breach.render().contains("unknown margin"),
+            "{}",
+            breach.render()
+        );
+        let within = Budget::new(lower_floor, OnBreach::Warn).check(&lower);
+        assert!(
+            within.render().contains("that floor is a lower bound"),
+            "{}",
+            within.render()
+        );
+        assert_eq!(within.unpriced_phases(), ["image-build"]);
+        // An exact total under the ceiling says it's the estimate and claims no lower bound.
+        let exact_within = Budget::new(floor, OnBreach::Warn).check(&exact);
+        assert!(exact_within.unpriced_phases().is_empty());
+        let text = exact_within.render();
+        assert!(text.starts_with("budget: the estimated total $"), "{text}");
+        assert!(!text.contains("lower bound"), "{text}");
+    }
+
+    /// An empty report is an exact zero, not a lower bound: nothing on it is unpriced, so a
+    /// zero ceiling holds it, and the dense line says `exact`.
+    #[test]
+    fn an_empty_report_is_judged_as_an_exact_zero() {
+        let empty = run_report(
+            SizeClass::Mib2048,
+            &RunUsage::default(),
+            &pinned_rates(),
+            fresh_day(),
+            DEFAULT_RUN_LABEL,
+        )
+        .expect("an empty report");
+        let verdict = Budget::new(EstimatedUsd::ZERO, OnBreach::Abort).check(&empty);
+        assert!(!verdict.is_lower_bound());
+        assert!(!verdict.breached());
+        assert_eq!(verdict.render_dense(), "budget\t0\texact\twithin\t-");
+    }
+
+    /// A judgement parses from its spelling and nothing else, so a surface taking a string
+    /// can't default one in by accident.
+    #[test]
+    fn a_judgement_parses_from_its_spelling_only() {
+        for judgement in OnBreach::ALL {
+            assert_eq!(judgement.as_str().parse::<OnBreach>().ok(), Some(judgement));
+        }
+        for bad in ["", "Warn", "abort ", "fail"] {
+            let error = bad.parse::<OnBreach>().expect_err("not a judgement");
+            assert_eq!(error.kind(), ErrorKind::InvalidArg, "{bad:?}");
+        }
     }
 }
