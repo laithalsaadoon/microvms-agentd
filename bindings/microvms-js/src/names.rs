@@ -151,6 +151,16 @@ impl NameRecord {
         self.inner.egress_posture.clone()
     }
 
+    /// The VM's tunnel identity, when it was launched with `identity: true`; `null` otherwise.
+    ///
+    /// Throws when the record carries one half of the pair, or a half that doesn't decode: the
+    /// record claims a verifiable VM, and reading it as unverifiable would hide that it's
+    /// broken. A method, like `agentToken()`, because it holds the host's secret half.
+    #[napi]
+    pub fn tunnel_identity(&self) -> napi::Result<Option<crate::serve::TunnelIdentity>, String> {
+        Ok(self.inner.tunnel_identity().map_err(js)?.map(Into::into))
+    }
+
     /// The record without its secrets.
     #[napi(js_name = "toString")]
     pub fn describe(&self) -> String {
