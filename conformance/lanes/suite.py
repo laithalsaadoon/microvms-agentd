@@ -386,6 +386,7 @@ def run_suite(args: argparse.Namespace) -> int:
                 binary,
                 Path(tmp) / "project",
                 aws.client("logs"),
+                aws.client("s3"),
                 results,
             )
             # Version skew (#298) beside them: this tree's CLI builds an image around the
@@ -439,6 +440,7 @@ def run_suite(args: argparse.Namespace) -> int:
                 binary,
                 Path(tmp) / "agent-state",
                 aws.client("logs"),
+                aws.client("s3"),
                 results,
             )
             # Auto-resume on its own VM (launched `--auto-resume` from the suite's image):

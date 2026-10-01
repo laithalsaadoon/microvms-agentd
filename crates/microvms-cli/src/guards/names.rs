@@ -256,9 +256,6 @@ async fn an_attached_command_by_name_carries_the_registered_triple() {
                 .push((attach, region.as_str().to_string()));
             Box::pin(async move { Err(Error::new(ErrorKind::Platform, "recorded; stopping")) })
         }
-        fn put_artifact(&self, _uri: &str, _bytes: Vec<u8>) -> BoxFuture<'_, Result<(), Error>> {
-            panic!("no artifact on this path")
-        }
     }
 
     let seam = AttachRecorder {
@@ -406,9 +403,6 @@ impl CoreSeam for PlaneRegions {
         self.record(&region);
         Box::pin(async move { Err(Error::new(ErrorKind::Platform, "recorded; stopping")) })
     }
-    fn put_artifact(&self, _uri: &str, _bytes: Vec<u8>) -> BoxFuture<'_, Result<(), Error>> {
-        panic!("no artifact on this path")
-    }
 }
 
 /// **`suspend`, `resume` and `terminate` by name build their control plane in the record's
@@ -509,9 +503,6 @@ impl CoreSeam for WindowInUsWest2 {
         attach: Attach,
     ) -> BoxFuture<'_, Result<Session, Error>> {
         self.sessions.attach_session(region, attach)
-    }
-    fn put_artifact(&self, _uri: &str, _bytes: Vec<u8>) -> BoxFuture<'_, Result<(), Error>> {
-        panic!("no artifact on this path")
     }
 }
 

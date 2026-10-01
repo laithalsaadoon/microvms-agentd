@@ -265,10 +265,6 @@ impl CoreSeam for DaemonSeam {
                 .build()
         })
     }
-
-    fn put_artifact(&self, _uri: &str, _bytes: Vec<u8>) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move { Err(Error::new(ErrorKind::Platform, "no uploads here")) })
-    }
 }
 
 /// **CLI-9, the guard proof.** `exec --stream` whose stdout reader leaves after the first

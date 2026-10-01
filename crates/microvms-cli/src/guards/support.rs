@@ -92,15 +92,6 @@ impl CoreSeam for RefusingSeam {
         let error = self.record(Door::AttachSession);
         Box::pin(async move { Err(error) })
     }
-
-    fn put_artifact(&self, _uri: &str, _bytes: Vec<u8>) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move {
-            Err(Error::new(
-                ErrorKind::Platform,
-                format!("{SENTINEL}: the artifact upload refused"),
-            ))
-        })
-    }
 }
 
 /// Infrastructure that satisfies every `require`, so a command reaches the seam rather than
@@ -245,10 +236,40 @@ pub(super) struct ScriptedTransport {
     answers: Mutex<std::collections::HashMap<String, std::collections::VecDeque<(u16, String)>>>,
     /// Fired the first time this operation is seen. The interrupt's trigger.
     trigger: Mutex<Option<(String, tokio::sync::oneshot::Sender<()>)>>,
-    /// The URIs `put_artifact` was asked to fill. On the transport rather than the seam so
-    /// the ordering guard can assert "zero uploads" through the handle it already holds —
-    /// an upload is not a control-plane call, so it must not pollute `calls`.
+    /// The `s3://` URIs the sandbox's build services were asked to fill ([`ScriptedServices`]).
+    /// On the transport rather than the seam so the ordering guard can assert "zero uploads"
+    /// through the handle it already holds; an upload is not a control-plane call, so it must
+    /// not pollute `calls`.
     uploads: Mutex<Vec<String>>,
+}
+
+/// The STS and S3 client a [`ScriptedSeam`] sandbox builds and ensures through: a fixed
+/// account, and every put recorded on the transport as the URI it filled (#258).
+pub(super) struct ScriptedServices {
+    pub(super) transport: Arc<ScriptedTransport>,
+}
+
+/// The account [`ScriptedServices`] answers, which an ensured image's ARN is built from.
+pub(super) const SCRIPTED_ACCOUNT: &str = "123456789012";
+
+impl microvms_core::control::BuildServices for ScriptedServices {
+    fn caller_account(&self) -> BoxFuture<'_, Result<String, Error>> {
+        Box::pin(async { Ok(SCRIPTED_ACCOUNT.to_string()) })
+    }
+
+    fn put_object<'a>(
+        &'a self,
+        bucket: &'a str,
+        key: &'a str,
+        _bytes: Vec<u8>,
+    ) -> BoxFuture<'a, Result<(), Error>> {
+        self.transport
+            .uploads
+            .lock()
+            .expect("not poisoned")
+            .push(format!("s3://{bucket}/{key}"));
+        Box::pin(async { Ok(()) })
+    }
 }
 
 // ── the scripted control plane ───────────────────────────────────────────────
@@ -408,7 +429,12 @@ impl CoreSeam for ScriptedSeam {
             region,
             Arc::clone(&self.clock) as Arc<dyn Clock>,
         );
-        Box::pin(async move { Ok(Sandbox::with_control_plane(plane)) })
+        let services = Arc::new(ScriptedServices {
+            transport: Arc::clone(&self.transport),
+        });
+        Box::pin(
+            async move { Ok(Sandbox::with_control_plane(plane).with_build_services(services)) },
+        )
     }
 
     fn attach_session(
@@ -422,15 +448,6 @@ impl CoreSeam for ScriptedSeam {
                 "this guard does not attach sessions",
             ))
         })
-    }
-
-    fn put_artifact(&self, uri: &str, _bytes: Vec<u8>) -> BoxFuture<'_, Result<(), Error>> {
-        self.transport
-            .uploads
-            .lock()
-            .expect("not poisoned")
-            .push(uri.to_string());
-        Box::pin(async move { Ok(()) })
     }
 }
 
@@ -594,6 +611,8 @@ pub(super) fn build_args_without_binary(state_dir: std::path::PathBuf) -> BuildA
         log_group: None,
         log_stream: None,
         reuse: false,
+        s3_key_prefix: None,
+        force: false,
         port: None,
         region: region_flags(),
         infra: InfraFlags::default(),
@@ -801,10 +820,6 @@ impl CoreSeam for ScriptedSessionSeam {
             .build();
         Box::pin(async move { built })
     }
-
-    fn put_artifact(&self, _uri: &str, _bytes: Vec<u8>) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move { Ok(()) })
-    }
 }
 
 /// Runs one attached command against `script`, returning the result and both streams.
@@ -962,10 +977,6 @@ impl CoreSeam for SyncSeam {
                 "these guards launch rather than attach",
             ))
         })
-    }
-
-    fn put_artifact(&self, _uri: &str, _bytes: Vec<u8>) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move { Ok(()) })
     }
 }
 

@@ -107,10 +107,6 @@ impl CoreSeam for RecordingSessionSeam {
             .push((attach, region.as_str().to_string()));
         Box::pin(async move { built })
     }
-
-    fn put_artifact(&self, _uri: &str, _bytes: Vec<u8>) -> BoxFuture<'_, Result<(), Error>> {
-        panic!("no artifact on this path")
-    }
 }
 
 /// Runs one `attach` against `script`: the result, stderr, and the attaches the seam saw.
