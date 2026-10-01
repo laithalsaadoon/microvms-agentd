@@ -3,21 +3,19 @@
 # default no row names, a core value the surfaces no longer state, a manifest behind core, a
 # reader that stops reading (the floor, once per surface), the sentinel row, and core's own copy.
 
-[[fault]]
-id = "parity-default-undeclared"
+[[family]]
 guard = "tools/check-parity.py"
 run = ["./tools/check-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "parity-default-undeclared"
 message = "py: ExecHandle.write_stdin(eof) = False belongs to no [[default]] row"
 transform = { file = "verify/parity/capabilities.toml", replace = "[[default]]\nid = \"stdin-eof\"\nexempt = \"whether this one write closes stdin: an argument of the call, with no default anywhere else\"\npy = \"ExecHandle.write_stdin(eof)\"\n", with = "" }
 
-[[fault]]
+[[family.fault]]
 id = "parity-default-core-changed"
-guard = "tools/check-parity.py"
-run = ["./tools/check-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "exec --timeout defaults to 300, but clientDefaults.execWaitSeconds is 301.0"
 transform = { file = "docs/manifest.json", replace = "\"execWaitSeconds\": 300.0", with = "\"execWaitSeconds\": 301.0" }
 
@@ -30,39 +28,29 @@ suite = "rust"
 message = "\"execWaitSeconds\": 301.0"
 transform = { file = "crates/microvms-app/src/session/exec.rs", replace = "pub const DEFAULT_EXEC_WAIT: Duration = Duration::from_secs(300);", with = "pub const DEFAULT_EXEC_WAIT: Duration = Duration::from_secs(301);" }
 
-[[fault]]
-id = "parity-default-no-client-defaults"
+[[family]]
 guard = "tools/check-parity.py"
 run = ["./tools/check-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "parity-default-no-client-defaults"
 message = "cli: the manifest carries no clientDefaults to compare with"
 transform = { file = "docs/manifest.json", replace = "\"clientDefaults\": {", with = "\"clientDefault\": {" }
 
-[[fault]]
+[[family.fault]]
 id = "parity-default-cli-floor"
-guard = "tools/check-parity.py"
-run = ["./tools/check-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "cli: the surface states no default the rows hold, so nothing was read"
 transform = { file = "tools/check-parity.py", replace = "            if parameter.get(\"default\") is not None:\n", with = "            if False:\n" }
 
-[[fault]]
+[[family.fault]]
 id = "parity-default-py-floor"
-guard = "tools/check-parity.py"
-run = ["./tools/check-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "py: the surface states no default the rows hold, so nothing was read"
 transform = { file = "tools/check-parity.py", replace = "        if parameter.get(\"default\") is not None:\n            surface.defaults[f\"{owner}", with = "        if False:\n            surface.defaults[f\"{owner}" }
 
-[[fault]]
+[[family.fault]]
 id = "parity-default-sentinel"
-guard = "tools/check-parity.py"
-run = ["./tools/check-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "the table marks no sentinel [[default]] row"
 transform = { file = "verify/parity/capabilities.toml", replace = "id = \"exec-wait\"\nsentinel = true\n", with = "id = \"exec-wait\"\n" }
 

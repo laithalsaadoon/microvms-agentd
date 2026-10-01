@@ -1,69 +1,53 @@
 # ── build's image options (#264, slice D) ─────────────────────────────────────
 
 # The tags never put on the request: the flag parses and nothing reaches the wire.
-[[fault]]
-id = "cli-build-tags-dropped"
+[[family]]
 guard = "guards::build::the_build_image_options_reach_the_create_body"
 run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::build::the_build_image_options_reach_the_create_body"]
 expect = "test-failed"
 suite = "rust"
-message = "the tags reach the create body"
 note = "crates/microvms-cli/src/guards/build.rs::the_build_image_options_reach_the_create_body"
+
+[[family.fault]]
+id = "cli-build-tags-dropped"
+message = "the tags reach the create body"
 transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "    for (key, value) in tags {\n", with = "    for (key, value) in tags.iter().take(0) {\n" }
 
 # The flag's name dropped from the paired base: the build lands on `al2023-1` whatever it names.
-[[fault]]
+[[family.fault]]
 id = "cli-build-base-image-ignored"
-guard = "guards::build::the_build_image_options_reach_the_create_body"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::build::the_build_image_options_reach_the_create_body"]
-expect = "test-failed"
-suite = "rust"
 message = "the base the flag names"
-note = "crates/microvms-cli/src/guards/build.rs::the_build_image_options_reach_the_create_body"
 transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "        base.name = base_name.to_string();\n", with = "        let _ = base_name;\n" }
 
 # The run family's timeout dropped: core's default goes out instead.
-[[fault]]
+[[family.fault]]
 id = "cli-build-run-hook-timeout-dropped"
-guard = "guards::build::the_build_image_options_reach_the_create_body"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::build::the_build_image_options_reach_the_create_body"]
-expect = "test-failed"
-suite = "rust"
 message = "the run family's timeout"
-note = "crates/microvms-cli/src/guards/build.rs::the_build_image_options_reach_the_create_body"
 transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "        request.run_hook_timeout = timeout;\n", with = "        let _ = timeout;\n" }
 
 # The build family's timeout dropped: core's default goes out instead.
-[[fault]]
+[[family.fault]]
 id = "cli-build-build-hook-timeout-dropped"
-guard = "guards::build::the_build_image_options_reach_the_create_body"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::build::the_build_image_options_reach_the_create_body"]
-expect = "test-failed"
-suite = "rust"
 message = "the build family's timeout"
-note = "crates/microvms-cli/src/guards/build.rs::the_build_image_options_reach_the_create_body"
 transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "        request.build_hook_timeout = timeout;\n", with = "        let _ = timeout;\n" }
 
 # `--inherit-workdir` never reaches core, so nothing checks for a WORKDIR and the build runs.
-[[fault]]
-id = "cli-build-inherit-workdir-dropped"
+[[family]]
 guard = "guards::build::a_build_refuses_an_inherit_workdir_or_a_tag_it_cannot_keep_before_any_call"
 run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::build::a_build_refuses_an_inherit_workdir_or_a_tag_it_cannot_keep_before_any_call"]
 expect = "test-failed"
 suite = "rust"
-message = "nothing declares a WORKDIR"
 note = "crates/microvms-cli/src/guards/build.rs::a_build_refuses_an_inherit_workdir_or_a_tag_it_cannot_keep_before_any_call"
+
+[[family.fault]]
+id = "cli-build-inherit-workdir-dropped"
+message = "nothing declares a WORKDIR"
 transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "    request.inherit_workdir = inherit_workdir;\n", with = "    request.inherit_workdir = inherit_workdir && false;\n" }
 
 # A repeated `--tag` key let through: the map keeps the last value and drops the first.
-[[fault]]
+[[family.fault]]
 id = "cli-build-tag-key-repeated"
-guard = "guards::build::a_build_refuses_an_inherit_workdir_or_a_tag_it_cannot_keep_before_any_call"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::build::a_build_refuses_an_inherit_workdir_or_a_tag_it_cannot_keep_before_any_call"]
-expect = "test-failed"
-suite = "rust"
 message = "a repeated tag key"
-note = "crates/microvms-cli/src/guards/build.rs::a_build_refuses_an_inherit_workdir_or_a_tag_it_cannot_keep_before_any_call"
 transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "        if request.tags.insert(key.clone(), value.clone()).is_some() {\n", with = "        if request.tags.insert(key.clone(), value.clone()).is_some() && false {\n" }
 
 # `--tag` split without core's `require_valid_tags`: an empty key parses and fails after the upload.

@@ -6,79 +6,53 @@
 # refuses. HEAD is also the clean schema each fault is seeded over, so an entry keeps firing
 # after the next release, or a PROTOCOL_VERSION bump, moves the tag's copy on. The unit tests
 # hold the tag lookup, the shallow clone included.
-[[fault]]
-id = "schema-compat-request-field-required"
+[[family]]
 guard = "tools/check-schema-compat.py"
 run = ["./tools/check-schema-compat.py", "--base-ref", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "schema-compat-request-field-required"
 message = "request StartRequest.cwd is required now"
 transform = { file = "docs/schema.json", replace = "        \"exec_id\",\n        \"command\"\n      ],", with = "        \"exec_id\",\n        \"command\",\n        \"cwd\"\n      ]," }
 
 # A route renamed is the old one gone, for a client that still calls it.
-[[fault]]
+[[family.fault]]
 id = "schema-compat-route-removed"
-guard = "tools/check-schema-compat.py"
-run = ["./tools/check-schema-compat.py", "--base-ref", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
 message = "route GET /v1/procs is gone"
 transform = { file = "docs/schema.json", replace = "\"path\": \"/v1/procs\",", with = "\"path\": \"/v1/processes\"," }
 
-[[fault]]
+[[family.fault]]
 id = "schema-compat-empty-input"
-guard = "tools/check-schema-compat.py"
-run = ["./tools/check-schema-compat.py", "--base-ref", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
 message = "tools/fixtures/schema-compat/empty.json is empty"
 argv_fault = ["--schema", "tools/fixtures/schema-compat/empty.json"]
 
-[[fault]]
+[[family.fault]]
 id = "schema-compat-routes-parse-to-nothing"
-guard = "tools/check-schema-compat.py"
-run = ["./tools/check-schema-compat.py", "--base-ref", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
 message = "has no routes with a method and a path"
 transform = { file = "tools/check-schema-compat.py", replace = "and isinstance(r.get(\"method\"), str)", with = "and isinstance(r.get(\"verb\"), str)" }
 
-[[fault]]
+[[family.fault]]
 id = "schema-compat-refs-reach-nothing"
-guard = "tools/check-schema-compat.py"
-run = ["./tools/check-schema-compat.py", "--base-ref", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
 message = "its routes reach no request definition in $defs"
 transform = { file = "tools/check-schema-compat.py", replace = "                key == \"$ref\"\n", with = "                key == \"ref\"\n" }
 
 # A route that took no body gains one with required fields: every older client sends none.
-[[fault]]
+[[family.fault]]
 id = "schema-compat-route-gains-required-body"
-guard = "tools/check-schema-compat.py"
-run = ["./tools/check-schema-compat.py", "--base-ref", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
 message = "request StartRequest.command is required now: an older client that omits it is refused (POST /v1/exec/{id}/kill)"
 transform = { file = "docs/schema.json", replace = "\"path\": \"/v1/exec/{id}/kill\",\n      \"request\": null,", with = "\"path\": \"/v1/exec/{id}/kill\",\n      \"request\": {\"media_type\": \"application/json\", \"schema\": {\"$ref\": \"#/$defs/StartRequest\"}}," }
 
 # What `skip_serializing_if` on `ExitEvent.truncated` writes: still listed, no longer required.
-[[fault]]
+[[family.fault]]
 id = "schema-compat-response-field-may-be-absent"
-guard = "tools/check-schema-compat.py"
-run = ["./tools/check-schema-compat.py", "--base-ref", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
 message = "response ExitEvent.truncated may be absent now"
 transform = { file = "docs/schema.json", replace = "\"timed_out\",\n        \"truncated\",\n        \"writers_may_be_alive\",\n        \"offset\"\n", with = "\"timed_out\",\n        \"writers_may_be_alive\",\n        \"offset\"\n" }
 
 # A bump with a break docs/schema-breaks.toml doesn't list: the version alone waives nothing.
-[[fault]]
+[[family.fault]]
 id = "schema-compat-undeclared-break"
-guard = "tools/check-schema-compat.py"
-run = ["./tools/check-schema-compat.py", "--base-ref", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
 message = "not declared"
 transform = [
   { file = "docs/schema.json", replace = "\"protocol_version\": \"1\"", with = "\"protocol_version\": \"2\"" },
@@ -87,20 +61,18 @@ transform = [
 
 # The readers the floor can't see go partly blind: the stream events' shapes, and the
 # definitions a field names. Either leaves the floor satisfied, so the unit suite holds them.
-[[fault]]
-id = "schema-compat-test-stream-event-shapes"
+[[family]]
 guard = "test_check_schema_compat.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_schema_compat.py"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "schema-compat-test-stream-event-shapes"
 message = "FAIL: test_a_field_gone_from_a_stream_event_fails ("
 transform = { file = "tools/check-schema-compat.py", replace = "        for event in sorted(old_events.keys() & new_events.keys()):\n", with = "        for event in sorted(old_events.keys() & set()):\n" }
 
-[[fault]]
+[[family.fault]]
 id = "schema-compat-test-field-definitions"
-guard = "test_check_schema_compat.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_schema_compat.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_field_gone_from_a_definition_another_one_names_fails ("
 transform = { file = "tools/check-schema-compat.py", replace = "            for was, now in pairs:\n", with = "            for was, now in []:\n" }

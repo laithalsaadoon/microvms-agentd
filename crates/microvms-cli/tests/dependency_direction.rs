@@ -290,6 +290,14 @@ const MEMBER_EDGES: [(&str, &[&str]); 11] = [
 /// **Falsification**: add `microvms-edges = { path = "../microvms-edges" }` to the app's
 /// `[dev-dependencies]` and this goes red naming the edge. (A normal dependency is a cycle,
 /// which fails `cargo metadata` before any test runs.)
+///
+/// ```falsification
+/// id = "deps-app-edges"
+/// file = "crates/microvms-app/Cargo.toml"
+/// replace = "[dev-dependencies]\n"
+/// with = "[dev-dependencies]\nmicrovms-edges = { path = \"../microvms-edges\" }\n"
+/// message = "left: {\"microvms-domain\", \"microvms-edges\", \"microvms-protocol\"}"
+/// ```
 #[test]
 fn each_member_depends_on_exactly_the_crates_of_ours_its_layer_allows() {
     let metadata = metadata();
@@ -581,6 +589,14 @@ const ADAPTERS: [&str; 3] = ["microvms-cli", "microvms-py", "microvms-js"];
 /// **Falsification**: add `globset = "0.4"` to `bindings/microvms-py/Cargo.toml` and this goes red
 /// naming it, and so does `reqwest` added to the CLI's `[dependencies]`. Delete `napi-build`
 /// from `microvms-js`'s build dependencies and it goes red on the stale set entry.
+///
+/// ```falsification
+/// id = "deps-py-globset"
+/// file = "bindings/microvms-py/Cargo.toml"
+/// replace = "[dependencies]\n"
+/// with = "[dependencies]\nglobset = \"0.4\"\n"
+/// message = "Outside the set: [\"globset\"]"
+/// ```
 #[test]
 fn each_adapter_depends_on_exactly_its_allowed_set() {
     for binding in ["microvms-py", "microvms-js"] {
@@ -718,6 +734,14 @@ const LAYERS: [&str; 3] = ["microvms-domain", "microvms-app", "microvms-core"];
 /// **Falsification**: add `tokio = "1"` to the domain's `[dependencies]` and this goes red
 /// naming it. Delete `jiff` from `verify/arch/placement.toml`'s domain set and it goes red on the crate
 /// outside the set.
+///
+/// ```falsification
+/// id = "deps-domain-tokio"
+/// file = "crates/microvms-domain/Cargo.toml"
+/// replace = "[dependencies]\n"
+/// with = "[dependencies]\ntokio = \"1\"\n"
+/// message = "Outside the set: [\"tokio\"]"
+/// ```
 #[test]
 fn each_layer_depends_on_exactly_its_allowed_set() {
     let records: Vec<String> = placement_records()
@@ -890,6 +914,14 @@ const DEV_ONLY_EDGES: [(&str, &str); 1] = [("agentd", "agentd-model")];
 /// **Falsification**: add `agentd-model = { path = "../model", version = "0.1.0" }` to agentd's
 /// `[dependencies]` and this fails naming the normal kind, while
 /// `each_member_depends_on_exactly_the_crates_of_ours_its_layer_allows` stays green.
+///
+/// ```falsification
+/// id = "deps-agentd-model-normal"
+/// file = "crates/agentd/Cargo.toml"
+/// replace = "[dependencies]\n"
+/// with = "[dependencies]\nagentd-model = { path = \"../model\", version = \"0.1.0\" }\n"
+/// message = "agentd depends on agentd-model as [Normal]"
+/// ```
 #[test]
 fn the_proof_edges_are_dev_dependencies_only() {
     let metadata = metadata();

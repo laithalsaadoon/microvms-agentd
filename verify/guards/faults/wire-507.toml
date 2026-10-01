@@ -22,21 +22,19 @@ suite = "rust"
 message = "right: Some(InsufficientStorage)"
 transform = { file = "crates/microvms-domain/src/error.rs", replace = "            507 => Some(WireKind::InsufficientStorage),\n", with = "" }
 
-[[fault]]
-id = "wire-507-cli"
+[[family]]
 guard = "guards::files::a_disk_pressure_507_is_platform_with_the_remedy_not_retryable"
 run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::files::a_disk_pressure_507_is_platform_with_the_remedy_not_retryable"]
 expect = "test-failed"
 suite = "rust"
+
+[[family.fault]]
+id = "wire-507-cli"
 message = "cp: a full disk is not retryable-unchanged"
 note = "crates/microvms-cli/src/guards/files.rs::a_disk_pressure_507_is_platform_with_the_remedy_not_retryable"
 transform = { file = "crates/microvms-domain/src/error.rs", replace = "            507 => Some(WireKind::InsufficientStorage),\n", with = "" }
 
-[[fault]]
+[[family.fault]]
 id = "wire-507-cli-marker"
-guard = "guards::files::a_disk_pressure_507_is_platform_with_the_remedy_not_retryable"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::files::a_disk_pressure_507_is_platform_with_the_remedy_not_retryable"]
-expect = "test-failed"
-suite = "rust"
 message = "cp: data.diskUnderPressure marks the refusal"
 transform = { file = "crates/microvms-cli/src/exit.rs", replace = "    if error.wire_kind() == Some(WireKind::InsufficientStorage) {\n", with = "    if error.wire_kind() == Some(WireKind::ServerError) {\n" }

@@ -7,190 +7,114 @@
 
 # ── reach ────────────────────────────────────────────────────────────────────
 
-[[fault]]
-id = "ci-parity-check-task-unreached"
+[[family]]
 guard = "tools/check-ci-parity.py"
 run = ["./tools/check-ci-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "ci-parity-check-task-unreached"
 message = "`check` depends on `targets:check`, which no task a CI job runs reaches"
 transform = { file = ".config/mise/tasks/ci.toml", replace = "  { task = \"targets:check\" },\n", with = "" }
 
 # `wait_for` runs nothing: a job that only waits for a check never runs it.
-[[fault]]
+[[family.fault]]
 id = "ci-parity-wait-for-reaches-nothing"
-guard = "tools/check-ci-parity.py"
-run = ["./tools/check-ci-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "`check` depends on `model:check`, which no task a CI job runs reaches"
 transform = { file = ".config/mise/tasks/ci.toml", replace = "run = [{ task = \"model:check\" }]\n", with = "wait_for = [\"model:check\"]\nrun = \"true\"\n" }
 
 # The rust job names its ubuntu leg's task through a matrix `include`: read wrong, the leg's
 # checks drop out of what CI reaches.
-[[fault]]
+[[family.fault]]
 id = "ci-parity-matrix-include-leg"
-guard = "tools/check-ci-parity.py"
-run = ["./tools/check-ci-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "`check` depends on `lint`, which no task a CI job runs reaches"
 transform = { file = ".github/workflows/ci.yml", replace = "          - os: ubuntu-latest\n            task: ci:rust\n", with = "          - os: ubuntu-latest\n            task: ci:rust-client\n" }
 
 # A task CI runs calling another through a command, where no check can see it and a `|| true`
 # can swallow its failure.
-[[fault]]
+[[family.fault]]
 id = "ci-parity-inline-mise-run"
-guard = "tools/check-ci-parity.py"
-run = ["./tools/check-ci-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "`ci:bindings` runs `mise run bindings:py || true` in a command"
 transform = { file = ".config/mise/tasks/ci.toml", replace = "  { task = \"bindings:py\" },\n", with = "  \"mise run bindings:py || true\",\n" }
 
-[[fault]]
+[[family.fault]]
 id = "ci-parity-flag-before-task"
-guard = "tools/check-ci-parity.py"
-run = ["./tools/check-ci-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "passes `mise run` the flag `--skip-deps` before its task"
 transform = { file = ".github/workflows/ci.yml", replace = "      - run: mise run ci:drift\n", with = "      - run: mise run --skip-deps ci:drift\n" }
 
-[[fault]]
+[[family.fault]]
 id = "ci-parity-task-missing"
-guard = "tools/check-ci-parity.py"
-run = ["./tools/check-ci-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "runs `mise run ci:drifts`, and mise.toml has no `ci:drifts` task"
 transform = { file = ".github/workflows/ci.yml", replace = "      - run: mise run ci:drift\n", with = "      - run: mise run ci:drifts\n" }
 
-# The floor: a `check` with no dependencies holds CI to nothing.
-[[fault]]
-id = "ci-parity-reach-floor"
-guard = "tools/check-ci-parity.py"
-run = ["./tools/check-ci-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
-message = "mise.toml's `check` depends on no task"
-transform = { file = ".config/mise/tasks/check.toml", replace = "depends = [\n  \"lint\",\n  \"security\",\n", with = "was = [\n  \"lint\",\n  \"security\",\n" }
-
 # The sentinel: the `mise run` reader matching nothing reads as a CI that runs no task.
-[[fault]]
+[[family.fault]]
 id = "ci-parity-reach-sentinel"
-guard = "tools/check-ci-parity.py"
-run = ["./tools/check-ci-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "runs `mise run`, so CI runs no task"
 transform = { file = "tools/check-ci-parity.py", replace = "MISE_RUN = re.compile(r\"(?<![\\w./`-])mise\\s+run\\s+", with = "MISE_RUN = re.compile(r\"(?<![\\w./`-])mise\\s+runs\\s+" }
 
 # ── the Rust channel ─────────────────────────────────────────────────────────
 
-[[fault]]
+[[family.fault]]
 id = "ci-parity-rust-channel"
-guard = "tools/check-ci-parity.py"
-run = ["./tools/check-ci-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "rust: .github/workflows/ci.yml job `security` installs 'beta', and rust-toolchain.toml says stable"
 transform = { file = ".github/workflows/ci.yml", replace = "          toolchain: stable\n          components: clippy\n      - uses: ./.github/actions/mise\n      - run: mise run ci:security\n", with = "          toolchain: beta\n          components: clippy\n      - uses: ./.github/actions/mise\n      - run: mise run ci:security\n" }
 
-[[fault]]
+[[family.fault]]
 id = "ci-parity-rust-mise"
-guard = "tools/check-ci-parity.py"
-run = ["./tools/check-ci-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "rust: mise.toml pins rust = 'beta', and rust-toolchain.toml says stable"
 transform = { file = "mise.toml", replace = "rust = \"stable\"\n", with = "rust = \"beta\"\n" }
 
 # The floor: a toolchain file with no channel holds the inputs to nothing.
-[[fault]]
+[[family.fault]]
 id = "ci-parity-rust-floor"
-guard = "tools/check-ci-parity.py"
-run = ["./tools/check-ci-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "rust: rust-toolchain.toml has no [toolchain] channel"
 transform = { file = "rust-toolchain.toml", replace = "channel = \"stable\"\n", with = "" }
 
 # The sentinel: the toolchain step matcher finding nothing compares nothing.
-[[fault]]
+[[family.fault]]
 id = "ci-parity-rust-sentinel"
-guard = "tools/check-ci-parity.py"
-run = ["./tools/check-ci-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "rust: .github/workflows/ci.yml has no dtolnay/rust-toolchain step"
 transform = { file = "tools/check-ci-parity.py", replace = "== \"dtolnay/rust-toolchain\":", with = "== \"dtolnay/rust-toolchains\":" }
 
 # ── pins ─────────────────────────────────────────────────────────────────────
 
-[[fault]]
+[[family.fault]]
 id = "ci-parity-mise-latest"
-guard = "tools/check-ci-parity.py"
-run = ["./tools/check-ci-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "mise.toml [tools] pins `lefthook` to latest"
 transform = { file = "mise.toml", replace = "lefthook = \"2.1.10\"\n", with = "lefthook = \"latest\"\n" }
 
 # A task's own tool, pinned through `[vars]`.
-[[fault]]
+[[family.fault]]
 id = "ci-parity-task-tool-latest"
-guard = "tools/check-ci-parity.py"
-run = ["./tools/check-ci-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "tools pins `cargo:cargo-mutants` to latest"
 transform = { file = "mise.toml", replace = "cargo_mutants = \"27.1.0\"\n", with = "cargo_mutants = \"latest\"\n" }
 
-[[fault]]
+[[family.fault]]
 id = "ci-parity-uvx-unpinned"
-guard = "tools/check-ci-parity.py"
-run = ["./tools/check-ci-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "runs `uvx maturin develop -m bindings/microvms-py/Cargo.toml`, which names no exact version of maturin"
 transform = { file = ".config/mise/tasks/test.toml", replace = "uvx maturin@1.14.1 develop -m", with = "uvx maturin develop -m" }
 
 # The call reader's spellings: options before the tool, `--from`, and `uv tool run`, each read
 # to the tool it runs (a misread names another tool, or none, in the message).
-[[fault]]
+[[family.fault]]
 id = "ci-parity-uvx-option-first"
-guard = "tools/check-ci-parity.py"
-run = ["./tools/check-ci-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "which names no exact version of ty"
 transform = { file = ".config/mise/tasks/test.toml", replace = "uvx ty@0.0.72 check", with = "uvx --python 3.12 ty check" }
 
-[[fault]]
+[[family.fault]]
 id = "ci-parity-uvx-from"
-guard = "tools/check-ci-parity.py"
-run = ["./tools/check-ci-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "which names no exact version of ty"
 transform = { file = ".config/mise/tasks/test.toml", replace = "uvx ty@0.0.72 check", with = "uvx --from 'ty>=0.0.72' ty check" }
 
-[[fault]]
+[[family.fault]]
 id = "ci-parity-uv-tool-run"
-guard = "tools/check-ci-parity.py"
-run = ["./tools/check-ci-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "which names no exact version of ty"
 transform = { file = ".config/mise/tasks/test.toml", replace = "uvx ty@0.0.72 check", with = "uv tool run ty check" }
 
-[[fault]]
+[[family.fault]]
 id = "ci-parity-uvx-unreadable"
-guard = "tools/check-ci-parity.py"
-run = ["./tools/check-ci-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "can't read the `uvx` call `uvx 'ty@"
 transform = { file = ".config/mise/tasks/test.toml", replace = "uvx ty@0.0.72 check", with = "uvx 'ty@0.0.72 check" }
 
@@ -207,64 +131,47 @@ transform = { file = "tools/check-ci-parity.py", replace = "UV_CALL = re.compile
 
 # ── unreadable input ─────────────────────────────────────────────────────────
 
-[[fault]]
-id = "ci-parity-ci-unparseable"
+[[family]]
 guard = "tools/check-ci-parity.py"
 run = ["./tools/check-ci-parity.py"]
 expect = "exit-nonzero"
 suite = "script"
-message = ".github/workflows/ci.yml doesn't parse"
-transform = { file = ".github/workflows/ci.yml", replace = "jobs:\n", with = "jobs: [\n" }
 
-[[fault]]
+[[family.fault]]
 id = "ci-parity-root-empty"
-guard = "tools/check-ci-parity.py"
-run = ["./tools/check-ci-parity.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "mise.toml: can't read"
 argv_fault = ["--root", "{empty_dir}"]
 
 # ── the unit suite ───────────────────────────────────────────────────────────
 
-[[fault]]
-id = "ci-parity-unit-uvx-valued"
+[[family]]
 guard = "test_check_ci_parity.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_ci_parity.py", "-k", "ParityTests"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "ci-parity-unit-uvx-valued"
 message = "FAIL: test_every_uvx_spelling_is_read ("
 transform = { file = "tools/check-ci-parity.py", replace = "    \"--cache-dir\", \"--refresh-package\", \"-p\", \"--python\", \"--color\",\n", with = "    \"--cache-dir\", \"--refresh-package\", \"-p\", \"--color\",\n" }
 
 # The registry read through check-guards-fire.py's loader, with what it refuses ignored: the
 # single file the registry was before the split would go unread.
-[[fault]]
+[[family.fault]]
 id = "ci-parity-unit-registry-refused"
-guard = "test_check_ci_parity.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_ci_parity.py", "-k", "ParityTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_the_former_single_registry_file_is_unreadable ("
 transform = { file = "tools/check-ci-parity.py", replace = "    if refused:\n        raise Unreadable(\n            f\"{GUARDS['REGISTRY']}", with = "    if False:\n        raise Unreadable(\n            f\"{GUARDS['REGISTRY']}" }
 
 # A matrix `include` entry that matches no leg joins every leg, as GitHub adds it.
-[[fault]]
+[[family.fault]]
 id = "ci-parity-unit-include"
-guard = "test_check_ci_parity.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_ci_parity.py", "-k", "ParityTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_an_include_with_only_new_keys_joins_every_leg ("
 transform = { file = "tools/check-ci-parity.py", replace = "        if matched:\n", with = "        if matched and any(k in axes for k in entry):\n" }
 
 # `depends_post` and a `run` of tasks run them: read as reaching nothing, a check CI runs that
 # way reads as unreached.
-[[fault]]
+[[family.fault]]
 id = "ci-parity-unit-run-tasks"
-guard = "test_check_ci_parity.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_ci_parity.py", "-k", "ParityTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_depends_post_and_a_run_list_of_tasks_reach ("
 transform = { file = "tools/check-ci-parity.py", replace = "            out += listed(entry.get(\"task\")) + listed(entry.get(\"tasks\"))\n", with = "            out += listed(entry.get(\"task\"))\n" }
 
@@ -319,39 +226,35 @@ message = "step `mise run ci:bindings || true` passes when"
 transform = { file = ".github/workflows/ci.yml", replace = "      - run: mise run ci:bindings\n", with = "      - run: mise run ci:bindings || true\n" }
 
 # Both of the guards job's steps, the pull request's and the push's.
-[[fault]]
-id = "ci-wrapper-guards"
+[[family]]
 guard = "test_check_ci_parity.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_ci_parity.py", "-k", "CiCommands.test_guards_"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "ci-wrapper-guards"
 message = "step `the seeded faults whose recorded verdicts a pull request can't keep fire` passes when"
 transform = { file = ".github/workflows/ci.yml", replace = "        run: mise run ci:guards --target-dir target --reuse \"$RUNNER_TEMP/guards-verdicts\"\n", with = "        run: mise run ci:guards --target-dir target --reuse \"$RUNNER_TEMP/guards-verdicts\" || true\n" }
 
-[[fault]]
+[[family.fault]]
 id = "ci-wrapper-guards-push"
-guard = "test_check_ci_parity.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_ci_parity.py", "-k", "CiCommands.test_guards_"]
-expect = "exit-nonzero"
-suite = "script"
 message = "step `every seeded fault fires, and its record is written` passes when"
 transform = { file = ".github/workflows/ci.yml", replace = "        run: mise run ci:guards --target-dir target --record \"$RUNNER_TEMP/guards-verdicts\"\n", with = "        run: mise run ci:guards --target-dir target --record \"$RUNNER_TEMP/guards-verdicts\" || true\n" }
 
-[[fault]]
-id = "ci-wrapper-guards-cache"
+[[family]]
 guard = "test_check_ci_parity.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_ci_parity.py", "-k", "CiCommands.test_guards_cache_"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "ci-wrapper-guards-cache"
 message = "step `build what the seeded faults compile` passes when"
 transform = { file = ".github/workflows/ci.yml", replace = "        run: mise run ci:guards-cache --target-dir target\n", with = "        run: mise run ci:guards-cache --target-dir target || true\n" }
 
-[[fault]]
+[[family.fault]]
 id = "ci-wrapper-tools"
-guard = "test_check_ci_parity.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_ci_parity.py", "-k", "CiCommands.test_guards_cache_"]
-expect = "exit-nonzero"
-suite = "script"
 message = "step `install every task's own tools` passes when"
 transform = { file = ".github/workflows/ci.yml", replace = "        run: mise run ci:tools\n", with = "        run: mise run ci:tools || true\n" }
 
@@ -427,29 +330,36 @@ transform = { file = ".config/mise/tasks/docs.toml", replace = "depends = [\"doc
 
 # An unreadable file takes out only the rules that read it: each part of that, reverted, fails its
 # test.
-[[fault]]
-id = "ci-parity-unreadable-workflow-ends-the-check"
+[[family]]
 guard = "test_check_ci_parity.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_ci_parity.py", "-k", "ParityTests"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "ci-parity-unreadable-workflow-ends-the-check"
 message = "FAIL: test_an_unreadable_workflow_is_listed_first_and_the_other_rules_still_run ("
 transform = { file = "tools/check-ci-parity.py", replace = "    commands = ci_commands(root, problems, tuple(workflows))\n", with = "    if len(workflows) < len(WORKFLOWS):\n        return problems, \"\"\n    commands = ci_commands(root, problems, tuple(workflows))\n" }
 
-[[fault]]
+[[family.fault]]
 id = "ci-parity-partial-reach-held"
-guard = "test_check_ci_parity.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_ci_parity.py", "-k", "ParityTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_an_unreadable_workflow_is_listed_first_and_the_other_rules_still_run ("
 transform = { file = "tools/check-ci-parity.py", replace = "    for dep in depends if every_workflow else []:\n", with = "    for dep in depends:\n" }
 
-[[fault]]
+[[family.fault]]
 id = "ci-parity-unreadable-registry-ends-the-check"
-guard = "test_check_ci_parity.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_ci_parity.py", "-k", "ParityTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_an_unreadable_registry_leaves_the_other_rules ("
 transform = { file = "tools/check-ci-parity.py", replace = "        problems.append(str(error))\n        calls_read = 0\n", with = "        problems[:] = [str(error)]\n        calls_read = 0\n" }
+
+# The files ci:parity reads itself, each emptied and each made unreadable, and its sentinel: a
+# `check` with no dependencies holds CI to nothing. mise.toml and the task files are read through
+# tools/mise_config.py, whose refusals the mise-config entries and ParityTests hold.
+[[scanner]]
+id = "ci-parity"
+guard = "tools/check-ci-parity.py"
+run = ["./tools/check-ci-parity.py"]
+suite = "script"
+inputs = [".github/workflows/ci.yml", ".github/workflows/fuzz.yml", "rust-toolchain.toml"]
+empty = "{input} is empty"
+unreadable = "{input} doesn't parse"
+sentinel = { file = ".config/mise/tasks/check.toml", replace = "depends = [\n  \"lint\",\n  \"security\",\n", with = "was = [\n  \"lint\",\n  \"security\",\n", message = "mise.toml's `check` depends on no task" }

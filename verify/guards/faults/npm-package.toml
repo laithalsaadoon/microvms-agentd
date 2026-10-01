@@ -5,8 +5,7 @@
 
 # A `types` naming a file the tarball doesn't hold. attw passes it: TypeScript falls back to the
 # `index.d.ts` beside `main`.
-[[fault]]
-id = "npm-package-publint-types-missing"
+[[family]]
 guard = "tools/check-npm-package.py"
 run = [
   ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
@@ -14,45 +13,27 @@ run = [
 ]
 expect = "exit-nonzero"
 suite = "bindings"
+
+[[family.fault]]
+id = "npm-package-publint-types-missing"
 message = "pkg.types is index.d.mts but the file does not exist"
 transform = { file = "bindings/microvms-js/package.json", replace = "\"types\": \"index.d.ts\",\n", with = "\"types\": \"index.d.mts\",\n" }
 
 # An `exports` whose one condition is `import`, so a `require` resolves nothing. publint passes it.
-[[fault]]
+[[family.fault]]
 id = "npm-package-attw-import-only-exports"
-guard = "tools/check-npm-package.py"
-run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
-  ["./tools/check-npm-package.py"],
-]
-expect = "exit-nonzero"
-suite = "bindings"
 message = "attw: NoResolution at `.` under node16-cjs"
 transform = { file = "bindings/microvms-js/package.json", replace = "\"types\": \"index.d.ts\",\n", with = "\"types\": \"index.d.ts\",\n  \"exports\": { \".\": { \"import\": \"./index.js\" } },\n" }
 
 # The floor: `files` without the declarations. attw reports a package with no types as a pass.
-[[fault]]
+[[family.fault]]
 id = "npm-package-attw-no-types"
-guard = "tools/check-npm-package.py"
-run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
-  ["./tools/check-npm-package.py"],
-]
-expect = "exit-nonzero"
-suite = "bindings"
 message = "attw: the package holds no type declarations"
 transform = { file = "bindings/microvms-js/package.json", replace = "    \"index.d.ts\",\n", with = "" }
 
 # The sentinel: an `exports` without `.`. attw resolves the entrypoints it finds, so a package whose
 # root can't be imported at all passes it.
-[[fault]]
+[[family.fault]]
 id = "npm-package-attw-no-root-entrypoint"
-guard = "tools/check-npm-package.py"
-run = [
-  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
-  ["./tools/check-npm-package.py"],
-]
-expect = "exit-nonzero"
-suite = "bindings"
 message = "attw: the root entrypoint `.` isn't in the report"
 transform = { file = "bindings/microvms-js/package.json", replace = "\"types\": \"index.d.ts\",\n", with = "\"types\": \"index.d.ts\",\n  \"exports\": { \"./package.json\": \"./package.json\" },\n" }

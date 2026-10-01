@@ -37,36 +37,28 @@ transform = { file = "crates/microvms-cli/src/seam.rs", replace = "/// The regio
 
 # D-I2: `run` hands `tear_down` a delete whatever its ensure said, so a run that reused an image
 # deletes it from under the run that is launching from it.
-[[fault]]
-id = "cli-run-deletes-a-reused-image"
+[[family]]
 guard = "guards::build::a_run_deletes_the_image_it_built_and_never_one_it_reused"
 run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::build::a_run_deletes_the_image_it_built_and_never_one_it_reused"]
 expect = "test-failed"
 suite = "rust"
-message = "the reused image is not deleted"
 note = "crates/microvms-cli/src/guards/build.rs::a_run_deletes_the_image_it_built_and_never_one_it_reused"
+
+[[family.fault]]
+id = "cli-run-deletes-a-reused-image"
+message = "the reused image is not deleted"
 transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "        args.keep,\n        !outcome.image_reused,\n    )\n", with = "        args.keep,\n        true,\n    )\n" }
 
 # D-I2: the image the sandbox holds goes on the ledger whatever the ensure said, so a reused
 # image is listed as this run's for the operator to delete.
-[[fault]]
+[[family.fault]]
 id = "cli-run-lists-a-reused-image"
-guard = "guards::build::a_run_deletes_the_image_it_built_and_never_one_it_reused"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::build::a_run_deletes_the_image_it_built_and_never_one_it_reused"]
-expect = "test-failed"
-suite = "rust"
 message = "the ledger does not name the reused image"
-note = "crates/microvms-cli/src/guards/build.rs::a_run_deletes_the_image_it_built_and_never_one_it_reused"
 transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "        if !outcome.image_reused {\n            ledger.record_image(&image.identifier, &image.name);\n        }\n", with = "        ledger.record_image(&image.identifier, &image.name);\n" }
 
 # D-I2: `imageBuilt` written for every building run, so the history says a run built the image it
 # found and reused.
-[[fault]]
+[[family.fault]]
 id = "cli-run-history-says-a-reused-image-was-built"
-guard = "guards::build::a_run_deletes_the_image_it_built_and_never_one_it_reused"
-run = ["cargo", "test", "-p", "microvms-cli", "--bin", "microvm", "--", "--exact", "guards::build::a_run_deletes_the_image_it_built_and_never_one_it_reused"]
-expect = "test-failed"
-suite = "rust"
 message = "the history does not say it was built"
-note = "crates/microvms-cli/src/guards/build.rs::a_run_deletes_the_image_it_built_and_never_one_it_reused"
 transform = { file = "crates/microvms-cli/src/commands/lifecycle.rs", replace = "        if building\n            && !outcome.image_reused\n            && let Some(image) = sandbox.image()\n", with = "        if building\n            && let Some(image) = sandbox.image()\n" }

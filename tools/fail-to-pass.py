@@ -75,12 +75,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 GUARDS_FIRE = HERE / "check-guards-fire.py"
+# The registry's loader is the fire's, so this reads the entries `list` and `fire` do.
+FIRE = runpy.run_path(str(GUARDS_FIRE))
 # The shipped set and the fragment names are tools/changelog.py's. Its main doesn't run here.
 CHANGELOG = runpy.run_path(str(HERE / "changelog.py"))
 FRAGMENT = CHANGELOG["FRAGMENT"]
@@ -624,16 +625,14 @@ def fix_patch(branch: Branch) -> str:
 
 
 def registry(texts: dict[str, str]) -> dict[str, dict]:
-    """Each entry of the registry files in `texts`, by id."""
-    entries: dict[str, dict] = {}
-    for path in sorted(texts):
-        try:
-            data = tomllib.loads(texts[path])
-        except tomllib.TOMLDecodeError as error:
-            raise Failure(f"{path} doesn't parse: {error}") from None
-        for table in data.get("fault", []):
-            entries[str(table.get("id"))] = table
-    return entries
+    """Each entry of the registry files in `texts`, by id, as the fire's loader reads them: a
+    family's rows and a scanner's entries are entries like a `[[fault]]` table's."""
+    if not texts:
+        return {}
+    tables, problems = FIRE["parse_registry"](texts)
+    if problems:
+        raise Failure("; ".join(problems))
+    return {str(t.data.get("id")): t.data for t in tables if isinstance(t.data, dict)}
 
 
 def registry_texts(branch: Branch, at_base: bool) -> dict[str, str]:
