@@ -587,10 +587,12 @@ async fn replay(steps: &[Step<'_>]) -> Result<(), String> {
 /// `Sandbox` with the model's five state variables, wire calls, run-hook payloads and proxy
 /// token, after every call.
 ///
-/// It's the sandbox's side of the model's keyed properties: STATE-3 (the bootstrap count
-/// never passes one), STATE-5 (no suspend call leaves a state other than RUNNING), STATE-8 (a
-/// completed resume leaves no proxy token cached) and STATE-11 (a terminated VM never reaches
-/// RUNNING). Each is a comparison this test makes after every call. The guarded model offers a
+/// It's the sandbox's side of the model's keyed properties, each a comparison this test makes
+/// after every call: the transitions STATE-1, STATE-2, STATE-4, STATE-6, STATE-7, STATE-9 and
+/// STATE-10 (the lifecycle and the three flags), STATE-3 (the bootstrap count never passes one),
+/// STATE-5 (no suspend call leaves a state other than RUNNING), STATE-7's payload count, STATE-8
+/// (a completed resume leaves no proxy token cached), and STATE-11 and STATE-12 (the resume
+/// calls a terminated VM or a closed window never gets). The guarded model offers a
 /// launch only while none was made, so no path calls `run` twice: for STATE-3 the replay holds
 /// the count against an extra bootstrap from a resume or a hook, and the refusal of a second
 /// `run` is `a_second_run_on_one_sandbox_is_refused_before_any_call` in the app's sandbox.rs.
@@ -756,11 +758,22 @@ fn claims(items: &[syn::Item], known: &BTreeSet<String>, claimed: &mut BTreeSet<
 /// The client model's safety properties that carry a requirement key, each exactly as named in
 /// `crates/model/src/client.rs`. A key that moves onto another property changes this set, though the
 /// key still starts some property's name.
-const KEYED: [&str; 4] = [
+const KEYED: [&str; 15] = [
+    "STATE-1 an accepted launch leaves the VM PENDING with its image recorded",
+    "STATE-2 a successful hook leaves the VM RUNNING with its token installed",
+    "STATE-4 an accepted suspend leaves the VM SUSPENDING",
+    "STATE-6 a reported suspension leaves the VM SUSPENDED",
+    "STATE-7 a completed resume leaves the VM RUNNING",
+    "STATE-9 an accepted terminate leaves the VM TERMINATING and recorded terminated",
+    "STATE-10 a reported termination leaves the VM TERMINATED",
     "STATE-3 bootstrap happens at most once",
     "STATE-5 no suspend call outside RUNNING",
-    "STATE-8 a resume completion drops the proxy token",
     "STATE-11 a terminated VM never reaches RUNNING",
+    "STATE-11 no resume call after a terminate",
+    "STATE-12 no resume call with the window closed",
+    "STATE-7 a resume re-delivers no run-hook payload",
+    "STATE-7 the installed token is never replaced",
+    "STATE-8 a resume completion drops the proxy token",
 ];
 
 /// Each requirement key this file's tests claim starts the name of an `always` property of the
@@ -768,10 +781,9 @@ const KEYED: [&str; 4] = [
 /// names.
 ///
 /// The claimed keys are read from this file's own source, as the trace reads a test file,
-/// rather than from a list that could drift from the docs. `trace:check` doesn't read this
-/// crate's tests and `verify/spec/traced/STATE.toml` lists no STATE key yet (#302), so this is what
-/// notices a property that loses its key, or a key that moves onto a property stating another
-/// rule.
+/// rather than from a list that could drift from the docs. `trace:check` credits a key's model
+/// layer from any property its name starts, so it can't see a key that moves onto a property
+/// stating another rule, or one of a key's several properties losing it; this test can.
 ///
 /// **Falsification**: drop `STATE-8` from the name of the model's "a resume completion drops
 /// the proxy token" property and this fails, while `cargo test -p agentd-model` stays green.
@@ -789,7 +801,7 @@ fn the_keys_the_replay_backs_name_safety_properties_of_the_client_model() {
     assert!(
         !claimed.is_empty(),
         "no test in this file claims a requirement key, so there's nothing to check; the \
-         replay's doc names STATE-3, STATE-5, STATE-8 and STATE-11"
+         replay's doc names STATE-1 to STATE-12"
     );
     let unbacked: Vec<&String> = claimed
         .iter()

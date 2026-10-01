@@ -1,1 +1,70 @@
 # The STATE group's traced requirements. The format and the rules are in tools/check-trace.py.
+
+[STATE-1]
+issue = "#302"
+waive.gherkin = "the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths"
+waive.fuzz = "the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz"
+waive.live = "PENDING between an accepted launch and the hook's report is the client's own record, which a live run sees only as `run` returning; the replay checks it after every call"
+
+[STATE-2]
+issue = "#302"
+waive.gherkin = "the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths"
+waive.fuzz = "the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz"
+waive.live = "a live run sees the hook's report only as `run` returning with a daemon that answers (AGENTD-2's live check); the client's RUNNING-and-installed record is checked by the replay after every call"
+
+[STATE-3]
+issue = "#302"
+waive.gherkin = "the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths"
+waive.fuzz = "the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz"
+waive.live = "the client offers one launch per `Sandbox`; a second install is the daemon's refusal, which AGENTD-3's live check asserts"
+
+[STATE-4]
+issue = "#302"
+waive.gherkin = "the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths"
+waive.fuzz = "the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz"
+waive.live = "SUSPENDING is the client's record while the platform suspends, and `suspend` returns only once it reads SUSPENDED (STATE-6's live check); the replay checks the transition after every call"
+
+[STATE-5]
+issue = "#302"
+waive.gherkin = "the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths"
+waive.fuzz = "the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz"
+waive.live = "a refusal before any call never reaches the service; the model and its replay against `Sandbox` hold it, and the app's tests drive it"
+
+[STATE-6]
+issue = "#302"
+waive.gherkin = "the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths"
+waive.fuzz = "the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz"
+
+[STATE-7]
+issue = "#302"
+waive.gherkin = "the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths"
+waive.fuzz = "the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz"
+
+[STATE-8]
+issue = "#302"
+waive.gherkin = "the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths"
+waive.fuzz = "the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz"
+waive.live = "the proxy token cache is client state no live response shows; the replay checks it after every call, and the app's tests check the next request mints"
+
+[STATE-9]
+issue = "#302"
+waive.gherkin = "the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths"
+waive.fuzz = "the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz"
+waive.live = "TERMINATING is the client's record while the platform terminates, and the live terminate checks read TERMINATED (STATE-10's); the replay checks the transition after every call"
+
+[STATE-10]
+issue = "#302"
+waive.gherkin = "the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths"
+waive.fuzz = "the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz"
+
+[STATE-11]
+issue = "#302"
+waive.gherkin = "the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths"
+waive.fuzz = "the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz"
+waive.live = "a refusal before any call never reaches the service; the model and its replay against `Sandbox` hold it, and the app's tests drive it"
+
+[STATE-12]
+issue = "#302"
+waive.gherkin = "the model walks every interleaving of caller requests and platform reports up to two cycles, and model-conformance's replay drives each path against `Sandbox`; a scenario would restate one of those paths"
+waive.fuzz = "the input is a sequence of requests and reports, which the model enumerates exhaustively and the replay drives; there is no byte stream to fuzz"
+waive.live = "the window is launch-time `suspendedDurationSeconds`, and the refusal comes before any call once the client's clock passes it; the model, its replay and the app's tests drive that clock, which a live run can only wait out"
