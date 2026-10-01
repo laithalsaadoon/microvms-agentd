@@ -25,6 +25,7 @@
         "autoResume": false,
         "denyEgress": false,
         "egress": false,
+        "identity": false,
         "loggingDisabled": false,
         "maxDurationSeconds": 3600,
         "maxIdleSeconds": 600,

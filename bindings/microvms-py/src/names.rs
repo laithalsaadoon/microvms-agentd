@@ -128,6 +128,20 @@ impl PyNameRecord {
         self.inner.egress_posture.as_deref()
     }
 
+    /// The VM's tunnel identity, when it was launched with `identity=True`; `None` otherwise.
+    ///
+    /// Raises when the record carries one half of the pair, or a half that doesn't decode: the
+    /// record claims a verifiable VM, and reading it as unverifiable would hide that it's
+    /// broken. Holds the host's secret half, which stays out of this record's repr.
+    #[getter]
+    fn tunnel_identity(&self) -> PyCoreResult<Option<crate::serve::PyTunnelIdentity>> {
+        Ok(self
+            .inner
+            .tunnel_identity()
+            .map_err(CoreError)?
+            .map(Into::into))
+    }
+
     fn __eq__(&self, other: &Self) -> bool {
         self.inner == other.inner
     }
