@@ -11,9 +11,9 @@ use super::support::{
 };
 use crate::cli::{
     AckArgs, AttachArgs, AttachFlags, BuildArgs, Cli, Command, CostArgs, CpArgs, DoctorArgs,
-    ExecArgs, Explicit, HealthArgs, InfraFlags, KeepaliveArgs, LogsArgs, LsArgs, MemoryMib,
-    PortForwardArgs, RegionFlags, ResumeArgs, RunArgs, StdinArgs, SuspendArgs, TerminateArgs,
-    TunnelArgs,
+    ExecArgs, ExistsArgs, Explicit, HealthArgs, InfraFlags, KeepaliveArgs, LogsArgs, LsArgs,
+    MemoryMib, PortForwardArgs, RegionFlags, ResumeArgs, RunArgs, StdinArgs, SuspendArgs,
+    TerminateArgs, TunnelArgs, WaitArgs,
 };
 use crate::seam::Door;
 
@@ -63,6 +63,7 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 user: None,
                 group: None,
                 keep: false,
+                no_wait: false,
                 identity: false,
                 vm_name: None,
                 timeout: Duration::from_secs(30),
@@ -99,6 +100,11 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 reuse: false,
                 s3_key_prefix: None,
                 force: false,
+                tags: Vec::new(),
+                base_image: None,
+                inherit_workdir: false,
+                run_hook_timeout_sec: None,
+                build_hook_timeout_sec: None,
                 port: None,
                 region: region_flags(),
                 infra: InfraFlags::default(),
@@ -181,6 +187,15 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 region: region_flags(),
             }),
             Door::AttachSession,
+        ),
+        (
+            "wait",
+            Command::Wait(WaitArgs {
+                timeout: Duration::from_secs(60),
+                attach: attach_flags(),
+                region: region_flags(),
+            }),
+            Door::ControlPlane,
         ),
         (
             "health",
@@ -285,6 +300,15 @@ fn aws_commands(binary: &std::path::Path) -> Vec<(&'static str, Command, Door)> 
                 tar: false,
                 mode: None,
                 lines: None,
+                attach: attach_flags(),
+                region: region_flags(),
+            }),
+            Door::AttachSession,
+        ),
+        (
+            "exists",
+            Command::Exists(ExistsArgs {
+                path: "/tmp/payload".into(),
                 attach: attach_flags(),
                 region: region_flags(),
             }),

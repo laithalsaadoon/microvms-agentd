@@ -628,6 +628,17 @@ export declare class NameRegistry {
    * terminate, so no name outlives its VM.
    */
   releaseByVm(microvmId: string): Array<string>
+  /**
+   * Registers a record this registry didn't write, once the VM has answered one
+   * authenticated request with the record's token; resolves with whether it refreshed a
+   * record of the same VM.
+   *
+   * `session` must be attached with the record's endpoint and token (`Session.attach` from
+   * its fields). A name held by another VM, or by an unreadable file, is refused before any
+   * request, and a probe the daemon refuses writes nothing. Core's `names::import`, the rule
+   * `microvm attach` applies.
+   */
+  importRecord(record: NameRecord, session: Session): Promise<boolean>
 }
 
 /** The pinned rate table, and everything it says about itself. */
@@ -1093,6 +1104,30 @@ export declare class Session {
    * before the start reject with `ERR_INVALID_ARG` before any request.
    */
   downloadFile(path: string, options?: DownloadFileOptions | undefined | null): Promise<Buffer>
+  /**
+   * Brings the files of a directory in the VM back under `localDir`: the regular files
+   * `globs` select, and nothing else.
+   *
+   * The daemon packs `remote`, and the archive describes the VM's filesystem, where
+   * untrusted work runs, so core writes only regular-file members that match a glob, never
+   * under `.git` whatever the globs say, and never outside `localDir`. A symlink, a special
+   * file or a `../` member is skipped, not refused. `['**']` brings every regular file back.
+   * Resolves to what was written; a local directory that can't be written to rejects with
+   * `ERR_INVALID_ARG`.
+   */
+  downloadDir(remote: string, localDir: string, globs: Array<string>): Promise<Array<DownloadedFile>>
+  /**
+   * Syncs `localDir` into the VM's `/workspace` once, uploading only what changed.
+   *
+   * Core's one pass, `microvm sync`'s: the local tree is hashed and diffed against the
+   * manifest the last sync left in the VM, the changed members travel as one archive, the
+   * paths gone locally are removed in the VM with one `rm` whose deadline is
+   * `deleteTimeout` seconds (core's default when omitted), and the manifest is rewritten.
+   * `full: true` ignores the manifest and uploads everything. `.git`, `target`,
+   * `node_modules` and `.venv` never travel. A tree over the daemon's budgets rejects with
+   * `ERR_INVALID_ARG` before anything is sent.
+   */
+  syncDir(localDir: string, options?: SyncDirOptions | undefined | null): Promise<SyncReport>
   /** Whether a path exists, distinguishing absence from every other refusal. */
   fileExists(path: string): Promise<boolean>
   /**
@@ -1502,6 +1537,14 @@ export interface DetachedObject {
   region: string
   port: number
   agentToken: string
+}
+
+/** One file `downloadDir` wrote. */
+export interface DownloadedFile {
+  /** The file's path under the local directory, as the archive named it. */
+  path: string
+  /** The file's size in bytes. */
+  size: number
 }
 
 /** The line range `downloadFile` reads, 1-based and inclusive. Both absent reads the file. */
@@ -2567,6 +2610,30 @@ export interface StreamOptionsInput {
   errorOnGap?: boolean
   /** How long the body may be silent before the connection is treated as dead. */
   idleTimeout?: number
+}
+
+/** How `syncDir` should behave. */
+export interface SyncDirOptions {
+  /** Ignore the manifest the last sync left in the VM and upload everything. */
+  full?: boolean
+  /** The in-VM removal's deadline, in seconds. Default: core's, 60. */
+  deleteTimeout?: number
+}
+
+/** What one `syncDir` did. */
+export interface SyncReport {
+  /** The uploaded archive's size, 0 when nothing travelled. */
+  uploadedBytes: number
+  /** How many members the upload carried: the changed ones, or every one when `full`. */
+  uploadedMembers: number
+  /** How many paths gone locally were removed in the VM. */
+  deleted: number
+  /** Deletions the VM's manifest ordered that weren't plain relative paths, so weren't run. */
+  refusedDeletions: number
+  /** No manifest was read (`full: true`, or none in the VM), so the whole tree travelled. */
+  full: boolean
+  /** The VM already held the tree as it is, so nothing travelled. */
+  unchanged: boolean
 }
 
 /**

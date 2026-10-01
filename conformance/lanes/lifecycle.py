@@ -5,6 +5,7 @@ and a second VM's machine identity are read against it."""
 from __future__ import annotations
 
 import secrets
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -124,19 +125,38 @@ def check_run_cost(report: dict[str, Any], results: Results) -> None:
     that breaks its rule.
     """
     items = report.get("items") or []
-    # A run's durations were timed, so each is `measured` and none is unlabelled. The set is
-    # empty (and the check fails) when the report carries no duration at all.
+    # COST-1 is a label on every duration, measured or projected, not "a run is measured": the
+    # phases a clock timed are measured, and `image-storage`'s one-week retention floor, which
+    # nobody timed, is projected, as core's own test of the mixed report in
+    # `crates/microvms-domain/src/cost.rs` pins. Wave 3's live run (d56806a) failed the first
+    # version of this check, which wanted every duration measured. The tuple is absent (and the
+    # check fails) when the report carries no duration at all.
+    durations = [
+        (item.get("phase"), (item.get("duration") or {}).get("provenance"))
+        for item in items
+        if item.get("duration")
+    ]
     results.eq(
-        "COST-1 every duration on the run's cost report is labelled measured",
-        sorted(
-            {
-                str((item.get("duration") or {}).get("provenance"))
-                for item in items
-                if item.get("duration")
-            }
+        "COST-1 every duration on the run's cost report is labelled: "
+        "the timed phases measured, the retention floor projected",
+        (
+            [
+                phase
+                for phase, label in durations
+                if label not in ("measured", "projected")
+            ],
+            sorted(
+                {
+                    phase
+                    for phase, label in durations
+                    if phase in ("image-build", "running") and label != "measured"
+                }
+            ),
+            sorted({label for phase, label in durations if phase == "image-storage"}),
         )
-        or None,
-        ["measured"],
+        if durations
+        else None,
+        ([], [], ["projected"]),
     )
     # This run built its image, and AWS publishes no rate for the build: the line is unpriced,
     # with no dollar figure, rather than `$0.00`.
@@ -433,3 +453,104 @@ def drive_launch_by_name(cli: Cli, launched: Envelope, results: Results) -> None
             gone.data.get("microvmId") == vm_id and not gone.data.get("leaked"),
             f"leaked={gone.data.get('leaked')}",
         )
+
+
+def drive_launch_without_waiting(
+    cli: Cli, launched: Envelope, results: Results
+) -> None:
+    """`run --keep --no-wait` returns at acceptance, and `wait` finishes the launch (#269).
+
+    On a bounded VM of its own from the suite's image, registered under a name in a state
+    directory of its own. The run must hand back what a later command needs while the VM is
+    still starting; `wait --name` then adopts it and waits through core's
+    `Sandbox::wait_until_ready`, and the exec after it must succeed on its first attempt, which
+    is the whole claim of the daemon wait (#254). A second `wait` on the now RUNNING VM must
+    take the daemon-only branch.
+
+    How long a launch stays PENDING is the service's, so the first wait may already find the
+    VM RUNNING; its `from` is recorded either way, and only a value outside the two fails.
+    """
+    print("\n-- launch without waiting, then wait --")
+    vm_name = f"conformance-no-wait-{secrets.token_hex(4)}"
+    with tempfile.TemporaryDirectory() as state:
+        accepted = cli.call(
+            "run",
+            "--image",
+            str(launched.data["imageIdentifier"]),
+            "--name",
+            f"microvm-cli-conformance-no-wait-{secrets.token_hex(4)}",
+            "--memory",
+            str(BASELINE_MEMORY_MIB),
+            "--keep",
+            "--no-wait",
+            "--vm-name",
+            vm_name,
+            "--state-dir",
+            state,
+            "--region",
+            cli.region,
+            "--max-idle-sec",
+            "600",
+            "--suspended-sec",
+            "600",
+            "--max-duration-sec",
+            "1800",
+        )
+        vm_id = str(accepted.data["microvmId"])
+        try:
+            results.check(
+                "run --keep --no-wait returns the endpoint, agent token and id at acceptance",
+                bool(accepted.data.get("endpoint"))
+                and bool(accepted.data.get("agentToken"))
+                and vm_id.startswith(("microvm-", "mvm-")),
+                f"microvm={vm_id} endpoint={accepted.data.get('endpoint')!r} "
+                f"token_len={len(accepted.data.get('agentToken') or '')}",
+            )
+            results.eq(
+                "run --keep --no-wait registers its --vm-name",
+                accepted.data.get("vmName"),
+                vm_name,
+            )
+            waited = cli.call("wait", "--name", vm_name, "--state-dir", state)
+            results.check(
+                "wait --name finishes a --no-wait launch: RUNNING, from PENDING or RUNNING",
+                waited.data.get("microvmId") == vm_id
+                and waited.data.get("state") == "RUNNING"
+                and waited.data.get("from") in {"PENDING", "RUNNING"},
+                f"from={waited.data.get('from')!r} state={waited.data.get('state')!r}",
+            )
+            results.eq(
+                "wait reports the endpoint the launch reported",
+                waited.data.get("endpoint"),
+                accepted.data.get("endpoint"),
+            )
+            first = cli.call(
+                "exec", "echo waited", "--name", vm_name, "--state-dir", state
+            )
+            results.check(
+                "the first exec after wait succeeds on its first attempt",
+                first.data.get("exitCode") == 0
+                and "waited" in (first.data.get("stdout") or ""),
+                f"exit={first.data.get('exitCode')} stdout={first.data.get('stdout')!r}",
+            )
+            again = cli.call("wait", "--name", vm_name, "--state-dir", state)
+            results.eq(
+                "wait on a RUNNING VM waits for the daemon alone",
+                again.data.get("from"),
+                "RUNNING",
+            )
+        finally:
+            gone = cli.call(
+                "terminate",
+                vm_id,
+                "--wait",
+                "--state-dir",
+                state,
+                "--region",
+                cli.region,
+            )
+            results.check(
+                "the no-wait VM tore down clean",
+                gone.data.get("microvmId") == vm_id and not gone.data.get("leaked"),
+                f"leaked={gone.data.get('leaked')}",
+            )

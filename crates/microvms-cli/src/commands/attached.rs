@@ -42,8 +42,8 @@ use microvms_core::{Error, ErrorKind};
 use serde_json::{Map, Value, json};
 
 use crate::cli::{
-    AckArgs, AttachArgs, AttachFlags, CpArgs, ExecArgs, HealthArgs, KeepaliveArgs, KillArgs,
-    PsArgs, RegionFlags, StdinArgs,
+    AckArgs, AttachArgs, AttachFlags, CpArgs, ExecArgs, ExistsArgs, HealthArgs, KeepaliveArgs,
+    KillArgs, PsArgs, RegionFlags, StdinArgs,
 };
 use crate::closed_output;
 use crate::commands::{Ctx, Rendered, STREAM_RESPONSE, explicit_region, response_type};
@@ -138,7 +138,7 @@ fn unregistered_name(name: &str, root: &std::path::Path) -> CliError {
 ///
 /// Split from [`attach`] so the resolution is testable without a seam: everything here is
 /// local — clap guarantees exactly one spelling is present, and the registry is a file read.
-fn resolve_attach<O: std::io::Write, E: std::io::Write>(
+pub(crate) fn resolve_attach<O: std::io::Write, E: std::io::Write>(
     ctx: &Ctx<'_, O, E>,
     region: &RegionFlags,
     flags: &AttachFlags,
@@ -1564,6 +1564,35 @@ fn resolve_paths(src: &str, dst: &str) -> Result<(Direction, String, String), Cl
     }
 }
 
+// ── exists ───────────────────────────────────────────────────────────────────
+
+/// `microvm exists PATH`: core's `Session::file_exists`, whose one `false` is the daemon's 404.
+///
+/// Exit 0 whether the path exists or not, because the answer is data rather than a failure,
+/// and a new exit row for "absent" would be one more code every consumer has to learn. A shell
+/// branches on `--json` and `.data.exists`, and any refusal other than not-found still fails with
+/// its own code.
+pub async fn exists<O: std::io::Write, E: std::io::Write>(
+    ctx: &mut Ctx<'_, O, E>,
+    args: &ExistsArgs,
+) -> Result<Rendered, CliError> {
+    let (session, microvm_id) = attach(ctx, &args.region, &args.attach).await?;
+    let exists = session.file_exists(&args.path).await?;
+
+    let mut data = Map::new();
+    data.insert("microvmId".into(), json!(microvm_id));
+    data.insert("path".into(), json!(args.path));
+    data.insert("exists".into(), json!(exists));
+    let text = if exists {
+        format!("{} exists", args.path)
+    } else {
+        format!("{} does not exist", args.path)
+    };
+    let dense = format!("{exists}\t{}", args.path);
+    let (kind, _) = response_type("exists");
+    Ok(Rendered::ok(kind, data, text, dense))
+}
+
 // ── sync ─────────────────────────────────────────────────────────────────────
 
 /// The progress line for the deletions a guest's manifest ordered that core's sync pass
@@ -1850,16 +1879,6 @@ fn report_pass<O: std::io::Write, E: std::io::Write>(
 
 // ── attach: adopting a record this state directory did not write ─────────────
 
-/// The path the authenticated probe reads: zero bytes, present in every Linux guest.
-///
-/// **Not `/v1/health`.** That route is `Auth::Open` (`crates/agentd/src/routes.rs`, the health row:
-/// the platform forwards no external traffic until the run hook returns 200, so reaching it
-/// implies nothing about the bearer), and a probe that stopped there would register a record
-/// whose token the daemon refuses on every later `exec --name` — the phantom this command
-/// exists to prevent. `GET /v1/fs/file` sits behind `auth::require_token`, and `/dev/null` is
-/// the one path a read cannot fail on for a reason that is about the file.
-const PROBE_PATH: &str = "/dev/null";
-
 /// Registers a name for a running MicroVM this state directory did not launch.
 ///
 /// Issue #66's cross-machine half. Same-machine adoption already exists: `run --keep
@@ -1872,11 +1891,12 @@ const PROBE_PATH: &str = "/dev/null";
 /// # Nothing is written until the VM has answered with the token being registered
 ///
 /// An attach authenticates the token, not the machine (the issue's own sentence), so the
-/// probe is the only proof the triple is live. One authenticated read of [`PROBE_PATH`]
-/// through the session seam: a dead endpoint, a wrong token (401), or an unbootstrapped daemon
-/// (503) fails here with the daemon's own class and leaves the registry untouched. The probe
-/// goes through [`crate::seam::CoreSeam::attach_session`] like every other attached command,
-/// which is what keeps CLI-2's door guard true for this one.
+/// probe is the only proof the triple is live. The rule is core's (#270): `names::probe` makes
+/// one authenticated read of `names::IMPORT_PROBE_PATH` over the session, and
+/// `names::import_probed` writes only with its proof, so a dead endpoint, a wrong token (401),
+/// or an unbootstrapped daemon (503) fails with the daemon's own class and leaves the registry
+/// untouched. The session comes through [`crate::seam::CoreSeam::attach_session`] like every
+/// other attached command, which is what keeps CLI-2's door guard true for this one.
 ///
 /// # A name is a promise
 ///
@@ -1995,13 +2015,12 @@ pub async fn attach_vm<O: std::io::Write, E: std::io::Write>(
 
     // The collision check, before any AWS call and before any probe: a refusal here costs
     // nothing and a name that pointed two ways would make every later command ambiguous
-    // about which VM it addresses. A torn record reads as taken (`Names::lookup`), so the
-    // empty id it reports lands in the refusal arm rather than the idempotent one.
+    // about which VM it addresses. Core's `names::holder` reads a torn record as taken.
     let record_path = names.path_of(&record.name);
-    let replaced = match names.lookup(&record.name) {
-        None => false,
-        Some(existing) if existing.microvm_id == record.microvm_id => true,
-        Some(existing) => {
+    let replaced = match microvms_core::names::holder(names.store(), &record) {
+        microvms_core::names::NameHolder::Free => false,
+        microvms_core::names::NameHolder::Same => true,
+        microvms_core::names::NameHolder::Other(holder) => {
             return Err(CliError::new(
                 Exit::NameTaken,
                 format!(
@@ -2009,18 +2028,14 @@ pub async fn attach_vm<O: std::io::Write, E: std::io::Write>(
                      name is a promise about which VM answers to it, and nothing overwrites \
                      one silently.",
                     record.name,
-                    if existing.microvm_id.is_empty() {
-                        "an unreadable record".to_string()
-                    } else {
-                        existing.microvm_id.clone()
-                    },
+                    holder.as_deref().unwrap_or("an unreadable record"),
                     record_path.display(),
                     record.microvm_id,
                 ),
             )
             .suggest("pass a different --name")
             .suggest("`microvm terminate <NAME>` releases the name when the VM holding it is done")
-            .with_data("holder", json!(existing.microvm_id))
+            .with_data("holder", json!(holder.unwrap_or_default()))
             .with_data("statePath", json!(record_path.display().to_string())));
         }
     };
@@ -2078,9 +2093,9 @@ pub async fn attach_vm<O: std::io::Write, E: std::io::Write>(
             },
         )
         .await?;
-    // Either answer proves the bearer was accepted: the 404 arm sits behind the same auth
-    // layer as the 200, and a 401 or 503 propagates with the daemon's own class.
-    session.file_exists(PROBE_PATH).await?;
+    // Core's probe: either answer proves the bearer was accepted, and a 401 or 503 propagates
+    // with the daemon's own class. Its proof is what the write below takes.
+    let probed = microvms_core::names::probe(&session, &record).await?;
 
     let verified_identity = match identity {
         None => false,
@@ -2138,7 +2153,7 @@ pub async fn attach_vm<O: std::io::Write, E: std::io::Write>(
 
     // Written last, after every proof: a register that failed here has cost one AWS
     // round trip and left the registry exactly as it was.
-    names.register(&record).map_err(|error| {
+    microvms_core::names::import_probed(names.store(), &record, probed).map_err(|error| {
         CliError::new(
             Exit::Precondition,
             format!(

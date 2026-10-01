@@ -47,18 +47,25 @@ What it does:
      changed function is on the base, over the merge base, each in a scratch directory whose
      `mutants/` is a git worktree of that tree. mutmut runs the suites in `mutants/`, so they read
      a whole checkout. The scripts beside it are the sources it mutates into `mutants/`, and
-     `setup.cfg` names them and their suites. Each run mutates only the changed functions
-     (`mutmut run <module>.<function>__mutmut_*`), so a change pays for what it touched.
+     `setup.cfg` names them and their suites. Each run mutates only the changed functions: the
+     copy mutmut reads marks every other function with a block pragma, so mutmut writes no
+     mutants for them into the script the suites load, and `mutmut run <module>.<function>*`
+     names the ones it runs. The glob matches the function's own name as well as its mutants,
+     which is how mutmut finds the tests to run clean: with `__mutmut_*` in it, it found none and
+     ran every suite clean. A change pays for what it touched.
+     The base run measures only the functions some mutant survives in on the head, since one
+     none survives in can't have more than its base had.
   6. Reads each function's verdicts from mutmut's results (`mutants/<script>.meta`) and counts
      the mutants whose tests passed or ran out of time. A test run a signal ended, other than the
      one mutmut's timeout sends, is caught: its tests didn't pass. One no test reached in-process
      (`no tests`) is listed, not counted: a suite that runs the script as a subprocess tests it,
      and mutmut can't see that. Fails when a changed function has more
      counted mutants than on the base, with each one's diff (`mutmut show`). A function the
-     base's suites didn't measure has no base count, and isn't held to one.
+     base's suites didn't measure, or that no in-process test reached on the base, has no base
+     count, and isn't held to one.
 
 It fails rather than read a count from nothing: mutmut exiting non-zero while a changed function
-has mutants, a results file that's missing or names no mutant of its script, a mutant left
+has mutants, a results file that's missing or names a mutant not of its script, a mutant left
 without a verdict or with an exit code mutmut doesn't name, and a function hash that isn't the
 one mutmut recorded, which would mean the functions read as changed aren't the ones mutmut sees.
 
@@ -166,7 +173,13 @@ REASONED = re.compile(
     r"# pragma: no mutate(?: block| start)? \(\S.*\)|# pragma: no mutate end"
 )
 # The config mutmut reads from setup.cfg: the scripts it mutates, the suites it runs, no pytest
-# cache written into the checkout, and no diffing of a scratch directory that isn't a repo.
+# cache written into the checkout, and no diffing of a scratch directory that isn't a repo. And
+# the fork server: by default mutmut runs pytest again and again in one process, the stats pass,
+# then the clean run, then a fork per mutant, so a suite's module and class state outlives the
+# run that made it. test_check_guards_fire.py's FireSharded caches its fixture repos on the
+# class, and the clean run read the repos the stats pass's class cleanup had deleted. The fork
+# server runs each pass in a fresh child and each mutant in a fresh fork of a process that has
+# only collected the suites.
 CONFIG = """[mutmut]
 source_paths ={sources}
 pytest_add_cli_args_test_selection ={suites}
@@ -174,7 +187,30 @@ pytest_add_cli_args =
     -p
     no:cacheprovider
 use_git_change_detection = false
+process_isolation = forkserver
 """
+# What marks a function mutmut isn't to touch in the copy of a script it reads: every function
+# the run doesn't mutate gets it on its header, so mutmut neither writes that function's mutants
+# into the mutated script nor puts it behind a trampoline.
+SKIP = "# pragma: no mutate block (check-mutmut mutates the changed functions only)"
+# The brackets a function's header can nest a colon in: an annotation, a default.
+OPEN, CLOSE = {"(", "[", "{"}, {")", "]", "}"}
+# The `sitecustomize` every Python a mutmut run starts imports first, from the directory the run
+# puts ahead on PYTHONPATH. mutmut's stats pass marks the environment, and a test that runs its
+# script as a subprocess from another directory (test_check_guards_fire.py's cases run it from a
+# throwaway repo) then ran a mutated copy that records its hits through mutmut's config, which
+# mutmut reads from the working directory, didn't find there, and failed the pass. The hits would
+# be lost with the child anyway, so a new interpreter drops the mark. A mutant's run marks the
+# environment with the mutant's name, which a child keeps, so it runs the mutant.
+SITE = """import os
+
+if os.environ.get("MUTANT_UNDER_TEST") == "stats":
+    del os.environ["MUTANT_UNDER_TEST"]
+"""
+# What mutmut 3.8.0 prints when its stats pass found no test that reached any mutant, before it
+# stops with exit 1 and every mutant unrun: the verdict "no tests" for each. Only the changed
+# functions are trampolined, so a change whose functions no in-process test calls ends this way.
+NONE_REACHED = "could not find any test case for any mutant"
 # The end of mutmut's log a failure prints, and the scratch directory's name.
 TAIL = 40
 PREFIX = "check-mutmut-"
@@ -344,33 +380,82 @@ def snapshot(root: Path, work: Path) -> str:
     return git(*commit, cwd=root, env=clean_env() | IDENTITY).strip()
 
 
+def only(source: str, keep: list[str]) -> str:
+    """`source` with `SKIP` on the header of each function mutmut mutates that `keep` doesn't
+    name: at the end of the line its header's colon is on, or ahead of a comment already there.
+    mutmut writes every function's mutants into the mutated script otherwise, and every suite
+    that loads the script compiles them: check-guards-fire.py's came to 40 MB and took minutes
+    to generate, for a run that tested one function's."""
+    starts = set()
+
+    def visit(body: list[ast.stmt], cls: str | None = None) -> None:
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if (f"xǁ{cls}ǁ{node.name}" if cls else f"x_{node.name}") not in keep:
+                    starts.add(node.lineno)
+            elif isinstance(node, ast.ClassDef):
+                visit(node.body, f"{cls}.{node.name}" if cls else node.name)
+
+    visit(ast.parse(source).body)
+    tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    comments = {t.start[0]: t.start[1] for t in tokens if t.type == tokenize.COMMENT}
+    lines = source.splitlines(keepends=True)
+    for i, token in enumerate(tokens):
+        if token.string != "def" or token.start[0] not in starts:
+            continue
+        depth = 0
+        for after in tokens[i:]:
+            depth += (after.string in OPEN) - (after.string in CLOSE)
+            if after.string == ":" and depth <= 0:
+                break
+        row = after.start[0]
+        text = lines[row - 1]
+        at = comments.get(row, len(text.rstrip("\r\n")))
+        lines[row - 1] = f"{text[:at]}  {SKIP}  {text[at:]}"
+    return "".join(lines)
+
+
 def prepare(
-    root: Path, commit: str, side: Path, paths: list[str], selected: list[str]
+    root: Path,
+    commit: str,
+    side: Path,
+    wanted: dict[str, list[str]],
+    selected: list[str],
 ) -> None:
-    """`side/mutants` holds `commit` checked out, and `side` the scripts mutmut reads and the
-    config naming them. mutmut writes each mutated script into `mutants/` where the checkout's
-    copy was, and runs the suites there."""
+    """`side/mutants` holds `commit` checked out, and `side` the scripts mutmut reads, each
+    with the functions this run doesn't mutate marked (`only`), and the config naming them.
+    mutmut writes each mutated script into `mutants/` where the checkout's copy was, and runs
+    the suites there."""
     git("worktree", "add", str(side / "mutants"), commit, cwd=root)
-    for path in paths:
+    for path, keys in wanted.items():
         (side / path).parent.mkdir(exist_ok=True)
-        # mutmut mutates the copy in `mutants/` when it's missing or no newer than the source:
-        # moved, not copied, so the mtime stays.
-        (side / "mutants" / path).rename(side / path)
-    sources = "".join(f"\n    {p}" for p in paths)
+        # mutmut mutates the copy in `mutants/` when it's missing, which it then copies from
+        # the source with the source's mtime.
+        source = (side / "mutants" / path).read_bytes().decode()
+        (side / path).write_bytes(only(source, keys).encode())
+        (side / "mutants" / path).unlink()
+    sources = "".join(f"\n    {p}" for p in wanted)
     (side / "setup.cfg").write_text(
         CONFIG.format(sources=sources, suites="".join(f"\n    {s}" for s in selected))
     )
 
 
 def run_mutmut(mutmut: list[str], side: Path, globs: list[str], jobs: list[str]) -> int:
-    """mutmut over `globs` in `side`, its output in `side/mutmut.log`; its exit code."""
+    """mutmut over `globs` in `side`, its output in `side/mutmut.log`; its exit code. Every
+    Python it starts imports `SITE` first."""
+    (side / "site").mkdir()
+    (side / "site" / "sitecustomize.py").write_text(SITE)
+    env = clean_env()
+    env["PYTHONPATH"] = os.pathsep.join(
+        filter(None, [str(side / "site"), env.get("PYTHONPATH")])
+    )
     with (side / "mutmut.log").open("w") as log:
         proc = subprocess.Popen(
             [*mutmut, "run", *jobs, *globs],
             cwd=side,
             stdout=log,
             stderr=subprocess.STDOUT,
-            env=clean_env(),
+            env=env,
             start_new_session=True,
         )
         try:
@@ -383,8 +468,10 @@ def run_mutmut(mutmut: list[str], side: Path, globs: list[str], jobs: list[str])
 
 
 def results(side: Path, path: str) -> dict:
-    """mutmut's results for `path` on one side. Missing, unreadable, or naming no mutant of the
-    script, fails."""
+    """mutmut's results for `path` on one side. Missing, unreadable, or naming a mutant that
+    isn't the script's, fails. Naming none is mutmut's answer that the functions this run left
+    unmarked have nothing to mutate: it writes the file when it generates the mutants, and
+    exits 1 on names that match none."""
     meta = side / "mutants" / f"{path}.meta"
     try:
         data = json.loads(meta.read_bytes())
@@ -394,11 +481,11 @@ def results(side: Path, path: str) -> dict:
             f"mutmut wrote no results for {path}: {meta}: {error!r}"
         ) from None
     prefix = f"{module_name(path)}.x"
-    if not verdicts or not all(
-        k.startswith(prefix) and "__mutmut_" in k for k in verdicts
-    ):
+    strays = [k for k in verdicts if not k.startswith(prefix) or "__mutmut_" not in k]
+    if strays:
         raise Failure(
-            f"{meta} names no mutant of {path} as `{prefix}<function>__mutmut_<n>`"
+            f"{meta} names {strays[0]}, not a mutant of {path} as"
+            f" `{prefix}<function>__mutmut_<n>`"
         )
     return data
 
@@ -458,17 +545,19 @@ def measure(
     jobs: list[str],
 ) -> dict[tuple[str, str], Tally]:
     """Mutate the `wanted` functions of each script at `commit`, and tally each one."""
-    prepare(root, commit, side, list(wanted), selected)
-    globs = [
-        f"{module_name(p)}.{k}__mutmut_*" for p, keys in wanted.items() for k in keys
-    ]
+    prepare(root, commit, side, wanted, selected)
+    globs = [f"{module_name(p)}.{k}*" for p, keys in wanted.items() for k in keys]
     code = run_mutmut(mutmut, side, globs, jobs)
     failed = Failure(
         f"mutmut exited {code} in {side}; the end of its log:\n{log_tail(side)}"
     )
+    stopped = NONE_REACHED.encode() in (side / "mutmut.log").read_bytes()
     # A run mutmut failed leaves results it didn't finish, so its own log is the reason given.
     try:
         data = {path: results(side, path) for path in wanted}
+        if stopped:
+            for found in data.values():
+                found["exit_code_by_key"] = dict.fromkeys(found["exit_code_by_key"], 33)
         out = {(p, k): tally(data[p], p, k) for p, keys in wanted.items() for k in keys}
     except Failure:
         if code:
@@ -476,7 +565,7 @@ def measure(
         raise
     # mutmut refuses names that match no mutant, which is the right answer when no changed
     # function has anything to mutate. Any other failure stands.
-    if code and any(t.total for t in out.values()):
+    if code and not stopped and any(t.total for t in out.values()):
         raise failed
     for path in wanted:
         check_hashes(data[path], path, (side / path).read_bytes())
@@ -511,8 +600,15 @@ def verdict(
             before = len(base.counted) if base else 0
             if key not in script.on_base:
                 origin = "new"
+            elif base and base.total and base.unreached == base.total:
+                # Adding the first test that reaches a function in-process can't fail a change
+                # for what that test leaves alive: the base had no count to hold it to.
+                origin = "no in-process test reached it on the base"
+                before = len(head.counted)
             elif base:
                 origin = f"{before} on the base"
+            elif script.base_suites and not head.counted:
+                origin = "none survive, so the base isn't measured"
             else:
                 origin, before = "not measured on the base", len(head.counted)
             line = f"    {shown(key)}: {len(head.counted)} of {head.total} survive ({origin})"
@@ -568,13 +664,6 @@ def gate(
         return 0
     mutmut = [args.mutmut] if args.mutmut else MUTMUT
     jobs = ["--max-children", args.jobs] if args.jobs else []
-    # The base run mutates the changed functions the base has and its suites measured.
-    on_base = {
-        s.change.base: s.on_base for s in measured if s.on_base and s.base_suites
-    }
-    base_suites = sorted(
-        {x for s in measured if s.change.base in on_base for x in s.base_suites}
-    )
     work = Path(tempfile.mkdtemp(prefix=PREFIX))
     # CI cancelling the job sends SIGTERM, and unwinding through `finally` removes the worktrees.
     previous = signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
@@ -588,6 +677,20 @@ def gate(
         head_suites = sorted({x for s in measured for x in s.head_suites})
         heads = measure(
             mutmut, root, snapshot(root, work), work / "head", head, head_suites, jobs
+        )
+        # The base run mutates the changed functions the base has and its suites measured, and
+        # of those only the ones some mutant survives in here: a function none survives in has
+        # no more survivors than any base count, so measuring its base decides nothing.
+        on_base = {
+            s.change.base: survived
+            for s in measured
+            if s.base_suites
+            and (
+                survived := [k for k in s.on_base if heads[(s.change.path, k)].counted]
+            )
+        }
+        base_suites = sorted(
+            {x for s in measured if s.change.base in on_base for x in s.base_suites}
         )
         bases = on_base and measure(
             mutmut, root, merge_base, work / "base", on_base, base_suites, jobs

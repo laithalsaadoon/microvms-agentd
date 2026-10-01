@@ -14,6 +14,7 @@ production went untested.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from harness.archives import build_hostile_archives
@@ -21,11 +22,13 @@ from harness.cli import Cli, attach_args
 from harness.envelope import Envelope, EnvelopeError, KindError
 from harness.results import Results
 
+from lanes.sessions import run_rust_live
+
 
 def drive_file_transfer(
     cli: Cli, launched: Envelope, results: Results, workdir: Path
 ) -> None:
-    """`microvm cp`, `cp --lines` and `cp --tar`, including the four hostile archives.
+    """`microvm cp`, `cp --lines`, `cp --tar` and `exists`, including the four hostile archives.
 
     The symlink pair is the one worth naming: harnesses pack symlinks deliberately, and a
     daemon that refused links would break real uploads — so an in-tree link has to survive
@@ -66,6 +69,18 @@ def drive_file_transfer(
         "read of an absent file is 404",
         "NotFound",
         lambda: cli.call("cp", "vm:/tmp/absent", str(workdir / "absent.txt"), *attach),
+    )
+    # `microvm exists` (#269), core's `file_exists`: the file just written, and the absent one
+    # the read above was refused for.
+    results.eq(
+        "exists reports the written file",
+        cli.call("exists", "/tmp/live.txt", *attach).data.get("exists"),
+        True,
+    )
+    results.eq(
+        "exists reports an absent path as absent",
+        cli.call("exists", "/tmp/absent", *attach).data.get("exists"),
+        False,
     )
 
     # A line window, sliced by the daemon (#265): lines 2 to 4 of a five-line file.
@@ -176,6 +191,28 @@ def drive_file_transfer(
         "nothing escaped the extraction root",
         "No such file" in listing or "cannot access" in listing,
         repr(listing[:160]),
+    )
+
+    # Core's guarded extraction through `Session::download_dir` (#260): a tree planted in the
+    # VM with a `.git` hook and a symlink out of it, brought back with `["**"]`. The daemon's
+    # packer can't produce a `../` member, so traversal stays with the unit and binding tiers.
+    run_rust_live(
+        cli,
+        launched,
+        results,
+        "live_workspace",
+        "download_dir_writes_only_the_regular_files_of_a_planted_tree",
+        "download_dir writes a planted tree's regular file and not its .git hook or symlink",
+        extra_env={
+            "MICROVM_LIVE_ATTACH": json.dumps(
+                {
+                    "microvmId": str(launched.data["microvmId"]),
+                    "endpoint": str(launched.data["endpoint"]),
+                    "agentToken": str(launched.data["agentToken"]),
+                    "region": cli.region,
+                }
+            )
+        },
     )
 
 

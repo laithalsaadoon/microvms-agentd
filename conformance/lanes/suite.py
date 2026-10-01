@@ -48,6 +48,7 @@ from lanes.lifecycle import (
     drive_health,
     drive_identity_per_vm,
     drive_launch_by_name,
+    drive_launch_without_waiting,
     drive_lifecycle,
 )
 from lanes.local import drive_doctor_region, drive_local_commands, drive_preflight
@@ -242,6 +243,16 @@ def run_suite(args: argparse.Namespace) -> int:
                 launched,
                 results,
             )
+            # `run --keep --no-wait` and `wait` (#269), on a bounded VM of its own from the
+            # suite's image.
+            run_section(
+                results,
+                "launch_without_waiting",
+                drive_launch_without_waiting,
+                cli,
+                launched,
+                results,
+            )
             # After the identity section because it leans on the same detach/poll surface
             # that section just proved: every process fact here is read through `ps` and
             # every stop through `kill`, against the same shared VM.
@@ -387,6 +398,7 @@ def run_suite(args: argparse.Namespace) -> int:
                 Path(tmp) / "project",
                 aws.client("logs"),
                 aws.client("s3"),
+                aws.client(SERVICE),
                 results,
             )
             # Version skew (#298) beside them: this tree's CLI builds an image around the

@@ -1,14 +1,14 @@
 # ── the live suite's COST checks, offline (#303) ────────────────────────────
 
-# COST-1: a check that reads only the measured durations can't see a projected one on a run.
+# COST-1: a check that takes any label on a timed phase can't see one a clock timed labelled projected.
 [[fault]]
 id = "conformance-cost-run-provenance-filtered"
 guard = "conformance/selftest/cost.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
-message = "FAIL  the run cost checks refuse a run duration labelled projected"
-transform = { file = "conformance/lanes/lifecycle.py", replace = "                for item in items\n                if item.get(\"duration\")\n", with = "                for item in items\n                if (item.get(\"duration\") or {}).get(\"provenance\") == \"measured\"\n" }
+message = "FAIL  the run cost checks refuse a timed run duration labelled projected"
+transform = { file = "conformance/lanes/lifecycle.py", replace = "                    if phase in (\"image-build\", \"running\") and label != \"measured\"\n", with = "                    if phase in (\"image-build\", \"running\") and label not in (\"measured\", \"projected\")\n" }
 
 # COST-3: a check that finds the build line and never reads its amount passes a `$0.00`.
 [[fault]]
@@ -39,3 +39,14 @@ expect = "exit-nonzero"
 suite = "script"
 message = "FAIL  the estimate cost check refuses an estimate labelled as a run"
 transform = { file = "conformance/lanes/local.py", replace = "            planned.get(\"label\"),\n", with = "            \"estimate\",\n" }
+
+# COST-1's other half (wave 3's live run): a check that ignores the retention floor's label passes
+# a report that claims a clock timed the week nobody observed.
+[[fault]]
+id = "conformance-cost-run-retention-ignored"
+guard = "conformance/selftest/cost.py"
+run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL  the run cost checks refuse a retention floor labelled measured"
+transform = { file = "conformance/lanes/lifecycle.py", replace = "            sorted({label for phase, label in durations if phase == \"image-storage\"}),\n", with = "            [\"projected\"],\n" }

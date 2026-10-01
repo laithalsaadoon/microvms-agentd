@@ -74,7 +74,7 @@ use microvms_core::sandbox::{
 use microvms_core::{Error, ErrorKind};
 use serde_json::{Map, json};
 
-use crate::cli::{BuildArgs, ResumeArgs, RunArgs, SuspendArgs, TerminateArgs};
+use crate::cli::{BuildArgs, ResumeArgs, RunArgs, SuspendArgs, TerminateArgs, WaitArgs};
 use crate::commands::{Ctx, Rendered, response_type};
 use crate::exit::Exit;
 use crate::history::{Event, History};
@@ -494,6 +494,21 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
         Some(path) if path.is_dir() => Some(path.clone()),
         _ => None,
     };
+    // `--no-wait` returns at acceptance (#269), and an exec or a synced tree needs the VM
+    // answering. Clap refuses `--exec` beside it; this catches the two spellings it can't see,
+    // an `exec` from microvm.toml and a directory positional, before anything is packed.
+    if args.no_wait && (args.exec.is_some() || sync_dir.is_some()) {
+        let what = if sync_dir.is_some() {
+            "sync mode, which uploads the tree to a VM that answers"
+        } else {
+            "an exec (from microvm.toml), which needs a VM that answers"
+        };
+        return Err(crate::exit::CliError::new(
+            Exit::InvalidArg,
+            format!("--no-wait returns while the VM is still PENDING, so it can't take {what}."),
+        )
+        .suggest("drop --no-wait, or launch with it and run the work after `microvm wait`"));
+    }
     let mut packed: Option<microvms_core::workspace::Packed> = None;
     if let Some(dir) = &sync_dir {
         args.binary = None; // the positional was a directory, not a binary to build from
@@ -904,9 +919,14 @@ pub async fn run<O: std::io::Write, E: std::io::Write>(
             crate::exit::CliError::new(
                 Exit::Precondition,
                 format!(
-                    "the VM launched and is RUNNING, but its name could not be registered: \
+                    "the VM launched and is {}, but its name could not be registered: \
                      {error}. Address it by the identifiers below; they are in this \
                      envelope's data.",
+                    if outcome.pending {
+                        "PENDING"
+                    } else {
+                        "RUNNING"
+                    },
                 ),
             )
             .with_data("microvmId", json!(record.microvm_id))
@@ -1157,6 +1177,19 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
             .progress(&format!("resolved image name {identifier} to {resolved}"));
     }
     accepted?;
+    if args.no_wait {
+        // `--no-wait` (#269): the VM is PENDING. Its identifiers go on the envelope now, and
+        // `microvm wait` finishes the launch from them in core, as this run would have.
+        outcome.pending = true;
+        outcome.running_seconds = run_started.elapsed().as_secs_f64();
+        record_launch(sandbox, ledger, outcome);
+        ctx.out.progress(&format!(
+            "microvm {} accepted and PENDING at {}; `microvm wait` finishes the launch",
+            outcome.microvm_id.as_deref().unwrap_or_default(),
+            outcome.endpoint.as_deref().unwrap_or_default(),
+        ));
+        return Ok(());
+    }
     // RUNNING and then the daemon answering, both in core (#254).
     let session = sandbox.wait_until_running(ready_timeout).await?;
     // Read off the session and the sandbox rather than remembered from the request, because
@@ -1253,7 +1286,17 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
         }
     }
     outcome.running_seconds = run_started.elapsed().as_secs_f64();
-    outcome.endpoint = Some(endpoint.clone());
+    record_launch(sandbox, ledger, outcome);
+    ctx.out.progress(&format!("microvm RUNNING at {endpoint}"));
+    Ok(())
+}
+
+/// The identifiers a later command addresses the launched VM by, read off the sandbox: the
+/// endpoint the service reported, the agent token, the identity pair, and the id.
+fn record_launch(sandbox: &Sandbox, ledger: &mut Ledger, outcome: &mut RunOutcome) {
+    outcome.endpoint = sandbox
+        .session()
+        .map(|session| session.endpoint().to_string());
     // The token the sandbox minted (or was given): without it the envelope's
     // agentToken is null and `run --keep` hands the caller a VM they cannot
     // exec into — the first live run found exactly that, as a bootstrap
@@ -1272,8 +1315,6 @@ async fn launch_and_exec<O: std::io::Write, E: std::io::Write>(
         outcome.microvm_id = Some(vm.id.clone());
         ledger.record_microvm(&vm.id);
     }
-    ctx.out.progress(&format!("microvm RUNNING at {endpoint}"));
-    Ok(())
 }
 
 /// Tears the VM down on the way out, however the block ended, and names what leaked.
@@ -1481,6 +1522,11 @@ pub async fn build<O: std::io::Write, E: std::io::Write>(
             base_image_version: args.base_image_version.as_deref(),
             log_group: args.log_group.as_deref(),
             log_stream: args.log_stream.as_deref(),
+            tags: &args.tags,
+            base_image: args.base_image.as_deref(),
+            inherit_workdir: args.inherit_workdir,
+            run_hook_timeout: args.run_hook_timeout_sec,
+            build_hook_timeout: args.build_hook_timeout_sec,
         },
     )?;
 
@@ -1655,6 +1701,17 @@ struct BuildSpec<'a> {
     /// The caller's log-stream **prefix**; core appends the per-build discriminator and
     /// the resolved exact name comes back on the image for the envelope to report.
     pub log_stream: Option<&'a str>,
+    /// `build --tag`'s pairs, in the order given (#264). `run` passes none, and none of the
+    /// options below, for the reason it pins no base: they describe a durable image.
+    pub tags: &'a [(String, String)],
+    /// `build --base-image`: the managed base's name, paired with the Dockerfile's `FROM`.
+    pub base_image: Option<&'a str>,
+    /// `build --inherit-workdir`, which core refuses when nothing declares a `WORKDIR`.
+    pub inherit_workdir: bool,
+    /// `build --run-hook-timeout-sec`, or `None` for core's default.
+    pub run_hook_timeout: Option<microvms_core::RunHookTimeout>,
+    /// `build --build-hook-timeout-sec`, or `None` for core's default.
+    pub build_hook_timeout: Option<microvms_core::BuildHookTimeout>,
 }
 
 /// The create request for `run`'s arguments.
@@ -1684,6 +1741,11 @@ fn build_request<'a, O: std::io::Write, E: std::io::Write>(
             // `microvm run` in a configured project.
             log_group: args.log_group.as_deref(),
             log_stream: args.log_stream.as_deref(),
+            tags: &[],
+            base_image: None,
+            inherit_workdir: false,
+            run_hook_timeout: None,
+            build_hook_timeout: None,
         },
     )
 }
@@ -1707,6 +1769,11 @@ fn build_request_from<O: std::io::Write, E: std::io::Write>(
         base_image_version,
         log_group,
         log_stream,
+        tags,
+        base_image,
+        inherit_workdir,
+        run_hook_timeout,
+        build_hook_timeout,
     } = spec;
     // No binary only beside a caller's --artifact-uri (#249). The image is built from their
     // object, and nothing reads these bytes: `upload_artifact` returns before building an
@@ -1769,6 +1836,35 @@ fn build_request_from<O: std::io::Write, E: std::io::Write>(
     }
     if let Some(dir) = project {
         request.project_files = Some(read_project_files(dir)?);
+    }
+    if let Some(base_name) = base_image {
+        // The registry reference is the Dockerfile's own `FROM`, through core's pairing, so the
+        // two halves of the base can't disagree. clap requires --dockerfile or --artifact-uri
+        // beside --base-image; with the URI no Dockerfile is built here, and only the name
+        // reaches the wire.
+        let mut base = match request.dockerfile.as_deref() {
+            Some(text) => microvms_core::control::BaseImage::from_dockerfile(text)?,
+            None => microvms_core::control::BaseImage::al2023(),
+        };
+        base.name = base_name.to_string();
+        request.base_image = base;
+    }
+    for (key, value) in tags {
+        // The service takes a map, so a repeated key would keep one value and drop the other
+        // with nothing said.
+        if request.tags.insert(key.clone(), value.clone()).is_some() {
+            return Err(Error::new(
+                ErrorKind::InvalidArg,
+                format!("the tag key {key:?} is given twice; an image carries one value per key"),
+            ));
+        }
+    }
+    request.inherit_workdir = inherit_workdir;
+    if let Some(timeout) = run_hook_timeout {
+        request.run_hook_timeout = timeout;
+    }
+    if let Some(timeout) = build_hook_timeout {
+        request.build_hook_timeout = timeout;
     }
     Ok(request)
 }
@@ -2187,6 +2283,49 @@ pub async fn resume<O: std::io::Write, E: std::io::Write>(
         data,
         format!("{} is RUNNING at {}", microvm_id, running.endpoint),
         format!("{}\tRUNNING\t{}", microvm_id, running.endpoint),
+    ))
+}
+
+/// `wait`: finishes a `run --keep --no-wait` (#269), or any launch another process accepted.
+///
+/// Adopted through core's `Sandbox::adopt`, over the seam's control plane, so the lifecycle it
+/// starts from is the service's answer rather than a guess, and core's
+/// `Sandbox::wait_until_ready` picks the wait that's left: RUNNING and then the daemon from
+/// PENDING, the daemon alone from RUNNING. A suspended or terminated VM is refused there.
+pub async fn wait<O: std::io::Write, E: std::io::Write>(
+    ctx: &mut Ctx<'_, O, E>,
+    args: &WaitArgs,
+) -> Result<Rendered, crate::exit::CliError> {
+    let (attach, region) =
+        crate::commands::attached::resolve_attach(ctx, &args.region, &args.attach)?;
+    let mut plane = ctx.seam.control_plane(region).await?;
+    if let Some(port) = attach.port {
+        plane = plane.with_port(port)?;
+    }
+    let microvm_id = attach.microvm_id.clone();
+    let mut sandbox =
+        Sandbox::adopt(plane, &microvm_id, attach.endpoint, attach.agent_token).await?;
+    let from = sandbox.lifecycle();
+    ctx.out
+        .progress(&format!("{microvm_id} is {from}; waiting for it to answer"));
+    let endpoint = sandbox
+        .wait_until_ready(args.timeout)
+        .await?
+        .endpoint()
+        .to_string();
+
+    let mut data = Map::new();
+    data.insert("microvmId".into(), json!(microvm_id));
+    data.insert("state".into(), json!(sandbox.lifecycle().as_str()));
+    // Which wait was left: PENDING waited for RUNNING and the daemon, RUNNING for the daemon.
+    data.insert("from".into(), json!(from.as_str()));
+    data.insert("endpoint".into(), json!(endpoint));
+    let (kind, _) = response_type("wait");
+    Ok(Rendered::ok(
+        kind,
+        data,
+        format!("{microvm_id} is RUNNING and its daemon answers at {endpoint}"),
+        format!("{microvm_id}\tRUNNING\t{endpoint}"),
     ))
 }
 

@@ -45,3 +45,4 @@ mod run_dir;
 mod seconds;
 mod support;
 mod thinness;
+mod wait;

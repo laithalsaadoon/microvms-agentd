@@ -466,6 +466,7 @@ async fn handle<O: std::io::Write, E: std::io::Write>(
         Command::AgentPrompt(args) => commands::agent::prompt(ctx, args).await,
         // The attached block: five commands, one door. See `commands/attached.rs`.
         Command::Exec(args) => commands::attached::exec(ctx, args).await,
+        Command::Wait(args) => commands::lifecycle::wait(ctx, args).await,
         Command::Health(args) => commands::attached::health(ctx, args).await,
         Command::Keepalive(args) => commands::attached::keepalive(ctx, args, interrupt).await,
         Command::Ack(args) => commands::attached::ack(ctx, args).await,
@@ -473,6 +474,7 @@ async fn handle<O: std::io::Write, E: std::io::Write>(
         Command::Ps(args) => commands::attached::ps(ctx, args).await,
         Command::Stdin(args) => commands::attached::stdin(ctx, args).await,
         Command::Cp(args) => commands::attached::cp(ctx, args).await,
+        Command::Exists(args) => commands::attached::exists(ctx, args).await,
         // The third command that takes the interrupt, and like the other two it is the
         // expected ending rather than an abort: `sync --watch` runs until the caller
         // stops it, and Ctrl-C resolves into the summary envelope.

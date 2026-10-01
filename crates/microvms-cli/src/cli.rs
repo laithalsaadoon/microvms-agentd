@@ -147,6 +147,14 @@ pub enum Command {
     /// naming it.
     Exec(ExecArgs),
 
+    /// Wait until a kept MicroVM answers: RUNNING, and then its daemon.
+    ///
+    /// Finishes a `run --keep --no-wait`. From PENDING it waits for RUNNING up to --timeout
+    /// and then for the daemon to answer; from RUNNING, for the daemon alone. Any other state
+    /// is refused, because a suspended or terminated VM isn't starting. The VM is named the
+    /// way the attached commands name one: `--name`, or the triple `run` printed.
+    Wait(WaitArgs),
+
     /// Ask a running MicroVM's daemon whether it is up, and what its identity repair did.
     ///
     /// The one unauthenticated route: the platform forwards no external traffic until the run
@@ -208,6 +216,13 @@ pub enum Command {
     /// extracts, and the local side is a `.tar` file moved as bytes, never packed or unpacked
     /// here, so the daemon's confined extractor is the one that unpacks an upload.
     Cp(CpArgs),
+
+    /// Say whether a path exists in a running MicroVM.
+    ///
+    /// Only the daemon's not-found answers `false`; any other refusal fails the command, so an
+    /// absent file is never confused with a bad path or a daemon that can't be reached. Exits 0
+    /// either way: the answer is `data.exists`.
+    Exists(ExistsArgs),
 
     /// Sync a project directory into a running MicroVM's /workspace, uploading only what changed.
     ///
@@ -910,6 +925,16 @@ pub struct RunArgs {
     #[arg(long)]
     pub keep: bool,
 
+    /// Return once the launch is accepted, with the VM still PENDING, instead of waiting for
+    /// RUNNING and for its daemon. `microvm wait` finishes the launch later.
+    ///
+    /// The envelope carries the identifiers a later command needs (the endpoint, the agent
+    /// token and the MicroVM id), and `--vm-name` registers the name as usual. Requires
+    /// --keep, since a VM torn down on the way out has nothing to wait for, and refuses an
+    /// exec (--exec or `exec` in microvm.toml) and sync mode, which need the VM answering.
+    #[arg(long, requires = "keep", conflicts_with = "exec")]
+    pub no_wait: bool,
+
     /// Generate a per-VM identity, so `tunnel --verify-identity` can prove the far end.
     ///
     /// The launch generates two x25519 seeds and delivers the VM's seed plus this host's
@@ -1020,6 +1045,14 @@ pub struct QuickstartArgs {
 }
 
 #[derive(Args, Debug)]
+// `--base-image` requires one of the group. `multiple(true)` keeps the group from making its
+// members conflict: `artifact_uri`'s own `conflicts_with_all` is the one refusal of the pair, and
+// a second one here would hide that refusal from its guard.
+#[command(group(
+    clap::ArgGroup::new("base_image_source")
+        .args(["dockerfile", "artifact_uri"])
+        .multiple(true)
+))]
 pub struct BuildArgs {
     /// The aarch64 agentd binary to bake in as the image CMD.
     ///
@@ -1100,6 +1133,44 @@ pub struct BuildArgs {
     /// Widen the guest so `sethostname` and the boot_id bind mount work.
     #[arg(long)]
     pub repair_identity: bool,
+
+    /// A tag on the image, repeatable. Split at the first `=`, so a VALUE may hold one, and
+    /// checked against the model's `TagKey` and `TagValue` at parse time; an empty VALUE is
+    /// legal. A KEY given twice is refused rather than one of its values dropped.
+    #[arg(long = "tag", value_name = "KEY=VALUE", value_parser = parse_tag)]
+    pub tags: Vec<(String, String)>,
+
+    /// The managed base image `baseImageArn` names, instead of `al2023-1`.
+    ///
+    /// Its registry reference is the --dockerfile's first `FROM`, taken whole (a digest pin
+    /// kept), so the two can't disagree. With --artifact-uri no Dockerfile is built here and
+    /// only the name is sent. Requires one of the two, because the derived default
+    /// Dockerfile's `FROM` is `al2023-1`'s.
+    #[arg(long, value_name = "NAME", requires = "base_image_source")]
+    pub base_image: Option<String>,
+
+    /// Rely on the image's `WORKDIR`: an exec with no cwd runs there.
+    ///
+    /// Refused before the upload when nothing declares one, neither the --dockerfile nor the
+    /// base, because most public ARM64 bases leave it empty and every relative path would
+    /// then resolve against `/`.
+    #[arg(long)]
+    pub inherit_workdir: bool,
+
+    /// The timeout of the `run`, `resume`, `suspend` and `terminate` hooks, in whole seconds.
+    ///
+    /// The service caps this family far below the build family, and core's `RunHookTimeout`
+    /// refuses a value past the cap at parse time, naming both ceilings. Omitted, core's
+    /// default.
+    #[arg(long, value_name = "SECONDS", value_parser = parse_run_hook_timeout)]
+    pub run_hook_timeout_sec: Option<microvms_core::RunHookTimeout>,
+
+    /// The timeout of the `ready` and `validate` build hooks, in whole seconds.
+    ///
+    /// Core's `BuildHookTimeout` refuses a value past the service's cap at parse time.
+    /// Omitted, core's default.
+    #[arg(long, value_name = "SECONDS", value_parser = parse_build_hook_timeout)]
+    pub build_hook_timeout_sec: Option<microvms_core::BuildHookTimeout>,
 
     /// Reuse an existing image whose build inputs match, instead of building.
     ///
@@ -1371,6 +1442,33 @@ pub struct KeepaliveArgs {
         default_value_t = microvms_core::session::keepalive::DEFAULT_TOLERATED_ERRORS
     )]
     pub tolerated_errors: u32,
+
+    #[command(flatten)]
+    pub attach: AttachFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct ExistsArgs {
+    /// The absolute path in the guest.
+    #[arg(value_name = "PATH")]
+    pub path: String,
+
+    #[command(flatten)]
+    pub attach: AttachFlags,
+
+    #[command(flatten)]
+    pub region: RegionFlags,
+}
+
+#[derive(Args, Debug)]
+pub struct WaitArgs {
+    /// How long to wait for RUNNING, in seconds. The daemon wait after it is core's own
+    /// bootstrap bound.
+    #[arg(long, default_value = "300", value_parser = parse_seconds)]
+    pub timeout: std::time::Duration,
 
     #[command(flatten)]
     pub attach: AttachFlags,
@@ -2423,6 +2521,38 @@ fn parse_env_pair(pair: &str) -> Result<(String, String), String> {
     Ok((key.to_string(), value.to_string()))
 }
 
+/// `build --tag`'s KEY=VALUE, split at the first `=` and held to core's `TagKey` and
+/// `TagValue` (`require_valid_tags`), so a bad tag is refused before the build rather than as
+/// a `ValidationException` after the upload.
+fn parse_tag(pair: &str) -> Result<(String, String), String> {
+    let Some((key, value)) = pair.split_once('=') else {
+        return Err(format!(
+            "no `=` in {pair:?}: --tag takes KEY=VALUE. A tag with an empty value is \
+             `--tag {pair}=`."
+        ));
+    };
+    let tag = std::collections::BTreeMap::from([(key.to_string(), value.to_string())]);
+    microvms_core::control::require_valid_tags(&tag).map_err(|error| error.to_string())?;
+    Ok((key.to_string(), value.to_string()))
+}
+
+/// Whole seconds for a hook timeout, as the integer the model's hook members are.
+fn hook_seconds(raw: &str) -> Result<u32, String> {
+    raw.parse::<u32>().map_err(|_| {
+        format!("{raw:?} is not a whole number of seconds: a hook timeout is an integer")
+    })
+}
+
+/// `build --run-hook-timeout-sec`, through core's `RunHookTimeout`.
+fn parse_run_hook_timeout(raw: &str) -> Result<microvms_core::RunHookTimeout, String> {
+    microvms_core::RunHookTimeout::try_new(hook_seconds(raw)?).map_err(|error| error.to_string())
+}
+
+/// `build --build-hook-timeout-sec`, through core's `BuildHookTimeout`.
+fn parse_build_hook_timeout(raw: &str) -> Result<microvms_core::BuildHookTimeout, String> {
+    microvms_core::BuildHookTimeout::try_new(hook_seconds(raw)?).map_err(|error| error.to_string())
+}
+
 /// A flag's seconds, as a duration, refused when they can't be one.
 ///
 /// A parser rather than a conversion in the handler, because the refusal has to come before the
@@ -2682,8 +2812,8 @@ mod tests {
 
     /// The subcommands, named as the manifest and the response table name them.
     ///
-    /// The block after `exec` is the attached one — `health`, `keepalive`, `ack`, `kill`, `ps`, `stdin`, `cp`,
-    /// `tunnel`, `port-forward`, and `shell` beside it — and their position is asserted rather than incidental,
+    /// The block after `exec` is the attached one (`wait`, `health`, `keepalive`, `ack`, `kill`, `ps`, `stdin`, `cp`,
+    /// `exists`, `tunnel`, `port-forward`, and `shell` beside it), and their position is asserted rather than incidental,
     /// because `--help`'s reading order is the only documentation of which commands need the
     /// identifier triple (`shell` sits with them because it addresses a running VM, though its
     /// credential is the minted shell token rather than the agent token). `history` and `names`
@@ -2703,6 +2833,7 @@ mod tests {
                 "agent-up",
                 "agent-prompt",
                 "exec",
+                "wait",
                 "health",
                 "keepalive",
                 "ack",
@@ -2710,6 +2841,7 @@ mod tests {
                 "ps",
                 "stdin",
                 "cp",
+                "exists",
                 "sync",
                 "attach",
                 "tunnel",
@@ -3505,6 +3637,7 @@ mod tests {
             (Command::Exec(args), "--timeout-sec") => args.timeout_sec,
             (Command::Exec(args), "--client-grace") => args.client_grace,
             (Command::Run(args), "--timeout") => Some(args.timeout),
+            (Command::Wait(args), "--timeout") => Some(args.timeout),
             (Command::Sync(args), "--timeout") => Some(args.timeout),
             (Command::Suspend(args), "--timeout") => Some(args.timeout),
             (Command::Resume(args), "--timeout") => Some(args.timeout),
@@ -3549,6 +3682,40 @@ mod tests {
         }
     }
 
+    /// **`wait --timeout` defaults to core's `DEFAULT_RUNNING_TIMEOUT` (#269),** the bound a
+    /// launch's own RUNNING wait takes, for the reason the exec waits' row above gives.
+    ///
+    /// **Falsification**: change `wait`'s `default_value = "300"` to `"301"` and the parse
+    /// reads 301s where core waits 300s.
+    #[test]
+    fn the_wait_timeout_defaults_to_the_cores_running_wait() {
+        let cli = Cli::try_parse_from(["microvm", "wait", "--name", "box"]).expect("parses");
+        assert_eq!(
+            parsed_seconds(&cli.command, "--timeout"),
+            Some(microvms_core::sandbox::DEFAULT_RUNNING_TIMEOUT),
+        );
+    }
+
+    /// **`run --no-wait` needs `--keep` and refuses `--exec` at parse time (#269).** A VM torn
+    /// down on the way out has nothing to wait for later, and an exec needs the VM answering,
+    /// so either combination is a caller's mistake that should cost nothing.
+    ///
+    /// **Falsification**: drop `requires = "keep"` from `--no-wait` and the bare row parses.
+    #[test]
+    fn run_no_wait_needs_keep_and_refuses_an_exec() {
+        let parse = |rest: &[&str]| {
+            Cli::try_parse_from(["microvm", "run", "--no-config"].iter().chain(rest))
+        };
+        let bare = parse(&["--no-wait"]).expect_err("--no-wait without --keep");
+        assert_eq!(bare.kind(), clap::error::ErrorKind::MissingRequiredArgument);
+        let exec = parse(&["--keep", "--no-wait", "--exec", "true"]).expect_err("an exec");
+        assert_eq!(exec.kind(), clap::error::ErrorKind::ArgumentConflict);
+        let Command::Run(args) = parse(&["--keep", "--no-wait"]).expect("parses").command else {
+            panic!("a run parses as a run");
+        };
+        assert!(args.no_wait && args.keep);
+    }
+
     /// **#268.** Every flag that takes seconds refuses, at parse time, a value that isn't a
     /// duration: non-finite, negative, too large for one, or not a number. Zero, a fraction and
     /// a whole figure parse to exactly that duration, and those rows are also what keep the
@@ -3569,11 +3736,12 @@ mod tests {
         let attached = ["--endpoint", "https://mvm-1.example", "--agent-token", "t"];
         let with_id =
             |rest: &[&'static str]| [&attached[..], &["--microvm-id", "mvm-1"], rest].concat();
-        let flags: [(&str, Vec<&str>, &str); 13] = [
+        let flags: [(&str, Vec<&str>, &str); 14] = [
             ("exec", with_id(&["true"]), "--timeout"),
             ("exec", with_id(&["true"]), "--timeout-sec"),
             ("exec", with_id(&["--complete", "true"]), "--client-grace"),
             ("run", vec!["--no-config"], "--timeout"),
+            ("wait", with_id(&[]), "--timeout"),
             ("sync", with_id(&["."]), "--timeout"),
             ("suspend", vec!["mvm-1"], "--timeout"),
             ("resume", vec!["mvm-1"], "--timeout"),

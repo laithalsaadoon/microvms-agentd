@@ -38,3 +38,29 @@ expect = "test-failed"
 suite = "rust"
 note = "crates/microvms-app/src/workspace.rs::sync_dir_diffs_against_the_guests_manifest_unless_full"
 transform = { file = "crates/microvms-app/src/workspace.rs", replace = "        let baseline = if full {\n", with = "        let baseline = if full && false {\n" }
+
+# The same break seen through each binding's `download_dir`: the issue's own acceptance (#260).
+
+[[fault]]
+id = "py-download-dir-writes-under-git"
+guard = "bindings/microvms-py/tests/test_workspace.py::test_download_dir_writes_only_the_selected_regular_files"
+run = [
+  ["uvx", "maturin@1.14.1", "develop", "-q", "-m", "bindings/microvms-py/Cargo.toml"],
+  ["python", "-m", "pytest", "-q", "-rA", "bindings/microvms-py/tests/test_workspace.py::test_download_dir_writes_only_the_selected_regular_files"],
+]
+expect = "test-failed"
+suite = "bindings"
+note = "bindings/microvms-py/tests/test_workspace.py::test_download_dir_writes_only_the_selected_regular_files"
+transform = { file = "crates/microvms-edges/src/workspace.rs", replace = ".any(|component| component.as_os_str() == \".git\")", with = ".any(|component| component.as_os_str() == \".git-never\")" }
+
+[[fault]]
+id = "js-download-dir-writes-under-git"
+guard = "downloadDir writes only the selected regular files of a hostile archive"
+run = [
+  ["npx", "-y", "-p", "@napi-rs/cli@3", "napi", "build", "--manifest-path", "Cargo.toml", "--package", "microvms-js", "--platform", "--output-dir", ".", "--cwd", "bindings/microvms-js"],
+  ["node", "--test", "--test-reporter=tap", "bindings/microvms-js/__test__/workspace.mjs"],
+]
+expect = "test-failed"
+suite = "bindings"
+note = "bindings/microvms-js/__test__/workspace.mjs::downloadDir writes only the selected regular files of a hostile archive"
+transform = { file = "crates/microvms-edges/src/workspace.rs", replace = ".any(|component| component.as_os_str() == \".git\")", with = ".any(|component| component.as_os_str() == \".git-never\")" }

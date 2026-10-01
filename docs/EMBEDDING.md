@@ -558,7 +558,9 @@ time this client saw, so the service answers a late resume. The `endpoint` must 
 one `GetMicrovm` reports.
 
 These launch options make a launch step safe to retry. `Sandbox.run(wait=False)` returns
-once `RunMicrovm` is accepted and `wait_until_running()` finishes the wait later. A
+once `RunMicrovm` is accepted and `wait_until_running()` finishes the wait later. The CLI's
+spelling is `run --keep --no-wait`, and `microvm wait` finishes it from another process,
+from PENDING or RUNNING, through core's `Sandbox::wait_until_ready`. A
 persisted `client_token` with an explicit `agent_token` makes a retried launch adopt the
 VM the first attempt made; if that VM idle-suspended in between, the launch resumes it
 rather than reporting a startup death (`docs/PLATFORM.md`, "A client-token retry after a
@@ -719,7 +721,13 @@ class LambdaMicrovmEnvironment:  # the harness's environment base class
     def download_file(self, source, target):
         open(target, "wb").write(self.session.download_file(source))
 
-    # upload_dir / download_dir: session.upload_tar / session.download_tar
+    def upload_dir(self, source):
+        # Into /workspace, and only what changed since the last pass travels.
+        self.session.sync_dir(source)
+
+    def download_dir(self, source, target, globs=("**",)):
+        # Regular files only, never under .git, never outside target: the archive is the VM's.
+        return self.session.download_dir(source, target, list(globs))
 
     def stop(self):
         # The image stays: the next trial of this task reuses it (see below).
