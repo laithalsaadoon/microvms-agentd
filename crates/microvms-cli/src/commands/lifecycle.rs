@@ -236,7 +236,13 @@ pub fn merge_config(
     let memory_config = config.memory.map(|mib| {
         crate::cli::memory_from_mib(mib).expect("config::load validated the memory domain")
     });
-    let memory = crate::config::pick(args.explicit.memory, args.memory, memory_config);
+    // `--cpus` and `--memory-mib` are a typed choice of class too (#269), so they win over the
+    // file as a typed `--memory` does, with core sizing the request.
+    let memory = crate::config::pick(
+        args.explicit.memory || args.size.requested(),
+        args.size.resolve(args.memory)?,
+        memory_config,
+    );
     report(
         "memory",
         json!(memory.value.size_class().baseline_mib()),
@@ -1455,6 +1461,8 @@ pub async fn build<O: std::io::Write, E: std::io::Write>(
     args: &BuildArgs,
 ) -> Result<Rendered, crate::exit::CliError> {
     let region = args.region.resolve(ctx.env)?;
+    // Before the provisioning fetch, so a request no class covers costs nothing.
+    let size = args.size.resolve(args.memory)?.size_class();
     ctx.infra.require(&["build_role_arn"])?;
     // The same provisioning chain as `run` (`provision.rs`), for the same reason: the
     // caller's intent is "an image with the daemon in it", and which bytes that means is
@@ -1495,7 +1503,6 @@ pub async fn build<O: std::io::Write, E: std::io::Write>(
             Some(path)
         }
     };
-    let size = args.memory.size_class();
     let seed = if args.reuse {
         // A stable stem: see the function docs on why the epoch default would make
         // `--reuse` a flag that always misses.
