@@ -2,241 +2,155 @@
 
 # #273's two ast-grep rules: each fault deletes one pattern alternative, and the fixture test
 # named after that shape fails. The exact-set test catches an alternative that over-matches.
-[[fault]]
-id = "adapter-logic-op-string"
+[[family]]
 guard = "test_ratchet.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "adapter-logic-op-string"
 message = "FAIL: test_an_operation_literal_is_flagged_in_a_call_an_index_and_a_macro ("
 transform = { file = "verify/ratchet/rules/operation-literal.yml", replace = "    - any: [kind: string_literal, kind: raw_string_literal]\n", with = "    - any: [kind: raw_string_literal]\n" }
 
-[[fault]]
+[[family.fault]]
 id = "adapter-logic-op-raw-string"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_an_operation_literal_is_flagged_in_a_call_an_index_and_a_macro ("
 transform = { file = "verify/ratchet/rules/operation-literal.yml", replace = "    - any: [kind: string_literal, kind: raw_string_literal]\n", with = "    - any: [kind: string_literal]\n" }
 
-[[fault]]
+[[family.fault]]
 id = "adapter-logic-op-test-code"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_the_fixture_reports_exactly_its_ruleid_lines ("
 transform = { file = "verify/ratchet/rules/operation-literal.yml", replace = "    - not:\n        matches: test-only\n", with = "" }
 
-[[fault]]
+[[family.fault]]
 id = "adapter-logic-default-const"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_default_const_is_flagged ("
 transform = { file = "verify/ratchet/rules/literal-default.yml", replace = "        - all:\n            - any: [kind: const_item, kind: static_item]\n            - any:\n                - has: { field: name, regex: '(?i)default|timeout|interval|wait|grace|deadline|poll|delay|backoff|ttl|cycles' }\n                - has: { field: type, regex: '\\bf(32|64)\\b' }\n            - has: { field: value, any: [matches: nonzero-number, has: { matches: nonzero-number, stopBy: end }] }\n            - not: { has: { field: value, any: [kind: call_expression, has: { kind: call_expression, stopBy: end }] } }\n", with = "" }
 
-[[fault]]
+[[family.fault]]
 id = "adapter-logic-default-duration"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_duration_from_a_literal_is_flagged ("
 transform = { file = "verify/ratchet/rules/literal-default.yml", replace = "        - all:\n            - kind: call_expression\n            - has:\n                field: function\n                any:\n                  - regex: '(^|::)\\s*Duration\\s*::\\s*(from_[a-z0-9_]+|new)$'\n                  - regex: '::\\s*from_(secs|millis|micros|nanos|mins|hours|days|weeks)(_f32|_f64)?$'\n            - has: { field: arguments, has: { matches: nonzero-number } }\n", with = "" }
 
-[[fault]]
+[[family.fault]]
 id = "adapter-logic-default-unwrap-or"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_an_unwrap_or_literal_is_flagged ("
 transform = { file = "verify/ratchet/rules/literal-default.yml", replace = "        - all:\n            - kind: call_expression\n            - has:\n                field: function\n                kind: field_expression\n                has: { field: field, regex: '^(unwrap_or|map_or|get_or_insert)$' }\n            - has: { field: arguments, has: { matches: nonzero-number } }\n", with = "" }
 
-[[fault]]
+[[family.fault]]
 id = "adapter-logic-default-wait-opts"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_wait_opts_literal_is_flagged ("
 transform = { file = "verify/ratchet/rules/literal-default.yml", replace = "        - all:\n            - kind: call_expression\n            - has: { field: function, regex: '(^|::)\\s*wait_opts$' }\n            - has: { field: arguments, has: { matches: nonzero-number } }\n", with = "" }
 
-[[fault]]
+[[family.fault]]
 id = "adapter-logic-default-timeout-plus"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_literal_added_to_a_timeout_is_flagged ("
 transform = { file = "verify/ratchet/rules/literal-default.yml", replace = "                - all:\n                    - has: { field: right, matches: nonzero-number }\n                    - has: { field: left, regex: '(?i)timeout|deadline|grace' }\n", with = "" }
 
-[[fault]]
+[[family.fault]]
 id = "adapter-logic-default-plus-timeout"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_literal_added_to_a_timeout_is_flagged ("
 transform = { file = "verify/ratchet/rules/literal-default.yml", replace = "                - all:\n                    - has: { field: left, matches: nonzero-number }\n                    - has: { field: right, regex: '(?i)timeout|deadline|grace' }\n", with = "" }
 
-[[fault]]
+[[family.fault]]
 id = "adapter-logic-default-test-code"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_the_fixture_reports_exactly_its_ruleid_lines ("
 transform = { file = "verify/ratchet/rules/literal-default.yml", replace = "    - not:\n        matches: test-only\n", with = "" }
 
-[[fault]]
+[[family.fault]]
 id = "adapter-logic-default-zero"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_the_fixture_reports_exactly_its_ruleid_lines ("
 transform = { file = "verify/ratchet/utils/nonzero-number.yml", replace = "    - not:\n        regex: '^0[0_]*", with = "    - not:\n        regex: '^NEVER[0_]*" }
 
 # Review round 1: the shapes the first rule let through (a `static`, a const named for a wait,
 # a float or a nested literal, an aliased `Duration`, `map_or` and a closure fallback).
-[[fault]]
+[[family.fault]]
 id = "adapter-logic-default-static"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_static_a_named_const_a_float_and_a_nested_literal_are_flagged ("
 transform = { file = "verify/ratchet/rules/literal-default.yml", replace = "            - any: [kind: const_item, kind: static_item]\n", with = "            - kind: const_item\n" }
 
-[[fault]]
+[[family.fault]]
 id = "adapter-logic-default-const-name"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_static_a_named_const_a_float_and_a_nested_literal_are_flagged ("
 transform = { file = "verify/ratchet/rules/literal-default.yml", replace = "                - has: { field: name, regex: '(?i)default|timeout|interval|wait|grace|deadline|poll|delay|backoff|ttl|cycles' }\n", with = "                - has: { field: name, regex: '^DEFAULT_' }\n" }
 
-[[fault]]
+[[family.fault]]
 id = "adapter-logic-default-const-float"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_static_a_named_const_a_float_and_a_nested_literal_are_flagged ("
 transform = { file = "verify/ratchet/rules/literal-default.yml", replace = "                - has: { field: type, regex: '\\bf(32|64)\\b' }\n", with = "" }
 
-[[fault]]
+[[family.fault]]
 id = "adapter-logic-default-const-nested"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_static_a_named_const_a_float_and_a_nested_literal_are_flagged ("
 transform = { file = "verify/ratchet/rules/literal-default.yml", replace = "            - has: { field: value, any: [matches: nonzero-number, has: { matches: nonzero-number, stopBy: end }] }\n", with = "            - has: { field: value, matches: nonzero-number }\n" }
 
-[[fault]]
+[[family.fault]]
 id = "adapter-logic-default-const-call"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_the_fixture_reports_exactly_its_ruleid_lines ("
 transform = { file = "verify/ratchet/rules/literal-default.yml", replace = "            - not: { has: { field: value, any: [kind: call_expression, has: { kind: call_expression, stopBy: end }] } }\n", with = "" }
 
-[[fault]]
+[[family.fault]]
 id = "adapter-logic-default-duration-alias"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_an_aliased_duration_and_duration_new_are_flagged ("
 transform = { file = "verify/ratchet/rules/literal-default.yml", replace = "                  - regex: '::\\s*from_(secs|millis|micros|nanos|mins|hours|days|weeks)(_f32|_f64)?$'\n", with = "" }
 
-[[fault]]
+[[family.fault]]
 id = "adapter-logic-default-duration-new"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_an_aliased_duration_and_duration_new_are_flagged ("
 transform = { file = "verify/ratchet/rules/literal-default.yml", replace = "(from_[a-z0-9_]+|new)$'", with = "(from_[a-z0-9_]+)$'" }
 
-[[fault]]
+[[family.fault]]
 id = "adapter-logic-default-map-or"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_map_or_or_a_closure_fallback_is_flagged ("
 transform = { file = "verify/ratchet/rules/literal-default.yml", replace = "'^(unwrap_or|map_or|get_or_insert)$'", with = "'^unwrap_or$'" }
 
-[[fault]]
+[[family.fault]]
 id = "adapter-logic-default-closure"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_map_or_or_a_closure_fallback_is_flagged ("
 transform = { file = "verify/ratchet/rules/literal-default.yml", replace = "        - all:\n            - kind: call_expression\n            - has:\n                field: function\n                kind: field_expression\n                has: { field: field, regex: '^(unwrap_or_else|map_or_else|get_or_insert_with)$' }\n            - has:\n                field: arguments\n                has:\n                  kind: closure_expression\n                  has: { field: body, any: [matches: nonzero-number, { kind: block, has: { matches: nonzero-number } }] }\n", with = "" }
 
-[[fault]]
+[[family.fault]]
 id = "adapter-logic-default-closure-block"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_map_or_or_a_closure_fallback_is_flagged ("
 transform = { file = "verify/ratchet/rules/literal-default.yml", replace = "any: [matches: nonzero-number, { kind: block, has: { matches: nonzero-number } }]", with = "matches: nonzero-number" }
 
-[[fault]]
+[[family.fault]]
 id = "adapter-logic-adapters-only"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "AdapterLogicTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_the_fixture_reports_exactly_its_ruleid_lines ("
 transform = { file = "tools/ratchet.py", replace = "elif match[\"ruleId\"] in ADAPTER_LOGIC and under(match, found.adapters.values()):", with = "elif match[\"ruleId\"] in ADAPTER_LOGIC and under(match, found.shipping.values()):" }
 
 # The COLLECTED each commit's ratchet.py lists, which the history reads to tell a category that
 # commit didn't count from a zero.
-[[fault]]
-id = "ratchet-bootstrap-empty-parse"
+[[family]]
 guard = "test_ratchet.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "BaseTests"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "ratchet-bootstrap-empty-parse"
 message = "FAIL: test_a_base_script_without_a_collected_tuple_is_an_error ("
 transform = { file = "tools/ratchet.py", replace = "    raise SystemExit(\n        f\"{where} has no COLLECTED tuple", with = "    return ()\n    raise SystemExit(\n        f\"{where} has no COLLECTED tuple" }
 
-[[fault]]
+[[family.fault]]
 id = "ratchet-bootstrap-reads-collected"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "BaseTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_the_base_collected_categories_are_read_from_its_script ("
 transform = { file = "tools/ratchet.py", replace = "                return value\n", with = "                return value[:1]\n" }
 
 # The adapter-logic collector against the checked-in sentinel, and on an empty input.
-[[fault]]
-id = "adapter-logic-sentinel"
+[[family]]
 guard = "test_ratchet.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "SentinelTests"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "adapter-logic-sentinel"
 message = "FAIL: test_the_checked_in_sentinel_matches_its_expectation ("
 transform = { file = "tools/ratchet.py", replace = "ADAPTER_LOGIC = (\"operation-literal\", \"literal-default\")", with = "ADAPTER_LOGIC = ()" }
 
-[[fault]]
+[[family.fault]]
 id = "ratchet-sentinel-empty"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "SentinelTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_collector_that_finds_nothing_fails ("
 transform = { file = "tools/ratchet.py", replace = "        if not got:\n", with = "        if False:\n" }

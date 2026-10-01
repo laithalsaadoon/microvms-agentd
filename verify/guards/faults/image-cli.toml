@@ -15,38 +15,28 @@ transform = { file = "crates/microvms-cli/src/commands/image.rs", replace = "   
 # The live section's round trip, through the self-test's fake CLI: a check that stops reading
 # the pinned launch, a round trip that never restores, a launch attempted on a version the
 # retire didn't reach, and a version picked from an image with more than one.
-[[fault]]
-id = "conformance-image-versions-pinned-unread"
+[[family]]
 guard = "conformance/run_rs.py --self-test: conformance/selftest/image_versions.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "conformance-image-versions-pinned-unread"
 message = "a service that launches an INACTIVE version: failed []"
 transform = { file = "conformance/lanes/image_versions.py", replace = "        isinstance(pinned, KindError),\n", with = "        True,\n" }
 
-[[fault]]
+[[family.fault]]
 id = "conformance-image-versions-no-restore"
-guard = "conformance/run_rs.py --self-test: conformance/selftest/image_versions.py"
-run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
-expect = "exit-nonzero"
-suite = "script"
 message = "a service that enforces the retire: failed"
 transform = { file = "conformance/lanes/image_versions.py", replace = "        restored = call(cli, \"image-set-status\", image_arn, version, \"ACTIVE\")\n", with = "        restored = retired\n" }
 
-[[fault]]
+[[family.fault]]
 id = "conformance-image-versions-launch-unguarded"
-guard = "conformance/run_rs.py --self-test: conformance/selftest/image_versions.py"
-run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
-expect = "exit-nonzero"
-suite = "script"
 message = "a retire that doesn't take: failed"
 transform = { file = "conformance/lanes/image_versions.py", replace = "        if isinstance(retired, Envelope) and retired.data.get(\"status\") == \"INACTIVE\":\n", with = "        if True:\n" }
 
-[[fault]]
+[[family.fault]]
 id = "conformance-image-versions-any-version"
-guard = "conformance/run_rs.py --self-test: conformance/selftest/image_versions.py"
-run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
-expect = "exit-nonzero"
-suite = "script"
 message = "an image with two versions: failed"
 transform = { file = "conformance/lanes/image_versions.py", replace = "    version = str(active[0].get(\"imageVersion\") or \"\") if len(versions) == 1 else \"\"\n", with = "    version = str(active[0].get(\"imageVersion\") or \"\") if active else \"\"\n" }

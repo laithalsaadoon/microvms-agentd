@@ -1,52 +1,38 @@
 # ── the live suite's COST checks, offline (#303) ────────────────────────────
 
 # COST-1: a check that takes any label on a timed phase can't see one a clock timed labelled projected.
-[[fault]]
-id = "conformance-cost-run-provenance-filtered"
+[[family]]
 guard = "conformance/selftest/cost.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "conformance-cost-run-provenance-filtered"
 message = "FAIL  the run cost checks refuse a timed run duration labelled projected"
 transform = { file = "conformance/lanes/lifecycle.py", replace = "                    if phase in (\"image-build\", \"running\") and label != \"measured\"\n", with = "                    if phase in (\"image-build\", \"running\") and label not in (\"measured\", \"projected\")\n" }
 
 # COST-3: a check that finds the build line and never reads its amount passes a `$0.00`.
-[[fault]]
+[[family.fault]]
 id = "conformance-cost-run-build-kind-ignored"
-guard = "conformance/selftest/cost.py"
-run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL  the run cost checks refuse an image build priced at zero dollars"
 transform = { file = "conformance/lanes/lifecycle.py", replace = "        [(amount.get(\"kind\"), \"usd\" in amount) for amount in builds] or None,\n", with = "        [(\"unpriced\", False) for amount in builds] or None,\n" }
 
 # COST-4: a check that reads the render and not the bound passes a plain sum that names the line.
-[[fault]]
+[[family.fault]]
 id = "conformance-cost-run-total-bound-ignored"
-guard = "conformance/selftest/cost.py"
-run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL  the run cost checks refuse a total that isn't a lower bound"
 transform = { file = "conformance/lanes/lifecycle.py", replace = "        (total.get(\"isLowerBound\"), \"image-build\" in str(total.get(\"render\"))),\n", with = "        (True, \"image-build\" in str(total.get(\"render\"))),\n" }
 
 # COST-10: a check that assumes the label passes a run report handed back for an estimate.
-[[fault]]
+[[family.fault]]
 id = "conformance-cost-estimate-label-ignored"
-guard = "conformance/selftest/cost.py"
-run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL  the estimate cost check refuses an estimate labelled as a run"
 transform = { file = "conformance/lanes/local.py", replace = "            planned.get(\"label\"),\n", with = "            \"estimate\",\n" }
 
 # COST-1's other half (wave 3's live run): a check that ignores the retention floor's label passes
 # a report that claims a clock timed the week nobody observed.
-[[fault]]
+[[family.fault]]
 id = "conformance-cost-run-retention-ignored"
-guard = "conformance/selftest/cost.py"
-run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL  the run cost checks refuse a retention floor labelled measured"
 transform = { file = "conformance/lanes/lifecycle.py", replace = "            sorted({label for phase, label in durations if phase == \"image-storage\"}),\n", with = "            [\"projected\"],\n" }

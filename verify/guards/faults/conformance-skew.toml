@@ -2,54 +2,40 @@
 
 # The downloads are only as good as their check: a digest compared with nothing lets any bytes
 # through as the previous release.
-[[fault]]
-id = "conformance-skew-checksum-ignored"
+[[family]]
 guard = "conformance/selftest/skew.py"
 run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "conformance-skew-checksum-ignored"
 message = "FAIL  skew: bytes whose sha256 differs are refused"
 transform = { file = "conformance/lanes/skew.py", replace = "    if got != want:\n", with = "    if False:\n" }
 
 # An asset SHA256SUMS doesn't list, read as fine.
-[[fault]]
+[[family.fault]]
 id = "conformance-skew-unlisted-asset"
-guard = "conformance/selftest/skew.py"
-run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL  skew: an asset SHA256SUMS doesn't list is refused"
 transform = { file = "conformance/lanes/skew.py", replace = "    if want is None:\n", with = "    if False:\n" }
 
 # On a release's own commit, the tag at HEAD taken as the previous release: the section would
 # skew the release against itself and pass.
-[[fault]]
+[[family.fault]]
 id = "conformance-skew-previous-is-head"
-guard = "conformance/selftest/skew.py"
-run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL  skew: on a release's own commit the previous release is the one before"
 transform = { file = "conformance/lanes/skew.py", replace = "        if commit != head:\n", with = "        if True:\n" }
 
 # Health's version is agentd's crate version, read from its manifest at the daemon's tree (wave 2's
 # live run expected the release tag and failed). A release from before #374 has only the old
 # path; without it the release's version can't be read.
-[[fault]]
+[[family.fault]]
 id = "conformance-skew-daemon-manifest-old-path"
-guard = "conformance/selftest/skew.py"
-run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL  skew: a release from before the move reads agentd's old manifest"
 transform = { file = "conformance/lanes/skew.py", replace = "DAEMON_MANIFESTS = (\"crates/agentd/Cargo.toml\", \"agentd/Cargo.toml\")", with = "DAEMON_MANIFESTS = (\"crates/agentd/Cargo.toml\",)" }
 
 # The old path read first: a tree that still carried a stale copy there would report it.
-[[fault]]
+[[family.fault]]
 id = "conformance-skew-daemon-manifest-order"
-guard = "conformance/selftest/skew.py"
-run = ["uv", "run", "--script", "conformance/run_rs.py", "--self-test"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL  skew: the current path wins where both exist"
 transform = { file = "conformance/lanes/skew.py", replace = "DAEMON_MANIFESTS = (\"crates/agentd/Cargo.toml\", \"agentd/Cargo.toml\")", with = "DAEMON_MANIFESTS = (\"agentd/Cargo.toml\", \"crates/agentd/Cargo.toml\")" }

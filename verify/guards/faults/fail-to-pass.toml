@@ -6,150 +6,102 @@
 # `check` over this tree, which isn't a fix, so it passes once each finder finds its sentinel.
 
 # A test that passes with the fix taken out proves nothing about the fix.
-[[fault]]
-id = "f2p-base-passes-proves"
+[[family]]
 guard = "test_fail_to_pass.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_fail_to_pass.py"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "f2p-base-passes-proves"
 message = "FAIL: test_a_test_that_passes_on_the_base_is_no_proof ("
 transform = { file = "tools/fail-to-pass.py", replace = "        return (\n            False,\n            \"passes with the fix taken out, so it proves nothing about the fix\",\n", with = "        return (\n            True,\n            \"passes with the fix taken out, so it proves nothing about the fix\",\n" }
 
 # A base that doesn't build isn't the test failing.
-[[fault]]
+[[family.fault]]
 id = "f2p-broken-build-proves"
-guard = "test_fail_to_pass.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_fail_to_pass.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_base_that_does_not_build_is_not_a_failure ("
 transform = { file = "tools/fail-to-pass.py", replace = "    if kind == \"DID NOT FIRE\" and \"the build broke\" in why:\n        return False, (\n", with = "    if kind == \"DID NOT FIRE\" and \"the build broke\" in why:\n        return True, (\n" }
 
 # The emitted patch takes the fix out of the head: written the other way round, it's the fix
 # itself, which `git apply --check` refuses on a head that already holds it.
-[[fault]]
+[[family.fault]]
 id = "f2p-patch-forward"
-guard = "test_fail_to_pass.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_fail_to_pass.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_the_emitted_patch_applies_to_the_head_and_leaves_the_base ("
 transform = { file = "tools/fail-to-pass.py", replace = "return git(branch.root, \"diff\", \"--binary\", head_tree, fixed_tree)", with = "return git(branch.root, \"diff\", \"--binary\", fixed_tree, head_tree)" }
 
 # A hunk inside a `#[cfg(test)]` module is the test's, and stays in.
-[[fault]]
+[[family.fault]]
 id = "f2p-test-hunks-reverted"
-guard = "test_fail_to_pass.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_fail_to_pass.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_reverted_keeps_hunks_inside_test_modules ("
 transform = { file = "tools/fail-to-pass.py", replace = "            out += head[j1:j2]\n", with = "            out += base[i1:i2]\n" }
 
 # The fix's mark: a `fixed` fragment. A check that stopped reading it passes every fix.
-[[fault]]
+[[family.fault]]
 id = "f2p-fix-types"
-guard = "test_fail_to_pass.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_fail_to_pass.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_fix_whose_test_has_no_entry_fails ("
 transform = { file = "tools/fail-to-pass.py", replace = "FIX_TYPES = (\"fixed\", \"security\")", with = "FIX_TYPES = (\"security\",)" }
 
 # The rule itself: a fix whose tests have no entry passes once the check stops asking.
-[[fault]]
+[[family.fault]]
 id = "f2p-no-entry-passes"
-guard = "test_fail_to_pass.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_fail_to_pass.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_fix_whose_test_has_no_entry_fails ("
 transform = { file = "tools/fail-to-pass.py", replace = "    if proven:\n", with = "    if True:\n" }
 
 # An entry the base already has proves an older fix, not this one.
-[[fault]]
+[[family.fault]]
 id = "f2p-base-entry-counts"
-guard = "test_fail_to_pass.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_fail_to_pass.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_an_entry_the_base_already_has_does_not_count ("
 transform = { file = "tools/fail-to-pass.py", replace = "    return {i: e for i, e in head.items() if base.get(i) != e}\n", with = "    return head\n" }
 
 # Only the tests the branch adds or changes: every test in a changed file isn't this fix's.
-[[fault]]
+[[family.fault]]
 id = "f2p-every-test-changed"
-guard = "test_fail_to_pass.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_fail_to_pass.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_only_the_changed_tests_are_named ("
 transform = { file = "tools/fail-to-pass.py", replace = "        if any(test.first <= n <= test.last for n in lines[test.path]):\n", with = "        if True:\n" }
 
 # The branch's floor: a diff that reads nothing makes every fix one with no product change.
-[[fault]]
+[[family.fault]]
 id = "f2p-branch-floor"
-guard = "test_fail_to_pass.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_fail_to_pass.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_a_fix_whose_test_has_no_entry_fails ("
 transform = { file = "tools/fail-to-pass.py", replace = "        changed = git(root, \"diff\", \"--name-only\", \"--no-renames\", self.fork)\n", with = "        changed = \"\"\n" }
 
 # The bindings entries it emits build the way the registry's own do.
-[[fault]]
+[[family.fault]]
 id = "f2p-bindings-build"
-guard = "test_fail_to_pass.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_fail_to_pass.py"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_the_build_commands_are_the_registrys ("
 transform = { file = "tools/fail-to-pass.py", replace = "    \"develop\",\n    \"-q\",\n", with = "    \"develop\",\n" }
 
 # The finders' floor: ast-grep returning nothing reads every fix as one with no test.
-[[fault]]
-id = "f2p-ast-grep-floor"
+[[family]]
 guard = "tools/fail-to-pass.py"
 run = ["./tools/fail-to-pass.py", "check", "--base", "HEAD"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "f2p-ast-grep-floor"
 message = "the rust finder doesn't find the_cli_exports_no_library_target_at_all"
 transform = { file = "tools/fail-to-pass.py", replace = "    return [json.loads(line) for line in done.stdout.splitlines() if line.strip()]\n", with = "    return []\n" }
 
 # Each finder's sentinel, on this tree.
-[[fault]]
+[[family.fault]]
 id = "f2p-rust-sentinel"
-guard = "tools/fail-to-pass.py"
-run = ["./tools/fail-to-pass.py", "check", "--base", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
 message = "the rust finder doesn't find the_cli_exports_no_library_target_at_all"
 transform = { file = "tools/fail-to-pass.py", replace = 'r"^#\[(?:\w+::)*test\b"', with = 'r"^#\[(?:\w+::)*tested\b"' }
 
-[[fault]]
+[[family.fault]]
 id = "f2p-inline-sentinel"
-guard = "tools/fail-to-pass.py"
-run = ["./tools/fail-to-pass.py", "check", "--base", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
 message = "the inline finder doesn't find exec::tests::the_builder_defaults_are_the_ones_serde_gives_an_omitted_field"
 transform = { file = "tools/fail-to-pass.py", replace = 'r"^#\[cfg\(test\)\]$"', with = 'r"^#\[cfg\(tests\)\]$"' }
 
-[[fault]]
+[[family.fault]]
 id = "f2p-pytest-sentinel"
-guard = "tools/fail-to-pass.py"
-run = ["./tools/fail-to-pass.py", "check", "--base", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
 message = "the pytest finder doesn't find bindings/microvms-py/tests/test_control.py::test_the_control_plane_checks_identifiers_before_the_wire"
 transform = { file = "tools/fail-to-pass.py", replace = "                if node.name.startswith(\"test\"):\n", with = "                if node.name.startswith(\"check\"):\n" }
 
-[[fault]]
+[[family.fault]]
 id = "f2p-node-sentinel"
-guard = "tools/fail-to-pass.py"
-run = ["./tools/fail-to-pass.py", "check", "--base", "HEAD"]
-expect = "exit-nonzero"
-suite = "script"
 message = "the node finder doesn't find the control plane checks identifiers before the wire"
 transform = { file = "tools/fail-to-pass.py", replace = 'r"^(?:test|it)$"', with = 'r"^(?:it)$"' }
 
@@ -163,3 +115,14 @@ expect = "exit-nonzero"
 suite = "script"
 message = "`check` depends on `fail-to-pass:check`, which no task a CI job runs reaches"
 transform = { file = ".config/mise/tasks/ci.toml", replace = "  { task = \"fail-to-pass:check\" },\n", with = "" }
+
+# The registry is read with the fire's loader: a reader of the `[[fault]]` tables alone would see
+# none of a family's rows, and a fix's entry added to a family would read as no entry.
+[[fault]]
+id = "f2p-registry-reads-families"
+guard = "test_fail_to_pass.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_fail_to_pass.py", "-k", "test_a_familys_rows_are_entries"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_familys_rows_are_entries ("
+transform = { file = "tools/fail-to-pass.py", replace = "    tables, problems = FIRE[\"parse_registry\"](texts)\n", with = "    tables, problems = [FIRE[\"Table\"](p, 0, e) for p, t in sorted(texts.items()) for e in __import__(\"tomllib\").loads(t).get(\"fault\", [])], []\n" }

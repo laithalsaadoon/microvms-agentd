@@ -3,20 +3,18 @@
 # A hook's `GIT_DIR` reaches the unit suite when `check` runs from lefthook's pre-push. Each
 # fault puts one of the two scrubs back to the inherited environment, and the decoy test fails:
 # the test's own helpers then write into the decoy, and the script's reads then answer from it.
-[[fault]]
-id = "ratchet-unit-git-env"
+[[family]]
 guard = "test_ratchet.py"
 run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "InheritedGitEnvTests"]
 expect = "exit-nonzero"
 suite = "script"
+
+[[family.fault]]
+id = "ratchet-unit-git-env"
 message = "FAIL: test_an_inherited_git_dir_leaves_that_repo_alone ("
 transform = { file = "tools/test_ratchet.py", replace = "if k not in GIT_ENV_LEAKS}", with = "if k not in ()}" }
 
-[[fault]]
+[[family.fault]]
 id = "ratchet-git-env"
-guard = "test_ratchet.py"
-run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_ratchet.py", "-k", "InheritedGitEnvTests"]
-expect = "exit-nonzero"
-suite = "script"
 message = "FAIL: test_an_inherited_git_dir_leaves_that_repo_alone ("
 transform = { file = "tools/ratchet.py", replace = "if k not in GIT_ENV_LEAKS}", with = "if k not in ()}" }
