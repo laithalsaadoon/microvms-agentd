@@ -22,14 +22,23 @@ from lanes.caller_artifact import (
     CALLER_ARTIFACT_GROUP_GONE,
     CALLER_ARTIFACT_IMAGE_GONE,
     CALLER_ARTIFACT_OBJECT_GONE,
+    CALLER_ARTIFACT_SOURCE,
     CALLER_ARTIFACT_UNTOUCHED,
     caller_artifact_checks,
     drive_caller_artifact,
 )
 
+#: Where the fake account holds the suite's own artifact: the ensure's key, which the suite's
+#: `run` reports as `artifactUri` (#258). Not `suite.zip`, the key `run` uploaded to before.
+SUITE_ARTIFACT_KEY = "suite/artifact.zip"
+
 
 class ResourceNotFoundException(Exception):
     """The fake plane's answer for a deleted image, named as boto3 names the real one."""
+
+
+class NoSuchKey(Exception):
+    """The fake S3's answer for a copy from a key it doesn't hold, as the real one refuses."""
 
 
 class FakeCallerArtifactAws:
@@ -54,10 +63,12 @@ class FakeCallerArtifactAws:
         self.blind = blind
         self.undeletable = undeletable
         self.listing_raises = listing_raises
-        self.objects: dict[str, dict[str, Any]] = {}
+        self.stamp = datetime(2026, 9, 28, 12, 0, tzinfo=timezone.utc)
+        self.objects: dict[str, dict[str, Any]] = {
+            SUITE_ARTIFACT_KEY: {"ETag": '"suite"', "LastModified": self.stamp}
+        }
         self.images: dict[str, dict[str, Any]] = {}
         self.groups: set[str] = set()
-        self.stamp = datetime(2026, 9, 28, 12, 0, tzinfo=timezone.utc)
         self.exceptions = type(
             "Exceptions", (), {"ResourceNotFoundException": ResourceNotFoundException}
         )
@@ -67,6 +78,8 @@ class FakeCallerArtifactAws:
 
     # S3
     def copy_object(self, **kwargs: Any) -> None:
+        if kwargs["CopySource"]["Key"] not in self.objects:
+            raise NoSuchKey(kwargs["CopySource"]["Key"])
         self.objects[kwargs["Key"]] = {
             "ETag": '"copy"',
             "LastModified": self.stamp,
@@ -274,9 +287,19 @@ def check_caller_artifact_driver(results: "Results") -> None:
     fail, none for the fixed CLI on a well-behaved account.
     """
     launched = Envelope(
+        status="ok",
+        api_version="1",
+        type="microvm.run",
+        data={
+            "imageName": "suite",
+            "artifactUri": f"s3://bucket/{SUITE_ARTIFACT_KEY}",
+        },
+    )
+    unreported = Envelope(
         status="ok", api_version="1", type="microvm.run", data={"imageName": "suite"}
     )
     every = [
+        CALLER_ARTIFACT_SOURCE,
         CALLER_ARTIFACT_UNTOUCHED,
         CALLER_ARTIFACT_BUILT_FROM,
         CALLER_ARTIFACT_BUCKET_SET,
@@ -284,25 +307,44 @@ def check_caller_artifact_driver(results: "Results") -> None:
         CALLER_ARTIFACT_OBJECT_GONE,
         CALLER_ARTIFACT_GROUP_GONE,
     ]
-    scenarios: dict[str, tuple[FakeCallerArtifactAws, list[str]]] = {
-        "the fixed CLI": (FakeCallerArtifactAws(), []),
+    scenarios: dict[str, tuple[FakeCallerArtifactAws, Envelope, list[str]]] = {
+        "the fixed CLI": (FakeCallerArtifactAws(), launched, []),
         "the CLI before #249": (
             FakeCallerArtifactAws(cli="unfixed"),
+            launched,
             [CALLER_ARTIFACT_UNTOUCHED, CALLER_ARTIFACT_BUCKET_SET],
         ),
-        "a listing that reads nothing": (FakeCallerArtifactAws(blind=True), []),
+        "a listing that reads nothing": (
+            FakeCallerArtifactAws(blind=True),
+            launched,
+            [],
+        ),
         "a hidden image that won't delete": (
             FakeCallerArtifactAws(blind=True, undeletable=True),
+            launched,
             [CALLER_ARTIFACT_IMAGE_GONE],
         ),
         "a listing that raises": (
             FakeCallerArtifactAws(listing_raises=True),
+            launched,
             [CALLER_ARTIFACT_IMAGE_GONE],
+        ),
+        # The suite's run says nothing about its artifact, so there's no object to copy: the
+        # section says so by name, and the #249 checks read an empty report (#258).
+        "a run that reports no artifact": (
+            FakeCallerArtifactAws(),
+            unreported,
+            [
+                CALLER_ARTIFACT_SOURCE,
+                CALLER_ARTIFACT_UNTOUCHED,
+                CALLER_ARTIFACT_BUILT_FROM,
+                CALLER_ARTIFACT_BUCKET_SET,
+            ],
         ),
     }
     wrong: list[str] = []
     with unittest.mock.patch.dict(os.environ, {"MICROVM_BUCKET": "bucket"}):
-        for scenario, (aws, expected) in scenarios.items():
+        for scenario, (aws, run, expected) in scenarios.items():
             probe = Results(probe=True)
             # Each sleep moves this clock instead of the process's, so the scenario whose
             # image never goes runs the ten-minute poll to its deadline in no time.
@@ -310,7 +352,7 @@ def check_caller_artifact_driver(results: "Results") -> None:
             try:
                 drive_caller_artifact(
                     FakeCallerArtifactCli(aws),
-                    launched,
+                    run,
                     aws,
                     probe,
                     sleep=lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds),

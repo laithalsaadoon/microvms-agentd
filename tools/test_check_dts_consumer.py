@@ -10,6 +10,7 @@ need npm on PATH, so run this under `mise x` or a mise task, on a POSIX host (th
 fcntl).
 """
 
+import inspect
 import os
 import runpy
 import sys
@@ -20,6 +21,11 @@ from unittest import mock
 
 SCRIPT = Path(__file__).with_name("check-dts-consumer.py")
 DTS = runpy.run_path(str(SCRIPT), run_name="tools.check-dts-consumer")
+# The script's own namespace, which its functions read their globals from. mutmut wraps each
+# function of a script it mutates in a trampoline defined in its own module, so under mutmut
+# a function's `__globals__` are mutmut's and a patch to them reaches nothing the script
+# reads. `inspect.unwrap` gives back the script's own function.
+DTS_GLOBALS = inspect.unwrap(DTS["check"]).__globals__
 VERSIONS = {"typescript": "5.9.3", "@types/node": "26.4.0"}
 
 # Stands in for npx. It prints FAKE_TSC only while someone else holds the lock beside the npm
@@ -91,7 +97,7 @@ class ProbeShapeTests(unittest.TestCase):
         tsc.chmod(0o755)
         dts = tsc.parent / "index.d.ts"
         dts.write_text("export {}\n", encoding="utf-8")
-        with mock.patch.dict(DTS["check"].__globals__, {"locate_tsc": lambda v: tsc}):
+        with mock.patch.dict(DTS_GLOBALS, {"locate_tsc": lambda v: tsc}):
             with self.assertRaises(DTS["ConsumerError"]) as raised:
                 DTS["check"](dts, root)
         lines = str(raised.exception).splitlines()
