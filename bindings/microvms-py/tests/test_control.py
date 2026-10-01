@@ -128,6 +128,27 @@ def test_an_agent_vm_takes_vpc_connectors_and_checks_them_locally() -> None:
         vm.launch(image_identifier="arn:image", log_stream="s")
 
 
+def test_an_agent_vm_launch_takes_the_launch_env_and_the_ready_timeout() -> None:
+    """`AgentVm.launch` takes `launch_env`, `shell` and `ready_timeout`, as `Sandbox.run` does (#267).
+
+    Both are refused locally when core can't take them, which is what shows they reach it: a
+    launch env over the run-hook payload's budget, and a wait that isn't a duration. `shell`
+    changes only the `RunMicrovm` body, which no offline test can read, so it's shown accepted.
+
+    **Falsification**: drop `launch_env` on its way to the core's `RunRequest` in
+    `AgentVm.launch`, and the over-budget env launches as if it weren't there.
+    """
+    vm = microvms.AgentVm(region(), [microvms.AgentSpec.claude_code()])
+    with pytest.raises(microvms.InvalidArgError, match="launch env contributed"):
+        vm.launch(image_identifier="arn:image", launch_env={"BIG": "x" * 5000})
+    with pytest.raises(microvms.InvalidArgError):
+        vm.launch(image_identifier="arn:image", ready_timeout=-1.0)
+    with pytest.raises(microvms.InvalidArgError, match="launch env contributed"):
+        vm.launch(
+            image_identifier="arn:image", shell=True, launch_env={"BIG": "x" * 5000}
+        )
+
+
 def test_terminate_waits_for_a_bool_or_a_number_of_seconds() -> None:
     """`wait_for_terminated` takes `True`, for the core's lifecycle default, or seconds (#267).
 

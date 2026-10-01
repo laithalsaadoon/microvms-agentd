@@ -389,6 +389,13 @@ pub struct AgentLaunchOptions {
     pub log_stream: Option<String>,
     /// Turns per-VM logging off. Cannot be combined with `logGroup` or `logStream`.
     pub disable_logging: Option<bool>,
+    /// The base environment for every exec in the VM. See `RunOptions.launchEnv`.
+    pub launch_env: Option<std::collections::HashMap<String, String>>,
+    /// Launch shell-capable. See `RunOptions.shell`.
+    pub shell: Option<bool>,
+    /// How long to wait for RUNNING. The wait for the daemon after it is the core's
+    /// `defaultReadyTimeoutSeconds`.
+    pub ready_timeout: Option<f64>,
 }
 
 /// One VM with coding agents in it: the sandbox plus the specs it is built for.
@@ -677,6 +684,13 @@ impl AgentVm {
             options.execution_role_arn,
         )
         .with_vpc_egress(options.egress_network_connectors.unwrap_or_default());
+        if let Some(env) = options.launch_env {
+            request.launch_env = env;
+        }
+        request.shell = options.shell.unwrap_or(request.shell);
+        if let Some(timeout) = options.ready_timeout {
+            request.ready_timeout = seconds_async(timeout)?;
+        }
         request.image_version = options.image_version;
         request.logging = microvms_core::control::ops::Logging::from_parts(
             options.log_group,

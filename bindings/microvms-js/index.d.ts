@@ -1254,6 +1254,15 @@ export interface AgentLaunchOptions {
   logStream?: string
   /** Turns per-VM logging off. Cannot be combined with `logGroup` or `logStream`. */
   disableLogging?: boolean
+  /** The base environment for every exec in the VM. See `RunOptions.launchEnv`. */
+  launchEnv?: Record<string, string>
+  /** Launch shell-capable. See `RunOptions.shell`. */
+  shell?: boolean
+  /**
+   * How long to wait for RUNNING. The wait for the daemon after it is the core's
+   * `defaultReadyTimeoutSeconds`.
+   */
+  readyTimeout?: number
 }
 
 /** A resolved spec: the model it will use and the command `prompt` runs. */
