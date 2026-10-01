@@ -279,3 +279,14 @@ expect = "exit-nonzero"
 suite = "script"
 message = "FAIL: test_each_side_mutates_only_the_changed_functions_with_their_suites ("
 transform = { file = "tools/check-mutmut.py", replace = "timeout_multiplier = 4\n", with = "" }
+
+# A stats pass that failed over the compiled script isn't run again over the source, so a suite
+# that reads its script as text (main's test_check_mutmut.py did) can't be measured.
+[[fault]]
+id = "mutmut-stats-failure-not-retried"
+guard = "test_check_mutmut.py"
+run = ["uv", "run", "python", "-m", "unittest", "discover", "-s", "tools", "-p", "test_check_mutmut.py"]
+expect = "exit-nonzero"
+suite = "script"
+message = "FAIL: test_a_stats_pass_that_fails_runs_again_over_the_source ("
+transform = { file = "tools/check-mutmut.py", replace = "        and STATS_FAILED.encode() in (side / \"mutmut.log\").read_bytes()\n", with = "        and False\n" }

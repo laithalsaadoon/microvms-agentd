@@ -230,6 +230,8 @@ if os.environ.get("MUTANT_UNDER_TEST") == "stats":
 # stops with exit 1 and every mutant unrun: the verdict "no tests" for each. Only the changed
 # functions are trampolined, so a change whose functions no in-process test calls ends this way.
 NONE_REACHED = "could not find any test case for any mutant"
+# What it prints when a test failed in its stats pass.
+STATS_FAILED = "failed to collect stats"
 # Writes each script's mutants the way `mutmut run` does (its own `create_mutants_for_file`),
 # then saves the mutated script as compiled code under its own name, newer than its source, so
 # `mutmut run` takes it as already generated. Python runs a file that starts with the bytecode
@@ -238,8 +240,9 @@ NONE_REACHED = "could not find any test case for any mutant"
 # mutants, and its mutated source took 6 to 8 s to compile, once for every load in every test:
 # the stats pass took 986 s of test time against 244 s for the plain suite, and each mutant's
 # tests paid it again. The mutated source stays beside it, which `restore` puts back for `mutmut
-# show`. A suite that reads its script as text reads bytecode in a run, and fails mutmut's stats
-# pass: it copies the script with `read_bytes`, as test_check_mutmut.py's CI case does.
+# show`. A suite that reads its script as text reads bytecode in such a run and fails mutmut's
+# stats pass, as main's test_check_mutmut.py did, so a run whose stats pass fails runs again over
+# the restored source (`measure`).
 GENERATE = """
 import importlib.util, marshal, os, sys
 from pathlib import Path
@@ -530,7 +533,7 @@ def run_mutmut(
     """mutmut over `wanted` in `side`, its output in `side/mutmut.log`: its exit code, and
     whether it was stopped after `seconds`. Every Python it starts imports `SITE` first. Each
     function's progress prints as it moves, a line at most every `POLL` seconds."""
-    (side / "site").mkdir()
+    (side / "site").mkdir(exist_ok=True)
     (side / "site" / "sitecustomize.py").write_text(SITE)
     env = clean_env()
     env["PYTHONPATH"] = os.pathsep.join(
@@ -691,10 +694,27 @@ def measure(
     """Mutate the `wanted` functions of each script at `commit`, and tally each one."""
     prepare(root, commit, side, wanted, selected)
     generate(python, side, wanted)
+    begun = time.monotonic()
     try:
         code, budget = run_mutmut(mutmut, side, wanted, jobs, seconds)
     finally:
         restore(side, wanted)
+    if (
+        code
+        and not budget
+        and STATS_FAILED.encode() in (side / "mutmut.log").read_bytes()
+    ):
+        # The restored source is newer than the script mutmut read, so the same mutants run
+        # again, compiled at each load: slower, and what a suite that reads its script as text
+        # needs. A suite that's broken fails the same way twice.
+        print(
+            f"check-mutmut: {side.name}: mutmut's stats pass failed over the compiled script;"
+            " running it again over the source",
+            file=sys.stderr,
+        )
+        # What's left of the side's share; spent, it stops the run at its first poll.
+        left = None if seconds is None else seconds - (time.monotonic() - begun)
+        code, budget = run_mutmut(mutmut, side, wanted, jobs, left)
     failed = Failure(
         f"mutmut exited {code} in {side}; the end of its log:\n{log_tail(side)}"
     )
@@ -921,11 +941,7 @@ def gate(
             jobs,
             head_seconds,
         )
-        left = (
-            None
-            if args.budget is None
-            else max(0, args.budget - (time.monotonic() - begun))
-        )
+        left = None if args.budget is None else args.budget - (time.monotonic() - begun)
         # The base run mutates the changed functions the base has and its suites measured, and
         # of those only the ones some mutant survives in here: a function none survives in has
         # no more survivors than any base count, so measuring its base decides nothing.

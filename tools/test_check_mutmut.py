@@ -66,6 +66,12 @@ if os.environ.get("FAKE_MUTMUT_TERM"):
     sys.exit(0)
 args = sys.argv[2:]
 globs = args[2:] if args[:1] == ["--max-children"] else args
+# A stats pass that fails the first time on the side this names, as one over a compiled script
+# fails for a suite that reads it as text.
+if os.environ.get("FAKE_MUTMUT_STATS_FAIL") == Path.cwd().name and not Path("failed-once").exists():
+    Path("failed-once").touch()
+    print("failed to collect stats. runner returned 1")
+    sys.exit(1)
 # mutmut's stop when no test reached any mutant, on the side this names.
 none_reached = os.environ.get("FAKE_MUTMUT_NONE_REACHED") == Path.cwd().name
 config = configparser.ConfigParser()
@@ -492,6 +498,34 @@ class RatchetTests(unittest.TestCase):
         self.assertTrue(err.endswith("/head; the end of its log:\nstopped\n"), err)
         self.assertNotIn("has no verdict", err)
 
+    def test_a_stats_pass_that_fails_runs_again_over_the_source(self):
+        repo = self.repo()
+        repo.commit({"tools/calc.py": calc("1 0 1", "return b + a")})
+        code, out, err = repo.run(env={"FAKE_MUTMUT_STATS_FAIL": "head"})
+        self.assertEqual(code, 0, out + err)
+        self.assertIn(
+            "check-mutmut: head: mutmut's stats pass failed over the compiled script; running"
+            " it again over the source\n",
+            err,
+        )
+        self.assertIn("    add: 1 of 3 survive (1 on the base)\n", out)
+        self.assertEqual([c[0] for c in repo.calls("argv")], ["head", "head", "base"])
+
+    def test_a_stats_pass_that_fails_twice_fails_with_the_log(self):
+        repo = self.repo()
+        repo.commit({"tools/calc.py": calc("1 0 1", "return b + a")})
+        code, out, err = repo.run(
+            env={
+                "FAKE_MUTMUT_EXIT": "1",
+                "FAKE_MUTMUT_SAY": "failed to collect stats again",
+            }
+        )
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("running it again over the source\n", err)
+        self.assertTrue(
+            err.endswith("the end of its log:\nfailed to collect stats again\n"), err
+        )
+
     def test_mutmut_refusing_names_that_match_no_mutant_passes(self):
         # A new function with nothing to mutate: mutmut exits 1 on names that match no mutant.
         repo = self.repo()
@@ -592,6 +626,28 @@ class BudgetTests(unittest.TestCase):
         self.assertLess(
             time.monotonic() - started, 20, "the budget didn't stop the run"
         )
+        self.assertEqual(code, 1, out + err)
+        self.assertIn(
+            "    sub: 1 of 2 survive (new), and 1 weren't run within the budget: MORE\n",
+            out,
+        )
+
+    def test_a_rerun_after_a_failed_stats_pass_gets_what_is_left_of_the_share(self):
+        repo = self.repo()
+        repo.commit(
+            {
+                "tools/calc.py": calc()
+                + "\n\ndef sub(a, b):\n    # fake: 1 0 none\n    return a - b\n"
+            }
+        )
+        started = time.monotonic()
+        code, out, err = repo.run(
+            "--budget",
+            "10",
+            env={"FAKE_MUTMUT_STATS_FAIL": "head", "FAKE_MUTMUT_SLOW": "head"},
+        )
+        self.assertLess(time.monotonic() - started, 20, "the rerun had no budget")
+        self.assertIn("running it again over the source\n", err)
         self.assertEqual(code, 1, out + err)
         self.assertIn(
             "    sub: 1 of 2 survive (new), and 1 weren't run within the budget: MORE\n",
@@ -721,6 +777,13 @@ class RunTests(unittest.TestCase):
         self.assertEqual(code, -signal.SIGTERM)
         self.assertLess(time.monotonic() - started, 0.9)
 
+    def test_a_spent_share_stops_the_run_at_its_first_poll(self):
+        side = self.side()
+        started = time.monotonic()
+        code, stopped = GATE["run_mutmut"]([self.sleeper(side)], side, {}, [], -5)
+        self.assertTrue(stopped)
+        self.assertLess(time.monotonic() - started, 0.9)
+
     def test_restore_puts_the_mutated_source_back(self):
         side = self.side()
         (side / "mutants/tools/a.py").write_bytes(b"compiled")
@@ -824,7 +887,8 @@ class ShardTests(unittest.TestCase):
                 contextlib.redirect_stderr(io.StringIO()) as err,
             ):
                 with self.assertRaises(SystemExit):
-                    GATE["main"](["--shard", spec])
+                    # One word, so no Python's argparse reads `-1/2` as an option of its own.
+                    GATE["main"]([f"--shard={spec}"])
                 self.assertIn(
                     f"--shard takes k/N with 0 <= k < N; got {spec}", err.getvalue()
                 )
@@ -1494,11 +1558,15 @@ class CiJobTests(unittest.TestCase):
             "BASE": "origin/main",
             "GITHUB_OUTPUT": str(output),
         }
-        # One changed function, which goes to shard 0; shard 1 has nothing to measure.
+        # One changed function, which goes to shard 0, and then two: the second goes to shard 1.
+        one = calc("0", "return b + a")
+        two = one.replace("return a * b", "return b * a")
         for change, shard, answer in (
             (lambda: None, "0/4", "false"),
-            (lambda: repo.write({"tools/calc.py": calc("0")}), "0/4", "true"),
+            (lambda: repo.write({"tools/calc.py": one}), "0/4", "true"),
             (lambda: None, "1/4", "false"),
+            (lambda: repo.write({"tools/calc.py": two}), "1/4", "true"),
+            (lambda: None, "2/4", "false"),
         ):
             with self.subTest(shard=shard, python=answer):
                 change()
@@ -1732,6 +1800,41 @@ class RealMutmutTests(unittest.TestCase):
         self.assertEqual(code, 1, out + err)
         self.assertIn("+++ tools/calc.py\n", err)
         self.assertIn("\n-    if a == 100:\n+    if a == 101:\n", err)
+
+    def test_a_suite_that_reads_its_script_as_text_is_measured_over_the_source(self):
+        suite = textwrap.dedent(
+            """\
+            import runpy
+            import unittest
+            from pathlib import Path
+
+            SCRIPT = Path(__file__).with_name("calc.py")
+            CALC = runpy.run_path(str(SCRIPT), run_name="tools.calc")
+
+
+            class CalcTests(unittest.TestCase):
+                def test_add(self):
+                    self.assertIn("def add", SCRIPT.read_text())
+                    self.assertEqual(CALC["add"](2, 3), 5)
+            """
+        )
+        repo = Repo(
+            self,
+            {
+                "tools/calc.py": "def add(a, b):\n    return a + b\n",
+                "tools/test_calc.py": suite,
+            },
+        )
+        changed = (
+            "def add(a, b):\n    if a == 100:\n        return 0\n    return a + b\n"
+        )
+        repo.commit({"tools/calc.py": changed})
+        code, out, err = repo.run("--jobs", "2", jobs=False, mutmut=False)
+        self.assertIn("running it again over the source\n", err)
+        self.assertEqual(code, 1, out + err)
+        self.assertRegex(
+            out, r"    add: [1-9]\d* of \d+ survive \(0 on the base\): MORE\n"
+        )
 
 
 if __name__ == "__main__":
