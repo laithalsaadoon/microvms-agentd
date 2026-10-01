@@ -551,6 +551,76 @@ impl Model for ClientLifecycle {
 
     fn properties(&self) -> Vec<Property<Self>> {
         vec![
+            // ── each transition lands where the spec says ────────────────────
+            //
+            // One per STATE-n that names a transition, read off the step just taken, so a
+            // transition that lands elsewhere is caught at the step that made it. First in
+            // the list: stateright reports the first property with a counterexample, and a
+            // broken transition should be reported by its own rule rather than by a later
+            // one it also breaks.
+            Property::<Self>::always(
+                "STATE-1 an accepted launch leaves the VM PENDING with its image recorded",
+                |_, state| match state.last {
+                    Some((Action::LaunchAccepted, Verdict::Issued)) => {
+                        state.vm_state == VmState::Pending && state.image_exists
+                    }
+                    _ => true,
+                },
+            ),
+            Property::<Self>::always(
+                "STATE-2 a successful hook leaves the VM RUNNING with its token installed",
+                |_, state| match state.last {
+                    Some((Action::HookSucceeded, Verdict::Issued)) => {
+                        state.vm_state == VmState::Running && state.token_installed
+                    }
+                    _ => true,
+                },
+            ),
+            Property::<Self>::always(
+                "STATE-4 an accepted suspend leaves the VM SUSPENDING",
+                |_, state| match state.last {
+                    Some((Action::SuspendRequested, Verdict::Issued)) => {
+                        state.vm_state == VmState::Suspending
+                    }
+                    _ => true,
+                },
+            ),
+            Property::<Self>::always(
+                "STATE-6 a reported suspension leaves the VM SUSPENDED",
+                |_, state| match state.last {
+                    Some((Action::SuspendComplete, Verdict::Issued)) => {
+                        state.vm_state == VmState::Suspended
+                    }
+                    _ => true,
+                },
+            ),
+            Property::<Self>::always(
+                "STATE-7 a completed resume leaves the VM RUNNING",
+                |_, state| match state.last {
+                    Some((Action::ResumeComplete, Verdict::Issued)) => {
+                        state.vm_state == VmState::Running
+                    }
+                    _ => true,
+                },
+            ),
+            Property::<Self>::always(
+                "STATE-9 an accepted terminate leaves the VM TERMINATING and recorded terminated",
+                |_, state| match state.last {
+                    Some((Action::TerminateRequested, Verdict::Issued)) => {
+                        state.vm_state == VmState::Terminating && state.was_terminated
+                    }
+                    _ => true,
+                },
+            ),
+            Property::<Self>::always(
+                "STATE-10 a reported termination leaves the VM TERMINATED",
+                |_, state| match state.last {
+                    Some((Action::TerminateComplete, Verdict::Issued)) => {
+                        state.vm_state == VmState::Terminated
+                    }
+                    _ => true,
+                },
+            ),
             // ── the three Z3 already proved, restated over interleavings ─────
             //
             // Stated unconditionally rather than consulting the config, for the reason the
@@ -588,28 +658,35 @@ impl Model for ClientLifecycle {
                 },
             ),
             // ── the wire-call properties, which is why calls are in the state ──
-            Property::<Self>::always("no resume call after a terminate", |_, state| {
+            Property::<Self>::always("STATE-11 no resume call after a terminate", |_, state| {
                 // The packet's headline: the rejection must cost **zero** wire calls, not
                 // merely end in a legal state. A client that called and read the failure
                 // satisfies every state-only property here and burns a poll timeout.
                 state.resumes_after_terminate == 0
             }),
-            Property::<Self>::always("no resume call with the window closed", |_, state| {
-                state.resumes_window_closed == 0
-            }),
-            Property::<Self>::always("a resume re-delivers no run-hook payload", |_, state| {
-                // The launch is the only source of a payload, so a resume that delivered
-                // one would push `payloads` past the launches — and a daemon whose one-shot
-                // bootstrap answered 409 would read like a broken VM.
-                state.wire.payloads == state.wire.launches
-            }),
-            Property::<Self>::always("the installed token is never replaced", |_, state| {
-                // STATE-7's "reuse the installed token": the identity is stable across every
-                // suspend and resume, so a client that re-minted would be caught even though
-                // the count of installed tokens stayed at one.
-                state.token_replacements == 0
-                    && (state.installed_token.is_some() == state.token_installed)
-            }),
+            Property::<Self>::always(
+                "STATE-12 no resume call with the window closed",
+                |_, state| state.resumes_window_closed == 0,
+            ),
+            Property::<Self>::always(
+                "STATE-7 a resume re-delivers no run-hook payload",
+                |_, state| {
+                    // The launch is the only source of a payload, so a resume that delivered
+                    // one would push `payloads` past the launches, and a daemon whose one-shot
+                    // bootstrap answered 409 would read like a broken VM.
+                    state.wire.payloads == state.wire.launches
+                },
+            ),
+            Property::<Self>::always(
+                "STATE-7 the installed token is never replaced",
+                |_, state| {
+                    // STATE-7's "reuse the installed token": the identity is stable across every
+                    // suspend and resume, so a client that re-minted would be caught even though
+                    // the count of installed tokens stayed at one.
+                    state.token_replacements == 0
+                        && (state.installed_token.is_some() == state.token_installed)
+                },
+            ),
             Property::<Self>::always(
                 "a suspended session keeps its token across the cycle",
                 |_, state| {
@@ -736,7 +813,7 @@ mod tests {
             .checker()
             .spawn_bfs()
             .join();
-        let path = checker.assert_any_discovery("no resume call after a terminate");
+        let path = checker.assert_any_discovery("STATE-11 no resume call after a terminate");
         let steps = path.into_actions();
         assert!(
             steps
@@ -760,7 +837,7 @@ mod tests {
             .checker()
             .spawn_bfs()
             .join();
-        let path = checker.assert_any_discovery("no resume call with the window closed");
+        let path = checker.assert_any_discovery("STATE-12 no resume call with the window closed");
         let steps = path.into_actions();
         assert!(
             steps

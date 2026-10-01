@@ -139,6 +139,8 @@ RUST_TEST_DIRS = (
     "crates/microvms-edges/tests",
     "crates/agentd/tests",
     "crates/agentd/fuzz/fuzz_targets",
+    # The app's proof crate: its tests replay the models against `Sandbox` and the daemon.
+    "crates/model-conformance/tests",
 )
 BINDING_TESTS = (
     ("bindings/microvms-py/tests", "*.py"),
